@@ -13,6 +13,7 @@ using MartenStudio.Services.Live;
 using MartenStudio.Services.Projections;
 using MartenStudio.Services.Query;
 using MartenStudio.Services.Schema;
+using MartenStudio.Services.Shapes;
 using PostgresStudio.Services.Connection;
 using PostgresStudio.Services.Query;
 using PostgresStudio.Services.Settings;
@@ -171,6 +172,11 @@ public static partial class MartenStudioServiceCollectionExtensions
 
         // 1.2: the event flow's model, one per store, rebuilt only when the configuration moved.
         services.TryAddSingleton<EventFlowCache>();
+
+        // 1.2-SHAPE: the shape check - a plain read under the store policy, one check per resolved scope and subject per five
+        // minutes across circuits.
+        services.TryAddSingleton<ShapeCheckCache>();
+        services.TryAddScoped<IDocumentShapeCheck, DocumentShapeCheckService>();
         services.TryAddScoped<ISchemaDataService, SchemaDataService>();
         services.TryAddScoped<IConfigurationService, ConfigurationService>();
         services.TryAddScoped<IQueryService, QueryService>();

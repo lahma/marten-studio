@@ -15441,3 +15441,128 @@ a.ms-schema-health-mark:focus-visible {
     color: var(--ms-color-text-secondary);
     font-size: var(--ms-font-size-sm);
 }
+
+/* ===== 1.2-SHAPE shape check ===== */
+
+.ms-shape-panel {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-sm);
+    min-width: 0;
+    margin: var(--ms-space-md) 0;
+    padding: var(--ms-space-md);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface);
+}
+
+.ms-shape-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--ms-space-sm);
+}
+
+.ms-shape-title {
+    margin: 0;
+    font-size: var(--ms-font-size-lg);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-shape-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-sm);
+}
+
+.ms-shape-summary,
+.ms-shape-note,
+.ms-shape-fits {
+    margin: 0;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.ms-shape-note,
+.ms-shape-muted {
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-shape-remedy {
+    margin: 0;
+    padding: var(--ms-space-sm);
+    border-radius: var(--ms-radius-sm);
+    background: var(--ms-color-warning-bg);
+    color: var(--ms-color-text);
+}
+
+.ms-shape-type {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-xs);
+    min-width: 0;
+}
+
+.ms-shape-type-title {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--ms-space-sm);
+    margin: var(--ms-space-sm) 0 0;
+    font-size: var(--ms-font-size-base);
+}
+
+.ms-shape-table td {
+    vertical-align: top;
+}
+
+.ms-shape-table .ms-shape-sentence {
+    min-width: 16rem;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+.ms-shape-table .ms-shape-member {
+    max-width: 18rem;
+    overflow-wrap: anywhere;
+}
+
+.ms-shape-kind {
+    padding: 3px 6px;
+    border-radius: var(--ms-radius-sm);
+    background: var(--ms-color-surface-alt);
+    color: var(--ms-color-text-secondary);
+    font-weight: var(--ms-font-weight-medium);
+    white-space: nowrap;
+}
+
+.ms-shape-kind-unreadable,
+.ms-shape-kind-readasnothing,
+.ms-shape-kind-notwritable,
+.ms-shape-kind-unknownsubclass,
+.ms-shape-kind-unknowneventtype {
+    background: var(--ms-color-danger-bg);
+    color: var(--ms-color-danger);
+}
+
+.ms-shape-kind-dropped,
+.ms-shape-kind-nulled,
+.ms-shape-kind-retyped,
+.ms-shape-kind-rewritten {
+    background: var(--ms-color-warning-bg);
+    color: var(--ms-color-warning);
+}
+
+.ms-shape-kind-respelled,
+.ms-shape-kind-defaulted {
+    background: var(--ms-color-info-bg);
+    color: var(--ms-color-info);
+}
+
+@media (max-width: 640px) {
+    .ms-shape-panel {
+        padding: var(--ms-space-sm);
+    }
+}

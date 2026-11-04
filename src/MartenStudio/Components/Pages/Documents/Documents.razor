@@ -3,6 +3,7 @@
 @using System.Text.Json
 @using Microsoft.Extensions.Options
 @using MartenStudio.Services.Documents
+@using MartenStudio.Components.Shapes
 @using MartenStudio.Services.Query
 @using PostgresStudio.Components.Pages.Query
 @using PostgresStudio.Components.Shared
@@ -98,6 +99,22 @@
             },
         };
     private string? loadError;
+
+    /// <summary>1.2-SHAPE: the alias whose shape check is open, or <see langword="null" />.</summary>
+    private string? shapeAlias;
+
+    private Task OpenShapesAsync()
+    {
+        shapeAlias = Alias;
+        return Task.CompletedTask;
+    }
+
+    private Task CloseShapesAsync()
+    {
+        shapeAlias = null;
+        return Task.CompletedTask;
+    }
+
     private bool loading = true;
     private string? loadedSignature;
     private bool preferencesLoaded;
@@ -367,7 +384,18 @@
                         @(list.Estimate.IsEstimate ? "~" : string.Empty)@list.Estimate.Value.ToString("N0", System.Globalization.CultureInfo.InvariantCulture) documents
                     </span>
                 }
+                @if (collection is { IsRegistered: true })
+                {
+                    <button type="button" class="ms-button" @onclick="OpenShapesAsync">Check shapes</button>
+                }
             </div>
+
+            @* 1.2-SHAPE: moving to another collection hides the panel (the alias no longer matches); a scope change re-creates it
+               (its key changes), and it starts its check when it is created. *@
+            @if (string.Equals(shapeAlias, Alias, StringComparison.OrdinalIgnoreCase))
+            {
+                <DocumentShapePanel @key="(State.ActiveScope, Alias)" Alias="@Alias" OnClose="CloseShapesAsync" />
+            }
 
             @if (loading)
             {

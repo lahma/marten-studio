@@ -71,6 +71,14 @@ internal static partial class MartenLog
         logger.SchemaChangeAppliedRaw(user, storeKey, databaseId, summary);
     }
 
+    /// <remarks>
+    /// 1.2-SHAPE: Debug, on a path a visitor started (a press of Check shapes) and nothing polls. The subject is the alias, which
+    /// the caller passes through <c>StudioLogValue.Cap</c>; no path, id, tenant, exception message or value is logged at any level.
+    /// 9228 is the events check's, in the same words.
+    /// </remarks>
+    [LoggerMessage(EventId = 9227, Level = LogLevel.Debug, Message = "Marten Studio checked the shapes of {Subject}: {Examined} examined, {Problems} kinds of problem, {Coverage}")]
+    public static partial void DocumentShapesChecked(this ILogger logger, string subject, int examined, int problems, string coverage);
+
     /// <summary>9207, with the user's name, the projection and the scope escaped and bounded.</summary>
     public static void ProjectionRebuildStarted(this ILogger logger, string user, string projection, string storeKey, string databaseId)
     {

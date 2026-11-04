@@ -188,6 +188,10 @@ public class StudioRegistrationTests
 
         // 1.2 (M6): the event flow's model, one per store, rebuilt only when the configuration moved.
         (typeof(EventFlowCache), ServiceLifetime.Singleton, How.Type, typeof(EventFlowCache)),
+
+        // 1.2-SHAPE: the shape check - the documents' check service, and the cache that makes it one read per scope and subject.
+        (typeof(MartenStudio.Services.Shapes.ShapeCheckCache), ServiceLifetime.Singleton, How.Type, typeof(MartenStudio.Services.Shapes.ShapeCheckCache)),
+        (typeof(MartenStudio.Services.Shapes.IDocumentShapeCheck), ServiceLifetime.Scoped, How.Type, typeof(MartenStudio.Services.Shapes.DocumentShapeCheckService)),
         (typeof(ISchemaDataService), ServiceLifetime.Scoped, How.Type, typeof(SchemaDataService)),
         (typeof(IConfigurationService), ServiceLifetime.Scoped, How.Type, typeof(ConfigurationService)),
         (typeof(IQueryService), ServiceLifetime.Scoped, How.Type, typeof(QueryService)),

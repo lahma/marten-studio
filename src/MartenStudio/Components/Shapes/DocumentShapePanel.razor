@@ -1,0 +1,193 @@
+@using Microsoft.Extensions.Options
+@using MartenStudio.Services.Documents
+@using MartenStudio.Services.Shapes
+@using PostgresStudio.Components.Shared
+@implements IDisposable
+@inject IDocumentShapeCheck Check
+@inject StudioState State
+@inject IOptions<MartenStudioOptions> Options
+@inject NavigationManager Navigation
+
+@*
+    Check shapes, for one document collection (D-SHAPE S10). It exists only after a click, so it never runs during prerender, and it
+    starts its check when it is created: the page re-creates it (a @key on scope and alias) when either changes.
+
+    The scope is the circuit's own (StudioState.ActiveScope), read here rather than passed in: a component parameter cannot be of an
+    internal type, and StudioScope is one (D12). Every link is built from this visitor's scope; the result holds ids, never links.
+
+    Cancel ends this panel's wait only. The check is shared by everyone who resolved the same scope and carries on to its own budget.
+*@
+
+<section class="ms-shape-panel" aria-label="@("Shape check of " + Alias)">
+    <div class="ms-shape-header">
+        <h2 class="ms-shape-title">Shape check</h2>
+        <div class="ms-shape-actions">
+            @if (running)
+            {
+                <button type="button" class="ms-button" @onclick="CancelAsync">Cancel</button>
+            }
+            else
+            {
+                <button type="button" class="ms-button" disabled="@RecheckDisabled" title="@RecheckTitle" @onclick="CheckAgainAsync">Check again</button>
+            }
+            <button type="button" class="ms-button" @onclick="CloseAsync">Close</button>
+        </div>
+    </div>
+
+    @if (running)
+    {
+        <LoadingSpinner />
+        <p class="ms-shape-note">Reading a sample of <code>@Alias</code> and loading each document through the store's serializer. Nothing is written.</p>
+    }
+    else if (problem is { Length: > 0 })
+    {
+        <ErrorAlert Message="@problem" />
+    }
+    else if (result is { } shown)
+    {
+        @if (shown.Error is { Length: > 0 } error)
+        {
+            <ErrorAlert Message="@error" />
+        }
+        else if (shown.Coverage == ShapeCoverage.NotChecked)
+        {
+            <p class="ms-shape-summary" role="status">@(shown.CoverageReason ?? "Nothing was checked.")</p>
+        }
+        else
+        {
+            <p class="ms-shape-summary" role="status">@ShapeCheckText.Summary(shown, State.FormatInSelectedTimeZone(shown.CheckedAt, "HH:mm"))</p>
+
+            @if (shown.Coverage == ShapeCoverage.Sampled && shown.CoverageReason is { Length: > 0 } qualification)
+            {
+                <p class="ms-shape-note">@qualification</p>
+            }
+
+            @foreach (string left in shown.LeftOut)
+            {
+                <p class="ms-shape-note" @key="left">@left</p>
+            }
+
+            @if (shown.TooLarge > 0)
+            {
+                <p class="ms-shape-note">@ShapeCheckText.TooLarge(shown.TooLarge)</p>
+            }
+
+            @if (shown.Remedy is { Length: > 0 } remedy)
+            {
+                <p class="ms-shape-remedy">@remedy</p>
+            }
+
+            @foreach (ShapeTypeResult type in shown.Types)
+            {
+                <ShapeFindingsTable @key="type.TypeName" Model="type" HrefFor="HrefFor" />
+            }
+
+            @if (shown.Types.Count == 0 && shown.Examined > 0)
+            {
+                <p class="ms-shape-fits">Every sampled document was read.</p>
+            }
+        }
+
+        @if (shown.Statements.Count > 0)
+        {
+            <SqlDisclosure Sql="@string.Join(";\n\n", shown.Statements.Select(static x => x.Sql))"
+                           ParameterNames="@shown.Statements.SelectMany(static x => x.ParameterNames).Distinct().ToList()" />
+        }
+    }
+</section>
+
+@code {
+    private CancellationTokenSource? cts;
+    private ShapeCheckResult? result;
+    private string? problem;
+    private bool running;
+
+    /// <summary>The collection (or subclass) alias to check.</summary>
+    [Parameter]
+    [EditorRequired]
+    public string Alias { get; set; } = string.Empty;
+
+    /// <summary>Raised when the visitor closes the panel.</summary>
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    private bool RecheckDisabled => result is { } shown && DateTimeOffset.UtcNow < shown.RecheckAt;
+
+    private string? RecheckTitle => RecheckDisabled && result is { } shown
+        ? ShapeCheckText.AvailableAt(State.FormatInSelectedTimeZone(shown.RecheckAt, "HH:mm:ss"))
+        : null;
+
+    /// <inheritdoc />
+    protected override Task OnInitializedAsync() => RunAsync(force: false);
+
+    private Task CheckAgainAsync() => RunAsync(force: true);
+
+    private Task CloseAsync() => OnClose.InvokeAsync();
+
+    private Task CancelAsync()
+    {
+        cts?.Cancel();
+        return Task.CompletedTask;
+    }
+
+    private async Task RunAsync(bool force)
+    {
+        StudioScope? scope = State.ActiveScope;
+
+        if (scope is null)
+        {
+            problem = "No database is selected.";
+            return;
+        }
+
+        CancellationTokenSource? previous = cts;
+        cts = new CancellationTokenSource();
+        previous?.Cancel();
+        previous?.Dispose();
+
+        CancellationToken token = cts.Token;
+        running = true;
+        problem = null;
+
+        try
+        {
+            result = await Check.CheckAsync(scope, Alias, force, token);
+        }
+        catch (OperationCanceledException)
+        {
+            problem = "The check was cancelled. It carries on for anyone else waiting for it; Check again shows its result.";
+        }
+        catch (StudioNotAuthorizedException)
+        {
+            problem = "You are not authorized to read this store.";
+        }
+        catch (Exception exception)
+        {
+            // Never the exception's message: this is a screen about not showing values. The type is enough to search for.
+            problem = "The shape check failed (" + exception.GetType().Name + ").";
+        }
+        finally
+        {
+            running = false;
+        }
+    }
+
+    private string HrefFor(string id, string? tenant, long? sequence, long? version)
+    {
+        StudioScope? scope = State.ActiveScope;
+
+        if (scope is not null && scope.TenantId is null && tenant is not null)
+        {
+            scope = scope with { TenantId = tenant };
+        }
+
+        return DocumentLinks.ToDocument(Options.Value, scope, Alias, id, Navigation.ToBaseRelativePath(Navigation.Uri));
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        cts?.Cancel();
+        cts?.Dispose();
+    }
+}

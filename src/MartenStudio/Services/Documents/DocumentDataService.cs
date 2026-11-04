@@ -1809,10 +1809,17 @@ internal sealed partial class DocumentDataService : IDocumentDataService
         }
     }
 
-    private IEnumerable<IDocumentType> VisibleDocumentTypes(IDocumentStore store)
-    {
-        Func<Type, bool>? visible = options.Value.IsDocumentTypeVisible;
+    private IEnumerable<IDocumentType> VisibleDocumentTypes(IDocumentStore store) =>
+        VisibleDocumentTypesOf(store, options.Value.IsDocumentTypeVisible);
 
+    /// <summary>
+    /// The registered document types a visitor may see: Marten's own bookkeeping and every type <paramref name="visible" /> refuses
+    /// left out. The one copy of the gate, shared with the shape check (1.2-SHAPE).
+    /// </summary>
+    /// <param name="store">The store.</param>
+    /// <param name="visible"><c>MartenStudioOptions.IsDocumentTypeVisible</c>, or <see langword="null" /> for all.</param>
+    internal static IEnumerable<IDocumentType> VisibleDocumentTypesOf(IDocumentStore store, Func<Type, bool>? visible)
+    {
         foreach (IDocumentType documentType in store.Options.AllKnownDocumentTypes())
         {
             // Marten's own bookkeeping is not one of this application's collections, and the browser's

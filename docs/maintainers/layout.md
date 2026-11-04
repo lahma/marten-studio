@@ -134,6 +134,10 @@ src/MartenStudio/Services/Documents/      Document read and write services and t
                                          Marten's edit preview (M5)
 tests/MartenStudio.Tests/Documents/       Document service unit tests - no database
 tests/MartenStudio.Integration.Tests/Documents/ Live Postgres: the document write path end to end
+src/MartenStudio/Services/Shapes/         The shape check's core (1.2-SHAPE): sampler limits and cache, the round-trip classifier, the
+                                         failure describer, the aggregator and the sentences; the documents' check service
+src/MartenStudio/Components/Shapes/       The shape check's panels and the findings table
+tests/MartenStudio.Tests/Shapes/          The shape check's classifier, sentences, queries, cache and panels - no database
 src/MartenStudio/Services/Projections/    Projection data service, daemon accessor, operation tracker; the lag history
                                          (M2); the progression-row classifier and the daemon topology (M47)
 src/PostgresStudio.Diagnostics/Services/Live/  The single-flight snapshot cache every reader shares (D10)

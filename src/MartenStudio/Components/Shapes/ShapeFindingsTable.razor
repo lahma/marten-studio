@@ -1,0 +1,152 @@
+@using MartenStudio.Services.Shapes
+@using PostgresStudio.Components.Shared
+
+@*
+    One type's shape findings (D-SHAPE S10): a row per kind of problem, each with a count out of the items examined, a link to an
+    example and the sentence an admin acts on. Documents and events share it; the sentences come from ShapeCheckText, so the markup
+    never spells one.
+
+    Nothing here can show a value: the model holds paths, kinds, counts and ids. A path can hold a dictionary's key, which is the
+    item's data, and is shown because the visitor may open that item under the same scope.
+
+    "Every sampled document fits" is never "healthy": it is a sample.
+*@
+
+@{
+    ShapeTypeResult type = ComponentModel.Read(Model, Empty);
+    IReadOnlyList<(string Dropped, string Defaulted)> questions = ShapeAggregator.RenameQuestions(type);
+}
+
+<section class="ms-shape-type" aria-label="@("Shape of " + type.TypeName)">
+    <h3 class="ms-shape-type-title">
+        <code>@type.TypeName</code>
+        <span class="ms-shape-muted">@type.Examined.ToString("N0", System.Globalization.CultureInfo.InvariantCulture) examined</span>
+    </h3>
+
+    @if (type.Failures.Count == 0 && type.Members.Count == 0 && type.MoreFailures == 0 && type.MoreMembers == 0)
+    {
+        <p class="ms-shape-fits">@Text(ShapeCheckText.EveryDocumentFits(type.TypeName))</p>
+    }
+    else
+    {
+        <TableScroll Label="@("Shape of " + type.TypeName)">
+            <table class="ms-table ms-shape-table">
+                <thead>
+                    <tr>
+                        <th scope="col">Problem</th>
+                        <th scope="col">Member</th>
+                        <th scope="col">Items</th>
+                        <th scope="col">Example</th>
+                        <th scope="col">What happens</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @for (int i = 0; i < type.Failures.Count; i++)
+                    {
+                        ShapeFailureGroup failure = type.Failures[i];
+
+                        <tr @key="@("f" + i + failure.Kind + failure.Path)">
+                            <td><span class="@("ms-badge ms-shape-kind ms-shape-kind-" + failure.Kind.ToString().ToLowerInvariant())">@FailureLabel(failure.Kind)</span></td>
+                            <td class="ms-shape-member">@if (failure.Path is { } path) { <code>@path</code> } else { <span class="ms-shape-muted">the whole document</span> }</td>
+                            <td>@ShapeCheckText.Of(failure.Count, type.Examined)</td>
+                            <td>@Example(failure.Example)</td>
+                            <td class="ms-shape-sentence">@Text(ShapeCheckText.DocumentFailure(failure, type.Examined, type.TypeName))</td>
+                        </tr>
+                    }
+                    @for (int i = 0; i < type.Members.Count; i++)
+                    {
+                        ShapeMemberFinding member = type.Members[i];
+
+                        <tr @key="@("m" + i + member.Kind + member.Path)">
+                            <td><span class="@("ms-badge ms-shape-kind ms-shape-kind-" + member.Kind.ToString().ToLowerInvariant())">@member.Kind</span></td>
+                            <td class="ms-shape-member">
+                                <code>@member.Path</code>
+                                @if (member.PairedPath is { } paired)
+                                {
+                                    <span class="ms-shape-muted"> as </span><code>@paired</code>
+                                }
+                            </td>
+                            <td>@ShapeCheckText.Of(member.Count, type.Examined)</td>
+                            <td>@Example(member.Example)</td>
+                            <td class="ms-shape-sentence">@Text(MemberSentence(member, type))</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </TableScroll>
+
+        @if (type.MoreFailures > 0)
+        {
+            <p class="ms-shape-note">@ShapeCheckText.AndMore(type.MoreFailures, "kinds of failure")</p>
+        }
+
+        @if (type.MoreMembers > 0)
+        {
+            <p class="ms-shape-note">@ShapeCheckText.AndMore(type.MoreMembers, "member findings")</p>
+        }
+
+        @foreach ((string dropped, string defaulted) in questions)
+        {
+            <p class="ms-shape-note" @key="@("q" + dropped + defaulted)">@Text(ShapeCheckText.RenameQuestion(dropped, defaulted))</p>
+        }
+    }
+</section>
+
+@code {
+    private static readonly ShapeTypeResult Empty = new(string.Empty, null, 0, 0, 0, [], [], 0, 0);
+
+    /// <summary>
+    /// The type's findings, as a <c>ShapeTypeResult</c>. Typed <see cref="object" />: the record is internal and a component
+    /// parameter cannot be (D12).
+    /// </summary>
+    [Parameter]
+    public object? Model { get; set; }
+
+    /// <summary>
+    /// The link to an example: the item's id, its tenant when it has one, and an event's sequence and version. Built by the panel
+    /// from its own visitor's scope; the result holds ids, never links.
+    /// </summary>
+    [Parameter]
+    public Func<string, string?, long?, long?, string> HrefFor { get; set; } = static (_, _, _, _) => "#";
+
+    private RenderFragment Example(ShapeItemKey key) =>
+        @<a class="ms-id-text" href="@HrefFor(key.Id, key.TenantId, key.Sequence, key.Version)" title="@key.Id">@key.Id</a>;
+
+    private static RenderFragment Text(string sentence) => builder =>
+    {
+        int sequence = 0;
+
+        foreach ((string text, bool isCode) in ShapeCheckText.Split(sentence))
+        {
+            if (isCode)
+            {
+                builder.OpenElement(sequence++, "code");
+                builder.AddContent(sequence++, text);
+                builder.CloseElement();
+            }
+            else
+            {
+                builder.AddContent(sequence++, text);
+            }
+        }
+    };
+
+    private static string FailureLabel(ShapeFailureKind kind) => kind switch
+    {
+        ShapeFailureKind.Unreadable => "Cannot load",
+        ShapeFailureKind.ReadAsNothing => "Loads as nothing",
+        ShapeFailureKind.NotWritable => "Cannot write back",
+        ShapeFailureKind.UnknownSubclass => "Unknown subclass",
+        _ => "Unknown event type",
+    };
+
+    private static string MemberSentence(ShapeMemberFinding member, ShapeTypeResult type) => member.Kind switch
+    {
+        ShapeMemberKind.Dropped => ShapeCheckText.DocumentDropped(member.Count, type.Examined, member.Path, type.TypeName),
+        ShapeMemberKind.Nulled => ShapeCheckText.DocumentNulled(member.Count, type.Examined, member.Path, type.TypeName),
+        ShapeMemberKind.Retyped => ShapeCheckText.DocumentRetyped(member.Count, type.Examined, member.Path, type.TypeName, member.StoredKind, member.ReadKind),
+        ShapeMemberKind.Rewritten => ShapeCheckText.DocumentRewritten(member.Count, type.Examined, member.Path),
+        ShapeMemberKind.Respelled => ShapeCheckText.DocumentRespelled(member.Count, type.Examined, member.Path, member.PairedPath ?? member.Path, type.TypeName),
+        _ => ShapeCheckText.DocumentDefaulted(member.Count, type.Examined, member.Path, type.TypeName),
+    };
+}
