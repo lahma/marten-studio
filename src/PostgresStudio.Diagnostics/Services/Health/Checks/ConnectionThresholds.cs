@@ -257,7 +257,7 @@ internal static class SessionEvidence
         + ", role " + (user ?? "(not readable)")
         + (string.IsNullOrEmpty(application) ? string.Empty : ", application '" + application + "'")
         + ", from " + (client ?? "a local socket")
-        + (backendStart is { } started ? ", connected since " + started.UtcDateTime.ToString("u", CultureInfo.InvariantCulture) : string.Empty)
+        + (backendStart is { } started ? ", connected since " + EvidenceTime.Utc(started) : string.Empty)
         + ": " + what;
 
     /// <summary>The label of the <paramref name="index" />th named item (zero-based), unique within a finding.</summary>
@@ -274,7 +274,7 @@ internal static class SessionEvidence
 
         List<string> parts =
         [
-            "Read in pg_stat_activity, for this database only, at " + readAt.UtcDateTime.ToString("u", CultureInfo.InvariantCulture)
+            "Read in pg_stat_activity, for this database only, at " + EvidenceTime.Utc(readAt)
             + "; ages are measured by Postgres's own clock.",
         ];
 

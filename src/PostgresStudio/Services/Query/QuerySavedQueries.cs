@@ -10,9 +10,17 @@ namespace PostgresStudio.Services.Query;
 /// into the save prompt.
 /// </param>
 /// <param name="Mode">Which editor it belongs in.</param>
-/// <param name="Alias">The document alias, for a Marten clause. <see langword="null" /> for SQL.</param>
-/// <param name="Text">The clause or statement itself.</param>
-internal sealed record SavedQuery(string Name, QueryMode Mode, string? Alias, string Text);
+/// <param name="Alias">
+/// The document alias, for a Marten clause or a LINQ predicate (1.2: a LINQ entry for the event log carries
+/// <c>(events)</c>, the target picker's own token). <see langword="null" /> for SQL.
+/// </param>
+/// <param name="Text">The clause, predicate or statement itself.</param>
+/// <param name="OrderBy">
+/// A LINQ entry's ordering (1.2): LINQ mode is two texts, the predicate and the ordering, and this is the second.
+/// <see langword="null" /> for every other mode and for a LINQ query with no ordering.
+/// </param>
+/// <param name="Archived">A LINQ entry for the event log: its archived selector (<c>include</c> or <c>only</c>), or <see langword="null" />.</param>
+internal sealed record SavedQuery(string Name, QueryMode Mode, string? Alias, string Text, string? OrderBy = null, string? Archived = null);
 
 /// <summary>
 /// Reads and writes the recent and saved query lists, as text, so the browser can keep them.
@@ -68,6 +76,18 @@ internal static class SavedQueryStore
                 writer.WriteString("mode", query.Mode.ToString());
                 writer.WriteString("alias", query.Alias);
                 writer.WriteString("text", query.Text);
+
+                // Written only when there is one, so a list with no LINQ entry is byte-for-byte what 1.1 wrote.
+                if (query.OrderBy is not null)
+                {
+                    writer.WriteString("orderBy", query.OrderBy);
+                }
+
+                if (query.Archived is not null)
+                {
+                    writer.WriteString("archived", query.Archived);
+                }
+
                 writer.WriteEndObject();
             }
 
@@ -120,7 +140,9 @@ internal static class SavedQueryStore
                     string.IsNullOrWhiteSpace(name) ? DefaultName(text) : name,
                     mode,
                     ReadString(element, "alias"),
-                    text)));
+                    text,
+                    ReadString(element, "orderBy"),
+                    ReadString(element, "archived"))));
 
                 if (queries.Count == MaxSaved)
                 {
@@ -158,7 +180,9 @@ internal static class SavedQueryStore
         {
             if (string.Equals(candidate.Text, normalized.Text, StringComparison.Ordinal)
                 && candidate.Mode == normalized.Mode
-                && string.Equals(candidate.Alias, normalized.Alias, StringComparison.Ordinal))
+                && string.Equals(candidate.Alias, normalized.Alias, StringComparison.Ordinal)
+                && string.Equals(candidate.OrderBy, normalized.OrderBy, StringComparison.Ordinal)
+                && string.Equals(candidate.Archived, normalized.Archived, StringComparison.Ordinal))
             {
                 continue;
             }
@@ -260,8 +284,15 @@ internal static class SavedQueryStore
         }
 
         var alias = string.IsNullOrWhiteSpace(entry.Alias) ? null : entry.Alias.Trim();
+        var orderBy = string.IsNullOrWhiteSpace(entry.OrderBy) ? null : entry.OrderBy.Trim();
+        var archived = string.IsNullOrWhiteSpace(entry.Archived) ? null : entry.Archived.Trim();
 
-        return entry with { Name = name, Text = text, Alias = alias };
+        if (orderBy is { Length: > MaxTextLength })
+        {
+            orderBy = orderBy[..MaxTextLength];
+        }
+
+        return entry with { Name = name, Text = text, Alias = alias, OrderBy = orderBy, Archived = archived };
     }
 
     private static string? ReadString(JsonElement element, string name) =>

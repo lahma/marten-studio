@@ -119,7 +119,7 @@ internal sealed class ChecksumFailuresCheck : HealthCheck<ChecksumFacts>
                 ? "none"
                 : Count(facts.OtherDatabases, facts.OtherLast) + " across " + SessionText.Count(facts.OtherDatabasesFailing, "database")),
             new("In the shared catalogs", Count(facts.SharedObjects, facts.SharedLast)),
-            new("Counted since", facts.StatsReset is { } reset ? reset.UtcDateTime.ToString("u", CultureInfo.InvariantCulture) : "the statistics were first collected"),
+            new("Counted since", facts.StatsReset is { } reset ? EvidenceTime.Utc(reset) : "the statistics were first collected"),
         ];
 
         return HealthVerdict.Of(new HealthFinding
@@ -129,7 +129,7 @@ internal sealed class ChecksumFailuresCheck : HealthCheck<ChecksumFacts>
             Title = (facts.Total == 1
                     ? "Postgres has read a page whose checksum did not match"
                     : "Postgres has read " + SessionText.Number(facts.Total) + " pages whose checksums did not match")
-                + (last is { } latest ? ", the last at " + latest.UtcDateTime.ToString("u", CultureInfo.InvariantCulture) : string.Empty),
+                + (last is { } latest ? ", the last at " + EvidenceTime.Utc(latest) : string.Empty),
             WhyItMatters =
                 "A checksum failure is a page that changed on disk after Postgres wrote it: the storage, a controller, memory, a "
                 + "filesystem or a copy taken the wrong way corrupted it. The statement that read it failed with \"invalid page\", and "
@@ -139,17 +139,17 @@ internal sealed class ChecksumFailuresCheck : HealthCheck<ChecksumFacts>
                 + "zero_damaged_pages and ignore_checksum_failure are not repairs - they throw the page away or use it as it is (S02).",
             Evidence = evidence,
             Caveat =
-                "Read in pg_stat_database at " + facts.ReadAt.UtcDateTime.ToString("u", CultureInfo.InvariantCulture)
+                "Read in pg_stat_database at " + EvidenceTime.Utc(facts.ReadAt)
                 + ". The counters only grow, until somebody resets the statistics, so a failure stays here after it is repaired; "
                 + "a page that is damaged and never read is not counted at all.",
         });
     }
 
     private static string Count(long? count, DateTimeOffset? last) =>
-        SessionText.Number(count ?? 0) + (last is { } at ? ", the last at " + at.UtcDateTime.ToString("u", CultureInfo.InvariantCulture) : string.Empty);
+        SessionText.Number(count ?? 0) + (last is { } at ? ", the last at " + EvidenceTime.Utc(at) : string.Empty);
 
     private static string Since(ChecksumFacts facts) =>
-        facts.StatsReset is { } reset ? " since the statistics were reset at " + reset.UtcDateTime.ToString("u", CultureInfo.InvariantCulture) : string.Empty;
+        facts.StatsReset is { } reset ? " since the statistics were reset at " + EvidenceTime.Utc(reset) : string.Empty;
 
     private static ChecksumFacts Map(NpgsqlDataReader reader, DateTimeOffset readAt) => new(
         readAt,

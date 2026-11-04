@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Reflection;
 
 using JasperFx.Events.Daemon;
@@ -66,7 +65,7 @@ public class ShardRestartMemoryTests
     private static HealthVerdict Evaluate(ShardFailedOrPausedFacts facts, params HealthSample[] samples) =>
         new ShardFailedOrPausedCheck().Evaluate(facts, HealthEvaluation.At(Now, history: new HealthHistoryView(samples)));
 
-    private static string U(DateTimeOffset at) => at.ToString("u", CultureInfo.InvariantCulture);
+    private static string U(DateTimeOffset at) => EvidenceTime.Utc(at);
 
     // ---- The restart window: the agent reads Running ------------------------------------------------------------------
 

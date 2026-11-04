@@ -727,7 +727,7 @@ internal sealed record StatisticsWindow
     };
 
     /// <summary>A moment, in UTC, the way the evidence prints one.</summary>
-    internal static string When(DateTimeOffset at) => at.UtcDateTime.ToString("yyyy-MM-dd HH:mm 'UTC'", CultureInfo.InvariantCulture);
+    internal static string When(DateTimeOffset at) => EvidenceTime.Utc(at);
 
     /// <summary>The low 52 bits a double holds exactly.</summary>
     private const long SystemMask = (1L << 52) - 1;

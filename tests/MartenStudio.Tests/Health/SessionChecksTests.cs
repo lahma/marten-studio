@@ -14,7 +14,7 @@ public class SessionChecksTests
     private static readonly DateTimeOffset Connected = new(2026, 10, 15, 8, 0, 0, TimeSpan.Zero);
 
     /// <summary>The values of the identifying fields every stated session carries - none may reach an ungated line.</summary>
-    private static readonly string[] Identifying = ["4242", "app_user", "billing-api", "10.1.2.3", "2026-10-15 08:00:00Z", "gid-orphan", "tx_owner"];
+    private static readonly string[] Identifying = ["4242", "app_user", "billing-api", "10.1.2.3", "2026-10-15 08:00:00 UTC", "gid-orphan", "tx_owner"];
 
     private static HealthEvaluation At(DateTimeOffset? now = null) => HealthEvaluation.At(now ?? Now);
 

@@ -576,7 +576,7 @@ public class StatisticsWindowTests
         window.CoversADay.Should().BeFalse();
         window.PerDay(1_000).Should().BeNull();
         window.Watching("the cache hit ratio", StatisticsWindow.Day).Should()
-            .StartWith("Watching: 4 h of statistics so far (since 2026-10-01 08:00 UTC, pg_stat_checkpointer.stats_reset)")
+            .StartWith("Watching: 4 h of statistics so far (since 2026-10-01 08:00:01 UTC, pg_stat_checkpointer.stats_reset)")
             .And.EndWith("the cache hit ratio is judged once they have counted for a day.");
     }
 

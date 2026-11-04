@@ -409,7 +409,7 @@ public class ServerChecksTests
         HealthVerdict verdict = Checksums(Clean);
 
         verdict.Findings.Should().BeEmpty();
-        verdict.Note.Should().Be("Data checksums are on, and no page has failed one since the statistics were reset at 2026-10-01 00:00:00Z.");
+        verdict.Note.Should().Be("Data checksums are on, and no page has failed one since the statistics were reset at 2026-10-01 00:00:00 UTC.");
     }
 
     [Fact]
@@ -420,10 +420,10 @@ public class ServerChecksTests
         HealthFinding finding = Checksums(Clean with { ThisDatabase = 1, ThisLast = when }).Findings.Should().ContainSingle().Subject;
 
         finding.Severity.Should().Be(HealthSeverity.Critical);
-        finding.Title.Should().Be("Postgres has read a page whose checksum did not match, the last at 2026-10-16 22:05:00Z");
-        finding.Evidence.Should().Contain(new HealthEvidence("In this database", "1, the last at 2026-10-16 22:05:00Z"));
+        finding.Title.Should().Be("Postgres has read a page whose checksum did not match, the last at 2026-10-16 22:05:00 UTC");
+        finding.Evidence.Should().Contain(new HealthEvidence("In this database", "1, the last at 2026-10-16 22:05:00 UTC"));
         finding.Evidence.Should().Contain(new HealthEvidence("In other databases on this server", "none"));
-        finding.Evidence.Should().Contain(new HealthEvidence("Counted since", "2026-10-01 00:00:00Z"));
+        finding.Evidence.Should().Contain(new HealthEvidence("Counted since", "2026-10-01 00:00:00 UTC"));
     }
 
     [Fact]

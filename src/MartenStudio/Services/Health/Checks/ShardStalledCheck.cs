@@ -187,7 +187,7 @@ internal sealed class ShardStalledCheck : HealthCheck<ShardStalledFacts>
                 [
                     new HealthEvidence("Position", DaemonCheckConfiguration.Number(row.Sequence)),
                     new HealthEvidence("High-water mark", DaemonCheckConfiguration.Number(mark)),
-                    new HealthEvidence("Last progress", lastMoved.ToString("u", CultureInfo.InvariantCulture) + " (server time)"),
+                    new HealthEvidence("Last progress", EvidenceTime.Utc(lastMoved) + " (server time)"),
                     new HealthEvidence("Quiet window", DaemonCheckConfiguration.Format(window) + (typicalPage is { } page
                         ? " (3 x this shard's typical page as the advisor saw it, " + DaemonCheckConfiguration.Format(page)
                           + ", at least 5 min, at most " + DaemonCheckConfiguration.Format(DaemonThresholds.ShardQuietCeilingFor(configuration.HealthInterval)) + ")"

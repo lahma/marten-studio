@@ -26,16 +26,16 @@ internal sealed record CapacityReading(PostgresComputeCapacity? Capacity, DateTi
     /// <summary>Whether the reading is Aurora Serverless v2's: its unit is <c>ACU</c>, which C03 and A6 key on.</summary>
     public bool IsAcu => Capacity is { Unit: "ACU" };
 
-    /// <summary>"4.5 ACU (min 0.5, max 16), measured 12:01 UTC", or <see langword="null" /> without a reading.</summary>
+    /// <summary>"4.5 ACU (min 0.5, max 16), measured 2026-11-04 12:01:00 UTC", or <see langword="null" /> without a reading.</summary>
     public string? Text => Capacity is { } capacity ? Describe(capacity) : null;
 
-    /// <summary>"4.5 ACU (min 0.5, max 16), measured 12:01 UTC".</summary>
+    /// <summary>"4.5 ACU (min 0.5, max 16), measured 2026-11-04 12:01:00 UTC".</summary>
     public static string Describe(PostgresComputeCapacity capacity)
     {
         ArgumentNullException.ThrowIfNull(capacity);
 
         return Amount(capacity.Current) + " " + capacity.Unit + " (min " + Amount(capacity.Minimum) + ", max " + Amount(capacity.Maximum)
-            + "), measured " + capacity.MeasuredAt.UtcDateTime.ToString("HH:mm 'UTC'", CultureInfo.InvariantCulture);
+            + "), measured " + EvidenceTime.Utc(capacity.MeasuredAt);
     }
 
     /// <summary>"16", "4.5": a capacity as its source spells it, to a hundredth.</summary>

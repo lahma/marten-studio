@@ -37,6 +37,7 @@ internal sealed class StudioState
     private readonly IStudioScopeCatalog catalog;
     private readonly ILogger<StudioState> logger;
     private readonly StudioProduct product;
+    private readonly TimeProvider clock;
 
     private string selectedTheme = "system";
     private string selectedTimeZoneId = TimeZoneInfo.Local.Id;
@@ -50,15 +51,21 @@ internal sealed class StudioState
     /// The studio's settings, whose words that line is logged in - optional so that a test can build the state by hand;
     /// the container always supplies them (<see cref="StudioText.Of" />).
     /// </param>
+    /// <param name="timeProvider">
+    /// The clock "today" is taken from when a moment is spelt (<see cref="Clock" />): the host's own <see cref="TimeProvider" /> when
+    /// it registered one, the system's otherwise.
+    /// </param>
     public StudioState(
         IStudioScopeCatalog catalog,
         ILogger<StudioState> logger,
         IHttpContextAccessor httpContextAccessor,
-        IStudioSettings? settings = null)
+        IStudioSettings? settings = null,
+        TimeProvider? timeProvider = null)
     {
         this.catalog = catalog;
         this.logger = logger;
         product = StudioText.Of(settings).Product;
+        clock = timeProvider ?? TimeProvider.System;
 
         HttpContext? httpContext = httpContextAccessor.HttpContext;
         if (httpContext is null)
@@ -321,6 +328,9 @@ internal sealed class StudioState
 
         return null;
     }
+
+    /// <summary>The clock a page takes "now" and "today" from: the host's <see cref="TimeProvider" /> if one is registered, else the system's.</summary>
+    public TimeProvider Clock => clock;
 
     /// <summary><paramref name="value" /> in the selected time zone.</summary>
     public DateTimeOffset ConvertToSelectedTimeZone(DateTimeOffset value) =>

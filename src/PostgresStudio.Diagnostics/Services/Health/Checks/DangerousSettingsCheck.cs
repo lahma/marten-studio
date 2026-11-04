@@ -1,5 +1,3 @@
-using System.Globalization;
-
 using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services.Database;
 using PostgresStudio.Services.Server;
@@ -436,7 +434,7 @@ internal sealed class DangerousSettingsCheck : HealthCheck<DangerousSettingsFact
     };
 
     private static string Caveat(DangerousSettingsFacts facts, StudioText text) =>
-        "Read in pg_settings at " + facts.ReadAt.UtcDateTime.ToString("u", CultureInfo.InvariantCulture)
+        "Read in pg_settings at " + EvidenceTime.Utc(facts.ReadAt)
         + ", " + text.SettingsReadOn + ". Only the settings named in this check's documentation are judged; sizing "
         + "settings never are.";
 }

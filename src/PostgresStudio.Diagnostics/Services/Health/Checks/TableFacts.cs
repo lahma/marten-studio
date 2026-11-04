@@ -1081,8 +1081,7 @@ internal static class TableText
     public static string Bytes(long bytes) => SchemaFormat.Bytes(bytes);
 
     /// <summary>A moment, in UTC: evidence is formatted once, for every visitor of the sweep.</summary>
-    public static string When(DateTimeOffset? at) =>
-        at is { } value ? value.UtcDateTime.ToString("yyyy-MM-dd HH:mm 'UTC'", CultureInfo.InvariantCulture) : "never";
+    public static string When(DateTimeOffset? at) => EvidenceTime.Utc(at);
 
     /// <summary>A span, as a person says it.</summary>
     public static string Span(TimeSpan span) => span switch

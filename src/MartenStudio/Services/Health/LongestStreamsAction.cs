@@ -333,7 +333,7 @@ internal sealed class LongestStreamsAction(IOptions<MartenStudioOptions> options
 
             if (shape.Created)
             {
-                cells.Add(row.Created is { } started ? new(started.ToString("u", CultureInfo.InvariantCulture)) { Time = started } : new(string.Empty));
+                cells.Add(row.Created is { } started ? new(EvidenceTime.Utc(started)) { Time = started } : new(string.Empty));
             }
 
             table.Add(new HealthActionRow(cells));

@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Reflection;
 
 using JasperFx.Events.Daemon;
@@ -453,7 +452,7 @@ internal sealed class ShardFailedOrPausedCheck : HealthCheck<ShardFailedOrPaused
 
         if (problem.Since is { } since)
         {
-            evidence.Add(new HealthEvidence(paused ? "Paused at" : "Stopped at", since.ToString("u", CultureInfo.InvariantCulture)));
+            evidence.Add(new HealthEvidence(paused ? "Paused at" : "Stopped at", EvidenceTime.Utc(since)));
         }
 
         if (problem.Restarted is { } seen)
@@ -510,7 +509,7 @@ internal sealed class ShardFailedOrPausedCheck : HealthCheck<ShardFailedOrPaused
         {
             evidence.Add(new HealthEvidence(
                 "Last start from Marten Studio",
-                "refused " + refusal.RefusedAt.ToString("u", CultureInfo.InvariantCulture)
+                "refused " + EvidenceTime.Utc(refusal.RefusedAt)
                 + (refusal.Reason is { Length: > 0 } classified ? ": " + classified : string.Empty)
                 + (refusal.IsTransient switch
                 {
@@ -567,10 +566,10 @@ internal sealed class ShardFailedOrPausedCheck : HealthCheck<ShardFailedOrPaused
 
     private static string SeenText(SeenFailure seen) =>
         (seen.PausedAt is { } earlier
-            ? "paused at " + DateTimeOffset.FromUnixTimeMilliseconds(earlier).ToString("u", CultureInfo.InvariantCulture) + ", "
+            ? "paused at " + EvidenceTime.Utc(DateTimeOffset.FromUnixTimeMilliseconds(earlier)) + ", "
             : string.Empty)
         + "at position " + DaemonCheckConfiguration.Number(seen.Position)
-        + ", seen by the advisor's check at " + seen.At.ToString("u", CultureInfo.InvariantCulture);
+        + ", seen by the advisor's check at " + EvidenceTime.Utc(seen.At);
 
     private static string CaveatOf(Problem problem, bool paused, TimeSpan memory)
     {

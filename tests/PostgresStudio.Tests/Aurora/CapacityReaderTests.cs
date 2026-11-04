@@ -138,7 +138,7 @@ public sealed class CapacityReaderTests : IDisposable
         reading.Capacity.Should().BeSameAs(capacity);
         reading.Unknown.Should().BeNull();
         reading.IsAcu.Should().BeTrue();
-        reading.Text.Should().Be("4.5 ACU (min 0.5, max 16), measured 11:59 UTC");
+        reading.Text.Should().Be("4.5 ACU (min 0.5, max 16), measured 2026-10-26 11:59:00 UTC");
 
         source.Asked.Should().ContainSingle();
         source.Asked[0].Database.Should().Be(new PostgresDatabaseRef("orders", "orders-db"));

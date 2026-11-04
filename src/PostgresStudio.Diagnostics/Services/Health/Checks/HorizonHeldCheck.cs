@@ -795,7 +795,7 @@ internal sealed class HorizonHeldCheck : HealthCheck<HorizonFacts>
         List<string> caveat =
         [
             "Read in pg_stat_activity, pg_prepared_xacts, pg_replication_slots and pg_stat_replication at "
-            + facts.ReadAt.UtcDateTime.ToString("u", CultureInfo.InvariantCulture) + "; ages are measured by Postgres's own clock.",
+            + EvidenceTime.Utc(facts.ReadAt) + "; ages are measured by Postgres's own clock.",
         ];
 
         if (hidden is not null)

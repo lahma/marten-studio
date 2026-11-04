@@ -546,4 +546,91 @@ public class SinceMarkPagesTests
         // Today is the selected zone's today: 20:00 UTC is already the next day in Kolkata.
         SinceMarkTime.When(context.State, T0, now: T0.AddHours(8)).Should().Be("2026-10-26 17:30", "20:00 UTC is 01:30 the next day in Kolkata");
     }
+
+    /// <summary>A clock that stands still, for a test that pins what "today" is.</summary>
+    private sealed class FixedClock(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
+    }
+
+    /// <summary>1.2-POLISH: "today" is the studio's <see cref="TimeProvider" />, the host's when it registered one.</summary>
+    [Fact]
+    public async Task Today_is_taken_from_the_registered_clock_and_from_the_system_clock_without_one()
+    {
+        await using PostgresStudioComponentContext pinned = new(static services => services.AddSingleton<TimeProvider>(new FixedClock(T0.AddHours(1))));
+        await pinned.ReadyAsync();
+        pinned.State.SelectedTimeZoneId = "Asia/Kolkata";
+
+        SinceMarkTime.When(pinned.State, T0).Should().Be("17:30", "the pinned clock says it is 13:00 UTC on the same day");
+
+        await using PostgresStudioComponentContext later = new(static services => services.AddSingleton<TimeProvider>(new FixedClock(T0.AddDays(3))));
+        await later.ReadyAsync();
+        later.State.SelectedTimeZoneId = "Asia/Kolkata";
+
+        SinceMarkTime.When(later.State, T0).Should().Be("2026-10-26 17:30", "three days later the date is spelt");
+        SinceMarkTime.When(later.State, T0.AddDays(3).AddMinutes(5)).Should().Be("17:35", "a moment of the pinned day is not given a date");
+
+        await using PostgresStudioComponentContext system = new();
+        await system.ReadyAsync();
+        system.State.SelectedTimeZoneId = "Asia/Kolkata";
+
+        system.State.Clock.Should().BeSameAs(TimeProvider.System, "no clock registered");
+        SinceMarkTime.When(system.State, DateTimeOffset.UtcNow).Should().NotContain("-", "now is today: no date");
+        SinceMarkTime.When(system.State, T0).Should().Contain("2026-10-26", "a moment in 2026-10 is not today");
+    }
+
+    private static StatementsView WithLateEntry(DateTimeOffset at, DateTimeOffset lateEntryBegan) => Statements(at, 30, 300, 1_400) with
+    {
+        Rows =
+        [
+            .. Statements(at, 30, 300, 1_400).Rows,
+            new StatementRowView(2, "select 2", null, "select · public.items", "select · public.items", Counts(5, 50), Counts(5, 50), 0.1, lateEntryBegan, null)
+            {
+                CountersSince = lateEntryBegan,
+            },
+        ],
+    };
+
+    /// <summary>
+    /// 1.2-POLISH: the per-row "Watched since" note sits beside the mark's own times, so it is spelt as they are - in the selected
+    /// zone, with the date when it is not today - and not in UTC beside them. On the advisor's window, where every other time on the
+    /// page is UTC, it stays UTC.
+    /// </summary>
+    [Fact]
+    public async Task A_watched_since_note_is_in_the_selected_zone_on_a_marked_view_and_in_UTC_on_the_advisors_window()
+    {
+        DateTimeOffset began = T0.AddMinutes(5);
+        FakeStatements service = new() { View = Statements(T0, 10, 100, 1_000) };
+        await using PostgresStudioComponentContext context = new(services =>
+        {
+            services.AddSingleton<IStatementsService>(service);
+            services.AddSingleton<TimeProvider>(new FixedClock(T1));
+        });
+        context.WithAllCapabilities();
+        await context.ReadyAsync();
+        context.State.SelectedTimeZoneId = "Asia/Kolkata";
+
+        var page = context.Render<StatementsPage>();
+        page.WaitForAssertion(() => page.Find(".ms-stmts-window").TextContent.Should().Be(Advisor));
+
+        // The advisor's window: the entry began 12:05 UTC, and its note is in UTC like the window text above it.
+        service.View = WithLateEntry(T1, began);
+        ClickRefresh(page);
+        page.WaitForAssertion(() => page.FindAll(".ms-stmts-note").Select(static x => x.TextContent.Trim())
+            .Should().Contain("Watched since 2026-10-26 12:05:00 UTC, part of the window."));
+
+        // A mark taken at T0 and read again at T1: the entry began after the mark, and its note is in Kolkata, as the mark's are.
+        service.View = Statements(T0, 10, 100, 1_000);
+        ClickRefresh(page);
+        page.WaitForAssertion(() => page.Find(".ms-stmts-window").TextContent.Should().Be(Advisor));
+        page.Find(".ms-mark-button").Click();
+        page.WaitForAssertion(() => page.Find(".ms-mark-chip"));
+
+        service.View = WithLateEntry(T1, began);
+        ClickRefresh(page);
+
+        page.WaitForAssertion(() => page.FindAll(".ms-stmts-note").Select(static x => x.TextContent.Trim())
+            .Should().Contain("Watched since 17:35, part of the window."));
+        page.Markup.Should().NotContain("Watched since 2026-10-26 12:05:00 UTC");
+    }
 }

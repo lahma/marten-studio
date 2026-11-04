@@ -141,4 +141,65 @@ public class SavedQueryStoreTests
         SavedQueryStore.RecentKey("default", QueryMode.Marten)
             .Should().NotBe(SavedQueryStore.SavedKey("default", QueryMode.Marten));
     }
+
+    /// <summary>1.2-POLISH: LINQ mode has lists of its own, so a LINQ entry never lands in SQL mode.</summary>
+    [Fact]
+    public void LINQ_mode_has_its_own_keys()
+    {
+        SavedQueryStore.RecentKey("default", QueryMode.Linq).Should().Be("ms_query_recent_default_linq");
+        SavedQueryStore.SavedKey("Other", QueryMode.Linq).Should().Be("ms_query_saved_other_linq");
+
+        string[] keys = [.. new[] { QueryMode.Marten, QueryMode.Sql, QueryMode.Linq }.SelectMany(mode =>
+            new[] { SavedQueryStore.RecentKey("default", mode), SavedQueryStore.SavedKey("default", mode) })];
+
+        keys.Should().OnlyHaveUniqueItems("each mode and each list has its own key");
+    }
+
+    /// <summary>A LINQ entry is two texts and a target: the ordering and the archived selector travel with the predicate.</summary>
+    [Fact]
+    public void A_LINQ_entry_round_trips_with_its_ordering_and_its_archived_selector()
+    {
+        IReadOnlyList<SavedQuery> original =
+        [
+            new("Big orders", QueryMode.Linq, "order", "Total > 100", "Total desc"),
+            new("Recent events", QueryMode.Linq, "(events)", "Version > 1", "Sequence", "include"),
+            new("No ordering", QueryMode.Linq, "order", "Total > 1"),
+        ];
+
+        var read = SavedQueryStore.Deserialize(SavedQueryStore.Serialize(original));
+
+        read.Should().Equal(original);
+        read[0].OrderBy.Should().Be("Total desc");
+        read[1].Archived.Should().Be("include");
+        read[2].OrderBy.Should().BeNull();
+    }
+
+    /// <summary>
+    /// A list with no LINQ entry is written exactly as 1.1 wrote it, and a list 1.1 wrote reads back: the two new keys are written only
+    /// when there is a value, and read as <see langword="null" /> when there is none.
+    /// </summary>
+    [Fact]
+    public void The_new_keys_are_written_only_when_present_and_a_1_1_list_reads_back()
+    {
+        string written = SavedQueryStore.Serialize([new SavedQuery("Count", QueryMode.Sql, null, "select 1")]);
+
+        written.Should().NotContain("orderBy").And.NotContain("archived");
+
+        var read = SavedQueryStore.Deserialize("""[{"name":"x","mode":"Marten","alias":"person","text":"where 1=1"}]""");
+        read.Should().ContainSingle().Which.Should().Be(new SavedQuery("x", QueryMode.Marten, "person", "where 1=1"));
+    }
+
+    /// <summary>The same predicate with another ordering, or another archived selector, is another query: both stay in the recent list.</summary>
+    [Fact]
+    public void The_same_predicate_with_another_ordering_is_another_recent_entry()
+    {
+        var first = new SavedQuery("p", QueryMode.Linq, "order", "Total > 1", "Total");
+        var second = first with { OrderBy = "Total desc" };
+        var third = first with { OrderBy = null };
+
+        var list = SavedQueryStore.AddRecent(SavedQueryStore.AddRecent(SavedQueryStore.AddRecent([], first), second), third);
+
+        list.Should().HaveCount(3);
+        SavedQueryStore.AddRecent(list, first).Select(static x => x.OrderBy).Should().Equal(new string?[] { "Total", null, "Total desc" }, "the same query again moves up");
+    }
 }

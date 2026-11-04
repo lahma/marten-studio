@@ -30,12 +30,12 @@ public class UsageGuardTests
     public void Six_days_withholds_and_seven_days_covers()
     {
         UsageGuard.For(null, Evaluation(Window(TimeSpan.FromDays(6))))!.Withheld(UsageGuard.MinimumWindow)
-            .Should().StartWith("Withheld: statistics 6 days old (since 2026-10-20 09:00 UTC, pg_stat_checkpointer.stats_reset)");
+            .Should().StartWith("Withheld: statistics 6 days old (since 2026-10-20 09:00:00 UTC, pg_stat_checkpointer.stats_reset)");
         UsageGuard.For(null, Evaluation(Window(TimeSpan.FromDays(7))))!.Withheld(UsageGuard.MinimumWindow).Should().BeNull();
     }
 
     [Theory]
-    [InlineData((int) StatisticsResetReason.Crash, "the server restarted at 2026-10-26 08:00 UTC without its statistics")]
+    [InlineData((int) StatisticsResetReason.Crash, "the server restarted at 2026-10-26 08:00:00 UTC without its statistics")]
     [InlineData((int) StatisticsResetReason.Restore, "the timeline went from 1 to 2 and the server started after the last check")]
     [InlineData((int) StatisticsResetReason.Failover, "the timeline went from 2 to 3 on a server that was already running at the last check")]
     [InlineData((int) StatisticsResetReason.FreshCluster, "the cluster's system identifier changed")]
@@ -130,9 +130,9 @@ public class UsageGuardTests
         HealthFinding finding = new UnusedIndexCheck().Evaluate(Unused(Scanned(160_004, Now.AddDays(-31))), Covered()).Findings.Single();
 
         finding.Title.Should().Contain("has not been scanned for 31 days");
-        finding.Evidence.Should().Contain(new HealthEvidence("Last scan", "2026-09-25 09:00 UTC"));
+        finding.Evidence.Should().Contain(new HealthEvidence("Last scan", "2026-09-25 09:00:00 UTC"));
         finding.Evidence.Should().Contain(new HealthEvidence("Index scans", "42"));
-        finding.WhyItMatters.Should().Contain("No query has used it since 2026-09-25 09:00 UTC.");
+        finding.WhyItMatters.Should().Contain("No query has used it since 2026-09-25 09:00:00 UTC.");
 
         new UnusedIndexCheck().Evaluate(Unused(Scanned(160_004, Now.AddDays(-29))), Covered()).Findings.Should().BeEmpty("29 days is inside the line");
     }

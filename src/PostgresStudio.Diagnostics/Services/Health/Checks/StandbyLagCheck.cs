@@ -255,7 +255,7 @@ internal sealed class StandbyLagCheck : HealthCheck<StandbyLagFacts>
             + "too small for the writer's write rate (a Serverless v2 reader in promotion tier 2 to 15 scales on its own, and a low "
             + "minimum capacity there \"can result in excessive replication lag\" - Performance and scaling for Aurora serverless), or "
             + "long queries on the reader that conflict with recovery (pg_stat_database_conflicts says which).",
-            "Read in aurora_replica_status() at " + status.ReadAt.UtcDateTime.ToString("u", CultureInfo.InvariantCulture)
+            "Read in aurora_replica_status() at " + EvidenceTime.Utc(status.ReadAt)
             + ": replica_lag_in_msec for each reader, which CloudWatch keeps as AuroraReplicaLag. Aurora replicates through its "
             + "storage rather than a WAL stream, so there is no byte figure. An instance is named by the cluster's own identifier for "
             + "it, shown to anyone the database-wide gate admits." + (unmeasured > 0
@@ -288,7 +288,7 @@ internal sealed class StandbyLagCheck : HealthCheck<StandbyLagFacts>
         {
             reader.ReplayLatency is { } replay ? "replay expected to take " + Milliseconds(replay) : null,
             reader.FeedbackXmin is { Length: > 0 } xmin ? "feedback xmin " + xmin : null,
-            reader.LastUpdate is { } updated ? "status updated " + updated.UtcDateTime.ToString("u", CultureInfo.InvariantCulture) : null,
+            reader.LastUpdate is { } updated ? "status updated " + EvidenceTime.Utc(updated) : null,
         }.Where(static x => x is not null));
 
         return detail.Length == 0 ? null : detail;
@@ -447,7 +447,7 @@ internal sealed class StandbyLagCheck : HealthCheck<StandbyLagFacts>
             + "or has to wait for. It also holds WAL on this server through its slot until it catches up. The usual causes are "
             + "a standby whose disk or CPU cannot keep up, a network link, a long query on the standby that replay waits for "
             + "(max_standby_streaming_delay), or replay paused there.",
-            "Read in pg_stat_replication at " + standbys.ReadAt.UtcDateTime.ToString("u", CultureInfo.InvariantCulture)
+            "Read in pg_stat_replication at " + EvidenceTime.Utc(standbys.ReadAt)
             + ": the bytes are this server's WAL position less the standby's replay position, and the time is the standby's own "
             + "replay_lag, which is empty once it has caught up and nothing new arrives - so an idle primary never makes it grow. "
             + "A known limit: a standby that delays replay on purpose (recovery_min_apply_delay) shows that delay here as lag - "
@@ -495,12 +495,12 @@ internal sealed class StandbyLagCheck : HealthCheck<StandbyLagFacts>
             {
                 null => "not measured: the replay position was not readable",
                 { Samples: 0 } => "not measured yet: no earlier sample of what it received",
-                { Since: { } since } when bytes > 0 && since < role.ReadAt => since.UtcDateTime.ToString("u", CultureInfo.InvariantCulture)
+                { Since: { } since } when bytes > 0 && since < role.ReadAt => EvidenceTime.Utc(since)
                     + (stall.SinceBeforeTheSamples ? " or earlier: the advisor's samples begin there" : string.Empty),
                 _ => "nothing the advisor's samples saw it receive is unreplayed",
             }),
             new("Last replayed commit", role.LastReplayAt is { } at
-                ? at.UtcDateTime.ToString("u", CultureInfo.InvariantCulture) + (age is { } ago ? ", " + SessionText.Duration(ago) + " ago" : string.Empty) + " - shown, never judged"
+                ? EvidenceTime.Utc(at) + (age is { } ago ? ", " + SessionText.Duration(ago) + " ago" : string.Empty) + " - shown, never judged"
                 : "none yet"),
             new("Replay", role.PauseState ?? (PostgresFeatures.Has(PostgresFeature.WalReplayPauseState, facts.Server.VersionNumber) ? "not read" : PostgresFeatures.Needs(PostgresFeature.WalReplayPauseState))),
             new("recovery_min_apply_delay", facts.ApplyDelay is null ? "not readable" : delay == TimeSpan.Zero ? "0 (replay is not delayed)" : SessionText.Duration(delay) + ": only the time beyond it is judged, and the WAL it holds is not"),
@@ -508,7 +508,7 @@ internal sealed class StandbyLagCheck : HealthCheck<StandbyLagFacts>
         ];
 
         string caveat =
-            "Read at " + role.ReadAt.UtcDateTime.ToString("u", CultureInfo.InvariantCulture) + " on the standby the data source "
+            "Read at " + EvidenceTime.Utc(role.ReadAt) + " on the standby the data source "
             + "reached. The time is how long WAL this standby received has gone unreplayed: each sweep samples what it has received, "
             + "and the time is the age of the oldest sample whose position replay has still not reached - at least that long, exact "
             + "to within a sample. The age of the last replayed commit is never the time: it grows with no lag at all on an idle "

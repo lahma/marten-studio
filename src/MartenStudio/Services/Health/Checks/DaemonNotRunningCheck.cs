@@ -346,7 +346,7 @@ internal sealed class DaemonNotRunningCheck : HealthCheck<DaemonNotRunningFacts>
 
         if (holder.BackendStart is { } started)
         {
-            parts.Add("connected " + started.ToString("u", CultureInfo.InvariantCulture));
+            parts.Add("connected " + EvidenceTime.Utc(started));
         }
 
         if (holder.State is { Length: > 0 } state)

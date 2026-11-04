@@ -51,7 +51,7 @@ public class AuroraWordingTests
 
         new ServerConnectionHeadroomCheck()
             .Evaluate(new ServerConnectionHeadroomFacts(Limits(), Aurora, Acu(16), 100), At())
-            .Findings.Single().Evidence.Should().Contain(new HealthEvidence("Compute capacity", "4.5 ACU (min 0.5, max 16), measured 11:59 UTC"));
+            .Findings.Single().Evidence.Should().Contain(new HealthEvidence("Compute capacity", "4.5 ACU (min 0.5, max 16), measured 2026-10-26 11:59:00 UTC"));
     }
 
     [Theory]

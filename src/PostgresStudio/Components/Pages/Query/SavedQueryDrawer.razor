@@ -114,6 +114,8 @@
     private string pendingName = string.Empty;
     private string pendingText = string.Empty;
     private string? pendingAlias;
+    private string? pendingOrderBy;
+    private string? pendingArchived;
     private string importText = string.Empty;
     private string? importMessage;
 
@@ -125,7 +127,10 @@
     [Parameter]
     public string? StoreKey { get; set; }
 
-    /// <summary>The mode the lists are keyed by: <c>marten</c> or <c>sql</c>.</summary>
+    /// <summary>
+    /// The mode the lists are keyed by: <c>marten</c>, <c>sql</c> or (1.2) <c>linq</c>. Each has its own two lists, so a LINQ
+    /// entry never reaches the SQL console's editor, nor a SQL statement the LINQ predicate box.
+    /// </summary>
     [Parameter]
     public string Mode { get; set; } = "marten";
 
@@ -133,11 +138,27 @@
     [Parameter]
     public EventCallback<(string Text, string? Alias)> OnPick { get; set; }
 
+    /// <summary>
+    /// Raised instead of <see cref="OnPick" /> when it is set, with a LINQ entry's ordering and archived selector as well (1.2):
+    /// LINQ mode is two texts, the predicate and the ordering.
+    /// </summary>
+    [Parameter]
+    public EventCallback<(string Text, string? Alias, string? OrderBy, string? Archived)> OnPickDetailed { get; set; }
+
     /// <summary>How many recent and saved queries are being shown, for a test and for the page.</summary>
     internal int Count => recent.Count + saved.Count;
 
     /// <summary>Opens the name prompt for the text in the editor.</summary>
-    public Task BeginSaveAsync(string text, string? alias)
+    /// <param name="text">The clause, predicate or statement.</param>
+    /// <param name="alias">The document alias, or a LINQ entry's target token.</param>
+    public Task BeginSaveAsync(string text, string? alias) => BeginSaveAsync(text, alias, null, null);
+
+    /// <summary>Opens the name prompt for a LINQ entry (1.2): its predicate, target, ordering and archived selector.</summary>
+    /// <param name="text">The predicate.</param>
+    /// <param name="alias">The document alias, or the target picker's token for the event log.</param>
+    /// <param name="orderBy">The ordering.</param>
+    /// <param name="archived">An event-log entry's archived selector.</param>
+    public Task BeginSaveAsync(string text, string? alias, string? orderBy, string? archived)
     {
         if (string.IsNullOrWhiteSpace(text))
         {
@@ -146,6 +167,8 @@
 
         pendingText = text;
         pendingAlias = alias;
+        pendingOrderBy = orderBy;
+        pendingArchived = archived;
         pendingName = SavedQueryStore.DefaultName(text);
         naming = true;
 
@@ -153,7 +176,16 @@
     }
 
     /// <summary>Puts a query that has just been run at the head of the recent list.</summary>
-    public async Task RecordRunAsync(string text, string? alias)
+    /// <param name="text">The clause, predicate or statement that ran.</param>
+    /// <param name="alias">The document alias, or a LINQ entry's target token.</param>
+    public Task RecordRunAsync(string text, string? alias) => RecordRunAsync(text, alias, null, null);
+
+    /// <summary>Puts a LINQ query that has just been run at the head of the recent list (1.2).</summary>
+    /// <param name="text">The predicate that ran.</param>
+    /// <param name="alias">The document alias, or the target picker's token for the event log.</param>
+    /// <param name="orderBy">The ordering.</param>
+    /// <param name="archived">An event-log entry's archived selector.</param>
+    public async Task RecordRunAsync(string text, string? alias, string? orderBy, string? archived)
     {
         if (string.IsNullOrWhiteSpace(text))
         {
@@ -161,7 +193,7 @@
         }
 
         recent = [.. SavedQueryStore.AddRecent(
-            recent, new SavedQuery(SavedQueryStore.DefaultName(text), CurrentMode, alias, text))];
+            recent, new SavedQuery(SavedQueryStore.DefaultName(text), CurrentMode, alias, text, orderBy, archived))];
 
         await WriteAsync(SavedQueryStore.RecentKey(StoreKey, CurrentMode), recent);
         await InvokeAsync(StateHasChanged);
@@ -184,9 +216,20 @@
     }
 
     private QueryMode CurrentMode =>
-        string.Equals(Mode, nameof(QueryMode.Sql), StringComparison.OrdinalIgnoreCase) ? QueryMode.Sql : QueryMode.Marten;
+        string.Equals(Mode, nameof(QueryMode.Sql), StringComparison.OrdinalIgnoreCase) ? QueryMode.Sql
+        : string.Equals(Mode, nameof(QueryMode.Linq), StringComparison.OrdinalIgnoreCase) ? QueryMode.Linq
+        : QueryMode.Marten;
 
-    private async Task PickAsync(SavedQuery query) => await OnPick.InvokeAsync((query.Text, query.Alias));
+    private async Task PickAsync(SavedQuery query)
+    {
+        if (OnPickDetailed.HasDelegate)
+        {
+            await OnPickDetailed.InvokeAsync((query.Text, query.Alias, query.OrderBy, query.Archived));
+            return;
+        }
+
+        await OnPick.InvokeAsync((query.Text, query.Alias));
+    }
 
     private Task OnNameChanged(ChangeEventArgs args)
     {
@@ -204,7 +247,7 @@
     {
         naming = false;
 
-        saved = [.. SavedQueryStore.Save(saved, new SavedQuery(pendingName, CurrentMode, pendingAlias, pendingText))];
+        saved = [.. SavedQueryStore.Save(saved, new SavedQuery(pendingName, CurrentMode, pendingAlias, pendingText, pendingOrderBy, pendingArchived))];
 
         await WriteAsync(SavedQueryStore.SavedKey(StoreKey, CurrentMode), saved);
         await InvokeAsync(StateHasChanged);
@@ -248,11 +291,17 @@
 
     private async Task ImportAsync()
     {
-        IReadOnlyList<SavedQuery> imported = SavedQueryStore.Deserialize(importText);
+        // An export holds the lists of the mode it came from (1.2): a LINQ entry is not offered to the SQL console or the
+        // Marten clause box, and neither of those is offered to the LINQ editor. An entry written before 1.2 has no LINQ mode,
+        // so it reads as a Marten clause and is kept out of LINQ's list here.
+        IReadOnlyList<SavedQuery> imported = [.. SavedQueryStore.Deserialize(importText)
+            .Where(query => (query.Mode == QueryMode.Linq) == (CurrentMode == QueryMode.Linq))];
 
         if (imported.Count == 0)
         {
-            importMessage = "That is not a list of queries this studio wrote.";
+            importMessage = CurrentMode == QueryMode.Linq
+                ? "That is not a list of LINQ queries this studio wrote."
+                : "That is not a list of queries this studio wrote.";
             return;
         }
 

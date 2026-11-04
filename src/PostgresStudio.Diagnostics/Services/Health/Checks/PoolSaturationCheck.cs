@@ -223,7 +223,7 @@ internal sealed class PoolSaturationCheck : HealthCheck<PoolFacts>
             Evidence = evidence,
             Caveat =
                 "Read in this process from Npgsql's own pool counters (" + facts.Instruments.Usage + " and " + facts.Instruments.Max + ") at "
-                + facts.ReadAt.UtcDateTime.ToString("u", CultureInfo.InvariantCulture) + ", including the studio's own connection while it "
+                + EvidenceTime.Utc(facts.ReadAt) + ", including the studio's own connection while it "
                 + "checks. Other processes on this database have pools of their own, which this does not see. Npgsql counts waiting "
                 + "requests only per request, which the studio never listens to, so \"fully in use\" is read from the pool reaching its "
                 + "ceiling on consecutive checks, one HealthInterval apart.",

@@ -297,7 +297,7 @@
 
                                     @if (row.WatchedFrom is { } from)
                                     {
-                                        <p class="ms-stmts-note">Watched since @TableText.When(from), part of the window.</p>
+                                        <p class="ms-stmts-note">Watched since @(view.MarkedAt is not null ? SinceMarkTime.When(State, from) : TableText.When(from)), part of the window.</p>
                                     }
 
                                     @if (row.ParallelNote is { Length: > 0 } parallel)

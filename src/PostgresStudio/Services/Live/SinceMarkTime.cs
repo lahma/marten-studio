@@ -10,13 +10,13 @@ internal static class SinceMarkTime
     /// <param name="state">The circuit's state, which knows the selected zone.</param>
     /// <param name="at">The moment.</param>
     /// <param name="seconds">Whether to spell seconds.</param>
-    /// <param name="now">The moment "today" is taken from; the clock when <see langword="null" />.</param>
+    /// <param name="now">The moment "today" is taken from; the state's <see cref="StudioState.Clock" /> when <see langword="null" />.</param>
     public static string When(StudioState state, DateTimeOffset at, bool seconds = false, DateTimeOffset? now = null)
     {
         ArgumentNullException.ThrowIfNull(state);
 
         string time = state.FormatInSelectedTimeZone(at, seconds ? "HH:mm:ss" : "HH:mm");
-        bool today = state.ConvertToSelectedTimeZone(at).Date == state.ConvertToSelectedTimeZone(now ?? DateTimeOffset.UtcNow).Date;
+        bool today = state.ConvertToSelectedTimeZone(at).Date == state.ConvertToSelectedTimeZone(now ?? state.Clock.GetUtcNow()).Date;
 
         return today ? time : state.FormatInSelectedTimeZone(at, "yyyy-MM-dd") + " " + time;
     }

@@ -59,7 +59,7 @@ public class PlanFactsPanelTests
 
         panel.Find(".ms-plan-dbfact-summary").TextContent.Should().Be("public.orders: ~1,000 rows, analyzed 30 days ago, 200,000 changed since (20000%)");
         string text = panel.Find(".ms-plan-dbfact-list").TextContent;
-        text.Should().Contain("table").And.Contain("40").And.Contain("20 (50%)").And.Contain("2026-10-02 12:00 UTC").And.Contain("200,000").And.Contain("12");
+        text.Should().Contain("table").And.Contain("40").And.Contain("20 (50%)").And.Contain("2026-10-02 12:00:00 UTC").And.Contain("200,000").And.Contain("12");
 
         panel.FindAll(".ms-plan-dbfact-table").Should().HaveCount(2, "the indexes and the columns");
         panel.FindAll(".ms-plan-dbfact-table").Select(static x => x.TextContent).First().Should().Contain("orders_pkey").And.Contain("(id)").And.Contain("btree").And.Contain("primary key");

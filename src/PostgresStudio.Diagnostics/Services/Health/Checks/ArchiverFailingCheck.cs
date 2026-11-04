@@ -1,5 +1,3 @@
-using System.Globalization;
-
 using Npgsql;
 
 using PostgresStudio.Services.Database;
@@ -384,11 +382,11 @@ internal sealed class ArchiverFailingCheck : HealthCheck<ArchiverFailingFacts>
     private static string When(DateTimeOffset? at, TimeSpan? ageAtRead, DateTimeOffset readAt, HealthEvaluation evaluation) =>
         at is not { } time
             ? "never"
-            : time.UtcDateTime.ToString("u", CultureInfo.InvariantCulture)
+            : EvidenceTime.Utc(time)
               + (ageAtRead is { } age ? ", " + SessionText.Duration(SnapshotAge.At(age, readAt, evaluation)) + " ago" : string.Empty);
 
     private static string Caveat(ArchiverFacts archiver) =>
-        "Read in pg_stat_archiver at " + archiver.ReadAt.UtcDateTime.ToString("u", CultureInfo.InvariantCulture)
-        + (archiver.StatsReset is { } reset ? "; its counters count since " + reset.UtcDateTime.ToString("u", CultureInfo.InvariantCulture) : string.Empty)
+        "Read in pg_stat_archiver at " + EvidenceTime.Utc(archiver.ReadAt)
+        + (archiver.StatsReset is { } reset ? "; its counters count since " + EvidenceTime.Utc(reset) : string.Empty)
         + ". The advisor's window is its own samples, which exist only while somebody watches the Health page or the Overview.";
 }

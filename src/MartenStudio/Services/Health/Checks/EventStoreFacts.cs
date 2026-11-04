@@ -724,8 +724,7 @@ internal static class EventHealth
     };
 
     /// <summary>A time, as the evidence prints it: ISO 8601, UTC, to the second.</summary>
-    public static string Time(DateTimeOffset at) =>
-        at.ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss 'UTC'", CultureInfo.InvariantCulture);
+    public static string Time(DateTimeOffset at) => EvidenceTime.Utc(at);
 
     /// <summary>The caveat line every statistics-based finding carries: when Postgres last sampled the table.</summary>
     public static string StatisticsCaveat(TableStatistics table)

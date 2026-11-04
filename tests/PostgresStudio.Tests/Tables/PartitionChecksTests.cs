@@ -360,7 +360,7 @@ public class PartitionChecksTests
 
         HealthEvidence added = evidenced.Evidence[^1];
         added.Label.Should().Be("Fast-path slots found full, whole server (PostgreSQL 19)");
-        added.Value.Should().Be("37 times since 2026-10-20 08:57 UTC; 1,204 relation-lock requests had to wait");
+        added.Value.Should().Be("37 times since 2026-10-20 08:57:00 UTC; 1,204 relation-lock requests had to wait");
     }
 
     [Fact]

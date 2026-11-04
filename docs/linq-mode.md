@@ -533,6 +533,15 @@ offer members that mean something else:
   all. The hidden subclass is not offered, and cannot be chosen or named, but its rows are not filtered out of the
   root's. This is how the Documents screen lists a hierarchy too. A host that must keep a subclass's rows unseen hides
   the root.
+- **Recent and saved queries live in the visitor's own browser.** From 1.2 LINQ mode has the same drawer as the SQL console
+  and the Marten clause box, with a list of its own for each store (a LINQ entry is a target, a predicate, an ordering and,
+  for the event log, an archived selector, and it is never offered to another mode). The lists are in the browser's
+  `localStorage` (a cookie when that is refused) and nowhere on the server, so a colleague never sees them and they cost the
+  database nothing. Picking an entry only fills the boxes: nothing runs until Run, which is the gate, the screen and the
+  guard as ever, so a list a visitor imported from a file can say whatever it likes and gains nothing. An entry for a
+  document type the store no longer registers is refused in the status line. Export and Import move a list between machines;
+  Import into LINQ mode takes LINQ entries only. The address bar still keeps the query too
+  (`?mode=linq&type=…&predicate=…&orderby=…`).
 - **An in-list's array is the one closed subtree accepted.** The composer builds it from the literals' values,
   without compiling anything, so Marten binds a value rather than evaluating an initialiser.
 - **Dates are put right after the parse, not during it.** JasperFx 2.84 to 2.90.2 reads a date with no offset in the
@@ -600,8 +609,6 @@ offer members that mean something else:
 
 ## Not yet
 
-- **Saved and recent queries do not cover LINQ mode yet.** A LINQ query is two texts and the saved-query store keeps
-  one. The address bar keeps the query (`?mode=linq&type=…&predicate=…&orderby=…`).
 - **No `@n` arguments.** Values are literals, so `in @0` is written `in ("a", "b")`.
 - **No predicates on an event's body.** A follow-up may offer LINQ over one *registered* event type's body, with the
   upcaster caveat on screen.

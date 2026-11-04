@@ -75,7 +75,7 @@ internal sealed class PreparedTransactionCheck : HealthCheck<PreparedTransaction
         List<HealthEvidence> evidence =
         [
             new("Prepared transactions older than " + SessionText.Duration(ConnectionThresholds.PreparedTransactionCritical), SessionText.Number(old.Count)),
-            new("Oldest", SessionText.Duration(oldest) + ", prepared at " + old[0].Row.Prepared.UtcDateTime.ToString("u", CultureInfo.InvariantCulture)),
+            new("Oldest", SessionText.Duration(oldest) + ", prepared at " + EvidenceTime.Utc(old[0].Row.Prepared)),
             new("max_prepared_transactions", facts.MaxPrepared.ToString(CultureInfo.InvariantCulture)),
         ];
 
@@ -106,7 +106,7 @@ internal sealed class PreparedTransactionCheck : HealthCheck<PreparedTransaction
                 + "that prepared it; by hand only after finding out whether it should commit or roll back.",
             Evidence = evidence,
             Caveat =
-                "Read in pg_prepared_xacts, for this database, at " + facts.ReadAt.UtcDateTime.ToString("u", CultureInfo.InvariantCulture)
+                "Read in pg_prepared_xacts, for this database, at " + EvidenceTime.Utc(facts.ReadAt)
                 + ". Its global identifier and owner are shown only with "
                 + evaluation.Text.OptionName("Capabilities.ViewDatabaseActivity") + ".",
             Remedy = null,

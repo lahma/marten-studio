@@ -223,7 +223,7 @@ internal sealed class AutovacuumWorkersCheck : HealthCheck<AutovacuumWorkersFact
                     : "This role is not a member of pg_read_all_stats, so it cannot tell autovacuum's workers from a manual VACUUM or ANALYZE: "
                       + "the count is every process in pg_stat_progress_vacuum and pg_stat_progress_analyze on the server, which is at least the "
                       + "busy workers and includes manual runs.")
-                + " Read at " + facts.ReadAt.UtcDateTime.ToString("u", CultureInfo.InvariantCulture) + ", once per sweep.",
+                + " Read at " + EvidenceTime.Utc(facts.ReadAt) + ", once per sweep.",
             Remedy = ServerSettingRemedy.Build(
                 facts.Platform,
                 "autovacuum_max_workers",

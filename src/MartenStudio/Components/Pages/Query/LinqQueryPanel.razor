@@ -490,6 +490,21 @@
     [Parameter]
     public EventCallback<(string? Alias, bool Events, string Where, string OrderBy, string? Archived)> OnDraftChanged { get; set; }
 
+    /// <summary>
+    /// Raised after a run of the first page that came back without a refusal or an error (1.2), with what was run, so the page can put
+    /// it at the head of the recent list: the target (<see cref="EventsToken" /> for the event log), the predicate, the ordering and,
+    /// for the event log, the archived selector.
+    /// </summary>
+    [Parameter]
+    public EventCallback<(string? Alias, bool Events, string Where, string OrderBy, string? Archived)> OnRan { get; set; }
+
+    /// <summary>
+    /// Raised by Save and Ctrl+S (1.2), with what is in the boxes, so the page can ask the drawer for a name. Without a handler the
+    /// panel says that nothing keeps the query but the address bar.
+    /// </summary>
+    [Parameter]
+    public EventCallback<(string? Alias, bool Events, string Where, string OrderBy, string? Archived)> OnSave { get; set; }
+
     private LinqDocumentTypeInfo? SelectedType =>
         eventsTarget ? null : status?.Types.FirstOrDefault(x => string.Equals(x.Alias, alias, StringComparison.OrdinalIgnoreCase));
 
@@ -734,12 +749,71 @@
         await DraftAsync();
     }
 
-    private Task SaveAsync(string text)
+    private async Task SaveAsync(string text)
     {
-        // Saved queries keep one text and one alias; a LINQ query is two texts. Listed as a follow-up rather than
-        // squeezed into the Marten mode's lists, where it would be offered to the wrong editor.
-        statusText = "Saved queries do not cover LINQ mode yet; the address bar keeps this query.";
-        return Task.CompletedTask;
+        if (!OnSave.HasDelegate)
+        {
+            statusText = "Nothing keeps a saved LINQ query here; the address bar keeps this one.";
+            return;
+        }
+
+        where = text;
+
+        try
+        {
+            await OnSave.InvokeAsync((alias, eventsTarget, where, orderBy, EventLinks.ArchivedToken(archived)));
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            await Toasts.Error("The query could not be saved (" + exception.GetType().Name + ").");
+        }
+    }
+
+    /// <summary>
+    /// Puts a recent or saved query into the boxes (1.2): the target, the predicate, the ordering and the archived selector, with
+    /// nothing run and any earlier result cleared. A document type this store no longer registers is not applied, and the status line
+    /// says so. Called by the page when an entry of the drawer is picked.
+    /// </summary>
+    /// <param name="pickedAlias">The document alias, or <see cref="EventsToken" /> for the event log.</param>
+    /// <param name="pickedWhere">The predicate.</param>
+    /// <param name="pickedOrderBy">The ordering, or <see langword="null" />.</param>
+    /// <param name="pickedArchived">The archived selector of an event-log entry, or <see langword="null" />.</param>
+    public async Task ApplyAsync(string? pickedAlias, string pickedWhere, string? pickedOrderBy, string? pickedArchived)
+    {
+        bool toEvents = string.Equals(pickedAlias, EventsToken, StringComparison.Ordinal);
+
+        if (!toEvents && (string.IsNullOrWhiteSpace(pickedAlias)
+            || status is null
+            || !status.Types.Any(x => string.Equals(x.Alias, pickedAlias, StringComparison.OrdinalIgnoreCase))))
+        {
+            statusText = "That query's document type is not one this store registers.";
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        eventsTarget = toEvents;
+
+        if (!toEvents)
+        {
+            alias = status!.Types.First(x => string.Equals(x.Alias, pickedAlias, StringComparison.OrdinalIgnoreCase)).Alias;
+        }
+
+        where = pickedWhere;
+        orderBy = pickedOrderBy ?? string.Empty;
+        archived = toEvents ? EventLinks.ParseArchived(pickedArchived) : ArchivedFilter.Exclude;
+        deleted = DeletedFilter.Exclude;
+        result = null;
+        plan = null;
+        advice = null;
+        whereError = null;
+        whereErrorPosition = -1;
+        orderError = null;
+        orderErrorPosition = -1;
+        generalError = null;
+        statusText = null;
+
+        await NotifyAsync();
+        await InvokeAsync(StateHasChanged);
     }
 
     private async Task DraftAsync()
@@ -846,6 +920,19 @@
             {
                 statusText = run.RowCount.ToString(CultureInfo.InvariantCulture) + (eventsTarget ? " events in " : " documents in ") +
                              run.Duration.TotalMilliseconds.ToString("0.##", CultureInfo.InvariantCulture) + " ms";
+
+                if (offset == 0 && OnRan.HasDelegate)
+                {
+                    try
+                    {
+                        await OnRan.InvokeAsync((alias, eventsTarget, where, orderBy, EventLinks.ArchivedToken(archived)));
+                    }
+                    catch (Exception exception) when (exception is not OperationCanceledException)
+                    {
+                        // The recent list is a convenience, kept in the visitor's own browser: a run that worked is not turned
+                        // into an error because the list could not be written (no storage, or interop lost).
+                    }
+                }
             }
         }
         catch (OperationCanceledException)

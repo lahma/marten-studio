@@ -103,7 +103,7 @@ internal sealed class IdleConnectionsHoardedCheck : HealthCheck<ConnectionHolder
                 + " used. Connections to every database on the server count, " + evaluation.Text.EveryDatabasesConnections + ".",
             Evidence = evidence,
             Caveat =
-                "Counted in pg_stat_activity across every database on the server at " + facts.ReadAt.UtcDateTime.ToString("u", CultureInfo.InvariantCulture)
+                "Counted in pg_stat_activity across every database on the server at " + EvidenceTime.Utc(facts.ReadAt)
                 + ": idle means a session whose state is idle, which a session idle inside a transaction (C04) is not, and a session with no "
                 + "application name is counted as an application of its own. An application's connections are summed across every database "
                 + "and every role it uses. A moment's reading: a pool's connections come and go between two checks."

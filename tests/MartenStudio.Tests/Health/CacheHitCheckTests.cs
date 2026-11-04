@@ -37,7 +37,7 @@ public class CacheHitCheckTests
         finding.Code.Should().Be("C11");
         finding.Severity.Should().Be(HealthSeverity.Warning);
         finding.Subject.Should().BeNull("one finding per database, about no object");
-        finding.Title.Should().StartWith("94.9% of this database's block reads were found in shared buffers since 2026-10-24 12:00 UTC");
+        finding.Title.Should().StartWith("94.9% of this database's block reads were found in shared buffers since 2026-10-24 12:00:00 UTC");
         finding.Evidence.Should().Contain(new HealthEvidence("Cache hit ratio", "94.9%"));
         finding.Evidence.Should().Contain(new HealthEvidence("Blocks read a day", "1,000,000"));
         finding.Evidence.Select(static x => x.Label).Should().Contain(["Window", "Counting since"]);

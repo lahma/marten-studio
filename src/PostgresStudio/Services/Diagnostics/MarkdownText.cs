@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Text;
 
+using PostgresStudio.Services.Health;
+
 namespace PostgresStudio.Services.Diagnostics;
 
 /// <summary>
@@ -140,8 +142,7 @@ internal static class MarkdownText
 
     /// <summary>A time, the report's one spelling: <c>yyyy-MM-dd HH:mm:ss UTC</c>. Where the studio's one time spelling lives, this is its stand-in.</summary>
     /// <param name="at">The moment.</param>
-    public static string Utc(DateTimeOffset at) =>
-        at.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss 'UTC'", CultureInfo.InvariantCulture);
+    public static string Utc(DateTimeOffset at) => EvidenceTime.Utc(at);
 
     /// <summary>A time, or <c>never</c>.</summary>
     /// <param name="at">The moment.</param>

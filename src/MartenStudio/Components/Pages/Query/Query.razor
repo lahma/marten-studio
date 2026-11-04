@@ -247,13 +247,16 @@
             else if (mode == QueryMode.Linq)
             {
                 @* F7: a component of its own, with its own service, so the two modes above never resolve it. *@
-                <LinqQueryPanel Alias="@linqAlias"
+                <LinqQueryPanel @ref="linqPanel"
+                                Alias="@linqAlias"
                                 Events="linqEvents"
                                 Archived="@linqArchived"
                                 Where="@linqWhere"
                                 OrderBy="@linqOrderBy"
                                 OnChanged="OnLinqChangedAsync"
-                                OnDraftChanged="OnLinqDraftChangedAsync" />
+                                OnDraftChanged="OnLinqDraftChangedAsync"
+                                OnRan="OnLinqRanAsync"
+                                OnSave="OnLinqSaveAsync" />
             }
             else
             {
@@ -267,15 +270,13 @@
             }
         </div>
 
-        @if (mode != QueryMode.Linq)
-        {
-            <aside class="ms-query-side" aria-label="Saved and recent queries">
-                <SavedQueryDrawer @ref="drawer"
-                                  StoreKey="@State.ActiveScope?.StoreKey"
-                                  Mode="@mode.ToString()"
-                                  OnPick="OnPickedAsync" />
-            </aside>
-        }
+        @* All three modes (LINQ's since 1.2), each with lists of its own: the drawer keys them by mode. *@
+        <aside class="ms-query-side" aria-label="Saved and recent queries">
+            <SavedQueryDrawer @ref="drawer"
+                              StoreKey="@State.ActiveScope?.StoreKey"
+                              Mode="@mode.ToString()"
+                              OnPickDetailed="OnPickedDetailedAsync" />
+        </aside>
     </div>
 </div>
 
@@ -288,6 +289,7 @@
     private readonly CancellationTokenSource pageCts = new();
 
     private SavedQueryDrawer? drawer;
+    private LinqQueryPanel? linqPanel;
     private CancellationTokenSource? runCts;
     private CancellationTokenSource? tickCts;
 
@@ -666,6 +668,52 @@
         PushUrl();
         await InvokeAsync(StateHasChanged);
     }
+
+    /// <summary>
+    /// An entry of the drawer was picked. LINQ's goes into the panel, which owns its target, predicate and ordering (1.2); the other
+    /// two modes' fill their editor as before.
+    /// </summary>
+    private async Task OnPickedDetailedAsync((string Text, string? Alias, string? OrderBy, string? Archived) picked)
+    {
+        if (mode == QueryMode.Linq)
+        {
+            if (linqPanel is not null)
+            {
+                await linqPanel.ApplyAsync(picked.Alias, picked.Text, picked.OrderBy, picked.Archived);
+            }
+
+            return;
+        }
+
+        await OnPickedAsync((picked.Text, picked.Alias));
+    }
+
+    /// <summary>A LINQ query ran without a refusal or an error: it goes into the drawer's recent list (1.2).</summary>
+    private async Task OnLinqRanAsync((string? Alias, bool Events, string Where, string OrderBy, string? Archived) ran)
+    {
+        if (drawer is not null)
+        {
+            (string? target, string? archivedToken) = LinqEntryKey(ran);
+            await drawer.RecordRunAsync(ran.Where, target, ran.OrderBy, archivedToken);
+        }
+    }
+
+    /// <summary>Save, or Ctrl+S, in the LINQ editor: the drawer asks for a name (1.2).</summary>
+    private async Task OnLinqSaveAsync((string? Alias, bool Events, string Where, string OrderBy, string? Archived) saving)
+    {
+        if (drawer is not null)
+        {
+            (string? target, string? archivedToken) = LinqEntryKey(saving);
+            await drawer.BeginSaveAsync(saving.Where, target, saving.OrderBy, archivedToken);
+        }
+    }
+
+    /// <summary>
+    /// What a LINQ entry is filed under: the alias of a document type or, for the event log, the target picker's own token; and the
+    /// archived selector, which only an event-log entry has.
+    /// </summary>
+    private static (string? Target, string? Archived) LinqEntryKey((string? Alias, bool Events, string Where, string OrderBy, string? Archived) query) =>
+        query.Events ? (LinqQueryPanel.EventsToken, query.Archived) : (NullIfBlank(query.Alias), null);
 
     private async Task OnPickedAsync((string Text, string? Alias) picked)
     {

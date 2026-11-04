@@ -243,7 +243,7 @@ public class StatementsServiceTests
             Read(2_000, Statement(1, "select 1", 20, 2_000)),
             History(Sample(TimeSpan.FromMinutes(25), 1_000, (1, 10, 1_000)), Sample(TimeSpan.Zero, 2_000, (1, 20, 2_000))));
 
-        StatementsService.WindowText(watched).Should().StartWith("Over the last 25 min the statement checks watched (2026-10-26 11:35 UTC to 2026-10-26 12:00 UTC)");
+        StatementsService.WindowText(watched).Should().StartWith("Over the last 25 min the statement checks watched (2026-10-26 11:35:00 UTC to 2026-10-26 12:00:00 UTC)");
     }
 
     /// <summary>

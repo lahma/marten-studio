@@ -360,7 +360,7 @@ public sealed class NpgsqlPoolInstrumentsTests
 
         older.Should().Be(
             "Read in this process from Npgsql's own pool counters (db.client.connections.usage and db.client.connections.max) at "
-            + "2026-10-20 09:00:00Z, including the studio's own connection while it checks. Other processes on this database have "
+            + "2026-10-20 09:00:00 UTC, including the studio's own connection while it checks. Other processes on this database have "
             + "pools of their own, which this does not see. Npgsql counts waiting requests only per request, which the studio never "
             + "listens to, so \"fully in use\" is read from the pool reaching its ceiling on consecutive checks, one HealthInterval "
             + "apart.");

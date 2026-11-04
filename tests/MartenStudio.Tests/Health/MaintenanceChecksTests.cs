@@ -810,7 +810,7 @@ public class MaintenanceChecksTests
         finding.Variant.Should().Be(StaleStatisticsCheck.SinceRestartVariant);
         finding.Subject.Should().BeNull("it is the database's");
         finding.Severity.Should().Be(HealthSeverity.Info);
-        finding.Title.Should().Contain("began again at 2026-10-15 06:00 UTC (a crash)").And.Contain("invisible to it, and to T07");
+        finding.Title.Should().Contain("began again at 2026-10-15 06:00:00 UTC (a crash)").And.Contain("invisible to it, and to T07");
         finding.Evidence.Should().Contain(new HealthEvidence("The largest of them", orders.Key));
         finding.WhyItMatters.Should().Contain("vacuumdb --all --analyze-only");
 
@@ -879,7 +879,7 @@ public class MaintenanceChecksTests
 
         HealthFinding finding = SinceRestartOf(check.Evaluate(facts, Evaluation() with { Statistics = Window(TimeSpan.FromHours(2), StatisticsResetReason.ManualReset) }))!;
         finding.Should().NotBeNull();
-        finding.Title.Should().Contain("began again at 2026-10-15 07:00 UTC (a statistics reset)");
+        finding.Title.Should().Contain("began again at 2026-10-15 07:00:00 UTC (a statistics reset)");
 
         SinceRestartOf(check.Evaluate(facts, Evaluation() with { Statistics = Window(TimeSpan.FromHours(2) + TimeSpan.FromMinutes(11), StatisticsResetReason.ManualReset) }))
             .Should().NotBeNull("the same window eleven minutes on, in the next sweeps: it holds");
@@ -908,7 +908,7 @@ public class MaintenanceChecksTests
 
         HealthFinding finding = SinceRestartOf(new StaleStatisticsCheck().Evaluate(new StatisticsFacts(Now, RestartTables()) { Statistics = reset }, Evaluation()))!;
         finding.Should().NotBeNull("pg_stat_reset() two hours ago, on a server up for a month");
-        finding.Title.Should().Contain("began again at 2026-10-15 07:00 UTC");
+        finding.Title.Should().Contain("began again at 2026-10-15 07:00:00 UTC");
 
         StatisticsReading counting = reset with { DatabaseReset = null };
         SinceRestartOf(new StaleStatisticsCheck().Evaluate(new StatisticsFacts(Now, RestartTables()) { Statistics = counting }, Evaluation()))

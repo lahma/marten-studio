@@ -1,5 +1,3 @@
-using System.Globalization;
-
 using PostgresStudio.Services.Database;
 using PostgresStudio.Services.Server;
 
@@ -57,7 +55,7 @@ internal sealed class PasswordExpiryCheck : HealthCheck<PasswordExpiryFacts>
         }
 
         TimeSpan left = until - evaluation.Now;
-        string when = until.UtcDateTime.ToString("u", CultureInfo.InvariantCulture);
+        string when = EvidenceTime.Utc(until);
 
         if (left > Warning)
         {

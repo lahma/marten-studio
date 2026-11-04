@@ -16095,3 +16095,39 @@ dialog.ms-modal::backdrop {
     font-size: var(--ms-font-size-xs);
     padding: 0 var(--ms-space-xs);
 }
+
+/* ===== 1.2-POLISH two layout leftovers at 1280 px ===== */
+
+/* Maintenance > Triggers. The table's name column was as wide as its longest identifier (368 px on the sample's), because a schema-
+   qualified name has no break opportunity, and it left no room for the columns after it: at 1280 the page's "Stats since" and
+   "Bloat" were scrolled out of sight. The name now breaks anywhere and stops at 15rem, each decision's bar needs 6rem rather than
+   9rem (its numbers are one line of 12 px mono), and the table's cells keep the small gutter the other dense tables keep. The
+   TableScroll stays the floor (D25): a table of ten columns, on PostgreSQL 19, still scrolls. */
+.ms-maint-table th,
+.ms-maint-table td {
+    padding-inline: var(--ms-space-sm);
+}
+
+/* Two headers ("Inserts since vacuum", "Changed since analyze") were the widest thing in their columns: nowrap held each on one line. */
+.ms-maint-table thead th {
+    white-space: normal;
+    vertical-align: bottom;
+}
+
+.ms-maint-name {
+    min-width: 9rem;
+    max-width: 15rem;
+    overflow-wrap: anywhere;
+}
+
+.ms-maint-decision {
+    min-width: 6rem;
+}
+
+/* A refusal's excerpt, with the width the SQL console's has. The message and the excerpt are two children of one row; the message
+   is the longer of the two in LINQ mode ("The ordering names 'X', which is not an event member that can be ordered by."), so the
+   excerpt shrank to about 120 px and scrolled inside itself. It now keeps 18rem (what the console's own excerpt measures), and the
+   message wraps instead. `min()` keeps it inside a box narrower than that, where UX-8 already stacks the two. */
+.ms-alert.ms-query-error > .ms-query-caret {
+    min-width: min(18rem, 100%);
+}

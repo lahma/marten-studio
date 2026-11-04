@@ -291,7 +291,7 @@ internal sealed class RangePartitionsCheck : HealthCheck<PartitionFacts>
     }
 
     private static string When(double seconds) =>
-        DateTimeOffset.FromUnixTimeMilliseconds((long) Math.Round(seconds * 1000d)).UtcDateTime.ToString("yyyy-MM-dd HH:mm 'UTC'", CultureInfo.InvariantCulture);
+        EvidenceTime.Utc(DateTimeOffset.FromUnixTimeMilliseconds((long) Math.Round(seconds * 1000d)));
 
     private static string Width(double seconds) => TableText.Span(TimeSpan.FromSeconds(seconds));
 

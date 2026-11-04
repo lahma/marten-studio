@@ -194,7 +194,7 @@ internal sealed class DatabaseCounterCheck : HealthCheck<DatabaseCounterFacts>
         ArgumentNullException.ThrowIfNull(evaluation);
 
         string since = facts.StatsReset is { } reset
-            ? "since the statistics were last reset, at " + reset.UtcDateTime.ToString("u", CultureInfo.InvariantCulture)
+            ? "since the statistics were last reset, at " + EvidenceTime.Utc(reset)
             : "since the server's statistics began";
 
         // Per day, over the statistics window (G5): only once it has counted for a day and does not look reset.

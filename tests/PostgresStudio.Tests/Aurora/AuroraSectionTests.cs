@@ -53,7 +53,7 @@ public class AuroraSectionTests
         var section = context.Render<AuroraSection>(parameters => parameters.Add(static x => x.Model, View()));
 
         section.Find(".ms-aur-facts").TextContent.Should().Contain("instance studio-test-instance-1 (the writer), Aurora 16.4.1")
-            .And.Contain("4.5 ACU (min 0.5, max 16), measured 11:59 UTC");
+            .And.Contain("4.5 ACU (min 0.5, max 16), measured 2026-10-26 11:59:00 UTC");
         section.Find(".ms-aur-instances").TextContent.Should().Contain("studio-test-instance-2").And.Contain("13 ms");
         section.Find(".ms-aur-waits").TextContent.Should().Contain("IO:XactSync").And.Contain("187,073");
         section.Markup.Should().Contain("since the instance started").And.Contain("2 events");
@@ -109,10 +109,10 @@ public class AuroraSectionTests
         await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
 
         var line = context.Render<ServerAnswer>(parameters => parameters.Add(static x => x.Model,
-            new HealthServerLine("instance studio-test-instance-2 (a reader), Aurora 16.4.1", Now.AddDays(-1), "4.5 ACU (min 0.5, max 16), measured 11:59 UTC", null)));
+            new HealthServerLine("instance studio-test-instance-2 (a reader), Aurora 16.4.1", Now.AddDays(-1), "4.5 ACU (min 0.5, max 16), measured 2026-10-26 11:59:00 UTC", null)));
 
         line.Find(".ms-aur-answer-instance").TextContent.Should().StartWith("Answered by instance studio-test-instance-2 (a reader), Aurora 16.4.1, up since");
-        line.Find(".ms-aur-answer-capacity").TextContent.Should().Be("Capacity 4.5 ACU (min 0.5, max 16), measured 11:59 UTC.");
+        line.Find(".ms-aur-answer-capacity").TextContent.Should().Be("Capacity 4.5 ACU (min 0.5, max 16), measured 2026-10-26 11:59:00 UTC.");
 
         var unknown = context.Render<ServerAnswer>(parameters => parameters.Add(static x => x.Model,
             new HealthServerLine(null, null, null, "capacity unknown this interval: the capacity source took longer than 5 s")));
@@ -129,7 +129,7 @@ public class AuroraSectionTests
         {
             MeasuredAt = Now,
             Server = new HealthServerLine("instance studio-test-instance-2 (the writer), Aurora 16.4.1", Now.AddMinutes(-3), null, null),
-            StatisticsReset = "The statistics look reset since the last check: another instance answered; its counters started at 2026-10-26 11:57 UTC.",
+            StatisticsReset = "The statistics look reset since the last check: another instance answered; its counters started at 2026-10-26 11:57:00 UTC.",
         };
 
         var page = context.Render<PostgresStudio.Components.Pages.Health.HealthPage>();
@@ -137,7 +137,7 @@ public class AuroraSectionTests
         page.WaitForAssertion(() => page.FindAll(".ms-aur-answer").Should().ContainSingle());
         page.Find(".ms-aur-answer-instance").TextContent.Should().StartWith("Answered by instance studio-test-instance-2 (the writer), Aurora 16.4.1");
         page.Find(".ms-aur-reset").TextContent.Trim().Should().Be(
-            "The statistics look reset since the last check: another instance answered; its counters started at 2026-10-26 11:57 UTC.");
+            "The statistics look reset since the last check: another instance answered; its counters started at 2026-10-26 11:57:00 UTC.");
 
         context.Health.Report = context.Health.Report with { Server = null, StatisticsReset = null };
         var plain = context.Render<PostgresStudio.Components.Pages.Health.HealthPage>();

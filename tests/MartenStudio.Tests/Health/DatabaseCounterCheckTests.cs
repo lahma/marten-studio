@@ -46,7 +46,7 @@ public class DatabaseCounterCheckTests
         HealthVerdict verdict = Evaluate((0, new Counters(100, 100, Deadlocks: 5)));
 
         verdict.Findings.Should().BeEmpty("a counter since the last reset is not a rate");
-        verdict.Note.Should().Contain("Watching").And.Contain("2026-10-01 00:00:00Z");
+        verdict.Note.Should().Contain("Watching").And.Contain("2026-10-01 00:00:00 UTC");
     }
 
     [Fact]
@@ -58,7 +58,7 @@ public class DatabaseCounterCheckTests
         finding.Variant.Should().Be("deadlocks");
         finding.Severity.Should().Be(HealthSeverity.Warning);
         finding.Title.Should().Be("1 deadlock in the last 5 min");
-        finding.Caveat.Should().Contain("2026-10-01 00:00:00Z");
+        finding.Caveat.Should().Contain("2026-10-01 00:00:00 UTC");
     }
 
     [Fact]
@@ -173,7 +173,7 @@ public class DatabaseCounterCheckTests
 
         finding.Variant.Should().Be("temp-files", "the variant name is kept exactly");
         finding.Severity.Should().Be(HealthSeverity.Warning);
-        finding.Title.Should().Be("Statements write 1.0 GiB of temporary files a day since 2026-10-13 09:00 UTC");
+        finding.Title.Should().Be("Statements write 1.0 GiB of temporary files a day since 2026-10-13 09:00:00 UTC");
         finding.Evidence.Should().Contain(new HealthEvidence("Written a day", "1.0 GiB"));
         finding.Evidence.Should().Contain(new HealthEvidence("Temporary files a day", "20"));
         finding.Evidence.Select(static x => x.Label).Should().Contain(["Window", "Counting since"]);
@@ -191,7 +191,7 @@ public class DatabaseCounterCheckTests
         HealthFinding finding = verdict.Findings.Should().ContainSingle().Subject;
         finding.Variant.Should().Be("temp-files");
         finding.Severity.Should().Be(HealthSeverity.Info, "under 1 GiB a day the hour's rule stands");
-        finding.Evidence.Select(static x => x.Label).Should().Contain("Written a day since 2026-10-13 09:05 UTC");
+        finding.Evidence.Select(static x => x.Label).Should().Contain("Written a day since 2026-10-13 09:05:00 UTC");
     }
 
     [Fact]
@@ -223,7 +223,7 @@ public class DatabaseCounterCheckTests
 
         finding.Variant.Should().Be("deadlocks");
         finding.Severity.Should().Be(HealthSeverity.Warning);
-        finding.Evidence.Should().Contain(new HealthEvidence("Deadlocks per day since 2026-10-11 09:05 UTC", "1.75"));
+        finding.Evidence.Should().Contain(new HealthEvidence("Deadlocks per day since 2026-10-11 09:05:00 UTC", "1.75"));
     }
 
     [Fact]
@@ -245,7 +245,7 @@ public class DatabaseCounterCheckTests
         HealthVerdict verdict = EvaluatePerDay(TimeSpan.FromDays(2), looksReset: false, (0, new Counters(100, 0, Deadlocks: 3)), (5, new Counters(150, 0, Deadlocks: 3)));
 
         verdict.Findings.Should().BeEmpty();
-        verdict.Note.Should().Contain("Per day since 2026-10-13 09:05 UTC: 1.5 deadlocks and 0 bytes of temporary files.");
+        verdict.Note.Should().Contain("Per day since 2026-10-13 09:05:00 UTC: 1.5 deadlocks and 0 bytes of temporary files.");
     }
 
     // ---- a window that could not be read (CAP-fix item 2) ---------------------------------------------------------------

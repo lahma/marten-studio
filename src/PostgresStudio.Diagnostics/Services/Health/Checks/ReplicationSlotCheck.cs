@@ -1,5 +1,3 @@
-using System.Globalization;
-
 using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services.Database;
 using PostgresStudio.Services.Server;
@@ -533,7 +531,7 @@ internal sealed class ReplicationSlotCheck : HealthCheck<ReplicationSlotFacts>
     }
 
     private static string Caveat(ReplicationSlotSnapshot snapshot, StudioText text) =>
-        "Read in pg_replication_slots at " + snapshot.ReadAt.UtcDateTime.ToString("u", CultureInfo.InvariantCulture)
+        "Read in pg_replication_slots at " + EvidenceTime.Utc(snapshot.ReadAt)
         + "; what a slot holds is the server's WAL position less the slot's restart_lsn. Slots are the server's, not this "
         + "database's, so " + text.EverySourceDatabase + " counts the same ones. A physical slot's name, and a logical slot's "
         + "name, plugin and database when it is this database's, are shown only with "

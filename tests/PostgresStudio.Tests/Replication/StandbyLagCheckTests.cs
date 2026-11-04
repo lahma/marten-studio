@@ -154,7 +154,7 @@ public class StandbyLagCheckTests
         finding.Variant.Should().Be("standby-view");
         finding.Severity.Should().Be(HealthSeverity.Warning, "the last commit is a minute old; what matters is the WAL received six minutes ago");
         finding.Evidence.Should().Contain(new HealthEvidence("Furthest behind in time", "6 min"));
-        finding.Evidence.Should().Contain(new HealthEvidence("Unreplayed since", "2026-10-26 11:54:00Z"));
+        finding.Evidence.Should().Contain(new HealthEvidence("Unreplayed since", "2026-10-26 11:54:00 UTC"));
         finding.Caveat.Should().Contain("the age of the oldest sample whose position replay has still not reached");
 
         Evaluate(Standby(13_254_232, TimeSpan.FromHours(2)), Received((70, Before), (65, After), (1, After)), null, 0).Findings.Should().ContainSingle()

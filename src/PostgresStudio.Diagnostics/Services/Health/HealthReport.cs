@@ -157,7 +157,7 @@ internal sealed record HealthCheckStatus(
 /// <see langword="null" /> on a platform that names no instance.
 /// </param>
 /// <param name="StartedAt">When that server started, or <see langword="null" /> when it was not read.</param>
-/// <param name="Capacity">"4.5 ACU (min 0.5, max 16), measured 12:01 UTC", or <see langword="null" /> without a reading.</param>
+/// <param name="Capacity">"4.5 ACU (min 0.5, max 16), measured 2026-11-04 12:01:00 UTC", or <see langword="null" /> without a reading.</param>
 /// <param name="CapacityUnknown">Why a registered source gave none this interval, or <see langword="null" />.</param>
 internal sealed record HealthServerLine(string? AnsweredBy, DateTimeOffset? StartedAt, string? Capacity, string? CapacityUnknown)
 {

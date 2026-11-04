@@ -93,7 +93,7 @@ internal sealed class UnattributedConnectionsCheck : HealthCheck<ConnectionHolde
                 + "\" into a name.",
             Evidence = evidence,
             Caveat =
-                "Counted in pg_stat_activity across every database on the server at " + facts.ReadAt.UtcDateTime.ToString("u", CultureInfo.InvariantCulture)
+                "Counted in pg_stat_activity across every database on the server at " + EvidenceTime.Utc(facts.ReadAt)
                 + ", the studio's own reading session aside; the studio's other reads share the host's data source, and so its application name, "
                 + "and are counted under it. Every role may read every session's application name. A moment's reading: a pool's connections "
                 + "come and go between two checks." + Suffix(facts.TruncationNote),

@@ -157,7 +157,7 @@ public class ConnectionNearMissCheckTests
         HealthFinding finding = Evaluate(Facts(90)).Findings.Single();
 
         finding.Title.Should().Contain("90 of 100").And.Contain("90%").And.Contain("24 hours");
-        finding.WhyItMatters.Should().Contain("2026-11-02 04:00:00Z").And.Contain("within the last 24 hours").And.Contain("client limit of 100 connections now");
+        finding.WhyItMatters.Should().Contain("2026-11-02 04:00:00 UTC").And.Contain("within the last 24 hours").And.Contain("client limit of 100 connections now");
         finding.Caveat.Should().Contain("Database › Sessions › Holders").And.Contain("7 days").And.Contain("a resize clears");
         finding.Link.Should().Be(SessionEvidence.HoldersLink);
         finding.Evidence.Select(static x => x.Label).Should().Contain(["Peak", "Client limit now", "Samples", "Instance changes"]);

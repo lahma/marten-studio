@@ -1,4 +1,3 @@
-using System.Globalization;
 using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Services.Health.Checks;
@@ -192,7 +191,7 @@ internal sealed class HighWaterPinnedCheck : HealthCheck<HighWaterPinnedFacts>
             new("Waiting for", waited > TimeSpan.Zero
                 ? "at least " + DaemonCheckConfiguration.Format(waited) + " (since the advisor first saw a committed event behind this mark)"
                 : "seen in this sweep for the first time; Critical is measured from here"),
-            new("Pinned since", reading.StuckSince!.Value.ToString("u", CultureInfo.InvariantCulture) + " (server time, Marten's HighWaterStuckGap row)"),
+            new("Pinned since", EvidenceTime.Utc(reading.StuckSince!.Value) + " (server time, Marten's HighWaterStuckGap row)"),
             new("Pinned for", DaemonCheckConfiguration.Format(pinned) + " (server time)"),
             new("Projections.StaleSequenceThreshold", DaemonCheckConfiguration.Format(configuration.StaleSequenceThreshold)),
             new("Projections.SkipStaleGapsDespiteLiveTransactionsAfter", configuration.SkipStaleGapsCap is { } cap

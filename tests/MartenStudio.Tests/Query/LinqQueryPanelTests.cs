@@ -150,7 +150,7 @@ public class LinqQueryPanelTests
 
         page.Find("#ms-query-mode-linq").GetAttribute("aria-selected").Should().Be("true");
         page.Find(".ms-query-panel-linq").Should().NotBeNull();
-        page.FindAll(".ms-query-side").Should().BeEmpty("saved queries do not cover LINQ mode yet, so the drawer is not offered");
+        page.FindAll(".ms-query-side .ms-query-drawer").Should().ContainSingle("LINQ mode has a saved-and-recent drawer of its own since 1.2");
     }
 
     [Fact]

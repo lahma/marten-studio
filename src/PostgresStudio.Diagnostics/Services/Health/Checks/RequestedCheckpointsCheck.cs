@@ -241,7 +241,7 @@ internal sealed class RequestedCheckpointsCheck : HealthCheck<RequestedCheckpoin
     private static string Totals(CheckpointStatistics checkpoints) =>
         SessionText.Number(checkpoints.Timed) + " timed, " + SessionText.Number(checkpoints.Requested) + " requested"
         + (checkpoints.Done is { } done ? ", " + SessionText.Number(done) + " done" : string.Empty)
-        + (checkpoints.StatsReset is { } reset ? " (since " + reset.UtcDateTime.ToString("u", CultureInfo.InvariantCulture) + ")" : string.Empty);
+        + (checkpoints.StatsReset is { } reset ? " (since " + EvidenceTime.Utc(reset) + ")" : string.Empty);
 
     /// <summary>WAL written over the same window, when the WAL counter was sampled across it.</summary>
     private static double? WalInWindow(HealthEvaluation evaluation, WalStatistics? wal, CounterWindow window)

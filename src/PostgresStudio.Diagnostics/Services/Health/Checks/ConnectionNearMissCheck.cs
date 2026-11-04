@@ -142,7 +142,7 @@ internal sealed class ConnectionNearMissCheck : HealthCheck<ConnectionNearMissFa
         }
 
         bool critical = share >= ConnectionThresholds.ServerUsedCritical;
-        string reached = view.PeakAt.UtcDateTime.ToString("u", CultureInfo.InvariantCulture);
+        string reached = EvidenceTime.Utc(view.PeakAt);
 
         List<HealthEvidence> evidence =
         [
@@ -157,7 +157,7 @@ internal sealed class ConnectionNearMissCheck : HealthCheck<ConnectionNearMissFa
 
         evidence.Add(new HealthEvidence(
             "Samples",
-            Count(view.Samples) + " from " + view.Since.UtcDateTime.ToString("u", CultureInfo.InvariantCulture) + " to " + view.Until.UtcDateTime.ToString("u", CultureInfo.InvariantCulture)));
+            Count(view.Samples) + " from " + EvidenceTime.Utc(view.Since) + " to " + EvidenceTime.Utc(view.Until)));
         evidence.Add(new HealthEvidence("Instance changes", Count(view.InstanceChanges)));
 
         IReadOnlyList<ConnectionHistoryPeak> applications = [.. view.Applications.Take(ConnectionThresholds.NearMissApplicationsNamed)];
@@ -168,7 +168,7 @@ internal sealed class ConnectionNearMissCheck : HealthCheck<ConnectionNearMissFa
                 SessionEvidence.Label("Application", i, "highest peak"),
                 ApplicationLabel(applications[i].Application) + ": " + SessionText.Count(applications[i].Peak, "connection")
                 + " at its peak, " + SessionText.Percent((double) applications[i].Peak / view.ClientLimitNow) + " of the client limit now, at "
-                + applications[i].At.UtcDateTime.ToString("u", CultureInfo.InvariantCulture),
+                + EvidenceTime.Utc(applications[i].At),
                 HealthGate.Activity));
         }
 
