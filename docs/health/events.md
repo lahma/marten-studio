@@ -15,7 +15,8 @@ They read in two ways, and say which in every finding's caveat:
   store - its twenty busiest tenants. Payload sizes are `pg_column_size` percentiles computed there; no payload
   leaves the database.
 - **E05, E06 and E07** read the planner's statistics - `pg_stats` for `mt_events` and `mt_streams`, and
-  `pg_class.reltuples` - with no scan of either table, at every interval (tier 1). That makes them estimates
+  `pg_class.reltuples` - with no scan of either table, at every interval (tier 1). E06's finding also offers an
+  on-demand read of the longest streams, which no sweep runs. That makes them estimates
   from the sample the last `ANALYZE` took: only as fresh as autovacuum keeps it, and blind to anything rarer
   than the sample. **E08** reads the statistics collector's counters for `mt_dcb_tag_version`.
 - **E09** is a tier-2 probe of its own: one event per compacted stream, by key (see its section).
@@ -156,7 +157,8 @@ stream on every request. The aggregates come from the configuration and from wha
 live (`ProjectionOptions.AllAggregateTypes()`); a hidden document type is never named. The stream lengths come
 from `histogram_bounds` of `mt_streams.version`, which describe every stream together: the statistics cannot say
 which aggregate a long stream belongs to - it may be one that is already snapshotted - which is why this is an
-Info. The 20 longest streams would need a scan of `mt_streams`, which the check never runs.
+Info. The check itself never scans `mt_streams`: the finding's **Find the 20 longest streams** button does, once, when
+you press it ([below](#on-demand-the-20-longest-streams)).
 
 ```csharp
 opts.Projections.Snapshot<YourAggregate>(SnapshotLifecycle.Inline);
@@ -166,6 +168,36 @@ That keeps the aggregate as a document, updated in the appending transaction, so
 the events after it; rebuild the snapshot projection once to fill it on an existing store. `SnapshotLifecycle.Async`
 keeps it off the append path instead. Stream compaction, on a stream's page behind `CompactStreams`, folds an old
 stream's history into one event.
+
+### On demand: the 20 longest streams
+
+The E06 card has a button, **Find the 20 longest streams**. It reads `mt_streams` once - every live stream's row,
+because no index orders streams by their length - and lists the twenty with the most events: each stream's id, linked
+to its page; how many events it holds; the aggregate it was started as; and whether this process rebuilds that
+aggregate from every event on each fetch or keeps it in a projection. For each aggregate in the list that is only ever
+built live, it offers that aggregate's own `Snapshot<T>` line, so the remedy names the type the long streams belong to.
+
+- **What it costs.** One statement: a sequential scan of `mt_streams` (never `mt_events`) with a `limit` of 20, in a
+  read-only transaction as `SqlConsoleRole` (the store's login when none is set), under `QueryTimeout` as
+  `statement_timeout` and a 3-second `lock_timeout`. Archived streams are left out, which on an archive-partitioned
+  store skips that partition. While it reads it holds an `AccessShareLock` on `mt_streams`, so a migration that alters
+  the table waits behind it, and appends wait behind the migration: on a large event store, do not press it during a
+  deploy. One runs at a time in a tab and one per database, and its time counts in the Health page's studio-cost line.
+- **Who may press it.** Anybody the finding is shown to, for the scope they selected. On a conjoined event store a
+  stream belongs to one tenant: with a tenant selected only its streams are read; with none, the list names each
+  stream's tenant, so it needs `ViewDatabaseActivity` and the write policy allowing it, and it leaves out the streams
+  of tenants the store policy does not show you, saying how many. On a store whose events are not conjoined, a
+  selected tenant narrows the list as Events › Streams narrows it.
+- **Hidden types.** While `IsDocumentTypeVisible` hides anything, only streams started as an aggregate it shows, or with
+  no type, are read: a hidden type's streams are not listed, counted or named, and an aggregate name this process does
+  not know is treated as hidden.
+- **Kept nowhere.** The list is drawn for you and dropped when you close it, change the database or leave the page. It
+  is not cached, not shared with other visitors, not part of any sweep, and never in the Snapshot download, the
+  Markdown report or the diagnostics API. Every press, refused or not, is audited as "Find the longest streams", with
+  a count and never a stream id or a tenant.
+
+A stream's type is the aggregate it was started as (`StartStream<T>`); code may also aggregate it as another type,
+which no table records.
 
 ## E07 Archived share without partitioning
 
@@ -283,10 +315,10 @@ up to ten tenants; the finding's caveat says when that cap was hit), and each is
 - **`Events.UseTenantPartitionedEvents`.** Every tenant numbers its events from one, so there is no single recent
   window and no store-global mark: E02, E03 and E04 say "not checked", and so does D08 on the daemon page. The
   statistics checks (E05-E07), E08 and E09 still run (E09 keys on the stream and its tenant, not on a sequence).
-- **E06's longest streams.** Naming the 20 longest streams, and which aggregate each belongs to, needs ordering all of
-  `mt_streams` by version, which no check does (E09 reads `mt_streams` too, but only its compacted streams and stops at
-  10,001 of them); the finding says how many streams are long, not which. A screen that lists
-  them is a separate, on-demand read, and is not part of this release.
+- **E06's longest streams, in a sweep.** No sweep orders `mt_streams` by version (E09 reads `mt_streams` too, but only
+  its compacted streams, and stops at 10,001 of them), so the finding says how many streams are long, not which. The
+  finding's button lists them on demand, for the visitor who presses it
+  ([above](#on-demand-the-20-longest-streams)).
 - **E05's unmatched aliases.** An unmapped alias whose own type name the statistics did not sample is reported as
   unmatched, not as unreadable. The Event types screen counts every type exactly.
 - **E03 and E04 on old traffic.** The window is the newest 100,000 events; a stream that was hot an hour ago and

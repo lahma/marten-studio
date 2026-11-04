@@ -327,6 +327,28 @@ waits behind the `ALTER`. `lock_timeout` keeps the measure from queueing behind 
 queueing behind the measure. On a busy table, measure outside a deploy window. Every press is recorded as "Measure
 bloat" with the table and nothing else, under `BrowseDatabase` when the table is in a schema only that gate shows.
 
+### Actions on a finding
+
+A finding on the Health page can offer an **action** (1.2): a read the visitor starts beyond what the sweep did, for them
+alone ([health.md](health.md#actions-on-a-finding)). Like Measure bloat it is audited and needs no capability of its own,
+and it is authorized in the service, never by the page: each press asks the finding's own gate again (the store policy for
+the database with `TenantId = null`, and `ViewDatabaseActivity` with the write policy for a finding that needs it, a
+tenant's store policy for a finding about one) and the action's own, before anything is read. It never writes. It runs in
+a read-only transaction as `SqlConsoleRole`, under `QueryTimeout`; one runs at a time in a tab and one per action per
+database, and a second press is refused, never joined, so no visitor is handed another's result. Nothing it returns is
+kept, logged above Debug, audited or sent anywhere but to the page that asked. Every press is recorded under the action's
+name with a count and never a value it read; a refusal that names a capability is filed under it, so the entry is shown
+only to somebody who may make that read.
+
+The one action in 1.2 is E06's **Find the 20 longest streams** ([events.md](health/events.md#on-demand-the-20-longest-streams)):
+a sequential scan of `mt_streams` with a limit of 20. On a conjoined event store a stream belongs to one tenant, so
+the list across tenants names them: it needs `ViewDatabaseActivity` and the write policy allowing it, which is stricter
+than Events › Streams (where the store policy alone names a tenant), because the result ranks streams across tenants by
+size, comparative data like T18's. With a tenant selected, only that tenant's streams are read. A stream whose tenant the
+store policy hides is left out and counted; a hidden document type's streams are never read, listed or named. While it
+reads it holds an `AccessShareLock` on `mt_streams`, so a migration that alters the table waits behind it: do not press
+it during a deploy.
+
 ### `RunLinqQueries`
 
 LINQ mode ([`linq-mode.md`](linq-mode.md)) takes a predicate somebody typed, such as
@@ -836,7 +858,8 @@ a statement out of the record.
 
 The Activity ring also records, under 9200 and 9201, the reads that reveal other people's details for the first time
 in a circuit - "Read replication names", "Read Aurora session waits", the Health page's first evidence behind the
-activity gate - and every "Measure bloat", every Statements drill-in plan ("Plan database statement") and every What
+activity gate - and every "Measure bloat", every press of a finding's action on the Health page ("Find the longest streams"),
+every Statements drill-in plan ("Plan database statement") and every What
 if? ("RunSql what-if", "ExplainQuery what-if", "LinqWhatIf", "DocumentsWhatIf" and "What-if database statement"). LINQ
 mode over events records "LinqEventQuery" (a run, success and failure) and "LinqEventExplain" (a refused plan). A
 diagnostics API call is not audited (event 9250, at Debug, codes and counts only).

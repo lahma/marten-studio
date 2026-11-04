@@ -188,6 +188,28 @@ the extension's owner, can put a function - and never one of that name in a sche
 Its rows are fenced to the store's role and the database exactly as the extension's are, and its columns
 are read by name, because on PostgreSQL 17 its documented column list collides with the extension's own.
 
+## Actions on a finding
+
+A finding can offer an **action**: a button on its card that reads more than the sweep did, on demand, for you alone.
+The sweep is the database's - once per interval, for everybody - and an action is yours: it runs when you press it, and
+what it finds is drawn under the card until you close it, change the database or leave the page. It is not cached, not
+shared with the visitor beside you, and never in a sweep, the Snapshot download or the diagnostics API. An action only
+reads: anything that changes state has a screen and a capability of its own, never a button on this page.
+
+- **Gate.** An action runs under at least its finding's own gate, asked again on every press in the service, never taken
+  from what the page showed (a finding about a tenant also needs that tenant's store policy). An action may ask for
+  more, and says so when it refuses.
+- **Cost.** It runs in a read-only transaction as `SqlConsoleRole` (the store's login when none is set), under
+  `QueryTimeout` as `statement_timeout`, and shows its SQL under **Show SQL**. One runs at a time in a tab, and one of
+  each action at a time per database: a second press elsewhere is refused, never handed the first visitor's result. Its
+  time counts in the studio-cost line above.
+- **Audit.** Every press is one entry in the Activity log under the action's name, success or refusal, with a count in
+  its message and never a value it read. A failure for a reason nobody chose is logged once as event 9223; a refusal
+  is logged at Debug as 9224.
+
+Marten Studio 1.2 has one: E06's **Find the 20 longest streams** ([E06](health/events.md#on-demand-the-20-longest-streams)).
+Postgres Studio has none, and its cards are as they were.
+
 ## Who sees what
 
 The sweep is about the database; what each visitor is shown of it is decided per visitor:
