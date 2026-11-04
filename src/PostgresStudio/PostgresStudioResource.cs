@@ -15,9 +15,10 @@ namespace PostgresStudio;
 /// </para>
 /// <para>
 /// <b>An empty <paramref name="DatabaseIdentifier" /> is not "any database".</b> The studio asks with an empty one only
-/// to decide whether to list a source that would not build, greyed out, with nothing behind it. It never reads a
-/// database on such an answer: every scope it resolves names its database, and one that names none is refused. A
-/// handler must not treat an empty identifier as permission for every database of the source.
+/// to decide whether to name a source that would not build, or whose databases could not be listed: the source picker, the
+/// Overview and, since 1.2, the Stores page. It reads nothing on such an answer: every scope it resolves for a read
+/// names its database, and one that names none is refused. A handler must not treat an empty identifier as permission for
+/// every database of the source.
 /// </para>
 /// <para>
 /// <b>A handler is always asked the registered names before anything is read.</b> A link's source and database match in
@@ -33,8 +34,8 @@ namespace PostgresStudio;
 /// </param>
 /// <param name="DatabaseIdentifier">
 /// The database's stable name, never a connection string: a data source's registration name, or the name a host's
-/// <see cref="IPostgresDatabaseSource" /> lists the database under. Empty only when the studio asks about listing a
-/// source that would not build (see the remarks).
+/// <see cref="IPostgresDatabaseSource" /> lists the database under. Empty only when the studio asks whether to name a
+/// source that would not build, or whose databases could not be listed (see the remarks); nothing is read on that answer.
 /// </param>
 /// <param name="Capability">
 /// The name of the capability being exercised (for example <c>RunSql</c>), or <see langword="null" /> for a read.

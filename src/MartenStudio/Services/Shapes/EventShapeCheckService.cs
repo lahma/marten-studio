@@ -44,8 +44,9 @@ namespace MartenStudio.Services.Shapes;
 /// <para>
 /// Events are read only through <c>IEventStorage</c> as <c>ISelector&lt;IEvent&gt;</c>, from a query session opened with
 /// <c>SessionOptions.ForDatabase</c> (hard rule 15) that is used for <c>EventStorage()</c> and runs nothing - never a LINQ terminal,
-/// <c>session.Events</c>, <c>QueryRawEvents</c> or <c>FetchStreamAsync</c> (hard rule 14). For an alias with no mapping the resolver loads the
-/// stored <c>mt_dotnet_type</c> and registers it in this process, as any event read in the host would; nothing reaches the database.
+/// <c>session.Events</c>, <c>QueryRawEvents</c> or <c>FetchStreamAsync</c> (hard rule 14). Only a mapped alias reaches the resolver: an alias with no
+/// mapping would have it load the stored <c>mt_dotnet_type</c> and register that type on the host's store, so its rows are classified without
+/// the resolver (<see cref="Prepare" />) and the resolver registers nothing here.
 /// </para>
 /// </remarks>
 internal sealed class EventShapeCheckService : IEventShapeCheck

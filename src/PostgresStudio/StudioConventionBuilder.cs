@@ -48,7 +48,7 @@ namespace PostgresStudio;
 /// <em>host's</em> files, not the package's, so it cannot opt out of anything: with an
 /// <c>AuthorizationPolicy</c> it carries the policy, and without one it takes whatever the caller says
 /// about the studio (<c>RequireAuthorization()</c>, <c>AllowAnonymous()</c>) and, silent, the host's
-/// <c>FallbackPolicy</c> — exactly what governs the page that imports those files.
+/// <c>FallbackPolicy</c> — exactly what governs the page that imports those files. At a root mount there is no such endpoint.
 /// </para>
 /// <para>
 /// The hub slot is empty in v1 and is kept for a reason: pages poll through a snapshot cache instead
@@ -60,7 +60,7 @@ internal sealed class StudioConventionBuilder : IEndpointConventionBuilder
 {
     private readonly IEndpointConventionBuilder components;
     private readonly IEndpointConventionBuilder? hub;
-    private readonly IEndpointConventionBuilder frameworkFiles;
+    private readonly IEndpointConventionBuilder? frameworkFiles;
 
     /// <param name="components">
     /// The Razor components builder the studio's pages and its Blazor circuit live in.
@@ -72,12 +72,13 @@ internal sealed class StudioConventionBuilder : IEndpointConventionBuilder
     /// </param>
     /// <param name="frameworkFiles">
     /// The forward of the host's own <c>_framework</c> files under the mount path: host-owned content, so it is governed
-    /// by what the caller says about the studio and not left to opt out like the package's static assets.
+    /// by what the caller says about the studio and not left to opt out like the package's static assets. <see langword="null" />
+    /// at a root mount (<c>Path = "/"</c>), where nothing is forwarded: the relative requests already reach the host's own files.
     /// </param>
     public StudioConventionBuilder(
         IEndpointConventionBuilder components,
         IEndpointConventionBuilder? hub,
-        IEndpointConventionBuilder frameworkFiles)
+        IEndpointConventionBuilder? frameworkFiles)
     {
         this.components = components;
         this.hub = hub;
@@ -88,13 +89,13 @@ internal sealed class StudioConventionBuilder : IEndpointConventionBuilder
     {
         components.Add(convention);
         hub?.Add(convention);
-        frameworkFiles.Add(convention);
+        frameworkFiles?.Add(convention);
     }
 
     public void Finally(Action<EndpointBuilder> finallyConvention)
     {
         components.Finally(finallyConvention);
         hub?.Finally(finallyConvention);
-        frameworkFiles.Finally(finallyConvention);
+        frameworkFiles?.Finally(finallyConvention);
     }
 }

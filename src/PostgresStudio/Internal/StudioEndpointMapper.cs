@@ -205,7 +205,11 @@ internal static class StudioEndpointMapper
         // forwards to files the HOST owns, and the host may have put them behind its own policy or a fail-closed
         // FallbackPolicy: it is governed exactly as the page that imports them is - by the studio's policy when there is
         // one, else by whatever the caller said about the mapping (StudioConventionBuilder) and the host's FallbackPolicy.
-        RouteHandlerBuilder frameworkFiles = MapStudioFrameworkFiles(builder, studioPath);
+        //
+        // At a root mount (Path = "/") there is nothing to forward: the studio's relative requests already reach the host's own
+        // /_framework, and a catch-all at /_framework/{**file} would be an endpoint of the studio standing on the host's own route
+        // space, answering for files the host serves itself and governed by the studio's policy instead of the host's.
+        RouteHandlerBuilder? frameworkFiles = studioPath.Length > 0 ? MapStudioFrameworkFiles(builder, studioPath) : null;
 
         if (!string.IsNullOrWhiteSpace(settings.AuthorizationPolicy))
         {
@@ -223,7 +227,7 @@ internal static class StudioEndpointMapper
             // the policy covers them all, which is also what keeps /_blazor reachable under a fail-closed
             // FallbackPolicy.
             components.RequireAuthorization(policyName);
-            frameworkFiles.RequireAuthorization(policyName);
+            frameworkFiles?.RequireAuthorization(policyName);
         }
         else
         {

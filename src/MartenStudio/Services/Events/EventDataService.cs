@@ -1049,6 +1049,13 @@ internal sealed partial class EventDataService : IEventDataService
     /// allows, and the panel says so (SEC1-fix F2).
     /// </para>
     /// <para>
+    /// <b>An unmapped alias is never resolved.</b> A row whose <c>type</c> no mapping answers to would have Marten's selector load
+    /// its <c>mt_dotnet_type</c> and register that type on the host's store (silencing E05 until a restart), so each row is checked
+    /// first (<see cref="UnmappedEventGuard" />): the replay stops at it, reads no further, and says the event is not mapped in this
+    /// process and not folded. That is a refusal here, as it is for time travel and for the compaction's pre-fold, which reports it as
+    /// not checked.
+    /// </para>
+    /// <para>
     /// An event store that is not there is no events, read as a stream that does not exist - never created to find
     /// out. A column the configuration reads and the table lacks is a pending migration Marten would have run here;
     /// the replay says so instead, and names the screen that applies it.
@@ -1105,15 +1112,26 @@ internal sealed partial class EventDataService : IEventDataService
         command.CommandTimeout = CommandTimeoutSeconds;
 
         Weasel.Storage.ISelector<IEvent> selector = storage;
+        UnmappedEventGuard guard = UnmappedEventGuard.For(resolved.Store.Options.Events);
         List<IEvent> events = [];
 
-        await using (NpgsqlDataReader reader = await command
-            .ExecuteReaderAsync(CommandBehavior.SingleResult, cancellationToken).ConfigureAwait(false))
+        try
         {
+            await using NpgsqlDataReader reader = await command
+                .ExecuteReaderAsync(CommandBehavior.SingleResult, cancellationToken).ConfigureAwait(false);
+
             while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
             {
+                // Before Marten's selector sees the row: it would register an unmapped alias's .NET type on the host's store.
+                await guard.RequireMappedAsync(reader, cancellationToken).ConfigureAwait(false);
+
                 events.Add(await selector.ResolveAsync(reader, cancellationToken).ConfigureAwait(false));
             }
+        }
+        catch (UnmappedEventException unmapped)
+        {
+            // An event that is not mapped here is not folded, and a fold cannot skip one: the replay says so and reads no further.
+            return new ReplayEvents([], new EventDataError(unmapped.Message, null, false));
         }
 
         return new ReplayEvents(events, null);
@@ -2656,6 +2674,12 @@ internal sealed partial class EventDataService : IEventDataService
         if (exception is StudioStoreUnavailableException unavailable)
         {
             return new EventDataError(unavailable.Reason, null, true);
+        }
+
+        if (exception is UnmappedEventException unmapped)
+        {
+            // An expected state, in words the studio wrote: shown, not logged.
+            return new EventDataError(unmapped.Message, null, false);
         }
 
         if (exception is NpgsqlException)

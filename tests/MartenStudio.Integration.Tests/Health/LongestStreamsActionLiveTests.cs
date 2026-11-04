@@ -447,7 +447,7 @@ public class LongestStreamsActionLiveTests(PostgresFixture postgres)
                 Area = HealthArea.Events,
             };
 
-            HealthReportFinding shown = new(finding, [], HealthService.MuteKeyOf("default", "db", finding), "https://example.invalid/", true, null);
+            HealthReportFinding shown = new(finding, [], HealthService.MuteKeyOf("default", Store.Storage.Database.Id.Identity, finding), "https://example.invalid/", true, null);
 
             await using AsyncServiceScope circuit = provider.CreateAsyncScope();
             StudioScope scope = new("default", Store.Storage.Database.Id.Identity, tenant);

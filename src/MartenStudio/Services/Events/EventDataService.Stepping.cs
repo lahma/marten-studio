@@ -39,6 +39,11 @@ namespace MartenStudio.Services.Events;
 /// <see cref="AggregateWalk.FromTheStartLimit" />. Every call runs under <see cref="MartenStudioOptions.QueryTimeout" />, and
 /// a fold that runs past it is a value on the page.
 /// </para>
+/// <para>
+/// <b>An unmapped alias is never resolved.</b> Each row is checked against the store's mappings before Marten's selector sees it
+/// (<see cref="UnmappedEventGuard" />), because the selector would load the row's <c>mt_dotnet_type</c> and register it on the host's
+/// store. An unmapped event is not folded: the window or the search that reaches it fails with "not mapped in this process; not folded".
+/// </para>
 /// </remarks>
 internal sealed partial class EventDataService
 {
@@ -429,6 +434,7 @@ internal sealed partial class EventDataService
                 Storage = storage,
                 Query = query,
                 Serializer = resolved.Store.Options.Serializer(),
+                Guard = UnmappedEventGuard.For(resolved.Store.Options.Events),
             }, null, null);
         }
         catch
@@ -460,6 +466,10 @@ internal sealed partial class EventDataService
 
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
+            // Before Marten's selector sees the row: for an alias this process does not map it would load the stored .NET type and
+            // register it on the host's store (UnmappedEventGuard). An unmapped event is not folded, and the call says so.
+            await source.Guard.RequireMappedAsync(reader, cancellationToken).ConfigureAwait(false);
+
             yield return await selector.ResolveAsync(reader, cancellationToken).ConfigureAwait(false);
         }
     }
@@ -637,6 +647,8 @@ internal sealed partial class EventDataService
         public required ReplayEventsQuery Query { get; init; }
 
         public required ISerializer Serializer { get; init; }
+
+        public required UnmappedEventGuard Guard { get; init; }
 
         public async ValueTask DisposeAsync()
         {

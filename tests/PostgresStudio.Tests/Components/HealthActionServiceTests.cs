@@ -88,6 +88,27 @@ public sealed class HealthActionServiceTests : IAsyncDisposable
         action.Runs.Should().Be(0);
     }
 
+    [Fact]
+    public async Task A_finding_from_another_database_is_refused_before_any_read_and_is_not_audited()
+    {
+        // The page presses with the scope selected now and the finding of the report on screen; a scope change in between leaves the
+        // two apart. The finding below was read for database "elsewhere"; the press is scoped to "default".
+        TestAction action = new("a.applies", "T01") { Gate = HealthGate.None };
+        HealthReportFinding fromA = Finding("T01") with { MuteKey = HealthService.MuteKeyOf("default", "elsewhere", Finding("T01").Finding) };
+
+        HealthActionResult result = await Service(action).RunAsync(Scope, fromA, "a.applies", Token);
+
+        result.Outcome.Should().Be(HealthActionOutcome.Refused);
+        result.Reason.Should().Be("This finding is from another database; run the checks again.");
+        action.Runs.Should().Be(0, "the action never ran");
+        action.Seen.Should().BeNull();
+        Audited().Should().BeEmpty("a refusal before any gate or read is not audited, like the runner's other pre-flight refusals");
+
+        // The same finding, keyed to this database, runs.
+        (await Service(action).RunAsync(Scope, Finding("T01"), "a.applies", Token)).Outcome.Should().Be(HealthActionOutcome.Done);
+        action.Runs.Should().Be(1);
+    }
+
     // ---------------------------------------------------------------------------------------------------
     // The gate, asked now
     // ---------------------------------------------------------------------------------------------------

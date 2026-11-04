@@ -130,11 +130,16 @@ namespace MartenStudio.Tests.Health
             },
             policies: policies);
 
-        private static HealthReportFinding E06(string code = "E06")
+        private static HealthReportFinding E06(string code = "E06") => E06("db", code);
+
+        /// <summary>The finding as the report for <paramref name="harness" />'s database would hold it: the runner refuses another database's.</summary>
+        private static HealthReportFinding E06(HealthHarness harness, string code = "E06") => E06(harness.Scope.DatabaseId, code);
+
+        private static HealthReportFinding E06(string databaseId, string code)
         {
             HealthFinding finding = FakeHealthService.Finding(code, HealthSeverity.Info, "Some streams are long", HealthArea.Events);
 
-            return new HealthReportFinding(finding, finding.Evidence, HealthService.MuteKeyOf("default", "db", finding), "https://example.invalid/", true, null);
+            return new HealthReportFinding(finding, finding.Evidence, HealthService.MuteKeyOf("default", databaseId, finding), "https://example.invalid/", true, null);
         }
 
         // ---------------------------------------------------------------------------------------------------
@@ -185,7 +190,7 @@ namespace MartenStudio.Tests.Health
             await using HealthHarness harness = Harness(conjoined: true, activity: false);
             IHealthActionService service = harness.Circuit.GetRequiredService<IHealthActionService>();
 
-            HealthActionResult result = await service.RunAsync(harness.Scope, E06(), Id, Token);
+            HealthActionResult result = await service.RunAsync(harness.Scope, E06(harness), Id, Token);
 
             // A connection to the refused port would have been a Failed result: a Refused one never reached it.
             result.Outcome.Should().Be(HealthActionOutcome.Refused);
@@ -202,7 +207,7 @@ namespace MartenStudio.Tests.Health
             await using HealthHarness harness = Harness(conjoined: true, activity: true, policies: true);
             harness.Policies.Allow(static resource => resource.Capability is null);
 
-            HealthActionResult result = await harness.Circuit.GetRequiredService<IHealthActionService>().RunAsync(harness.Scope, E06(), Id, Token);
+            HealthActionResult result = await harness.Circuit.GetRequiredService<IHealthActionService>().RunAsync(harness.Scope, E06(harness), Id, Token);
 
             result.Outcome.Should().Be(HealthActionOutcome.Refused);
             result.Reason.Should().Contain("write policy");
@@ -213,7 +218,7 @@ namespace MartenStudio.Tests.Health
         {
             await using HealthHarness harness = Harness(conjoined: true, activity: true);
 
-            HealthActionResult result = await harness.Circuit.GetRequiredService<IHealthActionService>().RunAsync(harness.Scope, E06(), Id, Token);
+            HealthActionResult result = await harness.Circuit.GetRequiredService<IHealthActionService>().RunAsync(harness.Scope, E06(harness), Id, Token);
 
             result.Outcome.Should().Be(HealthActionOutcome.Failed);
             result.Reason.Should().Contain("could not connect");
@@ -226,7 +231,7 @@ namespace MartenStudio.Tests.Health
             await using HealthHarness harness = Harness(conjoined: true, activity: false);
 
             HealthActionResult result = await harness.Circuit.GetRequiredService<IHealthActionService>()
-                .RunAsync(harness.Scope with { TenantId = "acme" }, E06(), Id, Token);
+                .RunAsync(harness.Scope with { TenantId = "acme" }, E06(harness), Id, Token);
 
             result.Outcome.Should().Be(HealthActionOutcome.Failed, "it reached the connection: no Activity gate stands in front of one tenant's streams");
             result.Reason.Should().Contain("could not connect");
@@ -237,7 +242,7 @@ namespace MartenStudio.Tests.Health
         {
             await using HealthHarness harness = Harness(conjoined: false, activity: false);
 
-            HealthActionResult result = await harness.Circuit.GetRequiredService<IHealthActionService>().RunAsync(harness.Scope, E06(), Id, Token);
+            HealthActionResult result = await harness.Circuit.GetRequiredService<IHealthActionService>().RunAsync(harness.Scope, E06(harness), Id, Token);
 
             result.Outcome.Should().Be(HealthActionOutcome.Failed);
             result.Reason.Should().Contain("could not connect");
@@ -249,7 +254,7 @@ namespace MartenStudio.Tests.Health
             await using HealthHarness harness = Harness(conjoined: false, activity: true, policies: true);
             harness.Policies.Allow(static resource => resource.TenantId != "acme");
 
-            HealthReportFinding about = E06() with { Finding = E06().Finding with { TenantId = "acme" } };
+            HealthReportFinding about = E06(harness) with { Finding = E06(harness).Finding with { TenantId = "acme" } };
 
             HealthActionResult result = await harness.Circuit.GetRequiredService<IHealthActionService>().RunAsync(harness.Scope, about, Id, Token);
 
@@ -266,8 +271,8 @@ namespace MartenStudio.Tests.Health
             await using HealthHarness harness = Harness(conjoined: false);
             IHealthActionService service = harness.Circuit.GetRequiredService<IHealthActionService>();
 
-            await service.RunAsync(harness.Scope, E06(), Id, Token);
-            await service.RunAsync(harness.Scope, E06(), Id, Token);
+            await service.RunAsync(harness.Scope, E06(harness), Id, Token);
+            await service.RunAsync(harness.Scope, E06(harness), Id, Token);
 
             AuditEntries(harness).Should().HaveCount(2).And.OnlyContain(static x => !x.Succeeded && x.Action == "Find the longest streams");
         }

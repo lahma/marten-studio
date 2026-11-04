@@ -309,6 +309,53 @@ public class PostgresStudioEndpointsTests
         }
     }
 
+    /// <summary>
+    /// At a root mount the relative <c>_framework</c> requests already reach the host's own files, so the forward is not mapped:
+    /// a <c>/_framework/{**file}</c> endpoint of the studio's would stand on the host's route space (1.2-SEC-FIX).
+    /// </summary>
+    /// <remarks>
+    /// <c>Path = "/"</c> normalizes to the default mount, so no option spells a root mount today; the guard is on the mapper's own
+    /// answer (<c>TrimmedPath</c> empty), which the test reaches by seeding the options' derived-path cache.
+    /// </remarks>
+    [Fact]
+    public async Task A_root_mount_maps_no_framework_file_forward_and_leaves_the_hosts_own_files_alone()
+    {
+        await using WebApplication app = CreateApp(
+            configureStudio: static options =>
+            {
+                options.Path = "/";
+                typeof(PostgresStudioOptions)
+                    .GetField("pathCache", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                    .SetValue(options, new PostgresStudio.Services.Settings.StudioPath("/", string.Empty, string.Empty, HasCustom: true));
+            },
+            configureBuilder: WithWebRoot);
+        app.MapGet("/_framework/host-own.js", static () => Results.Text("// the host's", "text/javascript")).AllowAnonymous();
+        app.MapPostgresStudio().AllowAnonymous();
+
+        List<string?> patterns = [.. RouteEndpoints(app).Select(static x => x.RoutePattern.RawText)];
+        patterns.Should().NotContain(static x => x != null && x.EndsWith("/_framework/{**file}", StringComparison.Ordinal),
+            "the host's own _framework files are reached by the host's own routes");
+        patterns.Should().Contain("/_framework/blazor.web.js", "the script is still served, from the host's web root");
+
+        await app.StartAsync(Token);
+        try
+        {
+            using HttpClient client = app.GetTestClient();
+
+            using HttpResponseMessage own = await client.GetAsync(new Uri("/_framework/host-own.js", UriKind.Relative), Token);
+            own.StatusCode.Should().Be(HttpStatusCode.OK);
+            (await own.Content.ReadAsStringAsync(Token)).Should().Be("// the host's");
+
+            using HttpResponseMessage script = await client.GetAsync(new Uri("/_framework/blazor.web.js", UriKind.Relative), Token);
+            script.StatusCode.Should().Be(HttpStatusCode.OK);
+            (await script.Content.ReadAsStringAsync(Token)).Should().Be("// blazor.web.js", "the host's web root wins (D22)");
+        }
+        finally
+        {
+            await app.StopAsync(Token);
+        }
+    }
+
     // -------------------------------------------------------------------------------------------
     // The forward serves the host's files: it is governed as the page that imports them is (1.2-NET11-FIX)
     // -------------------------------------------------------------------------------------------

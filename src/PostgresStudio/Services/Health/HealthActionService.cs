@@ -218,6 +218,16 @@ internal sealed class HealthActionService : IHealthActionService
             // this visitor's gates.
             whole = new(resolved.Source.Key, resolved.Target.Identity, null);
             audited = whole with { TenantId = scope.TenantId };
+
+            // 4b. The finding is this database's. A finding is bound to the database the report it came from was read for (its mute key
+            // names store, database and finding), and the page presses with the scope selected *now*: between a scope change and the
+            // page dropping its report, a finding of database A could be pressed with scope B and be run against B. Refused here,
+            // before any gate or read, and not audited, as every refusal before a gate is asked is (step 0, step 1): nothing was read.
+            if (!string.Equals(finding.MuteKey, HealthService.MuteKeyOf(whole.StoreKey, whole.DatabaseId, finding.Finding), StringComparison.Ordinal))
+            {
+                return Unaudited(scope, action.Id, "This finding is from another database; run the checks again.");
+            }
+
             gate = new(settings, authorization, capabilities, whole);
 
             // 5. At least the finding's own gate, and its tenant's store policy.
