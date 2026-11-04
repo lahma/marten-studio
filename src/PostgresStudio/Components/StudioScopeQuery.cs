@@ -85,12 +85,27 @@ internal static class StudioScopeQuery
         ArgumentNullException.ThrowIfNull(navigation);
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceParameter);
 
-        return navigation.GetUriWithQueryParameters(new Dictionary<string, object?>(StringComparer.Ordinal)
-        {
-            [sourceParameter] = NullIfBlank(scope?.StoreKey),
-            [DatabaseIdParameter] = NullIfBlank(scope?.DatabaseId),
-            [TenantIdParameter] = NullIfBlank(scope?.TenantId)
-        });
+        var parameters = new Dictionary<string, object?>(StringComparer.Ordinal);
+        AddScope(parameters, scope, sourceParameter);
+        return navigation.GetUriWithQueryParameters(parameters);
+    }
+
+    /// <summary>
+    /// Sets the source, database and tenant entries of <paramref name="scope" /> in <paramref name="parameters" />, for a page that
+    /// builds its own address with <c>GetUriWithQueryParameters</c>: a part the scope does not have is set to
+    /// <see langword="null" />, which removes it from the address rather than writing it empty.
+    /// </summary>
+    /// <param name="parameters">The page's query parameters, to which the three scope entries are added or replaced.</param>
+    /// <param name="scope">The scope to write, or <see langword="null" /> to remove all three.</param>
+    /// <param name="sourceParameter">The studio's source parameter (<see cref="DiagnosticsDescriptor.SourceQueryParameter" />).</param>
+    internal static void AddScope(IDictionary<string, object?> parameters, StudioScope? scope, string sourceParameter)
+    {
+        ArgumentNullException.ThrowIfNull(parameters);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceParameter);
+
+        parameters[sourceParameter] = NullIfBlank(scope?.StoreKey);
+        parameters[DatabaseIdParameter] = NullIfBlank(scope?.DatabaseId);
+        parameters[TenantIdParameter] = NullIfBlank(scope?.TenantId);
     }
 
     /// <summary>

@@ -344,7 +344,7 @@ public class HealthPageTests
 
         var nav = context.Render<NavMenu>();
 
-        IElement health = nav.FindAll("a.ms-nav-link").Single(static x => x.GetAttribute("href") == "health");
+        IElement health = nav.FindAll("a.ms-nav-link").Single(static x => x.GetAttribute("href")?.Split('?')[0] == "health");
         IElement badge = health.QuerySelector(".ms-nav-badge")!;
         badge.TextContent.Trim().Should().Be("3");
         badge.ClassList.Should().Contain("ms-nav-badge-danger");
@@ -359,7 +359,7 @@ public class HealthPageTests
 
         var nav = context.Render<NavMenu>();
 
-        nav.FindAll("a.ms-nav-link").Single(static x => x.GetAttribute("href") == "health")
+        nav.FindAll("a.ms-nav-link").Single(static x => x.GetAttribute("href")?.Split('?')[0] == "health")
             .QuerySelector(".ms-nav-badge").Should().BeNull();
     }
 

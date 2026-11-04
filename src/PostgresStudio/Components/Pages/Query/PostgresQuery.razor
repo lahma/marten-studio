@@ -1,8 +1,10 @@
 @using PostgresStudio.Internal.Sql
 @using PostgresStudio.Services
 @using PostgresStudio.Services.Query
+@using PostgresStudio.Services.Settings
 @inject NavigationManager Navigation
 @inject StudioState State
+@inject StudioDescriptor Descriptor
 
 @*
     PostgresStudio's Query page: the body of the shared QueryPage (the descriptor's QueryComponent), so no @page of its
@@ -108,6 +110,11 @@
         // including when the text was too long to travel and the parameter is absent.
         appliedSql = sql;
 
-        Navigation.NavigateTo(Navigation.GetUriWithQueryParameter("sql", sql), replace: true);
+        var parameters = new Dictionary<string, object?>(StringComparer.Ordinal) { ["sql"] = sql };
+
+        // The scope is written from the state, not copied from whatever the address holds (N6a, 1.2).
+        StudioScopeQuery.AddScope(parameters, State.ActiveScope, Descriptor.SourceQueryParameter);
+
+        Navigation.NavigateTo(Navigation.GetUriWithQueryParameters(parameters), replace: true);
     }
 }

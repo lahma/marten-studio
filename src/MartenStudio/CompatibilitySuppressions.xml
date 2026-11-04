@@ -1,0 +1,16 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<!-- https://learn.microsoft.com/dotnet/fundamentals/package-validation/diagnostic-ids -->
+<!--
+  1.2: Query.NavigationLanded, the 1.1 navigation workaround's JS callback, removed with it (1.2-NAV, design D-NAV N7). A Razor
+  component's members are not contract (D20, docs/stability.md); user, 2026-11-03: "we can ignore semver for linqpanel". Delete this
+  file when PackageValidationBaselineVersion moves to 1.2.0 (an unneeded suppression fails Pack).
+-->
+<Suppressions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <Suppression>
+    <DiagnosticId>CP0002</DiagnosticId>
+    <Target>M:MartenStudio.Components.Pages.Query.Query.NavigationLanded</Target>
+    <Left>lib/net10.0/MartenStudio.dll</Left>
+    <Right>lib/net10.0/MartenStudio.dll</Right>
+    <IsBaselineSuppression>true</IsBaselineSuppression>
+  </Suppression>
+</Suppressions>

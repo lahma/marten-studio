@@ -82,7 +82,7 @@ public class NavMenuScopeRaceTests
     /// <summary>The dead-letter entry's count, or <see langword="null" /> when it wears none.</summary>
     private static string? DeadLetterBadge(IRenderedComponent<NavMenu> nav)
     {
-        IElement link = nav.FindAll("a.ms-nav-link").Single(static x => x.GetAttribute("href") == "events/dead-letters");
+        IElement link = nav.FindAll("a.ms-nav-link").Single(static x => x.GetAttribute("href")?.Split('?')[0] == "events/dead-letters");
         return link.QuerySelector(".ms-nav-badge")?.TextContent.Trim();
     }
 }

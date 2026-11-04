@@ -16,6 +16,7 @@
 @inject ToastService Toasts
 @inject IStudioSettings Settings
 @inject NavigationManager Navigation
+@inject StudioDescriptor Descriptor
 
 @*
     Query › Plan (X3, issue #28): write a statement, get its plan drawn every way PlanView draws one, and what to fix. The page is
@@ -642,14 +643,17 @@
         // Recorded before navigating, so OnParametersSet sees its own address arrive and leaves the page alone.
         appliedKey = (sql ?? string.Empty) + "\u0001" + (modeValue ?? string.Empty) + "\u0001" + (optionsValue ?? "\u0002");
 
-        Navigation.NavigateTo(
-            Navigation.GetUriWithQueryParameters(new Dictionary<string, object?>(StringComparer.Ordinal)
-            {
-                [PlanLinks.SqlParameter] = sql,
-                [PlanLinks.ModeParameter] = modeValue,
-                [PlanLinks.OptionsParameter] = optionsValue,
-            }),
-            replace: true);
+        var parameters = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            [PlanLinks.SqlParameter] = sql,
+            [PlanLinks.ModeParameter] = modeValue,
+            [PlanLinks.OptionsParameter] = optionsValue,
+        };
+
+        // The scope is written from the state, not copied from whatever the address holds (N6a, 1.2).
+        StudioScopeQuery.AddScope(parameters, State.ActiveScope, Descriptor.SourceQueryParameter);
+
+        Navigation.NavigateTo(Navigation.GetUriWithQueryParameters(parameters), replace: true);
     }
 
     // ---- Running -------------------------------------------------------------------------------------------------------

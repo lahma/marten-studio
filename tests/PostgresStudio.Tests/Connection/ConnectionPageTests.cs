@@ -68,6 +68,50 @@ public sealed class ConnectionPageTests
         page.Markup.Should().Contain("Read ").And.Contain("Show SQL for what the server saw");
     }
 
+    /// <summary>
+    /// 1.2-NAV N9: an address with <c>#conn-…</c> reveals what it names once the page is drawn, once. The page's content arrives after
+    /// its first render, so the browser's own look for the fragment (on the document load) finds nothing, and a client-side navigation
+    /// has no document load at all.
+    /// </summary>
+    [Theory]
+    [InlineData("#conn-marten", "conn-marten")]
+    [InlineData("#conn-row-host", "conn-row-host")]
+    [InlineData("#conn-cmp-row-Host", "conn-cmp-row-Host")]
+    public async Task A_fragment_the_page_names_is_scrolled_to_once_after_the_view_is_drawn(string fragment, string id)
+    {
+        await using PostgresStudioComponentContext context = await ContextAsync(DefaultView());
+        context.Navigate("postgres/database/connection" + fragment);
+
+        IRenderedComponent<ConnectionPage> page = Open(context);
+
+        page.WaitForAssertion(() => ScrollInvocations(context).Should().ContainSingle());
+        ScrollInvocations(context)[0].Arguments.Should().Equal([id, "start"]);
+
+        await page.InvokeAsync(() => page.Find(".ms-conn-actions button").Click());
+        page.WaitForAssertion(() => page.FindAll(".ms-conn-strip").Should().ContainSingle());
+
+        ScrollInvocations(context).Should().ContainSingle("a read that redraws the page does not scroll the visitor back");
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("#elsewhere")]
+    [InlineData("#finding-x")]
+    public async Task No_fragment_or_one_the_page_does_not_own_scrolls_nothing(string fragment)
+    {
+        await using PostgresStudioComponentContext context = await ContextAsync(DefaultView());
+        context.Navigate("postgres/database/connection" + fragment);
+
+        IRenderedComponent<ConnectionPage> page = Open(context);
+        await page.InvokeAsync(() => page.Find(".ms-conn-actions button").Click());
+        page.WaitForAssertion(() => page.FindAll(".ms-conn-strip").Should().ContainSingle());
+
+        ScrollInvocations(context).Should().BeEmpty("only an id the page itself draws (conn-…) goes to the script");
+    }
+
+    private static List<Bunit.JSRuntimeInvocation> ScrollInvocations(PostgresStudioComponentContext context) =>
+        [.. context.JSInterop.Invocations.Where(static x => x.Identifier == "martenStudio.scroll.intoView")];
+
     [Fact]
     public async Task Each_fact_links_to_a_row_or_section_the_page_has()
     {

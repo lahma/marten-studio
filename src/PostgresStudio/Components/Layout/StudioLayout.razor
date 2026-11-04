@@ -17,7 +17,10 @@
    <HeadContent> put it inside the <HeadOutlet> marker, and the interactive outlet's first render - which
    happens before this layout has registered any section content - removed it from the live DOM. *@
 
-<div class="ms-studio" data-theme="@State.SelectedTheme">
+@* data-ms-interactive (1.2): present once the circuit has rendered this shell and read the browser's preferences. StudioRoutes asked for
+   navigation interception before that render batch was sent, so the attribute in the DOM means a link, Back or NavigateTo is
+   handled by the circuit. It is the browser suites' readiness signal; nothing else reads it. *@
+<div class="ms-studio" data-theme="@State.SelectedTheme" data-ms-interactive="@(preferencesLoaded ? "true" : null)">
     @* 1.1: the first focusable element of every page, hidden until it has focus. Its fragment is handled in studio.js, not by the
        browser: the document's <base href> would send a bare #fragment to the studio's front page. *@
     <a class="ms-skip-link" href="#ms-main-content">Skip to content</a>
@@ -106,6 +109,7 @@
     private ScopeAccess access = ScopeAccess.Unknown;
     private bool preferencesLoaded;
     private bool interactive;
+    private bool addressScopeApplied;
     private PersistingComponentStateSubscription persistingSubscription;
 
     /// <summary>
@@ -143,6 +147,11 @@
             await State.SetScopeAsync(storeKey, databaseId, tenantId);
         }
 
+        // From here on the address's own scope has been read, so the shell may write its scope into it (1.2, N5a). A no-op until the
+        // circuit is interactive; OnAfterRenderAsync can run while this method is still awaiting the catalog.
+        addressScopeApplied = true;
+        SyncScopeToUrl();
+
         await UpdateAccessAsync();
     }
 
@@ -178,8 +187,12 @@
     private async Task OnScopeChanged()
     {
         ScopeAccess previous = access;
-        await UpdateAccessAsync();
+
+        // The address names the selected scope whatever the policy says, so it is written first (1.2, N5b): the window in which a page's
+        // push and this rewrite, each built from an address the other has not reported yet, can overwrite each other shrinks from the
+        // policy's time plus a round trip to a round trip.
         SyncScopeToUrl();
+        await UpdateAccessAsync();
         if (previous != access)
         {
             await InvokeAsync(StateHasChanged);
@@ -198,7 +211,9 @@
     /// </remarks>
     private void SyncScopeToUrl()
     {
-        if (!interactive)
+        // Not before the address's own scope was read (addressScopeApplied): the catalog may still be loading, ActiveScope is null until
+        // it has, and a rewrite then would strip a pasted ?store=&db= or write the default database over it (D9).
+        if (!interactive || !addressScopeApplied)
         {
             return;
         }

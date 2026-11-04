@@ -194,7 +194,9 @@ component's members is not a break: components are public only because Razor mak
 `CompatibilitySuppressions.xml` (generate it with `-p:GenerateCompatibilitySuppressionFile=true`, then make it LF without a
 BOM and say why in its comment), reviewed the same way. 1.1.0 suppresses `LinqQueryPanel.OnChanged` (user, 2026-11-03).
 1.2.0 validates against 1.1.0, so that suppression is gone: the SDK's default (`ApiCompatPermitUnnecessarySuppressions`
-unset) fails `Pack` on a suppression that is no longer needed.
+unset) fails `Pack` on a suppression that is no longer needed. 1.2.0 suppresses one of its own, `Query.NavigationLanded` (the
+1.1 navigation workaround's JS callback, removed by the 1.2 navigation interception, 1.2-NAV; D20; user, 2026-11-03: "we can
+ignore semver for linqpanel"); it goes when the baseline moves to 1.2.0.
 
 The GitHub Release carries **no assets** (`ICreateGitHubRelease.AssetFiles => []`). All three packages are consumed
 by `PackageReference`; there is nothing a user could usefully download, and attaching a copy of a .nupkg

@@ -1,12 +1,17 @@
 @using PostgresStudio.Components.Layout
+@using PostgresStudio.Services.Live
 @using PostgresStudio.Services.Settings
 @implements IDisposable
 @inject NavigationManager Navigation
+@inject INavigationInterception NavigationInterception
+@inject IScrollToLocationHash ScrollToLocationHash
 @inject IStudioSettings Settings
 @inject StudioDescriptor Descriptor
 
 @* The built-in Blazor Router can only match the compile-time page templates, so the studio matches routes
-   itself - against its descriptor's route table - to honour a custom mount path. *@
+   itself - against its descriptor's route table - to honour a custom mount path. Since 1.2 it also does what the
+   Router does for the browser: it asks for navigation interception once (OnAfterRenderAsync), so a link, Back and
+   a page's own NavigateTo are handled by the circuit instead of being an enhanced-navigation fetch of the whole page. *@
 @if (routeData is not null)
 {
     <RouteView RouteData="routeData" DefaultLayout="typeof(StudioLayout)" />
@@ -27,22 +32,111 @@ else
 {
     private RouteData? routeData;
 
+    /// <summary>Whether interception has been asked for: once per component, before the await, as the built-in Router does.</summary>
+    private bool interceptionRequested;
+
+    /// <summary>The last location's path and fragment, to tell a move that deserves a scroll to a fragment from one that does not.</summary>
+    private string? lastPath;
+    private string? lastFragment;
+
+    /// <summary>Set by a location change that altered the path or the fragment of an address that has one; cleared by the render after it.</summary>
+    private bool scrollToFragment;
+
     protected override void OnInitialized()
     {
         Navigation.LocationChanged += OnLocationChanged;
-        UpdateRouteData(Navigation.Uri);
+        routeData = Match(Navigation.Uri);
+        (lastPath, lastFragment) = SplitLocation(Navigation.Uri);
     }
 
     private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
     {
-        UpdateRouteData(e.Location);
+        RouteData? next = Match(e.Location);
+
+        if (next is null && e.IsNavigationIntercepted)
+        {
+            // A link, Back or Forward to an address under the mount that is not a studio page - a file, an endpoint, an address that
+            // does not exist: the browser loads it, the built-in Router's rule. The page on screen stays until then. A document load
+            // does not come through here (the first address is read in OnInitialized, with no event), so this cannot loop.
+            Navigation.NavigateTo(e.Location, forceLoad: true);
+            return;
+        }
+
+        routeData = next;
+        NoteLocationForFragment(e.Location);
         _ = InvokeAsync(StateHasChanged);
     }
 
-    private void UpdateRouteData(string uri)
+    private RouteData? Match(string uri)
     {
         string? relative = StudioLink.ToDashboardRelativePath(uri, Navigation.BaseUri, Settings);
-        routeData = relative is null ? null : Descriptor.Routes.Match(relative, Settings);
+        return relative is null ? null : Descriptor.Routes.Match(relative, Settings);
+    }
+
+    /// <summary>
+    /// The Router scrolls to an address's fragment after the render that follows a location change; so does the studio, narrowed to a
+    /// change of path or of fragment, so a query-only change (a filter, a page of results) never pulls the visitor back to the fragment
+    /// a push keeps, and the first render does nothing (the browser scrolled the document itself).
+    /// </summary>
+    private void NoteLocationForFragment(string location)
+    {
+        (string path, string? fragment) = SplitLocation(location);
+
+        if (!string.IsNullOrEmpty(fragment)
+            && (!string.Equals(path, lastPath, StringComparison.Ordinal) || !string.Equals(fragment, lastFragment, StringComparison.Ordinal)))
+        {
+            scrollToFragment = true;
+        }
+
+        lastPath = path;
+        lastFragment = fragment;
+    }
+
+    private static (string Path, string? Fragment) SplitLocation(string location)
+    {
+        int hash = location.IndexOf('#', StringComparison.Ordinal);
+        string beforeFragment = hash < 0 ? location : location[..hash];
+        string? fragment = hash < 0 ? null : location[(hash + 1)..];
+        int query = beforeFragment.IndexOf('?', StringComparison.Ordinal);
+
+        return (query < 0 ? beforeFragment : beforeFragment[..query], fragment);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // The first interactive render of the root component, which runs before the shell's own (the render queue is first in, first
+        // out from the root), so the shell's first rewrite of the address is already a client-side history write, with nothing awaited in
+        // front of it. A prerender has no after-render, so nothing is asked of a static document.
+        if (firstRender && !interceptionRequested && StudioNavigationSwitch.InterceptionEnabled)
+        {
+            interceptionRequested = true;
+
+            try
+            {
+                await NavigationInterception.EnableNavigationInterceptionAsync();
+            }
+            catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
+            {
+                // A circuit that closed, or another renderer already holding interception in this document (a JSException): the
+                // enhanced navigation of 1.1 stays, and works.
+            }
+        }
+
+        if (!scrollToFragment)
+        {
+            return;
+        }
+
+        scrollToFragment = false;
+
+        try
+        {
+            await ScrollToLocationHash.RefreshScrollPositionForHash(Navigation.Uri);
+        }
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
+        {
+            // The page is right without the scroll.
+        }
     }
 
     public void Dispose()

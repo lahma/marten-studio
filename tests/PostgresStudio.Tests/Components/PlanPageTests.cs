@@ -333,6 +333,24 @@ public class PlanPageTests
         page.Find(".ms-plan-dbfacts-none").TextContent.Should().Contain("Plan it again with VERBOSE");
     }
 
+    /// <summary>
+    /// 1.2-NAV N6a: a push writes the scope from the state, not from whatever the address held. A page reached from a link without
+    /// <c>?store=&amp;db=</c> (the rail's used to be one) would otherwise write an address without a scope, and copy the gap forward.
+    /// </summary>
+    [Fact]
+    public async Task A_run_writes_the_scope_even_when_the_address_had_none()
+    {
+        await using PostgresStudioComponentContext context = await ReadyAsync();
+        context.CurrentUri.Should().NotContain("db=", "the premise: the address names no scope");
+
+        await RanAsync(context);
+
+        (string? source, string? database, _) = PostgresStudio.Components.StudioScopeQuery.Read(
+            context.CurrentUri, PostgresStudio.Services.Postgres.PostgresStudioDescriptor.Instance.SourceQueryParameter);
+        source.Should().Be(context.State.ActiveScope!.StoreKey);
+        database.Should().Be(context.State.ActiveScope!.DatabaseId);
+    }
+
     [Fact]
     public async Task The_default_mode_and_options_are_not_written_into_the_address()
     {

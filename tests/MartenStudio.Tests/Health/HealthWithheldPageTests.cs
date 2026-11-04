@@ -198,5 +198,5 @@ public class HealthWithheldPageTests
     }
 
     private static IElement HealthEntry(IRenderedComponent<NavMenu> nav) =>
-        nav.FindAll("a.ms-nav-link").Single(static x => x.GetAttribute("href") == "health");
+        nav.FindAll("a.ms-nav-link").Single(static x => x.GetAttribute("href")?.Split('?')[0] == "health");
 }

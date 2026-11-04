@@ -70,7 +70,8 @@ public class DeadLettersTests
 
         var nav = context.Render<PostgresStudio.Components.Layout.NavMenu>();
 
-        List<string?> links = [.. nav.FindAll("a.ms-nav-link").Select(static x => x.GetAttribute("href"))];
+        // The rail's links carry the scope since 1.2 (?store=&db=), so the page is the part before the query.
+        List<string?> links = [.. nav.FindAll("a.ms-nav-link").Select(static x => x.GetAttribute("href")?.Split('?')[0])];
         links.Should().NotContain("events/dead-letters", "a hidden document type is absent (D27)");
         links.Should().Contain("events/feed", "the rest of the Events section is still there");
     }
@@ -84,7 +85,7 @@ public class DeadLettersTests
 
         var nav = context.Render<PostgresStudio.Components.Layout.NavMenu>();
 
-        nav.FindAll("a.ms-nav-link").Select(static x => x.GetAttribute("href")).Should().Contain("events/dead-letters");
+        nav.FindAll("a.ms-nav-link").Select(static x => x.GetAttribute("href")?.Split('?')[0]).Should().Contain("events/dead-letters");
     }
 
     private static Func<Type, bool> Hiding(bool throws) => throws

@@ -43,12 +43,13 @@ public class LinqQueryPanelTests
     }
 
     /// <summary>
-    /// 1.1-FINAL-POLISH C1: editing the predicate and then pressing Ctrl+Enter from the Order-by box is one navigation, with both
-    /// values. A push on the predicate's `change` and another for the Run began a second enhanced navigation while the first
-    /// was in flight, and the browser aborted the first (net::ERR_ABORTED).
+    /// 1.1-FINAL-POLISH C1, reworded for 1.2: editing the predicate and then pressing Ctrl+Enter from the Order-by box writes one
+    /// address, with both values. The edit alone keeps its draft and writes nothing; the Run writes the address once, after both
+    /// boxes are bound. (In 1.1 a second push began a second enhanced navigation while the first was in flight and the browser
+    /// aborted the first, net::ERR_ABORTED; since 1.2 a push is a client-side history write and cannot abort another.)
     /// </summary>
     [Fact]
-    public async Task Editing_the_predicate_and_pressing_Ctrl_Enter_from_Order_by_navigates_once_with_both_values()
+    public async Task Editing_the_predicate_and_pressing_Ctrl_Enter_from_Order_by_writes_one_address_with_both_values()
     {
         var linq = new FakeLinqQueryService().WithType("order");
         using StudioComponentContext context = CreateContext(linq);
@@ -66,22 +67,43 @@ public class LinqQueryPanelTests
 
         await page.FindComponent<LinqQueryPanel>().InvokeAsync(() => page.FindComponent<LinqQueryPanel>().Instance.RunFromOrderByAsync("Total desc"));
 
-        locations.Should().ContainSingle("the Run pushes the address once, after both boxes are bound");
+        locations.Should().ContainSingle("one address per Run, written after both boxes are bound");
         locations[0].Should().Contain("predicate=Total%20%3E%205").And.Contain("orderby=Total%20desc");
         linq.Requests.Should().ContainSingle().Which.OrderBy.Should().Be("Total desc");
     }
 
     /// <summary>
-    /// 1.1-FINAL-POLISH-2: a push that waited for the one in flight is dropped when the page is disposed. A NavigationLanded the
-    /// browser had already sent (the sidebar link's own enhancedload) must not append this page's mode and predicate to the address
-    /// of the page being navigated to. (The grace timer is cancelled with the page's token, so it cannot push either.)
+    /// 1.2-NAV N6a: a push writes the scope from the state, not from whatever the address held. The rail's links used to carry no
+    /// <c>?store=&amp;db=</c>, and a push built from such an address wrote one without it and every later push copied the gap forward.
     /// </summary>
     [Fact]
-    public async Task A_queued_push_is_dropped_when_the_page_is_disposed_and_a_late_NavigationLanded_pushes_nothing()
+    public async Task A_push_writes_the_scope_even_when_the_address_had_none()
     {
         var linq = new FakeLinqQueryService().WithType("order");
         using StudioComponentContext context = CreateContext(linq);
-        context.JSInterop.Setup<bool>("martenStudio.query.watchNavigation", static _ => true).SetResult(true);
+        await context.State.EnsureInitializedAsync(Xunit.TestContext.Current.CancellationToken);
+        context.CurrentUri.Should().NotContain("store=", "the premise: the address names no scope");
+
+        var page = context.Render<QueryPage>();
+        page.Find("#ms-query-mode-linq").Click();
+        page.WaitForAssertion(() => page.FindAll("#ms-query-linq-where").Should().ContainSingle());
+
+        await page.FindComponent<LinqQueryPanel>().InvokeAsync(() => page.FindComponent<LinqQueryPanel>().Instance.RunFromOrderByAsync("Total desc"));
+
+        context.CurrentUri.Should().Contain("orderby=Total%20desc")
+            .And.Contain("store=" + context.State.ActiveScope!.StoreKey)
+            .And.Contain("db=" + Uri.EscapeDataString(context.State.ActiveScope!.DatabaseId!));
+    }
+
+    /// <summary>
+    /// 1.2-NAV: a page that has been disposed writes no address. A Run that reaches the page after the visitor has left it (the panel
+    /// outlives the await) must not put this page's mode and predicate onto the address of the page that replaced it.
+    /// </summary>
+    [Fact]
+    public async Task A_page_that_is_disposed_writes_no_address()
+    {
+        var linq = new FakeLinqQueryService().WithType("order");
+        using StudioComponentContext context = CreateContext(linq);
 
         var page = context.Render<QueryPage>();
         page.Find("#ms-query-mode-linq").Click();
@@ -91,15 +113,10 @@ public class LinqQueryPanelTests
         List<string> locations = [];
         navigation.LocationChanged += (_, args) => locations.Add(args.Location);
 
-        // The mode switch's navigation is still in flight (the browser has not said it landed), so this Run's address waits.
-        page.Find("#ms-query-linq-where").Change("Total > 5");
-        await page.FindComponent<LinqQueryPanel>().InvokeAsync(() => page.FindComponent<LinqQueryPanel>().Instance.RunFromOrderByAsync("Total desc"));
-        locations.Should().BeEmpty("the second address waits for the first page to land");
-
-        QueryPage instance = page.Instance;
+        LinqQueryPanel panel = page.FindComponent<LinqQueryPanel>().Instance;
         await context.DisposeComponentsAsync();
-        await instance.NavigationLanded();
-        await instance.NavigationLanded();
+
+        await panel.RunFromOrderByAsync("Total desc");
 
         locations.Should().BeEmpty("a page that is gone pushes nothing onto the address of the page that replaced it");
     }

@@ -290,7 +290,13 @@
         return string.Join(" and ", parts) + withheld + ", as of " + State.FormatInSelectedTimeZone(health.MeasuredAt, "HH:mm");
     }
 
-    private string Link(string subPath) => StudioLink.To(Settings, subPath);
+    /// <summary>
+    /// The rail's href for a page: the page, carrying the scope the studio is about (1.2). A rail click is a client-side navigation, and
+    /// an address without <c>store=&amp;db=</c> would show the previous scope's page under no scope until the shell rewrote it. Read at
+    /// render, and the rail renders again on every location and scope change, so it is never older than the address.
+    /// </summary>
+    private string Link(string subPath) =>
+        StudioScopeQuery.Append(StudioLink.To(Settings, subPath), State.ActiveScope, Descriptor.SourceQueryParameter);
 
     private void UpdateCurrentRelativePath(string uri)
     {

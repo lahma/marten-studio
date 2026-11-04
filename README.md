@@ -804,6 +804,10 @@ tenant, because there is nothing to filter on and hiding it would hide something
   `AllowAnonymous()` mapping under a fail-closed policy is the usual case
   ([dotnet/aspnetcore#69624](https://github.com/dotnet/aspnetcore/issues/69624), open). The studio does not work around
   it; until it is fixed, an anonymous mapping on .NET 11 needs an application without a fail-closed `FallbackPolicy`.
+- **Navigation inside the studio is handled by its circuit (1.2).** A link, Back and a page's own address changes no longer
+  fetch the page from the server. Should a host need 1.1's behaviour back for a release, it calls
+  `AppContext.SetSwitch("PostgresStudio.DisableNavigationInterception", true)` before `app.Run()`; the switch is temporary
+  and goes in 1.3.
 - **Behind a reverse proxy**, forward the studio prefix and it works: the studio's plumbing is all under
   its own path. If the proxy strips a prefix, give the application the same prefix with
   `app.UsePathBase("/…")` so that the routes and the `<base href>` agree; mounting at

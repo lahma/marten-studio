@@ -15,6 +15,7 @@
 @inject IStudioSettings Settings
 @inject StudioDescriptor Descriptor
 @inject IJSRuntime JsRuntime
+@inject NavigationManager Navigation
 
 @*
     Database › Connection (1.1, NP3): how this application connects to this database, for an admin who arrives with three
@@ -154,12 +155,23 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (!firstRender || disposed)
+        if (disposed)
         {
             return;
         }
 
+        if (!firstRender)
+        {
+            // Every render after the first, because the one that draws the page is not the first: it is the one the read causes.
+            await RevealLinkedAnchorAsync();
+            return;
+        }
+
         interactive = true;
+
+        // Read here and not in OnInitialized: a prerender's address has no fragment (a browser does not send one), and the circuit's
+        // does. Taken before the first await, so no later render can look before it is set (1.2, N9).
+        linkedAnchor = ConnectionFragment(Navigation.Uri);
         CancellationToken token = lifetime.Token;
 
         try
@@ -195,6 +207,55 @@
 
         live = LiveFactory.Create();
         await live.StartAsync(Settings.EffectiveHealthInterval, TickAsync, token);
+    }
+
+    /// <summary>The id an address's fragment names, until the page has scrolled to it once.</summary>
+    private string? linkedAnchor;
+
+    /// <summary>
+    /// The element id an address's fragment names, or <see langword="null" /> when it names none: <c>#conn-…</c> only, as every id this
+    /// page and its contributors draw starts (<c>conn-row-</c>, <c>conn-card-</c>, <c>conn-cmp-row-</c>, <c>conn-marten</c>), bounded
+    /// so an address cannot make the page carry a long string around.
+    /// </summary>
+    private static string? ConnectionFragment(string uri)
+    {
+        int hash = uri.IndexOf('#', StringComparison.Ordinal);
+        if (hash < 0 || uri.Length - hash > 256)
+        {
+            return null;
+        }
+
+        string fragment = Uri.UnescapeDataString(uri[(hash + 1)..]);
+        return fragment.StartsWith("conn-", StringComparison.Ordinal) ? fragment : null;
+    }
+
+    /// <summary>
+    /// Once the page is drawn, scrolls to the element the address's fragment names. It runs after the render the read causes, because
+    /// a browser looks for the fragment when the document arrives, before the circuit has read anything, and finds nothing; and it
+    /// runs once, so a poll that redraws the page does not scroll the visitor back. Only an id the address names goes to the script,
+    /// which looks it up by id and does nothing else with it; an element that is not drawn (a filtered row) is left.
+    /// </summary>
+    private async Task RevealLinkedAnchorAsync()
+    {
+        if (linkedAnchor is not { } id || loading || view is not { Refusal: ConnectionRefusal.None })
+        {
+            return;
+        }
+
+        linkedAnchor = null;
+
+        try
+        {
+            await JsRuntime.InvokeAsync<bool>("martenStudio.scroll.intoView", lifetime.Token, id, "start");
+        }
+        catch (OperationCanceledException)
+        {
+            // The page went away under the call.
+        }
+        catch (Exception exception) when (StudioLiveUpdates.IsInteropUnavailable(exception))
+        {
+            // A circuit that closed, or a browser that refused: the page is right without the scroll.
+        }
     }
 
     private async Task TickAsync(CancellationToken cancellationToken) => await LoadAsync(cancellationToken);

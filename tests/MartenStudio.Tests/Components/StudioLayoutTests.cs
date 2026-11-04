@@ -9,6 +9,7 @@ using MartenStudio.Services;
 using MartenStudio.Tests.Support;
 
 using Microsoft.AspNetCore.Components;
+using Microsoft.Extensions.DependencyInjection;
 using PostgresStudio.Services;
 
 namespace MartenStudio.Tests.Components;
@@ -942,6 +943,122 @@ public class StudioLayoutTests
         RenderLayout(context);
 
         context.State.ActiveScope!.StoreKey.Should().Be("default", "a URL is something anyone can type");
+    }
+
+    /// <summary>
+    /// 1.2-NAV N5a: the shell never writes the address before it has read the address's own scope. The first interactive render can run
+    /// while the scope the address names is still being applied (a slow catalog), and <c>ActiveScope</c> is then the previous one: a
+    /// rewrite at that moment would put the default database over the pasted one, and the pasted link would be lost (D9).
+    /// </summary>
+    [Fact]
+    public async Task The_address_keeps_a_pasted_scope_while_the_scope_is_still_being_applied()
+    {
+        using var context = new StudioComponentContext();
+        context.Catalog.WithStore("default", "Default", DatabaseCardinality.StaticMultiple, "db-a", "db-b");
+        await context.State.EnsureInitializedAsync(Xunit.TestContext.Current.CancellationToken);
+        context.State.ActiveScope!.DatabaseId.Should().Be("db-a", "the premise: the circuit starts on the first database");
+
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        context.Catalog.DescribeGate = gate;
+
+        context.Navigate("marten?store=default&db=db-b");
+        NavigationManager navigation = context.Services.GetRequiredService<NavigationManager>();
+        List<string> locations = [];
+        navigation.LocationChanged += (_, args) => locations.Add(args.Location);
+
+        var layout = RenderLayout(context);
+
+        locations.Should().NotContain(static x => x.Contains("db=db-a", StringComparison.Ordinal), "nothing is written before the address's scope is read");
+        context.CurrentUri.Should().Contain("db=db-b");
+
+        gate.SetResult();
+
+        layout.WaitForAssertion(() => context.State.ActiveScope!.DatabaseId.Should().Be("db-b"));
+        layout.WaitForAssertion(() => layout.Markup.Should().Contain(BodyMarker));
+        context.CurrentUri.Should().Contain("db=db-b");
+        locations.Should().NotContain(static x => x.Contains("db=db-a", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// 1.2-NAV N5b: a scope change is written into the address before the policy is asked about it. The address names the selected
+    /// scope whatever the policy says, and writing it first narrows the window in which a page's own push and the shell's rewrite can
+    /// overwrite each other.
+    /// </summary>
+    [Fact]
+    public void A_scope_change_is_in_the_address_while_the_policy_has_not_answered()
+    {
+        using var context = new StudioComponentContext().WithPolicy("default");
+        context.Catalog.WithStore("default", "Default", DatabaseCardinality.StaticMultiple, "db-a", "db-b");
+
+        var layout = RenderLayout(context);
+        layout.WaitForAssertion(() => layout.Markup.Should().Contain(BodyMarker));
+
+        // A slow policy from here on: the scope change below is asked about and the answer does not come.
+        var gate = new TaskCompletionSource();
+        context.AuthorizationService.Gate = gate;
+
+        layout.Find("#ms-database-select").Change("db-b");
+
+        layout.WaitForAssertion(() => context.CurrentUri.Should().Contain("db=db-b"));
+        context.State.ActiveScope!.DatabaseId.Should().Be("db-b");
+
+        gate.SetResult();
+    }
+
+    /// <summary>
+    /// 1.2-NAV (brief answer 3): every rail link carries the scope the studio is about, and follows it. A rail click is a client-side
+    /// navigation now, and a link without <c>store=&amp;db=</c> would show the page under no scope until the shell rewrote the address.
+    /// </summary>
+    [Fact]
+    public void Every_rail_link_carries_the_scope_and_follows_a_scope_change()
+    {
+        using var context = new StudioComponentContext();
+        context.Catalog
+            .WithStore("default", "Default", DatabaseCardinality.StaticMultiple, "db-a", "db-b")
+            .WithTenants("default", new TenantList(["acme", "globex"], IsTruncated: false, TenantListSource.Configured));
+
+        var layout = RenderLayout(context);
+        layout.Find("#ms-tenant-select").Change("acme");
+
+        layout.WaitForAssertion(() =>
+        {
+            string?[] hrefs = [.. layout.FindAll("a.ms-nav-link").Select(static x => x.GetAttribute("href"))];
+            hrefs.Should().NotBeEmpty().And.OnlyContain(static x => x != null && x.Contains("store=default&db=db-a&tenant=acme", StringComparison.Ordinal));
+        });
+
+        layout.Find("#ms-database-select").Change("db-b");
+
+        layout.WaitForAssertion(() =>
+        {
+            string?[] hrefs = [.. layout.FindAll("a.ms-nav-link").Select(static x => x.GetAttribute("href"))];
+            hrefs.Should().OnlyContain(static x => x != null && x.Contains("store=default&db=db-b", StringComparison.Ordinal));
+        });
+    }
+
+    /// <summary>
+    /// 1.2-NAV N5c: <c>data-ms-interactive</c> is absent until the shell has rendered and read the browser's preferences, and present
+    /// after. It is the browser suites' sign that the circuit is up and (StudioRoutes having asked first) that interception is on.
+    /// </summary>
+    [Fact]
+    public void The_shell_says_when_it_is_interactive()
+    {
+        using var context = new StudioComponentContext();
+
+        JSRuntimeInvocationHandler<string?> storedTheme =
+            context.JSInterop.Setup<string?>("martenStudio.prefs.get", StudioState.ThemePreferenceKey);
+        JSRuntimeInvocationHandler<string?> storedZone =
+            context.JSInterop.Setup<string?>("martenStudio.prefs.get", StudioState.TimeZonePreferenceKey);
+
+        var layout = context.Render<StudioLayout>(parameters => parameters.Add(x => x.Body, Body));
+
+        layout.Instance.PreferencesLoaded.Should().BeFalse("the browser has not answered yet");
+        layout.Find(".ms-studio").HasAttribute("data-ms-interactive").Should().BeFalse();
+
+        storedTheme.SetResult(null);
+        storedZone.SetResult(null);
+        layout.WaitForState(() => layout.Instance.PreferencesLoaded);
+
+        layout.WaitForAssertion(() => layout.Find(".ms-studio").GetAttribute("data-ms-interactive").Should().Be("true"));
     }
 
     // -------------------------------------------------------------------------------------------

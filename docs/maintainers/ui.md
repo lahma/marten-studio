@@ -117,3 +117,19 @@ The credit is the column's last child with `margin-top: auto`: at the foot when 
 list when it is longer, and never over it. It is three `.ms-rail-credit-line` blocks (product and version, licence, author).
 On the 56 px rail (at 1024 px and below) it is clipped out of sight the way the entries' names are, and stays in the
 accessibility tree.
+
+## Navigation inside the studio (1.2)
+
+**The studio intercepts its own navigation.** `StudioRoutes` matches routes itself (D11), so nothing called
+`EnableNavigationInterceptionAsync` and every link, Back and `NavigateTo` inside the mount was an enhanced navigation: a `GET`
+of the whole page, which the next one aborted (`net::ERR_ABORTED`). Since 1.2 `StudioRoutes` asks for interception once, in its
+first interactive render, as the built-in `Router` does; a link or Back is then rendered by the circuit, and a page's
+`NavigateTo` is a `replaceState` or `pushState` the browser reports back one round trip later. It is confined to the mount by
+the studio-rooted `<base href>`, and it is per document, so a host's own Blazor app is untouched. An intercepted address that no
+studio page matches is loaded by the browser (`forceLoad`), which is how a link to a file or an endpoint under the mount still
+works; a link to a file says `download` or `target="_blank"` as well (`data-enhance-nav` means nothing under interception). After
+a location change whose path or fragment changes, `StudioRoutes` scrolls to the fragment as the `Router` does; a page whose
+content arrives after its first render reveals its own fragment once drawn (Health, Connection). Nothing waits for a
+navigation to land, and the shell writes the scope into the address only after it has read the address's own scope.
+`data-ms-interactive` on `.ms-studio` is the browser suites' sign that the circuit has rendered and interception is on. The
+AppContext switch `PostgresStudio.DisableNavigationInterception` restores 1.1's enhanced navigation (`docs/stability.md`).

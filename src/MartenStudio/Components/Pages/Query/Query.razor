@@ -18,6 +18,7 @@
 @inject NavigationManager Navigation
 @inject IJSRuntime JsRuntime
 @inject IStudioSettings Settings
+@inject StudioDescriptor Descriptor
 
 @*
     Two modes, and the asymmetry between them is the design.
@@ -406,64 +407,7 @@
     {
         pageSize = Settings.DefaultPageSize;
         State.ScopeChanged += OnScopeChangedAsync;
-        Navigation.LocationChanged += OnLocationChanged;
     }
-
-    /// <summary>Whatever moved the address - this page's own push, the scope selector, Back - the address is known again.</summary>
-    private void OnLocationChanged(object? sender, LocationChangedEventArgs args)
-    {
-        // The server's manager reports a new location as the navigation begins, not when its request has been served, so where the
-        // browser can say when the page has landed (NavigationLanded) that is what ends a push; this is the fallback without it.
-        if (!navigationWatched)
-        {
-            NavigationEnded();
-        }
-    }
-
-    /// <summary>The browser says an enhanced navigation has been served and applied (Blazor's <c>enhancedload</c>).</summary>
-    [JSInvokable]
-    public async Task NavigationLanded() => await InvokeAsync(NavigationEnded);
-
-    private void NavigationEnded()
-    {
-        if (disposed)
-        {
-            return;
-        }
-
-        pendingUri = null;
-
-        if (pushQueued)
-        {
-            // After the router has applied the parameters of the address that just landed (its handler was subscribed first and
-            // queued its refresh first), so the queued push is built from the state as it is, not overwritten by the older address.
-            _ = InvokeAsync(FlushQueuedPush);
-        }
-    }
-
-    protected override async Task OnAfterRenderAsync(bool firstRender)
-    {
-        if (!firstRender)
-        {
-            return;
-        }
-
-        var reference = DotNetObjectReference.Create(this);
-        navigationReference = reference;
-
-        try
-        {
-            navigationWatched = await JsRuntime.InvokeAsync<bool>("martenStudio.query.watchNavigation", reference);
-        }
-        catch (Exception exception) when (StudioLiveUpdates.IsInteropUnavailable(exception))
-        {
-            // Prerendering, a circuit that closed, or a helper script without the helper: LocationChanged ends a push instead.
-        }
-    }
-
-    private IDisposable? navigationReference;
-
-    private bool navigationWatched;
 
     protected override async Task OnInitializedAsync()
     {
@@ -547,33 +491,10 @@
 
     public async ValueTask DisposeAsync()
     {
-        // First, before anything is awaited: a NavigationLanded the browser already sent (the sidebar link's own enhancedload) or the
-        // grace timer waking while this page is going away must not push this page's mode, type and predicate onto the address of the
-        // page being navigated to.
+        // First, before anything is awaited: a page that is going away pushes no address of its own onto the one being navigated to.
         disposed = true;
-        pushQueued = false;
-        pendingUri = null;
 
         State.ScopeChanged -= OnScopeChangedAsync;
-        Navigation.LocationChanged -= OnLocationChanged;
-
-        try
-        {
-            if (navigationWatched)
-            {
-                await JsRuntime.InvokeVoidAsync("martenStudio.query.releaseNavigation");
-            }
-        }
-        catch (Exception exception) when (StudioLiveUpdates.IsInteropUnavailable(exception))
-        {
-            // The circuit is already gone, which is the usual way a page is disposed.
-        }
-        finally
-        {
-            navigationWatched = false;
-            navigationReference?.Dispose();
-            navigationReference = null;
-        }
 
         await pageCts.CancelAsync();
         pageCts.Dispose();
@@ -1008,7 +929,7 @@
             typeValue = null;
         }
 
-        string uri = Navigation.GetUriWithQueryParameters(new Dictionary<string, object?>(StringComparer.Ordinal)
+        var parameters = new Dictionary<string, object?>(StringComparer.Ordinal)
         {
             ["mode"] = modeValue,
             ["type"] = typeValue,
@@ -1018,36 +939,13 @@
             ["orderby"] = orderByValue,
             ["target"] = targetValue,
             ["archived"] = archivedValue,
-        });
+        };
 
-        // 1.1-UX-FIX-B: never navigate to the address the page is already at, or is already on its way to. The studio's router
-        // is its own, so Blazor carries every NavigateTo as an enhanced navigation - a GET of this whole page - and a second
-        // one begun while the first is in flight aborts it (net::ERR_ABORTED in the network panel). Clicking Run after
-        // editing a box is exactly that: the box's `change` pushes the address as the click lands, and Run pushes the same
-        // one again. NavigationManager.Uri is not yet the first push's address when the second arrives (the server's manager
-        // sets it after an awaited location-changing round), so the address pushed last is remembered until the location
-        // changes.
-        //
-        // 1.1-FINAL-POLISH: and never begin a navigation while another of this page's is in flight, whatever the address. A Run
-        // right after another Run (the LINQ tab's Order-by box, Ctrl+Enter) began its push while the first one's request was
-        // still being served, which aborted that request on a slow machine. The later address waits, is built from the state as
-        // it is then, and is pushed when the location has changed (FlushQueuedPush).
-        if (pendingUri is not null && System.Diagnostics.Stopwatch.GetElapsedTime(pendingSince) > PendingGrace)
-        {
-            // A navigation that never reported a location (cancelled by a handler, say) must not hold every later push for good.
-            pendingUri = null;
-        }
+        // The scope is written from the state and not copied from whatever the address holds (N6a): a push built before the shell's own
+        // rewrite was reported, or on a page reached from a link without a scope, would otherwise carry that gap forward.
+        StudioScopeQuery.AddScope(parameters, State.ActiveScope, Descriptor.SourceQueryParameter);
 
-        if (pendingUri is not null)
-        {
-            if (!string.Equals(uri, pendingUri, StringComparison.Ordinal) && !pushQueued)
-            {
-                pushQueued = true;
-                _ = FlushAfterGraceAsync(pendingUri);
-            }
-
-            return;
-        }
+        string uri = Navigation.GetUriWithQueryParameters(parameters);
 
         // Recorded before navigating, so OnParametersSet sees its own values arrive and leaves the editor
         // alone - including when the text was too long to travel and the parameter is absent.
@@ -1065,66 +963,15 @@
             return;
         }
 
-        pendingUri = uri;
-        pendingSince = System.Diagnostics.Stopwatch.GetTimestamp();
+        // Inside the studio a NavigateTo is client-side (StudioRoutes enables navigation interception, 1.2): the browser replaces its
+        // history entry and reports the address back one round trip later, and nothing is fetched, so two pushes cannot cancel each
+        // other. The values are recorded above before navigating so that OnParametersSet sees its own address arrive and leaves the
+        // editor alone; an address the page is already at is not written again.
         Navigation.NavigateTo(uri, replace: true);
     }
 
-    private static readonly TimeSpan PendingGrace = TimeSpan.FromSeconds(15);
-
-    private long pendingSince;
-
-    /// <summary>The address this page has pushed and the navigation manager has not yet reported, or <see langword="null" />.</summary>
-    private string? pendingUri;
-
-    /// <summary>Whether an address was asked for while <see cref="pendingUri" /> was in flight, so it is pushed when that one lands.</summary>
-    private bool pushQueued;
-
     /// <summary>Whether <see cref="DisposeAsync" /> has begun: nothing of this page pushes an address any more.</summary>
     private bool disposed;
-
-    /// <summary>
-    /// A push that waited must not wait for good: if the navigation in flight never reports that it landed (it was a no-op, or its
-    /// request failed), the queued address goes after <see cref="PendingGrace" />.
-    /// </summary>
-    /// <param name="waitingFor">The address in flight when the push was queued.</param>
-    private async Task FlushAfterGraceAsync(string waitingFor)
-    {
-        try
-        {
-            await Task.Delay(PendingGrace, pageCts.Token);
-            await InvokeAsync(() =>
-            {
-                if (pushQueued && string.Equals(pendingUri, waitingFor, StringComparison.Ordinal))
-                {
-                    pendingUri = null;
-                    return FlushQueuedPush();
-                }
-
-                return Task.CompletedTask;
-            });
-        }
-        catch (OperationCanceledException)
-        {
-            // The page went away.
-        }
-        catch (ObjectDisposedException)
-        {
-            // So did its token source.
-        }
-    }
-
-    /// <summary>Pushes the address that waited for the one in flight, from the state as it is now.</summary>
-    private Task FlushQueuedPush()
-    {
-        if (!disposed && pushQueued && pendingUri is null)
-        {
-            pushQueued = false;
-            PushUrl();
-        }
-
-        return Task.CompletedTask;
-    }
 
     /// <summary>The LINQ panel's type, target or archived choice moved, or it was run: keep the deep link in step, once.</summary>
     private Task OnLinqChangedAsync((string? Alias, bool Events, string Where, string OrderBy, string? Archived) changed)

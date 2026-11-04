@@ -105,6 +105,25 @@ public class CorePageSmokeTests
         page.Find("#ms-query-sql").GetAttribute("value").Should().Be("select 1", "the deep link put the statement into the editor");
     }
 
+    /// <summary>1.2-NAV N6a: the Run writes the scope from the state, even when the address it was reached by had none.</summary>
+    [Fact]
+    public async Task Query_writes_the_scope_with_the_statement_even_when_the_address_had_none()
+    {
+        await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().WithAllCapabilities().ReadyAsync();
+        context.CurrentUri.Should().NotContain("db=", "the premise: the address names no scope");
+        var page = context.Render<QueryPage>();
+        page.WaitForAssertion(() => page.FindAll("#ms-query-sql").Should().ContainSingle());
+
+        page.Find("#ms-query-sql").Change("select 1");
+        await page.InvokeAsync(() => page.Find(".ms-query-run").Click());
+
+        page.WaitForAssertion(() => context.CurrentUri.Should().Contain("sql=select%201"));
+        (string? source, string? database, _) = PostgresStudio.Components.StudioScopeQuery.Read(
+            context.CurrentUri, PostgresStudio.Services.Postgres.PostgresStudioDescriptor.Instance.SourceQueryParameter);
+        source.Should().Be(context.State.ActiveScope!.StoreKey);
+        database.Should().Be(context.State.ActiveScope!.DatabaseId);
+    }
+
     [Fact]
     public async Task Query_without_RunSql_names_PostgresStudios_own_option()
     {
@@ -243,7 +262,7 @@ public class CorePageSmokeTests
 
         var menu = context.Render<NavMenu>();
 
-        menu.FindAll("a.ms-nav-link").Select(static x => x.GetAttribute("href")).Should().NotContain("query").And.Contain("plan");
+        menu.FindAll("a.ms-nav-link").Select(static x => x.GetAttribute("href")?.Split('?')[0]).Should().NotContain("query").And.Contain("plan");
         menu.FindAll(".ms-nav-link-text").Select(static x => x.TextContent).Should().NotContain("Query").And.StartWith(["Overview", "Plan", "Tables"]);
     }
 
@@ -256,7 +275,7 @@ public class CorePageSmokeTests
         var menu = context.Render<NavMenu>();
 
         menu.FindAll(".ms-nav-link-text").Select(static x => x.TextContent).Should().StartWith(["Overview", "Query", "Plan", "Tables"]);
-        menu.FindAll("a.ms-nav-link").Select(static x => x.GetAttribute("href")).Should().Contain(["query", "plan"]);
+        menu.FindAll("a.ms-nav-link").Select(static x => x.GetAttribute("href")?.Split('?')[0]).Should().Contain(["query", "plan"]);
     }
 
     /// <summary>The master switch turns every capability off, so it takes Query with it whatever <c>RunSql</c> says; Plan stays.</summary>

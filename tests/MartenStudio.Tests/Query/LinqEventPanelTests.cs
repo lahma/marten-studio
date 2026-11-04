@@ -439,9 +439,9 @@ public class LinqEventPanelTests
     }
 
     /// <summary>
-    /// The studio's router is its own, so every <c>NavigateTo</c> is an enhanced navigation (a GET of the page), and one begun
-    /// while another is in flight aborts it. Editing a box and clicking Run is exactly that: the box's <c>change</c> pushes the
-    /// address as the click lands, and Run pushed the same address again. Now it pushes once.
+    /// Editing a box and clicking Run is one address, not two: the box's <c>change</c> keeps its draft and writes nothing, and the Run
+    /// writes the address once (one address per Run). In 1.1 the two writes were enhanced navigations, a fetch of the page each, and
+    /// the second aborted the first; since 1.2 a write is a client-side history update that cannot abort another.
     /// </summary>
     [Fact]
     public async Task Editing_the_predicate_and_clicking_Run_rewrites_the_address_once_not_twice()
@@ -463,7 +463,7 @@ public class LinqEventPanelTests
         await page.Find(".ms-query-run").ClickAsync(new MouseEventArgs());
 
         linq.Requests.Should().ContainSingle();
-        pushed.Should().ContainSingle("the second push would have been the same address, and a navigation begun while one is in flight aborts it")
+        pushed.Should().ContainSingle("one address per Run: a second push would have been the same address again")
             .Which.Should().Contain("predicate=Version%20%3E%200");
     }
 
