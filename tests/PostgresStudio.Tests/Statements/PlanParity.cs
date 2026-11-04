@@ -10,13 +10,32 @@ namespace PostgresStudio.Tests.Statements;
 /// </summary>
 internal static class PlanParity
 {
+    /// <summary>
+    /// How far two executions of one statement may differ in what they counted (1.2-FLK). The two plans of a parity run come from two
+    /// executions, and what an execution counts beyond what the statement determines - the blocks it touched (hint bits set by the
+    /// first run, a page the other found pruned), the rows some nodes returned - moves by a few units and by a share of a large
+    /// count: PostgreSQL 19, sort-spill case, 837 blocks touched from text and 834 from JSON (publish run 41628950778). The larger of
+    /// 8 and 2 % of the larger count is far under any difference a reader bug makes (a field dropped or read from the wrong line is off
+    /// by the whole count), and it is applied only to <c>executed</c> plans: a plain <c>EXPLAIN</c> runs nothing and stays exact.
+    /// Times are never compared, and neither are the shape, the estimates or the node set: those are exact in every mode.
+    /// </summary>
+    /// <param name="expected">The count from one execution.</param>
+    /// <param name="actual">The count from the other.</param>
+    /// <returns>The largest difference that still counts as the same.</returns>
+    internal static double ExecutedTolerance(double? expected, double? actual)
+        => Math.Max(8, 0.02 * Math.Max(Math.Abs(expected ?? 0), Math.Abs(actual ?? 0)));
+
     /// <summary>Everything that differs between <paramref name="json" /> and <paramref name="text" />, as sentences.</summary>
     /// <param name="json">The plan read from JSON.</param>
     /// <param name="text">The plan read from text.</param>
     /// <param name="actuals">Whether the statement's own measurements (rows, loops, rows removed...) are compared.</param>
     /// <param name="timed">Whether the plan was timed, so a time must be there.</param>
     /// <param name="label">What is compared, for each sentence.</param>
-    public static IReadOnlyList<string> Compare(QueryPlan json, QueryPlan text, bool actuals, bool timed, string label)
+    /// <param name="executed">
+    /// Whether the two plans come from two executions of the statement, so that the block and row counts they measured are compared
+    /// within <see cref="ExecutedTolerance" /> instead of exactly (1.2-FLK).
+    /// </param>
+    public static IReadOnlyList<string> Compare(QueryPlan json, QueryPlan text, bool actuals, bool timed, string label, bool executed = false)
     {
         List<string> problems = [];
 
@@ -38,6 +57,9 @@ internal static class PlanParity
                 problems.Add(label + ": " + what + " is " + Show(actual) + " from text, " + Show(expected) + " from JSON");
             }
         }
+
+        void Count(string what, double? expected, double? actual, double exactTolerance)
+            => Near(what, expected, actual, executed ? Math.Max(exactTolerance, ExecutedTolerance(expected, actual)) : exactTolerance);
 
         // The cost or estimate of a timed or analyzed plan is the same plan's, so it is compared exactly in every mode.
         PlanNode[] left = [.. json.Nodes];
@@ -113,8 +135,8 @@ internal static class PlanParity
                     continue;
                 }
 
-                Near(at + " actual rows", j.ActualRows, t.ActualRows, 0.0051);
-                Near(at + " actual loops", j.ActualLoops, t.ActualLoops, 0.0051);
+                Count(at + " actual rows", j.ActualRows, t.ActualRows, 0.0051);
+                Count(at + " actual loops", j.ActualLoops, t.ActualLoops, 0.0051);
                 Near(at + " rows removed by filter", j.RowsRemovedByFilter ?? 0, t.RowsRemovedByFilter ?? 0, 0.0051);
                 Near(at + " rows removed by recheck", j.RowsRemovedByIndexRecheck ?? 0, t.RowsRemovedByIndexRecheck ?? 0, 0.0051);
                 Near(at + " rows removed by join filter", j.RowsRemovedByJoinFilter ?? 0, t.RowsRemovedByJoinFilter ?? 0, 0.0051);
@@ -134,7 +156,7 @@ internal static class PlanParity
                 if (j.Buffers is { } jb && t.Buffers is { } tb)
                 {
                     // Which blocks were hit and which were read differs between two runs; how many were touched does not.
-                    Near(at + " shared blocks touched", jb.SharedHit + jb.SharedRead, tb.SharedHit + tb.SharedRead, 2);
+                    Count(at + " shared blocks touched", jb.SharedHit + jb.SharedRead, tb.SharedHit + tb.SharedRead, 2);
                     Same(at + " temp written blocks", jb.TempWritten > 0, tb.TempWritten > 0);
                 }
             }

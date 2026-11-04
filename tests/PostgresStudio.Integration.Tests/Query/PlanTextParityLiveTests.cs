@@ -27,6 +27,12 @@ namespace PostgresStudio.Integration.Tests.Query;
 /// on how many workers got scheduled, and are not compared at all.
 /// </para>
 /// <para>
+/// <b>Two executions are not one.</b> (1.2-FLK) The shape of an executed plan - node types, relations, keys, the order of children -
+/// its estimates and its node set are still compared exactly, but the counts the two executions measured (blocks touched, actual rows
+/// and loops) are compared within <c>PlanParity.ExecutedTolerance</c>, the larger of 8 and 2 % of the larger count, because two runs of
+/// one statement differ by a few blocks (PostgreSQL 19, sort-spill: 837 against 834). A plain <c>EXPLAIN</c> runs nothing and stays exact.
+/// </para>
+/// <para>
 /// <b>Fixtures.</b> With <c>MARTENSTUDIO_SAVE_PLAN_FIXTURES=1</c> the text of every statement on 17 and 18 is written to
 /// <c>tests/PostgresStudio.Tests/Statements/PlanCorpus/text-*.txt</c> (the TIMING-off variant on 17 only), and each plain plan's JSON
 /// beside it as <c>pair-text-*.json</c>, for the fast suite to read offline. The files are checked in; this switch is how they were made.
@@ -169,7 +175,7 @@ public class PlanTextParityLiveTests(PostgresVersionMatrix matrix)
                     continue;
                 }
 
-                problems.AddRange(PlanParity.Compare(fromJson.Plan, fromText.Plan, mode.Analyzed && !statement.Parallel, mode.Timed, label));
+                problems.AddRange(PlanParity.Compare(fromJson.Plan, fromText.Plan, mode.Analyzed && !statement.Parallel, mode.Timed, label, executed: mode.Analyzed));
 
                 if (save && (mode.Name != "notiming" || major == 17))
                 {
