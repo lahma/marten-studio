@@ -13,9 +13,9 @@ using PostgresStudio.Components.Shared;
 namespace MartenStudio.Tests.Documents;
 
 /// <summary>
-/// 1.2-A11Y: the round-trip preview is a native modal like every studio dialog - and it starts on the safe choice: Save when saving
-/// loses nothing and Marten agrees, "Back to the editor" when it does not (then Save is the danger button). Esc is "Back to the
-/// editor". What the browser does with the upgrade is the browser suites'.
+/// 1.2-A11Y: the round-trip preview is a native modal like every studio dialog - and it always starts on "Back to the editor", whatever
+/// the preview found (Save is primary when saving loses nothing and Marten agrees, the danger button when it does not). Esc is "Back
+/// to the editor". What the browser does with the upgrade is the browser suites'.
 /// </summary>
 public class DocumentWritePreviewDialogTests
 {
@@ -83,15 +83,17 @@ public class DocumentWritePreviewDialogTests
     }
 
     [Fact]
-    public void A_save_that_loses_nothing_starts_on_Save()
+    public void A_save_that_loses_nothing_still_starts_on_Back_to_the_editor_and_Save_stays_primary()
     {
         using BunitContext context = Context();
         IRenderedComponent<DocumentWritePreviewDialog> dialog = Render(context, FakeDocumentWriteService.Ready());
 
+        IElement back = dialog.FindAll(".ms-write-preview-actions button")[0];
         IElement save = dialog.FindAll(".ms-write-preview-actions button")[1];
 
-        Marked(dialog).Should().ContainSingle().Which.Should().BeSameAs(save);
+        Marked(dialog).Should().ContainSingle().Which.Should().BeSameAs(back, "a save is never the first thing under the keyboard");
         save.ClassList.Should().Contain("ms-button-primary");
+        save.HasAttribute("data-ms-dialog-focus").Should().BeFalse();
     }
 
     [Fact]

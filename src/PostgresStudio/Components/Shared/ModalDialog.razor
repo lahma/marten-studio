@@ -57,8 +57,8 @@
     public EventCallback OnCancel { get; set; }
 
     /// <summary>
-    /// What the dialog holds. The element to focus first carries <c>data-ms-dialog-focus</c>: the primary button when the action
-    /// is safe, Cancel when it is destructive. With none marked, the browser's own choice (the first focusable element) stands.
+    /// What the dialog holds. The element to focus first carries <c>data-ms-dialog-focus</c>: Cancel (or "Back to the editor") for
+    /// an action that cannot be undone, or the box a confirmation is typed into - never a button that saves or deletes. With none marked, the browser's own choice (the first focusable element) stands.
     /// </summary>
     [Parameter]
     public RenderFragment? ChildContent { get; set; }

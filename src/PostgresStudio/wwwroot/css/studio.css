@@ -16008,14 +16008,22 @@ dialog.ms-modal {
     color: inherit;
 }
 
-/* The dialog that is always in the page (the shortcut sheet) is closed until it is shown; this is the user agent's own rule, which
-   .ms-confirm-overlay's display: flex would otherwise win over. */
+/* A dialog that is not open is not drawn. This is the user agent's own rule, restated because an author rule that sets `display` on a
+   dialog - the shortcut sheet's centring below - would otherwise win over it, and the sheet is in the page closed. */
 dialog.ms-modal:not([open]) {
     display: none;
 }
 
 dialog.ms-modal:modal {
     background-color: transparent;
+}
+
+/* The shortcut sheet has no .ms-confirm-overlay (that class is the server-rendered fallback overlay, and the sheet is only ever
+   shown by the script), so the centring the overlay gives a confirmation is its own. */
+dialog.ms-shortcuts-host[open] {
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 dialog.ms-modal::backdrop {

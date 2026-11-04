@@ -16,8 +16,9 @@
     offers no preview it is one line saying so. It is advisory: the save is still the studio's.
 *@
 
-@* A native modal (1.2-A11Y, ModalDialog). Focus starts on the safe choice: Save when saving drops nothing and Marten's preview does not
-   disagree, and "Back to the editor" when either does (the Save button is then the danger one). Esc is "Back to the editor". *@
+@* A native modal (1.2-A11Y, ModalDialog). Focus always starts on "Back to the editor", whatever the preview found: a save is never the
+   first thing under the keyboard. Save is the primary button when saving drops nothing and Marten's preview agrees, and the danger
+   one when either does not. Esc is "Back to the editor". *@
 <ModalDialog IsOpen="@(IsOpen && Preview is not null)"
              Label="What saving this document would do"
              CssClass="ms-write-preview-overlay"
@@ -86,8 +87,8 @@
             }
 
             <div class="ms-write-preview-actions">
-                <button type="button" class="ms-button" data-ms-dialog-focus="@(Safe ? null : "true")" @onclick="OnCancel">Back to the editor</button>
-                <button type="button" class="@ConfirmClass" data-ms-dialog-focus="@(Safe ? "true" : null)" @onclick="OnConfirm">@ConfirmLabel</button>
+                <button type="button" class="ms-button" data-ms-dialog-focus @onclick="OnCancel">Back to the editor</button>
+                <button type="button" class="@ConfirmClass" @onclick="OnConfirm">@ConfirmLabel</button>
             </div>
         </div>
 }
@@ -135,7 +136,7 @@
         }
     }
 
-    /// <summary>Whether saving drops nothing and Marten's own preview agrees: the Save button is the primary one, and the one focused first.</summary>
+    /// <summary>Whether saving drops nothing and Marten's own preview agrees: the Save button is the primary one, not the danger one.</summary>
     private bool Safe => Preview is not { HasDrops: true } and not { MartenCheck.IsDisagreement: true };
 
     private string ConfirmClass => Safe ? "ms-button ms-button-primary" : "ms-button ms-button-danger";

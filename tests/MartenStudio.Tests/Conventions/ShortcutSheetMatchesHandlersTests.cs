@@ -18,6 +18,10 @@ namespace MartenStudio.Tests.Conventions;
 /// line on the sheet whose handler has gone. Modifier names (Ctrl, Shift) are the sheet's own words and are not compared.
 /// </para>
 /// <para>
+/// The script half works the same way: every <c>enhance*</c> attach point in studio.js is listed (a new one fails until it is
+/// accounted for), the <c>event.key</c> names inside each are read, and the sheet's group for it must list exactly those.
+/// </para>
+/// <para>
 /// What it cannot read is intent: the order of a group and the sentence beside a key are the sheet's and a reviewer's.
 /// </para>
 /// </remarks>
@@ -104,22 +108,51 @@ public class ShortcutSheetMatchesHandlersTests
         handled.Should().BeSubsetOf(SheetKeys("Menus"));
     }
 
+    /// <summary>
+    /// The keys one <c>enhance*</c> attach point in studio.js compares <c>event.key</c> against, spelled as the sheet spells them.
+    /// </summary>
+    private static HashSet<string> ScriptKeys(string script, string attachPoint)
+    {
+        Match function = Regex.Match(script, $@"\n        {attachPoint}: function .*?\n        \}}[,\n]", RegexOptions.Singleline);
+        function.Success.Should().BeTrue($"studio.js should still define {attachPoint}");
+
+        return [.. Regex.Matches(function.Value, "event\\.key\\s*[!=]==\\s*\"([^\"]*)\"")
+            .Select(static x => x.Groups[1].Value)
+            .Select(static x => string.Equals(x, "s", StringComparison.OrdinalIgnoreCase) ? "S" : Spelling.GetValueOrDefault(x, x))];
+    }
+
     [Fact]
-    public void The_scripts_chords_are_the_ones_the_sheet_lists()
+    public void Every_attach_point_in_the_script_is_one_this_test_knows()
     {
         string script = Source("src/PostgresStudio/wwwroot/js/studio.js");
 
-        // The SQL editor: Ctrl/Cmd+Enter runs, Esc cancels, Ctrl/Cmd+S saves.
-        script.Should().Contain("event.key === \"Enter\" && (event.ctrlKey || event.metaKey)");
-        script.Should().Contain("invoke(\"CancelAsync\")");
-        script.Should().Contain("(event.key === \"s\" || event.key === \"S\") && (event.ctrlKey || event.metaKey)");
-        SheetKeys("SQL editor").Should().BeEquivalentTo("Enter", "Esc", "S");
+        // A new `enhance*` function binds keys somewhere; it fails here until the test (and the sheet) account for it.
+        Regex.Matches(script, @"\n        (enhance[A-Za-z]*): function ")
+            .Select(static x => x.Groups[1].Value)
+            .Should().BeEquivalentTo("enhanceTextarea", "enhanceEditor", "enhanceRunField");
+    }
+
+    [Fact]
+    public void The_scripts_chords_are_the_ones_the_sheet_lists_and_the_sheet_lists_no_other()
+    {
+        string script = Source("src/PostgresStudio/wwwroot/js/studio.js");
+
+        // The query editor (the SQL console's, and the LINQ predicate box): Ctrl/Cmd+Enter runs, Esc cancels, Ctrl/Cmd+S saves.
+        HashSet<string> editor = ScriptKeys(script, "enhanceEditor");
+        editor.Should().BeEquivalentTo("Enter", "Esc", "S");
+        SheetKeys("SQL editor").Should().BeEquivalentTo(editor);
+
+        // The one-line box beside an editor (LINQ's Order by) answers to Ctrl/Cmd+Enter only.
+        HashSet<string> field = ScriptKeys(script, "enhanceRunField");
+        field.Should().BeEquivalentTo("Enter");
+
+        // The LINQ group is the predicate box (an editor) and the Order by box (a run field), nothing else.
+        SheetKeys("LINQ query (a box has focus)").Should().BeEquivalentTo(editor.Union(field));
 
         // The JSON editor: Ctrl/Cmd+Enter saves, Esc cancels, Tab inserts two spaces and Shift+Tab leaves.
-        script.Should().Contain("event.key === \"Enter\" && (event.ctrlKey || event.metaKey) && !event.altKey");
-        script.Should().Contain("event.key === \"Escape\" || event.key === \"Esc\"");
-        script.Should().Contain("event.key !== \"Tab\"");
-        SheetKeys("Document editor").Should().BeEquivalentTo("Enter", "Esc", "Tab");
+        HashSet<string> json = ScriptKeys(script, "enhanceTextarea");
+        json.Should().BeEquivalentTo("Enter", "Esc", "Tab");
+        SheetKeys("Document editor").Should().BeEquivalentTo(json);
 
         // The sheet itself, and the dialogs' own Tab loop.
         script.Should().Contain("event.key !== \"?\"");

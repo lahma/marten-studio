@@ -46,6 +46,40 @@ public class ShortcutSheetBrowserTests(BrowserSuiteFixture fixture)
             studio.AssertClean("opening and closing the shortcut sheet");
         });
 
+    /// <summary>1.2-A11Y-FU: the sheet's panel sits in the middle of the viewport, not in its top-left corner.</summary>
+    [BrowserFact]
+    public Task The_sheet_is_centred_in_a_desktop_viewport() => CentredAsync(1280, 800);
+
+    /// <summary>1.2-A11Y-FU: and on a phone.</summary>
+    [BrowserFact]
+    public Task The_sheet_is_centred_at_390_px() => CentredAsync(390, 844);
+
+    private Task CentredAsync(int width, int height) =>
+        BrowserScenario.RunAsync(fixture.Browser, "pg-shortcut-sheet-centred-" + width, fixture.Host, "admin", async studio =>
+        {
+            IPage page = studio.Page;
+            await page.SetViewportSizeAsync(width, height);
+            await studio.GoAsync(fixture.Host.StudioUrl());
+
+            await page.Keyboard.PressAsync("Shift+Slash");
+            await page.WaitForFunctionAsync("() => { const d = document.getElementById('ms-shortcuts'); return d !== null && d.open && d.matches(':modal'); }", null, Wait);
+
+            // The panel slides in (ms-slide-up); its box is only the final one once the animations have finished.
+            await page.WaitForFunctionAsync("() => document.getAnimations().every(a => a.playState !== 'running')", null, Wait);
+
+            LocatorBoundingBoxResult? box = await page.Locator("#ms-shortcuts .ms-shortcuts").BoundingBoxAsync();
+            box.Should().NotBeNull();
+
+            float centreX = box!.X + (box.Width / 2f);
+            float centreY = box.Y + (box.Height / 2f);
+            centreX.Should().BeApproximately(width / 2f, 4f, "the panel is centred across the " + width + " px viewport");
+            centreY.Should().BeApproximately(height / 2f, 4f, "and down the " + height + " px one");
+            box.X.Should().BeGreaterThanOrEqualTo(0f);
+            (box.X + box.Width).Should().BeLessThanOrEqualTo(width + 0.5f, "it does not scroll the page sideways");
+
+            studio.AssertClean("showing the shortcut sheet at " + width + " px");
+        });
+
     [BrowserFact]
     public Task The_question_mark_typed_into_the_SQL_editor_is_a_character_and_opens_nothing() =>
         BrowserScenario.RunAsync(fixture.Browser, "pg-shortcut-sheet-in-editor", fixture.Host, "admin", async studio =>

@@ -91,7 +91,7 @@ public class DialogFocusBrowserTests(BrowserSuiteFixture fixture)
             await page.WaitForFunctionAsync("() => document.activeElement && document.activeElement.closest('#ms-shortcuts') !== null && document.activeElement.textContent.trim() === 'Close'", null, Wait);
 
             string text = await page.Locator("#ms-shortcuts").TextContentAsync() ?? string.Empty;
-            text.Should().Contain("Keyboard shortcuts").And.Contain("JSON viewer").And.Contain("Document editor").And.Contain("Plan icicle");
+            text.Should().Contain("Keyboard shortcuts").And.Contain("JSON viewer").And.Contain("Document editor").And.Contain("LINQ query").And.Contain("Plan icicle");
 
             // A second '?' does not stack a second dialog; Tab stays in the sheet.
             await page.Keyboard.PressAsync("Shift+Slash");
@@ -107,7 +107,6 @@ public class DialogFocusBrowserTests(BrowserSuiteFixture fixture)
             await page.WaitForFunctionAsync("() => !document.getElementById('ms-shortcuts').open", null, Wait);
             (await page.EvaluateAsync<string>("() => document.activeElement.getAttribute('href')")).Should().Be(expected, "focus returns to the control that was focused");
 
-            // The Close button closes it too.
             // Straight after it closed, with no wait in between: it opens again, and the Close button closes it too.
             await page.Keyboard.PressAsync("Shift+Slash");
             await page.WaitForFunctionAsync("() => document.getElementById('ms-shortcuts').open && document.getElementById('ms-shortcuts').matches(':modal')", null, Wait);

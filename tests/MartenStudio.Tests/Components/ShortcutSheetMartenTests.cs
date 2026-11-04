@@ -24,7 +24,7 @@ public class ShortcutSheetMartenTests
 
         string[] titles = [.. sheet.FindAll(".ms-shortcuts-title").Select(static x => x.TextContent.Trim())];
         titles.Should().StartWith("Anywhere", "In a dialog");
-        titles.TakeLast(2).Should().Equal("Document lists (a row has focus)", "Document editor");
+        titles.TakeLast(3).Should().Equal("Document lists (a row has focus)", "LINQ query (a box has focus)", "Document editor");
         titles.Should().Contain("JSON viewer (a row has focus)", "the shared groups are still there");
     }
 

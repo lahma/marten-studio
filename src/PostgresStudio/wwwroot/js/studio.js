@@ -215,8 +215,8 @@
     // Native modal dialogs (1.2-A11Y). Every studio dialog is a <dialog class="ms-modal"> that the server renders with the `open`
     // attribute - which is today's overlay, drawn by the stylesheet - and that this script upgrades to a real modal with showModal():
     // the browser then makes the rest of the page inert and keeps Tab inside, and the script moves focus to the element marked
-    // `data-ms-dialog-focus` (the primary button when the action is safe, Cancel when it is destructive, the typed-confirmation box
-    // when there is one), turns Esc into the component's own Cancel, and puts focus back on the control that opened the dialog when
+    // `data-ms-dialog-focus` (Cancel, or "Back to the editor", for an action that cannot be undone; the typed-confirmation box when there
+    // is one; never a button that saves or deletes), turns Esc into the component's own Cancel, and puts focus back on the control that opened the dialog when
     // the dialog goes. A page where this script (or the browser's showModal) is missing keeps the overlay it always had: the
     // upgrade is the only thing that is lost, which is why the server never waits for it.
     //
@@ -437,7 +437,7 @@
     // The shortcut sheet's `?`, and the Close button of any dialog that carries one (1.2-A11Y). Both are plain markup hooks: the
     // sheet is part of the shell, so it works before the circuit connects and after it goes. `?` is ignored where it is a character
     // being typed - a text field, a textarea, a select, anything contenteditable, an ARIA textbox - and while a dialog is open.
-    (function () {
+    window.martenStudio.shortcuts = window.martenStudio.shortcuts || (function () {
         const nonText = ["button", "checkbox", "color", "file", "image", "radio", "range", "reset", "submit"];
 
         function isTyping(target) {
@@ -479,6 +479,8 @@
                 dialog.close();
             }
         });
+
+        return {};
     })();
 
     // The JSON viewer has one copy menu for every row, so the stylesheet cannot name its anchor the way a
@@ -501,33 +503,39 @@
         menuAnchored = element || null;
     }
 
-    document.addEventListener("click", function (event) {
-        const key = event.target && event.target.closest ? event.target.closest(".ms-json-key") : null;
-        if (key) {
-            anchorMenuTo(key);
-        }
-    }, true);
+    // Both document-level click listeners below are registered once however many times this script is evaluated, like everything
+    // else here (1.2-A11Y-FU): a second evaluation would otherwise run the key anchoring and the skip link twice per click.
+    window.martenStudio.clickHooks = window.martenStudio.clickHooks || (function () {
+        document.addEventListener("click", function (event) {
+            const key = event.target && event.target.closest ? event.target.closest(".ms-json-key") : null;
+            if (key) {
+                anchorMenuTo(key);
+            }
+        }, true);
 
-    // The skip link (1.1). Its href is a bare fragment, and the studio's document has a <base href> at its own root, so the
-    // browser would resolve `#ms-main-content` against that base - the studio's front page - and Blazor would navigate there.
-    // The click is handled here instead, in the capture phase and before Blazor's own listener sees it: the content region
-    // takes focus (it has tabindex="-1" for exactly this) and scrolls into view, and nothing navigates.
-    document.addEventListener("click", function (event) {
-        const link = event.target && event.target.closest ? event.target.closest("a.ms-skip-link") : null;
-        if (!link) {
-            return;
-        }
+        // The skip link (1.1). Its href is a bare fragment, and the studio's document has a <base href> at its own root, so the
+        // browser would resolve `#ms-main-content` against that base - the studio's front page - and Blazor would navigate there.
+        // The click is handled here instead, in the capture phase and before Blazor's own listener sees it: the content region
+        // takes focus (it has tabindex="-1" for exactly this) and scrolls into view, and nothing navigates.
+        document.addEventListener("click", function (event) {
+            const link = event.target && event.target.closest ? event.target.closest("a.ms-skip-link") : null;
+            if (!link) {
+                return;
+            }
 
-        const id = (link.getAttribute("href") || "").replace(/^#/, "");
-        const target = id ? document.getElementById(id) : null;
+            const id = (link.getAttribute("href") || "").replace(/^#/, "");
+            const target = id ? document.getElementById(id) : null;
 
-        event.preventDefault();
+            event.preventDefault();
 
-        if (target) {
-            target.focus({ preventScroll: true });
-            target.scrollIntoView({ block: "start" });
-        }
-    }, true);
+            if (target) {
+                target.focus({ preventScroll: true });
+                target.scrollIntoView({ block: "start" });
+            }
+        }, true);
+
+        return {};
+    })();
 
     // A read-only text box that exists to be copied from (the header's copy-link fallback, 1.2) selects its text when it takes focus,
     // so the visitor's next key is Ctrl+C. Delegated, because the box is added to the page by the circuit long after this script ran,
