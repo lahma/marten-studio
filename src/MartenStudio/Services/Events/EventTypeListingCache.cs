@@ -1,6 +1,6 @@
-using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
-using PostgresStudio.Services;
+using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services.Live;
 
 namespace MartenStudio.Services.Events;
@@ -11,10 +11,13 @@ namespace MartenStudio.Services.Events;
 /// </summary>
 /// <remarks>
 /// <para>
-/// A singleton whose read runs <b>in a scope of its own</b>: the shared work must not close over the first caller's scoped
-/// <see cref="IEventDataService" />, which that circuit may dispose while others are still waiting on the read. The caller has already
-/// resolved the scope under the store policy - the key is the resolved scope's, as every cache here - so a cached listing is only
-/// ever handed to someone who has just passed it. A listing that carries an error is not kept.
+/// A singleton that <b>resolves nothing</b> - the pattern <see cref="DeadLetterGroupCache" /> follows. The caller resolves the scope under
+/// its own visitor and every policy before the cache is reached, and the shared read is given what was resolved: no resolver, no DI scope,
+/// no scoped service. A read that created a scope of its own and resolved again there would run with no user (a Blazor Server host's
+/// <c>ServerAuthenticationStateProvider</c> throws outside a circuit's scope), and every store policy would refuse every visitor. The key is
+/// the resolved scope - the store's registered key, the database's own identity and the tenant - and nothing about the visitor, so a cached
+/// listing is only ever handed to someone who has just passed the same checks for the same scope. A read that fails is thrown to every
+/// waiting caller, which turns it into its own sentence, and is not kept.
 /// </para>
 /// </remarks>
 internal sealed class EventTypeListingCache
@@ -22,49 +25,44 @@ internal sealed class EventTypeListingCache
     /// <summary>How long a counted listing is shared: long enough for the click that follows "Load counts", short enough to be a fresh count.</summary>
     internal static readonly TimeSpan TimeToLive = TimeSpan.FromSeconds(30);
 
-    private readonly IServiceScopeFactory scopes;
+    private readonly ColumnCatalog catalog;
+    private readonly IOptions<MartenStudioOptions> options;
     private readonly StudioSnapshotCache cache;
+    private readonly Func<ResolvedScope, CancellationToken, Task<EventTypeList>>? read;
 
-    public EventTypeListingCache(IServiceScopeFactory scopes)
-        : this(scopes, TimeProvider.System)
+    public EventTypeListingCache(ColumnCatalog catalog, IOptions<MartenStudioOptions> options)
+        : this(catalog, options, TimeProvider.System)
     {
     }
 
-    internal EventTypeListingCache(IServiceScopeFactory scopes, TimeProvider timeProvider)
+    /// <param name="catalog">The column catalog.</param>
+    /// <param name="options">The studio's options.</param>
+    /// <param name="timeProvider">The clock.</param>
+    /// <param name="read">The shared read, for a test that has no database; the group-by itself otherwise.</param>
+    internal EventTypeListingCache(
+        ColumnCatalog catalog,
+        IOptions<MartenStudioOptions> options,
+        TimeProvider timeProvider,
+        Func<ResolvedScope, CancellationToken, Task<EventTypeList>>? read = null)
     {
-        this.scopes = scopes;
+        this.catalog = catalog;
+        this.options = options;
+        this.read = read;
         cache = new StudioSnapshotCache(timeProvider, TimeToLive);
     }
 
     /// <summary>The counted listing of <paramref name="resolved" />'s scope, read at most once per <see cref="TimeToLive" />.</summary>
-    /// <param name="resolved">The scope as it resolved: every policy applied already.</param>
-    /// <param name="scope">The scope the read is made with.</param>
-    /// <param name="cancellationToken">Cancels this caller's wait.</param>
-    public async Task<EventTypeList> GetAsync(ResolvedScope resolved, StudioScope scope, CancellationToken cancellationToken)
+    /// <param name="resolved">The scope as it resolved: every policy applied already, by the caller, under its visitor.</param>
+    /// <param name="cancellationToken">Cancels this caller's wait, never the shared read.</param>
+    public async Task<EventTypeList> GetAsync(ResolvedScope resolved, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(resolved);
-        ArgumentNullException.ThrowIfNull(scope);
 
         string key = resolved.Registration.Key + "\u001f" + resolved.Database.Id.Identity + "\u001f" + (resolved.TenantId ?? string.Empty);
+        int timeout = (int) Math.Ceiling(options.Value.QueryTimeout.TotalSeconds);
 
         return await cache
-            .GetAsync(
-                key,
-                async token =>
-                {
-                    await using AsyncServiceScope own = scopes.CreateAsyncScope();
-                    var service = (EventDataService) own.ServiceProvider.GetRequiredService<IEventDataService>();
-
-                    EventTypeList list = await service.ReadEventTypesAsync(scope, withCounts: true, token).ConfigureAwait(false);
-
-                    if (list.Error is not null)
-                    {
-                        cache.Invalidate(key);
-                    }
-
-                    return list;
-                },
-                cancellationToken)
+            .GetAsync(key, token => read is null ? EventDataService.ReadCountedAsync(resolved, catalog, timeout, token) : read(resolved, token), cancellationToken)
             .ConfigureAwait(false);
     }
 }

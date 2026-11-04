@@ -86,7 +86,7 @@ internal sealed partial class EventDataService : IEventDataService
     private const int MaxDeadLetterPageSize = 200;
 
     /// <summary>The most event types the screen will list.</summary>
-    private const int MaxEventTypes = 2_000;
+    internal const int MaxEventTypes = 2_000;
 
     /// <summary>The most streams the Overview's panel will read, however many it asks for.</summary>
     private const int MaxRecentStreams = 50;
@@ -694,7 +694,8 @@ internal sealed partial class EventDataService : IEventDataService
     /// <inheritdoc />
     /// <remarks>
     /// The counted listing is shared per resolved scope for half a minute (<see cref="EventTypeListingCache" />): the page's "Load counts" and
-    /// the shape check read the same <c>group by type</c> once. The scope is resolved under the store policy first, on every call.
+    /// the shape check read the same <c>group by type</c> once. <b>The scope is resolved under the visitor, here, on every call, before the
+    /// cache</b>; the cache reads with what was resolved and resolves nothing, so it needs no user and no scoped service.
     /// </remarks>
     public async Task<EventTypeList> ListEventTypesAsync(
         StudioScope scope,
@@ -703,16 +704,13 @@ internal sealed partial class EventDataService : IEventDataService
     {
         ArgumentNullException.ThrowIfNull(scope);
 
-        if (!withCounts)
-        {
-            return await ReadEventTypesAsync(scope, withCounts, cancellationToken).ConfigureAwait(false);
-        }
-
         try
         {
             ResolvedScope resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
 
-            return await listings.GetAsync(resolved, scope, cancellationToken).ConfigureAwait(false);
+            return withCounts
+                ? await listings.GetAsync(resolved, cancellationToken).ConfigureAwait(false)
+                : new EventTypeList(Order(RegisteredTypes(resolved).Values), CountsLoaded: false);
         }
         catch (Exception exception) when (IsReadFailure(exception))
         {
@@ -720,104 +718,113 @@ internal sealed partial class EventDataService : IEventDataService
         }
     }
 
-    /// <summary>The listing itself, read now: what <see cref="EventTypeListingCache" /> shares.</summary>
-    internal async Task<EventTypeList> ReadEventTypesAsync(
-        StudioScope scope,
-        bool withCounts,
+    /// <summary>The event types the store registers, by name.</summary>
+    private static Dictionary<string, EventTypeInfo> RegisteredTypes(ResolvedScope resolved)
+    {
+        Dictionary<string, EventTypeInfo> registered = new(StringComparer.Ordinal);
+
+        foreach (IEventType eventType in resolved.Store.Options.Events.AllKnownEventTypes())
+        {
+            registered[eventType.EventTypeName] = new EventTypeInfo(
+                eventType.EventTypeName,
+                eventType.DotNetTypeName,
+                IsRegistered: true);
+        }
+
+        return registered;
+    }
+
+    /// <summary>
+    /// The counted listing, read now: what <see cref="EventTypeListingCache" /> shares. Static, and given a scope that is already
+    /// resolved: it calls no resolver and touches no scoped service, so it runs the same for whichever visitor's call started it. A
+    /// failure is thrown, not returned, and each waiting caller turns it into its own sentence.
+    /// </summary>
+    /// <param name="resolved">The scope, resolved under a visitor who passed every policy.</param>
+    /// <param name="catalog">The column catalog, a singleton.</param>
+    /// <param name="commandTimeoutSeconds">The studio's <c>QueryTimeout</c>.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    internal static async Task<EventTypeList> ReadCountedAsync(
+        ResolvedScope resolved,
+        ColumnCatalog catalog,
+        int commandTimeoutSeconds,
         CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(scope);
+        ArgumentNullException.ThrowIfNull(resolved);
+        ArgumentNullException.ThrowIfNull(catalog);
 
-        try
+        Dictionary<string, EventTypeInfo> registered = RegisteredTypes(resolved);
+
+        await using NpgsqlConnection connection = await OpenAsync(resolved, cancellationToken).ConfigureAwait(false);
+
+        string schema = resolved.Store.Options.Events.DatabaseSchemaName;
+        TableColumns events = await catalog.GetAsync(connection, schema, EventTableInfo.EventsTable, cancellationToken).ConfigureAwait(false);
+        TableColumns streams = await catalog.GetAsync(connection, schema, EventTableInfo.StreamsTable, cancellationToken).ConfigureAwait(false);
+        EventTableInfo table = EventTableInfo.FromColumns(schema, resolved.Store.Options.Events.StreamIdentity, events, streams);
+
+        if (table.EventColumns.Count == 0)
         {
-            ResolvedScope resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
+            return new EventTypeList(Order(registered.Values), CountsLoaded: true);
+        }
 
-            Dictionary<string, EventTypeInfo> registered = new(StringComparer.Ordinal);
-            foreach (IEventType eventType in resolved.Store.Options.Events.AllKnownEventTypes())
+        // The tenant is part of the question, not decoration: on a conjoined event store the counts
+        // of "how many OrderPlaced are there" differ per tenant, and a screen scoped to one tenant
+        // that showed everybody's totals would be reporting another tenant's business volume.
+        await using NpgsqlCommand command = EventQueryBuilder.BuildEventTypeCounts(table, resolved.TenantId);
+        command.Connection = connection;
+        command.CommandTimeout = commandTimeoutSeconds;
+
+        Dictionary<string, EventTypeInfo> merged = new(registered, StringComparer.Ordinal);
+        bool truncated = false;
+
+        await using (NpgsqlDataReader reader = await command
+            .ExecuteReaderAsync(CommandBehavior.SingleResult, cancellationToken).ConfigureAwait(false))
+        {
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
             {
-                registered[eventType.EventTypeName] = new EventTypeInfo(
-                    eventType.EventTypeName,
-                    eventType.DotNetTypeName,
-                    IsRegistered: true);
-            }
-
-            if (!withCounts)
-            {
-                return new EventTypeList(Order(registered.Values), CountsLoaded: false);
-            }
-
-            await using NpgsqlConnection connection = await OpenAsync(resolved, cancellationToken).ConfigureAwait(false);
-            EventTableInfo table = await DescribeTablesAsync(resolved, connection, cancellationToken).ConfigureAwait(false);
-
-            if (table.EventColumns.Count == 0)
-            {
-                return new EventTypeList(Order(registered.Values), CountsLoaded: true);
-            }
-
-            // The tenant is part of the question, not decoration: on a conjoined event store the counts
-            // of "how many OrderPlaced are there" differ per tenant, and a screen scoped to one tenant
-            // that showed everybody's totals would be reporting another tenant's business volume.
-            await using NpgsqlCommand command = EventQueryBuilder.BuildEventTypeCounts(table, resolved.TenantId);
-            command.Connection = connection;
-            command.CommandTimeout = CommandTimeoutSeconds;
-
-            Dictionary<string, EventTypeInfo> merged = new(registered, StringComparer.Ordinal);
-            bool truncated = false;
-
-            await using (NpgsqlDataReader reader = await command
-                .ExecuteReaderAsync(CommandBehavior.SingleResult, cancellationToken).ConfigureAwait(false))
-            {
-                while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                if (merged.Count >= MaxEventTypes)
                 {
-                    if (merged.Count >= MaxEventTypes)
-                    {
-                        // The row that did not fit is the proof there were more, and the screen has to
-                        // say so: a silently capped list is indistinguishable from a complete one.
-                        truncated = true;
-                        break;
-                    }
+                    // The row that did not fit is the proof there were more, and the screen has to
+                    // say so: a silently capped list is indistinguishable from a complete one.
+                    truncated = true;
+                    break;
+                }
 
-                    string name = reader.GetString(0);
-                    long count = reader.GetInt64(1);
-                    long first = reader.GetInt64(2);
-                    long last = reader.GetInt64(3);
+                string name = reader.GetString(0);
+                long count = reader.GetInt64(1);
+                long first = reader.GetInt64(2);
+                long last = reader.GetInt64(3);
 
-                    EventTypeInfo? known = merged.GetValueOrDefault(name);
-                    merged[name] = new EventTypeInfo(
-                        name,
-                        known?.DotNetTypeName,
-                        known is not null,
-                        count,
-                        first,
-                        last);
+                EventTypeInfo? known = merged.GetValueOrDefault(name);
+                merged[name] = new EventTypeInfo(
+                    name,
+                    known?.DotNetTypeName,
+                    known is not null,
+                    count,
+                    first,
+                    last);
+            }
+        }
+
+        // A registered type the group-by never mentioned has no events at all, which is a fact worth
+        // flagging rather than an unknown - unless the group-by was cut short, in which case "no
+        // events" would be a guess.
+        if (!truncated)
+        {
+            foreach (string name in registered.Keys)
+            {
+                if (merged[name].Count is null)
+                {
+                    merged[name] = merged[name] with { Count = 0 };
                 }
             }
-
-            // A registered type the group-by never mentioned has no events at all, which is a fact worth
-            // flagging rather than an unknown - unless the group-by was cut short, in which case "no
-            // events" would be a guess.
-            if (!truncated)
-            {
-                foreach (string name in registered.Keys)
-                {
-                    if (merged[name].Count is null)
-                    {
-                        merged[name] = merged[name] with { Count = 0 };
-                    }
-                }
-            }
-
-            // Under per-tenant sequences with no tenant selected, min(seq_id) and max(seq_id) are taken across counters that
-            // each tenant runs on its own, and name no event: the page labels them rather than show them (SEC1-fix4).
-            return new EventTypeList(Order(merged.Values), CountsLoaded: true, IsTruncated: truncated)
-            {
-                SequencesPerTenant = resolved.TenantId is null && resolved.Store.Options.Events.UseTenantPartitionedEvents,
-            };
         }
-        catch (Exception exception) when (IsReadFailure(exception))
+
+        // Under per-tenant sequences with no tenant selected, min(seq_id) and max(seq_id) are taken across counters that
+        // each tenant runs on its own, and name no event: the page labels them rather than show them (SEC1-fix4).
+        return new EventTypeList(Order(merged.Values), CountsLoaded: true, IsTruncated: truncated)
         {
-            return EventTypeList.Failed(Describe(scope, exception, "list the event types"));
-        }
+            SequencesPerTenant = resolved.TenantId is null && resolved.Store.Options.Events.UseTenantPartitionedEvents,
+        };
     }
 
     /// <inheritdoc />
@@ -2539,7 +2546,7 @@ internal sealed partial class EventDataService : IEventDataService
             StreamIdentity = resolved.Store.Options.Events.StreamIdentity,
         }.ParseStreamId(streamId);
 
-    private static List<EventTypeInfo> Order(IEnumerable<EventTypeInfo> types) =>
+    internal static List<EventTypeInfo> Order(IEnumerable<EventTypeInfo> types) =>
         [.. types
             .OrderByDescending(static x => x.IsRegistered)
             .ThenBy(static x => x.Name, StringComparer.Ordinal)];
