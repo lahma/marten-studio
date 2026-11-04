@@ -139,56 +139,90 @@ public class MigrationImpactLiveTests(PostgresFixture postgres)
     }
 
     /// <summary>
-    /// The sessions read counts this database only: a session in another database that holds a lock on a table of the same
-    /// schema and name is not counted. (The read filters <c>pg_locks.database</c>; a join on names alone would count it.)
+    /// The sessions read counts this database only. Object ids are server-wide, so a name-based join proves nothing: the other database
+    /// here is a template clone of this one, where the table has the very same oid, and a lock held on it there must not be counted
+    /// when the table is asked about in this database. (The read filters <c>pg_locks.database</c>.)
     /// </summary>
     [PostgresFact]
-    public async Task A_session_in_another_database_holding_a_lock_on_a_same_named_table_is_not_counted()
+    public async Task A_session_in_a_clone_database_holding_a_lock_on_the_same_table_id_is_not_counted()
     {
-        await using SchemaFixture schema = await StartPopulatedAsync("apply_impact_otherdb");
-        SchemaFixture.StudioHost drifted = schema.Drifted(static options => options.Capabilities.ViewDatabaseActivity = true);
-        string other = "apply_impact_other_" + Guid.NewGuid().ToString("N")[..8];
+        string suffix = Guid.NewGuid().ToString("N")[..8];
+        string a = "apply_impact_a_" + suffix;
+        string b = "apply_impact_b_" + suffix;
 
-        await using (NpgsqlConnection admin = await postgres.OpenAsync(Token))
-        {
-            await ExecuteAsync(admin, $"create database {other}");
-        }
+        NpgsqlConnectionStringBuilder InDatabase(string name) => new(postgres.ConnectionString) { Database = name, Pooling = false };
 
         try
         {
-            var builder = new NpgsqlConnectionStringBuilder(postgres.ConnectionString) { Database = other, Pooling = false };
-            await using var holder = new NpgsqlConnection(builder.ConnectionString);
-            await holder.OpenAsync(Token);
-            await ExecuteAsync(holder, $"create schema {schema.Schema}");
-            await ExecuteAsync(holder, $"create table {schema.Schema}.{Customers} (id int)");
+            uint tableId;
 
-            await using NpgsqlTransaction holding = await holder.BeginTransactionAsync(Token);
-            await ExecuteAsync(holder, $"lock table {schema.Schema}.{Customers} in access share mode");
+            await using (NpgsqlConnection admin = await postgres.OpenAsync(Token))
+            {
+                await ExecuteAsync(admin, $"create database {a}");
+            }
 
-            // Anti-vacuity: the other database really holds that lock, on the table of that name.
+            await using (var first = new NpgsqlConnection(InDatabase(a).ConnectionString))
+            {
+                await first.OpenAsync(Token);
+                await ExecuteAsync(first, "create schema tpl");
+                await ExecuteAsync(first, "create table tpl.t (id int)");
+                tableId = await ScalarAsync<uint>(first, "select 'tpl.t'::regclass::oid");
+            }
+
+            // The clone: same catalog, same object ids, a database of its own. A template must have no connections to it.
+            await using (NpgsqlConnection admin = await postgres.OpenAsync(Token))
+            {
+                await ExecuteAsync(admin, $"create database {b} template {a}");
+            }
+
+            await using var cloneHolder = new NpgsqlConnection(InDatabase(b).ConnectionString);
+            await cloneHolder.OpenAsync(Token);
+            await using NpgsqlTransaction cloneHolding = await cloneHolder.BeginTransactionAsync(Token);
+            await ExecuteAsync(cloneHolder, "lock table tpl.t in access share mode");
+
+            // Anti-vacuity: the clone's table has the same id, and the lock table shows the clone's session holding it.
+            (await ScalarAsync<uint>(cloneHolder, "select 'tpl.t'::regclass::oid")).Should().Be(tableId);
+
             await using (NpgsqlConnection admin = await postgres.OpenAsync(Token))
             {
                 await using var held = new NpgsqlCommand(
                     """
-                    select count(*) from pg_locks l join pg_database d on d.oid = l.database
-                    where d.datname = @other and l.locktype = 'relation' and l.mode = 'AccessShareLock' and l.granted
-                      and l.pid <> pg_backend_pid()
+                    select count(*) from pg_locks l
+                    where l.database = (select d.oid from pg_database d where d.datname = @clone)
+                      and l.locktype = 'relation' and l.relation = @id and l.granted
                     """,
                     admin);
-                held.Parameters.AddWithValue("other", other);
-                ((long) (await held.ExecuteScalarAsync(Token))!).Should().BePositive("the other database's session holds a lock");
+                held.Parameters.AddWithValue("clone", b);
+                held.Parameters.Add(new NpgsqlParameter("id", NpgsqlTypes.NpgsqlDbType.Oid) { Value = tableId });
+                ((long) (await held.ExecuteScalarAsync(Token))!).Should().BePositive("the clone's session holds a lock on that very id");
             }
 
-            MigrationPreview preview = await drifted.SchemaAsync(x => x.PreviewAsync(SchemaFixture.Scope));
+            // The read, in database A, for A's table id: nobody holds it here.
+            await using var reader = new NpgsqlConnection(InDatabase(a).ConnectionString);
+            await reader.OpenAsync(Token);
+            await using NpgsqlTransaction reading = await reader.BeginTransactionAsync(Token);
 
-            preview.Impact.Tables.Should().ContainSingle().Which.Sessions!.Holding.Should().Be(0, "that session is in another database");
+            (await MigrationImpactQueries.ReadSessionsAsync(reader, reading, [tableId], 30, Token))
+                .Should().BeEmpty("the lock is held in the other database");
+
+            // And the same read does see a holder in this database, so an empty answer above is not an answer to nothing.
+            await using var holder = new NpgsqlConnection(InDatabase(a).ConnectionString);
+            await holder.OpenAsync(Token);
+            await using NpgsqlTransaction holding = await holder.BeginTransactionAsync(Token);
+            await ExecuteAsync(holder, "lock table tpl.t in access share mode");
+
+            (await MigrationImpactQueries.ReadSessionsAsync(reader, reading, [tableId], 30, Token))
+                .Should().ContainSingle().Which.Sessions.Should().Be(1);
 
             await holding.RollbackAsync(Token);
+            await cloneHolding.RollbackAsync(Token);
+            await reading.RollbackAsync(Token);
         }
         finally
         {
             await using NpgsqlConnection admin = await postgres.OpenAsync(Token);
-            await ExecuteAsync(admin, $"drop database if exists {other} with (force)");
+            await ExecuteAsync(admin, $"drop database if exists {b} with (force)");
+            await ExecuteAsync(admin, $"drop database if exists {a} with (force)");
         }
     }
 
@@ -353,6 +387,15 @@ public class MigrationImpactLiveTests(PostgresFixture postgres)
         await ExecuteAsync(connection, $"analyze {schema.Schema}.{Customers}");
 
         return schema;
+    }
+
+    private static async Task<T> ScalarAsync<T>(NpgsqlConnection connection, string sql)
+    {
+        await using var command = new NpgsqlCommand(sql, connection);
+        await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(Token);
+        (await reader.ReadAsync(Token)).Should().BeTrue();
+
+        return reader.GetFieldValue<T>(0);
     }
 
     private static async Task ExecuteAsync(NpgsqlConnection connection, string sql)

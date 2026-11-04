@@ -159,11 +159,6 @@ public class ActivityViewsOffThePollPathTests
     }
 
     /// <summary>
-    /// 1.2-APPLY: the migration notes' sessions read is called by one place, the Schema service's impact read, and that read asks
-    /// the Activity gate - the capability, then the write policy with the capability named - before it opens a connection for it.
-    /// The Preview button is the only thing that reaches it.
-    /// </summary>
-    /// <summary>
     /// 1.2-APPLY-FIX: both of the migration notes' reads - the table statistics and the sessions - open the primary
     /// (<c>ConnectionUsage.ReadWrite</c>, inside the read-only transaction), because the apply runs there and a standby's locks and
     /// sessions are another server's. <c>InSessionAsync</c> defaults to <c>Read</c> for the Schema tabs, so each call here names it.
@@ -186,6 +181,11 @@ public class ActivityViewsOffThePollPathTests
         service.Should().Contain("MartenStudioDatabase.CreateConnection(resolved.Database, usage)", "InSessionAsync opens the usage it is given");
     }
 
+    /// <summary>
+    /// 1.2-APPLY: the migration notes' sessions read is called by one place, the Schema service's impact read, and that read asks
+    /// the Activity gate - the capability, then the write policy with the capability named - before it opens a connection for it.
+    /// The Preview button is the only thing that reaches it.
+    /// </summary>
     [Fact]
     public void The_migration_notes_sessions_read_is_called_only_behind_the_activity_gate()
     {

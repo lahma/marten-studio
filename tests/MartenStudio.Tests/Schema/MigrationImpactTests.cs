@@ -352,6 +352,154 @@ public class MigrationImpactTests
     }
 
     // ------------------------------------------------------------------------------------------------
+    // 1.2-APPLY-FU
+    // ------------------------------------------------------------------------------------------------
+
+    [Fact]
+    public void A_function_dropped_with_cascade_is_listed_as_taking_its_indexes_with_it_and_a_plain_drop_is_not()
+    {
+        // Weasel 9.48.0 StringWriterExtensions.WriteDropFunction appends " cascade;".
+        const string sql = "DROP FUNCTION IF EXISTS studio.mt_immutable_timestamp(timestamp without time zone) cascade;";
+
+        IReadOnlyList<TableLockStatement> found = MigrationRisk.LockStatements(sql);
+
+        TableLockStatement statement = found.Should().ContainSingle().Subject;
+        statement.Kind.Should().Be(MigrationRisk.DropsFunctionCascadeKind);
+        statement.IsFunction.Should().BeTrue();
+        statement.Lock.Should().Be(TableLockMode.AccessExclusive);
+        (statement.Schema, statement.Name).Should().Be(("studio", "mt_immutable_timestamp"));
+        MigrationImpact.RelationsOf(found).Should().BeEmpty("a function is not a relation to look up");
+        MigrationRisk.Advice(found).Should().ContainSingle().Which.Should().Contain("ACCESS EXCLUSIVE");
+
+        MigrationRisk.LockStatements("drop function if exists studio.mt_something();").Should().BeEmpty();
+    }
+
+    [Fact]
+    public void A_dropped_function_names_the_tables_whose_declared_indexes_use_it_from_the_configuration_alone()
+    {
+        TableLockStatement[] statements = [.. MigrationRisk.LockStatements("drop function if exists studio.mt_immutable_timestamp(timestamp) cascade;")];
+        PostgresStudio.Services.Schema.DeclaredIndex[] declared =
+        [
+            new("order", "Order", "studio", "mt_doc_order", "mt_doc_order_idx_placed",
+                "CREATE INDEX mt_doc_order_idx_placed ON studio.mt_doc_order USING btree (studio.mt_immutable_timestamp((data ->> 'Placed')::timestamp));"),
+            new("customer", "Customer", "studio", "mt_doc_customer", "mt_doc_customer_idx_name",
+                "CREATE INDEX mt_doc_customer_idx_name ON studio.mt_doc_customer USING btree ((data ->> 'Name'));"),
+        ];
+
+        TableImpact named = MigrationImpact.Assemble(statements, [], sessions: null, declared).Tables.Should().ContainSingle().Subject;
+        named.IsFunction.Should().BeTrue();
+        named.Display.Should().Be("function studio.mt_immutable_timestamp");
+        named.Note.Should().Contain("studio.mt_doc_order (mt_doc_order_idx_placed)").And.NotContain("mt_doc_customer")
+            .And.Contain("Any other table whose indexes or defaults use it");
+
+        MigrationImpact.Assemble(statements, [], sessions: null, declaredIndexes: null).Tables.Single().Note
+            .Should().Be("Tables whose indexes or defaults use it.");
+        MigrationImpact.Assemble(statements, [], sessions: null, declaredIndexes: []).Tables.Single().Note
+            .Should().Be("Tables whose indexes or defaults use it.");
+    }
+
+    [Fact]
+    public void A_new_tables_foreign_key_to_an_existing_table_locks_the_existing_one_and_a_key_between_new_tables_nothing()
+    {
+        const string sql =
+            """
+            CREATE TABLE studio.mt_doc_new (id uuid not null, customer_id uuid);
+            CREATE TABLE studio.mt_doc_newer (id uuid not null);
+            ALTER TABLE studio.mt_doc_new
+            ADD CONSTRAINT fk_new_customer FOREIGN KEY(customer_id)
+            REFERENCES studio.mt_doc_customer(id);
+            ALTER TABLE studio.mt_doc_new
+            ADD CONSTRAINT fk_new_newer FOREIGN KEY(id)
+            REFERENCES studio.mt_doc_newer(id);
+            """;
+
+        TableLockStatement statement = MigrationRisk.LockStatements(sql).Should().ContainSingle().Subject;
+
+        statement.Kind.Should().Be(MigrationRisk.ReferencedByForeignKeyKind);
+        statement.Lock.Should().Be(TableLockMode.ShareRowExclusive);
+        statement.Name.Should().Be("mt_doc_customer");
+    }
+
+    [Fact]
+    public void A_backfilling_update_in_the_same_command_makes_any_alter_a_rewrite()
+    {
+        TableLockStatement dropped = MigrationRisk.LockStatements("alter table studio.t drop column x;update studio.t set y = 1;")
+            .Should().ContainSingle().Subject;
+
+        dropped.Kind.Should().Be(MigrationRisk.DropsColumnKind);
+        dropped.Rewrite.Should().Be(TableRewrite.Yes);
+        dropped.Effect.Should().Contain("updates every row");
+
+        MigrationRisk.LockStatements("alter table studio.t alter column x set default 1;update studio.t set y = 1;")
+            .Should().ContainSingle().Which.Rewrite.Should().Be(TableRewrite.Yes);
+    }
+
+    [Theory]
+    [InlineData("random()", true)]
+    [InlineData("clock_timestamp()", true)]
+    [InlineData("gen_random_uuid()", true)]
+    [InlineData("uuid_generate_v1()", true)]
+    [InlineData("uuid_generate_v1mc()", true)]
+    [InlineData("uuid_generate_v4()", true)]
+    [InlineData("uuidv4()", true)]
+    [InlineData("uuidv7()", true)]
+    [InlineData("nextval('studio.s')", true)]
+    [InlineData("statement_timestamp()", false)]
+    [InlineData("now()", false)]
+    [InlineData("uuid_generate_v3(uuid_ns_dns(), 'x')", false)]
+    [InlineData("uuid_generate_v5(uuid_ns_dns(), 'x')", false)]
+    public void A_default_is_volatile_only_when_its_function_is(string expression, bool volatileDefault)
+    {
+        TableLockStatement statement = MigrationRisk.LockStatements($"alter table studio.t add column c uuid default ({expression});")
+            .Should().ContainSingle().Subject;
+
+        statement.Kind.Should().Be(volatileDefault ? MigrationRisk.AddsVolatileColumnKind : MigrationRisk.AltersTableKind);
+    }
+
+    [Fact]
+    public void The_lines_inside_a_dollar_quoted_body_are_not_statements_but_the_lines_around_it_are()
+    {
+        const string sql =
+            """
+            CREATE OR REPLACE FUNCTION studio.host_fn() RETURNS void AS $function$
+            BEGIN
+              CREATE TABLE studio.in_body (id int);
+              ALTER TABLE studio.in_body ADD COLUMN y int;
+              drop index studio.in_body_idx;
+              ALTER TABLE studio.mt_doc_customer DROP COLUMN z;
+            END;
+            $function$ LANGUAGE plpgsql;
+            alter table studio.in_body drop column q;
+            alter table studio.mt_doc_customer drop column real_one;
+            """;
+
+        IReadOnlyList<TableLockStatement> found = MigrationRisk.LockStatements(sql);
+
+        found.Select(static x => x.Name).Should().Equal("in_body", "mt_doc_customer");
+        found.Select(static x => x.Statement).Should().Equal(
+            "alter table studio.in_body drop column q;",
+            "alter table studio.mt_doc_customer drop column real_one;");
+        MigrationRisk.Find(sql).Select(static x => x.Statement).Should().Equal(
+            "alter table studio.in_body drop column q;",
+            "alter table studio.mt_doc_customer drop column real_one;");
+        MigrationRisk.Notes(sql).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void A_body_that_opens_and_closes_on_one_line_a_string_holding_dollars_and_a_transaction_wrapper_hide_nothing()
+    {
+        MigrationRisk.LockStatements(
+                "CREATE FUNCTION studio.f() RETURNS int AS $$ select 1 $$ LANGUAGE sql;\nalter table studio.t drop column a;")
+            .Should().ContainSingle();
+
+        MigrationRisk.LockStatements("update studio.t set note = 'costs $$ a lot';\nalter table studio.t drop column b;")
+            .Should().ContainSingle().Which.Statement.Should().Contain("column b");
+
+        MigrationRisk.LockStatements("DO LANGUAGE plpgsql $tran$\nBEGIN\nalter table studio.t drop column c;\nEND;\n$tran$;")
+            .Should().ContainSingle().Which.Statement.Should().Contain("column c");
+    }
+
+    // ------------------------------------------------------------------------------------------------
     // Advice
     // ------------------------------------------------------------------------------------------------
 

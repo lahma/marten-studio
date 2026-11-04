@@ -93,21 +93,107 @@ internal static partial class MigrationRisk
         return found;
     }
 
-    /// <summary>The script's lines, trimmed, without blank lines and <c>--</c> comments (Weasel's markers among them).</summary>
+    /// <summary>
+    /// The script's lines, trimmed, without blank lines and <c>--</c> comments (Weasel's markers among them), and without the lines
+    /// strictly inside a dollar-quoted body (<c>$function$ … $function$</c>): a host's function in <c>ExtendedSchemaObjects</c> whose
+    /// body has <c>ALTER TABLE</c> or <c>CREATE TABLE</c> lines is not a statement of the migration. The line that opens a body and the
+    /// line that closes it are kept; <c>$tran$</c>, Weasel's transaction wrapper, is not a body.
+    /// </summary>
     private static List<string> StatementLines(string sql)
     {
         List<string> lines = [];
+        string? body = null;
 
         foreach (ReadOnlySpan<char> rawLine in sql.AsSpan().EnumerateLines())
         {
-            ReadOnlySpan<char> line = rawLine.Trim();
-            if (!line.IsEmpty && !line.StartsWith("--", StringComparison.Ordinal))
+            string text = rawLine.Trim().ToString();
+            bool insideAtStart = body is not null;
+
+            if (text.Length == 0 || (!insideAtStart && text.StartsWith("--", StringComparison.Ordinal)))
             {
-                lines.Add(line.ToString());
+                continue;
             }
+
+            AdvanceDollarQuotes(text, ref body);
+
+            if (insideAtStart && body is not null)
+            {
+                continue;
+            }
+
+            lines.Add(text);
         }
 
         return lines;
+    }
+
+    /// <summary>Moves <paramref name="body" /> (the open dollar-quote tag, or <see langword="null" />) across one line.</summary>
+    private static void AdvanceDollarQuotes(string text, ref string? body)
+    {
+        for (int i = 0; i < text.Length; i++)
+        {
+            if (body is not null)
+            {
+                int close = text.IndexOf(body, i, StringComparison.Ordinal);
+                if (close < 0)
+                {
+                    return;
+                }
+
+                i = close + body.Length - 1;
+                body = null;
+                continue;
+            }
+
+            char c = text[i];
+
+            if (c == '\'')
+            {
+                // A string literal on this line: '' is an escaped quote, and an unterminated one runs to the end of the line.
+                int end = i + 1;
+                while (end < text.Length)
+                {
+                    if (text[end] == '\'')
+                    {
+                        if (end + 1 < text.Length && text[end + 1] == '\'')
+                        {
+                            end += 2;
+                            continue;
+                        }
+
+                        break;
+                    }
+
+                    end++;
+                }
+
+                if (end >= text.Length)
+                {
+                    return;
+                }
+
+                i = end;
+            }
+            else if (c == '$')
+            {
+                int j = i + 1;
+                while (j < text.Length && (char.IsLetterOrDigit(text[j]) || text[j] == '_'))
+                {
+                    j++;
+                }
+
+                if (j < text.Length && text[j] == '$' && (j == i + 1 || !char.IsDigit(text[i + 1])))
+                {
+                    string tag = text[i..(j + 1)];
+                    i = j;
+
+                    if (!string.Equals(tag, "$tran$", StringComparison.Ordinal))
+                    {
+                        body = tag;
+                    }
+                }
+            }
+        }
     }
 
     /// <summary>Whether <paramref name="sql" /> contains anything that removes or rewrites an object.</summary>

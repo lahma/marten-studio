@@ -270,8 +270,10 @@ else
                     <strong>What applying this will lock and rewrite.</strong> The statements below run against tables that already
                     exist. Rows and sizes are estimates from the catalog's statistics (<code>pg_class</code>), as of the last
                     <code>VACUUM</code> or <code>ANALYZE</code> or index build - nothing was counted or locked to read them.
-                    Every <code>ALTER TABLE</code> and partition create on an existing table is listed; other statements
-                    (functions, sequences, new tables and their indexes) lock nothing that already holds data.
+                    Every <code>ALTER TABLE</code> and partition create on an existing table is listed. Functions and sequences
+                    lock no table, except that Weasel drops a replaced function with <code>CASCADE</code>, which removes every
+                    index or default built on it under that table's <code>ACCESS EXCLUSIVE</code> lock - the list names the drop.
+                    New tables and their indexes lock nothing that already holds data.
                 </p>
                 @if (impact.Notice is { Length: > 0 } impactNotice)
                 {
@@ -313,7 +315,11 @@ else
                                             }
                                         </ul>
                                     </td>
-                                    @if (table.Footprint is { } footprint)
+                                    @if (table.IsFunction)
+                                    {
+                                        <td class="ms-table-cell ms-muted" colspan="2">@table.Note</td>
+                                    }
+                                    else if (table.Footprint is { } footprint)
                                     {
                                         <td class="ms-table-cell ms-num">@footprint.RowsText</td>
                                         <td class="ms-table-cell">@footprint.SizeText</td>
@@ -326,7 +332,7 @@ else
                                     }
                                     @if (showSessions)
                                     {
-                                        <td class="ms-table-cell">@(table.Sessions?.Summary ?? "not shown")</td>
+                                        <td class="ms-table-cell">@(table.IsFunction ? "-" : table.Sessions?.Summary ?? "not shown")</td>
                                     }
                                 </tr>
                             }

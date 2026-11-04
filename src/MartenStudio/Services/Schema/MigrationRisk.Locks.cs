@@ -49,6 +49,10 @@ internal enum TableRewrite
 /// <param name="Lock">The lock it takes on the table (on an index's table, for an index).</param>
 /// <param name="Rewrite">Whether it rewrites the table.</param>
 /// <param name="Effect">What it does to the table's readers and writers, in a sentence.</param>
+/// <param name="IsFunction">
+/// Whether <paramref name="Name" /> is a function dropped with <c>CASCADE</c>: no relation of its own, but it removes every index or
+/// default built on it, under those tables' locks.
+/// </param>
 internal sealed record TableLockStatement(
     string Kind,
     string Statement,
@@ -57,7 +61,8 @@ internal sealed record TableLockStatement(
     bool IsIndex,
     TableLockMode Lock,
     TableRewrite Rewrite,
-    string Effect)
+    string Effect,
+    bool IsFunction = false)
 {
     /// <summary>The relation as a person reads it: <c>schema.name</c>, or the bare name.</summary>
     public string Display => Schema is null ? Name : Schema + "." + Name;
@@ -103,19 +108,23 @@ internal sealed record TableLockStatement(
 /// <c>ALTER TABLE</c>, <c>ADD CONSTRAINT</c> and <c>REFERENCES</c> lines are joined), a renamed constraint, a column added with a
 /// volatile default or with Marten's backfilling <c>update</c>, <c>CREATE TABLE … PARTITION OF</c> an existing parent, and the
 /// partition rebuild's copy out. Any <i>other</i> <c>ALTER TABLE</c> on an existing table is listed too, as one the studio does not
-/// judge (<see cref="TableRewrite.Unknown" />, <c>ACCESS EXCLUSIVE</c>): most forms take that lock. What is not listed - functions,
-/// sequences, new tables and their indexes - locks nothing that already holds data. A relation is "existing" until the script creates
-/// it, in order: the rebuild's <c>create table s.t_temp as select * from s.t</c>, <c>drop table s.t cascade</c> and <c>CREATE TABLE
+/// judge (<see cref="TableRewrite.Unknown" />, <c>ACCESS EXCLUSIVE</c>): most forms take that lock. A <c>drop function … cascade</c>
+/// is listed too: Weasel drops a replaced or removed function that way, and CASCADE removes every index or default built on it (Marten's
+/// computed indexes on <c>DateTime</c> members use <c>mt_immutable_timestamp</c> and its siblings) under that table's <c>ACCESS
+/// EXCLUSIVE</c> lock. A new table's foreign key to an existing table is listed on the existing table. What is not listed - other
+/// functions, sequences, new tables and their indexes - locks no table that already holds data. A relation is "existing" until the
+/// script creates it, in order: the rebuild's <c>create table s.t_temp as select * from s.t</c>, <c>drop table s.t cascade</c> and <c>CREATE TABLE
 /// s.t</c> are about <c>s.t</c> before the create and about nothing after it, and <c>s.t_temp</c> is the script's own throughout.
 /// </para>
 /// <para>
-/// <b>A line is the unit the lock is held for.</b> Weasel sends everything between index markers as one command, in one implicit
-/// transaction, and Marten writes several statements on one line for a duplicated field: an added field is <c>alter table s.t add
+/// <b>A line is the unit of classification, and the lock is held for the whole command.</b> Weasel splits a script only on the
+/// concurrent-index markers, so everything between them is one command in one implicit transaction: an <c>ACCESS EXCLUSIVE</c> lock is
+/// held until the command ends, and a plain <c>CREATE INDEX</c> after it runs under it. Marten writes several statements on one line for a duplicated field: an added field is <c>alter table s.t add
 /// column c type;update s.t set c = …;</c> and a changed type is <c>alter table s.t drop column c;alter table s.t add column c
 /// type;update s.t set c = …;</c> (Marten <c>DuplicatedFieldColumn</c>). A line is split on <c>;</c> outside quotes and dollar
 /// quotes, classified by its leading <c>ALTER TABLE</c>, and an <c>update</c> of the same table in it means the <c>ACCESS
-/// EXCLUSIVE</c> lock is held through a backfill of every row. A line that begins with <c>update</c> (or is part of a function
-/// body) is never classified on its own.
+/// EXCLUSIVE</c> lock is held through a backfill of every row. A line that begins with <c>update</c> is never classified on its own,
+/// and the lines inside a dollar-quoted function body are not statements at all (<c>StatementLines</c>).
 /// </para>
 /// <para>
 /// <b>The locks are PostgreSQL's, not Weasel's.</b> A plain <c>CREATE INDEX</c> takes <c>SHARE</c>, so writers wait and readers do
@@ -161,6 +170,9 @@ internal static partial class MigrationRisk
     /// <summary>The kind of any other <c>ALTER TABLE</c>.</summary>
     internal const string AltersTableKind = "alters the table";
 
+    /// <summary>The kind of Weasel's <c>drop function … cascade</c>, which takes every index or default built on the function with it.</summary>
+    internal const string DropsFunctionCascadeKind = "drops a function with CASCADE";
+
     /// <summary>
     /// Why a plain index build is worth moving to <c>CONCURRENTLY</c>, and the setting that does it - Weasel 9.48.0's
     /// <c>PostgresqlMigrator.BuildIndexesConcurrentlyOnAlter</c>, reached through Marten 9.57's
@@ -183,7 +195,7 @@ internal static partial class MigrationRisk
 
     /// <summary>Functions that make a column default volatile, so adding the column writes every row.</summary>
     private static readonly Regex VolatileDefault = new(
-        @"\b(random|clock_timestamp|gen_random_uuid|uuid_generate_v[1-5]|nextval|timeofday|statement_timestamp)\s*\(",
+        @"\b(random|clock_timestamp|gen_random_uuid|uuid_generate_v1mc|uuid_generate_v1|uuid_generate_v4|uuidv4|uuidv7|nextval|timeofday)\s*\(",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
         TimeSpan.FromSeconds(5));
 
@@ -424,6 +436,33 @@ internal static partial class MigrationRisk
             yield break;
         }
 
+        if (StartsWithWords(line, "drop function ") && ContainsWords(line, " cascade"))
+        {
+            // Weasel's WriteDropFunction: "drop function if exists s.f(args) cascade;" - CASCADE takes every index or default built on
+            // the function with it, under each such table's ACCESS EXCLUSIVE lock. The function names no table.
+            string rest = line["drop function ".Length..].TrimStart();
+
+            if (StartsWithWords(rest, "if exists "))
+            {
+                rest = rest["if exists ".Length..].TrimStart();
+            }
+
+            if (FirstToken(rest) is { } function)
+            {
+                yield return LockOf(
+                    DropsFunctionCascadeKind,
+                    line,
+                    function,
+                    isIndex: false,
+                    TableLockMode.AccessExclusive,
+                    TableRewrite.No,
+                    "removes every index or default built on the function, under that table's ACCESS EXCLUSIVE lock",
+                    isFunction: true);
+            }
+
+            yield break;
+        }
+
         if (StartsWithWords(line, "drop table "))
         {
             string rest = line["drop table ".Length..].TrimStart();
@@ -484,18 +523,59 @@ internal static partial class MigrationRisk
             yield break;
         }
 
-        (string table, string rest) = target;
-
-        if (created.Contains(Normalize(table)))
-        {
-            yield break;
-        }
-
-        string key = Normalize(table);
+        string key = Normalize(target.Table);
 
         // Marten's backfill: "update <this table> set …" in the same command, which runs under the lock the alter took.
         bool backfills = segments.Skip(1).Any(segment =>
             After(segment, "update ") is { } updated && FirstToken(updated) is { } updatedTable && Normalize(updatedTable) == key);
+
+        foreach (TableLockStatement statement in ClassifyAlterCore(line, segments, target, created, backfills))
+        {
+            // Whatever the alter is, a backfill in the same command updates every row of the table while the lock is held.
+            yield return backfills && statement.Rewrite != TableRewrite.Yes && statement.Kind != ReferencedByForeignKeyKind
+                ? statement with
+                {
+                    Rewrite = TableRewrite.Yes,
+                    Effect = statement.Effect + "; the same command then updates every row of the table while it holds the lock",
+                }
+                : statement;
+        }
+    }
+
+    private static IEnumerable<TableLockStatement> ClassifyAlterCore(
+        string line,
+        IReadOnlyList<string> segments,
+        (string Table, string Remainder) target,
+        HashSet<string> created,
+        bool backfills)
+    {
+        (string table, string rest) = target;
+        string key = Normalize(table);
+        bool isNew = created.Contains(key);
+
+        // A new table has nothing to wait for, but its foreign key to an existing table validates against - and locks - that table.
+        if (isNew && !(StartsWithWords(rest, "add ") && ContainsWords(rest, "foreign key")))
+        {
+            yield break;
+        }
+
+        if (isNew)
+        {
+            if (After(rest, " references ", anywhere: true) is { } newReferenced && FirstToken(newReferenced) is { } newReferencedTable
+                && !created.Contains(Normalize(newReferencedTable)))
+            {
+                yield return LockOf(
+                    ReferencedByForeignKeyKind,
+                    line,
+                    newReferencedTable,
+                    isIndex: false,
+                    TableLockMode.ShareRowExclusive,
+                    TableRewrite.No,
+                    "is locked against writes while a new table's key to it is validated, reads go on");
+            }
+
+            yield break;
+        }
 
         if (StartsWithWords(rest, "drop column "))
         {
@@ -689,11 +769,12 @@ internal static partial class MigrationRisk
         bool isIndex,
         TableLockMode mode,
         TableRewrite rewrite,
-        string effect)
+        string effect,
+        bool isFunction = false)
     {
         string[] parts = Normalize(relation).Split(PartSeparator);
         string? schema = parts.Length >= 2 ? parts[^2] : null;
 
-        return new TableLockStatement(kind, Clamp(line), schema, parts[^1], isIndex, mode, rewrite, effect);
+        return new TableLockStatement(kind, Clamp(line), schema, parts[^1], isIndex, mode, rewrite, effect, isFunction);
     }
 }

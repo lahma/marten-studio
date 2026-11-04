@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.RegularExpressions;
 
 using MartenStudio.Internal.Sql;
 
@@ -87,6 +88,17 @@ internal sealed record TableImpact(
     TableFootprint? Footprint,
     TableSessions? Sessions)
 {
+    /// <summary>
+    /// Whether this is a function dropped with <c>CASCADE</c> rather than a table: it has no rows, size or sessions of its own.
+    /// </summary>
+    public bool IsFunction => Statements.All(static x => x.IsFunction);
+
+    /// <summary>
+    /// For a function, which tables lose what: the tables whose declared indexes use it where the configuration says so, otherwise a
+    /// sentence that every table with an index or default built on it does.
+    /// </summary>
+    public string? Note { get; init; }
+
     /// <summary>The strongest lock any of its statements takes.</summary>
     public TableLockMode StrongestLock => Statements.Max(static x => x.Lock);
 
@@ -130,7 +142,7 @@ internal sealed record MigrationImpact(IReadOnlyList<TableImpact> Tables, IReadO
 
         foreach (TableLockStatement statement in statements)
         {
-            if (statement.Schema is { } schema && !relations.Contains((schema, statement.Name)))
+            if (!statement.IsFunction && statement.Schema is { } schema && !relations.Contains((schema, statement.Name)))
             {
                 relations.Add((schema, statement.Name));
             }
@@ -143,10 +155,15 @@ internal sealed record MigrationImpact(IReadOnlyList<TableImpact> Tables, IReadO
     /// <param name="statements">The script's lock statements.</param>
     /// <param name="footprints">The catalog read, asked about <see cref="RelationsOf" /> of the same statements.</param>
     /// <param name="sessions">The sessions read, or <see langword="null" /> when it was not made.</param>
+    /// <param name="declaredIndexes">
+    /// The indexes the configuration declares, to name the tables a function dropped with <c>CASCADE</c> takes an index from; or
+    /// <see langword="null" /> when they could not be read.
+    /// </param>
     public static MigrationImpact Assemble(
         IReadOnlyList<TableLockStatement> statements,
         IReadOnlyList<RelationFootprintRow> footprints,
-        IReadOnlyList<TableSessionRow>? sessions)
+        IReadOnlyList<TableSessionRow>? sessions,
+        IReadOnlyList<PostgresStudio.Services.Schema.DeclaredIndex>? declaredIndexes = null)
     {
         ArgumentNullException.ThrowIfNull(statements);
         ArgumentNullException.ThrowIfNull(footprints);
@@ -176,8 +193,8 @@ internal sealed record MigrationImpact(IReadOnlyList<TableImpact> Tables, IReadO
                 ? found
                 : null;
 
-            string key = row is null ? "\u001F" + statement.Display : row.Schema + "\u001F" + row.Table;
-            string display = row is null ? statement.Display : row.Schema + "." + row.Table;
+            string key = row is null ? "\u001F" + (statement.IsFunction ? "function " : string.Empty) + statement.Display : row.Schema + "\u001F" + row.Table;
+            string display = row is null ? (statement.IsFunction ? "function " : string.Empty) + statement.Display : row.Schema + "." + row.Table;
 
             int at = groups.FindIndex(x => string.Equals(x.Key, key, StringComparison.Ordinal));
             if (at < 0)
@@ -202,9 +219,37 @@ internal sealed record MigrationImpact(IReadOnlyList<TableImpact> Tables, IReadO
                 ? null
                 : new TableSessions([.. sessions.Where(x => x.TableOid == row.TableOid).Select(static x => new SessionStateCount(x.State, x.Granted, x.Sessions))]);
 
-            tables.Add(new TableImpact(display, grouped, footprint, onTable));
+            tables.Add(new TableImpact(display, grouped, footprint, onTable)
+            {
+                Note = grouped.All(static x => x.IsFunction) ? FunctionNote(grouped[0].Name, declaredIndexes) : null,
+            });
         }
 
         return new MigrationImpact(tables, MigrationRisk.Advice(statements));
+    }
+
+    /// <summary>What a function dropped with <c>CASCADE</c> takes with it, and where the configuration says so, from which tables.</summary>
+    internal static string FunctionNote(string function, IReadOnlyList<PostgresStudio.Services.Schema.DeclaredIndex>? declaredIndexes)
+    {
+        const string General = "Tables whose indexes or defaults use it.";
+
+        if (declaredIndexes is null)
+        {
+            return General;
+        }
+
+        Regex uses = new(@"\b" + Regex.Escape(function) + @"\s*\(", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromSeconds(5));
+        string[] names =
+        [
+            .. declaredIndexes
+                .Where(x => uses.IsMatch(x.Definition))
+                .Select(static x => x.Schema + "." + x.Table + " (" + x.Name + ")")
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(static x => x, StringComparer.Ordinal),
+        ];
+
+        return names.Length == 0
+            ? General
+            : "Declared indexes that use it: " + string.Join(", ", names) + ". " + General.Replace("Tables", "Any other table", StringComparison.Ordinal);
     }
 }

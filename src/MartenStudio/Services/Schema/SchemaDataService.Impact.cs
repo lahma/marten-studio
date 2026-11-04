@@ -125,7 +125,16 @@ internal sealed partial class SchemaDataService
             sessionsNotice = "Sessions on these tables were not read: the tables could not be resolved.";
         }
 
-        return MigrationImpact.Assemble(statements, footprints, sessions) with { Notice = notice, SessionsNotice = sessionsNotice };
+        // A function dropped with CASCADE names the tables whose declared indexes use it, from the configuration alone (no connection).
+        IReadOnlyList<PostgresStudio.Services.Schema.DeclaredIndex>? declared = null;
+
+        if (statements.Any(static x => x.IsFunction))
+        {
+            PostgresStudio.Services.Schema.SchemaDeclarationRead own = SchemaDeclarationReader.ReadForClassification(resolved.Store.Options, options.Value.IsDocumentTypeVisible);
+            declared = own.Succeeded ? own.Declarations.Indexes : null;
+        }
+
+        return MigrationImpact.Assemble(statements, footprints, sessions, declared) with { Notice = notice, SessionsNotice = sessionsNotice };
     }
 
     /// <summary>
