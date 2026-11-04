@@ -495,7 +495,8 @@ if?, and audited. A write, a locking read, a cut text or one withheld from you g
 that reads a schema you may not see is not shown. **Index advisor** (1.2) plans the 20 statements with the most execution
 time that you may see, imagines each index their plans suggest with hypopg, one at a time, and ranks them by planned cost
 saved times calls, with the `StoreOptions` line (Marten document tables) or `CREATE INDEX CONCURRENTLY` as the remedy; it
-plans on a press, behind the page's own gate, creates nothing and applies nothing. **Mark** (1.2) counts from now, in this tab: each statement's change
+plans on a press, behind the page's own gate, creates nothing and applies nothing. Health's T01 and T15 cards offer it,
+narrowed to the table, and a what-if of the foreign key's own lookup. **Mark** (1.2) counts from now, in this tab: each statement's change
 since the mark instead of the advisor's window, kept in this tab's connection only.
 
 **Maintenance** (Operations, `/marten/maintenance`) — what autovacuum will do next and why: each table against the

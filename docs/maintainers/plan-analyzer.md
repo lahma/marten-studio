@@ -27,7 +27,16 @@ shown; the rest is masked like the text, and each plan is audited by `queryid`. 
 output, unmasked (D27). What if? (X2) imagines one index with hypopg behind the gate of the plan it accompanies, only
 one a builder writes (`MigrationSqlText`, or Marten's own `ToDDL`), re-derived on the server. Read-only; never
 `CREATE EXTENSION` or a real index; `hypopg_reset()` on the same connection, and a session whose reset fails ends
-itself, so no pooled backend keeps a hypothetical index. **Query › Plan (0.9, issue #28)** is the console's gate as a page of its
+itself, so no pooled backend keeps a hypothetical index. **The index advisor (1.2).** Statements' Index advisor and the T01
+and T15 card actions use X2's engine over several statements and indexes: one connection, a read-only transaction and a
+`hypopg_reset()` per candidate, the reset-or-end rule unchanged, behind the gate of the plans they read - the Statements
+page's for the advisor and T01, the finding's (`Database`) for T15's studio-built lookup, which drops `FOR KEY SHARE` so a
+`SELECT`-only console role can plan it. Candidates are only what builders write (`MigrationSqlText`, Marten's `ToDDL`
+through `IIndexCandidateContributor`, as the line that declares the index, or as a note where the store declares it
+already, imagined as the declared index's own DDL); a recorded statement names no JSON member, so none is offered; P17
+offers none; partitioned tables are not imagined; asking about one table never confirms a table in a schema you may not
+see; a card action's press is one audit entry, carrying the advisor's counts; nothing is planned without hypopg and
+nothing is applied. **Query › Plan (0.9, issue #28)** is the console's gate as a page of its
 own, and nothing new: `ISqlConsoleService.PlanAsync` takes the same capability, write policy, guard, read-only transaction
 and timeout, audited as `RunSql` (the matrix classifies it with `RunSqlAsync`), planned, analyzed, or as a generic or custom plan
 of a statement with `$n` placeholders - a custom plan binds the typed values to the statement `EXPLAIN` explains, because a

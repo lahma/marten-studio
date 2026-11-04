@@ -265,7 +265,8 @@ sequential scan filters on plain columns, **What if?** plans the statement again
 hypopg and draws both plans side by side; it creates nothing, and needs hypopg installed, which is your decision.
 Statements also has an **Index advisor** (1.2, hypopg): the top statements you may see, each index their plans suggest
 tried one at a time, ranked by planned cost saved times calls, with `CREATE INDEX CONCURRENTLY` as the remedy; planned on
-a press behind the page's gate, nothing created.
+a press behind the page's gate, nothing created. T01 and T15 findings offer it, and a what-if of the foreign key's own
+lookup.
 
 **Blocking.** Database › Sessions › Blocking (`?view=blocking`) draws who holds up whom as trees, behind
 `ViewDatabaseActivity`, with a chain head's `pg_terminate_backend` (and `pg_cancel_backend`) as text to copy - the
