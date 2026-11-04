@@ -171,6 +171,29 @@ public class ResultColumnTypesTests
         ReadOnlySqlSession.AutoPrepares(zero).Should().BeFalse();
     }
 
+    /// <summary>
+    /// <c>Max Auto Prepare</c> set in code through the data source builder is in the connection's string like one written in it,
+    /// with no server involved.
+    /// </summary>
+    [Fact]
+    public void Max_Auto_Prepare_set_in_code_on_a_data_source_is_seen()
+    {
+        var builder = new Npgsql.NpgsqlDataSourceBuilder("Host=h;Database=d");
+        builder.ConnectionStringBuilder.MaxAutoPrepare = 50;
+
+        using Npgsql.NpgsqlDataSource source = builder.Build();
+        using Npgsql.NpgsqlConnection connection = source.CreateConnection();
+
+        ReadOnlySqlSession.AutoPrepares(connection).Should().BeTrue();
+
+        var plain = new Npgsql.NpgsqlDataSourceBuilder("Host=h;Database=d");
+
+        using Npgsql.NpgsqlDataSource plainSource = plain.Build();
+        using Npgsql.NpgsqlConnection plainConnection = plainSource.CreateConnection();
+
+        ReadOnlySqlSession.AutoPrepares(plainConnection).Should().BeFalse();
+    }
+
     [Theory]
     [InlineData("seg", "(cannot read seg) - cast it to ::text in the statement to see it")]
     [InlineData("public.vector", "(cannot read public.vector) - this connection prepares statements automatically (Max Auto Prepare), so the console cannot ask for text: cast it to ::text in the statement to see it")]

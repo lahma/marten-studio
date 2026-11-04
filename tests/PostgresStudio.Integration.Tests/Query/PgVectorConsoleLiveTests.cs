@@ -187,6 +187,13 @@ public sealed class PgVectorConsoleLiveTests : IAsyncLifetime
             (await reader.ReadAsync(Token)).Should().BeTrue();
             reader.GetInt32(0).Should().Be(1);
             reader.GetDecimal(2).Should().Be(1.5m);
+
+            // Column 1 is still described as binary on the host's own command: Npgsql has no handler for vector, so reading it
+            // throws - it never returns the string a text-format description left on the pooled connection would give.
+            Exception? unreadable = Record.Exception(() => reader.GetValue(1));
+
+            unreadable.Should().NotBeNull("a vector column has no handler, and a text-format description would have returned its text");
+            unreadable.Should().Match<Exception>(static x => x is InvalidCastException || x is NotSupportedException);
         }
     }
 
