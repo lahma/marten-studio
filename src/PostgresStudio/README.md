@@ -223,7 +223,8 @@ statement by statement, grouped by verb and table), **Maintenance** (autovacuum'
 workers, the freeze forecast and the vacuum horizon), **Storage** (size, growth and the largest tables, from the
 catalog's page counts) and **Replication** (slots, standbys, the archiver, WAL, checkpoints and I/O). **System** -
 **Server** (version, platform, what the reading role can see, settings, extensions and the security posture) and
-**Activity** (the last 500 actions taken through the studio).
+**Activity** (the last 500 actions taken through the studio). **Find** (1.2), the header box (`/` or Ctrl+K), opens a
+table or view by name or a statement by queryid, through the page it opens and under that page's gate.
 
 **Database › Connection** (1.1; the long form is
 [`docs/connection.md`](https://github.com/lahma/marten-studio/blob/main/docs/connection.md)) shows how your application

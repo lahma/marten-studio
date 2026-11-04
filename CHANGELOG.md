@@ -1,3 +1,195 @@
+# 1.2.0
+
+1.2.0 makes the studio move like an application - pages change inside the circuit, the header finds anything by id, and
+dialogs and keys work for a keyboard - and answers more of the questions an admin brings to it locally: what a migration
+will lock, whether stored documents and events still fit the types, which index would help, which projections read an
+event, how two snapshots differ, and where each store and tenant lives. One write is new, removing an orphaned
+progression row, and lag thresholds can be set per projection in code. It fixes the three open issues (#55, #56, #57)
+and a .NET 11 SDK Debug start-up failure.
+
+- Moving around a studio no longer fetches the page from the server. Links, Back and Forward and the addresses a page
+  writes (a filter, a page of results, a Run) are handled inside the circuit, the way a Blazor app with its own router
+  handles them; in 1.1 each was a fetch of the whole page, and on a slow connection one could cancel the one before it
+  (`net::ERR_ABORTED` in the network panel). An address under the studio's path that is not one of its pages is loaded
+  by the browser as before. Host JavaScript initializers no longer receive `enhancedload` for moves inside the studio.
+  The AppContext switch `PostgresStudio.DisableNavigationInterception` restores 1.1's navigation until 1.3
+  (docs/stability.md).
+- The address keeps the store and database in two cases where it could lose them: a link pasted with a scope other than
+  the first, on a host whose scope listing is slow, and the SQL, Plan and Query pages reached from the navigation rail.
+  A link to another store, database or tenant that you click moves the studio to it; Back and Forward rewrite the
+  address back to the scope on screen. The sidebar's links follow a scope change at once.
+- Find by id, a box in both studios' header (`/` or Ctrl+K): a document id, stream id, natural key, `#sequence`, table
+  or view name, or a statement's queryid, tried against the selected store and database with each probe made by the page
+  it opens and under its gates. One match opens it, several are listed, and nothing found offers the other stores.
+  Hidden document types, withheld schemas and tenants your policy refuses never answer and are never counted.
+- The shell's header shows the host's environment as a badge (`IHostEnvironment.EnvironmentName`: Production in the
+  danger colour, Staging in the warning colour, Development in the success colour, any other name neutral), a copy-link
+  button that copies the page's address with its scope in it (a text box to copy from when the browser's clipboard
+  refuses), and, when the host sets the new `ApplicationPath` option on `MartenStudioOptions` or
+  `PostgresStudioOptions`, a "Back to application" link. `ApplicationPath` is a path that starts with a single `/` or an
+  absolute http(s) URL without user information, used as written and never re-rooted under the mount; `null`, the
+  default, shows no link. On a phone a header with a scope selector is two rows. (Public API: both options classes gain
+  `ApplicationPath`.)
+- Every dialog is now a native modal. Opening one moves keyboard focus into it (to the box you type the confirmation
+  into, to Cancel for an action that cannot be undone, or to "Back to the editor" in a document's save preview), Tab
+  stays inside it, Esc is Cancel, the page behind it cannot be reached, and closing it puts focus back on the button
+  that opened it. A browser or page that cannot do this keeps the overlay it always had.
+- Press ? anywhere except in a text field to see every keyboard shortcut the studio has: the JSON viewer and its search
+  box, menus, the SQL editor, table rows, the plan icicle, Find, and in Marten Studio the document list, the LINQ query
+  boxes and the document editor. Esc closes it.
+- Stores, a new Marten Studio page (`/marten/stores`) for hosts with several stores: each store you may see, whether it
+  builds and why not, its tenancy in words, document types, event store and whether this process hosts its daemon, and
+  each database with a health chip from the last sweep (never green when a check could not run). Opening it starts no
+  sweep and enumerates no store the header has not; Check runs one database's regular sweep on request. The Overview now
+  shows the selected store's card, and a line linking to Stores when there are two or more; a store whose databases
+  could not be listed is kept and says so.
+- Tenants, a new read-only Marten Studio page (`/marten/tenants`): the tenants you may address, 25 a page, each with its
+  database or partition, estimated documents, events and streams from the catalog's statistics (partition estimates on
+  tenant-partitioned tables, column statistics on shared ones, never a `count(*)`), its last event where an index finds
+  it, and its projection progress under `UseTenantPartitionedEvents` or a database of its own. Estimates and last events
+  are shown with `ViewDatabaseActivity`, as T18's tenant skew is, and the first such read in a circuit is audited (event
+  9265). Provisioning tenants stays out.
+- Events > Event flow: which projections and subscriptions read each event type of the store, and the document types,
+  flat tables and live aggregates they write, drawn from `StoreOptions` and the projection graph alone (no database
+  read), with filters by projection and by event type, and the event types nothing reads (M6). A document type the host
+  hides, and the subclasses of a hidden root, are absent. The Rebuild dialog says which event types a projection reads
+  ("Event types read"), and the Projections and Event types screens link each projection and event type to its flow
+  ("Show its flow").
+- Documents: Check shapes, in a collection's header, reads a bounded sample of the collection in scope - all of it up to
+  200 documents, otherwise the lowest and highest ids and up to 150 more spread across the collection by PostgreSQL's
+  own statistics (a conjoined collection with all tenants in scope reads only its lowest and highest keys, in
+  primary-key order; choose a tenant for a spread sample) - and round-trips each document through the store's
+  serializer. It lists documents that cannot be loaded, members the type no longer declares (the next save drops them),
+  values that change or come back empty, and members the stored documents lack, each with a count and an example.
+  Nothing is written and no value is shown; it is a read under the store policy, cached for five minutes per scope.
+- Event types: Check shapes does the same for each event type, reading every sampled event through Marten's own event
+  reader - the one a rebuild uses, upcasters included - so an event a rebuild would stop on is found before the rebuild,
+  with the sequence of the first and what RebuildErrors would do about it. An event type the store has not registered is
+  never read through that reader (it would register the type on your store): its events are reported as unknown, or -
+  when their .NET type is loaded - as events Marten would register on first read. Without
+  opts.Events.EnableEventTypeIndex it reads each type's oldest and newest events only, and says so; a click over many
+  types stops after a minute and says how far it got. With per-tenant sequences and every tenant in scope, only the
+  oldest and newest events of each type are read.
+- Statements has an index advisor: for the 20 statements with the most execution time that you may see, it imagines each
+  index their plans suggest with hypopg, one at a time, plans the statements again, and ranks the indexes by planned
+  cost saved times calls, with the statements each one helps and the remedy - a StoreOptions line for a Marten document
+  table (or, where the store already declares the index and the database has lost it, a note that applying the schema
+  creates it), CREATE INDEX CONCURRENTLY otherwise. Behind the Statements page's own gate; planned, never run; nothing
+  is created.
+- Health: a finding can offer an action that reads more, on demand, for the visitor who presses it - under at least the
+  finding's own gate, one at a time in a tab and one per database, audited, and kept nowhere: not in the sweep, the
+  snapshot or the diagnostics API. E06's "Find the 20 longest streams" reads `mt_streams` once, in a read-only
+  transaction under `statement_timeout`, names the aggregate each long stream was started as and whether it is rebuilt
+  from every event on each fetch, and offers that aggregate's own `Snapshot<T>` line; hidden types are never named. T15
+  (foreign key without a covering index) offers "What if it had an index?": the lookup Postgres runs for every delete
+  from the referenced table, planned now and with a hypothetical index on the key's columns, under the finding's own
+  gate. T01 (sequential scans on a large table) offers "Try indexes against this table's statements": the index advisor
+  narrowed to that table, behind the Statements page's gate. A finding from another database (the scope moved while the
+  page still showed the old report) is refused and reads nothing.
+- Health › Snapshot: "Compare with an earlier snapshot" reads a snapshot file in the page (at most 4 MB, `schemaVersion`
+  1) and shows findings that are new, worse, better or no longer reported, statement and size changes, the WAL written
+  between the two, new checksum failures and changed connection settings - only for what you may see now. The file is
+  never stored, logged, audited or sent anywhere. "Copy Markdown" and "Download Markdown" write the same view as the
+  JSON as a readable report for a ticket, with every value from the database escaped. The Snapshot download fills
+  `statements.windowSeconds` and `statements.statisticsSince`, as the diagnostics API always did.
+- Statements, Storage and Maintenance: Mark remembers the counters on screen, in this tab only, and shows each one's
+  change since then ("since 14:02") until you clear it; a statistics reset, or a restart or failover that began the
+  counters again, ends the mark and says so. Statements' per-row "Watched since" note follows the mark's selected time
+  zone, and the mark's "today" is taken from the host's `TimeProvider` when one is registered.
+- Projections: an orphaned progression row can be removed from the screen. Remove sits beside Marten's own call on each
+  row the daemon does not still read, under `CorrectProgression`, after a confirmation. The studio reads the table again
+  at the click, removes only a row that is still an orphan, asks the store and write policies about the database as a
+  whole whatever tenant is selected (the button shows the policy's refusal rather than failing), says so when the row
+  was already gone, and audits it under the database with no tenant (events 9225 and 9226). Marten's call first ensures
+  the event store's storage, as every write to it does.
+- The Rebuild dialog names the error policy a rebuild runs under (`Projections.RebuildErrors`) and says when it differs
+  from the continuous agents' `Projections.Errors`, so a rebuild that stops where the live agent skipped is no surprise.
+- New option `MartenStudioOptions.ProjectionThresholds` (and the record `ProjectionLagThreshold`) sets amber and red lag
+  per projection name, for every store: `o.ProjectionThresholds["Trips"] = new(WarningBehind: 5_000, CriticalBehind:
+  50_000)`. It wins over thresholds written into a progression row and over the studio's 1,000 and 100,000, for the lag
+  colours, the chart lines, the Overview and D03/D04, and the Projections page says which source applies to each
+  projection. Startup refuses a non-positive pair or a critical below its warning, naming the projection. (Public API:
+  MartenStudio's baseline gains `ProjectionThresholds` and `ProjectionLagThreshold`.)
+- `AcceptedChecks` (all three packages) and `ProjectionThresholds` are read once, when the options are validated at
+  startup; a change made to the resolved options afterwards is no longer seen (before 1.2 `AcceptedChecks` was read
+  live, unvalidated and unsafely against concurrent readers).
+- The Schema screen's apply section now says what a migration will lock and rewrite. For each `ALTER TABLE` and
+  partition create the previewed script runs on a table that already exists - a changed or added column (including
+  Marten's duplicated fields, whose backfilling `update` runs under the lock), a changed type, a dropped column,
+  constraint, index or table, an added primary or foreign key (a new table's foreign key is listed on the existing table
+  it references), `SET NOT NULL`, a plain `CREATE INDEX`, a new partition, and the copy out and back of a repartitioned
+  table - and for each function Weasel drops with `CASCADE`, which removes every index or default built on it under that
+  table's lock, it names the lock the statement takes (`SHARE`, `SHARE ROW EXCLUSIVE` or `ACCESS EXCLUSIVE`), whether it
+  rewrites the table, and the table's estimated rows and size from the catalog's statistics, read without opening the
+  table or calling a size function. An `ALTER TABLE` form the studio has no rule for is listed too, as one it does not
+  judge. With `Capabilities.ViewDatabaseActivity` on and the write policy allowing it, it also counts the sessions that
+  hold or wait for a lock on each table now, in this database and on the host the apply runs on, by state and never by
+  statement; anyone else gets one line saying they are not shown. It advises
+  `opts.Advanced.Migrator.BuildIndexesConcurrentlyOnAlter = true` for index builds that make writers wait, and a quiet
+  time or a `lock_timeout` in the host's own migration path for `ACCESS EXCLUSIVE` statements, which keep the lock until
+  the whole command they are in has finished. These are notes: the apply, its typed confirmation and its authorization
+  are unchanged.
+- Schema › Indexes no longer queues behind a migration's lock (D27): the list used to print every index's statement with
+  `pg_get_indexdef`, which opens the indexed table, so it waited out the 3-second `lock_timeout` while a migration held
+  any store table. It now shows each index's keys from the catalogs (an expression key reads "(expression)", and where
+  the store declares the index the Keys column also shows the declared keys, labelled "declared"), its included columns,
+  whether it is partial or invalid, and answers at once. An index's full statement is read when you open "Show
+  definition" on its row, and says so if a migration holds that one table.
+- The SQL console shows pgvector. A `vector`, `halfvec` or `sparsevec` column, which the console could not read unless
+  the host called `UseVector()` and used to answer "(cannot read vector)", now arrives as the text Postgres prints and
+  is drawn as the database browser draws it: the type and the first components (`vector [0.0123, -0.0441, 0.2, …]`),
+  with a chip that opens the whole value under the grid, with Copy. This holds on PostgresStudio's Query page and on
+  Marten Studio's Query › SQL tab alike, and for a host that did call `UseVector()`, so the text is Postgres's own in
+  every host. A type is pgvector's when the `vector` extension owns it, whatever it is called. The statement is
+  described first (Parse and Describe only: nothing runs) in the console's own read-only transaction, under the same
+  statement timeout, for one extra round trip; the guard, the transaction and the audit are unchanged. Any other type
+  Npgsql has no handler for (an extension's own) now arrives as the text Postgres prints instead of "(cannot read …)". A
+  pgvector value is kept to 64 Ki characters rather than a cell's kilobyte, and a result keeps 8 Mi characters of them
+  in all, so the CSV and JSON exports carry an embedding whole. The limit: on a connection whose string sets `Max Auto
+  Prepare` the console asks for no text, because Npgsql fixes an auto-prepared statement's result formats by its SQL
+  text and that would leak into the host's own commands; there it behaves as before, and a cell it cannot read says
+  "cast it to ::text in the statement to see it".
+- LINQ mode on the Query page keeps recent and saved queries, in a drawer of its own beside the editor (documents and
+  the event log). An entry is the target, the predicate, the ordering and, for the event log, the archived selector;
+  Export and Import move a list between machines, and a LINQ list never mixes with the SQL console's or the Marten
+  clause box's. The lists stay in the visitor's own browser, as the other two modes' do.
+- Health evidence spells every moment one way, `2026-11-04 08:57:03 UTC` (UTC, to the second). In 1.1 some findings
+  wrote `2026-11-04 08:57:03Z` and others `2026-11-04 08:57 UTC`. A host that parsed an evidence value, a caveat or a
+  title for a time must match on the finding's code instead: evidence labels, values and caveats are wording
+  (docs/stability.md).
+- Maintenance's Triggers table no longer pushes its last columns out of sight at 1280 px: a long table name wraps and
+  the autovacuum bars need less room. A LINQ refusal's caret line keeps the width the SQL console's has.
+- `PostgresStudioPage` gains `Connection` (Database › Connection), and `GetStudioPath` answers it with the same scope
+  query as the other pages (#55).
+- C18 (several pools to one database in this process) counts the pools of data sources the host gave a `Name` with
+  `NpgsqlDataSourceBuilder.Name` (#56). The studio identifies such a pool, in memory, through the data sources it
+  already resolves: the one being read, Postgres Studio's registered and `AddDataSource` sources, and Marten Studio's
+  stores. A host's `AddDatabaseSource` is never asked, and a name that several data sources share (a factory that names
+  every tenant alike, a multi-host data source) is not judged. A named pool it does not resolve is no longer silently
+  left out: a quiet C18 says "Not judged for N named pool(s)", with the reasons that apply; a finding counts them under
+  "Named pools not identified, left out". Counts only; no name or connection string is kept or shown (D33).
+- With `PostgresConnectionHistoryOptions.ShouldSample` set, the connection history's empty-window sentence (Holders and
+  the `ConnectionHistory` section's `Reason`) follows `ShouldSample`'s last answer instead of promising a first sample
+  "a moment after the application starts", and says when another process samples or when a process that is not chosen
+  keeps the default in-memory history, whose samples never appear there (#57).
+- The studio starts in a Debug build of the host with the .NET 11 SDK. That build lists a hot-reload JavaScript
+  initializer among the page's Blazor initializers, and the studio-rooted `<base href>` asked for it under the mount
+  path, where it was a 404 that stopped `Blazor.start`. The studio now serves the host's own `_framework` files under
+  its path, only to a visitor the host itself would serve them to (its `AuthorizationPolicy`, or the mapping's
+  `RequireAuthorization()`/`AllowAnonymous()` and the host's `FallbackPolicy`), and a path that climbs out of
+  `_framework` is a 404. The packages still ship no initializer (D24). The
+  `-p:EnableHotReloadInRuntimeConfigDevFile=false` workaround is no longer needed. On .NET 11 the circuit starts only
+  for a visitor the `FallbackPolicy` admits (dotnet/aspnetcore#69624).
+- Time travel, the projection stepper and the compaction preview no longer register an event type the store does not
+  map. A stream event whose type is not mapped in this process is not folded, and the replay says "not mapped in this
+  process; not folded" instead of loading the stored .NET type onto the host's store, which had silenced the
+  unregistered-event-types check (E05) until a restart.
+- Leaving a page with live numbers (Sessions, the Overviews, Health and others) before its first refresh had started no
+  longer ends the session; it threw in the page's first render.
+- `PostgresStudioResource` and `MartenStoreResource` document that an empty `DatabaseIdentifier` means only "may this
+  source or store be named" and never "every database".
+- Package validation runs against 1.1.0, and tests and samples build without warnings on the .NET 11 SDK.
+
 # 1.1.0
 
 1.1.0 moves the floors to the latest Marten and Npgsql (Marten 9.57.0, Npgsql 9.0.4), supports PostgreSQL 19, adds

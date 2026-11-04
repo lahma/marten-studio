@@ -36,6 +36,9 @@ byte-for-byte the application it was.
 - **Events**: a stream's timeline and time travel; **Event flow** shows which projections read which event types.
 - **Query**: the Marten clause box, the SQL console and LINQ mode each keep recent and saved queries in your browser; the
   console's results export as CSV and JSON. Press `?` for every keyboard shortcut.
+- **Find by id** (the header box, `/` or Ctrl+K): paste a document id, a stream id or natural key, `#sequence`, a table
+  name or a statement's queryid; one match opens it, several are listed. Each probe is the read its page makes, under the
+  same gates; a hidden type never answers.
 
 ## Three packages
 
@@ -1081,7 +1084,8 @@ The long form is in [`docs/security.md`](docs/security.md). The short form:
 - **No "integrate into my own Blazor app" mode.** The studio maps its own component root; its pages
   cannot be added to your router (D11).
 - **Keyboard shortcuts are listed, not configurable.** Press `?` outside a text field for the list; the
-  keys are the ones each control handles when it has focus, and the only global ones are `?` and Esc.
+  keys are the ones each control handles when it has focus, and the only global ones are `?`, Find's `/` and Ctrl+K,
+  and Esc.
   There are no user-defined shortcuts.
 - **No live SQL tail.** It would require replacing your `StoreOptions.Logger`, which is exactly the
   "registration changes host behaviour" failure this project refuses. Every generated grid carries a

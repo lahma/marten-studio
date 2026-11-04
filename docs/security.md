@@ -53,6 +53,11 @@ studio authorized by `AuthorizationPolicy` alone asks no policy per call. A link
 store, database or tenant moves the studio to it only when the visitor's own listings carry it, as the store policy decided
 them; Back, Forward and a page's own navigation never move the scope.
 
+Find (1.2), the header box, runs each probe through the service of the page it opens, under that page's gates, and audits
+nothing itself. A hidden document type, a schema the browser's gate withholds, a tenant the store policy refuses and a
+statement below the `Activity` gate never answer and are never counted; a hit in another store, database or tenant is a
+link, which the clicked-link rule above governs.
+
 Layer 2 filters listings rather than annotating them. A tenant you may not see is one you never learn
 exists — the *count* of tenants in a process is itself something a tenant should not learn. In Postgres Studio layer 2
 is `SourceAuthorizationPolicy`, against a `PostgresStudioResource` ([Postgres Studio](#postgres-studio)).

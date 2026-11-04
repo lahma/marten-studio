@@ -249,6 +249,12 @@ honour another application's visibility rules.
 Every database-wide page asks the source policy about the database as a whole. A page polls at `RefreshInterval` while
 its tab is visible, through caches shared by every circuit, so ten open tabs cost what one does.
 
+**Find** (1.2), the box in the header (`/` or Ctrl+K), takes a table or view name (or `schema.name`) or a statement's
+queryid and looks for it in the selected source and database: one match opens it, several are listed. Each probe is the
+read of the page it opens, under that page's gate - a name only among what the database browser lists for you, a queryid
+only among the statements the last sweep read, with `ViewDatabaseActivity` - so nothing withheld answers or is counted.
+Find starts no sweep and records nothing of its own.
+
 ## The health advisor
 
 The Health page (`/postgres/health`, long form in [health.md](health.md), every code in
