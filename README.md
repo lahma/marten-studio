@@ -479,7 +479,8 @@ activity gate. C13 (an application holding a tenth of the client limit idle whil
 that set no `Application Name`, Info) are the checks over it. With `AddPostgresConnectionHistory()` (1.0) Holders also says what
 the server's connections peaked at before now, and when - each application's own peak behind the activity gate - from a
 sample a minute that the host keeps where it likes ([docs/diagnostics.md](docs/diagnostics.md#connection-history)). The Health page's **Snapshot** menu views, copies or downloads what your
-pages show of the database as JSON, built from your own view of each page.
+pages show of the database as JSON or as a Markdown report for a ticket, built from your own view of each page, and
+compares an earlier snapshot file with now.
 
 **Statements** (Operations, `/marten/statements`) — where the database's time goes, statement by statement, grouped
 by Marten operation and document type, behind `ViewDatabaseActivity`. A statement's **Plan** link (`?queryid=`) opens

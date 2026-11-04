@@ -167,9 +167,10 @@ written without reading the docs must not put statements in an e-mail.
 *The studio never serves it.* Nothing in either package puts an API result into an HTTP response, a log line above
 Debug, a metric, the Activity ring or the health check's data, and no endpoint maps one: where a result goes is the
 host's decision. So the opt-in health check stays codes and counts (D29's second exception); the Health page's Snapshot
-download is built from the visitor's own gated view, section by section, never from this API (`VisitorSnapshotBuilder`,
-fenced by `DiagnosticsApiIsNotServedTests`); and an API call is not audited, as host code is not a visitor: a call is
-event 9250, at Debug, codes and counts only.
+download, its Markdown report and its compare (1.2) are built from the visitor's own gated view, section by section,
+never from this API (`VisitorSnapshotBuilder`, fenced by `DiagnosticsApiIsNotServedTests`), and the compare opens the
+visitor's own file only past that view's gate and keeps, logs and audits nothing of it; and an API call is not audited,
+as host code is not a visitor: a call is event 9250, at Debug, codes and counts only.
 
 *Stable codes.* A code is a letter and two digits, a string, never an enum, never reused, renamed or moved to another
 area (hard rule 7). A finding's variant (`deadlocks`, `temp-files`) is frozen the same way within its code, and a check

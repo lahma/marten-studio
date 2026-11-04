@@ -305,7 +305,8 @@ tests/PostgresStudio.Tests/Tables/        T15, T19, T20, T25 and T26 at their ed
 src/PostgresStudio.Diagnostics/Diagnostics/  The public diagnostics read model (D31): IPostgresDiagnostics, its request, snapshot,
                                          findings, checks and sections - namespace PostgresStudio, like the registration types
 src/PostgresStudio.Diagnostics/Services/Diagnostics/  The API's service, host gate, mapper, snapshot builder, read limiter and JSON writer (W5-API)
-src/PostgresStudio/Services/Diagnostics/  The Health page's visitor download builder, which never reaches the API (W5-API)
+src/PostgresStudio/Services/Diagnostics/  The Health page's visitor download builder, its Markdown report and the snapshot
+                                         compare, which never reach the API (W5-API)
 tests/PostgresStudio.Tests/Diagnostics/   The mapper over every enum member, the host gate's sentinels, the JSON baselines, the
                                          limiter, the sections from hand-built facts, the visitor download and the Snapshot
                                          menu - no database

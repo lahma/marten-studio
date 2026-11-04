@@ -389,10 +389,10 @@ found, for the host's own code, by stable code; there are no mutes without a UI,
 strings that mean nothing where no studio is mounted; results are
 extend-only records, and activity-grade data is returned only when the call sets `IncludeActivity = true`. The studio
 never serves it: nothing in either package puts an API result into an HTTP response, a log line above Debug, a metric,
-the Activity ring or the health check's data, and no endpoint maps one; the Health page's Snapshot download is built
-from the visitor's own gated view, never from this API, and an API call is not audited. A code is a letter and two
-digits, never reused, renamed or moved to another area, and a variant is frozen within its code. Full text:
-[architecture.md](docs/maintainers/architecture.md#d31).
+the Activity ring or the health check's data, and no endpoint maps one; the Health page's Snapshot download, its
+Markdown report and its compare are built from the visitor's own gated view, never from this API, and an API call is not
+audited. A code is a letter and two digits, never reused, renamed or moved to another area, and a variant is frozen
+within its code. Full text: [architecture.md](docs/maintainers/architecture.md#d31).
 
 **D32 — The studio draws every plan, plan insights judge it, and EXPLAIN ANALYZE is the console's alone.** Every plan is
 drawn through `QueryPlanReader` and `PlanView`; plan insights are pure evaluators with stable `P` codes in `codes.md`,
