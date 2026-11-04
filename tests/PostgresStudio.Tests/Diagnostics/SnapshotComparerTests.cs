@@ -666,6 +666,33 @@ public class SnapshotComparerTests
     }
 
     [Fact]
+    public void Extreme_sizes_and_counts_never_throw()
+    {
+        PostgresTableStorage Table(string name, long bytes) => new() { Schema = "public", Name = name, TotalBytes = bytes };
+
+        foreach ((long low, long high) in new[] { (long.MinValue, long.MaxValue), (long.MaxValue, long.MinValue), (-1L, long.MaxValue), (0L, long.MaxValue) })
+        {
+            PostgresDiagnosticsSnapshot earlier = Earlier() with
+            {
+                Storage = Storage(low, At.AddDays(-2), Table("a", low), Table("gone", low)),
+                Wal = Wal(low, low, low, At.AddDays(-30), At.AddDays(-2)),
+                Settings = Now().Settings! with { ChecksumFailures = low },
+            };
+
+            PostgresDiagnosticsSnapshot now = Now() with
+            {
+                Storage = Storage(high, At, Table("a", high), Table("new", high)),
+                Wal = Wal(high, high, high, At.AddDays(-30), At),
+                Settings = Now().Settings! with { ChecksumFailures = high },
+            };
+
+            Action compare = () => Compare(earlier, now);
+
+            compare.Should().NotThrow("a crafted size is bounded by the reader and by the comparer's own arithmetic");
+        }
+    }
+
+    [Fact]
     public void Comparing_a_snapshot_with_itself_changes_nothing()
     {
         PostgresDiagnosticsSnapshot snapshot = SnapshotFileReaderTests.Everything();

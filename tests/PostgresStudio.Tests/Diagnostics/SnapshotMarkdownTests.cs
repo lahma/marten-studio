@@ -98,16 +98,17 @@ public partial class SnapshotMarkdownTests
 
     [Theory]
     [InlineData("**b**", "\\*\\*b\\*\\*")]
-    [InlineData("# h", "\\# h")]
+    [InlineData("# h", "\\#\u2060 h")]
+    [InlineData("#12", "\\#\u206012")]
     [InlineData("---", "\\-\\-\\-")]
     [InlineData("| a | b |", "\\| a \\| b \\|")]
     [InlineData("&amp;", "\\&amp\\;")]
-    [InlineData(":smile:", "\\:smile\\:")]
-    [InlineData("http://evil", "http\\:\\/\\/evil")]
+    [InlineData(":smile:", "\\:\u2060smile\\:\u2060")]
+    [InlineData("http://evil", "http\\:\u2060\\/\\/evil")]
     [InlineData("<script>alert(1)</script>", "\\<script\\>alert\\(1\\)\\<\\/script\\>")]
     [InlineData("<img src=x onerror=alert(1)>", "\\<img src\\=x onerror\\=alert\\(1\\)\\>")]
-    [InlineData("[x](javascript:alert(1))", "\\[x\\]\\(javascript\\:alert\\(1\\)\\)")]
-    [InlineData("![i](http://evil/x.png)", "\\!\\[i\\]\\(http\\:\\/\\/evil\\/x\\.png\\)")]
+    [InlineData("[x](javascript:alert(1))", "\\[x\\]\\(javascript\\:\u2060alert\\(1\\)\\)")]
+    [InlineData("![i](http://evil/x.png)", "\\!\\[i\\]\\(http\\:\u2060\\/\\/evil\\/x\\.png\\)")]
     [InlineData("a\r\nb", "a b")]
     [InlineData("   lead and   trail   ", "lead and trail")]
     [InlineData("1. not a list", "1\\. not a list")]
@@ -119,6 +120,13 @@ public partial class SnapshotMarkdownTests
     {
         MarkdownText.Inline("@channel").Should().Be("\\@" + WordJoiner + "channel");
         MarkdownText.Inline("a@b.com").Should().Be("a\\@" + WordJoiner + "b\\.com");
+    }
+
+    [Fact]
+    public void Issue_references_and_emoji_get_a_word_joiner_after_their_first_character_as_a_mention_does()
+    {
+        MarkdownText.Inline("see #12").Should().Be("see \\#" + WordJoiner + "12");
+        MarkdownText.Inline(":smile:").Should().Be("\\:" + WordJoiner + "smile\\:" + WordJoiner);
     }
 
     [Fact]
@@ -176,6 +184,8 @@ public partial class SnapshotMarkdownTests
         "evil‮text",
         "zero​width",
         "@channel",
+        "#12",
+        "fixes #12 and :+1: :smile:",
         "&amp;",
         ":smile:",
         "http://evil",
@@ -285,6 +295,7 @@ public partial class SnapshotMarkdownTests
         List<string> offences = Shape(markdown);
 
         offences.Should().BeEmpty(string.Join(Environment.NewLine, offences));
+        EscapedWithoutJoiner().IsMatch(markdown).Should().BeFalse("every escaped @, # and : is followed by a word joiner, which no backslash can stand in for");
     }
 
     [Fact]
@@ -348,7 +359,9 @@ public partial class SnapshotMarkdownTests
 
             if (line.StartsWith('|'))
             {
-                int count = prose.Count(static c => c == '|');
+                // On the raw row, before any code span is taken out: GitHub splits a row into cells before it reads code, so a pipe
+                // that is not escaped counts even inside backticks, and a code span that forgot `inTableCell` fails here.
+                int count = UnescapedPipe().Count(line);
                 pipes = pipes < 0 ? count : pipes;
 
                 if (count != pipes)
@@ -459,6 +472,12 @@ public partial class SnapshotMarkdownTests
 
         return result.ToString();
     }
+
+    [GeneratedRegex(@"\\[#:@](?!\u2060)", RegexOptions.CultureInvariant)]
+    private static partial Regex EscapedWithoutJoiner();
+
+    [GeneratedRegex(@"(?<!\\)\|", RegexOptions.CultureInvariant)]
+    private static partial Regex UnescapedPipe();
 
     [GeneratedRegex("^(`{3,})(sql|text)?$", RegexOptions.CultureInvariant)]
     private static partial Regex FenceLine();

@@ -7,14 +7,18 @@ namespace PostgresStudio.Services.Diagnostics;
 internal interface ISnapshotCompareService
 {
     /// <summary>
-    /// Compares <paramref name="file" /> with the visitor's current view of <paramref name="scope" />. The visitor's current view is
-    /// built first, as Download JSON builds it; when it is refused the stream is never read.
+    /// Compares the file <paramref name="openFile" /> opens with the visitor's current view of <paramref name="scope" />. The visitor's
+    /// current view is built first, as Download JSON builds it; when it is refused the file is never opened, so it never starts
+    /// crossing the circuit.
     /// </summary>
     /// <param name="scope">The visitor's scope.</param>
-    /// <param name="file">The snapshot file's bytes. Read once, to at most <see cref="SnapshotFileReader.MaxBytes" />, and not kept.</param>
+    /// <param name="openFile">
+    /// Opens the snapshot file's bytes, called once and only past the visitor's gate. Read once, to at most
+    /// <see cref="SnapshotFileReader.MaxBytes" />, disposed and not kept.
+    /// </param>
     /// <param name="fileName">The file's name, for the heading; kept to 120 characters.</param>
     /// <param name="cancellationToken">Cancels the reads.</param>
-    Task<SnapshotComparison> CompareAsync(StudioScope scope, Stream file, string? fileName, CancellationToken cancellationToken = default);
+    Task<SnapshotComparison> CompareAsync(StudioScope scope, Func<CancellationToken, Stream> openFile, string? fileName, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -46,10 +50,10 @@ internal sealed class SnapshotCompareService : ISnapshotCompareService
     }
 
     /// <inheritdoc />
-    public async Task<SnapshotComparison> CompareAsync(StudioScope scope, Stream file, string? fileName, CancellationToken cancellationToken = default)
+    public async Task<SnapshotComparison> CompareAsync(StudioScope scope, Func<CancellationToken, Stream> openFile, string? fileName, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(scope);
-        ArgumentNullException.ThrowIfNull(file);
+        ArgumentNullException.ThrowIfNull(openFile);
 
         VisitorView view = await builder.BuildViewAsync(scope, cancellationToken).ConfigureAwait(false);
 
@@ -61,6 +65,8 @@ internal sealed class SnapshotCompareService : ISnapshotCompareService
                 fileName);
         }
 
+        // Only now does the file start crossing the circuit.
+        await using Stream file = openFile(cancellationToken);
         SnapshotFileRead read = await SnapshotFileReader.ReadAsync(file, cancellationToken).ConfigureAwait(false);
 
         if (read.Snapshot is not { } earlier)

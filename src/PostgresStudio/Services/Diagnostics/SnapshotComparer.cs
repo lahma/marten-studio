@@ -415,7 +415,7 @@ internal static class SnapshotComparer
             if (before.ChecksumFailures is { } failuresBefore && after.ChecksumFailures is { } failuresNow && failuresBefore != failuresNow)
             {
                 string note = failuresNow > failuresBefore
-                    ? Count(failuresNow - failuresBefore) + " new" + (after.LastChecksumFailure is { } last ? ", the last at " + MarkdownText.Utc(last) : string.Empty)
+                    ? Count((long) Math.Min((double) failuresNow - failuresBefore, long.MaxValue)) + " new" + (after.LastChecksumFailure is { } last ? ", the last at " + MarkdownText.Utc(last) : string.Empty)
                     : "reset";
 
                 ServerRows.Add(new SnapshotValueChange("Checksum failures", Count(failuresBefore), Count(failuresNow), note));
@@ -438,7 +438,7 @@ internal static class SnapshotComparer
 
             if (before!.DatabaseBytes != after!.DatabaseBytes)
             {
-                long change = after.DatabaseBytes - before.DatabaseBytes;
+                double change = (double) after.DatabaseBytes - before.DatabaseBytes;
                 TimeSpan span = Span(before.MeasuredAt, after.MeasuredAt);
                 string? perDay = span >= TimeSpan.FromHours(1) ? Signed(change / span.TotalDays) + " a day" : null;
 
@@ -466,7 +466,7 @@ internal static class SnapshotComparer
                     continue;
                 }
 
-                long delta = Math.Abs(table.TotalBytes - old.TotalBytes);
+                double delta = Math.Abs((double) table.TotalBytes - old.TotalBytes);
 
                 if (delta > 0 && (delta >= TableAbsolute || delta >= TableRelative * old.TotalBytes))
                 {
@@ -488,7 +488,7 @@ internal static class SnapshotComparer
                 }
             }
 
-            TableRows.AddRange(changed.OrderByDescending(static x => Math.Abs((x.BytesNow ?? 0) - (x.BytesBefore ?? 0))).ThenBy(static x => x.Table, StringComparer.Ordinal).Take(MaxListed));
+            TableRows.AddRange(changed.OrderByDescending(static x => Math.Abs((double) (x.BytesNow ?? 0) - (x.BytesBefore ?? 0))).ThenBy(static x => x.Table, StringComparer.Ordinal).Take(MaxListed));
             TableRows.AddRange(added.OrderByDescending(static x => x.BytesNow).ThenBy(static x => x.Table, StringComparer.Ordinal).Take(MaxListed));
             TableRows.AddRange(gone.OrderByDescending(static x => x.BytesBefore).ThenBy(static x => x.Table, StringComparer.Ordinal).Take(MaxListed));
 
@@ -609,9 +609,9 @@ internal static class SnapshotComparer
             TimeSpan span = Span(before.MeasuredAt, after.MeasuredAt);
             double hours = span.TotalHours;
 
-            WalDelta(WalRows, "WAL records written", before.Records, after.Records, hours, static x => Count((long) x));
-            WalDelta(WalRows, "Full-page images written", before.FullPageImages, after.FullPageImages, hours, static x => Count((long) x));
-            WalDelta(WalRows, "WAL bytes written", before.Bytes, after.Bytes, hours, static x => TableText.Bytes((long) x));
+            WalDelta(WalRows, "WAL records written", before.Records, after.Records, hours, static x => Count(ToLong(x)));
+            WalDelta(WalRows, "Full-page images written", before.FullPageImages, after.FullPageImages, hours, static x => Count(ToLong(x)));
+            WalDelta(WalRows, "WAL bytes written", before.Bytes, after.Bytes, hours, static x => TableText.Bytes(ToLong(x)));
         }
 
         private static void WalDelta(List<SnapshotValueChange> rows, string label, long? before, long? after, double hours, Func<double, string> format)
@@ -621,10 +621,12 @@ internal static class SnapshotComparer
                 return;
             }
 
-            double written = current - was;
+            double written = (double) current - was;
 
             rows.Add(new SnapshotValueChange(label, null, format(written), hours >= 1 ? format(written / hours) + " an hour" : null));
         }
+
+        private static long ToLong(double value) => (long) Math.Clamp(value, long.MinValue, long.MaxValue);
 
         private static bool Fell(long? before, long? after) => before is { } was && after is { } current && current < was;
 
@@ -841,7 +843,7 @@ internal static class SnapshotComparer
 
         private static string Count(long value) => value.ToString("N0", Invariant);
 
-        private static string Signed(double bytes) => (bytes < 0 ? "-" : "+") + TableText.Bytes((long) Math.Abs(Math.Round(bytes)));
+        private static string Signed(double bytes) => (bytes < 0 ? "-" : "+") + TableText.Bytes((long) Math.Min(Math.Abs(Math.Round(bytes)), long.MaxValue));
 
         private static void AddCount(List<string> parts, int count, string singular, string? plural = null)
         {

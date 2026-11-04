@@ -59,7 +59,8 @@ internal static class MarkdownText
     /// <summary>
     /// Prose, literal: every ASCII punctuation character is backslash-escaped (CommonMark reads an escaped punctuation character
     /// as itself), so nothing forms emphasis, a link, an image, an autolink, raw HTML, a heading, a list, a table cell, an entity
-    /// or an emoji. Every <c>@</c> is followed by a word joiner, because a backslash does not stop a chat's mention filter.
+    /// or an emoji. Every <c>@</c>, <c>#</c> and <c>:</c> is followed by a word joiner, because a backslash does not stop a chat's mention,
+    /// issue-reference and emoji filters.
     /// Runs of white space are one space, and the ends are trimmed, so the text cannot become an indented code block.
     /// </summary>
     /// <param name="value">The text.</param>
@@ -91,7 +92,9 @@ internal static class MarkdownText
 
             result.Append('\\').Append(c);
 
-            if (c == '@')
+            // A backslash does not stop GitHub's mention, issue-reference and emoji filters, which read the text, so each of
+            // @name, #12 and :smile: gets a word joiner after its first character.
+            if (c is '@' or '#' or ':')
             {
                 result.Append(WordJoiner);
             }

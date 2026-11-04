@@ -439,18 +439,136 @@ public class SnapshotFileReaderTests
         Read(tree).Problem.Should().Be("database.source is missing.");
     }
 
-    [Fact]
-    public void No_refusal_holds_a_sentinel_placed_in_any_string_position()
+    /// <summary>Every leaf of the fixture - text, number or flag - by its path from the root.</summary>
+    private static List<string> Leaves(JsonNode? node, string path = "")
     {
-        // Every string position of the fixture, set to the sentinel with a wrong-typed neighbour: whatever the refusal says, not the sentinel.
+        List<string> leaves = [];
+
+        switch (node)
+        {
+            case JsonObject obj:
+                foreach ((string key, JsonNode? child) in obj)
+                {
+                    string childPath = path.Length == 0 ? key : path + "/" + key;
+
+                    // A key the writer wrote as null is a position too: the reader takes it, and a value there is a wrong one.
+                    leaves.AddRange(child is null ? [childPath] : Leaves(child, childPath));
+                }
+
+                break;
+
+            case JsonArray array:
+                for (int i = 0; i < array.Count; i++)
+                {
+                    leaves.AddRange(Leaves(array[i], path + "/[" + i + "]"));
+                }
+
+                break;
+
+            case not null:
+                leaves.Add(path);
+                break;
+        }
+
+        return leaves;
+    }
+
+    private static void SetPath(JsonNode root, string path, JsonNode? value)
+    {
+        string[] steps = path.Split('/');
+        JsonNode node = root;
+
+        for (int i = 0; i < steps.Length; i++)
+        {
+            bool last = i == steps.Length - 1;
+            string step = steps[i];
+
+            if (step.StartsWith('['))
+            {
+                int index = int.Parse(step[1..^1], System.Globalization.CultureInfo.InvariantCulture);
+
+                if (last)
+                {
+                    node.AsArray()[index] = value;
+                    return;
+                }
+
+                node = node.AsArray()[index]!;
+            }
+            else if (last)
+            {
+                node.AsObject()[step] = value;
+            }
+            else
+            {
+                node = node[step]!;
+            }
+        }
+    }
+
+    [Fact]
+    public void No_refusal_holds_a_sentinel_placed_at_any_position_the_reader_takes()
+    {
+        // Every leaf of the fixture, in turn, is replaced three ways - by the sentinel as text, by an object that carries it and by
+        // a list that does - so every key the reader takes meets a value of the wrong kind or a made-up word. Whatever it answers, a
+        // refusal never holds the sentinel, and what it reads never quietly keeps it where the reader does not take text.
+        int leaves = 0;
+
+        foreach (string path in Leaves(Tree(Everything())))
+        {
+            leaves++;
+
+            foreach (Func<JsonNode> poison in (Func<JsonNode>[]) [() => JsonValue.Create(Sentinel)!, () => new JsonObject { ["x"] = Sentinel }, () => new JsonArray(Sentinel)])
+            {
+                JsonObject tree = Tree(Everything());
+                SetPath(tree, path, poison());
+
+                SnapshotFileRead read = Read(tree);
+
+                (read.Problem ?? string.Empty).Should().NotContain(Sentinel, "the refusal for " + path);
+            }
+        }
+
+        leaves.Should().BeGreaterThan(250, "the fixture is large enough that this is not vacuous");
+    }
+
+    [Fact]
+    public void A_schema_version_and_a_time_that_are_made_up_are_refused_by_path()
+    {
         string json = DiagnosticsJson.Write(Everything());
-        string poisoned = json.Replace("\"schemaVersion\": 1", "\"schemaVersion\": \"" + Sentinel + "\"", StringComparison.Ordinal);
 
-        Read(poisoned).Problem.Should().NotBeNull().And.NotContain(Sentinel);
+        Read(json.Replace("\"schemaVersion\": 1", "\"schemaVersion\": \"" + Sentinel + "\"", StringComparison.Ordinal)).Problem
+            .Should().Be("schemaVersion is not a whole number.");
+        Read(json.Replace("\"generatedAt\": \"", "\"generatedAt\": \"" + Sentinel, StringComparison.Ordinal)).Problem
+            .Should().Be("generatedAt is not a time.");
+    }
 
-        string badTime = json.Replace("\"generatedAt\": \"", "\"generatedAt\": \"" + Sentinel, StringComparison.Ordinal);
+    public static TheoryData<string, string> NegativeSizes => new()
+    {
+        { "storage.databaseBytes", "storage.databaseBytes is not a size." },
+        { "storage.largestTables[0].totalBytes", "storage.largestTables[0].totalBytes is not a size." },
+        { "storage.largestTables[0].tableBytes", "storage.largestTables[0].tableBytes is not a size." },
+        { "storage.largestTables[0].estimatedRows", "storage.largestTables[0].estimatedRows is not a size." },
+        { "statements.top[0].calls", "statements.top[0].calls is not a size." },
+        { "wal.bytes", "wal.bytes is not a size." },
+        { "wal.records", "wal.records is not a size." },
+        { "settings.checksumFailures", "settings.checksumFailures is not a size." },
+    };
 
-        Read(badTime).Problem.Should().Be("generatedAt is not a time.");
+    [Theory]
+    [MemberData(nameof(NegativeSizes))]
+    public void A_negative_size_or_count_is_refused_as_not_a_size(string path, string sentence)
+    {
+        foreach (long value in (long[]) [-1, long.MinValue])
+        {
+            JsonObject tree = Tree(Everything());
+            Set(tree, path, JsonValue.Create(value)!);
+
+            SnapshotFileRead read = Read(tree);
+
+            read.Snapshot.Should().BeNull();
+            read.Problem.Should().Be(sentence);
+        }
     }
 
     private static void Set(JsonObject root, string path, JsonNode value)

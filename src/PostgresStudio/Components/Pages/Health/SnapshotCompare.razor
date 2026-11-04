@@ -3,6 +3,7 @@
 @using PostgresStudio.Components.Shared
 @using PostgresStudio.Services
 @using PostgresStudio.Services.Diagnostics
+@using PostgresStudio.Services.Live
 @implements IDisposable
 @inject IServiceProvider Services
 @inject StudioState State
@@ -72,6 +73,21 @@
     [Parameter]
     public EventCallback OnClose { get; set; }
 
+    protected override void OnInitialized() => State.ScopeChanged += OnScopeChangedAsync;
+
+    /// <summary>A comparison is about the database it was made in: another scope shows none of it.</summary>
+    private async Task OnScopeChangedAsync()
+    {
+        comparison = null;
+        message = null;
+        inputGeneration++;
+
+        if (!disposed)
+        {
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
     private async Task CloseAsync()
     {
         comparison = null;
@@ -113,12 +129,25 @@
 
         try
         {
-            await using Stream stream = file.OpenReadStream(SnapshotFileReader.MaxBytes, lifetime.Token);
-            comparison = await Services.GetRequiredService<ISnapshotCompareService>().CompareAsync(scope, stream, file.Name, lifetime.Token);
+            // The service opens the file only past the visitor's gate, so a refused visitor's file never starts crossing the circuit.
+            SnapshotComparison result = await Services.GetRequiredService<ISnapshotCompareService>()
+                .CompareAsync(scope, token => file.OpenReadStream(SnapshotFileReader.MaxBytes, token), file.Name, lifetime.Token);
+
+            // An answer about the database the visitor has since left is not drawn under the one they are on.
+            if (State.ActiveScope == scope)
+            {
+                comparison = result;
+            }
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
         {
             return;
+        }
+        catch (Exception exception) when (StudioLiveUpdates.IsInteropUnavailable(exception) || exception is IOException or TimeoutException)
+        {
+            // An expected state, not a bug: the browser went away or stopped sending the file. Quiet, and the visitor chooses it again.
+            Logger.LogDebug(exception, "The Health page's snapshot compare for store {StoreKey}, database {DatabaseId} lost its file from the browser", StudioLogValue.Cap(scope.StoreKey), StudioLogValue.Cap(scope.DatabaseId));
+            message = "The file did not arrive from the browser; choose it again.";
         }
         catch (Exception exception)
         {
@@ -313,6 +342,7 @@
     public void Dispose()
     {
         disposed = true;
+        State.ScopeChanged -= OnScopeChangedAsync;
         lifetime.Cancel();
         lifetime.Dispose();
     }

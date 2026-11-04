@@ -3,8 +3,6 @@ using System.Text;
 
 using Bunit;
 
-using MartenStudio.Tests.Support;
-
 using Microsoft.AspNetCore.Components.Forms;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
@@ -80,6 +78,46 @@ internal static class SnapshotCompareFixtures
         return await context.ReadyAsync();
     }
 
+    /// <summary>Everything logged - the message and the exception's whole <c>ToString()</c> - so a sentinel cannot hide in either.</summary>
+    internal sealed class FullLogProvider : ILoggerProvider
+    {
+        private readonly List<(LogLevel Level, string Text)> entries = [];
+        private readonly Lock gate = new();
+
+        public IReadOnlyList<(LogLevel Level, string Text)> Entries
+        {
+            get
+            {
+                lock (gate)
+                {
+                    return entries.ToArray();
+                }
+            }
+        }
+
+        public ILogger CreateLogger(string categoryName) => new Capture(this, categoryName);
+
+        public void Dispose()
+        {
+        }
+
+        private sealed class Capture(FullLogProvider owner, string category) : ILogger
+        {
+            public IDisposable? BeginScope<TState>(TState state)
+                where TState : notnull => null;
+
+            public bool IsEnabled(LogLevel logLevel) => true;
+
+            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            {
+                lock (owner.gate)
+                {
+                    owner.entries.Add((logLevel, category + ": " + formatter(state, exception) + (exception is null ? string.Empty : " | " + exception)));
+                }
+            }
+        }
+    }
+
     /// <summary>A snapshot file of the current view of the fake database, as Download JSON would save it.</summary>
     public static async Task<string> DownloadedJsonAsync(PostgresStudioComponentContext context)
     {
@@ -94,57 +132,50 @@ internal static class SnapshotCompareFixtures
 /// </summary>
 public class SnapshotCompareServiceTests
 {
-    /// <summary>A stream that fails the test on any read.</summary>
-    private sealed class ForbiddenStream : Stream
-    {
-        public bool WasRead { get; private set; }
-
-        public override bool CanRead => true;
-
-        public override bool CanSeek => false;
-
-        public override bool CanWrite => false;
-
-        public override long Length => 1;
-
-        public override long Position { get => 0; set => throw new NotSupportedException(); }
-
-        public override void Flush()
-        {
-        }
-
-        public override int Read(byte[] buffer, int offset, int count)
-        {
-            WasRead = true;
-            throw new InvalidOperationException("The file must not be read when the visitor's own view is refused.");
-        }
-
-        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
-        {
-            WasRead = true;
-            throw new InvalidOperationException("The file must not be read when the visitor's own view is refused.");
-        }
-
-        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
-
-        public override void SetLength(long value) => throw new NotSupportedException();
-
-        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
-    }
-
     [Fact]
-    public async Task A_refused_current_view_never_reads_the_stream()
+    public async Task A_refused_current_view_never_opens_the_file()
     {
         await using PostgresStudioComponentContext context = await SnapshotCompareFixtures.ContextAsync();
         context.Health.Report = HealthReport.Refused(HealthRefusal.StorePolicy, "The store policy does not allow you this database.");
-        ForbiddenStream stream = new();
+        int opened = 0;
 
         SnapshotComparison result = await context.Services.GetRequiredService<ISnapshotCompareService>()
-            .CompareAsync(context.State.ActiveScope!, stream, "earlier.json", Xunit.TestContext.Current.CancellationToken);
+            .CompareAsync(
+                context.State.ActiveScope!,
+                _ =>
+                {
+                    opened++;
+                    throw new InvalidOperationException("The file must not be opened when the visitor's own view is refused.");
+                },
+                "earlier.json",
+                Xunit.TestContext.Current.CancellationToken);
 
         result.Outcome.Should().Be(SnapshotCompareOutcome.Refused);
         result.Reason.Should().Be("The store policy does not allow you this database.");
-        stream.WasRead.Should().BeFalse("the visitor's gate is asked first, and the file is read only past it");
+        opened.Should().Be(0, "the visitor's gate is asked first, and the file is opened - so starts crossing the circuit - only past it");
+    }
+
+    [Fact]
+    public async Task A_file_is_opened_once_past_the_gate_and_disposed()
+    {
+        await using PostgresStudioComponentContext context = await SnapshotCompareFixtures.ContextAsync();
+        string json = await SnapshotCompareFixtures.DownloadedJsonAsync(context);
+        int opened = 0;
+        MemoryStream stream = new(Encoding.UTF8.GetBytes(json));
+
+        await context.Services.GetRequiredService<ISnapshotCompareService>()
+            .CompareAsync(
+                context.State.ActiveScope!,
+                _ =>
+                {
+                    opened++;
+                    return stream;
+                },
+                "x.json",
+                Xunit.TestContext.Current.CancellationToken);
+
+        opened.Should().Be(1);
+        stream.CanRead.Should().BeFalse("the service disposes the file it opened");
     }
 
     [Fact]
@@ -155,7 +186,7 @@ public class SnapshotCompareServiceTests
         await using MemoryStream stream = new(Encoding.UTF8.GetBytes(json));
 
         SnapshotComparison result = await context.Services.GetRequiredService<ISnapshotCompareService>()
-            .CompareAsync(context.State.ActiveScope!, stream, "postgres-snapshot.json", Xunit.TestContext.Current.CancellationToken);
+            .CompareAsync(context.State.ActiveScope!, _ => stream, "postgres-snapshot.json", Xunit.TestContext.Current.CancellationToken);
 
         result.Outcome.Should().Be(SnapshotCompareOutcome.Compared);
         result.FileName.Should().Be("postgres-snapshot.json");
@@ -170,7 +201,7 @@ public class SnapshotCompareServiceTests
         await using MemoryStream stream = new(Encoding.UTF8.GetBytes("SENTINEL not json"));
 
         SnapshotComparison result = await context.Services.GetRequiredService<ISnapshotCompareService>()
-            .CompareAsync(context.State.ActiveScope!, stream, "x.json", Xunit.TestContext.Current.CancellationToken);
+            .CompareAsync(context.State.ActiveScope!, _ => stream, "x.json", Xunit.TestContext.Current.CancellationToken);
 
         result.Outcome.Should().Be(SnapshotCompareOutcome.Unreadable);
         result.Reason.Should().StartWith("This file is not a snapshot's JSON").And.NotContain("SENTINEL");
@@ -422,7 +453,7 @@ public class SnapshotCompareTests
     [Fact]
     public async Task A_file_of_sentinel_strings_reaches_no_log_no_audit_entry_no_interop_call_and_no_field()
     {
-        CapturingLoggerProvider logs = new();
+        SnapshotCompareFixtures.FullLogProvider logs = new();
         (PostgresStudioComponentContext context, IRenderedComponent<SnapshotMenu> menu) = await OpenAsync(services =>
             services.AddLogging(builder => builder.SetMinimumLevel(LogLevel.Trace).AddProvider(logs)));
         await using PostgresStudioComponentContext owned = context;
@@ -463,7 +494,7 @@ public class SnapshotCompareTests
         // The file's name is the visitor's own and is drawn (capped); nothing else of the file is.
         menu.Markup.Replace(Sentinel + ".json", string.Empty, StringComparison.Ordinal).Should().NotContain(Sentinel);
 
-        logs.Entries.Should().NotContain(x => x.Message.Contains(Sentinel, StringComparison.Ordinal), "nothing of the file is logged, at any level");
+        logs.Entries.Should().NotContain(x => x.Text.Contains(Sentinel, StringComparison.Ordinal), "nothing of the file is logged, at any level, in a message or an exception");
         context.ActionLog.GetLatest().Should().BeEmpty("a compare is not audited: the file is the visitor's own");
         context.JSInterop.Invocations.SelectMany(static x => x.Arguments).Select(static x => x?.ToString() ?? string.Empty)
             .Should().NotContain(x => x.Contains(Sentinel, StringComparison.Ordinal), "no interop call carries the file");
@@ -482,25 +513,78 @@ public class SnapshotCompareTests
     }
 
     [Fact]
-    public async Task A_compare_that_fails_unexpectedly_is_logged_once_without_the_files_words_and_the_visitor_is_told_only_that_it_failed()
+    public async Task A_compare_that_fails_unexpectedly_is_logged_once_and_nothing_of_the_file_is_in_the_log_or_the_page()
     {
-        CapturingLoggerProvider logs = new();
+        SnapshotCompareFixtures.FullLogProvider logs = new();
         (PostgresStudioComponentContext context, IRenderedComponent<SnapshotMenu> menu) = await OpenAsync(services =>
         {
             services.AddLogging(builder => builder.SetMinimumLevel(LogLevel.Trace).AddProvider(logs));
-            services.AddScoped<ISnapshotCompareService>(static _ => new ThrowingCompare());
+            services.AddScoped<ISnapshotCompareService>(static _ => new FailingCompare(new FormatException("boom")));
         });
         await using PostgresStudioComponentContext owned = context;
 
-        Upload(menu, "x.json", "{}");
+        Upload(menu, "x.json", "{\"words\": \"" + Sentinel + "\"}");
 
         menu.WaitForAssertion(() => menu.Find(".ms-snapshot-compare-message").TextContent.Should().Be("The file could not be compared; the server log has why."));
-        logs.Entries.Should().ContainSingle(static x => x.Level == LogLevel.Warning && x.Message.Contains("snapshot compare", StringComparison.Ordinal));
+        logs.Entries.Should().ContainSingle(static x => x.Level == LogLevel.Warning && x.Text.Contains("snapshot compare", StringComparison.Ordinal));
+        logs.Entries.Should().NotContain(x => x.Text.Contains(Sentinel, StringComparison.Ordinal), "the compare read the file; none of it is in a log line or an exception");
+        menu.Markup.Should().NotContain(Sentinel);
     }
 
-    private sealed class ThrowingCompare : ISnapshotCompareService
+    [Fact]
+    public async Task A_file_that_stops_arriving_from_the_browser_is_quiet_and_asks_to_choose_it_again()
     {
-        public Task<SnapshotComparison> CompareAsync(StudioScope scope, Stream file, string? fileName, CancellationToken cancellationToken = default) =>
-            throw new InvalidOperationException("boom");
+        foreach (Exception lost in (Exception[]) [new IOException("the circuit went away"), new TimeoutException("stalled"), new Microsoft.JSInterop.JSDisconnectedException("gone")])
+        {
+            SnapshotCompareFixtures.FullLogProvider logs = new();
+            (PostgresStudioComponentContext context, IRenderedComponent<SnapshotMenu> menu) = await OpenAsync(services =>
+            {
+                services.AddLogging(builder => builder.SetMinimumLevel(LogLevel.Trace).AddProvider(logs));
+                services.AddScoped<ISnapshotCompareService>(_ => new FailingCompare(lost));
+            });
+            await using PostgresStudioComponentContext owned = context;
+
+            Upload(menu, "x.json", "{}");
+
+            menu.WaitForAssertion(() => menu.Find(".ms-snapshot-compare-message").TextContent.Should().Be("The file did not arrive from the browser; choose it again."));
+            logs.Entries.Should().NotContain(static x => x.Level >= LogLevel.Warning, lost.GetType().Name + " is an expected state and logs quietly");
+            logs.Entries.Should().Contain(static x => x.Level == LogLevel.Debug && x.Text.Contains("snapshot compare", StringComparison.Ordinal));
+        }
+    }
+
+    [Fact]
+    public async Task A_change_of_scope_clears_the_comparison_and_the_json_view()
+    {
+        (PostgresStudioComponentContext context, IRenderedComponent<SnapshotMenu> menu) = await OpenAsync();
+        await using PostgresStudioComponentContext owned = context;
+
+        Upload(menu, "x.json", await SnapshotCompareFixtures.DownloadedJsonAsync(context));
+        menu.WaitForAssertion(() => menu.FindAll(".ms-snapshot-compare-verdict").Should().ContainSingle());
+        AngleSharp.Dom.IElement before = menu.Find("input[type=file]");
+
+        await menu.InvokeAsync(() => context.State.NotifyAsync());
+
+        menu.WaitForAssertion(() => menu.FindAll(".ms-snapshot-compare-result").Should().BeEmpty("a comparison is about the database it was made in"));
+        menu.Find("input[type=file]").Should().NotBeSameAs(before);
+
+        await Select(menu, "View JSON");
+        menu.WaitForAssertion(() => menu.FindAll("section[aria-label='Snapshot JSON']").Should().ContainSingle());
+
+        await menu.InvokeAsync(() => context.State.NotifyAsync());
+
+        menu.WaitForAssertion(() => menu.FindAll("section[aria-label='Snapshot JSON']").Should().BeEmpty("the JSON shown is about the database it was built for"));
+    }
+
+    /// <summary>A service that reads the file it is handed - so it knows what is in it - and then fails with a message of its own.</summary>
+    private sealed class FailingCompare(Exception failure) : ISnapshotCompareService
+    {
+        public async Task<SnapshotComparison> CompareAsync(StudioScope scope, Func<CancellationToken, Stream> openFile, string? fileName, CancellationToken cancellationToken = default)
+        {
+            await using Stream file = openFile(cancellationToken);
+            using StreamReader reader = new(file);
+            _ = await reader.ReadToEndAsync(cancellationToken);
+
+            throw failure;
+        }
     }
 }

@@ -85,7 +85,7 @@ internal static class SnapshotFileReader
         }
         finally
         {
-            ArrayPool<byte>.Shared.Return(rented);
+            ArrayPool<byte>.Shared.Return(rented, clearArray: true);
         }
     }
 
@@ -410,11 +410,11 @@ internal static class SnapshotFileReader
                     Name = Text(item, "name", path, required: true)!,
                     Ownership = ownership,
                     Owner = Text(item, "owner", path),
-                    TotalBytes = Long(item, "totalBytes", path) ?? 0,
-                    TableBytes = Long(item, "tableBytes", path) ?? 0,
-                    IndexBytes = Long(item, "indexBytes", path) ?? 0,
-                    ToastBytes = Long(item, "toastBytes", path) ?? 0,
-                    EstimatedRows = Long(item, "estimatedRows", path) ?? 0,
+                    TotalBytes = Size(item, "totalBytes", path) ?? 0,
+                    TableBytes = Size(item, "tableBytes", path) ?? 0,
+                    IndexBytes = Size(item, "indexBytes", path) ?? 0,
+                    ToastBytes = Size(item, "toastBytes", path) ?? 0,
+                    EstimatedRows = Size(item, "estimatedRows", path) ?? 0,
                     ShareOfDatabase = Double(item, "shareOfDatabase", path) ?? 0,
                     HotUpdateRatio = Double(item, "hotUpdateRatio", path),
                     GrowthBytesPerDay = Long(item, "growthBytesPerDay", path),
@@ -427,7 +427,7 @@ internal static class SnapshotFileReader
                 Outcome = Outcome(e, "outcome", "storage."),
                 Reason = Text(e, "reason", "storage."),
                 MeasuredAt = Time(e, "measuredAt", "storage.") ?? default,
-                DatabaseBytes = Long(e, "databaseBytes", "storage.") ?? 0,
+                DatabaseBytes = Size(e, "databaseBytes", "storage.") ?? 0,
                 SizesAreEstimates = Bool(e, "sizesAreEstimates", "storage.") ?? false,
                 StatisticsSince = Time(e, "statisticsSince", "storage."),
                 GrowthBytesPerDay = Long(e, "growthBytesPerDay", "storage."),
@@ -464,15 +464,15 @@ internal static class SnapshotFileReader
                     Text = Text(item, "text", path),
                     TextTruncated = Bool(item, "textTruncated", path) ?? false,
                     TextWithheld = Text(item, "textWithheld", path),
-                    Calls = Long(item, "calls", path) ?? 0,
+                    Calls = Size(item, "calls", path) ?? 0,
                     TotalMilliseconds = Double(item, "totalMilliseconds", path) ?? 0,
                     MeanMilliseconds = Double(item, "meanMilliseconds", path) ?? 0,
                     ShareOfTime = Double(item, "shareOfTime", path) ?? 0,
-                    Rows = Long(item, "rows", path) ?? 0,
-                    SharedBlocksHit = Long(item, "sharedBlocksHit", path) ?? 0,
-                    SharedBlocksRead = Long(item, "sharedBlocksRead", path) ?? 0,
-                    TempBlocksWritten = Long(item, "tempBlocksWritten", path) ?? 0,
-                    StorageBlocksRead = Long(item, "storageBlocksRead", path),
+                    Rows = Size(item, "rows", path) ?? 0,
+                    SharedBlocksHit = Size(item, "sharedBlocksHit", path) ?? 0,
+                    SharedBlocksRead = Size(item, "sharedBlocksRead", path) ?? 0,
+                    TempBlocksWritten = Size(item, "tempBlocksWritten", path) ?? 0,
+                    StorageBlocksRead = Size(item, "storageBlocksRead", path),
                 });
             }
 
@@ -544,7 +544,7 @@ internal static class SnapshotFileReader
                 Settings = settings,
                 Extensions = extensions,
                 DataChecksums = Bool(e, "dataChecksums", "settings."),
-                ChecksumFailures = Long(e, "checksumFailures", "settings."),
+                ChecksumFailures = Size(e, "checksumFailures", "settings."),
                 LastChecksumFailure = Time(e, "lastChecksumFailure", "settings."),
             };
         }
@@ -611,11 +611,11 @@ internal static class SnapshotFileReader
                 Outcome = Outcome(e, "outcome", "wal."),
                 Reason = Text(e, "reason", "wal."),
                 MeasuredAt = Time(e, "measuredAt", "wal.") ?? default,
-                Records = Long(e, "records", "wal."),
-                FullPageImages = Long(e, "fullPageImages", "wal."),
-                Bytes = Long(e, "bytes", "wal."),
-                Writes = Long(e, "writes", "wal."),
-                Syncs = Long(e, "syncs", "wal."),
+                Records = Size(e, "records", "wal."),
+                FullPageImages = Size(e, "fullPageImages", "wal."),
+                Bytes = Size(e, "bytes", "wal."),
+                Writes = Size(e, "writes", "wal."),
+                Syncs = Size(e, "syncs", "wal."),
                 WriteTimeMs = Double(e, "writeTimeMs", "wal."),
                 SyncTimeMs = Double(e, "syncTimeMs", "wal."),
                 StatsReset = Time(e, "statsReset", "wal."),
@@ -748,10 +748,10 @@ internal static class SnapshotFileReader
 
                     applications.Add(new ConnectionSnapshotApplication(
                         Text(item, "applicationName", path, required: true)!,
-                        Long(item, "sessions", path) ?? 0,
+                        Size(item, "sessions", path) ?? 0,
                         Time(item, "oldestConnection", path),
-                        Long(item, "tlsKnown", path) ?? 0,
-                        Long(item, "tlsOn", path) ?? 0));
+                        Size(item, "tlsKnown", path) ?? 0,
+                        Size(item, "tlsOn", path) ?? 0));
                 }
             }
 
@@ -903,6 +903,14 @@ internal static class SnapshotFileReader
             return value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out long number)
                 ? number
                 : throw new SnapshotFormatException(path + key + " is not a whole number.");
+        }
+
+        /// <summary>A size or a count: a whole number that is never negative.</summary>
+        private static long? Size(JsonElement parent, string key, string path)
+        {
+            long? value = Long(parent, key, path);
+
+            return value is < 0 ? throw new SnapshotFormatException(path + key + " is not a size.") : value;
         }
 
         private static int? Int(JsonElement parent, string key, string path)

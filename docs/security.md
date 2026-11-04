@@ -459,7 +459,7 @@ own, and nothing a mute writes reaches the database or another visitor ([health.
 
 Health › Snapshot › "Compare with an earlier snapshot" (1.2) reads a snapshot file the visitor chooses, at most 4 MB, in the
 visitor's own circuit. It builds the visitor's current gated view first, as Download JSON does, and reads the file only
-past it: a visitor the store policy refuses is told so and the file is never read. The file is the visitor's own, so the
+past it: a visitor the store policy refuses is told so and the file is never opened, so it does not even start crossing the circuit. The file is the visitor's own, so the
 compare is not audited, and it is never stored, cached, logged or sent anywhere; no policy is asked with a value from the
 file, so nothing of it reaches a host's authorization handler. Only what the visitor may see now is compared: an earlier
 finding, statement or table the current view would not show is counted and never described, and a section withheld now is

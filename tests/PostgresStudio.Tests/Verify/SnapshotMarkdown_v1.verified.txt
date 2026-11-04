@@ -47,7 +47,7 @@ Vacuums it at 2\% dead rows instead of 20\%\.
 |---|---|---|
 | `C04` | Idle in transaction | withheld |
 | `T07` | Vacuum falling behind | read\, 1 finding |
-| `T08` | Never analysed\, or stale statistics | unavailable \- Not checked\: this needs pg\_read\_all\_stats for role studio\_reader\. |
+| `T08` | Never analysed\, or stale statistics | unavailable \- Not checked\:⁠ this needs pg\_read\_all\_stats for role studio\_reader\. |
 
 ## Storage
 
@@ -80,7 +80,7 @@ select d.data from public.mt_doc_order as d where d.id = $1
 
 1 call, 10.0 ms in all, mean 10.0 ms, 5.0% of the time, 0 rows.
 
-Text withheld: Withheld\: it still carries a string constant as written\.
+Text withheld: Withheld\:⁠ it still carries a string constant as written\.
 
 ## Settings and extensions
 
@@ -144,5 +144,5 @@ What the server saw:
 
 ## Withheld from you
 
-- `connections.byApplication`: Activity\-grade\: call with IncludeActivity \= true
-- `statements`: Activity\-grade\: call with IncludeActivity \= true
+- `connections.byApplication`: Activity\-grade\:⁠ call with IncludeActivity \= true
+- `statements`: Activity\-grade\:⁠ call with IncludeActivity \= true

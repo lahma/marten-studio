@@ -326,7 +326,7 @@ public class LogLevelsTests
         ["src/PostgresStudio/Components/Pages/Health/SnapshotMenu.razor : The Health page's snapshot of store {StoreKey}, database {DatabaseId} could not be built"] = (Verdict.VisitorAction,
             "The Snapshot menu's builder threw, which the page services never should: one line per click, and the menu says it failed."),
         ["src/PostgresStudio/Components/Pages/Health/SnapshotCompare.razor : The Health page's snapshot compare for store {StoreKey}, database {DatabaseId} failed"] = (Verdict.VisitorAction,
-            "The compare's service threw, which it never should: one line per chosen file, naming the store and database and none of the file, and the drawer says it failed."),
+            "The compare's service threw something that is not interop loss, a stalled upload (IOException, TimeoutException) or a cancelled page - those are Debug, with a sentence on the page - so it is a bug: one line per chosen file, naming the store and database and none of the file, and the drawer says it failed."),
     };
 
     [Fact]

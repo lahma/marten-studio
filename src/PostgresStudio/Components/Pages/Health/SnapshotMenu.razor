@@ -64,9 +64,28 @@
     private IReadOnlyList<(string Label, string? Detail, Func<Task> OnSelect)> items = [];
     private VisitorSnapshot? viewed;
     private bool comparing;
+    private bool disposed;
     private string? message;
 
-    protected override void OnInitialized() =>
+    /// <summary>
+    /// What the drawer shows is about the database it was built for: another scope shows none of it. The compare drawer clears its own
+    /// comparison; the JSON the viewer holds is cleared here.
+    /// </summary>
+    private async Task OnScopeChangedAsync()
+    {
+        viewed = null;
+        message = null;
+
+        if (!disposed)
+        {
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    protected override void OnInitialized()
+    {
+        State.ScopeChanged += OnScopeChangedAsync;
+
         items =
         [
             ("View JSON", "Open it here, in the JSON viewer", () => RunAsync(ViewAsync)),
@@ -76,6 +95,7 @@
             ("Download Markdown", "A readable report as a .md file", () => RunAsync(DownloadMarkdownAsync)),
             ("Compare with an earlier snapshot", "Choose a JSON file this menu saved", () => RunAsync(OpenCompareAsync)),
         ];
+    }
 
     /// <summary>
     /// One item, then this component's render: the menu's items are plain delegates the MenuButton runs, not event callbacks,
@@ -212,6 +232,8 @@
 
     public void Dispose()
     {
+        disposed = true;
+        State.ScopeChanged -= OnScopeChangedAsync;
         lifetime.Cancel();
         lifetime.Dispose();
     }
