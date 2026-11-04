@@ -57,3 +57,36 @@ argument on the same pinned session (the overload with one opens an unpinned `Qu
 `BuildLinqParser`/`BuildDiagnosticCommand` path. The members are a closed list mirroring Marten's `EventQueryMapping`
 columns from `IReadOnlyStoreOptions.Events`, because every other `IEvent` member reads the JSON body and matches
 nothing. The statement must stay on the studio's session and read no `d.data`, or it is refused.
+
+## The shape check (1.2)
+
+The shape check reads only with the studio's own SQL (`DocumentShapeQueries`, `EventShapeQueries`): keys and stored
+sizes first, from the primary key and `pg_stats.histogram_bounds`, chosen inside one statement so another tenant's ids
+never leave the database; then the chosen rows by key, in a read-only transaction under `statement_timeout`. Never
+`order by random()`, `tablesample` or a sort on an unindexed column (D8). Documents deserialize through
+`store.Options.Serializer()` into the row's concrete type (hard rule 10); events only through `IEventStorage` as
+`ISelector<IEvent>` from a session opened with `SessionOptions.ForDatabase` (hard rule 15) - the daemon's and the
+stepper's resolver, never a LINQ terminal or a `session.Events` read (hard rule 14). Only mapped aliases
+(`EventHealth.KnownAliases`, upcaster aliases included, falling back to the registered names) reach that resolver,
+because for an alias with no mapping it would call `Type.GetType` on `mt_dotnet_type` and register the type on the host's
+store, which silences E05 until a restart. An unmapped alias's events are each `UnknownEventType`, classified from the
+stored name with `EventHealth.ResolveLoaded`, which loads nothing; if that type is loaded, they are
+`UnregisteredEventType`, "Marten would read these as T and register it on first read", with no member comparison.
+Findings are paths, JSON kinds, counts and ids: no value and no exception message is kept, rendered or logged. It is a
+plain read under the store policy, and a hidden type answers like an absent one. Results are cached five minutes per
+resolved scope and subject, and shared by every visitor who resolves that scope.
+
+**Every ordering is an index order, at every tenancy.** On a conjoined collection with no tenant selected, only the
+lowest and highest keys are read, in the primary key's own order (`tenant_id, id` by default), so both are index scans;
+the spread needs a tenant, because the primary key leads with it. Events are always `order by seq_id`: `mt_events`'
+primary key is `seq_id` (or `(seq_id, tenant_id)` under `UseTenantPartitionedEvents`, where all tenants in scope is an
+ordered append of the partitions' primary keys) and `EnableEventTypeIndex` adds `(type, seq_id)`. Without an index on
+`type` the walk for a rare type is a filter along the primary key, bounded by `statement_timeout`: the check reads the
+oldest and newest 100 events and says so, and the remedy is `opts.Events.EnableEventTypeIndex = true;`. With per-tenant
+sequences and every tenant in scope a spread between the edges would interpolate across numbering that collides, so only
+the edges are read. A row's text is rendered once (`offset 0` lateral) and rows over 256 KiB of text are counted, not
+parsed. A click over many types is bounded at 60 s (counts first without the type index, zero-count types skipped); the
+counted listing is one read shared by the Event types page and the check for 30 s per resolved scope
+(`EventTypeListingCache`, which resolves nothing: the caller resolves under its visitor first). The event type name is
+validated before the cache, so an arbitrary string never becomes a cache key or reaches SQL. An error result is handed to
+those waiting on it and is not cached; each run has its own in-flight marker.

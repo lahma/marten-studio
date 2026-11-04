@@ -674,7 +674,12 @@ the version the dialog shows into one snapshot and deletes them, behind a typed 
 event type, sequence range, stream, tenant, a **DCB tag** (`tag:<type>=<value>`, with its index verdict)
 and the archived/skipped flags the store actually has, with a follow mode; each event's tags are chips
 that link to that filter. *Event types* counts what the store has seen and lists the tag types with each
-table's key. *Dead letters* lists the daemon's failures with the exception, and with `ManageDeadLetters`
+table's key; its **Check shapes** (1.2) runs the documents' check for each event type through Marten's own event reader,
+so it answers "would a rebuild throw?" before you start one: events no type can read, events that fail to deserialize
+(with the sequence a rebuild would stop at, and whether `RebuildErrors` would skip them), and members your event types no
+longer declare. Events an upcaster reads as a newer type are counted, not compared. Event types the store does not
+register are never read through Marten's reader, which would register them on your store; they are reported from their
+stored names alone. *Dead letters* lists the daemon's failures with the exception, and with `ManageDeadLetters`
 discards a record, marks the underlying event as skipped — only on a store that enabled event skipping,
 because it writes `mt_events.is_skipped` and a store without that column has no way to express the idea —
 or rewinds the projection's subscription to the event that failed, behind a typed confirmation that states

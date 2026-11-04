@@ -146,6 +146,9 @@ opts.Events.MapEventType<YourEventType>("the_old_alias");
 opts.Projections.RebuildErrors.SkipUnknownEvents = true;
 ```
 
+For an exact answer per event, Event types › Check shapes (1.2) reads a sample of each type through Marten's own event
+reader.
+
 ## E06 Long streams without a snapshot
 
 **Info.** An aggregate is only ever built live - nothing inline or async keeps it - and the statistics of
