@@ -111,4 +111,7 @@ graph:
    database withholds itself.
    Waits are always wait-on-condition, **never `Task.Delay`**. The Playwright scenarios live in `Browser/`
    (and the Health page's first one in `Health/`): locally they skip with the install command in the
-   reason when Chromium is missing; on CI a missing browser throws (D19).
+   reason when Chromium is missing; on CI a missing browser throws (D19). The browser suites record enhanced
+   navigations (`StudioPage.EnhancedNavigations`) and assert none (`AssertNoPageFetch`, 1.2);
+   `MARTENSTUDIO_TEST_NAV_INTERCEPTION_OFF=true` runs a suite with the `PostgresStudio.DisableNavigationInterception`
+   switch on.

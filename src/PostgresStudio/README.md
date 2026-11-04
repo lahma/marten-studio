@@ -263,6 +263,9 @@ with it. Operations › Statements opens one statement's drill-in (`?queryid=`):
 plan, planned as `SqlConsoleRole` behind the page's own gate, masked as the text is, and audited. Where a plan's
 sequential scan filters on plain columns, **What if?** plans the statement again with an index on them imagined by
 hypopg and draws both plans side by side; it creates nothing, and needs hypopg installed, which is your decision.
+Statements also has an **Index advisor** (1.2, hypopg): the top statements you may see, each index their plans suggest
+tried one at a time, ranked by planned cost saved times calls, with `CREATE INDEX CONCURRENTLY` as the remedy; planned on
+a press behind the page's gate, nothing created.
 
 **Blocking.** Database › Sessions › Blocking (`?view=blocking`) draws who holds up whom as trees, behind
 `ViewDatabaseActivity`, with a chain head's `pg_terminate_backend` (and `pg_cancel_backend`) as text to copy - the

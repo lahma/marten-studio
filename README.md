@@ -486,7 +486,10 @@ compares an earlier snapshot file with now.
 by Marten operation and document type, behind `ViewDatabaseActivity`. A statement's **Plan** link (`?queryid=`) opens
 its drill-in: the text, the counters and its generic plan, planned as `SqlConsoleRole` with its plan insights and What
 if?, and audited. A write, a locking read, a cut text or one withheld from you gets no plan and says why, and a plan
-that reads a schema you may not see is not shown. **Mark** (1.2) counts from now, in this tab: each statement's change
+that reads a schema you may not see is not shown. **Index advisor** (1.2) plans the 20 statements with the most execution
+time that you may see, imagines each index their plans suggest with hypopg, one at a time, and ranks them by planned cost
+saved times calls, with the `StoreOptions` line (Marten document tables) or `CREATE INDEX CONCURRENTLY` as the remedy; it
+plans on a press, behind the page's own gate, creates nothing and applies nothing. **Mark** (1.2) counts from now, in this tab: each statement's change
 since the mark instead of the advisor's window, kept in this tab's connection only.
 
 **Maintenance** (Operations, `/marten/maintenance`) — what autovacuum will do next and why: each table against the
