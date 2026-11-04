@@ -283,10 +283,11 @@ agent's own names, because the overload starts the tenant's agents wherever it i
 store-global rewind is never made, and Skip event is the tenant overload of `MarkEventsAsSkipped` (#5698), asked about
 the tenant as before. Below either, both stay refused (SEC1-fix4).
 
-Orphaned progression rows (M47, 0.6) are listed and never removed. Marten does have a removal by name,
+Orphaned progression rows (M47, 0.6) were listed and not removed until 1.2. Marten has a removal by name,
 `DeleteProjectionProgressByShardNameAsync` (present at 9.39 already, marten#4785), but it ensures the event storage
-first, so it may only ever be a capability-gated write; a Remove button built on it is left to a later release, and
-0.6 shows the call, and the equivalent SQL, as text for the host.
+first, so it may only ever be a capability-gated write: 0.6 showed the call, and the equivalent SQL, as text for the host,
+and 1.2 adds the Remove button under `CorrectProgression`, asked as `(store, database, null)` whatever tenant is selected,
+after a second read of the table (1.2-PROJ).
 
 Enumerating a dynamic tenancy's databases is not read-only, at any Marten through 9.54.1: `AllDatabases()`,
 `Tenancy.DescribeDatabasesAsync()` and 9.50.1's `IEventStore.TryDescribeDatabasesAsync()` all run

@@ -47,7 +47,7 @@ This is the full text of hard rules 1 to 16, moved word for word from AGENTS.md 
    `WriteAuthorizationPolicy`) → the operation → `audit.Record`, written on failure as well as on success.
    A value a visitor could shape reaches the log only through `StudioLogValue`: escaped, a backslash doubled, a
    name bounded at 256 characters and other text at 4,000. That holds in these events: 9200–9205, 9235, 9236, 9245
-   and 9452 (the per-product dispatchers); 9206, 9207 and 9209 (MartenLog's wrappers); 9260–9263 (LINQ mode's
+   and 9452 (the per-product dispatchers); 9206, 9207, 9209, 9225 and 9226 (MartenLog's wrappers); 9260–9263 (LINQ mode's
    `Logged*` values); and every Warning that carries a typed route value. `RefusalLogValuesTests` also holds every
    `[LoggerMessage]` template's call sites, at any level, to it. The one exception is 9204's executed
    statement, which is kept whole up to the circuit's 32 KB receive bound, and by its head and tail beyond it.
@@ -62,7 +62,7 @@ This is the full text of hard rules 1 to 16, moved word for word from AGENTS.md 
    `EventHandler` is what *forces* the mistake, so the type is the enforcement and the scanner is only
    the backstop.
 7. **A public API change needs a reviewed Verify baseline and a CHANGELOG entry.** MartenStudio's surface is
-   three static classes, two classes and one record, in
+   three static classes, two classes and two records, in
    `tests/MartenStudio.Tests/Verify/PublicApiTest_MartenStudio.verified.txt`, and it must not move because of
    PostgresStudio. PostgresStudio's, in `tests/PostgresStudio.Tests/Verify/PublicApiTest_PostgresStudio.verified.txt`, is
    its five registration types: `PostgresStudioServiceCollectionExtensions`, `PostgresStudioEndpointRouteBuilderExtensions`,

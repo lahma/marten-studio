@@ -74,7 +74,7 @@ unqualified name names no schema.
 **Reach, not scope.** An operation Marten runs over a whole database (a progression correction, a rebuild, a high-water
 restart, a store-global agent, cancelling a rebuild, the dead-letter "Rewind subscription", a schema apply) is
 authorized as `(store, database, null)` unless the database is exclusively the selected tenant's, never on a sharded
-tenancy, which pools tenants; the SQL console, the Mode A subquery lift and `EXPLAIN` are always asked with
+tenancy (removing an orphaned progression row never takes that exception: it is always `(store, database, null)`), which pools tenants; the SQL console, the Mode A subquery lift and `EXPLAIN` are always asked with
 `TenantId = null`, as nothing narrows a typed statement to a tenant. The one exception is the dead-letter rewind under
 `UseTenantPartitionedEvents` since Marten 9.51 with JasperFx 2.91, whose
 per-tenant overload touches only that tenant's agents and dead letters (#5700, jasperfx#1025): it is authorized as
@@ -85,7 +85,8 @@ overload starts the tenant's agents wherever it is asked. There the store-global
 checks in order, one statement proving every sequence in scope (`EventQueryBuilder.BuildSequencesInScope`), its
 commit (`CommitSkipAsync`, which `StorageEnsuringCallTests` holds to those two callers) and one audit entry naming the
 group and the count; under `UseTenantPartitionedEvents` it runs in one tenant, never a loop over several. The studio
-never removes an orphaned progression row (`ProgressionRowClassifier`, from `AllShards()`), and refuses Start and the
+removes an orphaned progression row (`ProgressionRowClassifier`, from `AllShards()`) only under `CorrectProgression`, asked
+as `(store, database, null)`, after reading the table again (1.2), and refuses Start and the
 store-global Rewind on a HotCold node whose distributor holds no lock (`DaemonLeadership`, M47). A tenant's database is
 found without asking a dynamic tenancy for a tenant it lacks (`DatabaseReach.FindTenantDatabaseAsync`). Enumerating
 a dynamic tenancy's databases (`AllDatabases()`, `Tenancy.DescribeDatabasesAsync()`, 9.50.1's

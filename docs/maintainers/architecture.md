@@ -47,7 +47,7 @@ somewhere; rewriting it would be the single most likely way to ship something th
 
 **D12 — The data seam is internal, across both assemblies.** Per-area service interfaces (`IDocumentDataService`,
 `IEventDataService`, …) with `InternalsVisibleTo` for the test projects - and, from PostgresStudio, for MartenStudio
-(D30). Each package's *registration* surface is three static classes, two classes and one record, snapshot-tested;
+(D30). Each package's *registration* surface is three static classes, two classes and two records, snapshot-tested;
 PostgresStudio's also carries its inbound types and the D31 read model, which are results and hooks, never seams
 (hard rule 7). Everything a consumer can bind to is everything we have to keep working.
 

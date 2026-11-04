@@ -103,12 +103,12 @@ Each rule's full text, with its lists of events, tests and history, is in
    codebase raises is declared `event Func<Task>?`. `NoAsyncVoidTests` scans `src/`. Full text: hard rule 6.
 
 7. **A public API change needs a reviewed Verify baseline and a CHANGELOG entry.** MartenStudio's surface is three
-   static classes, two classes and one record, and it must not move because of PostgresStudio; PostgresStudio's is its five
-   registration types, and PostgresStudio.Diagnostics' (a baseline of its own) is `AddPostgresDiagnostics`, the health-check
-   extension, `PostgresDiagnosticsOptions`, the six inbound types (`IPostgresDatabaseSource`, `IPostgresCapacitySource` and
-   their records), the D31 read model and, since 1.0, the connection history's four (`AddPostgresConnectionHistory`, its
-   options, `IPostgresConnectionHistoryStore` and `PostgresConnectionSample`). Anything else that appears in any baseline is
-   a mistake, not a feature.
+   static classes, two classes and two records, and it must not move because of PostgresStudio; PostgresStudio's is its
+   five registration types, and PostgresStudio.Diagnostics' (a baseline of its own) is `AddPostgresDiagnostics`, the
+   health-check extension, `PostgresDiagnosticsOptions`, the six inbound types (`IPostgresDatabaseSource`,
+   `IPostgresCapacitySource` and their records), the D31 read model and, since 1.0, the connection history's four
+   (`AddPostgresConnectionHistory`, its options, `IPostgresConnectionHistoryStore` and `PostgresConnectionSample`).
+   Anything else that appears in any baseline is a mistake, not a feature.
    Never hand-edit a `.verified.txt`: run the test, read the diff deliberately, say in the pull request what moved and
    why, then accept the baseline. The read model is extend-only (D31). **`docs/health/codes.md` is a contract too, and a
    row is never deleted**: every registered check's code has its row; a retired check keeps its row, marked with the
@@ -250,10 +250,10 @@ assembly's own root (`/postgres`, `/marten`), and `/_blazor`, `blazor.web.js`, `
 **D12 — The data seam is internal, across both assemblies.** Per-area service interfaces (`IDocumentDataService`,
 `IEventDataService`, …) are internal, with `InternalsVisibleTo` for the test projects and, from PostgresStudio, for
 MartenStudio (D30), and from the engine for PostgresStudio and MartenStudio. Each package's *registration* surface is
-snapshot-tested: MartenStudio's three static classes, two classes and one record; PostgresStudio's five registration types;
-PostgresStudio.Diagnostics' `AddPostgresDiagnostics`, the health-check extension, `PostgresDiagnosticsOptions`, the six
-inbound types (`IPostgresDatabaseSource`, `IPostgresCapacitySource` and their records), the D31 read model and the
-connection history's four types (1.0). Full text: [architecture.md](docs/maintainers/architecture.md#d12).
+snapshot-tested: MartenStudio's three static classes, two classes and two records; PostgresStudio's five registration
+types; PostgresStudio.Diagnostics' `AddPostgresDiagnostics`, the health-check extension, `PostgresDiagnosticsOptions`,
+the six inbound types (`IPostgresDatabaseSource`, `IPostgresCapacitySource` and their records), the D31 read model and
+the connection history's four types (1.0). Full text: [architecture.md](docs/maintainers/architecture.md#d12).
 
 **D13 — The SQL console is off by default, and its real guard is the transaction.** `RunSql` is a capability like any
 other. What makes it safe is `SET TRANSACTION READ ONLY` plus `statement_timeout` and an optional `SET LOCAL ROLE`, not
@@ -335,8 +335,9 @@ with its own name, and never reads a row. Marten's document and event tables and
 hidden document type is absent from every list. `BrowsableSchemas` limits the screens, not `RunSql`: `SqlConsoleRole` is
 the real boundary. Every list reads `pg_catalog` and locks nothing it lists. **Reach, not scope:** an operation Marten
 runs over a whole database is authorized as `(store, database, null)` unless the database is exclusively the selected
-tenant's, never on a sharded tenancy; the SQL console, the Mode A subquery lift and `EXPLAIN` are always asked with
-`TenantId = null`. Full text, with *D27 in PostgresStudio*:
+tenant's, never on a sharded tenancy (removing an orphaned progression row, 1.2, always asks `(store, database, null)`);
+the SQL console, the Mode A subquery lift and `EXPLAIN` are always asked with `TenantId = null`. Full text, with *D27 in
+PostgresStudio*:
 [sql-and-catalog.md](docs/maintainers/sql-and-catalog.md#d27).
 
 **D28 — LINQ mode is its own capability, parsed by JasperFx's Dynamic LINQ, built without `ToCommand`, and unconditional

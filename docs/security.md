@@ -79,7 +79,8 @@ visitor has selected: `BrowseDatabase` and `ViewDefinitions` are always authoriz
 confines people to their own tenant therefore refuses them the database browser — which is the point.
 `RunSql`, the dead-letter rewind, the progression corrections, rebuilds and a schema apply are asked the
 same way, because each of them reaches every tenant in the database (the operations are narrowed to the
-tenant only when the database holds that tenant alone). One rewind is the exception: on a store with
+tenant only when the database holds that tenant alone; removing an orphaned progression row never is, and is always asked
+and audited as the database with no tenant). One rewind is the exception: on a store with
 `Events.UseTenantPartitionedEvents`, since Marten 9.51 with JasperFx 2.91, the dead-letter rewind is the daemon's
 per-tenant one - it stops, rewinds and restarts only that tenant's agents and deletes only that tenant's dead
 letters - so it is asked about the dead letter's tenant, and it is offered only where the daemon in this process
@@ -854,6 +855,8 @@ a statement out of the record.
 | 9207 | `ProjectionRebuildStarted` | Information |
 | 9208 | `ProjectionRebuildFinished` — elapsed milliseconds and the outcome | Information |
 | 9209 | `DaemonControlRequested` — the operation and its target | Information |
+| 9225 | `OrphanedProgressionRemovalRequested` — the row being removed, its store and database | Information |
+| 9226 | `OrphanedProgressionRemovalRefused` — the re-check declined the row, and why | Information |
 | 9210 | `StoreUnavailable` — a registered store that would not build, and why | Warning |
 | 9211 | `DocumentWriteRoundTripDropped` — a save whose round trip dropped properties, counted and named | Warning |
 | 9235 | `TableRowsRead` — the first read of a relation's rows per signature: the relation, the filter as typed and the sort | Information |
