@@ -18,10 +18,12 @@ namespace PostgresStudio.Services.Health.Checks;
 /// </para>
 /// <para>
 /// <b>Named pools are identified, not guessed (issue #56).</b> A name that is not a connection string - a data source the host
-/// built with <c>NpgsqlDataSourceBuilder.Name</c>, as Aspire's integration and keyed registrations do - is looked up among the
-/// data sources the studio already resolves (<see cref="NamedPoolIdentities" />) and counted like an unnamed pool with that data
-/// source's identity. A named pool no resolved data source has stays unidentified, and the check says it did not judge it: a quiet
-/// C18 is then not proof, and the verdict and the evidence count the pools it could not tell.
+/// built with <c>NpgsqlDataSourceBuilder.Name</c>, directly or in the builder callback that <c>AddNpgsqlDataSource</c> and Aspire
+/// take (neither sets a name of its own) - is looked up among the data sources the studio already resolves
+/// (<see cref="NamedPoolIdentities" />, never a host's database source) and counted like an unnamed pool with that data source's
+/// identity, when exactly one data source reports under the name. A named pool no resolved data source has, one several share, or
+/// one the bounded walk did not reach stays unidentified, and the check says it did not judge it: a quiet C18 is then not proof,
+/// and the verdict and the evidence count the pools it could not tell.
 /// </para>
 /// <para>
 /// <b>Why Info.</b> Several pools are often deliberate (a pool per tenant database is a different database and is not counted;
@@ -104,8 +106,8 @@ internal sealed class SiblingPoolsCheck : HealthCheck<ConnectionFacts>
             Caveat =
                 "Counted from the pool names Npgsql reports to its meter, compared by host, port, database and login. A pool per "
                 + "tenant database is a different database and is not counted. A data source given a Name of its own is counted when "
-                + "the studio resolves it (the one it reads, or one registered or listed with it); one it does not resolve cannot be "
-                + "compared and is left out" + (siblings.UnparsedNames > 0 ? " (" + siblings.UnparsedNames.ToString(CultureInfo.InvariantCulture) + " here)" : string.Empty)
+                + "the studio resolves it (the one it reads, or one registered with the studio) and no other data source shares the name; "
+                + "one it does not resolve cannot be compared and is left out" + (siblings.UnparsedNames > 0 ? " (" + siblings.UnparsedNames.ToString(CultureInfo.InvariantCulture) + " here)" : string.Empty)
                 + ". Several pools are sometimes deliberate - a separate pool for a long-running job - in which case the check can be "
                 + "accepted with AcceptedChecks.",
             Remedy = new HealthRemedy(evaluation.Text.SharedDataSourceRemedyCode, evaluation.Text.SharedDataSourceRemedyExplanation),
@@ -122,13 +124,26 @@ internal sealed class SiblingPoolsCheck : HealthCheck<ConnectionFacts>
         if (siblings.UnparsedNames == 0)
         {
             return siblings.Pools == 0
-                ? "No Npgsql pool of this process that connects to this database as this login reports to Npgsql's meter (pooling is off)."
+                ? "No Npgsql pool of this process that connects to this database as this login reports to Npgsql's meter (pooling is off, or the pools are named or multi-host)."
                 : "Only one Npgsql pool in this process connects to this database as this login.";
         }
 
+        string reasons = "a data source named with NpgsqlDataSourceBuilder.Name that the studio does not resolve, or several data sources "
+            + "that share one name";
+
+        if (siblings.NoHost > 0)
+        {
+            reasons += ", or a pool name that is a connection string naming no host";
+        }
+
+        if (siblings.CutOff > 0)
+        {
+            reasons += "; " + siblings.CutOff.ToString(CultureInfo.InvariantCulture)
+                + " of them not judged because the studio could not identify them in time";
+        }
+
         return "Not judged for " + siblings.UnparsedNames.ToString(CultureInfo.InvariantCulture)
-            + " named pool(s) of this process that the studio cannot identify (a data source named with NpgsqlDataSourceBuilder.Name "
-            + "that the studio does not resolve); "
+            + " named pool(s) of this process that the studio cannot identify (" + reasons + "); "
             + (siblings.Pools == 0
                 ? "no pool it can identify connects to this database as this login."
                 : "one pool of this process connects to this database as this login.");

@@ -30,24 +30,35 @@ internal sealed record ConnectionSessionStatistics(long? Sessions, double? Sessi
 /// </summary>
 /// <remarks>
 /// A pool whose name is not a connection string - a data source the host gave a <c>Name</c> - is identified through the data
-/// sources the studio resolves (<see cref="NamedPoolIdentities" />) and counted like an unnamed one; one the studio cannot
-/// identify is counted in <paramref name="UnparsedNames" /> and judged by nobody.
+/// sources the studio resolves (<see cref="NamedPoolIdentities" />) and counted like an unnamed one, <b>when exactly one data
+/// source reports under the name</b>: several reporters under one name (a factory that names every tenant's data source alike,
+/// a multi-host data source whose every per-host pool reports its name) cannot be told apart, and are not judged. A pool the
+/// studio cannot identify is counted in <paramref name="UnparsedNames" /> and judged by nobody.
 /// </remarks>
 /// <param name="Pools">How many pools share the data source's identity, this one included.</param>
 /// <param name="SumMaxPoolSize">The sum of their <c>Maximum Pool Size</c>, or <see langword="null" /> when one did not report it.</param>
-/// <param name="UnparsedNames">How many pools stay unidentified: their name is not a connection string, and no data source the studio resolves has it (a data source named with <c>NpgsqlDataSourceBuilder.Name</c> that the studio does not know). Not judged.</param>
-internal sealed record ConnectionPoolSiblings(int Pools, int? SumMaxPoolSize, int UnparsedNames)
+/// <param name="UnparsedNames">
+/// How many <b>pools</b> stay unidentified and are not judged: the name is not a connection string and no data source the studio
+/// resolves has it (a data source named with <c>NpgsqlDataSourceBuilder.Name</c> that the studio does not know), or several data
+/// sources report under it, or it is a connection string that names no host.
+/// </param>
+/// <param name="NoHost">Of those, how many have a name that is a connection string naming no host (Npgsql does not read <c>PGHOST</c>).</param>
+/// <param name="CutOff">Of those, how many the studio might have identified had its walk not been cut off by its time bound or its cap.</param>
+internal sealed record ConnectionPoolSiblings(int Pools, int? SumMaxPoolSize, int UnparsedNames, int NoHost = 0, int CutOff = 0)
 {
     /// <summary>
     /// The identity two pools must share to be one database's pools: the sorted, lower-cased <c>host:port</c> list, the database
-    /// and the login of a connection string, or <see langword="null" /> when <paramref name="connectionString" /> does not parse.
+    /// and the login of a connection string, or <see langword="null" /> when <paramref name="connectionString" /> does not parse
+    /// or names no host.
     /// </summary>
     /// <param name="connectionString">A data source's connection string or a pool's name.</param>
-    public static string? IdentityOf(string? connectionString)
+    public static string? IdentityOf(string? connectionString) => Classify(connectionString).Identity;
+
+    private static (string? Identity, bool NoHost) Classify(string? connectionString)
     {
         if (string.IsNullOrWhiteSpace(connectionString))
         {
-            return null;
+            return (null, false);
         }
 
         try
@@ -56,31 +67,31 @@ internal sealed record ConnectionPoolSiblings(int Pools, int? SumMaxPoolSize, in
 
             if (string.IsNullOrEmpty(builder.Host))
             {
-                return null;
+                return (null, true);
             }
 
             string endpoints = string.Join(',', DataSourceEndpoints.Parse(builder.Host, builder.Port)
                 .Select(static x => x.Host.ToLowerInvariant() + ":" + x.Port.ToString(CultureInfo.InvariantCulture))
                 .Order(StringComparer.Ordinal));
 
-            return endpoints + "|" + (builder.Database ?? string.Empty) + "|" + (builder.Username ?? string.Empty);
+            return (endpoints + "|" + (builder.Database ?? string.Empty) + "|" + (builder.Username ?? string.Empty), false);
         }
         catch (Exception exception) when (exception is ArgumentException or KeyNotFoundException or FormatException)
         {
-            return null;
+            return (null, false);
         }
     }
 
     /// <summary>
     /// The pool names among <paramref name="readings" /> that are not a connection string - the pools a host named, which only a
-    /// data source can identify.
+    /// data source can identify. A connection string that names no host is not among them: no data source is named like one.
     /// </summary>
     /// <param name="readings">Every pool the meter reports.</param>
     public static HashSet<string> NamedPools(IEnumerable<NpgsqlPoolReading> readings)
     {
         ArgumentNullException.ThrowIfNull(readings);
 
-        return [.. readings.Where(static x => IdentityOf(x.PoolName) is null).Select(static x => x.PoolName)];
+        return [.. readings.Where(static x => Classify(x.PoolName) is (null, false)).Select(static x => x.PoolName)];
     }
 
     /// <summary>Counts the pools of <paramref name="readings" /> that have <paramref name="identity" />.</summary>
@@ -88,32 +99,55 @@ internal sealed record ConnectionPoolSiblings(int Pools, int? SumMaxPoolSize, in
     /// <param name="readings">Every pool the meter reports.</param>
     /// <param name="named">
     /// The identity of each named pool the studio could identify, by the pool's name (<see cref="NamedPoolIdentities" />), or
-    /// <see langword="null" /> when none was asked for. A pool name in it counts like an unnamed pool with that identity.
+    /// <see langword="null" /> when none was asked for. A pool name in it counts like an unnamed pool with that identity, when one
+    /// data source reports under it.
     /// </param>
-    public static ConnectionPoolSiblings Count(string identity, IEnumerable<NpgsqlPoolReading> readings, IReadOnlyDictionary<string, string>? named = null)
+    /// <param name="cutOff">Whether the walk that built <paramref name="named" /> was cut off before it had looked everywhere.</param>
+    public static ConnectionPoolSiblings Count(string identity, IEnumerable<NpgsqlPoolReading> readings, IReadOnlyDictionary<string, string>? named = null, bool cutOff = false)
     {
         ArgumentException.ThrowIfNullOrEmpty(identity);
         ArgumentNullException.ThrowIfNull(readings);
 
         int pools = 0;
         int unparsed = 0;
+        int noHost = 0;
+        int notInTime = 0;
         int sum = 0;
         bool sumKnown = true;
 
         foreach (NpgsqlPoolReading reading in readings)
         {
-            string? other = IdentityOf(reading.PoolName);
+            (string? other, bool hostless) = Classify(reading.PoolName);
 
-            if (other is null && named is not null && named.TryGetValue(reading.PoolName, out string? identified))
+            if (hostless)
             {
-                other = identified;
+                unparsed += reading.Reporters;
+                noHost += reading.Reporters;
+                continue;
             }
 
             if (other is null)
             {
-                unparsed++;
+                // A name only a data source can identify. Several data sources under one name are one tally in the meter that cannot
+                // be told apart (a factory naming every tenant alike, a multi-host data source's per-host pools): not judged.
+                if (named is not null && named.TryGetValue(reading.PoolName, out string? identified) && reading.Reporters == 1)
+                {
+                    other = identified;
+                }
+                else
+                {
+                    unparsed += reading.Reporters;
+
+                    if (cutOff && (named is null || !named.ContainsKey(reading.PoolName)))
+                    {
+                        notInTime += reading.Reporters;
+                    }
+
+                    continue;
+                }
             }
-            else if (string.Equals(other, identity, StringComparison.Ordinal))
+
+            if (string.Equals(other, identity, StringComparison.Ordinal))
             {
                 // More than one data source reporting under one name is that many pools with one connection string.
                 pools += reading.Reporters;
@@ -129,7 +163,7 @@ internal sealed record ConnectionPoolSiblings(int Pools, int? SumMaxPoolSize, in
             }
         }
 
-        return new ConnectionPoolSiblings(pools, pools > 0 && sumKnown ? sum : null, unparsed);
+        return new ConnectionPoolSiblings(pools, pools > 0 && sumKnown ? sum : null, unparsed, noHost, notInTime);
     }
 }
 
@@ -380,14 +414,14 @@ internal sealed record ConnectionFacts
         // Only the pools whose name is not a connection string need a data source to be told apart (issue #56); the lease is
         // given back before the studio's sources are asked, which may wait on a host.
         HashSet<string> named = ConnectionPoolSiblings.NamedPools(readings);
-        IReadOnlyDictionary<string, string>? identified = null;
+        NamedPoolIdentification? identified = null;
 
         if (named.Count > 0)
         {
             identified = await NamedPoolIdentities.ReadAsync(context, named, cancellationToken).ConfigureAwait(false);
         }
 
-        return ConnectionPoolSiblings.Count(identity, readings, identified);
+        return ConnectionPoolSiblings.Count(identity, readings, identified?.Identities, identified?.CutOff ?? false);
     }
 
     private static ConnectionObserved MapObserved(NpgsqlDataReader reader) => new(

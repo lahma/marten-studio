@@ -285,10 +285,10 @@ internal interface IStudioSourceProvider
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>Nothing new is scanned.</b> A data source registration is the instance the studio already built for its sources, a
-    /// host's database source is asked for the data sources of the names it lists (each bounded by <c>QueryTimeout</c>, a name
-    /// the host no longer has skipped), and a Marten store is its tenancy's held databases (<c>HeldDatabases</c>, which builds
-    /// none, D27). A source that will not build is skipped; the provider has logged why, throttled.
+    /// <b>Nothing new is scanned.</b> A data source registration is the instance the studio already built for its sources, and a
+    /// Marten store is its tenancy's held databases (<c>HeldDatabases</c>, which builds none, D27). <b>A host's database source
+    /// (<c>IPostgresDatabaseSource</c>) is never asked</b>: it is promised to be asked for a data source only for a database
+    /// somebody opens or a sweep reaches. A source that will not build is skipped; the provider has logged why, throttled.
     /// </para>
     /// <para>
     /// The default answers none, for a provider that holds no data source.

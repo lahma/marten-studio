@@ -230,10 +230,10 @@ internal sealed class PostgresStudioSourceProvider : IStudioSourceProvider
 
     /// <inheritdoc />
     /// <remarks>
-    /// Each data source registration's instance (the one the studio builds for the source, once), then, for a host's database
-    /// source, the data source the host hands over for each name it lists - the host's own cached instances, which it must
-    /// return rather than build (<see cref="IPostgresDatabaseSource" />). Streamed, so the reader that stops early opens no
-    /// more of them than it needs.
+    /// Each data source registration's instance - the one the studio builds for the source, once - and nothing else. <b>A host's
+    /// database source is never asked</b>: <see cref="IPostgresDatabaseSource" /> promises that the studio asks it for a data
+    /// source only for a database somebody opens or a sweep reaches, and a host that builds lazily would have every tenant's built
+    /// by the first sweep of an unrelated check. Lazy: the reader that stops early resolves no more sources than it needs.
     /// </remarks>
     public async IAsyncEnumerable<NpgsqlDataSource> HeldDataSourcesAsync([EnumeratorCancellation] CancellationToken cancellationToken)
     {
@@ -242,39 +242,11 @@ internal sealed class PostgresStudioSourceProvider : IStudioSourceProvider
             cancellationToken.ThrowIfCancellationRequested();
 
             // TryResolve has logged why a source would not build, throttled (9210).
-            if (!TryResolve(registration, out IStudioSource? source).IsAvailable)
-            {
-                continue;
-            }
-
-            if (source is PostgresDataSourceSource single)
+            if (registration.Kind == StudioSourceKind.DataSource
+                && TryResolve(registration, out IStudioSource? source).IsAvailable
+                && source is PostgresDataSourceSource single)
             {
                 yield return single.Database.DataSource;
-                continue;
-            }
-
-            if (source is not PostgresHostSource host)
-            {
-                continue;
-            }
-
-            IReadOnlyList<string>? names = await host.TryListAsync(cancellationToken).ConfigureAwait(false);
-
-            if (names is null)
-            {
-                continue;
-            }
-
-            foreach (string name in names)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                (DataSourceDatabase? opened, _) = await host.TryOpenAsync(name, cancellationToken).ConfigureAwait(false);
-
-                if (opened is not null)
-                {
-                    yield return opened.DataSource;
-                }
             }
         }
     }

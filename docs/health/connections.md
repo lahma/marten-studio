@@ -737,21 +737,30 @@ source was given a `Name`). Each name is parsed in memory and compared, and **on
 pools and the sum of their `Maximum Pool Size`, never a name, a host, a connection string or a password. A pool per tenant
 database, or per login, is a different database or login and is not counted.
 
-**Named data sources.** A data source built with `NpgsqlDataSourceBuilder.Name` (Aspire's Npgsql integration, keyed
-registrations, a host that wants readable pool metrics) reports that name instead of its connection string, so the name alone says
-nothing about the database. The studio identifies such a pool through the data sources it already resolves - it adds no scan of
-your container:
+**Named data sources.** A data source built with `NpgsqlDataSourceBuilder.Name` reports that name to Npgsql's meter instead of
+its connection string, so the name alone says nothing about the database. (`AddNpgsqlDataSource` and Aspire's Npgsql integration
+set no name of their own; a host sets one directly or in the builder callback they take.) The studio identifies such a pool through
+the data sources it already resolves - it adds no scan of your container:
 
-- the data source the sweep is about, and the other sources Postgres Studio lists: the unkeyed `NpgsqlDataSource` it discovers,
-  each `AddDataSource(name, ...)` (a keyed registration goes in as `sp => sp.GetRequiredKeyedService<NpgsqlDataSource>(key)`), and
-  the data source an `AddDatabaseSource` host hands over for each database it lists;
-- in Marten Studio, the data source of each database of each Marten store the application registered.
+- the data source the sweep is about, and the other sources Postgres Studio lists: the unkeyed `NpgsqlDataSource` it discovers and
+  each `AddDataSource(name, ...)` (a keyed registration goes in as `sp => sp.GetRequiredKeyedService<NpgsqlDataSource>(key)`).
+  Listing a data source this way **also makes it a source the studio browses and sweeps**, with everything that implies;
+- in Marten Studio, the data source of each database of each Marten store the application registered. Marten Studio has no
+  `AddDataSource` (and `AddPostgresDiagnostics` is refused beside it), so a named pool that no store uses - the host's own
+  `AddNpgsqlDataSource`, Wolverine's standalone persistence - stays not judged for good. Drop its `Name`, or accept C18.
+
+A host's `AddDatabaseSource` is never asked: it is promised to hand over a data source only for a database somebody opens or a
+sweep reaches, so its pools stay not judged too.
 
 A named pool whose data source is one of these is compared by that data source's host, port, database and login and counted like
-an unnamed pool. **A named pool the studio does not resolve - a data source your code builds and keeps to itself - is not judged:**
-the check is still quiet, but it says *"Not judged for N named pool(s) of this process that the studio cannot identify"* instead of
-"nothing found", and when it fires the evidence row *Named pools not identified, left out* counts them. To have such a pool
-judged, list it with `AddDataSource(name, ...)` in Postgres Studio; Marten Studio's stores are listed from Marten.
+an unnamed pool, **when exactly one data source reports under the name**. Several under one name - a factory that names every
+tenant's data source alike, a multi-host data source whose every per-host pool reports its name - cannot be told apart and are not
+judged. **A named pool the studio does not resolve is not judged:** the check is still quiet, but it says *"Not judged for N named
+pool(s) of this process that the studio cannot identify"* instead of "nothing found", naming the reasons that apply, and when it
+fires the evidence row *Named pools not identified, left out* counts them. The walk over the sources is bounded: it stops at
+`QueryTimeout` or after 256 sources, and the pools it did not reach are then said to be "not judged because the studio could not
+identify them in time". A pool name that is a connection string naming no `Host` is not judged either (Npgsql does not read
+`PGHOST`).
 
 Several pools are sometimes deliberate - a separate pool for a long-running job - in which case accept the check with
 `AcceptedChecks`. Otherwise the remedy is one shared `NpgsqlDataSource` for the process: register it once
