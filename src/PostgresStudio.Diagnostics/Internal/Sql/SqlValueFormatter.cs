@@ -58,6 +58,13 @@ internal sealed record SqlValueFormatterOptions
     /// <summary>The longest a <c>json</c>/<c>jsonb</c> cell may be before it is cut. 4 KiB by default.</summary>
     public int MaxJsonLength { get; init; } = 4 * 1024;
 
+    /// <summary>
+    /// The longest a pgvector value (<c>vector</c>, <c>halfvec</c>, <c>sparsevec</c>) may be before it is cut: 64 Ki characters,
+    /// some 6 000 dimensions, so an embedding of any usual size reaches the export and the "show all" panel whole. A grid shows
+    /// only its first components either way; this bounds what a statement that selects hundreds of rows keeps in memory.
+    /// </summary>
+    public int MaxVectorLength { get; init; } = 64 * 1024;
+
     /// <summary>How many bytes of a <c>bytea</c> value are rendered as hex.</summary>
     public int MaxBinaryBytes { get; init; } = 32;
 
@@ -152,6 +159,18 @@ internal sealed class SqlValueFormatter
                     SqlCellKind.Text,
                     options.MaxCellLength);
         }
+    }
+
+    /// <summary>
+    /// A pgvector value, as Postgres prints it, kept to <see cref="SqlValueFormatterOptions.MaxVectorLength" /> rather than the
+    /// kilobyte of an ordinary cell. It is text, and stays <see cref="SqlCellKind.Text" />: the grid knows it is a vector from
+    /// its column.
+    /// </summary>
+    public SqlCell FormatPgVector(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+
+        return Cut(text, SqlCellKind.Text, options.MaxVectorLength);
     }
 
     private static bool IsJson(string? postgresType) =>

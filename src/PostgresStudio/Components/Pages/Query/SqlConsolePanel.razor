@@ -112,6 +112,8 @@
 
                 <ResultGrid Columns="@GridColumns(result)"
                             Rows="@GridRows(result)"
+                            Vectors="@GridVectors(result)"
+                            CutCells="@GridCutCells(result)"
                             Truncated="result.Truncated"
                             RowLimit="result.RowLimit"
                             EmptyTitle="Nothing to show"
@@ -569,6 +571,43 @@
         }
 
         return columns;
+    }
+
+    /// <summary>The pgvector type of each column, or <see langword="null" /> - what the grid collapses (1.2-VEC).</summary>
+    private static IReadOnlyList<object?> GridVectors(SqlConsoleResult result)
+    {
+        List<object?> vectors = new(result.Columns.Count);
+
+        foreach (SqlResultColumn column in result.Columns)
+        {
+            vectors.Add(column.Vector);
+        }
+
+        return vectors;
+    }
+
+    /// <summary>The pgvector cells the server cut, which the grid collapses from what was read and never offers for copying.</summary>
+    private static IReadOnlySet<(int Row, int Column)> GridCutCells(SqlConsoleResult result)
+    {
+        HashSet<(int Row, int Column)> cut = [];
+
+        for (int column = 0; column < result.Columns.Count; column++)
+        {
+            if (result.Columns[column].Vector is null)
+            {
+                continue;
+            }
+
+            for (int row = 0; row < result.Rows.Count; row++)
+            {
+                if (column < result.Rows[row].Count && result.Rows[row][column].IsTruncated)
+                {
+                    cut.Add((row, column));
+                }
+            }
+        }
+
+        return cut;
     }
 
     private static IReadOnlyList<IReadOnlyList<(string Text, string Kind)>> GridRows(SqlConsoleResult result)

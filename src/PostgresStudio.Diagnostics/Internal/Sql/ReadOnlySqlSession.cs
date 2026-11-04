@@ -1,3 +1,4 @@
+using System.Data;
 using System.Data.Common;
 using System.Diagnostics;
 using System.Globalization;
@@ -6,12 +7,23 @@ using Npgsql;
 
 using NpgsqlTypes;
 
+using PostgresStudio.Services.Database;
+
 namespace PostgresStudio.Internal.Sql;
 
 /// <summary>One column of a SQL console result.</summary>
 /// <param name="Name">The column name as Postgres returned it.</param>
 /// <param name="PostgresType">The Postgres type name, shown in the grid header.</param>
-internal sealed record SqlResultColumn(string Name, string PostgresType);
+internal sealed record SqlResultColumn(string Name, string PostgresType)
+{
+    /// <summary>
+    /// The pgvector type the column holds - <c>vector</c>, <c>halfvec</c> or <c>sparsevec</c>, owned by the <c>vector</c>
+    /// extension - or <see langword="null" /> for any other column. Its cells are the text Postgres prints, so the grid can
+    /// collapse them as the database browser does. The dimensions are not known here: a result column carries a type, not
+    /// the declaration of a table's column.
+    /// </summary>
+    public PgVectorColumn? Vector { get; init; }
+}
 
 /// <summary>A Postgres error, as values rather than as an exception.</summary>
 /// <param name="SqlState">The five-character SQLSTATE, for example <c>25006</c> or <c>57014</c>.</param>
@@ -126,6 +138,12 @@ internal sealed record ReadOnlySqlOptions
 /// Every GUC, including the role, is set through <c>select set_config(@name, @value, true)</c> rather than
 /// a <c>SET</c> statement, because <c>SET</c> takes no parameters and would mean interpolating text into
 /// SQL. The role is validated as an identifier as well; both, not either.
+/// </para>
+/// <para>
+/// <b>The statement is described before it runs</b> (1.2-VEC): one extra round trip, Parse and Describe only, inside the same
+/// transaction and under the same timeouts, tells which result columns Npgsql has no handler for, and those - pgvector's
+/// <c>vector</c>, <c>halfvec</c> and <c>sparsevec</c> first among them - are requested in text form
+/// (<see cref="ResultColumnTypes" />). The guard, the transaction and what is audited are exactly what they were.
 /// </para>
 /// </remarks>
 internal sealed class ReadOnlySqlSession
@@ -331,22 +349,33 @@ internal sealed class ReadOnlySqlSession
         string? plan = null;
         long? planCharacters = null;
 
-        await using var command = new NpgsqlCommand(sql, connection, transaction)
-        {
-            // A little past the server-side timeout: statement_timeout is what should fire, because it
-            // produces 57014 with a message, while a client-side timeout only breaks the connection.
-            CommandTimeout = (int)Math.Ceiling(options.StatementTimeout.TotalSeconds) + 5,
-        };
-
-        bind?.Invoke(command);
-
         try
         {
+            // One extra round trip, before the statement runs and inside the same transaction: which columns the driver cannot
+            // read as a value. An error here is the error the statement would have raised (it is the same Parse), and is
+            // answered by the same handlers below.
+            ResultTextPlan textPlan = await DescribeAsync(connection, transaction, sql, bind, cancellationToken).ConfigureAwait(false);
+
+            // The duration is the execution's alone, as it always was: the describe is not the statement's time.
+            stopwatch.Restart();
+
+            await using var command = NewCommand(connection, transaction, sql, bind);
+
+            if (textPlan.UnknownResultTypes is { } unknown)
+            {
+                // Requested from Postgres in text form: the driver makes no attempt to parse these, and hands each back as the
+                // string Postgres prints. It applies to the first statement only, which is the only result set read.
+                command.UnknownResultTypeList = unknown;
+            }
+
             await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
 
             for (var i = 0; i < reader.FieldCount; i++)
             {
-                columns.Add(new SqlResultColumn(reader.GetName(i), reader.GetDataTypeName(i)));
+                columns.Add(new SqlResultColumn(reader.GetName(i), reader.GetDataTypeName(i))
+                {
+                    Vector = i < textPlan.Vectors.Count ? textPlan.Vectors[i] : null,
+                });
             }
 
             // EXPLAIN (FORMAT JSON)'s one json column: kept whole for the plan view (X1), as well as capped for the grid.
@@ -382,7 +411,7 @@ internal sealed class ReadOnlySqlSession
                 {
                     for (var i = 0; i < reader.FieldCount; i++)
                     {
-                        row[i] = ReadCell(reader, i, columns[i].PostgresType);
+                        row[i] = ReadCell(reader, i, columns[i]);
                     }
                 }
 
@@ -432,18 +461,111 @@ internal sealed class ReadOnlySqlSession
     private static SqlResultSet Failed(TimeSpan elapsed, string sqlState, string message) =>
         new([], [], false, elapsed, new SqlError(sqlState, message, 0, null, null));
 
-    private SqlCell ReadCell(NpgsqlDataReader reader, int ordinal, string postgresType)
+    /// <summary>
+    /// A command for the statement, with the timeout and whatever the caller binds. A new one each time: the describe and the
+    /// run are two commands, so neither inherits the other's result-type list or prepared state.
+    /// </summary>
+    private NpgsqlCommand NewCommand(NpgsqlConnection connection, NpgsqlTransaction transaction, string sql, Action<NpgsqlCommand>? bind)
+    {
+        var command = new NpgsqlCommand(sql, connection, transaction)
+        {
+            // A little past the server-side timeout: statement_timeout is what should fire, because it
+            // produces 57014 with a message, while a client-side timeout only breaks the connection.
+            CommandTimeout = (int)Math.Ceiling(options.StatementTimeout.TotalSeconds) + 5,
+        };
+
+        bind?.Invoke(command);
+
+        return command;
+    }
+
+    /// <summary>
+    /// Describes the statement - Parse and Describe, never Bind or Execute: nothing in it runs (<c>CommandBehavior.SchemaOnly</c>,
+    /// Npgsql 9.0.4 and 10.0.3) - and decides which result columns arrive as text (<see cref="ResultColumnTypes" />).
+    /// </summary>
+    /// <remarks>
+    /// The second round trip, which asks the catalog who owns the types of the columns the driver cannot read, is made only
+    /// when there is such a column or one named like a pgvector type.
+    /// </remarks>
+    private async Task<ResultTextPlan> DescribeAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        string sql,
+        Action<NpgsqlCommand>? bind,
+        CancellationToken cancellationToken)
+    {
+        DescribedColumn[] described;
+
+        await using (var command = NewCommand(connection, transaction, sql, bind))
+        await using (var reader = await command.ExecuteReaderAsync(CommandBehavior.SchemaOnly, cancellationToken).ConfigureAwait(false))
+        {
+            described = new DescribedColumn[reader.FieldCount];
+
+            for (var i = 0; i < described.Length; i++)
+            {
+                described[i] = new DescribedColumn(reader.GetDataTypeOID(i), reader.GetPostgresType(i).Name, IsReadable(reader, i));
+            }
+        }
+
+        if (described.Length == 0)
+        {
+            return ResultTextPlan.None(0);
+        }
+
+        long[] candidates = ResultColumnTypes.Candidates(described);
+        Dictionary<long, string> owned = [];
+
+        if (candidates.Length > 0)
+        {
+            await using var command = new NpgsqlCommand(ResultColumnTypes.PgVectorTypesSql, connection, transaction)
+            {
+                CommandTimeout = (int)Math.Ceiling(options.StatementTimeout.TotalSeconds) + 5,
+            };
+
+            command.Parameters.Add(new NpgsqlParameter("oids", NpgsqlDbType.Array | NpgsqlDbType.Bigint) { Value = candidates });
+
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                owned[reader.GetInt64(0)] = reader.GetString(1);
+            }
+        }
+
+        return ResultColumnTypes.Plan(described, owned);
+    }
+
+    /// <summary>Whether the driver can read the column as a value: it has a handler for the column's type.</summary>
+    private static bool IsReadable(NpgsqlDataReader reader, int ordinal)
     {
         try
         {
-            return formatter.Format(reader.GetValue(ordinal), postgresType);
+            _ = reader.GetFieldType(ordinal);
+            return true;
         }
         catch (Exception exception) when (exception is InvalidCastException or NotSupportedException)
         {
-            // An extension type with no Npgsql mapping. The grid says so rather than failing the whole run. A pgvector
-            // column is one, unless the host called UseVector() on its data source - which is why the console's grid
-            // does not collapse vectors as the database browser's does (see ResultGrid).
-            return new SqlCell($"(cannot read {postgresType})", SqlCellKind.Text, false, 0);
+            return false;
+        }
+    }
+
+    private SqlCell ReadCell(NpgsqlDataReader reader, int ordinal, SqlResultColumn column)
+    {
+        try
+        {
+            object value = reader.GetValue(ordinal);
+
+            // A pgvector value is the text Postgres prints (ResultColumnTypes), kept to a cap of its own: a 1536-dimension
+            // embedding is some 15 000 characters, which the 1 KiB a cell gets would cut in the middle of the export.
+            return column.Vector is not null && value is string text
+                ? formatter.FormatPgVector(text)
+                : formatter.Format(value, column.PostgresType);
+        }
+        catch (Exception exception) when (exception is InvalidCastException or NotSupportedException)
+        {
+            // A type the driver has no handler for that was not requested as text. Since the describe above that is rare -
+            // an unknown type arrives as text - but a failure to read one value must not fail the whole run.
+            return new SqlCell($"(cannot read {column.PostgresType})", SqlCellKind.Text, false, 0);
         }
     }
 

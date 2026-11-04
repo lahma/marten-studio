@@ -63,16 +63,19 @@ else
                             <td class="ms-table-cell ms-query-cell ms-query-kind-@cell.Kind" @key="columnIndex">
                                 @* NULL, the JSON chip and plain text are SqlCellView's, shared with the database
                                    browser's row grid so the two grids never spell a cell two ways.
-                                   A pgvector value is not collapsed here, unlike the row grid (PGV): the console reads
-                                   values through Npgsql's type mapping, which cannot read a vector at all unless the
-                                   host called UseVector() (the cell says "cannot read" and the type), and when it can,
-                                   the text is Pgvector's own ToString, not Postgres's; and nothing here knows the
-                                   column is pgvector's - the row grid's PgVectorColumn comes from pg_depend and the type
-                                   modifier, and a result set has only a type name. Casting to ::text in the statement
-                                   reads one as Postgres prints it. *@
+                                   A pgvector column (1.2-VEC) is the same cell the row grid draws: the console asks
+                                   Postgres for such a column in text form, and the service knows it is pgvector's from
+                                   the extension that owns its type (ReadOnlySqlSession), so the grid is handed its
+                                   PgVectorColumn and SqlCellView collapses the value to its type and first components.
+                                   Rich is set for those columns only - it also changes how a timestamp and a bytea are
+                                   drawn, and every other column is exactly what it always was. *@
                                 <SqlCellView Text="@cell.Text"
                                              Kind="@cell.Kind"
-                                             OnOpen="() => OpenJsonAsync(rowIndex, columnIndex)" />
+                                             Type="@Columns[columnIndex].Type"
+                                             Rich="@IsVector(columnIndex)"
+                                             Vector="@VectorOf(columnIndex)"
+                                             IsTruncated="@IsCut(rowIndex, columnIndex)"
+                                             OnOpen="() => OpenAsync(rowIndex, columnIndex)" />
                             </td>
                         }
                     </tr>
@@ -109,6 +112,33 @@ else
                       DownloadFileName="cell.json" />
         </div>
     }
+    else if (openVector is not null)
+    {
+        @* The whole value of a pgvector cell, as Postgres prints it: the database browser's panel, in the console's. *@
+        <div class="ms-query-json-panel ms-row-json-panel">
+            <div class="ms-query-json-panel-header">
+                <span class="ms-query-json-panel-title">@openTitle</span>
+                <button type="button" class="ms-btn ms-btn-sm" @onclick="CloseJson">Close</button>
+            </div>
+            @if (openVectorCut)
+            {
+                <p class="ms-row-value-note">
+                    This value was cut to fit the console's cell, so what is shown (and what the export carries) is not the whole
+                    of it, and it is not offered for copying.
+                </p>
+            }
+            else
+            {
+                <p class="ms-row-value-note ms-vector-panel-actions">
+                    <CopyButton Value="@openVector" Label="@("Copy the whole value of " + openTitle)" />
+                    <span>The whole value, as Postgres prints it.</span>
+                </p>
+            }
+            <div class="ms-row-text-panel" role="region" aria-label="@openTitle" tabindex="0">
+                <pre class="ms-row-text-panel-body ms-vector-whole">@openVector</pre>
+            </div>
+        </div>
+    }
 }
 
 @code {
@@ -119,6 +149,8 @@ else
     public const string JsonKind = SqlCellView.JsonKind;
 
     private string? openJson;
+    private string? openVector;
+    private bool openVectorCut;
     private string openTitle = string.Empty;
 
     /// <summary>The columns, as name and Postgres type.</summary>
@@ -145,13 +177,47 @@ else
     [Parameter]
     public string EmptyText { get; set; } = "This statement returned no result set.";
 
-    private Task OpenJsonAsync(int row, int column)
+    /// <summary>
+    /// For each column, in order, its <c>PgVectorColumn</c> when the column holds pgvector values and <see langword="null" />
+    /// when it does not - the type the console learned from the extension that owns the column's type. Typed
+    /// <see cref="object" /> for the reason <c>SqlCellView.Vector</c> gives: a public parameter cannot have an internal type.
+    /// A list shorter than <see cref="Columns" /> (or none) means no column is a vector.
+    /// </summary>
+    [Parameter]
+    public IReadOnlyList<object?> Vectors { get; set; } = [];
+
+    /// <summary>
+    /// The (row, column) positions, zero-based, of the pgvector cells whose text the server cut. A cut value is collapsed from
+    /// what was read and is never offered for copying.
+    /// </summary>
+    [Parameter]
+    public IReadOnlySet<(int Row, int Column)> CutCells { get; set; } = new HashSet<(int Row, int Column)>();
+
+    private object? VectorOf(int column) => column < Vectors.Count ? Vectors[column] : null;
+
+    private bool IsVector(int column) => VectorOf(column) is not null;
+
+    private bool IsCut(int row, int column) => CutCells.Contains((row, column));
+
+    private Task OpenAsync(int row, int column)
     {
         if (row < Rows.Count && column < Rows[row].Count)
         {
-            openJson = Rows[row][column].Text;
-            openTitle = (column < Columns.Count ? Columns[column].Name : "value") +
+            string title = (column < Columns.Count ? Columns[column].Name : "value") +
                 " (row " + (row + 1).ToString(System.Globalization.CultureInfo.InvariantCulture) + ")";
+
+            CloseJson();
+            openTitle = title;
+
+            if (IsVector(column))
+            {
+                openVector = Rows[row][column].Text;
+                openVectorCut = IsCut(row, column);
+            }
+            else
+            {
+                openJson = Rows[row][column].Text;
+            }
         }
 
         return Task.CompletedTask;
@@ -160,6 +226,8 @@ else
     private void CloseJson()
     {
         openJson = null;
+        openVector = null;
+        openVectorCut = false;
         openTitle = string.Empty;
     }
 }

@@ -12,7 +12,8 @@
     viewer rather than four kilobytes of text in a table cell.
 
     `Rich` is the row grid's mode, and it is off by default so the console's grid draws exactly what it
-    always has. With it on:
+    always has - except that the console's grid turns it on for a pgvector column (1.2-VEC), the only column it
+    knows enough about to draw collapsed, and for no other. With it on:
 
       - a `timestamptz` is shown in the time zone the header picked, with the stored value in the tooltip;
         a `timestamp` is shown as stored, never converted - it has no zone to convert from - and says
