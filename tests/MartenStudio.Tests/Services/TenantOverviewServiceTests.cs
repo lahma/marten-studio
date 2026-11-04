@@ -1,6 +1,8 @@
 using Marten;
+using Marten.Storage;
 
 using MartenStudio.Services.Tenants;
+using MartenStudio.Tests.Projections;
 using MartenStudio.Tests.Support;
 
 using Microsoft.AspNetCore.Authorization;
@@ -230,6 +232,148 @@ public class TenantOverviewServiceTests
     }
 
     // -------------------------------------------------------------------------------------------------
+    // 1.2-SCOPE-2-FU
+    // -------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// F1: a host that accepts the connection and never answers. The budget (here 300 ms) is spent while the first database's connection
+    /// waits out its startup <c>Timeout</c> (1 s) - Npgsql's open does not honour the token during startup - and the footer's read then
+    /// meets a spent token: the page is given "not read in time", not an exception the page would swallow into a blank.
+    /// </summary>
+    [Fact]
+    public async Task A_spent_budget_gives_not_read_in_time_and_never_an_exception()
+    {
+        using var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        listener.Start();
+        using CancellationTokenSource accepting = new();
+        List<System.Net.Sockets.TcpClient> held = [];
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                while (!accepting.IsCancellationRequested)
+                {
+                    held.Add(await listener.AcceptTcpClientAsync(accepting.Token));
+                }
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        }, Token);
+
+        string silent = $"Host=127.0.0.1;Port={((System.Net.IPEndPoint) listener.LocalEndpoint).Port};Database=silent;Username=u;Password=p;Timeout=1;Pooling=false";
+
+        await using Harness harness = Harness.Create(
+            static options =>
+            {
+                options.Schema.For<TenantedNote>().MultiTenanted();
+                options.Schema.For<PlainNote>();
+            },
+            known: ["acme"],
+            activity: true,
+            connection: silent,
+            budget: TimeSpan.FromMilliseconds(300));
+
+        TenantOverview overview = await harness.Service.GetAsync(DefaultScope, new TenantOverviewRequest(), Token);
+
+        await accepting.CancelAsync();
+        listener.Stop();
+        foreach (System.Net.Sockets.TcpClient client in held)
+        {
+            client.Dispose();
+        }
+
+        overview.Rows.Should().ContainSingle().Which.ReadProblem.Should().NotBeNull("the one database could not be read");
+        overview.Shared.Should().NotBeNull();
+        overview.Shared!.Documents.Text.Should().Be("not read in time");
+        overview.Shared.Collections.Should().Be(1);
+    }
+
+    /// <summary>F3: a duplicated KnownTenantIds entry is one row - two rows would share one @key and end the circuit.</summary>
+    [Fact]
+    public async Task A_duplicated_known_tenant_id_is_one_row()
+    {
+        await using Harness harness = Harness.Create(Conjoined, known: ["acme", "globex", "acme"]);
+
+        TenantOverview overview = await harness.Service.GetAsync(DefaultScope, new TenantOverviewRequest(), Token);
+
+        overview.Rows.Select(static x => x.TenantId).Should().Equal("acme", "globex");
+        overview.Rows.Select(static x => (x.DatabaseId, x.TenantId)).Should().OnlyHaveUniqueItems();
+    }
+
+    [Fact]
+    public async Task A_duplicated_known_tenant_id_on_a_store_with_several_databases_is_one_row()
+    {
+        await using Harness harness = Harness.CreateStatic(known: ["acme", "acme"]);
+
+        TenantOverview overview = await harness.Service.GetAsync(DefaultScope, new TenantOverviewRequest(), Token);
+
+        overview.Rows.Select(static x => x.TenantId).Should().Equal("acme");
+    }
+
+    /// <summary>F5: the page enumerates nothing of its own - on a master-table shape, exactly the resolver's one BuildDatabases.</summary>
+    [Fact]
+    public async Task A_page_read_makes_exactly_the_resolvers_one_enumeration()
+    {
+        int builds = 0;
+
+        await using Harness harness = Harness.CreateStatic(
+            known: null,
+            after: options =>
+            {
+                ObservedTenancy observed = ObservedTenancy.Over(options.Tenancy, masterTableShape: true);
+                observed.OnBuildDatabases = () => Interlocked.Increment(ref builds);
+                options.Tenancy = (ITenancy) (object) observed;
+            });
+
+        TenantOverview overview = await harness.Service.GetAsync(DefaultScope, new TenantOverviewRequest(), Token);
+
+        overview.Rows.Select(static x => x.TenantId).Should().BeEquivalentTo(["acme", "globex", "initech"]);
+        builds.Should().Be(1, "the resolver's enumeration; tenant lists, placement and the other database's tenants are read from it");
+    }
+
+    /// <summary>F6: a tenant with no single-value partition has no claim to "0 rows" - they may be in a shared or default partition.</summary>
+    [Fact]
+    public void A_tenant_with_no_partition_in_any_table_reads_a_dash_and_one_with_an_empty_partition_reads_zero()
+    {
+        TenantCell none = TenantOverviewService.Cell([new(TenantOverviewService.Kind.NoPartition, 0, "app.docs")], "collections");
+
+        none.Text.Should().Be("—");
+        none.Title.Should().Be("its rows, if any, are in a shared or default partition");
+
+        TenantOverviewService.Cell([new(TenantOverviewService.Kind.Count, 0, "app.docs")], "collections").Text.Should().Be("~0");
+        TenantOverviewService.Cell(
+                [new(TenantOverviewService.Kind.Count, 12, "app.docs"), new(TenantOverviewService.Kind.NoPartition, 0, "app.more")],
+                "collections")
+            .Text.Should().Be("~12");
+    }
+
+    /// <summary>F8: a database the policy refuses as a whole lists none of its tenants, though each would be allowed one by one.</summary>
+    [Fact]
+    public async Task A_database_the_policy_refuses_as_a_whole_lists_none_of_its_tenants()
+    {
+        await using Harness harness = Harness.CreateStatic(known: null, policies: true);
+
+        // A static tenancy enumerates in hash order, so learn which database holds what before hiding one.
+        TenantOverview open = await harness.Service.GetAsync(DefaultScope, new TenantOverviewRequest(), Token);
+        string kept = open.Rows.Single(static x => x.TenantId == "acme").DatabaseId;
+        string hidden = open.Rows.Single(static x => x.TenantId == "globex").DatabaseId;
+        hidden.Should().NotBe(kept, "the premise");
+
+        harness.Policies.Allow(resource => !string.Equals(resource.DatabaseIdentifier, hidden, StringComparison.Ordinal) || resource.TenantId is not null);
+        int before = harness.Policies.Calls.Count;
+
+        TenantOverview overview = await harness.Service.GetAsync(DefaultScope with { DatabaseId = kept }, new TenantOverviewRequest(), Token);
+
+        overview.Rows.Select(static x => x.TenantId).Should().Equal(["acme"], "globex and initech live in the database the header's picker hides");
+        harness.Policies.Calls.Skip(before).Count(x => x.Resource.TenantId is null && x.Resource.DatabaseIdentifier == hidden)
+            .Should().Be(1, "asked once for that database");
+        harness.Policies.Calls.Skip(before).Should().NotContain(
+            x => x.Resource.TenantId == "globex" || x.Resource.TenantId == "initech",
+            "none of its tenants is asked about, since none is listed");
+    }
+
+    // -------------------------------------------------------------------------------------------------
     // T8: a tenant's projections in one cell
     // -------------------------------------------------------------------------------------------------
 
@@ -292,21 +436,24 @@ public class TenantOverviewServiceTests
             bool policies = false,
             string[]? known = null,
             bool discover = true,
-            bool activity = false) =>
+            bool activity = false,
+            string? connection = null,
+            TimeSpan? budget = null) =>
             Build(
                 options =>
                 {
-                    options.Connection(FirstConnection);
+                    options.Connection(connection ?? FirstConnection);
                     options.DatabaseSchemaName = "scope2";
                     configure(options);
                 },
                 policies,
                 known,
                 discover,
-                activity);
+                activity,
+                budget);
 
         /// <summary>A static two-database store: acme alone in the first, globex and initech together in the second.</summary>
-        public static Harness CreateStatic(string[]? known) =>
+        public static Harness CreateStatic(string[]? known, bool policies = false, Action<StoreOptions>? after = null) =>
             Build(
                 options =>
                 {
@@ -317,13 +464,15 @@ public class TenantOverviewServiceTests
                         tenancy.AddMultipleTenantDatabase(SecondConnection, "tenants-b").ForTenants("globex", "initech");
                     });
                     Conjoined(options);
+                    after?.Invoke(options);
                 },
-                policies: false,
+                policies,
                 known,
                 discover: true,
-                activity: false);
+                activity: false,
+                budget: null);
 
-        private static Harness Build(Action<StoreOptions> configure, bool policies, string[]? known, bool discover, bool activity)
+        private static Harness Build(Action<StoreOptions> configure, bool policies, string[]? known, bool discover, bool activity, TimeSpan? budget)
         {
             var users = new TestAuthenticationStateProvider();
             users.SignIn("tester");
@@ -357,6 +506,11 @@ public class TenantOverviewServiceTests
 
             services.AddSingleton<IAuthorizationService>(authorization);
             services.AddScoped<AuthenticationStateProvider>(_ => users);
+
+            if (budget is { } spend)
+            {
+                services.AddScoped<ITenantOverviewService>(sp => ActivatorUtilities.CreateInstance<TenantOverviewService>(sp, spend));
+            }
 
             return new Harness(services.BuildServiceProvider(), authorization);
         }

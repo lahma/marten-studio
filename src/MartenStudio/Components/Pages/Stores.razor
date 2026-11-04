@@ -94,7 +94,13 @@
                     <div class="ms-kv">
                         <div class="ms-kv-row ms-stores-tenancy">
                             <span class="ms-kv-key">Tenancy</span>
-                            <span class="ms-kv-value">@store.Tenancy.Words</span>
+                            <span class="ms-kv-value">
+                                @store.Tenancy.Words
+                                @if (store.Tenancy.Kind != StoreTenancyKind.Single && !HasPerTenantData(store))
+                                {
+                                    <span class="ms-muted ms-stores-tenant-is-database">Each tenant is a database here; choose one in the header.</span>
+                                }
+                            </span>
                         </div>
                         <div class="ms-kv-row ms-stores-documents">
                             <span class="ms-kv-key">Document types</span>
@@ -168,7 +174,7 @@
                                             <td class="ms-table-cell">
                                                 <a href="@OverviewHref(store.Key, database.Identity)">Overview</a>
                                                 <a href="@HealthHref(store.Key, database.Identity)">Health</a>
-                                                @if (store.Tenancy.Kind != StoreTenancyKind.Single)
+                                                @if (HasPerTenantData(store))
                                                 {
                                                     <a class="ms-stores-tenants-link" href="@TenantsHref(store.Key, database.Identity)">Tenants</a>
                                                 }
@@ -550,6 +556,15 @@
     private static string DocumentTypesText(StoreOverview store) =>
         store.DocumentTypeCount.ToString(CultureInfo.InvariantCulture)
         + (store.ConjoinedDocumentTypes > 0 ? " (" + store.ConjoinedDocumentTypes.ToString(CultureInfo.InvariantCulture) + " conjoined)" : string.Empty);
+
+    /// <summary>
+    /// Whether the Tenants page has per-tenant data to show for the store - a visible conjoined document type or a conjoined event
+    /// store, as <c>TenantDiscovery.IsTenantScopeRelevant</c> asks - and so whether Stores links to it. On a database-per-tenant store
+    /// with neither, each tenant is a database, chosen in the header.
+    /// </summary>
+    private static bool HasPerTenantData(StoreOverview store) =>
+        store.Tenancy.Kind != StoreTenancyKind.Single
+        && (store.ConjoinedDocumentTypes > 0 || string.Equals(store.Events?.TenancyStyle, "Conjoined", StringComparison.Ordinal));
 
     private bool IsCurrent(StoreOverview store) =>
         string.Equals(State.ActiveScope?.StoreKey, store.Key, StringComparison.OrdinalIgnoreCase);

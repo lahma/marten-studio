@@ -44,7 +44,9 @@ namespace MartenStudio.Services.Tenants;
 /// <para>
 /// <b>Bounded.</b> A page is 25 rows; the statistics are read for those rows' tenants only, one database after another on one
 /// connection each, every statement under the studio's <c>QueryTimeout</c> and the whole read under a 20-second budget; a database
-/// not reached in time shows "not read in time". Every statement is built in <c>Internal/Sql</c> (hard rule 4) and reads the catalog
+/// not reached in time shows "not read in time", and so does the footer. The budget is 20 seconds <em>plus one connection
+/// <c>Timeout</c></em>: Npgsql's open does not honour the token during the startup handshake, so a host that accepts and never answers
+/// holds the connection being opened for its <c>Timeout</c>, and the budget is noticed at the next await. Every statement is built in <c>Internal/Sql</c> (hard rule 4) and reads the catalog
 /// and the planner's statistics: no table of the store is read but, for the newest event, <c>mt_events</c>'s primary key.
 /// </para>
 /// </remarks>
@@ -74,6 +76,7 @@ internal sealed class TenantOverviewService : ITenantOverviewService
     private readonly ColumnCatalog catalog;
     private readonly ILogger<TenantOverviewService> logger;
     private readonly TableRowAuditLedger ledger = new();
+    private readonly TimeSpan readBudget;
 
     public TenantOverviewService(
         StudioScopeResolver resolver,
@@ -83,8 +86,10 @@ internal sealed class TenantOverviewService : ITenantOverviewService
         StudioActionLog audit,
         IOptions<MartenStudioOptions> options,
         ColumnCatalog catalog,
-        ILogger<TenantOverviewService> logger)
+        ILogger<TenantOverviewService> logger,
+        TimeSpan? budget = null)
     {
+        readBudget = budget ?? Budget;
         this.resolver = resolver;
         this.discovery = discovery;
         this.authorization = authorization;
@@ -130,7 +135,7 @@ internal sealed class TenantOverviewService : ITenantOverviewService
         List<IMartenDatabase> databases = Distinct(listed);
 
         // 1. The tenants, per database, from the enumeration the resolver has made.
-        (List<Candidate> candidates, bool idsWithoutDatabases, bool listUnavailable) =
+        (List<Candidate> candidates, bool idsWithoutDatabases, bool listUnavailable, bool listTruncated) =
             await ListCandidatesAsync(storeKey, store, resolved, databases, listed, cancellationToken).ConfigureAwait(false);
 
         // 2. The picker's gate, for each (store, database, tenant) - the same question the header asks of its listing.
@@ -151,8 +156,8 @@ internal sealed class TenantOverviewService : ITenantOverviewService
                 : string.Compare(a.Database?.Id.Identity, b.Database?.Id.Identity, StringComparison.OrdinalIgnoreCase);
         });
 
-        bool truncated = admitted.Count > TenantList.MaxListedTenants;
-        if (truncated)
+        bool truncated = listTruncated || admitted.Count > TenantList.MaxListedTenants;
+        if (admitted.Count > TenantList.MaxListedTenants)
         {
             admitted.RemoveRange(TenantList.MaxListedTenants, admitted.Count - TenantList.MaxListedTenants);
         }
@@ -174,7 +179,7 @@ internal sealed class TenantOverviewService : ITenantOverviewService
         List<RowDraft> drafts = [.. shown.Select(x => new RowDraft(x.Database, x.TenantId))];
 
         using CancellationTokenSource budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        budget.CancelAfter(Budget);
+        budget.CancelAfter(readBudget);
 
         bool anyVolumes = false;
         string? withheldReason = null;
@@ -221,7 +226,7 @@ internal sealed class TenantOverviewService : ITenantOverviewService
             }
         }
 
-        TenantSharedRow? shared = await SharedRowAsync(store, resolved.Database, budget.Token).ConfigureAwait(false);
+        TenantSharedRow? shared = await SharedRowAsync(store, resolved.Database, budget.Token, cancellationToken).ConfigureAwait(false);
 
         List<string> captions = [];
         if (anyVolumes && layout.Documents.Any(static x => x.SoftDeleted))
@@ -260,6 +265,18 @@ internal sealed class TenantOverviewService : ITenantOverviewService
 
     private sealed record Candidate(IMartenDatabase? Database, string TenantId);
 
+    /// <summary>Databases compare by identity ignoring case, as the studio scopes them; tenant ids compare ordinally, as Marten does.</summary>
+    private sealed class DatabaseTenantComparer : IEqualityComparer<(string Database, string Tenant)>
+    {
+        public static DatabaseTenantComparer Instance { get; } = new();
+
+        public bool Equals((string Database, string Tenant) x, (string Database, string Tenant) y) =>
+            string.Equals(x.Database, y.Database, StringComparison.OrdinalIgnoreCase) && string.Equals(x.Tenant, y.Tenant, StringComparison.Ordinal);
+
+        public int GetHashCode((string Database, string Tenant) value) =>
+            HashCode.Combine(StringComparer.OrdinalIgnoreCase.GetHashCode(value.Database), StringComparer.Ordinal.GetHashCode(value.Tenant));
+    }
+
     private static List<IMartenDatabase> Distinct(IReadOnlyList<IMartenDatabase> listed)
     {
         List<IMartenDatabase> distinct = [];
@@ -276,7 +293,7 @@ internal sealed class TenantOverviewService : ITenantOverviewService
         return distinct;
     }
 
-    private async Task<(List<Candidate> Candidates, bool IdsWithoutDatabases, bool ListUnavailable)> ListCandidatesAsync(
+    private async Task<(List<Candidate> Candidates, bool IdsWithoutDatabases, bool ListUnavailable, bool Truncated)> ListCandidatesAsync(
         string storeKey,
         IDocumentStore store,
         ResolvedScope resolved,
@@ -292,9 +309,10 @@ internal sealed class TenantOverviewService : ITenantOverviewService
         if (own.Source == TenantListSource.Configured && databases.Count > 1)
         {
             candidates.AddRange(own.Ids.Select(static x => new Candidate(null, x)));
-            return (candidates, true, false);
+            return (candidates, true, false, own.IsTruncated);
         }
 
+        bool truncated = own.IsTruncated;
         candidates.AddRange(own.Ids.Select(x => new Candidate(resolved.Database, x)));
 
         foreach (IMartenDatabase other in databases)
@@ -304,13 +322,26 @@ internal sealed class TenantOverviewService : ITenantOverviewService
                 continue;
             }
 
+            // The header's database picker hides a database the store policy refuses for the database as a whole, and so does this
+            // page: asked once per other database, before a tenant of it is listed (the scope's own was asked by the resolver).
+            if (!await authorization.IsAuthorizedAsync(new StudioScope(storeKey, other.Id.Identity, null), capability: null, cancellationToken).ConfigureAwait(false))
+            {
+                continue;
+            }
+
             if (await discovery.ListedOnlyAsync(store, other, listed, cancellationToken).ConfigureAwait(false) is { } tenants)
             {
+                truncated |= tenants.IsTruncated;
                 candidates.AddRange(tenants.Ids.Select(x => new Candidate(other, x)));
             }
         }
 
-        return (candidates, false, own.Source == TenantListSource.Unavailable);
+        // A tenant listed twice (a twin instance, a duplicated KnownTenantIds entry) is one row: the page keys its rows by
+        // (database, tenant), and two siblings under one @key end the circuit.
+        HashSet<(string Database, string Tenant)> seen = new(DatabaseTenantComparer.Instance);
+        candidates = [.. candidates.Where(x => seen.Add((x.Database?.Id.Identity ?? string.Empty, x.TenantId)))];
+
+        return (candidates, false, own.Source == TenantListSource.Unavailable, truncated);
     }
 
     /// <summary>The page requested; or, with none requested, the one that holds the scope's tenant, else the first.</summary>
@@ -641,7 +672,7 @@ internal sealed class TenantOverviewService : ITenantOverviewService
     // Volumes of tables shared with other tenants
     // -------------------------------------------------------------------------------------------------
 
-    private enum Kind
+    internal enum Kind
     {
         Count,
         NoPartition,
@@ -650,7 +681,7 @@ internal sealed class TenantOverviewService : ITenantOverviewService
         Hidden,
     }
 
-    private readonly record struct Outcome(Kind Kind, double Tuples, string Table);
+    internal readonly record struct Outcome(Kind Kind, double Tuples, string Table);
 
     private async Task ReadSharedAsync(NpgsqlConnection connection, Layout layout, List<RowDraft> rows, CancellationToken cancellationToken)
     {
@@ -770,7 +801,7 @@ internal sealed class TenantOverviewService : ITenantOverviewService
     private static string Key(string schema, string table) => schema + "." + table;
 
     /// <summary>One category's cell from its tables' outcomes (T6's wording).</summary>
-    private static TenantCell Cell(List<Outcome> outcomes, string noun)
+    internal static TenantCell Cell(List<Outcome> outcomes, string noun)
     {
         if (outcomes.Count == 0)
         {
@@ -783,7 +814,11 @@ internal sealed class TenantOverviewService : ITenantOverviewService
 
         if (unknown.Count == 0)
         {
-            return new TenantCell("~" + number);
+            // Every table is partitioned by tenant and this tenant holds no partition of its own: its rows, if it has any, are in a
+            // shared or default partition, and 0 would be a claim the catalog cannot make.
+            return total == 0 && outcomes.All(static x => x.Kind == Kind.NoPartition)
+                ? TenantCell.Dash("its rows, if any, are in a shared or default partition")
+                : new TenantCell("~" + number);
         }
 
         if (total > 0)
@@ -979,7 +1014,11 @@ internal sealed class TenantOverviewService : ITenantOverviewService
     // -------------------------------------------------------------------------------------------------
 
     /// <summary>Whole-table estimates of the visible single-tenanted collections of the scope's database: shared by every tenant.</summary>
-    private async Task<TenantSharedRow?> SharedRowAsync(IDocumentStore store, IMartenDatabase database, CancellationToken cancellationToken)
+    private async Task<TenantSharedRow?> SharedRowAsync(
+        IDocumentStore store,
+        IMartenDatabase database,
+        CancellationToken cancellationToken,
+        CancellationToken callerToken)
     {
         List<(string Schema, string Table)> tables = [];
 
@@ -1017,6 +1056,11 @@ internal sealed class TenantOverviewService : ITenantOverviewService
                 "no storage yet");
 
             return new TenantSharedRow(tables.Count, cell);
+        }
+        catch (OperationCanceledException) when (!callerToken.IsCancellationRequested)
+        {
+            // The budget is spent, not the visitor gone: the page says so rather than going blank.
+            return new TenantSharedRow(tables.Count, new TenantCell("not read in time", "the 20-second budget for this page was spent before this was read"));
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {

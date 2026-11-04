@@ -259,6 +259,42 @@ public class TenantOverviewLiveTests(PostgresFixture postgres)
         before.ShouldBeUnchangedIn(await ServerSnapshot.ReadAsync(owned.ConnectionStrings, Prefix, lookupTable, Token));
     }
 
+    /// <summary>
+    /// F2: more tenants than the listing holds, discovered through tier 3 (the tenant columns), say so - the 200-tenant sentence was
+    /// never set for a store with one database, because only the union's size was counted.
+    /// </summary>
+    [PostgresFact]
+    public async Task More_than_two_hundred_tenants_found_in_the_tables_set_the_truncation_flag()
+    {
+        await using OwnedDatabases owned = await OwnedDatabases.CreateAsync(postgres, [Prefix + "many"], Token);
+        string database = owned[0];
+
+        void Configure(StoreOptions options)
+        {
+            options.Connection(database);
+            Documents(options);
+        }
+
+        await using (DocumentStore seed = DocumentStore.For(Configure))
+        {
+            await seed.Storage.ApplyAllConfiguredChangesToDatabaseAsync();
+
+            for (int i = 0; i < 205; i++)
+            {
+                await WriteAsync(seed, "t" + i.ToString("000", CultureInfo.InvariantCulture), 1);
+            }
+        }
+
+        await using TenancyStudio studio = TenancyStudio.Start(Configure, studio: Activity);
+        await using AsyncServiceScope circuit = studio.Services.CreateAsyncScope();
+        TenantOverview overview = await circuit.ServiceProvider.GetRequiredService<ITenantOverviewService>()
+            .GetAsync(Scope, new TenantOverviewRequest(), Token);
+
+        overview.ListTruncated.Should().BeTrue("tier 3 stops at 200 and says there are more");
+        overview.Rows.Should().HaveCount(25);
+        overview.HasNext.Should().BeTrue();
+    }
+
     private static void Activity(MartenStudioOptions options) =>
         options.Capabilities = new MartenStudioCapabilities { ViewDatabaseActivity = true };
 

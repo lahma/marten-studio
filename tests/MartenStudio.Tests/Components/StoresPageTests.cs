@@ -191,6 +191,26 @@ public class StoresPageTests
         rowLinks.Should().Equal("?store=other&db=db-x", "health?store=other&db=db-x", "tenants?store=other&db=db-x");
     }
 
+    /// <summary>F7: Tenants is linked only where it has per-tenant data; on a database-per-tenant store with none, each tenant is a database.</summary>
+    [Fact]
+    public async Task Tenants_is_linked_only_where_there_is_per_tenant_data()
+    {
+        await using StudioComponentContext context = new();
+        context.StoreInfo.WithDatabases("withdata", "With data", "db-a");
+        context.StoreInfo.WithDatabases("without", "Without", "db-b");
+        context.StoreInfo.Stores[1] = context.StoreInfo.Stores[1] with { ConjoinedDocumentTypes = 0 };
+
+        IRenderedComponent<Stores> page = context.Render<Stores>();
+        page.WaitForAssertion(() => page.FindAll(".ms-stores-store").Should().HaveCount(2));
+
+        IElement[] sections = [.. page.FindAll(".ms-stores-store")];
+        sections[0].QuerySelectorAll(".ms-stores-tenants-link").Should().ContainSingle();
+        sections[0].QuerySelectorAll(".ms-stores-tenant-is-database").Should().BeEmpty();
+
+        sections[1].QuerySelectorAll(".ms-stores-tenants-link").Should().BeEmpty("no conjoined type and no conjoined events: nothing per tenant to show");
+        sections[1].QuerySelector(".ms-stores-tenant-is-database")!.TextContent.Trim().Should().Be("Each tenant is a database here; choose one in the header.");
+    }
+
     [Fact]
     public async Task A_store_lists_twenty_databases_and_points_at_the_pickers_for_the_rest()
     {

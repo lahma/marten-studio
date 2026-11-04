@@ -130,7 +130,8 @@ internal sealed class TenantDiscovery
         // the only tier that works for a store whose tenants exist but have no streams yet.
         if (value.KnownTenantIds.Count > 0)
         {
-            return new TenantList([.. value.KnownTenantIds], IsTruncated: false, TenantListSource.Configured);
+            // Once each, in the order the host wrote them: a duplicated entry would be two rows and two options with one key.
+            return new TenantList([.. value.KnownTenantIds.Distinct(StringComparer.Ordinal)], IsTruncated: false, TenantListSource.Configured);
         }
 
         if (!value.DiscoverTenantIds)
