@@ -449,8 +449,21 @@
 
     private string FeedHref(string alias) => EventLinks.ToFeedForType(Options.Value, State.ActiveScope, alias);
 
-    /// <summary>The Projections page, scrolled to one projection's row.</summary>
-    private string ProjectionHref(string name) => EventLinks.ToProjection(Options.Value, State.ActiveScope, name);
+    /// <summary>
+    /// The Projections page, scrolled to one projection's row. A composite's member has no row of its own (its shards are the
+    /// composite's), so it links to the top-level composite's.
+    /// </summary>
+    private string ProjectionHref(string name)
+    {
+        string top = name;
+
+        for (int depth = 0; depth < 8 && model.Source(top) is { Composite: { Length: > 0 } parent }; depth++)
+        {
+            top = parent;
+        }
+
+        return EventLinks.ToProjection(Options.Value, State.ActiveScope, top);
+    }
 
     private string CollectionHref(string alias) => Links.ToCollection(State.ActiveScope, alias) ?? string.Empty;
 

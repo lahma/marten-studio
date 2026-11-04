@@ -23,6 +23,8 @@
 @inject IHealthService Health
 @inject IServiceProvider Services
 @inject MartenStudio.Services.Events.IEventDataService EventData
+@inject NavigationManager Navigation
+@inject IJSRuntime JsRuntime
 
 <PageTitle>Projections</PageTitle>
 
@@ -968,14 +970,29 @@
         }
     }
 
+    /// <summary>The row id an address's fragment names, until the page has scrolled to it once.</summary>
+    private string? linkedRow;
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (!firstRender)
+        {
+            // Every render after the first, because the one that draws the rows is not the first: it is the one the read causes.
+            await RevealLinkedRowAsync();
+        }
+
         if (!firstRender || started)
         {
             return;
         }
 
         started = true;
+
+        // Read here and not in OnInitialized: a prerender's address has no fragment (a browser does not send one), and the circuit's does.
+        linkedRow = MartenStudio.Services.Events.EventLinks.ProjectionFragment(Navigation.Uri);
+
+        // A read that finished before the first render (a cached one) has drawn the rows already.
+        await RevealLinkedRowAsync();
 
         // The tracker lease and the polling loop are both started after the first render: neither needs
         // to exist for the page to draw, and neither may delay it.
@@ -984,6 +1001,35 @@
         if (live is not null && !disposed)
         {
             await live.StartAsync(Options.Value.RefreshInterval, TickAsync, pageCancellation.Token);
+        }
+    }
+
+    /// <summary>
+    /// Once the rows are drawn, scrolls to the one the address's fragment names (the Event flow's link). A browser looks for the
+    /// fragment when the document arrives, before the circuit has read anything, and finds nothing, and the router scrolls once,
+    /// before the rows exist; so this runs after the render the read causes, and once, so a poll that redraws the page does not
+    /// scroll the visitor back. Only an id the address names goes to the script, which looks it up by id and does nothing else with it.
+    /// </summary>
+    private async Task RevealLinkedRowAsync()
+    {
+        if (linkedRow is not { } id || loading || disposed)
+        {
+            return;
+        }
+
+        linkedRow = null;
+
+        try
+        {
+            await JsRuntime.InvokeAsync<bool>("martenStudio.scroll.intoView", pageCancellation.Token, id, "start");
+        }
+        catch (OperationCanceledException)
+        {
+            // The page went away under the call.
+        }
+        catch (Exception exception) when (StudioLiveUpdates.IsInteropUnavailable(exception))
+        {
+            // A circuit that closed, or a browser that refused: the page is right without the scroll.
         }
     }
 

@@ -2,10 +2,12 @@ using AngleSharp.Dom;
 
 using Bunit;
 
-using JasperFx.Events.Projections;
-
 using MartenStudio.Services.Events;
 using MartenStudio.Tests.Components;
+
+using Microsoft.Extensions.DependencyInjection;
+
+using MartenStudio.Components.Pages.Projections;
 
 using EventTypesPage = MartenStudio.Components.Pages.Events.EventTypes;
 using ProjectionsPage = MartenStudio.Components.Pages.Projections.Projections;
@@ -130,7 +132,8 @@ public class EventFlowLinksTests
         IElement row = page.WaitForElement(ConfirmDialog + " .ms-rebuild-event-types");
         row.TextContent.Should().Contain("Event types read").And.Contain("order_placed (and Marten's own archived)");
         row.QuerySelector("a.ms-rebuild-flow-link")!.GetAttribute("href").Should().StartWith("events/flow?projection=DailySales");
-        context.EventData.EventFlowReads.Should().BeGreaterThan(0, "it comes from the flow's cached model, the one read the Event flow page makes");
+        context.EventData.EventFlowReads.Should().Be(1, "it comes from the flow's cached model, read once for the one dialog opened");
+        context.EventData.EventFlowScopes.Single().Should().Be(context.Services.GetRequiredService<PostgresStudio.Services.StudioState>().ActiveScope, "the scope the page is on");
     }
 
     [Fact]
@@ -201,11 +204,165 @@ public class EventFlowLinksTests
     }
 
     [Fact]
-    public void A_projection_is_never_marked_a_flow_link_without_a_name_to_filter_by()
+    public async Task A_flow_link_is_drawn_only_when_the_page_gave_one()
     {
-        EventLinks.ToFlow(new MartenStudioOptions(), null, "Orders").Should().Be("events/flow?projection=Orders");
-        ProjectionStatus(ProjectionLifecycle.Async).Should().BeTrue();
+        await using StudioComponentContext context = new StudioComponentContext();
+
+        foreach (string? href in new string?[] { null, string.Empty })
+        {
+            IRenderedComponent<ProjectionRow> row = context.Render<ProjectionRow>(parameters => parameters
+                .Add(x => x.Name, "DailySales")
+                .Add(x => x.Lifecycle, "Async")
+                .Add(x => x.FlowHref, href));
+
+            row.FindAll("a.ms-projection-flow-link").Should().BeEmpty();
+        }
     }
 
-    private static bool ProjectionStatus(ProjectionLifecycle lifecycle) => lifecycle == ProjectionLifecycle.Async;
+    [Fact]
+    public async Task Opening_the_projections_page_does_not_read_the_event_flow()
+    {
+        await using StudioComponentContext context = new StudioComponentContext().WithAllCapabilities();
+        context.ProjectionData.WithProjection("DailySales");
+        await context.ReadyAsync();
+
+        IRenderedComponent<ProjectionsPage> page = context.Render<ProjectionsPage>();
+        page.WaitForElement("tr[data-projection='DailySales']");
+
+        context.EventData.EventFlowReads.Should().Be(0, "the flow is read when a Rebuild dialog opens, never to draw the rows");
+    }
+
+    [Fact]
+    public async Task The_row_header_is_named_by_the_projection_and_its_lifecycle_and_the_link_names_what_it_is_for()
+    {
+        await using StudioComponentContext context = new StudioComponentContext().WithAllCapabilities();
+        context.ProjectionData.WithProjection("DailySales");
+        await context.ReadyAsync();
+
+        IRenderedComponent<ProjectionsPage> page = context.Render<ProjectionsPage>();
+
+        IElement row = page.Find("tr[data-projection='DailySales']");
+        IElement header = row.QuerySelector("th")!;
+        string[] named = header.GetAttribute("aria-labelledby")!.Split(' ');
+        named.Should().HaveCount(2);
+        named.Select(id => row.QuerySelector("#" + id)!.TextContent.Trim()).Should().Equal("DailySales", "Async");
+        row.QuerySelector("a.ms-projection-flow-link")!.GetAttribute("aria-label").Should().Be("Show its flow: DailySales");
+        header.QuerySelector("a.ms-projection-flow-link").Should().NotBeNull("inline after the badges, and outside the header's name");
+    }
+
+    [Fact]
+    public async Task The_page_scrolls_once_to_the_row_an_address_fragment_names_after_the_rows_are_drawn()
+    {
+        await using StudioComponentContext context = new StudioComponentContext().WithAllCapabilities();
+        context.ProjectionData.WithProjection("DailySales");
+        await context.ReadyAsync();
+        context.Navigate("marten/projections#projection-DailySales");
+
+        IRenderedComponent<ProjectionsPage> page = context.Render<ProjectionsPage>();
+        page.WaitForElement("tr[data-projection='DailySales']");
+
+        page.WaitForAssertion(() => context.JSInterop.Invocations["martenStudio.scroll.intoView"].Should().ContainSingle()
+            .Which.Arguments.Should().Equal("projection-DailySales", "start"));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("#other-DailySales")]
+    public async Task An_address_that_names_no_projection_row_scrolls_nothing(string fragment)
+    {
+        await using StudioComponentContext context = new StudioComponentContext().WithAllCapabilities();
+        context.ProjectionData.WithProjection("DailySales");
+        await context.ReadyAsync();
+        context.Navigate("marten/projections" + fragment);
+
+        IRenderedComponent<ProjectionsPage> page = context.Render<ProjectionsPage>();
+        page.WaitForElement("tr[data-projection='DailySales']");
+
+        context.JSInterop.Invocations["martenStudio.scroll.intoView"].Should().BeEmpty();
+    }
+
+    [Fact]
+    public void The_fragment_is_prefix_checked_and_bounded()
+    {
+        EventLinks.ProjectionFragment("http://x/marten/projections#projection-A%20b").Should().Be("projection-A b");
+        EventLinks.ProjectionFragment("http://x/marten/projections#finding-a").Should().BeNull();
+        EventLinks.ProjectionFragment("http://x/marten/projections").Should().BeNull();
+        EventLinks.ProjectionFragment("http://x/marten/projections#projection-" + new string('a', 300)).Should().BeNull();
+    }
+
+    [Fact]
+    public void A_flow_link_for_one_projection_filters_by_its_name_alone()
+    {
+        EventLinks.ToFlow(new MartenStudioOptions(), null, "Orders").Should().Be("events/flow?projection=Orders");
+    }
+
+    [Fact]
+    public async Task A_composites_member_links_to_the_composites_row_and_shards_have_no_row_of_their_own()
+    {
+        EventFlowModel model = new(
+            [EventFlowFixtures.Event("a")],
+            [
+                EventFlowFixtures.Source("Outer", FlowSourceKind.Composite),
+                EventFlowFixtures.Source("Inner", FlowSourceKind.Composite, composite: "Outer"),
+                EventFlowFixtures.Source("Member", composite: "Inner"),
+                EventFlowFixtures.Source("Plain"),
+            ],
+            [new("a", "Member", null), new("a", "Plain", null)],
+            [],
+            [],
+            [],
+            null);
+        await using StudioComponentContext context = new StudioComponentContext();
+        context.EventData.EventFlow = new EventFlowResult(model, null);
+        await context.ReadyAsync();
+        context.Navigate("marten/events/flow");
+
+        IRenderedComponent<MartenStudio.Components.Pages.Events.EventFlow> page = context.Render<MartenStudio.Components.Pages.Events.EventFlow>();
+
+        page.Find("tr[data-source='Member'] a.ms-flow-source-link").GetAttribute("href").Should().EndWith("#projection-Outer");
+        page.Find("tr[data-source='Inner'] a.ms-flow-source-link").GetAttribute("href").Should().EndWith("#projection-Outer");
+        page.Find("tr[data-source='Plain'] a.ms-flow-source-link").GetAttribute("href").Should().EndWith("#projection-Plain");
+        page.Find("tr[data-source='Outer'] a.ms-flow-source-link").GetAttribute("href").Should().EndWith("#projection-Outer");
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // The sentence's edges
+    // ---------------------------------------------------------------------------------------------
+
+    [Fact]
+    public void A_shared_alias_is_named_once()
+    {
+        FlowReads reads = new(FlowInput.Declared, ["a", "a", "b"], []);
+
+        reads.Sentence.Should().Be("a, b");
+    }
+
+    [Fact]
+    public void A_long_list_is_cut_at_twenty_with_how_many_more()
+    {
+        string[] many = [.. Enumerable.Range(0, 25).Select(static i => "e" + i.ToString("D2", System.Globalization.CultureInfo.InvariantCulture))];
+
+        string sentence = new FlowReads(FlowInput.Declared, many, ["archived"]).Sentence;
+
+        sentence.Should().StartWith("e00, e01").And.Contain("e19").And.NotContain("e20").And.Contain("and 5 more").And.EndWith("(and Marten's own archived)");
+    }
+
+    [Fact]
+    public void A_composite_with_a_member_that_declares_none_says_the_member_does()
+    {
+        EventFlowModel model = new(
+            [EventFlowFixtures.Event("a")],
+            [
+                EventFlowFixtures.Source("Bundle", FlowSourceKind.Composite),
+                EventFlowFixtures.Source("Bare", FlowSourceKind.Custom, input: FlowInput.Everything, composite: "Bundle"),
+            ],
+            [],
+            [],
+            [],
+            [],
+            null);
+
+        model.ReadsOf("Bundle").Sentence.Should().Be("every event type (a member declares none)");
+        model.ReadsOf("Bare").Sentence.Should().Be("every event type (it declares none)");
+    }
 }

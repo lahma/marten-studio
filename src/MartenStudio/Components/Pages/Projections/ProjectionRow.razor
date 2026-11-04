@@ -5,13 +5,10 @@
    public [Parameter] cannot have an internal type, and every DTO here is internal (plan D12). *@
 
 <tr class="ms-table-row ms-projection-row" id="@EventLinks.ProjectionAnchor(Name)" data-projection="@Name">
-    <th scope="rowgroup" class="ms-table-cell ms-projection-name">
-        <span class="ms-mono">@Name</span>
-        @if (FlowHref is { Length: > 0 })
-        {
-            <a class="ms-projection-flow-link" href="@FlowHref" title="@("Draw only " + Name + " and the event types it reads and what it writes")">Show its flow</a>
-        }
-        <span class="ms-badge ms-lifecycle ms-lifecycle-@Lifecycle.ToLowerInvariant()">@Lifecycle</span>
+    @* The header's name is the projection's and its lifecycle, not the link that follows them. *@
+    <th scope="rowgroup" class="ms-table-cell ms-projection-name" aria-labelledby="@(EventLinks.ProjectionAnchor(Name) + "-name " + EventLinks.ProjectionAnchor(Name) + "-lifecycle")">
+        <span class="ms-mono" id="@(EventLinks.ProjectionAnchor(Name) + "-name")">@Name</span>
+        <span class="ms-badge ms-lifecycle ms-lifecycle-@Lifecycle.ToLowerInvariant()" id="@(EventLinks.ProjectionAnchor(Name) + "-lifecycle")">@Lifecycle</span>
         @if (!IsAsync)
         {
             <span class="ms-muted ms-projection-note">the async daemon does not run this</span>
@@ -21,6 +18,10 @@
             @* A state, not an error: the rebuild is somebody's deliberate act, and the buttons beside it say what it
                means for them. *@
             <span class="ms-badge ms-projection-rebuilding" title="@("Being rebuilt " + (RebuildingBy ?? string.Empty))">rebuilding</span>
+        }
+        @if (FlowHref is { Length: > 0 })
+        {
+            <a class="ms-projection-flow-link" href="@FlowHref" aria-label="@("Show its flow: " + Name)" title="@("Draw only " + Name + " and the event types it reads and what it writes")">Show its flow</a>
         }
     </th>
     <td class="ms-table-cell ms-table-cell-mono ms-projection-type" title="@ImplementationType">@ImplementationType</td>

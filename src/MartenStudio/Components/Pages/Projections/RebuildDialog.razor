@@ -41,7 +41,7 @@
                     @EventTypesRead
                     @if (EventTypesHref is { Length: > 0 })
                     {
-                        <a class="ms-rebuild-flow-link" href="@EventTypesHref">Show its flow</a>
+                        <a class="ms-rebuild-flow-link" href="@EventTypesHref" aria-label="@("Show its flow: " + ProjectionName)">Show its flow</a>
                     }
                 </span>
             </div>

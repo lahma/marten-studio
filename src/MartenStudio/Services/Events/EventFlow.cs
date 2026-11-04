@@ -124,7 +124,7 @@ internal sealed record EventFlowModel(
 
         if (selected.Any(static x => x.Input == FlowInput.Everything))
         {
-            return new FlowReads(FlowInput.Everything, [], []);
+            return new FlowReads(FlowInput.Everything, [], []) { ThroughMember = Source(source)?.IsComposite == true };
         }
 
         HashSet<string> keys = new(Reads.Where(x => names.Contains(x.Source)).Select(static x => x.EventAlias), StringComparer.Ordinal);
@@ -306,6 +306,21 @@ internal sealed record FlowWrite(string Source, string OutputKey, string? Subcla
 /// <param name="MartenOwnAliases">Marten's own event types it reads (<c>Archived</c>, <c>Compacted&lt;T&gt;</c>).</param>
 internal sealed record FlowReads(FlowInput Input, IReadOnlyList<string> Aliases, IReadOnlyList<string> MartenOwnAliases)
 {
+    /// <summary>The most event types the sentence names before "and N more".</summary>
+    public const int SentenceLimit = 20;
+
+    /// <summary>Whether <see cref="FlowInput.Everything" /> is a member's: the projection is a composite and one of its members declares none.</summary>
+    public bool ThroughMember { get; init; }
+
+    private static string Names(IReadOnlyList<string> aliases)
+    {
+        string[] distinct = [.. aliases.Distinct(StringComparer.Ordinal)];
+
+        return distinct.Length <= SentenceLimit
+            ? string.Join(", ", distinct)
+            : string.Join(", ", distinct.Take(SentenceLimit)) + " and " + (distinct.Length - SentenceLimit) + " more";
+    }
+
     /// <summary>
     /// What the Rebuild dialog's "Event types read" row says: the event types the projection reads, by alias, and Marten's own
     /// after them - or that it declares none and so reads every event.
@@ -316,17 +331,17 @@ internal sealed record FlowReads(FlowInput Input, IReadOnlyList<string> Aliases,
         {
             if (Input == FlowInput.Everything)
             {
-                return "every event type (it declares none)";
+                return ThroughMember ? "every event type (a member declares none)" : "every event type (it declares none)";
             }
 
-            string own = MartenOwnAliases.Count == 0 ? string.Empty : "Marten's own " + string.Join(", ", MartenOwnAliases);
+            string own = MartenOwnAliases.Count == 0 ? string.Empty : "Marten's own " + Names(MartenOwnAliases);
 
             return (Aliases.Count, MartenOwnAliases.Count) switch
             {
                 (0, 0) => "none listed",
                 (0, _) => own,
-                (_, 0) => string.Join(", ", Aliases),
-                _ => string.Join(", ", Aliases) + " (and " + own + ")",
+                (_, 0) => Names(Aliases),
+                _ => Names(Aliases) + " (and " + own + ")",
             };
         }
     }

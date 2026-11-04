@@ -166,7 +166,29 @@ internal static class EventLinks
         return builder.ToString();
     }
 
-    /// <summary>A link to the Projections page, scrolled to one projection's row (1.2).</summary>
+    /// <summary>
+    /// The projection-row anchor an address's fragment names, or <see langword="null" /> when it names none: <c>#projection-</c> only,
+    /// as every row's id starts, bounded so an address cannot make the page carry a long string around.
+    /// </summary>
+    public static string? ProjectionFragment(string uri)
+    {
+        ArgumentNullException.ThrowIfNull(uri);
+
+        int hash = uri.IndexOf('#', StringComparison.Ordinal);
+        if (hash < 0 || uri.Length - hash > 256)
+        {
+            return null;
+        }
+
+        string fragment = Uri.UnescapeDataString(uri[(hash + 1)..]);
+
+        return fragment.StartsWith("projection-", StringComparison.Ordinal) ? fragment : null;
+    }
+
+    /// <summary>
+    /// A link to the Projections page that names one projection's row (1.2). The browser alone cannot scroll to it, because the rows
+    /// are drawn after the circuit reads them; the page scrolls once they are, from this fragment.
+    /// </summary>
     public static string ToProjection(MartenStudioOptions options, StudioScope? scope, string projectionName) =>
         To(options, ProjectionsRoute, scope, []) + "#" + ProjectionAnchor(projectionName);
 

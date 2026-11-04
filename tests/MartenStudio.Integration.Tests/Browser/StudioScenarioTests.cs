@@ -38,6 +38,8 @@ public class StudioScenarioTests(BrowserSuiteFixture fixture)
     /// <summary>The demo store's three projections, by name.</summary>
     private static readonly string[] SampleProjections = ["OrderSummary", "DailySales", "ShipmentTracker"];
 
+    private static readonly Regex ShipmentTrackerRow = new("projections.*#projection-ShipmentTracker", RegexOptions.None, TimeSpan.FromSeconds(5));
+
     private static readonly Regex ProjectionInUrl = new("projection=ShipmentTracker", RegexOptions.None, TimeSpan.FromSeconds(5));
 
     private static readonly Regex Digits = new(@"\d", RegexOptions.None, TimeSpan.FromSeconds(5));
@@ -419,6 +421,35 @@ public class StudioScenarioTests(BrowserSuiteFixture fixture)
             await Assertions.Expect(studio.Page.Locator("svg.ms-graph-svg .ms-flow-node-source")).ToHaveCountAsync(1);
 
             studio.AssertClean("reading the event flow and filtering it");
+        });
+    }
+
+    /// <summary>
+    /// The Event flow links each projection to its row on the Projections page, and the page scrolls to it once its rows are drawn -
+    /// from the flow's link and from the same address pasted into a fresh tab, where the browser alone finds nothing because the rows
+    /// do not exist when the document arrives. A short window makes the row sit below the fold, so being in view is a scroll.
+    /// </summary>
+    [BrowserFact]
+    public async Task The_event_flows_projection_link_scrolls_the_projections_page_to_the_row()
+    {
+        await RunAsync("event-flow-anchor", fixture.Root, "admin", async studio =>
+        {
+            await studio.Page.SetViewportSizeAsync(StudioPage.ViewportWidth, 300);
+            await studio.GoAsync(fixture.Root.StudioUrl("events/flow"));
+            await studio.Page.Locator("tr[data-source='ShipmentTracker'] a.ms-flow-source-link").WaitForAsync();
+
+            await studio.Page.Locator("tr[data-source='ShipmentTracker'] a.ms-flow-source-link").ClickAsync();
+            await Assertions.Expect(studio.Page).ToHaveURLAsync(ShipmentTrackerRow);
+            await Assertions.Expect(studio.Page.Locator("tr#projection-ShipmentTracker")).ToBeInViewportAsync();
+
+            (await studio.Page.EvaluateAsync<double>("window.scrollY")).Should().BeGreaterThan(0, "the row is below the fold, so seeing it is a scroll");
+
+            // The same address, pasted into a fresh load.
+            await studio.GoAsync(fixture.Root.StudioUrl("projections") + "#projection-ShipmentTracker");
+            await Assertions.Expect(studio.Page.Locator("tr#projection-ShipmentTracker")).ToBeInViewportAsync();
+            (await studio.Page.EvaluateAsync<double>("window.scrollY")).Should().BeGreaterThan(0, "a fresh load scrolls too, once the rows are drawn");
+
+            studio.AssertClean("following the event flow's link to a projection row");
         });
     }
 
