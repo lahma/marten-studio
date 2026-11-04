@@ -1,9 +1,11 @@
 using System.Net;
+using System.Security.Claims;
 
 using MartenStudio.Tests.Support;
 
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization.Infrastructure;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -203,6 +205,12 @@ public class PostgresStudioEndpointsTests
             ["appsettings.json"] = "{ \"secret\": true }"u8.ToArray(),
         }));
         await using WebApplication app = CreateApp(configureBuilder: builder => builder.Environment.WebRootFileProvider = webRoot);
+        string? matched = null;
+        app.Use(async (context, next) =>
+        {
+            matched = (context.GetEndpoint() as RouteEndpoint)?.RoutePattern.RawText;
+            await next(context);
+        });
         app.MapPostgresStudio().AllowAnonymous();
         await app.StartAsync(Token);
         try
@@ -215,6 +223,7 @@ public class PostgresStudioEndpointsTests
                 },
                 Token);
 
+            matched.Should().Be("/postgres/_framework/{**file}", "the row must reach the forward's guard, not be routed elsewhere");
             response.Response.StatusCode.Should().Be(StatusCodes.Status404NotFound);
             using StreamReader reader = new(response.Response.Body);
             (await reader.ReadToEndAsync(Token)).Should().NotContain("secret");
@@ -406,6 +415,113 @@ public class PostgresStudioEndpointsTests
             using HttpResponseMessage adminUnderMount = await client.SendAsync(underMount, Token);
             adminUnderMount.StatusCode.Should().Be(HttpStatusCode.NotFound, "the studio never serves what the host would refuse");
             (await adminUnderMount.Content.ReadAsStringAsync(Token)).Should().NotContain("host-owned");
+        }
+        finally
+        {
+            await app.StopAsync(Token);
+        }
+    }
+
+    /// <summary>A host's authorization handler that judges the request it is asked about by its path and its resource.</summary>
+    private sealed class RootPathRequirement : IAuthorizationRequirement
+    {
+        public const string Policy = "root-path";
+
+        public const string RootPath = "/_framework/rooted.js";
+    }
+
+    private sealed class RootPathHandler : AuthorizationHandler<RootPathRequirement>
+    {
+        protected override Task HandleRequirementAsync(AuthorizationHandlerContext context, RootPathRequirement requirement)
+        {
+            if (context.Resource is HttpContext http && http.Request.Path == RootPathRequirement.RootPath)
+            {
+                context.Succeed(requirement);
+            }
+
+            return Task.CompletedTask;
+        }
+    }
+
+    /// <summary>An endpoint that states its authorization only as requirement data, as an attribute implementing it would.</summary>
+    private sealed class FailingRequirementData : IAuthorizationRequirementData
+    {
+        public IEnumerable<IAuthorizationRequirement> GetRequirements() => [new AssertionRequirement(static _ => false)];
+    }
+
+    /// <summary>
+    /// <c>UseAuthorization</c> judges a request to the root path: a handler of the host's reads the <see cref="HttpContext" />
+    /// as the resource and the path as the root's. The forward evaluates the root endpoint's policy the same way, so a handler
+    /// that admits the root request admits the mirrored one (the studio sees what the host would see), while the same handler
+    /// refuses a request whose path is the mirror's.
+    /// </summary>
+    [Fact]
+    public async Task The_roots_authorization_is_evaluated_as_the_middleware_would_with_the_http_context_and_the_root_path()
+    {
+        await using WebApplication app = CreateFailClosedApp(static builder =>
+        {
+            builder.Services.AddSingleton<IAuthorizationHandler, RootPathHandler>();
+            builder.Services.Configure<AuthorizationOptions>(static options =>
+                options.AddPolicy(RootPathRequirement.Policy, static policy => policy.AddRequirements(new RootPathRequirement())));
+        });
+        app.UseAuthentication();
+        app.UseAuthorization();
+        app.MapGet(RootPathRequirement.RootPath, static () => Results.Text("host-owned rooted", "text/javascript")).RequireAuthorization(RootPathRequirement.Policy);
+        app.MapPostgresStudio().RequireAuthorization();
+        await app.StartAsync(Token);
+        try
+        {
+            using HttpClient client = app.GetTestClient();
+
+            using HttpRequestMessage rootRequest = AsOperator(RootPathRequirement.RootPath);
+            using HttpResponseMessage root = await client.SendAsync(rootRequest, Token);
+            root.StatusCode.Should().Be(HttpStatusCode.OK, "the handler admits the root request");
+
+            using HttpRequestMessage mirrorRequest = AsOperator("/postgres" + RootPathRequirement.RootPath);
+            using HttpResponseMessage mirror = await client.SendAsync(mirrorRequest, Token);
+            mirror.StatusCode.Should().Be(HttpStatusCode.OK, "the evaluation sees the root path and the HttpContext, as the middleware would");
+            (await mirror.Content.ReadAsStringAsync(Token)).Should().Contain("host-owned rooted");
+
+            // The control: the very same policy refuses a request that carries the mirror's path.
+            DefaultHttpContext asMirror = new();
+            asMirror.Request.Path = "/postgres" + RootPathRequirement.RootPath;
+            ClaimsPrincipal user = new(new ClaimsIdentity("test"));
+            IAuthorizationService authorization = app.Services.GetRequiredService<IAuthorizationService>();
+            (await authorization.AuthorizeAsync(user, asMirror, RootPathRequirement.Policy)).Succeeded.Should().BeFalse();
+
+            // Whatever the evaluation did to the request, it put the mirror's path and endpoint back.
+            using HttpRequestMessage again = AsOperator("/postgres/_framework/nothing-here.js");
+            using HttpResponseMessage missing = await client.SendAsync(again, Token);
+            missing.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        }
+        finally
+        {
+            await app.StopAsync(Token);
+        }
+    }
+
+    /// <summary>An endpoint that states only an <see cref="IAuthorizationRequirementData" /> is judged by it, not by the fallback.</summary>
+    [Fact]
+    public async Task A_root_endpoint_that_states_only_requirement_data_is_refused_through_the_mirror_when_the_requirement_fails()
+    {
+        await using WebApplication app = CreateFailClosedApp();
+        app.UseAuthentication();
+        app.UseAuthorization();
+        app.MapGet("/_framework/requirement-data.js", static () => Results.Text("host-owned data", "text/javascript")).WithMetadata(new FailingRequirementData());
+        app.MapPostgresStudio().RequireAuthorization();
+        await app.StartAsync(Token);
+        try
+        {
+            using HttpClient client = app.GetTestClient();
+
+            using HttpRequestMessage rootRequest = AsOperator("/_framework/requirement-data.js");
+            using HttpResponseMessage root = await client.SendAsync(rootRequest, Token);
+            root.StatusCode.Should().Be(HttpStatusCode.Forbidden, "the host's own middleware refuses an authenticated visitor");
+
+            using HttpRequestMessage mirrorRequest = AsOperator("/postgres/_framework/requirement-data.js");
+            using HttpResponseMessage mirror = await client.SendAsync(mirrorRequest, Token);
+            mirror.StatusCode.Should().Be(HttpStatusCode.NotFound, "the studio never serves what the host would refuse");
+            (await mirror.Content.ReadAsStringAsync(Token)).Should().NotContain("host-owned");
         }
         finally
         {

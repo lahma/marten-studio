@@ -466,7 +466,7 @@ internal static class StudioEndpointMapper
             IFileInfo fileInfo = env.WebRootFileProvider.GetFileInfo("_framework/" + file);
             if (!fileInfo.Exists
                 || fileInfo.IsDirectory
-                || !await IsAdmittedAsync(context, rootEndpoint: null).ConfigureAwait(false))
+                || !await IsAdmittedAsync(context, "/_framework/" + file, rootEndpoint: null).ConfigureAwait(false))
             {
                 context.Response.StatusCode = StatusCodes.Status404NotFound;
                 return;
@@ -525,7 +525,7 @@ internal static class StudioEndpointMapper
             return false;
         }
 
-        if (enforceRootAuthorization && !await IsAdmittedAsync(context, rootEndpoint).ConfigureAwait(false))
+        if (enforceRootAuthorization && !await IsAdmittedAsync(context, rootPath, rootEndpoint).ConfigureAwait(false))
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             return true;
@@ -557,12 +557,19 @@ internal static class StudioEndpointMapper
 
     /// <summary>
     /// Whether the host's authorization would admit this request to <paramref name="rootEndpoint" />, as
-    /// <c>UseAuthorization</c> decides it: the endpoint's <see cref="IAuthorizeData" /> and policies combined, else the
-    /// <c>FallbackPolicy</c> when the endpoint states nothing and does not allow anonymous. With no endpoint
+    /// <c>UseAuthorization</c> decides it for a request to <paramref name="rootPath" />: the endpoint's
+    /// <see cref="IAuthorizeData" />, policies and <see cref="IAuthorizationRequirementData" /> requirements combined, else
+    /// the <c>FallbackPolicy</c> when the endpoint states nothing and does not allow anonymous. With no endpoint
     /// (<see langword="null" />, a file of the web root) it is the <c>FallbackPolicy</c> alone. Evaluated here, never
     /// challenged: a refusal is the caller's 404.
     /// </summary>
-    private static async Task<bool> IsAdmittedAsync(HttpContext context, Endpoint? rootEndpoint)
+    /// <remarks>
+    /// The middleware passes the <see cref="HttpContext" /> as the resource and runs while the request path and the matched
+    /// endpoint are the root's own, and a host's handler may read both. So this does the same: the path and the endpoint
+    /// describe the root request for the length of the evaluation, as they do around the root endpoint's delegate, and are
+    /// restored whatever happens.
+    /// </remarks>
+    private static async Task<bool> IsAdmittedAsync(HttpContext context, string rootPath, Endpoint? rootEndpoint)
     {
         if (rootEndpoint?.Metadata.GetMetadata<IAllowAnonymous>() is not null)
         {
@@ -571,7 +578,8 @@ internal static class StudioEndpointMapper
 
         IReadOnlyList<IAuthorizeData> authorizeData = rootEndpoint?.Metadata.GetOrderedMetadata<IAuthorizeData>() ?? [];
         IReadOnlyList<AuthorizationPolicy> policies = rootEndpoint?.Metadata.GetOrderedMetadata<AuthorizationPolicy>() ?? [];
-        bool statesSomething = authorizeData.Count > 0 || policies.Count > 0;
+        IReadOnlyList<IAuthorizationRequirementData> requirementData = rootEndpoint?.Metadata.GetOrderedMetadata<IAuthorizationRequirementData>() ?? [];
+        bool statesSomething = authorizeData.Count > 0 || policies.Count > 0 || requirementData.Count > 0;
 
         IAuthorizationPolicyProvider? provider = context.RequestServices.GetService<IAuthorizationPolicyProvider>();
         IPolicyEvaluator? evaluator = context.RequestServices.GetService<IPolicyEvaluator>();
@@ -582,17 +590,51 @@ internal static class StudioEndpointMapper
             return !statesSomething;
         }
 
-        AuthorizationPolicy? policy = statesSomething
-            ? await AuthorizationPolicy.CombineAsync(provider, authorizeData, policies).ConfigureAwait(false)
-            : await provider.GetFallbackPolicyAsync().ConfigureAwait(false);
-        if (policy is null)
+        PathString originalPath = context.Request.Path;
+        Endpoint? originalEndpoint = context.GetEndpoint();
+        context.Request.Path = rootPath;
+        context.SetEndpoint(rootEndpoint);
+        try
         {
-            return true;
-        }
+            AuthorizationPolicy? policy = null;
+            if (statesSomething)
+            {
+                policy = await AuthorizationPolicy.CombineAsync(provider, authorizeData, policies).ConfigureAwait(false);
 
-        AuthenticateResult authentication = await evaluator.AuthenticateAsync(policy, context).ConfigureAwait(false);
-        PolicyAuthorizationResult authorization = await evaluator.AuthorizeAsync(policy, authentication, context, rootEndpoint).ConfigureAwait(false);
-        return authorization.Succeeded;
+                // As the .NET 8+ middleware does: the requirements an attribute states about itself join the policy.
+                if (requirementData.Count > 0)
+                {
+                    AuthorizationPolicyBuilder requirements = new();
+                    foreach (IAuthorizationRequirementData data in requirementData)
+                    {
+                        foreach (IAuthorizationRequirement requirement in data.GetRequirements())
+                        {
+                            requirements.AddRequirements(requirement);
+                        }
+                    }
+
+                    policy = policy is null ? requirements.Build() : AuthorizationPolicy.Combine(policy, requirements.Build());
+                }
+            }
+            else
+            {
+                policy = await provider.GetFallbackPolicyAsync().ConfigureAwait(false);
+            }
+
+            if (policy is null)
+            {
+                return true;
+            }
+
+            AuthenticateResult authentication = await evaluator.AuthenticateAsync(policy, context).ConfigureAwait(false);
+            PolicyAuthorizationResult authorization = await evaluator.AuthorizeAsync(policy, authentication, context, resource: context).ConfigureAwait(false);
+            return authorization.Succeeded;
+        }
+        finally
+        {
+            context.Request.Path = originalPath;
+            context.SetEndpoint(originalEndpoint);
+        }
     }
 
     private static async Task WriteFileAsync(HttpContext context, IFileInfo fileInfo, string contentType, string? etagCacheKey)
