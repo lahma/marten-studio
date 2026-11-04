@@ -249,6 +249,14 @@ else
                             <td class="ms-table-cell ms-num">@SchemaFormat.Count(index.TuplesRead)</td>
                             <td class="ms-table-cell">
                                 <div class="ms-index-definition">@index.Summary</div>
+                                @if (index.DeclaredKeys is { Length: > 0 } declaredKeys)
+                                {
+                                    <div class="ms-index-definition ms-index-declared">
+                                        <span class="ms-index-flag ms-index-flag-info"
+                                              title="What the store's configuration declares for this index, from StoreOptions - not read from the database. Show definition reads what Postgres has.">declared</span>
+                                        <code>@declaredKeys</code>
+                                    </div>
+                                }
                                 @if (index.Vector is { } vector)
                                 {
                                     <VectorIndexSummary Model="vector" />

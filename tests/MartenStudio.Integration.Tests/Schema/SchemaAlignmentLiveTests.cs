@@ -178,7 +178,7 @@ public class SchemaAlignmentLiveTests(PostgresFixture fixture)
                 tables.Should().Contain(x => x.Table == Partitioned && x.IsPartitioned && x.PartitionCount == Tenants.Length);
                 tables.Should().NotContain(x => x.Table.StartsWith(Partitioned + "_", StringComparison.Ordinal));
                 tables.Should().OnlyContain(static x => x.TotalBytes >= 0 && x.HeapBytes >= 0 && x.IndexBytes >= 0);
-                (await SchemaLocksAsync(reader, host.Schema)).Should().BeEmpty(
+                (await SchemaLocksAsync(reader)).Should().BeEmpty(
                     "since 1.0 no size function opens a listed table: the sizes are the catalog's page counts");
 
                 // 1.2 (D27): the index list prints no definition, so it answers through the same locks at once...
@@ -188,7 +188,7 @@ public class SchemaAlignmentLiveTests(PostgresFixture fixture)
 
                 clock.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(1), "it never waited for the lock_timeout");
                 whileHeld.Should().Contain(x => x.Table == Partitioned);
-                (await SchemaLocksAsync(reader, host.Schema)).Should().BeEmpty(
+                (await SchemaLocksAsync(reader)).Should().BeEmpty(
                     "the list opens no relation it lists: its keys are pg_attribute names and its flags are index columns");
 
                 // ...and the one statement that does deparse still waits for the table, and gives up at the lock_timeout.
@@ -213,7 +213,7 @@ public class SchemaAlignmentLiveTests(PostgresFixture fixture)
 
         (await PartitionLocksAsync(reader, host.Schema)).Should().BeEmpty(
             "the reads walk pg_inherits and catalog columns and never open a partition");
-        (await SchemaLocksAsync(reader, host.Schema)).Should().BeEmpty(
+        (await SchemaLocksAsync(reader)).Should().BeEmpty(
             "since 1.2 the index list calls no deparse function, so it opens - and locks - no relation of the schema at all");
 
         await again.RollbackAsync(Token);
@@ -625,23 +625,23 @@ public class SchemaAlignmentLiveTests(PostgresFixture fixture)
         await command.ExecuteNonQueryAsync(Token);
     }
 
-    /// <summary>Every lock this connection's backend holds on a partition in <paramref name="schema" />.</summary>
-    /// <summary>Every relation lock this backend holds on a relation of <paramref name="schema" />.</summary>
-    private static async Task<IReadOnlyList<string>> SchemaLocksAsync(NpgsqlConnection connection, string schema)
+    /// <summary>
+    /// Every relation lock this backend holds on a relation outside <c>pg_catalog</c> - the document and event schemas, their
+    /// TOAST tables (<c>pg_toast</c>) and anything else a read could have opened.
+    /// </summary>
+    private static async Task<IReadOnlyList<string>> SchemaLocksAsync(NpgsqlConnection connection)
     {
         await using var command = new NpgsqlCommand(
             """
-            select c.relname || ' ' || l.mode
+            select n.nspname || '.' || c.relname || ' ' || l.mode
             from pg_locks l
             join pg_class c on c.oid = l.relation
             join pg_namespace n on n.oid = c.relnamespace
             where l.pid = pg_backend_pid()
-              and n.nspname = @schema
+              and n.nspname <> 'pg_catalog'
             order by 1
             """,
             connection);
-
-        command.Parameters.AddWithValue("schema", schema);
 
         List<string> locks = [];
         await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(Token);

@@ -199,7 +199,11 @@ internal static class PgVector
     /// </summary>
     /// <param name="ownedByPgVector">Whether the <c>vector</c> extension owns the index's access method.</param>
     /// <param name="accessMethod"><c>pg_am.amname</c>.</param>
-    /// <param name="keyColumns">Each key column as <c>pg_get_indexdef(oid, k, true)</c> prints it, already masked.</param>
+    /// <param name="keyColumns">
+    /// Each key column as the caller names it, in key order. The database browser, which deparses by design, passes
+    /// <c>pg_get_indexdef(oid, k, true)</c>'s text, already masked; the Schema screen's list, which deparses nothing (D27),
+    /// passes the <c>pg_attribute</c> column name, or "(expression)" for an expression key.
+    /// </param>
     /// <param name="operatorClasses">Each key column's operator class, <c>pg_opclass.opcname</c>, in key order.</param>
     /// <param name="reloptions">The index's <c>pg_class.reloptions</c>, as <c>name=value</c>.</param>
     public static PgVectorIndex? Index(

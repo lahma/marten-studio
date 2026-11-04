@@ -109,7 +109,8 @@ public class PgVectorLiveTests(PgVectorServerFixture server) : IClassFixture<PgV
         ivfflat.Columns.Single().OperatorClass.Should().Be("vector_l2_ops");
         (await scope.ServiceProvider.GetRequiredService<ISchemaDataService>()
                 .IndexDefinitionAsync(Scope, DocumentSchema, Table, "embeddings_ivfflat", Token))
-            .Sql.Should().NotContain("vector_l2_ops",
+            .Sql.Should().Contain("USING ivfflat", "the statement was really read, so the next line is not vacuous on a null")
+            .And.NotContain("vector_l2_ops",
                 "Postgres prints no operator class that is the default for its type - which is why the studio reads pg_opclass");
         byName["embeddings_ivfflat"].Summary.Should().Be("ivfflat (embedding)", "the list's keys are pg_attribute names, never a deparse");
 
@@ -191,7 +192,7 @@ public class PgVectorLiveTests(PgVectorServerFixture server) : IClassFixture<PgV
         // The statement, on request, is masked through the same gate as the definition beside it in the browser.
         SchemaIndexDefinition statement = await scope.ServiceProvider.GetRequiredService<ISchemaDataService>()
             .IndexDefinitionAsync(Scope, schemaExpression.Schema, schemaExpression.Table, schemaExpression.Name, Token);
-        statement.Sql.Should().NotContain("public.").And.Contain(WithheldNames.Token + ".vector_l1_ops");
+        statement.Sql.Should().Contain(WithheldNames.Token + ".vector_l1_ops").And.NotContain("public.");
     }
 
     /// <summary>

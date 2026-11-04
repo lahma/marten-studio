@@ -232,6 +232,8 @@ internal static class IndexAdvice
                 nonPrimaryKeyIndexes[tableKey] = nonPrimaryKeyIndexes.GetValueOrDefault(tableKey) + 1;
             }
 
+            DeclaredIndex? declaredIndex = declaredByKey.GetValueOrDefault(indexKey);
+
             indexes.Add(new IndexInfo(
                 row.Schema,
                 row.Table,
@@ -249,6 +251,9 @@ internal static class IndexAdvice
                 ignored)
             {
                 AccessMethod = row.AccessMethod,
+                DeclaredKeys = declaredIndex is not null && row.KeyColumns.Any(static x => x is null)
+                    ? DeclaredKeysOf(declaredIndex.Definition)
+                    : null,
                 Vector = PostgresStudio.Services.Database.PgVector.Index(
                     row.AccessMethodIsPgVector, row.AccessMethod, row.KeyColumnNames, row.OperatorClasses, row.Options),
             });
@@ -317,6 +322,23 @@ internal static class IndexAdvice
         ];
 
         return lines;
+    }
+
+    /// <summary>
+    /// The key part of a declared index's statement as Weasel renders it: from <c>USING</c> on, without the trailing
+    /// semicolon - or <see langword="null" /> when the statement is only the index's name (it could not be rendered).
+    /// </summary>
+    internal static string? DeclaredKeysOf(string definition)
+    {
+        if (string.IsNullOrWhiteSpace(definition))
+        {
+            return null;
+        }
+
+        int usingAt = definition.IndexOf(" USING ", StringComparison.OrdinalIgnoreCase);
+        string keys = (usingAt >= 0 ? definition[(usingAt + 1)..] : definition).Trim().TrimEnd(';').Trim();
+
+        return keys.Length == 0 || (usingAt < 0 && !keys.Contains(' ', StringComparison.Ordinal)) ? null : keys;
     }
 
     private static string? SuggestionFor(IndexStatsRow row, bool isDeclared, bool onMartenTable, bool ignored, bool relational)

@@ -68,6 +68,14 @@ internal sealed record IndexInfo(
     /// <summary>Whether dropping it would change what the schema enforces rather than only what it costs.</summary>
     public bool IsConstraint => IsPrimaryKey || IsUnique;
 
+    /// <summary>
+    /// What the store's configuration declares for this index - <c>USING btree ((data ->> 'Name'))</c> as Weasel writes it,
+    /// from <c>SchemaDeclarationReader</c> alone - or <see langword="null" />. Set only when the index is declared and has an
+    /// expression key, so the list can say what the expression is without deparsing it (D27). It is configuration, not read
+    /// from the database: the screen labels it "declared".
+    /// </summary>
+    public string? DeclaredKeys { get; init; }
+
     /// <summary>Its access method: <c>btree</c>, <c>gin</c>, <c>hnsw</c>, <c>ivfflat</c>...</summary>
     public string AccessMethod { get; init; } = "btree";
 

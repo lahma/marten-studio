@@ -1,5 +1,6 @@
 using Marten;
 
+using MartenStudio.Internal.Sql;
 using MartenStudio.Services.Schema;
 using MartenStudio.Tests.Sql;
 using PostgresStudio.Services.Schema;
@@ -65,6 +66,44 @@ public class SchemaDeclarationReaderTests
 
         declarations.Indexes.Should().OnlyContain(x => x.Definition.Length > 0);
         declarations.ManagedTables.Should().Contain(SqlTestStore.Schema + ".mt_doc_sqltestcustomer");
+    }
+
+    /// <summary>
+    /// 1.2-LOCKS-FU: the list prints no statement (D27), so a Marten index over an expression on <c>data</c> would read
+    /// "(expression)"; where the configuration declares the index the Keys column adds what it declares, from
+    /// <c>StoreOptions</c> alone. A duplicated field is a plain column and needs no declaration shown; an expression index
+    /// nobody declared keeps "(expression)" alone.
+    /// </summary>
+    [Fact]
+    public void A_declared_computed_index_shows_its_declared_keys_and_an_undeclared_expression_index_does_not()
+    {
+        SchemaDeclarations declarations = Read(options =>
+        {
+            options.Schema.For<SqlTestCustomer>().Index(x => x.Name);
+            options.Schema.For<SqlTestCustomer>().Duplicate(x => x.Email);
+        });
+
+        DeclaredIndex computed = declarations.Indexes.Single(x => x.Name.Contains("_name", StringComparison.OrdinalIgnoreCase));
+        DeclaredIndex duplicated = declarations.Indexes.Single(x => x.Name.Contains("_email", StringComparison.OrdinalIgnoreCase));
+
+        IndexStatsRow Row(string name, params string?[] keys) =>
+            new(SqlTestStore.Schema, "mt_doc_sqltestcustomer", name, 8192, 1, 1, false, false) { KeyColumns = keys };
+
+        SchemaIndexes result = IndexAdvice.Join(
+            [Row(computed.Name, [null]), Row(duplicated.Name, "email"), Row("hand_made_lower_name", [null])],
+            declarations.Indexes,
+            []);
+
+        IndexInfo declaredExpression = result.Indexes.Single(x => x.Name == computed.Name);
+        declaredExpression.Summary.Should().Be("btree ((expression))");
+        declaredExpression.DeclaredKeys.Should().StartWith("USING btree").And.Contain("Name", Exactly.Once(),
+            "the expression Weasel would write for the member, from configuration alone");
+        declaredExpression.DeclaredKeys.Should().NotContain("CREATE INDEX").And.NotEndWith(";");
+
+        result.Indexes.Single(x => x.Name == duplicated.Name).Should().Match<IndexInfo>(
+            x => x.Summary == "btree (email)" && x.DeclaredKeys == null, "a column is named by the catalog");
+        result.Indexes.Single(x => x.Name == "hand_made_lower_name").Should().Match<IndexInfo>(
+            x => x.Summary == "btree ((expression))" && x.DeclaredKeys == null, "an undeclared expression index keeps '(expression)'");
     }
 
     /// <summary>
