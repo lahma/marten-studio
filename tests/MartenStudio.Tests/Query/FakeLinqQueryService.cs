@@ -37,16 +37,24 @@ internal sealed class FakeLinqQueryService : ILinqQueryService
     public Task<LinqModeStatus> DescribeAsync(StudioScope scope, CancellationToken cancellationToken = default) =>
         Task.FromResult(Status);
 
-    public Task<LinqQueryResult> RunAsync(StudioScope scope, LinqQueryRequest request, CancellationToken cancellationToken = default)
+    /// <summary>When set, <see cref="RunAsync" /> does not answer until it is completed: a run held in flight.</summary>
+    public TaskCompletionSource? Hold { get; set; }
+
+    public async Task<LinqQueryResult> RunAsync(StudioScope scope, LinqQueryRequest request, CancellationToken cancellationToken = default)
     {
         Requests.Add(request);
 
-        if (Failure is { } failure)
+        if (Hold is { } hold)
         {
-            return Task.FromException<LinqQueryResult>(failure);
+            await hold.Task;
         }
 
-        return Task.FromResult(Result ?? new LinqQueryResult(request.Alias, [], false, request.Offset, request.PageSize ?? 50, string.Empty, [], TimeSpan.Zero));
+        if (Failure is { } failure)
+        {
+            throw failure;
+        }
+
+        return Result ?? new LinqQueryResult(request.Alias, [], false, request.Offset, request.PageSize ?? 50, string.Empty, [], TimeSpan.Zero);
     }
 
     /// <summary>X2: what <see cref="WhatIfAsync" /> answers; hypopg not installed when a test says nothing.</summary>

@@ -100,7 +100,7 @@ public class IndexLintLiveTests(PostgresFixture postgres)
         HealthReportFinding runningOut = OnTable(report, "T20", schema + ".events").Should().ContainSingle().Subject;
         runningOut.Severity.Should().Be(HealthSeverity.Critical, "no DEFAULT partition: an insert for October fails");
         runningOut.Finding.Variant.Should().Be(RangePartitionsCheck.RunningOutVariant);
-        runningOut.Finding.Title.Should().Contain("ran out at 2026-10-01 00:00 UTC");
+        runningOut.Finding.Title.Should().Contain("ran out at 2026-10-01 00:00:00 UTC");
         runningOut.Finding.Remedy!.Code.Should().Be(
             "CREATE TABLE \"ps_lint_t20\".\"events_p20261001\" PARTITION OF \"ps_lint_t20\".\"events\" FOR VALUES FROM ('2026-10-01 00:00:00+00') TO ('2026-11-01 00:00:00+00');",
             "a calendar month on from the newest bound, read from the catalog without opening a partition");

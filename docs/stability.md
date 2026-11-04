@@ -38,7 +38,9 @@ What a minor or patch release will not break:
 - **Markup and CSS**: the studio's HTML, its `ms-` classes and its design tokens are not a theming surface. A host must
   not style the studio from its own stylesheet; the studio never styles the host.
 - **Wording**: a finding's title, detail and remedy, a page's sentences and a log message's text can be improved in any
-  release. Match on codes and event ids, never on text.
+  release. So can its evidence: the labels, the values and the caveats, among them how a time is spelt (1.2 writes every
+  moment in evidence `2026-11-04 08:57:03 UTC`, where 1.1 wrote some as `2026-11-04 08:57:03Z` and some to the minute). Match
+  on codes and event ids, never on text.
 - **The studio's own SQL** - what "Show SQL" shows - can change in any release, within the rules in
   [docs/security.md](security.md) (catalog reads lock nothing they list; the console's transaction is read-only).
 - **Internal types**, which the packages share through `InternalsVisibleTo`: they change whenever the code needs them to.

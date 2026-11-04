@@ -216,6 +216,85 @@ public class LinqSavedQueriesTests
         page.FindAll(".ms-query-drawer-pick").Should().BeEmpty("and so are the Marten clause box's");
     }
 
+    /// <summary>1.2-POLISH-FIX F2: the recent list records what ran, not what the boxes hold when the run comes back.</summary>
+    [Fact]
+    public void A_run_is_recorded_as_it_was_asked_even_when_the_predicate_is_edited_while_it_is_in_flight()
+    {
+        var linq = new FakeLinqQueryService().WithType("order");
+        linq.Hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using StudioComponentContext context = CreateContext(linq);
+
+        var page = context.Render<QueryPage>();
+        page.Find("#ms-query-mode-linq").Click();
+        page.WaitForAssertion(() => page.FindAll("#ms-query-linq-where").Should().ContainSingle());
+
+        page.Find("#ms-query-linq-where").Change("Total > 5");
+        page.Find("#ms-query-linq-orderby").Change("Total desc");
+        page.Find(".ms-query-run").Click();
+        page.WaitForAssertion(() => linq.Requests.Should().ContainSingle());
+
+        page.Find("#ms-query-linq-where").Change("Total > 99");
+        page.Find("#ms-query-linq-orderby").Change("Name");
+
+        linq.Hold.SetResult();
+        page.WaitForAssertion(() => page.FindAll(".ms-query-drawer-recent .ms-query-drawer-pick").Should().ContainSingle());
+
+        Written(context, RecentKey(QueryMode.Linq))!.Should().ContainSingle().Which
+            .Should().Be(new SavedQuery("Total > 5", QueryMode.Linq, "order", "Total > 5", "Total desc"), "the run was asked with the first predicate");
+    }
+
+    /// <summary>1.2-POLISH-FIX F2: picking an entry while a run is in flight changes nothing and says why.</summary>
+    [Fact]
+    public void Picking_an_entry_while_a_run_is_in_flight_is_refused_in_the_status_line()
+    {
+        var linq = new FakeLinqQueryService().WithType("order");
+        linq.Hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using StudioComponentContext context = CreateContext(linq);
+
+        context.JSInterop.Setup<string?>("martenStudio.prefs.get", SavedKey(QueryMode.Linq)).SetResult(SavedQueryStore.Serialize(
+            [new SavedQuery("Mine", QueryMode.Linq, "order", "Total > 7", null)]));
+
+        var page = context.Render<QueryPage>();
+        page.Find("#ms-query-mode-linq").Click();
+        page.WaitForAssertion(() => page.FindAll(".ms-query-drawer-saved .ms-query-drawer-pick").Should().ContainSingle());
+
+        page.Find("#ms-query-linq-where").Change("Total > 5");
+        page.Find(".ms-query-run").Click();
+        page.WaitForAssertion(() => linq.Requests.Should().ContainSingle());
+
+        page.Find(".ms-query-drawer-saved .ms-query-drawer-pick").Click();
+
+        page.WaitForAssertion(() => page.Markup.Should().Contain("A query is running"));
+        page.Find("#ms-query-linq-where").GetAttribute("value").Should().Be("Total > 5", "the boxes are what the run was asked with");
+
+        linq.Hold.SetResult();
+    }
+
+    /// <summary>1.2-POLISH-FIX F3: an open name prompt closes when the mode or the store moves, so it can never save into the other list.</summary>
+    [Theory]
+    [InlineData("Linq", "Sql", Store, Store)]
+    [InlineData("Sql", "Linq", Store, Store)]
+    [InlineData("Linq", "Linq", Store, "other")]
+    public void The_name_prompt_closes_when_the_mode_or_the_store_changes(string from, string to, string fromStore, string toStore)
+    {
+        using StudioComponentContext context = new();
+
+        IRenderedComponent<SavedQueryDrawer> drawer = context.Render<SavedQueryDrawer>(parameters =>
+            parameters.Add(x => x.StoreKey, fromStore).Add(x => x.Mode, from));
+
+        drawer.InvokeAsync(() => drawer.Instance.BeginSaveAsync("Total > 1", "order", "Total", null));
+        drawer.FindAll("#ms-query-save-name").Should().ContainSingle();
+
+        drawer.Render(parameters => parameters.Add(x => x.StoreKey, toStore).Add(x => x.Mode, to));
+
+        drawer.FindAll("#ms-query-save-name").Should().BeEmpty("what was typed for one list is not saved into another");
+
+        // The prompt is open again for a save in the new place, and the same parameters leave it alone.
+        drawer.InvokeAsync(() => drawer.Instance.BeginSaveAsync("x = 1", null, null, null));
+        drawer.Render(parameters => parameters.Add(x => x.StoreKey, toStore).Add(x => x.Mode, to));
+        drawer.FindAll("#ms-query-save-name").Should().ContainSingle("an unchanged mode and store keep the prompt");
+    }
+
     [Fact]
     public void Importing_into_the_LINQ_drawer_takes_LINQ_entries_only_and_the_other_drawers_take_none_of_them()
     {

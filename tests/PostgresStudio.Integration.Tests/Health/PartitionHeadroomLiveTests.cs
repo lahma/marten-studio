@@ -48,7 +48,7 @@ public class PartitionHeadroomLiveTests(PostgresFixture postgres)
         HealthReportFinding finding = About(await ReportAsync(host), "T20", "x4.events").Should().ContainSingle().Subject;
         finding.Severity.Should().Be(HealthSeverity.Critical, "the newest partition ends in six days, and no DEFAULT takes November's rows");
         finding.Finding.Variant.Should().Be(RangePartitionsCheck.RunningOutVariant);
-        finding.Finding.Title.Should().Contain("runs out at 2026-11-01 00:00 UTC");
+        finding.Finding.Title.Should().Contain("runs out at 2026-11-01 00:00:00 UTC");
         finding.Finding.Remedy!.Code.Should().Be(
             "CREATE TABLE \"x4\".\"events_p20261101\" PARTITION OF \"x4\".\"events\" FOR VALUES FROM ('2026-11-01 00:00:00+00') TO ('2026-12-01 00:00:00+00');",
             "the bounds were parsed by the studio from Postgres' own text, and the next month written from them");
@@ -101,7 +101,7 @@ public class PartitionHeadroomLiveTests(PostgresFixture postgres)
 
         HealthReportFinding finding = About(report, "T20", "x4.events").Should().ContainSingle().Subject;
         finding.Severity.Should().Be(HealthSeverity.Critical, "the newest partition ends in six days, and no DEFAULT takes November's rows");
-        finding.Finding.Title.Should().Contain("runs out at 2026-11-01 00:00 UTC");
+        finding.Finding.Title.Should().Contain("runs out at 2026-11-01 00:00:00 UTC");
         finding.Finding.Remedy!.Code.Should().Be(
             "CREATE TABLE \"x4\".\"events_p20261101\" PARTITION OF \"x4\".\"events\" FOR VALUES FROM ('2026-11-01 00:00:00+00') TO ('2026-12-01 00:00:00+00');",
             "the same next month as under ISO: the bounds were read in ISO");

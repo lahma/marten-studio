@@ -778,8 +778,16 @@
     /// <param name="pickedWhere">The predicate.</param>
     /// <param name="pickedOrderBy">The ordering, or <see langword="null" />.</param>
     /// <param name="pickedArchived">The archived selector of an event-log entry, or <see langword="null" />.</param>
-    public async Task ApplyAsync(string? pickedAlias, string pickedWhere, string? pickedOrderBy, string? pickedArchived)
+    internal async Task ApplyAsync(string? pickedAlias, string pickedWhere, string? pickedOrderBy, string? pickedArchived)
     {
+        if (running)
+        {
+            // What the boxes hold is what the run in flight was asked with, and what it will be recorded as: not changed under it.
+            statusText = "A query is running. Wait for it, or cancel it, before picking another.";
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
         bool toEvents = string.Equals(pickedAlias, EventsToken, StringComparison.Ordinal);
 
         if (!toEvents && (string.IsNullOrWhiteSpace(pickedAlias)
@@ -877,6 +885,11 @@
 
         try
         {
+            // What this run is asked with, captured before the first await: the boxes may be edited while it is in flight, and the
+            // recent list records what ran, not what is in them when it returns.
+            (string? ranAlias, bool ranEvents, string ranWhere, string ranOrderBy, string? ranArchived) =
+                (alias, eventsTarget, where, orderBy, EventLinks.ArchivedToken(archived));
+
             LinqQueryRequest request = eventsTarget
                 ? new(LinqQueryService.EventsAlias, where, orderBy, pageSize, offset, IncludePlan: offset == 0 && status?.MayExplain == true,
                     Target: LinqQueryTarget.Events, Archived: archived)
@@ -925,12 +938,12 @@
                 {
                     try
                     {
-                        await OnRan.InvokeAsync((alias, eventsTarget, where, orderBy, EventLinks.ArchivedToken(archived)));
+                        await OnRan.InvokeAsync((ranAlias, ranEvents, ranWhere, ranOrderBy, ranArchived));
                     }
-                    catch (Exception exception) when (exception is not OperationCanceledException)
+                    catch (Exception exception) when (StudioLiveUpdates.IsInteropUnavailable(exception))
                     {
                         // The recent list is a convenience, kept in the visitor's own browser: a run that worked is not turned
-                        // into an error because the list could not be written (no storage, or interop lost).
+                        // into an error (or into "Cancelled.", by a timed-out interop call) because the list could not be written.
                     }
                 }
             }

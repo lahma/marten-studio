@@ -121,9 +121,23 @@ public class PolishBrowserTests(BrowserSuiteFixture fixture)
                 null,
                 new PageWaitForFunctionOptions { Timeout = 30_000 });
 
-            // The SQL console keeps a list of its own: the LINQ entry is not in it.
+            // The entry is in the browser's own storage under the LINQ key, with its ordering, and under no SQL or Marten key: an
+            // empty drawer on the SQL page proves nothing if the drawer had not loaded yet, so the storage is asked directly.
+            string[] linqKeys = await studio.Page.EvaluateAsync<string[]>(
+                "() => Object.keys(window.localStorage).filter(k => k.startsWith('ms_query_recent_') && k.endsWith('_linq') && JSON.parse(window.localStorage.getItem(k)).some(e => e.mode === 'Linq' && e.text === 'Version > 0' && e.orderBy === 'Sequence'))");
+            linqKeys.Should().ContainSingle("the run is under the LINQ key, with its ordering");
+
+            string[] otherKeys = await studio.Page.EvaluateAsync<string[]>(
+                "() => Object.keys(window.localStorage).filter(k => k.startsWith('ms_query_') && !k.endsWith('_linq') && JSON.parse(window.localStorage.getItem(k)).some(e => e.text === 'Version > 0'))");
+            otherKeys.Should().BeEmpty("a LINQ entry is under no other mode's key");
+
+            // And the SQL console's drawer, once it has read its own list, does not show it.
             await studio.GoAsync(fixture.Root.StudioUrl("query?mode=sql"));
             await studio.Page.Locator(".ms-query-drawer").WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
+            await studio.Page.WaitForFunctionAsync(
+                "() => document.querySelector('.ms-query-drawer-recent') === null || document.querySelector('.ms-query-drawer-recent .ms-query-drawer-pick') === null",
+                null,
+                new PageWaitForFunctionOptions { Timeout = 30_000 });
             (await studio.Page.Locator(".ms-query-drawer-recent .ms-query-drawer-pick").CountAsync()).Should().Be(0);
 
             studio.AssertClean("a LINQ run kept in its recent list");

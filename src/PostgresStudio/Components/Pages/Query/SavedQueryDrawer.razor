@@ -1,3 +1,4 @@
+@using PostgresStudio.Services.Live
 @using PostgresStudio.Services.Query
 @inject IJSRuntime JsRuntime
 
@@ -109,6 +110,9 @@
     private List<SavedQuery> recent = [];
     private List<SavedQuery> saved = [];
     private string? loadedKey;
+    private bool parametersSeen;
+    private QueryMode seenMode;
+    private string? seenStore;
     private bool naming;
     private bool importing;
     private string pendingName = string.Empty;
@@ -158,7 +162,7 @@
     /// <param name="alias">The document alias, or the target picker's token for the event log.</param>
     /// <param name="orderBy">The ordering.</param>
     /// <param name="archived">An event-log entry's archived selector.</param>
-    public Task BeginSaveAsync(string text, string? alias, string? orderBy, string? archived)
+    internal Task BeginSaveAsync(string text, string? alias, string? orderBy, string? archived)
     {
         if (string.IsNullOrWhiteSpace(text))
         {
@@ -185,7 +189,7 @@
     /// <param name="alias">The document alias, or the target picker's token for the event log.</param>
     /// <param name="orderBy">The ordering.</param>
     /// <param name="archived">An event-log entry's archived selector.</param>
-    public async Task RecordRunAsync(string text, string? alias, string? orderBy, string? archived)
+    internal async Task RecordRunAsync(string text, string? alias, string? orderBy, string? archived)
     {
         if (string.IsNullOrWhiteSpace(text))
         {
@@ -197,6 +201,23 @@
 
         await WriteAsync(SavedQueryStore.RecentKey(StoreKey, CurrentMode), recent);
         await InvokeAsync(StateHasChanged);
+    }
+
+    protected override void OnParametersSet()
+    {
+        // The mode or the store moved under an open prompt: what it holds was typed for the other list, so it closes, and a LINQ
+        // predicate can never be saved into the SQL list (or the other way round). Nothing is kept of it.
+        if (parametersSeen
+            && (seenMode != CurrentMode || !string.Equals(seenStore, StoreKey, StringComparison.Ordinal)))
+        {
+            naming = false;
+            importing = false;
+            importMessage = null;
+        }
+
+        parametersSeen = true;
+        seenMode = CurrentMode;
+        seenStore = StoreKey;
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -281,11 +302,9 @@
                 "application/json",
                 json);
         }
-        catch (JSException)
+        catch (Exception exception) when (StudioLiveUpdates.IsInteropUnavailable(exception))
         {
-        }
-        catch (InvalidOperationException)
-        {
+            // No browser to hand a file to (interop lost): there is nothing to report on a circuit that is going away.
         }
     }
 
@@ -327,18 +346,14 @@
 
             return SavedQueryStore.Deserialize(stored);
         }
-        catch (JSException)
+        catch (Exception exception) when (StudioLiveUpdates.IsInteropUnavailable(exception))
         {
-            return [];
-        }
-        catch (InvalidOperationException)
-        {
-            // Prerendering: there is no browser to ask yet, and the next render asks again.
-            loadedKey = null;
-            return [];
-        }
-        catch (System.Text.Json.JsonException)
-        {
+            if (exception is InvalidOperationException)
+            {
+                // Prerendering: there is no browser to ask yet, and the next render asks again.
+                loadedKey = null;
+            }
+
             return [];
         }
     }
@@ -349,11 +364,9 @@
         {
             await JsRuntime.InvokeVoidAsync("martenStudio.prefs.set", key, SavedQueryStore.Serialize(queries));
         }
-        catch (JSException)
+        catch (Exception exception) when (StudioLiveUpdates.IsInteropUnavailable(exception))
         {
-        }
-        catch (InvalidOperationException)
-        {
+            // No storage, or interop lost: the list is a convenience and stays as it is on screen.
         }
     }
 }
