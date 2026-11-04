@@ -109,7 +109,10 @@ graph:
    own, as `MaintenanceLiveTests`' T08 test and `SinceRestartLiveTests` do: the statistics window reads a reset time that
    moves between two sweeps as a reset, and every usage verdict (T01, T05, T06) of a class judging the shared `postgres`
    database withholds itself.
-   Waits are always wait-on-condition, **never `Task.Delay`**. The Playwright scenarios live in `Browser/`
+   Waits are always wait-on-condition, **never `Task.Delay`**. A test that holds a gate shut awaits it through `Bounded()`
+   (`TestBounds`, one copy per fast suite); `NoUnboundedGateAwaitTests` fails on an unbounded await of a gate in either
+   fast suite, and CI's fast suites run with a ten-minute blame-hang timeout, so a hang fails with a dump naming the test.
+   The Playwright scenarios live in `Browser/`
    (and the Health page's first one in `Health/`): locally they skip with the install command in the
    reason when Chromium is missing; on CI a missing browser throws (D19). The browser suites record enhanced
    navigations (`StudioPage.EnhancedNavigations`) and assert none (`AssertNoPageFetch`, 1.2);
