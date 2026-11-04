@@ -270,6 +270,9 @@ public class SchemaHealthColumnsPageTests
         public Task<HealthGlance?> GlanceAsync(StudioScope scope, CancellationToken cancellationToken = default) =>
             Task.FromResult<HealthGlance?>(null);
 
+        public Task<HealthGlance?> CheckAsync(StudioScope scope, CancellationToken cancellationToken = default) =>
+            Task.FromResult<HealthGlance?>(null);
+
         public Task<IReadOnlyList<HealthReportFinding>> CachedFindingsAsync(
             StudioScope scope,
             IReadOnlyCollection<string> codes,

@@ -39,6 +39,17 @@ internal interface IHealthService
     Task<HealthGlance?> GlanceAsync(StudioScope scope, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Starts one regular sweep of the scope's database when the cached one has expired - single flight, the sweep the
+    /// Overview and the Health page start - and answers the glance of it (1.2: the Stores page's "Check"). The scope is
+    /// resolved first, so a store policy refusal starts no sweep and answers <see langword="null" />. The glance path is
+    /// <see cref="GlanceAsync" />'s: it shows counts and titles, never evidence, so nothing is audited and the action
+    /// log is untouched.
+    /// </summary>
+    /// <param name="scope">The store and database; a tenant in it is read as <see cref="GlanceAsync" /> reads it.</param>
+    /// <param name="cancellationToken">Cancels this caller's wait, never the shared sweep.</param>
+    Task<HealthGlance?> CheckAsync(StudioScope scope, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// The findings with these codes that this visitor may see and has not muted, from the last regular sweep
     /// of the scope's database - for a banner on the screen a finding belongs to (D01 and D02 on Projections,
     /// T03-T05 on Schema). <b>Cache-only</b>, like <see cref="GlanceAsync" />: it never starts a sweep, and asks
@@ -339,7 +350,38 @@ internal sealed class HealthService : IHealthService
             // The visitor's scope as asked, not the swept names: the toast compares it with the scope the sidebar is on
             // when the glance reaches it.
             Scope = scope,
+            Suggestions = unmuted.Count(static x => x.Severity == HealthSeverity.Info),
         };
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Not <see cref="GetReportAsync" />: its findings are shown with <c>audit: true</c>, which could record "Read health session
+    /// details" for evidence the Stores tile never shows. The sweep is the regular one only, so a deeper or statement sweep is never
+    /// started by a chip; the resolve is <see cref="GetReportAsync" />'s own (the store policy, before anything is looked up).
+    /// </remarks>
+    public async Task<HealthGlance?> CheckAsync(StudioScope scope, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+
+        ResolvedSource resolved;
+
+        try
+        {
+            resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is StudioNotAuthorizedException or KeyNotFoundException or StudioStoreUnavailableException)
+        {
+            // Refused, unknown or unbuildable: no sweep, and a chip that stays "not checked recently".
+            return null;
+        }
+
+        // The store by its registered key and the database by its identity, as GetReportAsync names them (D29).
+        ResolvedSource whole = resolved with { Scope = new StudioScope(resolved.Source.Key, resolved.Target.Identity, null) };
+
+        _ = await cache.GetAsync(whole, HealthSweepKind.Regular, scope.DatabaseId, cancellationToken).ConfigureAwait(false);
+
+        return await GlanceAsync(scope, cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />

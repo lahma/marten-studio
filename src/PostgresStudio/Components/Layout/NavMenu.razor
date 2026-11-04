@@ -111,7 +111,8 @@
     /// MartenStudio's Dead letters entry is absent while the host hides <c>DeadLetterEvent</c>, failing closed, as a
     /// hidden document type is absent (D27) and the page it would link to says why if it is reached by its address.
     /// </summary>
-    private bool Shown(StudioNavItem item) => item.IsShown is null || item.IsShown(Settings);
+    private bool Shown(StudioNavItem item) =>
+        (item.IsShown is null || item.IsShown(Settings)) && (item.IsShownInScope is null || item.IsShownInScope(State));
 
     private readonly CancellationTokenSource cancellation = new();
 

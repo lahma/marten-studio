@@ -63,7 +63,7 @@ public class StoreInfoServiceVersionTests
         await using ServiceProvider provider = services.BuildServiceProvider();
         await using AsyncServiceScope circuit = provider.CreateAsyncScope();
 
-        StudioOverview overview = await circuit.ServiceProvider.GetRequiredService<IStoreInfoService>().GetOverviewAsync(Token);
+        StudioOverview overview = await circuit.ServiceProvider.GetRequiredService<IStoreInfoService>().GetOverviewAsync(cancellationToken: Token);
 
         StoreOverview store = overview.Stores.Should().ContainSingle().Subject;
         store.IsAvailable.Should().BeTrue();

@@ -15755,3 +15755,100 @@ a.ms-schema-health-mark:focus-visible {
         align-items: flex-start;
     }
 }
+
+/* ===== 1.2-STORES the Stores page, and the Overview's stores strip ===== */
+
+/* Stores (SCOPE-1). Chips borrow the Health severities' look (.ms-health-severity-*) and add the two states those do not have:
+   "nothing to report" and "not checked recently". Text stays the body colour on the tinted grounds: the success hue is below 4.5:1
+   as text on its own tint. A later rule of an earlier selector wins on purpose (D26). */
+
+.ms-stores-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ms-space-sm);
+  margin-left: auto;
+}
+
+.ms-stores-store {
+  margin-bottom: var(--ms-space-xl);
+}
+
+.ms-stores-open {
+  margin: 0 0 var(--ms-space-md);
+}
+
+.ms-stores-current {
+  align-self: center;
+}
+
+.ms-stores-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--ms-space-sm);
+  border-radius: var(--ms-radius-full);
+  font-size: var(--ms-font-size-xs);
+  font-weight: var(--ms-font-weight-semibold);
+  line-height: 1.5rem;
+  white-space: nowrap;
+}
+
+.ms-stores-chip-ok {
+  background: var(--ms-color-success-bg);
+  color: var(--ms-color-text);
+}
+
+.ms-stores-chip-muted {
+  background: var(--ms-color-surface-alt);
+  color: var(--ms-color-text-secondary);
+  border: 1px solid var(--ms-color-border-strong);
+}
+
+.ms-stores-health {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ms-space-sm);
+}
+
+.ms-stores-databases .ms-table-cell a + a {
+  margin-left: var(--ms-space-md);
+}
+
+.ms-stores-more,
+.ms-stores-check-message {
+  margin: var(--ms-space-sm) 0 var(--ms-space-md);
+}
+
+/* The Overview's stores strip: one line, wrapping when it must, so it never widens the page at 390 px. */
+
+.ms-stores-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--ms-space-xs) var(--ms-space-md);
+  margin: 0 0 var(--ms-space-md);
+  font-size: var(--ms-font-size-sm);
+}
+
+.ms-stores-strip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ms-space-xs) var(--ms-space-md);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ms-stores-strip-link {
+  overflow-wrap: anywhere;
+}
+
+.ms-stores-strip-current {
+  color: var(--ms-color-text);
+  font-weight: var(--ms-font-weight-semibold);
+  text-decoration: none;
+}
+
+.ms-stores-strip-all {
+  margin-left: auto;
+}

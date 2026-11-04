@@ -118,6 +118,14 @@ internal sealed record StudioNavItem(
     /// the sidebar, and the answer must fail closed - an entry for something the host hides is absent (D27).
     /// </summary>
     public Func<IStudioSettings, bool>? IsShown { get; init; }
+
+    /// <summary>
+    /// Whether the entry is drawn for the visitor's scope state, or <see langword="null" /> for always (1.2): MartenStudio's Stores
+    /// entry is drawn while the visitor may see two or more stores, the same test the header's store picker makes. Pure and
+    /// in-memory like <see cref="IsShown" />: the sidebar asks it on every render and re-renders on every scope change, so it reads
+    /// what <see cref="StudioState" /> already holds and does no I/O.
+    /// </summary>
+    public Func<StudioState, bool>? IsShownInScope { get; init; }
 }
 
 /// <summary>What one sidebar badge renders as.</summary>

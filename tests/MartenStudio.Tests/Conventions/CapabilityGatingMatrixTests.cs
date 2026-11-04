@@ -263,7 +263,9 @@ public class CapabilityGatingMatrixTests
 
         // H1: the health advisor reads; ViewDatabaseActivity decides what of a report a visitor is shown, per
         // finding and per piece of evidence, and refuses nothing - the read that refuses on it is the sessions one.
-        [typeof(IHealthService)] = ["CachedFindingsAsync", "GetReportAsync", "GlanceAsync"],
+        // 1.2-SCOPE-1: CheckAsync is GetReportAsync's resolve and regular sweep, answered through the glance: the store policy for the
+        // database, no capability, and it audits nothing because it shows no evidence.
+        [typeof(IHealthService)] = ["CachedFindingsAsync", "CheckAsync", "GetReportAsync", "GlanceAsync"],
 
         // 1.2-H-C: a finding's on-demand action. A read at the finding's own gate (re-asked on every press, in the service), audited
         // on every press. No 1.2 action declares a capability; one that does moves RunAsync to GatedReads, with the three refusals.

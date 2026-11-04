@@ -5,6 +5,7 @@ using Marten;
 using Marten.Events.Projections;
 using Marten.Storage;
 
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 using MartenCoordinator = Marten.Events.Daemon.Coordination.IProjectionCoordinator;
@@ -250,6 +251,60 @@ internal sealed class DaemonAccessor
         {
             return true;
         }
+    }
+
+    /// <summary>
+    /// Where this store's async projections run, from configuration alone (1.2: the Stores page): the store's options and
+    /// whether the container has a coordinator registered for it. Pure: it constructs no coordinator (a registration whose
+    /// factory throws is still "registered here"), reads no database and asks the daemon nothing, so it is safe on a page
+    /// that polls.
+    /// </summary>
+    /// <param name="registration">The store.</param>
+    /// <param name="store">The built store.</param>
+    /// <param name="provider">The container, asked only <c>IServiceProviderIsService</c>.</param>
+    internal static StoreDaemonHosting HostingOf(MartenStoreRegistration registration, IDocumentStore store, IServiceProvider provider)
+    {
+        ArgumentNullException.ThrowIfNull(registration);
+        ArgumentNullException.ThrowIfNull(store);
+        ArgumentNullException.ThrowIfNull(provider);
+
+        if (IsExternallyManaged(store))
+        {
+            return new(StoreDaemonHostingKind.ExternallyManaged);
+        }
+
+        if (!HasAsyncWork(store))
+        {
+            return new(StoreDaemonHostingKind.NoAsyncWork);
+        }
+
+        Type? coordinator = CoordinatorServiceType(registration);
+
+        try
+        {
+            if (coordinator is not null && provider.GetService(typeof(IServiceProviderIsService)) is IServiceProviderIsService registered
+                && registered.IsService(coordinator))
+            {
+                DaemonMode? mode = null;
+
+                try
+                {
+                    mode = store.Options.Events.Daemon.AsyncMode;
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    // The mode is a nicety on the sentence; the registration is the fact.
+                }
+
+                return new(StoreDaemonHostingKind.RegisteredHere, mode);
+            }
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // A container that cannot say is "not hosted here", the answer that claims nothing.
+        }
+
+        return new(StoreDaemonHostingKind.NotHostedHere);
     }
 
     /// <summary>Why there is no daemon to show, when nothing is registered for this store.</summary>

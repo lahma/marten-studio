@@ -24,6 +24,9 @@ internal static class MartenStudioDescriptor
     /// <summary>The query-string parameter a store key travels under.</summary>
     public const string SourceQueryParameter = "store";
 
+    /// <summary>The Stores page, relative to the studio root (1.2).</summary>
+    public const string StoresRoute = "stores";
+
     /// <summary>The dead-letter entry's badge key.</summary>
     public const string DeadLettersBadge = "dead-letters";
 
@@ -84,6 +87,13 @@ internal static class MartenStudioDescriptor
         new("Data",
         [
             new("Overview", "", "grid"),
+
+            // 1.2 (SCOPE-1): every store the visitor may see, drawn only while there are two or more - the header's store picker's own
+            // test. A single-store host never sees it; the address still works and shows the one store.
+            new("Stores", StoresRoute, "grid", Title: "Every store you may see: whether it builds, its tenancy, its databases and their health")
+            {
+                IsShownInScope = static state => state.AvailableStores.Count > 1,
+            },
             new("Documents", "documents", "doc"),
 
             // Query stays whatever RunSql says (issue #37): besides the SQL console it hosts Mode A, a typed where clause that

@@ -40,6 +40,9 @@ public class EventTypesHealthAndTagsTests
         public Task<HealthGlance?> GlanceAsync(StudioScope scope, CancellationToken cancellationToken = default) =>
             Task.FromResult<HealthGlance?>(null);
 
+        public Task<HealthGlance?> CheckAsync(StudioScope scope, CancellationToken cancellationToken = default) =>
+            Task.FromResult<HealthGlance?>(null);
+
         public Task<IReadOnlyList<HealthReportFinding>> CachedFindingsAsync(
             StudioScope scope,
             IReadOnlyCollection<string> codes,
@@ -227,6 +230,9 @@ public class EventTypesHealthAndTagsTests
             Task.FromResult(new HealthReport());
 
         public Task<HealthGlance?> GlanceAsync(StudioScope scope, CancellationToken cancellationToken = default) =>
+            Task.FromResult<HealthGlance?>(null);
+
+        public Task<HealthGlance?> CheckAsync(StudioScope scope, CancellationToken cancellationToken = default) =>
             Task.FromResult<HealthGlance?>(null);
 
         public Task<IReadOnlyList<HealthReportFinding>> CachedFindingsAsync(

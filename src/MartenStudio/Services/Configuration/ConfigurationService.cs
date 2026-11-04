@@ -231,7 +231,7 @@ internal sealed class ConfigurationService : IConfigurationService
     {
         try
         {
-            StudioOverview overview = await storeInfo.GetOverviewAsync(cancellationToken).ConfigureAwait(false);
+            StudioOverview overview = await storeInfo.GetOverviewAsync(storeKey, cancellationToken).ConfigureAwait(false);
             foreach (StoreOverview store in overview.Stores)
             {
                 if (string.Equals(store.Key, storeKey, StringComparison.OrdinalIgnoreCase))

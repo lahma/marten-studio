@@ -46,7 +46,36 @@ internal sealed class FakeHealthService : IHealthService
     public Task<HealthGlance?> GlanceAsync(StudioScope scope, CancellationToken cancellationToken = default)
     {
         Glances++;
-        return Task.FromResult(Glance);
+        Glanced.Add(scope);
+
+        return Task.FromResult(GlanceResults.TryGetValue(scope.DatabaseId, out HealthGlance? glanced) ? glanced : Glance);
+    }
+
+    /// <summary>Every scope <see cref="CheckAsync" /> was asked for, in order (1.2: the Stores page's Check).</summary>
+    public List<StudioScope> Checks { get; } = [];
+
+    /// <summary>What <see cref="CheckAsync" /> answers per scope's database identity, when a test says; <see cref="Glance" /> otherwise.</summary>
+    public Dictionary<string, HealthGlance?> CheckResults { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>Every scope <see cref="GlanceAsync" /> was asked for, in order.</summary>
+    public List<StudioScope> Glanced { get; } = [];
+
+    /// <summary>What <see cref="GlanceAsync" /> answers per database identity, when a test says; <see cref="Glance" /> otherwise.</summary>
+    public Dictionary<string, HealthGlance?> GlanceResults { get; } = new(StringComparer.Ordinal);
+
+    public Task<HealthGlance?> CheckAsync(StudioScope scope, CancellationToken cancellationToken = default)
+    {
+        Checks.Add(scope);
+
+        HealthGlance? swept = CheckResults.TryGetValue(scope.DatabaseId, out HealthGlance? checkedGlance) ? checkedGlance : Glance;
+
+        // The sweep a Check starts is the shared one, so the cache-only read finds it afterwards.
+        if (swept is not null)
+        {
+            GlanceResults[scope.DatabaseId] = swept;
+        }
+
+        return Task.FromResult(swept);
     }
 
     /// <summary>How many banner reads were asked for, and with which codes.</summary>

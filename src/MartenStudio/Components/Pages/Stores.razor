@@ -1,0 +1,598 @@
+@page "/marten/stores"
+@using System.Globalization
+@using MartenStudio.Services
+@using MartenStudio.Services.Events
+@using MartenStudio.Services.Health
+@using Microsoft.Extensions.Options
+@using PostgresStudio.Components.Shared
+@using PostgresStudio.Services
+@using PostgresStudio.Services.Health
+@using PostgresStudio.Services.Live
+@implements IAsyncDisposable
+@inject IStoreInfoService StoreInfo
+@inject IHealthService HealthData
+@inject StudioState State
+@inject StudioLiveUpdatesFactory LiveFactory
+@inject IOptions<MartenStudioOptions> Options
+
+@*
+    1.2 SCOPE-1: every Marten store the visitor may see, what each says about itself, and each of its databases with a health
+    chip from the last sweep. It is never a redirect target (D-SCOPE S2), reads nothing while it is prerendered, and starts no
+    sweep by being opened: the chips are the shared sweep's last result, and "Check" runs the regular sweep a database's
+    Overview would.
+*@
+
+<PageTitle>Stores</PageTitle>
+
+<div class="ms-page ms-stores">
+    <div class="ms-page-header">
+        <h1 class="ms-page-title">Stores</h1>
+        <div class="ms-stores-actions">
+            @if (overview is { Stores.Count: > 0 })
+            {
+                <button type="button" class="ms-button ms-stores-check-all" disabled="@checkingAll" @onclick="CheckAllAsync">Check all</button>
+            }
+            <button type="button" class="ms-button ms-stores-refresh" disabled="@(loading)" @onclick="RefreshAsync">Refresh</button>
+        </div>
+    </div>
+
+    @if (actionError is { Length: > 0 } problem)
+    {
+        <ErrorAlert Message="@problem" />
+    }
+
+    @if (checkAllMessage is { Length: > 0 } progress)
+    {
+        <p class="ms-muted ms-stores-check-message" role="status">@progress</p>
+    }
+
+    @if (loading)
+    {
+        @* Also the whole of a prerender: nothing is read until the circuit renders the page (D-SCOPE S3). *@
+        <p class="ms-muted ms-stores-loading" role="status">Loading stores…</p>
+    }
+    else if (loadError is { Length: > 0 })
+    {
+        <ErrorAlert Message="@loadError" OnRetry="RefreshAsync" />
+    }
+    else if (overview is null || overview.Stores.Count == 0)
+    {
+        <div class="ms-empty">
+            <p class="ms-empty-title">No Marten store to show</p>
+            <p class="ms-empty-description">
+                This application registered no Marten store that you are authorized to see. Marten Studio
+                renders the stores the host configured - add <code>AddMarten(...)</code> to the container,
+                or check the policy named by <code>MartenStudioOptions.StoreAuthorizationPolicy</code>.
+            </p>
+        </div>
+    }
+    else
+    {
+        @foreach (StoreOverview store in overview.Stores)
+        {
+            <section class="ms-section ms-stores-store" @key="store.Key">
+                <h2 class="ms-section-title">
+                    @store.DisplayName
+                    <code class="ms-section-key">@store.Key</code>
+                    @if (IsCurrent(store))
+                    {
+                        <span class="ms-chip ms-stores-current">Current</span>
+                    }
+                </h2>
+
+                @if (!store.IsAvailable)
+                {
+                    @* Its own region: a store that will not build must not blank the page for the ones that do (plan section 4.8). *@
+                    <ErrorAlert Message="@("This store could not be built: " + StudioLogValue.CapText(store.UnavailableMessage))" OnRetry="RefreshAsync" />
+                }
+                else
+                {
+                    <p class="ms-stores-open">
+                        <a class="ms-stores-open-overview" href="@OverviewHref(store.Key, string.Empty)">Open overview</a>
+                    </p>
+
+                    <div class="ms-kv">
+                        <div class="ms-kv-row ms-stores-tenancy">
+                            <span class="ms-kv-key">Tenancy</span>
+                            <span class="ms-kv-value">@store.Tenancy.Words</span>
+                        </div>
+                        <div class="ms-kv-row ms-stores-documents">
+                            <span class="ms-kv-key">Document types</span>
+                            <span class="ms-kv-value">@DocumentTypesText(store)</span>
+                        </div>
+                        @if (store.Events is { } events)
+                        {
+                            <div class="ms-kv-row ms-stores-events">
+                                <span class="ms-kv-key">Event store</span>
+                                <span class="ms-kv-value">
+                                    @events.StreamIdentity stream ids, @events.AppendMode append, @events.TenancyStyle tenancy@(store.TenantPartitionedEvents ? ", partitioned by tenant" : string.Empty)
+                                </span>
+                            </div>
+                        }
+                        <div class="ms-kv-row ms-stores-daemon">
+                            <span class="ms-kv-key">Daemon</span>
+                            <span class="ms-kv-value">@store.Daemon.Words</span>
+                        </div>
+                        <div class="ms-kv-row ms-stores-postgres">
+                            <span class="ms-kv-key">PostgreSQL</span>
+                            <span class="ms-kv-value">
+                                @(store.PostgresVersion ?? "unknown")
+                                @if (System.Version.TryParse(store.PostgresVersion, out System.Version? parsed) && PostgresStudio.Services.Server.PostgresFeatures.IsBelowFloor(parsed))
+                                {
+                                    <span class="ms-muted ms-stores-floor">, @PostgresStudio.Services.Server.PostgresFeatures.BelowFloor</span>
+                                }
+                            </span>
+                        </div>
+                    </div>
+
+                    @foreach (DatabaseOverview failed in store.Databases.Where(static x => x.Error is { Length: > 0 }))
+                    {
+                        @* The store's database list failed: one card carrying the failure, with Retry (S7). *@
+                        <ErrorAlert Message="@failed.Error" OnRetry="RefreshAsync" />
+                    }
+
+                    List<DatabaseOverview> shown = ShownOf(store);
+                    int more = ReadableDatabases(store).Count - shown.Count;
+
+                    @if (shown.Count > 0)
+                    {
+                        <TableScroll Label="@("Databases of " + store.DisplayName)">
+                            <table class="ms-table ms-stores-databases">
+                                <thead>
+                                    <tr>
+                                        <th>Database</th>
+                                        <th>Server</th>
+                                        <th>Name</th>
+                                        <th>Health</th>
+                                        <th>Links</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (DatabaseOverview database in shown)
+                                    {
+                                        RowHealth row = Row(store.Key, database.Identity);
+                                        (string text, string css) = Chip(row.Glance);
+
+                                        <tr class="ms-table-row" @key="database.Identity">
+                                            <td class="ms-table-cell ms-table-cell-mono">@database.Identity</td>
+                                            <td class="ms-table-cell ms-table-cell-mono">@database.Server</td>
+                                            <td class="ms-table-cell ms-table-cell-mono">@database.Name</td>
+                                            <td class="ms-table-cell ms-stores-health">
+                                                <span class="@css" title="@ChipTitle(row.Glance)">@text</span>
+                                                @if (row.Glance is null)
+                                                {
+                                                    <button type="button" class="ms-button ms-stores-check" disabled="@(row.Checking || checkingAll)"
+                                                            @onclick="() => CheckAsync(store, database)">@(row.Checking ? "Checking…" : "Check")</button>
+                                                }
+                                            </td>
+                                            <td class="ms-table-cell">
+                                                <a href="@OverviewHref(store.Key, database.Identity)">Overview</a>
+                                                <a href="@HealthHref(store.Key, database.Identity)">Health</a>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </TableScroll>
+
+                        @if (more > 0)
+                        {
+                            <p class="ms-muted ms-stores-more">
+                                @more.ToString(CultureInfo.InvariantCulture) more @(more == 1 ? "database" : "databases"). The header's database picker lists every one.
+                            </p>
+                        }
+                    }
+                }
+            </section>
+        }
+    }
+</div>
+
+@code {
+    /// <summary>How many databases a store's table lists before it points at the header's picker.</summary>
+    internal const int MaxDatabaseRows = 20;
+
+    /// <summary>How many databases one "Check all" sweeps.</summary>
+    internal const int CheckAllBatch = 8;
+
+    private readonly CancellationTokenSource pageCancellation = new();
+
+    /// <summary>One row's chip state, by <see cref="RowKey" />.</summary>
+    private readonly Dictionary<string, RowHealth> rows = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// This page's polling loop, built rather than injected: <c>StudioLiveUpdates</c> is <c>IAsyncDisposable</c>, and a transient
+    /// registration would leave the circuit's container holding one per page visit.
+    /// </summary>
+    private StudioLiveUpdates? live;
+
+    private StudioOverview? overview;
+    private bool loading = true;
+    private bool started;
+    private bool disposed;
+    private bool checkingAll;
+    private string? loadError;
+    private string? actionError;
+    private string? checkAllMessage;
+
+    protected override Task OnInitializedAsync()
+    {
+        State.ScopeChanged += OnScopeChangedAsync;
+
+        // Nothing is read here: this runs in the prerender and again in the circuit (D-SCOPE S3).
+        return Task.CompletedTask;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || started || disposed)
+        {
+            return;
+        }
+
+        started = true;
+
+        try
+        {
+            await LoadAsync();
+            await ApplyGlancesAsync();
+
+            live = LiveFactory.Create();
+
+            // No Failed handler: a chip that could not be read is "not checked recently", and the tick catches its own failures.
+            await live.StartAsync(Options.Value.RefreshInterval, TickAsync, pageCancellation.Token);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            loadError = exception.Message;
+            loading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    /// <summary>One poll: only the chips, which are in-process reads of the shared sweep. Never the stores themselves.</summary>
+    private async Task TickAsync(CancellationToken _)
+    {
+        await ApplyGlancesAsync();
+    }
+
+    private async Task RefreshAsync()
+    {
+        try
+        {
+            await LoadAsync();
+            await ApplyGlancesAsync();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            actionError = exception.Message;
+        }
+    }
+
+    private async Task OnScopeChangedAsync() => await InvokeAsync(StateHasChanged);
+
+    /// <summary>The one enumeration this page makes, per load (<c>GetOverviewAsync()</c>, with no key).</summary>
+    private async Task LoadAsync()
+    {
+        loadError = null;
+
+        try
+        {
+            overview = await StoreInfo.GetOverviewAsync(null, pageCancellation.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            // On the page rather than in the log only: a failure the visitor cannot see is a page that silently shows nothing.
+            loadError = exception.Message;
+        }
+        finally
+        {
+            loading = false;
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>
+    /// Reads every listed database's glance - cache-only, no sweep, no connection - and applies them on the renderer.
+    /// </summary>
+    private async Task ApplyGlancesAsync()
+    {
+        CancellationToken token = pageCancellation.Token;
+        List<(string Key, HealthGlance? Glance)> read = [];
+
+        foreach ((StoreOverview store, DatabaseOverview database) in ShownDatabases())
+        {
+            token.ThrowIfCancellationRequested();
+
+            HealthGlance? glance = null;
+
+            try
+            {
+                glance = await HealthData.GlanceAsync(new StudioScope(store.Key, database.Identity, null), token);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception)
+            {
+                // A chip that cannot be read says "not checked recently": it decorates, it never fails the page.
+            }
+
+            read.Add((RowKey(store.Key, database.Identity), glance));
+        }
+
+        if (disposed)
+        {
+            return;
+        }
+
+        await InvokeAsync(() =>
+        {
+            foreach ((string key, HealthGlance? glance) in read)
+            {
+                if (rows.TryGetValue(key, out RowHealth? row))
+                {
+                    row.Glance = glance;
+                }
+                else
+                {
+                    rows[key] = new RowHealth { Glance = glance };
+                }
+            }
+
+            StateHasChanged();
+        });
+    }
+
+    /// <summary>"Check" on a stale row: the one regular sweep a database's Overview would start, then its glance.</summary>
+    private async Task CheckAsync(StoreOverview store, DatabaseOverview database)
+    {
+        RowHealth row = Row(store.Key, database.Identity);
+        if (row.Checking)
+        {
+            return;
+        }
+
+        row.Checking = true;
+        actionError = null;
+        StateHasChanged();
+
+        try
+        {
+            await CheckRowAsync(store, database, row);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            actionError = exception.Message;
+        }
+        finally
+        {
+            row.Checking = false;
+        }
+    }
+
+    /// <summary>
+    /// "Check all": sequential, and at most <see cref="CheckAllBatch" /> databases per click - only those with no recent sweep.
+    /// </summary>
+    private async Task CheckAllAsync()
+    {
+        if (checkingAll)
+        {
+            return;
+        }
+
+        checkingAll = true;
+        actionError = null;
+        checkAllMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            List<(StoreOverview Store, DatabaseOverview Database)> stale =
+            [
+                .. ShownDatabases().Where(x => NeedsCheck(Row(x.Store.Key, x.Database.Identity))),
+            ];
+
+            List<(StoreOverview Store, DatabaseOverview Database)> batch = [.. stale.Take(CheckAllBatch)];
+
+            foreach ((StoreOverview store, DatabaseOverview database) in batch)
+            {
+                RowHealth row = Row(store.Key, database.Identity);
+                row.Checking = true;
+                StateHasChanged();
+
+                try
+                {
+                    await CheckRowAsync(store, database, row);
+                }
+                finally
+                {
+                    row.Checking = false;
+                }
+            }
+
+            checkAllMessage = stale.Count == 0
+                ? "Every database listed has a recent sweep."
+                : stale.Count > batch.Count
+                    ? $"Checked {batch.Count} of {stale.Count}; press again for the next {Math.Min(CheckAllBatch, stale.Count - batch.Count)}."
+                    : $"Checked {batch.Count} of {stale.Count}.";
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            actionError = exception.Message;
+        }
+        finally
+        {
+            checkingAll = false;
+        }
+    }
+
+    private async Task CheckRowAsync(StoreOverview store, DatabaseOverview database, RowHealth row)
+    {
+        HealthGlance? glance = await HealthData.CheckAsync(new StudioScope(store.Key, database.Identity, null), pageCancellation.Token);
+
+        row.Glance = glance;
+        row.Attempted = true;
+    }
+
+    /// <summary>Whether "Check all" should sweep this row: it has no recent sweep and was not already tried and refused.</summary>
+    private static bool NeedsCheck(RowHealth row) => row.Glance is null && !row.Attempted;
+
+    private static string RowKey(string storeKey, string identity) => storeKey + "|" + identity;
+
+    private RowHealth Row(string storeKey, string identity)
+    {
+        string key = RowKey(storeKey, identity);
+
+        if (!rows.TryGetValue(key, out RowHealth? row))
+        {
+            row = new RowHealth();
+            rows[key] = row;
+        }
+
+        return row;
+    }
+
+    /// <summary>The databases of a store a person can read a row for: the failed listing's card has no identity.</summary>
+    private static List<DatabaseOverview> ReadableDatabases(StoreOverview store) =>
+        [.. store.Databases.Where(static x => x.Error is not { Length: > 0 } && x.Identity.Length > 0)];
+
+    /// <summary>The rows drawn for a store: at most <see cref="MaxDatabaseRows" />, in the header picker's order.</summary>
+    private static List<DatabaseOverview> ShownOf(StoreOverview store) => [.. ReadableDatabases(store).Take(MaxDatabaseRows)];
+
+    /// <summary>Every database the page draws a row for, in page order.</summary>
+    private List<(StoreOverview Store, DatabaseOverview Database)> ShownDatabases()
+    {
+        StudioOverview? current = overview;
+        List<(StoreOverview, DatabaseOverview)> shown = [];
+
+        if (current is null)
+        {
+            return shown;
+        }
+
+        foreach (StoreOverview store in current.Stores.Where(static x => x.IsAvailable))
+        {
+            foreach (DatabaseOverview database in ShownOf(store))
+            {
+                shown.Add((store, database));
+            }
+        }
+
+        return shown;
+    }
+
+    /// <summary>The visible document types, and how many of them keep a row per tenant.</summary>
+    private static string DocumentTypesText(StoreOverview store) =>
+        store.DocumentTypeCount.ToString(CultureInfo.InvariantCulture)
+        + (store.ConjoinedDocumentTypes > 0 ? " (" + store.ConjoinedDocumentTypes.ToString(CultureInfo.InvariantCulture) + " conjoined)" : string.Empty);
+
+    private bool IsCurrent(StoreOverview store) =>
+        string.Equals(State.ActiveScope?.StoreKey, store.Key, StringComparison.OrdinalIgnoreCase);
+
+    private string OverviewHref(string storeKey, string identity) =>
+        EventLinks.To(Options.Value, string.Empty, new StudioScope(storeKey, identity, null));
+
+    private string HealthHref(string storeKey, string identity) =>
+        HealthLinks.ToPage(Options.Value, new StudioScope(storeKey, identity, null));
+
+    /// <summary>
+    /// The chip for a database's last sweep: the worst finding the visitor may see, and never green while any is withheld
+    /// (the Overview tile's rule, D-SCOPE S6).
+    /// </summary>
+    internal static (string Text, string Css) Chip(HealthGlance? glance)
+    {
+        if (glance is null)
+        {
+            return ("not checked recently", "ms-stores-chip ms-stores-chip-muted");
+        }
+
+        if (glance.Critical > 0)
+        {
+            return (glance.Critical.ToString(CultureInfo.InvariantCulture) + " critical", "ms-stores-chip ms-health-severity ms-health-severity-critical");
+        }
+
+        if (glance.Warning > 0)
+        {
+            return (
+                glance.Warning.ToString(CultureInfo.InvariantCulture) + (glance.Warning == 1 ? " warning" : " warnings"),
+                "ms-stores-chip ms-health-severity ms-health-severity-warning");
+        }
+
+        if (glance.Withheld > 0)
+        {
+            return (glance.Withheld.ToString(CultureInfo.InvariantCulture) + " not shown", "ms-stores-chip ms-health-severity ms-health-severity-info");
+        }
+
+        return glance.Suggestions > 0
+            ? (glance.Suggestions.ToString(CultureInfo.InvariantCulture) + (glance.Suggestions == 1 ? " suggestion" : " suggestions"), "ms-stores-chip ms-stores-chip-ok")
+            : ("nothing to report", "ms-stores-chip ms-stores-chip-ok");
+    }
+
+    private string? ChipTitle(HealthGlance? glance) => glance is null
+        ? "No sweep within the last few intervals. Check runs one."
+        : "As of " + State.FormatInSelectedTimeZone(glance.MeasuredAt, "HH:mm") + (glance.Withheld > 0 ? "; some findings are not shown to you" : string.Empty);
+
+    public async ValueTask DisposeAsync()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        disposed = true;
+
+        State.ScopeChanged -= OnScopeChangedAsync;
+
+        try
+        {
+            if (live is not null)
+            {
+                await live.DisposeAsync();
+                live = null;
+            }
+        }
+        finally
+        {
+            try
+            {
+                await pageCancellation.CancelAsync();
+            }
+            finally
+            {
+                pageCancellation.Dispose();
+            }
+        }
+
+        GC.SuppressFinalize(this);
+    }
+
+    /// <summary>What one database row knows about its chip.</summary>
+    private sealed class RowHealth
+    {
+        public HealthGlance? Glance { get; set; }
+
+        public bool Checking { get; set; }
+
+        /// <summary>Whether a Check was tried and left the row without a sweep: Check all does not try it again.</summary>
+        public bool Attempted { get; set; }
+    }
+}

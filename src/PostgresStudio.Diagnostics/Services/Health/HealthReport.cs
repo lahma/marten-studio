@@ -325,6 +325,12 @@ internal sealed record HealthGlance(
     /// observed as nothing.
     /// </summary>
     public StudioScope? Scope { get; init; }
+
+    /// <summary>
+    /// How many Info findings this visitor is shown and has not muted (1.2): the Stores page's chip says "N suggestions" with it.
+    /// Never drawn on the sidebar's badge, which is for Critical and Warning alone.
+    /// </summary>
+    public int Suggestions { get; init; }
 }
 
 /// <summary>

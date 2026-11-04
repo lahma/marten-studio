@@ -1,11 +1,12 @@
 using JasperFx.Descriptors;
 
 using MartenStudio.Services;
+using MartenStudio.Services.Projections;
 
 namespace MartenStudio.Tests.Support;
 
 /// <summary>
-/// The store facts the Overview page renders, said outright by a test.
+/// The store facts the Overview and Stores pages render, said outright by a test.
 /// </summary>
 internal sealed class FakeStoreInfoService : IStoreInfoService
 {
@@ -17,6 +18,15 @@ internal sealed class FakeStoreInfoService : IStoreInfoService
 
     /// <summary>How many times the page has asked, so a Retry can be told apart from the first load.</summary>
     public int Loads { get; private set; }
+
+    /// <summary>The store key of each ask, in order (<see langword="null" /> for every store).</summary>
+    public List<string?> Keys { get; } = [];
+
+    /// <summary>
+    /// When set, <see cref="GetOverviewAsync" /> waits for it before answering, so a test can see a page between its ask and
+    /// its answer.
+    /// </summary>
+    public TaskCompletionSource? Gate { get; set; }
 
     /// <summary>Adds a store with one database and the facts the tiles show.</summary>
     public FakeStoreInfoService WithStore(
@@ -37,7 +47,32 @@ internal sealed class FakeStoreInfoService : IStoreInfoService
             documentTypes,
             postgresVersion,
             new EventStoreFacts("Guid", "Quick", "Single", "studio_sample_events", 4),
-            [new DatabaseOverview(databaseIdentity, "marten", "localhost", ["studio_sample", "studio_sample_events"], databaseError)]));
+            [new DatabaseOverview(databaseIdentity, "marten", "localhost", ["studio_sample", "studio_sample_events"], databaseError)],
+            new StoreTenancy(StoreTenancyKind.Single, "One database, no tenants"),
+            new StoreDaemonHosting(StoreDaemonHostingKind.NotHostedHere),
+            ConjoinedDocumentTypes: 0,
+            TenantPartitionedEvents: false));
+
+        return this;
+    }
+
+    /// <summary>Adds a store with these databases (<c>identity</c> is also the database's name) and nothing else of note.</summary>
+    public FakeStoreInfoService WithDatabases(string key, string displayName, params string[] identities)
+    {
+        Stores.Add(new StoreOverview(
+            key,
+            displayName,
+            IsAvailable: true,
+            UnavailableMessage: null,
+            identities.Length > 1 ? DatabaseCardinality.StaticMultiple : DatabaseCardinality.Single,
+            DocumentTypeCount: 3,
+            PostgresVersion: "17.2",
+            new EventStoreFacts("Guid", "Quick", "Single", "studio_sample_events", 4),
+            [.. identities.Select(static x => new DatabaseOverview(x, x, "localhost", ["studio_sample"], null))],
+            new StoreTenancy(StoreTenancyKind.Static, "A database per tenant, configured"),
+            new StoreDaemonHosting(StoreDaemonHostingKind.RegisteredHere, JasperFx.Events.Daemon.DaemonMode.Solo),
+            ConjoinedDocumentTypes: 2,
+            TenantPartitionedEvents: true));
 
         return this;
     }
@@ -54,16 +89,32 @@ internal sealed class FakeStoreInfoService : IStoreInfoService
             DocumentTypeCount: 0,
             PostgresVersion: null,
             Events: null,
-            Databases: []));
+            Databases: [],
+            StoreTenancy.Unknown,
+            new StoreDaemonHosting(StoreDaemonHostingKind.NotHostedHere),
+            ConjoinedDocumentTypes: 0,
+            TenantPartitionedEvents: false));
 
         return this;
     }
 
-    public Task<StudioOverview> GetOverviewAsync(CancellationToken cancellationToken = default)
+    public async Task<StudioOverview> GetOverviewAsync(string? storeKey = null, CancellationToken cancellationToken = default)
     {
         Loads++;
-        return Failure is null
-            ? Task.FromResult(new StudioOverview(Stores))
-            : Task.FromException<StudioOverview>(Failure);
+        Keys.Add(storeKey);
+
+        if (Gate is { } gate)
+        {
+            await gate.Task.WaitAsync(cancellationToken);
+        }
+
+        if (Failure is not null)
+        {
+            throw Failure;
+        }
+
+        return new StudioOverview(storeKey is null
+            ? [.. Stores]
+            : [.. Stores.Where(x => string.Equals(x.Key, storeKey, StringComparison.OrdinalIgnoreCase))]);
     }
 }

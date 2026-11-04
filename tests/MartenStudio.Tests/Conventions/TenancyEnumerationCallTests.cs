@@ -99,7 +99,8 @@ public class TenancyEnumerationCallTests
             + "source whose cardinality is Single or StaticMultiple - a DynamicMultiple source is never enumerated, so the "
             + "background loop never builds a tenancy's databases - and read again only every ConnectionHistorySampler.ServersFor"),
         new("src/MartenStudio/Services/StoreInfoService.cs", "AllDatabases", 1,
-            "names, for the Overview's cards - one enumeration per store per load (F8-D3 C3)"),
+            "names, for the Stores page's cards and the Overview's one store card: one enumeration per store per load (F8-D3 C3; "
+            + "1.2-SCOPE-1: the Overview passes the selected store's key, so a load costs one enumeration, not one per store)"),
         new("src/MartenStudio/Services/TenantDiscovery.cs", "DescribeDatabasesAsync", 1,
             "tenant ids, for every tenancy but master-table and sharded, which are read from the instance (F8-D3 C4)"),
         // PS-1b: moved with the code, from DatabaseAccess.cs to MartenStudio's IDatabaseDeclarationsSource.

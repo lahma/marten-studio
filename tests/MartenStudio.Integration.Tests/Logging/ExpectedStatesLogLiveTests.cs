@@ -58,7 +58,7 @@ internal static class StudioPolling
         var health = services.GetRequiredService<IHealthService>();
 
         // The Overview's store cards, read once per page load.
-        _ = await storeInfo.GetOverviewAsync(token);
+        _ = await storeInfo.GetOverviewAsync(cancellationToken: token);
 
         using IDisposable lease = await projections.SubscribeToLiveStateAsync(scope, token);
 

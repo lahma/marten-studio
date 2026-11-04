@@ -54,7 +54,7 @@ public class StoreInfoServiceOverviewTests
 
         int before = harness.Builds;
 
-        StudioOverview overview = await harness.Overview.GetOverviewAsync(Token);
+        StudioOverview overview = await harness.Overview.GetOverviewAsync(cancellationToken: Token);
 
         (harness.Builds - before).Should().Be(1, "one enumeration per store per load; it used to be N + 2");
 
@@ -80,7 +80,7 @@ public class StoreInfoServiceOverviewTests
 
         harness.Policies.DenyEverything();
 
-        StudioOverview overview = await harness.Overview.GetOverviewAsync(Token);
+        StudioOverview overview = await harness.Overview.GetOverviewAsync(cancellationToken: Token);
 
         overview.Stores.Should().BeEmpty("a store the visitor may not see is absent, not drawn with a refusal");
         harness.Builds.Should().Be(0, "nothing about a store is enumerated before its policy has said yes");
@@ -99,7 +99,7 @@ public class StoreInfoServiceOverviewTests
         string refused = identities[1];
         harness.Policies.Allow(x => !string.Equals(x.DatabaseIdentifier, refused, StringComparison.Ordinal));
 
-        StudioOverview overview = await harness.Overview.GetOverviewAsync(Token);
+        StudioOverview overview = await harness.Overview.GetOverviewAsync(cancellationToken: Token);
 
         overview.Stores.Should().ContainSingle()
             .Which.Databases.Select(static x => x.Identity).Should().Equal(identities[0]);
@@ -124,7 +124,7 @@ public class StoreInfoServiceOverviewTests
         identities.Should().HaveCount(2, "the premise: two database objects");
         identities.Distinct(StringComparer.OrdinalIgnoreCase).Should().ContainSingle("the premise: one identity");
 
-        StudioOverview overview = await harness.Overview.GetOverviewAsync(Token);
+        StudioOverview overview = await harness.Overview.GetOverviewAsync(cancellationToken: Token);
 
         overview.Stores.Should().ContainSingle()
             .Which.Databases.Should().ContainSingle("the page keys its cards by identity")
@@ -157,7 +157,7 @@ public class StoreInfoServiceOverviewTests
                 options.Tenancy = (ITenancy) (object) observed;
             }));
 
-        StudioOverview overview = await harness.Overview.GetOverviewAsync(Token);
+        StudioOverview overview = await harness.Overview.GetOverviewAsync(cancellationToken: Token);
 
         overview.Stores.Select(static x => x.Key).Should().BeEquivalentTo(
             [MartenStoreRegistry.DefaultStoreKey, nameof(IUnlistableDatabasesStore)],
@@ -201,7 +201,7 @@ public class StoreInfoServiceOverviewTests
                 options.Tenancy = (ITenancy) (object) ObservedTenancy.Over(options.Tenancy, masterTableShape: true);
             }));
 
-        StudioOverview overview = await harness.Overview.GetOverviewAsync(Token);
+        StudioOverview overview = await harness.Overview.GetOverviewAsync(cancellationToken: Token);
 
         overview.Stores.Select(static x => x.Key).Should().BeEquivalentTo([MartenStoreRegistry.DefaultStoreKey, nameof(IVersionlessStore)]);
         overview.Stores.Should().OnlyContain(static x => x.IsAvailable && x.PostgresVersion == null);
@@ -222,7 +222,7 @@ public class StoreInfoServiceOverviewTests
         await using Harness harness = Harness.Create(static tenancy =>
             tenancy.AddMultipleTenantDatabase(FirstConnectionString, "tenants-a").ForTenants("acme").AsDefault());
 
-        StudioOverview overview = await harness.Overview.GetOverviewAsync(Token);
+        StudioOverview overview = await harness.Overview.GetOverviewAsync(cancellationToken: Token);
 
         overview.Stores.Should().ContainSingle().Which.PostgresVersion.Should().BeNull("the host does not answer");
         harness.Logs.Entries.Should().ContainSingle(static x => x.EventId.Id == 9214)

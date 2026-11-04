@@ -38,6 +38,28 @@
         <button type="button" class="ms-button ms-overview-refresh" @onclick="RefreshAsync">Refresh</button>
     </div>
 
+    @* ----------------------------------------------------------------------------------------------
+       1.2 (SCOPE-1): with two or more stores, one line naming each of them - from the header's own listing, so it does no I/O -
+       each opening that store's Overview, and "All stores" opening the Stores page. The root stays the Overview at every store
+       count: it is never a redirect (D-SCOPE S2).
+       ---------------------------------------------------------------------------------------------- *@
+    @if (State.AvailableStores.Count > 1)
+    {
+        <nav class="ms-stores-strip" aria-label="Stores">
+            <ul class="ms-stores-strip-list">
+                @foreach (StoreListing listing in State.AvailableStores)
+                {
+                    <li class="ms-stores-strip-item" @key="listing.Key">
+                        <a class="ms-stores-strip-link @(IsActiveStore(listing.Key) ? "ms-stores-strip-current" : string.Empty)"
+                           href="@StoreOverviewHref(listing.Key)"
+                           aria-current="@(IsActiveStore(listing.Key) ? "true" : null)">@(listing.DisplayName + (listing.Availability.IsAvailable ? string.Empty : " (unavailable)"))</a>
+                    </li>
+                }
+            </ul>
+            <a class="ms-stores-strip-all" href="@EventLinks.To(Options.Value, MartenStudioDescriptor.StoresRoute, null)">All stores</a>
+        </nav>
+    }
+
     @if (State.ActiveScope is not null)
     {
         @* ------------------------------------------------------------------------------------------
@@ -542,6 +564,9 @@
     private long? deadLetters;
 
     private bool loading = true;
+
+    /// <summary>The store key the stores region was last read for (<see langword="null" />: every store the visitor may see).</summary>
+    private string? loadedStoreKey;
     private bool started;
     private bool disposed;
     private string? loadError;
@@ -799,6 +824,13 @@
 
     private async Task OnScopeChangedAsync()
     {
+        // 1.2: the bottom region is the selected store's card alone, so a move to another store reads that store's card.
+        // Moving between databases of one store reads nothing more. InvokeAsync, because LoadAsync renders.
+        if (!string.Equals(State.ActiveScope?.StoreKey, loadedStoreKey, StringComparison.OrdinalIgnoreCase))
+        {
+            await InvokeAsync(LoadAsync);
+        }
+
         await LoadScopeRegionsAsync();
 
         if (started)
@@ -862,9 +894,14 @@
         loadError = null;
         StateHasChanged();
 
+        // 1.2: only the selected store's card (one enumeration, not one per registered store). Before a scope exists - a bare
+        // component in a test, or a visitor who may see no store - every store the visitor may see is read, as it was.
+        string? storeKey = State.ActiveScope?.StoreKey;
+
         try
         {
-            overview = await StoreInfo.GetOverviewAsync(pageCancellation.Token);
+            overview = await StoreInfo.GetOverviewAsync(storeKey, pageCancellation.Token);
+            loadedStoreKey = storeKey;
         }
         catch (OperationCanceledException)
         {
@@ -1043,6 +1080,13 @@
     }
 
     private string Link(string route) => EventLinks.To(Options.Value, route, State.ActiveScope);
+
+    /// <summary>The strip's link for a store: its Overview, scoped to the store alone (the layout settles the database).</summary>
+    private string StoreOverviewHref(string storeKey) =>
+        EventLinks.To(Options.Value, string.Empty, new StudioScope(storeKey, string.Empty, null));
+
+    private bool IsActiveStore(string storeKey) =>
+        string.Equals(State.ActiveScope?.StoreKey, storeKey, StringComparison.OrdinalIgnoreCase);
 
     private string StreamHref(string streamId) => EventLinks.ToStream(Options.Value, State.ActiveScope, streamId);
 

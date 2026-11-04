@@ -4,6 +4,8 @@ using Marten;
 using Marten.Schema;
 using Marten.Storage;
 
+using MartenStudio.Services.Projections;
+
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using PostgresStudio.Services;
@@ -37,7 +39,20 @@ internal sealed record EventStoreFacts(
     string SchemaName,
     int KnownEventTypeCount);
 
-/// <summary>One store on the Overview page.</summary>
+/// <summary>One store on the Overview page and the Stores page.</summary>
+/// <param name="Key">The store's registered key.</param>
+/// <param name="DisplayName">What a person reads.</param>
+/// <param name="IsAvailable">Whether the store built.</param>
+/// <param name="UnavailableMessage">Why it did not, when it did not.</param>
+/// <param name="Cardinality">How many databases the tenancy has.</param>
+/// <param name="DocumentTypeCount">Visible document types.</param>
+/// <param name="PostgresVersion">The server version, read once per circuit.</param>
+/// <param name="Events">The event store's configuration.</param>
+/// <param name="Databases">The databases the visitor may see.</param>
+/// <param name="Tenancy">How the store lays its tenants out, in words (1.2).</param>
+/// <param name="Daemon">What configuration says about hosting its async daemon (1.2).</param>
+/// <param name="ConjoinedDocumentTypes">Visible conjoined document types (1.2).</param>
+/// <param name="TenantPartitionedEvents">Whether the event store is partitioned by tenant (<c>UseTenantPartitionedEvents</c>, 1.2).</param>
 internal sealed record StoreOverview(
     string Key,
     string DisplayName,
@@ -47,21 +62,28 @@ internal sealed record StoreOverview(
     int DocumentTypeCount,
     string? PostgresVersion,
     EventStoreFacts? Events,
-    IReadOnlyList<DatabaseOverview> Databases);
+    IReadOnlyList<DatabaseOverview> Databases,
+    StoreTenancy Tenancy,
+    StoreDaemonHosting Daemon,
+    int ConjoinedDocumentTypes,
+    bool TenantPartitionedEvents);
 
 /// <summary>Everything the Overview page renders.</summary>
 internal sealed record StudioOverview(IReadOnlyList<StoreOverview> Stores);
 
 /// <summary>
-/// What the Overview page reads. An interface so a component test can hand the page facts without a
+/// What the Overview page and the Stores page read. An interface so a component test can hand the page facts without a
 /// Postgres.
 /// </summary>
 internal interface IStoreInfoService
 {
     /// <summary>
-    /// Every store the visitor may see, with the databases of each they may see.
+    /// Every store the visitor may see, with the databases of each they may see - or, with <paramref name="storeKey" />,
+    /// only that store, and no other is built or enumerated.
     /// </summary>
-    Task<StudioOverview> GetOverviewAsync(CancellationToken cancellationToken = default);
+    /// <param name="storeKey">The one store wanted (ordinal, ignoring case), or <see langword="null" /> for every one.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    Task<StudioOverview> GetOverviewAsync(string? storeKey = null, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -111,12 +133,19 @@ internal sealed class StoreInfoService : IStoreInfoService
     }
 
     /// <inheritdoc />
-    public async Task<StudioOverview> GetOverviewAsync(CancellationToken cancellationToken = default)
+    public async Task<StudioOverview> GetOverviewAsync(string? storeKey = null, CancellationToken cancellationToken = default)
     {
         List<StoreOverview> stores = [];
 
         foreach (MartenStoreRegistration registration in registry.Registrations(options))
         {
+            // 1.2: a caller that wants one store (the Overview's card) never builds, asks the policy about, or enumerates the
+            // others - the filter is before everything DescribeStoreAsync does.
+            if (storeKey is not null && !string.Equals(registration.Key, storeKey, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
             StoreOverview? overview = await DescribeStoreAsync(registration, cancellationToken).ConfigureAwait(false);
             if (overview is not null)
             {
@@ -156,7 +185,11 @@ internal sealed class StoreInfoService : IStoreInfoService
                 DocumentTypeCount: 0,
                 PostgresVersion: null,
                 Events: null,
-                Databases: []);
+                Databases: [],
+                StoreTenancy.Unknown,
+                new StoreDaemonHosting(StoreDaemonHostingKind.NotHostedHere),
+                ConjoinedDocumentTypes: 0,
+                TenantPartitionedEvents: false);
         }
 
         // 3. Its databases, from one enumeration.
@@ -169,6 +202,7 @@ internal sealed class StoreInfoService : IStoreInfoService
         }
 
         IReadOnlyStoreOptions storeOptions = store.Options;
+        Func<Type, bool>? visible = options.Value.IsDocumentTypeVisible;
 
         return new StoreOverview(
             storeKey,
@@ -179,7 +213,12 @@ internal sealed class StoreInfoService : IStoreInfoService
             CountVisibleDocumentTypes(storeOptions),
             await PostgresVersionAsync(storeKey, store, cancellationToken).ConfigureAwait(false),
             DescribeEvents(storeOptions),
-            databases);
+            databases,
+            // Configuration only, from memory (1.2): no connection, no enumeration, no coordinator built.
+            StoreTenancy.Classify(store.Options, visible),
+            DaemonAccessor.HostingOf(registration, store, provider),
+            StoreTenancy.Conjoined(store.Options, visible).Count,
+            store.Options.Events.UseTenantPartitionedEvents);
     }
 
     /// <summary>

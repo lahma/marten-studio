@@ -42,8 +42,11 @@ internal sealed class TenancyStudio : IAsyncDisposable
     /// <summary>The store the studio reads.</summary>
     public IDocumentStore Store => provider.GetRequiredService<IDocumentStore>();
 
-    /// <summary>A studio over a store configured by <paramref name="configure" />, and nothing else.</summary>
-    public static TenancyStudio Start(Action<StoreOptions> configure)
+    /// <summary>The studio's container, for a test that opens a circuit of its own.</summary>
+    public IServiceProvider Services => provider;
+
+    /// <summary>A studio over a store configured by <paramref name="configure" />, and nothing else - or with the stores <paramref name="extra" /> adds.</summary>
+    public static TenancyStudio Start(Action<StoreOptions> configure, Action<IServiceCollection>? extra = null)
     {
         ArgumentNullException.ThrowIfNull(configure);
 
@@ -52,6 +55,7 @@ internal sealed class TenancyStudio : IAsyncDisposable
         services.AddAuthorization();
         services.AddSingleton<AuthenticationStateProvider, SignedInVisitor>();
         services.AddMarten(configure);
+        extra?.Invoke(services);
 
         // Tenant discovery stays on: tier 2 and tier 3 are part of what a first navigation does.
         services.AddMartenStudio(static options => options.AuthorizationPolicy = null);
@@ -68,7 +72,19 @@ internal sealed class TenancyStudio : IAsyncDisposable
         var state = services.GetRequiredService<StudioState>();
         await state.EnsureInitializedAsync(cancellationToken);
 
-        StudioOverview overview = await services.GetRequiredService<IStoreInfoService>().GetOverviewAsync(cancellationToken);
+        // The Overview's card and the Stores page's reads: GetOverviewAsync() with no key (what the Stores page calls), and then the
+        // health chip of every database it lists - a cache-only glance, which opens no connection and starts no sweep (1.2-SCOPE-1).
+        // The ServerSnapshot a test takes around this covers both.
+        StudioOverview overview = await services.GetRequiredService<IStoreInfoService>().GetOverviewAsync(cancellationToken: cancellationToken);
+
+        var health = services.GetRequiredService<PostgresStudio.Services.Health.IHealthService>();
+        foreach (StoreOverview store in overview.Stores)
+        {
+            foreach (DatabaseOverview listed in store.Databases.Where(static x => x.Identity.Length > 0))
+            {
+                _ = await health.GlanceAsync(new StudioScope(store.Key, listed.Identity, null), cancellationToken);
+            }
+        }
 
         var catalog = services.GetRequiredService<IStudioScopeCatalog>();
         var resolver = services.GetRequiredService<StudioScopeResolver>();
