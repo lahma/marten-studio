@@ -44,7 +44,8 @@ A mapping that says nothing about authorization refuses to start, before the hos
 > registered and, with its capabilities on, can read their rows, run SQL against them and list other sessions'
 > statements, so Postgres Studio refuses to start rather than serve that by accident. Say which you meant:
 >
-> - `app.MapPostgresStudio().RequireAuthorization()` authorizes its pages and its Blazor circuit;
+> - `app.MapPostgresStudio().RequireAuthorization()` authorizes its pages, its Blazor circuit and its forward of your own
+>   `_framework` files;
 > - `services.AddPostgresStudio(options => options.AuthorizationPolicy = "...")` authorizes those and the static assets
 >   with them;
 > - `app.MapPostgresStudio().AllowAnonymous()` serves it to anyone, deliberately.
@@ -301,7 +302,7 @@ statement. Grant `RunSql` to people you would give `psql` to, and set `SqlConsol
 |---|---|---|
 | `Path` | `/postgres` | A plain rooted path; `MapPostgresStudio(pattern)` overrides it |
 | `Title` | `Postgres Studio` | |
-| `AuthorizationPolicy` | `null` | Every studio endpoint: pages, circuit, static assets |
+| `AuthorizationPolicy` | `null` | Every studio endpoint: pages, circuit, static assets, the forward of the host's `_framework` files |
 | `SourceAuthorizationPolicy` | `null` | Against `PostgresStudioResource`, capability `null` |
 | `WriteAuthorizationPolicy` | `null` | Against `PostgresStudioResource`, capability named; falls back to the source policy |
 | `ReadOnly` | `false` | Every capability off |
