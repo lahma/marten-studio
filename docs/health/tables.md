@@ -105,6 +105,14 @@ opts.Schema.For<Order>().Duplicate(x => x.Status);
 
 The studio's own exact counts, `pg_dump` and a one-off report are sequential scans too.
 
+**Try indexes** (1.2). The finding's card offers **Try indexes against this table's statements**: the Statements page's
+[index advisor](plans.md#the-index-advisor-12) narrowed to this table. It plans the statements you may see that name the table,
+now and again under each index their plans suggest (hypopg), and lists up to five recommendations with the planned cost
+weighted by calls, the share it saves, the remedy to copy (a `StoreOptions` line on a Marten document table, `CREATE INDEX
+CONCURRENTLY` otherwise) and a link to the panel on Statements, where you may try an index of your own on its columns. It is the
+**Activity** gate's, although the finding is `Database`: it plans statement texts, which are other programs' source text. It is
+planned, never run, applies nothing, and is one audit entry; a finding about a schema you may not see offers it to nobody.
+
 **Never over a short or reset window** (0.5, issue #8 G4). While the statistics have counted for less than seven days, or
 look reset - a crash, a restore, a pre-18 `pg_upgrade`, a failover - T01 makes no finding, and its row says why:
 "Withheld: statistics 3 days old (since ..., basis ...)" or "Withheld: the counters look reset (...)". The window is the
@@ -907,6 +915,17 @@ next apply drops an index nobody declares. Marten's DCB tag tables (`mt_event_ta
 primary key leads with `value`, so a delete of an event reads every tag table whole. marten#5694 declares
 `idx_mt_event_tag_<suffix>_seq_id` from Marten 9.51.0, so a tag table the studio's Marten applied is covered; one built by a
 Marten below 9.51 is not until the next apply builds the index.
+
+**What if it had an index?** (1.2). The finding's card offers a hypopg what-if for the foreign key itself. It plans the lookup
+Postgres runs for every row deleted from the referenced table - `select 1 from only "schema"."table" x where x."col" = $1`, one
+placeholder per column of the key, which the studio reads again from `pg_catalog` by the finding's subject - now, and with a
+hypothetical index on all of the key's columns in key order, and shows both: the top scan, the estimated rows and cost, and
+the finding's own remedy beneath. The statement carries **no `FOR KEY SHARE`**, which Postgres' own check takes: `EXPLAIN` checks
+the row-lock privilege, so a `SqlConsoleRole` that may only `SELECT` would be refused, and the lock adds a node on top without
+changing the access path being compared. The gate is the finding's own, `Database` - what it shows is a node type, an estimated
+cost and row count and the child table's own index names, which the finding and Storage show already - and it declares no
+capability. It is planned, never run; one audit entry; and not offered on a partitioned table or a partition (hypopg's
+support for those is unmeasured), nor when hypopg is absent or the role may not use it, where the answer is the sentence.
 
 ## T17 Orphaned document tables
 

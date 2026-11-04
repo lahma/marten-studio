@@ -145,46 +145,52 @@ internal sealed class MartenIndexCandidateContributor : IIndexCandidateContribut
             && MartenIndexDdl.Computed(mapping, duplicated.Members) is { } computed)
         {
             string line = Line(table, "Index(x => x." + string.Join('.', duplicated.Members.Select(static x => x.Name)) + ")");
-            return Make(table, computed, line);
+            return Make(table, column, computed, line);
         }
 
         if (string.Equals(table.Info.MetadataColumnName(DocumentMetadataColumn.LastModified), column, StringComparison.Ordinal)
             && MartenIndexDdl.OnColumn(mapping, column) is { } onColumn)
         {
-            return Make(table, onColumn, Line(table, "IndexLastModified()"));
+            return Make(table, column, onColumn, Line(table, "IndexLastModified()"));
         }
 
         return null;
     }
 
     /// <summary>
-    /// The index for <paramref name="line" /> - unless the store's configuration <em>already declares</em> an index of that name (a
-    /// <c>Duplicate()</c> or <c>[DuplicateField]</c> always declares its own, and <c>IndexLastModified()</c> may be declared): then
-    /// the line is no remedy, because it is already written. The index is missing from the database, and applying the schema creates
-    /// it - so the candidate has <b>no line</b> and says so (<see cref="MartenIndexDdl.AlreadyDeclaredNote" />).
+    /// The index for <paramref name="line" /> - unless the store's configuration <em>already declares</em> an index on that very
+    /// column (a <c>Duplicate()</c> or <c>[DuplicateField]</c> always declares its own, under whatever name, and
+    /// <c>IndexLastModified()</c> may be declared): then the line is no remedy, because it is already written. The index is missing
+    /// from the database, and applying the schema creates it - so the candidate has <b>no line</b> and says so
+    /// (<see cref="MartenIndexDdl.AlreadyDeclaredNote" />), and what is imagined is the declared index's own DDL, so the what-if tests
+    /// what an apply would create.
     /// </summary>
-    private static HypotheticalIndex Make(MartenPlanTable table, string definition, string line)
+    private static HypotheticalIndex Make(MartenPlanTable table, string column, string definition, string line)
     {
         HypotheticalIndex index = MartenIndexDdl.Index("advisor:" + table.Schema + "." + table.Table + ":" + line, definition, line, table.Info, duplicate: false);
 
-        return DeclaredName(definition) is { } name && table.Indexes.Any(x => string.Equals(x.Name, name, StringComparison.Ordinal))
-            ? index with { Line = null, Caption = "The index " + name + ", which the store already declares", Note = MartenIndexDdl.AlreadyDeclaredNote }
+        return DeclaredOn(table, column) is { } declared
+            ? index with
+            {
+                Definition = declared.Definition,
+                Line = null,
+                Caption = "The index " + declared.Name + ", which the store already declares",
+                Note = MartenIndexDdl.AlreadyDeclaredNote,
+            }
             : index;
     }
 
-    /// <summary>The name in Marten's <c>CREATE INDEX name ON …</c>, or <see langword="null" />.</summary>
-    private static string? DeclaredName(string definition)
-    {
-        const string Prefix = "CREATE INDEX ";
-        const string UniquePrefix = "CREATE UNIQUE INDEX ";
+    /// <summary>
+    /// The index the mapping declares on exactly <paramref name="column" />, whatever it is named: a plain b-tree over that one
+    /// column, not partial. A partial or multi-column index does not serve the same lookups, so it is not "the" declared index.
+    /// </summary>
+    private static MartenDeclaredIndex? DeclaredOn(MartenPlanTable table, string column) =>
+        table.Indexes.FirstOrDefault(x => x.IsBtree && string.IsNullOrWhiteSpace(x.Predicate) && x.Columns.Count == 1
+            && string.Equals(Bare(x.Columns[0]), column, StringComparison.OrdinalIgnoreCase)
+            && x.Definition.StartsWith("CREATE ", StringComparison.Ordinal));
 
-        string rest = definition.StartsWith(Prefix, StringComparison.Ordinal) ? definition[Prefix.Length..]
-            : definition.StartsWith(UniquePrefix, StringComparison.Ordinal) ? definition[UniquePrefix.Length..]
-            : string.Empty;
-
-        int end = rest.IndexOf(' ', StringComparison.Ordinal);
-        return end > 0 ? rest[..end] : null;
-    }
+    /// <summary>A column as an index holds it: without the parentheses and quotes an expression index and a quoted name add.</summary>
+    private static string Bare(string column) => column.Trim().Trim('(', ')').Trim().Trim('"').Trim();
 
     private static string Line(MartenPlanTable table, string call) => "options.Schema.For<" + table.TypeName + ">()." + call + ";";
 }

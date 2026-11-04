@@ -14,7 +14,20 @@ namespace MartenStudio.Services.Query;
 /// <param name="Name">Its name.</param>
 /// <param name="Definition">Marten's own <c>CREATE INDEX</c> statement for it - the text <c>pg_indexes</c> would hold once applied.</param>
 /// <param name="Computed">Whether it is a computed index over members of the JSON (<c>Index(x =&gt; x.Member)</c>), rather than over a column.</param>
-internal sealed record MartenDeclaredIndex(string Name, string Definition, bool Computed);
+internal sealed record MartenDeclaredIndex(string Name, string Definition, bool Computed)
+{
+    /// <summary>
+    /// 1.2-INDEX-B: the columns (or expressions) it is on, as Weasel holds them - what the index advisor matches an index on a column
+    /// by, whatever the index is named.
+    /// </summary>
+    public IReadOnlyList<string> Columns { get; init; } = [];
+
+    /// <summary>Its partial-index predicate, or <see langword="null" />.</summary>
+    public string? Predicate { get; init; }
+
+    /// <summary>Whether it is a plain b-tree, which is what serves an equality or a range on its column.</summary>
+    public bool IsBtree { get; init; }
+}
 
 /// <summary>
 /// 1.0-P3C: a document table the store declares, as the plan insights P26 to P28 judge a plan against - the type's mapping read from
@@ -91,7 +104,23 @@ internal sealed class MartenPlanTable
                 definition = index.Name;
             }
 
-            indexes.Add(new MartenDeclaredIndex(index.Name, definition, index is ComputedIndex));
+            string[] columns;
+
+            try
+            {
+                columns = index.Columns ?? [];
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                columns = [];
+            }
+
+            indexes.Add(new MartenDeclaredIndex(index.Name, definition, index is ComputedIndex)
+            {
+                Columns = columns,
+                Predicate = index.Predicate,
+                IsBtree = index.Method == IndexMethod.btree,
+            });
         }
 
         return new MartenPlanTable

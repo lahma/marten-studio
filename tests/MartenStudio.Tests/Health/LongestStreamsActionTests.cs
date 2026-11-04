@@ -161,13 +161,18 @@ namespace MartenStudio.Tests.Health
         {
             await using HealthHarness harness = Harness(conjoined: false);
 
-            IHealthFindingAction[] actions = [.. harness.Services.GetServices<IHealthFindingAction>()];
+            IHealthFindingAction[] all = [.. harness.Services.GetServices<IHealthFindingAction>()];
 
-            actions.Should().ContainSingle().Which.Should().BeOfType<LongestStreamsAction>();
+            // E06's, and the two index what-ifs (T01, T15) both studios register (1.2-INDEX-B): each once.
+            all.Select(static x => x.Id).Should().BeEquivalentTo(["e06.longest-streams", "t01.try-indexes", "t15.what-if"]);
+
+            IHealthFindingAction[] actions = [.. all.OfType<LongestStreamsAction>()];
+
+            actions.Should().ContainSingle();
             actions[0].Capability.Should().BeNull();
             actions[0].Gate.Should().Be(HealthGate.Database);
             actions[0].Code.Should().Be("E06");
-            harness.Services.GetServices<IHealthFindingAction>().Single().Should().BeSameAs(actions[0]);
+            harness.Services.GetServices<IHealthFindingAction>().OfType<LongestStreamsAction>().Single().Should().BeSameAs(actions[0]);
         }
 
         // ---------------------------------------------------------------------------------------------------

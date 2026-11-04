@@ -113,6 +113,8 @@ public class StudioRegistrationTests
         // 1.2-H-C: a finding's on-demand actions - the runner is the circuit's, one run of an action per database is the process's.
         (typeof(HealthActionFlights), ServiceLifetime.Singleton, How.Type, typeof(HealthActionFlights)),
         (typeof(IHealthActionService), ServiceLifetime.Scoped, How.Type, typeof(HealthActionService)),
+        (typeof(IHealthFindingAction), ServiceLifetime.Scoped, How.Type, typeof(ForeignKeyWhatIfAction)),
+        (typeof(IHealthFindingAction), ServiceLifetime.Scoped, How.Type, typeof(SequentialScanWhatIfAction)),
         (typeof(PostgresStudio.Services.Maintenance.IMaintenanceFacts), ServiceLifetime.Singleton, How.Type, typeof(PostgresStudio.Services.Maintenance.MaintenanceFactsReader)),
         (typeof(PostgresStudio.Services.Maintenance.BloatMeasureFlights), ServiceLifetime.Singleton, How.Type, typeof(PostgresStudio.Services.Maintenance.BloatMeasureFlights)),
         (typeof(PostgresStudio.Services.Maintenance.IMaintenanceNameGate), ServiceLifetime.Scoped, How.Type, typeof(PostgresStudio.Services.Maintenance.DatabaseAccessNameGate)),

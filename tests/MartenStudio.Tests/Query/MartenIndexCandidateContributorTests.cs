@@ -54,19 +54,44 @@ public class MartenIndexCandidateContributorTests
     }
 
     [Fact]
-    public void A_duplicated_field_the_store_already_declares_an_index_on_has_no_line_and_says_applying_the_schema_creates_it()
+    public void A_duplicated_field_the_store_already_declares_an_index_on_has_no_line_and_imagines_the_declared_index_itself()
     {
         IReadOnlyList<MartenPlanTable> tables = Tables(static o => o.Schema.For<SqlTestCustomer>().Duplicate(x => x.Email));
-
-        tables[0].Indexes.Should().Contain(static x => x.Name == "mt_doc_sqltestcustomer_idx_email", "a Duplicate() always declares its own index");
+        MartenDeclaredIndex declared = tables[0].Indexes.Should().ContainSingle(static x => x.Name == "mt_doc_sqltestcustomer_idx_email", "a Duplicate() always declares its own index").Subject;
 
         HypotheticalIndex index = Offer(Scan("(d.email = $1)"), tables).Should().ContainSingle().Subject;
 
         index.Origin.Should().Be(HypotheticalIndexOrigin.Marten);
         index.Line.Should().BeNull("the line is already written in the configuration");
         index.Note.Should().Be(MartenIndexDdl.AlreadyDeclaredNote);
-        index.Definition.Should().Be("CREATE INDEX mt_doc_sqltestcustomer_idx_email ON studio_sql.mt_doc_sqltestcustomer USING btree ((email));");
+        index.Definition.Should().Be(declared.Definition, "what an apply would create is what the what-if tests");
         index.Caption.Should().Contain("already declares");
+    }
+
+    [Fact]
+    public void A_declared_index_is_found_by_its_column_whatever_it_is_named()
+    {
+        IReadOnlyList<MartenPlanTable> tables = Tables(static o => o.Schema.For<SqlTestCustomer>().Duplicate(x => x.Email, configure: static i => i.Name = "my_email_idx"));
+        MartenDeclaredIndex declared = tables[0].Indexes.Should().ContainSingle(static x => x.Name == "my_email_idx").Subject;
+
+        HypotheticalIndex index = Offer(Scan("(d.email = $1)"), tables).Should().ContainSingle().Subject;
+
+        index.Line.Should().BeNull("a custom name does not make the line any less declared");
+        index.Note.Should().Be(MartenIndexDdl.AlreadyDeclaredNote);
+        index.Definition.Should().Be(declared.Definition).And.Contain("my_email_idx");
+    }
+
+    [Fact]
+    public void A_partial_declared_index_is_not_the_index_a_line_would_declare()
+    {
+        IReadOnlyList<MartenPlanTable> tables = Tables(static o => o.Schema.For<SqlTestCustomer>().Duplicate(x => x.Email, configure: static i => i.Predicate = "email is not null"));
+
+        tables[0].Indexes.Should().ContainSingle(static x => x.Predicate != null);
+
+        HypotheticalIndex index = Offer(Scan("(d.email = $1)"), tables).Should().ContainSingle().Subject;
+
+        index.Line.Should().Be("options.Schema.For<SqlTestCustomer>().Index(x => x.Email);", "a partial index does not serve every lookup of the column");
+        index.Definition.Should().Be("CREATE INDEX mt_doc_sqltestcustomer_idx_email ON studio_sql.mt_doc_sqltestcustomer USING btree ((email));");
     }
 
     [Fact]
