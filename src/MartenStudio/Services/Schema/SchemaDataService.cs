@@ -72,7 +72,7 @@ namespace MartenStudio.Services.Schema;
 /// sees no change.
 /// </para>
 /// </remarks>
-internal sealed class SchemaDataService : ISchemaDataService
+internal sealed partial class SchemaDataService : ISchemaDataService
 {
     /// <summary>What the audit entry is called.</summary>
     private const string ApplyAction = "Apply schema changes";
@@ -195,8 +195,14 @@ internal sealed class SchemaDataService : ISchemaDataService
             };
         }
 
-        return await LateRefusalAsync(scope, grant, SchemaScript.Preview, PreviewAction, cancellationToken).ConfigureAwait(false) is { } late
-            ? MigrationPreview.Refused(late)
+        if (await LateRefusalAsync(scope, grant, SchemaScript.Preview, PreviewAction, cancellationToken).ConfigureAwait(false) is { } late)
+        {
+            return MigrationPreview.Refused(late);
+        }
+
+        // The notes on what the script will lock: read last, once the script is known to be this visitor's to see. Never a refusal.
+        return preview.HasSql
+            ? preview with { Impact = await ReadImpactAsync(grant.Resolved, preview.Sql, cancellationToken).ConfigureAwait(false) }
             : preview;
     }
 

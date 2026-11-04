@@ -259,6 +259,95 @@ else
         </div>
     }
 
+    @* 1.2-APPLY: what the statements above lock on tables that already exist, whether they rewrite them, how big the tables
+       are (pg_class statistics - nothing was counted or locked to read them) and, for a visitor through the Activity gate,
+       how many sessions have a lock on them now: counts and states, never a statement. Notes, never a refusal. *@
+    @if (preview.Impact is { HasContent: true } impact)
+    {
+        <div class="ms-alert ms-alert-info ms-schema-notes ms-schema-impact" role="note">
+            <div class="ms-alert-content">
+                <p>
+                    <strong>What applying this will lock and rewrite.</strong> The statements below run against tables that already
+                    exist. Rows and sizes are estimates from the catalog's statistics (<code>pg_class</code>), as of the last
+                    <code>VACUUM</code> or <code>ANALYZE</code> or index build - nothing was counted or locked to read them.
+                </p>
+                @if (impact.Notice is { Length: > 0 } impactNotice)
+                {
+                    <p class="ms-muted">@impactNotice</p>
+                }
+                @{
+                    bool showSessions = impact.Tables.Any(static x => x.Sessions is not null);
+                }
+                <TableScroll Label="Tables the migration locks">
+                    <table class="ms-table">
+                        <thead>
+                            <tr>
+                                <th>Table</th>
+                                <th>What the migration does to it</th>
+                                <th>Rows</th>
+                                <th>Size</th>
+                                @if (showSessions)
+                                {
+                                    <th>Sessions now</th>
+                                }
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (TableImpact table in impact.Tables)
+                            {
+                                <tr class="ms-table-row" @key="table.Display">
+                                    <td class="ms-table-cell ms-table-cell-mono">@table.Display</td>
+                                    <td class="ms-table-cell">
+                                        <ul class="ms-destructive-list">
+                                            @for (int ordinal = 0; ordinal < table.Statements.Count; ordinal++)
+                                            {
+                                                TableLockStatement statement = table.Statements[ordinal];
+
+                                                <li @key="ordinal">
+                                                    <span class="ms-destructive-kind">@statement.Kind</span>
+                                                    <strong>@statement.LockName</strong> lock; @statement.RewriteText. This @statement.Effect.
+                                                    <code class="ms-destructive-statement">@statement.Statement</code>
+                                                </li>
+                                            }
+                                        </ul>
+                                    </td>
+                                    @if (table.Footprint is { } footprint)
+                                    {
+                                        <td class="ms-table-cell ms-num">@footprint.RowsText</td>
+                                        <td class="ms-table-cell">@footprint.SizeText</td>
+                                    }
+                                    else
+                                    {
+                                        <td class="ms-table-cell ms-muted" colspan="2">
+                                            Not in the catalog yet, or not resolvable by name.
+                                        </td>
+                                    }
+                                    @if (showSessions)
+                                    {
+                                        <td class="ms-table-cell">@(table.Sessions?.Summary ?? "not shown")</td>
+                                    }
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </TableScroll>
+                @if (impact.SessionsNotice is { Length: > 0 } sessionsNotice)
+                {
+                    <p class="ms-muted">@sessionsNotice</p>
+                }
+                @if (impact.Advice.Count > 0)
+                {
+                    <ul class="ms-destructive-list">
+                        @for (int ordinal = 0; ordinal < impact.Advice.Count; ordinal++)
+                        {
+                            <li @key="ordinal">@impact.Advice[ordinal]</li>
+                        }
+                    </ul>
+                }
+            </div>
+        </div>
+    }
+
     @* Disabled and not hidden for a visitor the write policy refuses: "this studio can apply schema
        changes and your account may not" is a different fact from "this studio cannot apply schema
        changes". ISchemaDataService refuses regardless (AGENTS.md hard rule 5). *@

@@ -67,6 +67,14 @@ internal sealed record MigrationPreview(
     /// <see cref="DestructiveStatements" />, so it cannot disagree with <see cref="Sql" />.
     /// </summary>
     public IReadOnlyList<MigrationNote> Notes => MigrationRisk.Notes(Sql);
+
+    /// <summary>
+    /// What applying this will lock and rewrite, table by table, with each table's estimated rows and size from <c>pg_class</c>
+    /// statistics and - only for a visitor who passes the Activity gate - the sessions locking it now. Read by the service when the
+    /// preview is rendered (<c>SchemaDataService.PreviewAsync</c>), so unlike <see cref="Notes" /> it is a value the service sets;
+    /// <see cref="MigrationImpact.None" /> everywhere else, an apply's own render included. Notes, never a refusal.
+    /// </summary>
+    public MigrationImpact Impact { get; init; } = MigrationImpact.None;
 }
 
 /// <summary>What applying a migration did.</summary>

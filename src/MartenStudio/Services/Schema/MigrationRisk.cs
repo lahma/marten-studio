@@ -42,6 +42,24 @@ internal static partial class MigrationRisk
         "indexes and columns the configuration does not declare, alters changed column types, and drops " +
         "and recreates a changed primary key.";
 
+    /// <summary>The kind of a <c>drop index</c>.</summary>
+    internal const string DropsIndexKind = "drops an index";
+
+    /// <summary>The kind of a <c>drop table</c>.</summary>
+    internal const string DropsTableKind = "drops a table";
+
+    /// <summary>The kind of an <c>alter table … drop column</c>.</summary>
+    internal const string DropsColumnKind = "drops a column";
+
+    /// <summary>The kind of an <c>alter table … drop constraint</c>.</summary>
+    internal const string DropsConstraintKind = "drops a constraint";
+
+    /// <summary>The kind of an <c>alter table … alter column … type</c>.</summary>
+    internal const string ChangesColumnTypeKind = "changes a column type";
+
+    /// <summary>The kind of the partition rebuild's <c>create table … as select</c>.</summary>
+    internal const string PartitionRebuildKind = "copies a table out and back (partition rebuild)";
+
     /// <summary>Every destructive statement in <paramref name="sql" />, in the order they would run.</summary>
     /// <param name="sql">The migration script, exactly as it would be executed.</param>
     public static IReadOnlyList<DestructiveStatement> Find(string? sql)
@@ -117,12 +135,12 @@ internal static partial class MigrationRisk
         // IsPartitionIndexResume, before this is asked.
         if (StartsWithWords(line, "drop index"))
         {
-            return "drops an index";
+            return DropsIndexKind;
         }
 
         if (StartsWithWords(line, "drop table"))
         {
-            return "drops a table";
+            return DropsTableKind;
         }
 
         if (StartsWithWords(line, "drop function") || StartsWithWords(line, "drop sequence"))
@@ -132,24 +150,24 @@ internal static partial class MigrationRisk
 
         if (StartsWithWords(line, "alter table") && ContainsWords(line, "drop column"))
         {
-            return "drops a column";
+            return DropsColumnKind;
         }
 
         if (StartsWithWords(line, "alter table") && ContainsWords(line, "drop constraint"))
         {
-            return "drops a constraint";
+            return DropsConstraintKind;
         }
 
         // "alter table x alter column y type z" - Weasel's AlterColumnTypeSql. A type change rewrites
         // every row in the table and can fail, or round, on data that does not fit.
         if (StartsWithWords(line, "alter table") && ContainsWords(line, "alter column") && ContainsWords(line, " type "))
         {
-            return "changes a column type";
+            return ChangesColumnTypeKind;
         }
 
         if (StartsWithWords(line, "create table") && ContainsWords(line, " as select"))
         {
-            return "copies a table out and back (partition rebuild)";
+            return PartitionRebuildKind;
         }
 
         return null;

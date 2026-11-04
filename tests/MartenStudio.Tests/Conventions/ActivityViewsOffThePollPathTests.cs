@@ -109,6 +109,13 @@ public class ActivityViewsOffThePollPathTests
     /// </summary>
     private const string ConnectionBuilder = "src/PostgresStudio.Diagnostics/Internal/Sql/ConnectionObservedQueries.cs";
 
+    /// <summary>
+    /// The migration notes' builder (1.2-APPLY): its sessions read counts the sessions holding a lock on the tables a previewed
+    /// migration names, by state - counts only, never text. It is called only by the Schema service's impact read, after the
+    /// Activity gate has passed, and that read runs only when the Schema tab's Preview button is pressed (the net below).
+    /// </summary>
+    private const string ImpactBuilder = "src/MartenStudio/Internal/Sql/MigrationImpactQueries.cs";
+
     /// <summary>SQL that reads one of the views: from or join it, or call <c>pg_blocking_pids</c>.</summary>
     internal static readonly Regex ReadsAnActivityView = new(
         @"\b(from|join)\s+(pg_catalog\.)?pg_(stat_activity|locks|prepared_xacts)\b(?!\.)|\bpg_blocking_pids\s*\(",
@@ -124,7 +131,7 @@ public class ActivityViewsOffThePollPathTests
         List<string> offenders =
         [
             .. files
-                .Where(static file => SourceScanner.Relative(file) is not (Builder or DaemonBuilder or HorizonBuilder or MaintenanceBuilder or ReplicationBuilder or AuroraBuilder or ApplicationsBuilder or ConnectionBuilder))
+                .Where(static file => SourceScanner.Relative(file) is not (Builder or DaemonBuilder or HorizonBuilder or MaintenanceBuilder or ReplicationBuilder or AuroraBuilder or ApplicationsBuilder or ConnectionBuilder or ImpactBuilder))
                 .Where(static file => ReadsAnActivityView.IsMatch(File.ReadAllText(file)))
                 .Select(SourceScanner.Relative),
         ];
@@ -147,6 +154,49 @@ public class ActivityViewsOffThePollPathTests
             .Should().BeTrue("the applications builder counts this database's sessions, so its exemption is not an exemption for nothing");
         ReadsAnActivityView.IsMatch(File.ReadAllText(RepositoryRoot.Combine(ConnectionBuilder.Split('/'))))
             .Should().BeTrue("the connection builder lists the login's sessions by application, so its exemption is not an exemption for nothing");
+        ReadsAnActivityView.IsMatch(File.ReadAllText(RepositoryRoot.Combine(ImpactBuilder.Split('/'))))
+            .Should().BeTrue("the migration notes' builder counts the sessions holding a lock, so its exemption is not an exemption for nothing");
+    }
+
+    /// <summary>
+    /// 1.2-APPLY: the migration notes' sessions read is called by one place, the Schema service's impact read, and that read asks
+    /// the Activity gate - the capability, then the write policy with the capability named - before it opens a connection for it.
+    /// The Preview button is the only thing that reaches it.
+    /// </summary>
+    [Fact]
+    public void The_migration_notes_sessions_read_is_called_only_behind_the_activity_gate()
+    {
+        List<string> callers =
+        [
+            .. SourceScanner.ShippedSourceFiles()
+                .Where(static file => SourceScanner.Relative(file) != ImpactBuilder)
+                .Where(static file => SourceScanner.StripCommentsAndStrings(File.ReadAllText(file)).Contains("MigrationImpactQueries.ReadSessionsAsync(", StringComparison.Ordinal))
+                .Select(SourceScanner.Relative),
+        ];
+
+        callers.Should().Equal(["src/MartenStudio/Services/Schema/SchemaDataService.Impact.cs"],
+            "the sessions on a migration's tables are the Schema service's impact read, and nothing else's");
+
+        string service = SourceScanner.StripCommentsAndStrings(
+            File.ReadAllText(RepositoryRoot.Combine("src", "MartenStudio", "Services", "Schema", "SchemaDataService.Impact.cs")));
+        int method = service.IndexOf("Task<MigrationImpact> ReadImpactAsync(", StringComparison.Ordinal);
+        int gate = service.IndexOf("ActivityGateAsync(whole", method, StringComparison.Ordinal);
+        int read = service.IndexOf("MigrationImpactQueries.ReadSessionsAsync(", method, StringComparison.Ordinal);
+
+        method.Should().BePositive();
+        gate.Should().BePositive();
+        read.Should().BeGreaterThan(gate, "the sessions are read only after the activity gate has said yes");
+
+        string gateBody = service[service.IndexOf("Task<(bool Passes, string? Reason)> ActivityGateAsync(", StringComparison.Ordinal)..];
+        int enabled = gateBody.IndexOf("capabilities.IsEnabled(StudioCapability.ViewDatabaseActivity)", StringComparison.Ordinal);
+        int policy = gateBody.IndexOf("IsAuthorizedAsync(whole, StudioCapability.ViewDatabaseActivity", StringComparison.Ordinal);
+
+        enabled.Should().BePositive();
+        policy.Should().BeGreaterThan(enabled, "the capability is asked before anybody's policy");
+
+        string tab = SourceScanner.StripCommentsAndStrings(
+            File.ReadAllText(RepositoryRoot.Combine("src", "MartenStudio", "Components", "Pages", "Schema", "DriftTab.razor")));
+        tab.Should().NotContain("PeriodicTimer").And.NotContain("RefreshInterval", "the Schema tab's drift section polls nothing: Preview is a button");
     }
 
     /// <summary>

@@ -229,6 +229,8 @@ public class LogLevelsTests
             "The migration preview behind a button failed."),
         ["src/MartenStudio/Services/Schema/SchemaDataService.cs : Marten Studio's schema apply on {DatabaseId} was cancelled"] = (Verdict.VisitorAction,
             "An apply was cancelled mid-way by the process stopping; the schema may be half migrated."),
+        ["src/MartenStudio/Services/Schema/SchemaDataService.Impact.cs : Marten Studio could not read {What} for a migration preview of database {DatabaseId}"] = (Verdict.VisitorAction,
+            "The migration preview's lock notes (table statistics, sessions, the activity policy) failed behind the Preview button; the preview itself is shown and says so. A lock timeout is Debug."),
         ["src/MartenStudio/Services/Schema/SchemaDataService.cs : Marten Studio could not read table statistics for database {DatabaseId}"] = (Verdict.VisitorAction,
             "The schema screen's tables tab failed to load."),
         ["src/MartenStudio/Services/Schema/SchemaDataService.cs : Marten Studio could not read index statistics for database {DatabaseId}"] = (Verdict.VisitorAction,
