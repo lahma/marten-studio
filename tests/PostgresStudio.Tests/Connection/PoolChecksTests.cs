@@ -322,16 +322,16 @@ public sealed class PoolChecksTests
         finding.Severity.Should().Be(HealthSeverity.Info);
         finding.Evidence.Should().Contain(x => x.Label == "Pools to this database as this login" && x.Value == "3");
         finding.Evidence.Should().Contain(x => x.Label == "Maximum Pool Size, added up" && x.Value == "250 connections at most");
-        finding.Evidence.Should().NotContain(static x => x.Label.StartsWith("Pools with a name", StringComparison.Ordinal), "no pool name was left out");
+        finding.Evidence.Should().NotContain(static x => x.Label.StartsWith("Named pools", StringComparison.Ordinal), "no named pool was left out");
         finding.Link!.Route.Should().Be(SessionEvidence.HoldersLink.Route);
     }
 
     [Fact]
-    public void Pools_that_could_not_be_compared_are_counted_in_the_evidence_and_a_missing_ceiling_says_so()
+    public void Named_pools_the_studio_could_not_identify_are_counted_in_the_evidence_and_a_missing_ceiling_says_so()
     {
         HealthFinding finding = C18(Facts("Host=db.example", siblings: new ConnectionPoolSiblings(2, null, 4))).Findings.Single();
 
-        finding.Evidence.Should().Contain(x => x.Label == "Pools with a name of their own, left out" && x.Value == "4");
+        finding.Evidence.Should().Contain(x => x.Label == "Named pools not identified, left out" && x.Value == "4");
         finding.Evidence.Should().Contain(x => x.Label == "Maximum Pool Size, added up" && x.Value == "not reported by every pool");
         finding.Caveat.Should().Contain("(4 here)");
     }
@@ -344,7 +344,7 @@ public sealed class PoolChecksTests
         HealthVerdict verdict = C18(Facts("Host=db.example", siblings: new ConnectionPoolSiblings(pools, pools == 0 ? null : 100, 2)));
 
         verdict.Findings.Should().BeEmpty();
-        verdict.Note.Should().Contain("2 pool name(s)");
+        verdict.Note.Should().Contain("Not judged for 2 named pool(s)", "a quiet C18 with unidentified named pools is not proof");
     }
 
     [Fact]

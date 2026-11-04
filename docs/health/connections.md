@@ -734,9 +734,24 @@ saturation and C03's headroom - one pool at a time - do not add up.
 
 It is counted from the pool names Npgsql reports to its meter (`pool.name`, the data source's connection string unless the data
 source was given a `Name`). Each name is parsed in memory and compared, and **only counts are kept**: the finding shows how many
-pools and the sum of their `Maximum Pool Size`, never a name, a host, a connection string or a password. A pool name that is not a
-connection string - a data source the host gave a `Name` - cannot be compared and is left out; the evidence says how many there
-were. A pool per tenant database, or per login, is a different database or login and is not counted.
+pools and the sum of their `Maximum Pool Size`, never a name, a host, a connection string or a password. A pool per tenant
+database, or per login, is a different database or login and is not counted.
+
+**Named data sources.** A data source built with `NpgsqlDataSourceBuilder.Name` (Aspire's Npgsql integration, keyed
+registrations, a host that wants readable pool metrics) reports that name instead of its connection string, so the name alone says
+nothing about the database. The studio identifies such a pool through the data sources it already resolves - it adds no scan of
+your container:
+
+- the data source the sweep is about, and the other sources Postgres Studio lists: the unkeyed `NpgsqlDataSource` it discovers,
+  each `AddDataSource(name, ...)` (a keyed registration goes in as `sp => sp.GetRequiredKeyedService<NpgsqlDataSource>(key)`), and
+  the data source an `AddDatabaseSource` host hands over for each database it lists;
+- in Marten Studio, the data source of each database of each Marten store the application registered.
+
+A named pool whose data source is one of these is compared by that data source's host, port, database and login and counted like
+an unnamed pool. **A named pool the studio does not resolve - a data source your code builds and keeps to itself - is not judged:**
+the check is still quiet, but it says *"Not judged for N named pool(s) of this process that the studio cannot identify"* instead of
+"nothing found", and when it fires the evidence row *Named pools not identified, left out* counts them. To have such a pool
+judged, list it with `AddDataSource(name, ...)` in Postgres Studio; Marten Studio's stores are listed from Marten.
 
 Several pools are sometimes deliberate - a separate pool for a long-running job - in which case accept the check with
 `AcceptedChecks`. Otherwise the remedy is one shared `NpgsqlDataSource` for the process: register it once

@@ -276,4 +276,25 @@ internal interface IStudioSourceProvider
     /// <param name="databaseId">The database's identity, compared ignoring case; empty for the source's first.</param>
     /// <param name="cancellationToken">Cancels the resolution.</param>
     ValueTask<StudioUnattendedResolution> ResolveUnattendedAsync(string sourceKey, string databaseId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The application's own <see cref="Npgsql.NpgsqlDataSource" /> instances this provider already resolves or holds, streamed,
+    /// so a reader that sees a pool only by the name Npgsql's meter reports it under (C18, issue #56) can tell which database and
+    /// login a <em>named</em> data source connects to. Instances only: nothing is opened, no connection string leaves the reader
+    /// that asked, and the caller stops reading as soon as it has what it needs.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Nothing new is scanned.</b> A data source registration is the instance the studio already built for its sources, a
+    /// host's database source is asked for the data sources of the names it lists (each bounded by <c>QueryTimeout</c>, a name
+    /// the host no longer has skipped), and a Marten store is its tenancy's held databases (<c>HeldDatabases</c>, which builds
+    /// none, D27). A source that will not build is skipped; the provider has logged why, throttled.
+    /// </para>
+    /// <para>
+    /// The default answers none, for a provider that holds no data source.
+    /// </para>
+    /// </remarks>
+    /// <param name="cancellationToken">Cancels the enumeration.</param>
+    IAsyncEnumerable<Npgsql.NpgsqlDataSource> HeldDataSourcesAsync(CancellationToken cancellationToken) =>
+        System.Linq.AsyncEnumerable.Empty<Npgsql.NpgsqlDataSource>();
 }

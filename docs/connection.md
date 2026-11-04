@@ -83,6 +83,13 @@ The page is built so that a connection string never reaches it ([D33 in the main
 - the **raw connection string**, and the names Npgsql gives its pools (built from it), never leave the reader. Nothing a
   check, a hint card, the snapshot download, a log line or the audit log holds can contain them.
 
+A data source you gave a `Name` (`NpgsqlDataSourceBuilder.Name`; Aspire's Npgsql integration and keyed registrations do) is
+reported to Npgsql's meter under that name, not its connection string. C18 identifies such a pool in memory, from the data sources
+the studio already resolves - the one this page is about, Postgres Studio's listed sources (`AddDataSource`, `AddDatabaseSource`)
+and Marten Studio's stores' databases - and keeps only counts, as above. A named pool the studio does not resolve is **not
+judged**: C18 says "Not judged for N named pool(s)" rather than "nothing found". See
+[C18](health/connections.md#c18-several-pools-to-one-database-in-this-process).
+
 Tests run a data source made entirely of sentinel strings through every one of those places and fail if one appears.
 
 ## The hints

@@ -28,9 +28,14 @@ internal sealed record ConnectionSessionStatistics(long? Sessions, double? Sessi
 /// pool names Npgsql reports to its meter. Counts and sums only: a pool name is a connection string and is parsed and dropped,
 /// never kept or shown.
 /// </summary>
+/// <remarks>
+/// A pool whose name is not a connection string - a data source the host gave a <c>Name</c> - is identified through the data
+/// sources the studio resolves (<see cref="NamedPoolIdentities" />) and counted like an unnamed one; one the studio cannot
+/// identify is counted in <paramref name="UnparsedNames" /> and judged by nobody.
+/// </remarks>
 /// <param name="Pools">How many pools share the data source's identity, this one included.</param>
 /// <param name="SumMaxPoolSize">The sum of their <c>Maximum Pool Size</c>, or <see langword="null" /> when one did not report it.</param>
-/// <param name="UnparsedNames">How many pool names are not a connection string (a name the host gave its data source) and were left out.</param>
+/// <param name="UnparsedNames">How many pools stay unidentified: their name is not a connection string, and no data source the studio resolves has it (a data source named with <c>NpgsqlDataSourceBuilder.Name</c> that the studio does not know). Not judged.</param>
 internal sealed record ConnectionPoolSiblings(int Pools, int? SumMaxPoolSize, int UnparsedNames)
 {
     /// <summary>
@@ -66,10 +71,26 @@ internal sealed record ConnectionPoolSiblings(int Pools, int? SumMaxPoolSize, in
         }
     }
 
+    /// <summary>
+    /// The pool names among <paramref name="readings" /> that are not a connection string - the pools a host named, which only a
+    /// data source can identify.
+    /// </summary>
+    /// <param name="readings">Every pool the meter reports.</param>
+    public static HashSet<string> NamedPools(IEnumerable<NpgsqlPoolReading> readings)
+    {
+        ArgumentNullException.ThrowIfNull(readings);
+
+        return [.. readings.Where(static x => IdentityOf(x.PoolName) is null).Select(static x => x.PoolName)];
+    }
+
     /// <summary>Counts the pools of <paramref name="readings" /> that have <paramref name="identity" />.</summary>
     /// <param name="identity">The data source's <see cref="IdentityOf" />.</param>
     /// <param name="readings">Every pool the meter reports.</param>
-    public static ConnectionPoolSiblings Count(string identity, IEnumerable<NpgsqlPoolReading> readings)
+    /// <param name="named">
+    /// The identity of each named pool the studio could identify, by the pool's name (<see cref="NamedPoolIdentities" />), or
+    /// <see langword="null" /> when none was asked for. A pool name in it counts like an unnamed pool with that identity.
+    /// </param>
+    public static ConnectionPoolSiblings Count(string identity, IEnumerable<NpgsqlPoolReading> readings, IReadOnlyDictionary<string, string>? named = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(identity);
         ArgumentNullException.ThrowIfNull(readings);
@@ -82,6 +103,11 @@ internal sealed record ConnectionPoolSiblings(int Pools, int? SumMaxPoolSize, in
         foreach (NpgsqlPoolReading reading in readings)
         {
             string? other = IdentityOf(reading.PoolName);
+
+            if (other is null && named is not null && named.TryGetValue(reading.PoolName, out string? identified))
+            {
+                other = identified;
+            }
 
             if (other is null)
             {
@@ -237,7 +263,7 @@ internal sealed record ConnectionFacts
             ObservedFailure = failure,
             Platform = platform,
             Sessions = sessions,
-            Siblings = identity is null ? null : ObserveSiblings(context, identity),
+            Siblings = identity is null ? null : await ObserveSiblingsAsync(context, identity, cancellationToken).ConfigureAwait(false),
             SiblingsNotObserved = identity is null ? NoIdentityReason : null,
         };
     }
@@ -332,22 +358,36 @@ internal sealed record ConnectionFacts
         }
     }
 
-    private static ConnectionPoolSiblings? ObserveSiblings(HealthCheckContext context, string identity)
+    private static async Task<ConnectionPoolSiblings?> ObserveSiblingsAsync(HealthCheckContext context, string identity, CancellationToken cancellationToken)
     {
         if (context.Services.GetService<SessionPoolObserver>() is not { } observer)
         {
             return null;
         }
 
+        IReadOnlyList<NpgsqlPoolReading> readings;
+
         try
         {
             using SessionPoolLease lease = observer.Lease();
-            return ConnectionPoolSiblings.Count(identity, lease.Read());
+            readings = lease.Read();
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             return null;
         }
+
+        // Only the pools whose name is not a connection string need a data source to be told apart (issue #56); the lease is
+        // given back before the studio's sources are asked, which may wait on a host.
+        HashSet<string> named = ConnectionPoolSiblings.NamedPools(readings);
+        IReadOnlyDictionary<string, string>? identified = null;
+
+        if (named.Count > 0)
+        {
+            identified = await NamedPoolIdentities.ReadAsync(context, named, cancellationToken).ConfigureAwait(false);
+        }
+
+        return ConnectionPoolSiblings.Count(identity, readings, identified);
     }
 
     private static ConnectionObserved MapObserved(NpgsqlDataReader reader) => new(

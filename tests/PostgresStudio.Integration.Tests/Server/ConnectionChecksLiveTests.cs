@@ -153,4 +153,53 @@ public class ConnectionChecksLiveTests(PostgresVersionMatrix matrix)
         string everything = string.Join('\n', finding.Title, finding.WhyItMatters, finding.Caveat, finding.Remedy!.Code, string.Join('\n', finding.Evidence.Select(static x => x.Value)));
         everything.Should().NotContain("np2-second-pool").And.NotContain("ms-matrix-host-").And.NotContain("Host=").And.NotContain("Password");
     }
+
+    /// <summary>
+    /// Issue #56: a second pool built with <c>NpgsqlDataSourceBuilder.Name</c> reports to Npgsql's meter under that name, which is
+    /// no connection string. With the data source registered in the container (a keyed registration, listed under a name of the
+    /// studio's own) the studio identifies the pool by its connection string and C18 fires with two pools; with the data source
+    /// the studio does not resolve the check stays quiet and says it did not judge the pool - not "nothing found".
+    /// </summary>
+    [PostgresFact]
+    [HealthFires("C18")]
+    [HealthQuiet("C18")]
+    public async Task C18_counts_a_named_data_source_the_studio_resolves_and_says_it_did_not_judge_one_it_does_not()
+    {
+        MatrixServer server = await matrix.IsolatedServerAsync(17, "i56-named");
+        server.SkipIfUnavailable();
+
+        NpgsqlConnectionStringBuilder scheduler = new(server.ConnectionString(MatrixRole.App)) { ApplicationName = "i56-scheduler" };
+        await using NpgsqlDataSource named = new NpgsqlDataSourceBuilder(scheduler.ConnectionString) { Name = "i56-scheduler-pool" }.Build();
+        await using (NpgsqlConnection warm = await named.OpenConnectionAsync(Token))
+        {
+            await using NpgsqlCommand command = new("select 1", warm);
+            await command.ExecuteScalarAsync(Token);
+        }
+
+        await using (MatrixHost unresolved = await MatrixHost.CreateAsync(server, MatrixRole.App))
+        {
+            HealthCheckResult result = PostureHost.Result(await unresolved.SweepAsync(HealthSweepKind.Regular), "C18");
+
+            result.Outcome.Should().Be(HealthCheckOutcome.Checked, result.Problem?.Reason);
+            result.Findings.Should().BeEmpty("the pool is the studio's to identify, and it cannot");
+            result.Note.Should().Contain("Not judged for 1 named pool(s)").And.Contain("one pool of this process connects to this database as this login");
+        }
+
+        await using MatrixHost resolved = await MatrixHost.CreateAsync(
+            server,
+            MatrixRole.App,
+            services: s => s.AddKeyedSingleton("scheduler", named),
+            options: static o => o.AddDataSource("scheduler", static sp => sp.GetRequiredKeyedService<NpgsqlDataSource>("scheduler")));
+
+        HealthCheckResult counted = PostureHost.Result(await resolved.SweepAsync(HealthSweepKind.Regular), "C18");
+
+        counted.Outcome.Should().Be(HealthCheckOutcome.Checked, counted.Problem?.Reason);
+        HealthFinding finding = counted.Findings.Should().ContainSingle().Subject;
+        finding.Evidence.Should().Contain(x => x.Label == "Pools to this database as this login" && x.Value == "2");
+        finding.Evidence.Should().Contain(x => x.Label == "Maximum Pool Size, added up" && x.Value == "200 connections at most");
+        finding.Evidence.Should().NotContain(static x => x.Label.StartsWith("Named pools", StringComparison.Ordinal));
+
+        string everything = string.Join('\n', finding.Title, finding.WhyItMatters, finding.Caveat, finding.Remedy!.Code, string.Join('\n', finding.Evidence.Select(static x => x.Label + x.Value)));
+        everything.Should().NotContain("i56-scheduler").And.NotContain("Host=").And.NotContain("Password");
+    }
 }

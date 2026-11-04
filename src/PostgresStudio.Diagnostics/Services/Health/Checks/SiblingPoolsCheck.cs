@@ -13,9 +13,15 @@ namespace PostgresStudio.Services.Health.Checks;
 /// <b>Counted from the pools' own names.</b> Npgsql reports every pool to its meter under the pool's name, which is the data
 /// source's connection string unless it was given a <c>Name</c> (<c>NpgsqlDataSource.Name = name ?? ConnectionString</c>, Npgsql
 /// 9.0.4). The sweep parses each name in memory and compares the sorted <c>host:port</c> list, the database and the login with the
-/// data source's own (<see cref="ConnectionPoolSiblings" />), and keeps only the counts. A name that is not a connection string -
-/// a data source the host named - is ignored, and the evidence says how many were. <b>No name, host, connection string or password
-/// is ever kept or shown</b> (NP-DESIGN §2).
+/// data source's own (<see cref="ConnectionPoolSiblings" />), and keeps only the counts. <b>No name, host, connection string or
+/// password is ever kept or shown</b> (NP-DESIGN §2).
+/// </para>
+/// <para>
+/// <b>Named pools are identified, not guessed (issue #56).</b> A name that is not a connection string - a data source the host
+/// built with <c>NpgsqlDataSourceBuilder.Name</c>, as Aspire's integration and keyed registrations do - is looked up among the
+/// data sources the studio already resolves (<see cref="NamedPoolIdentities" />) and counted like an unnamed pool with that data
+/// source's identity. A named pool no resolved data source has stays unidentified, and the check says it did not judge it: a quiet
+/// C18 is then not proof, and the verdict and the evidence count the pools it could not tell.
 /// </para>
 /// <para>
 /// <b>Why Info.</b> Several pools are often deliberate (a pool per tenant database is a different database and is not counted;
@@ -63,11 +69,7 @@ internal sealed class SiblingPoolsCheck : HealthCheck<ConnectionFacts>
 
         if (siblings.Pools < 2)
         {
-            return HealthVerdict.Quiet(
-                (siblings.Pools == 0
-                    ? "No Npgsql pool of this process that connects to this database as this login reports to Npgsql's meter (pooling is off, or the pool is named)."
-                    : "Only one Npgsql pool in this process connects to this database as this login.")
-                + Unparsed(siblings));
+            return HealthVerdict.Quiet(QuietNote(siblings));
         }
 
         string pools = siblings.Pools.ToString(CultureInfo.InvariantCulture);
@@ -84,7 +86,7 @@ internal sealed class SiblingPoolsCheck : HealthCheck<ConnectionFacts>
         if (siblings.UnparsedNames > 0)
         {
             evidence.Add(new(
-                "Pools with a name of their own, left out",
+                "Named pools not identified, left out",
                 siblings.UnparsedNames.ToString(CultureInfo.InvariantCulture)));
         }
 
@@ -101,7 +103,8 @@ internal sealed class SiblingPoolsCheck : HealthCheck<ConnectionFacts>
             Evidence = evidence,
             Caveat =
                 "Counted from the pool names Npgsql reports to its meter, compared by host, port, database and login. A pool per "
-                + "tenant database is a different database and is not counted; a data source given a Name of its own cannot be "
+                + "tenant database is a different database and is not counted. A data source given a Name of its own is counted when "
+                + "the studio resolves it (the one it reads, or one registered or listed with it); one it does not resolve cannot be "
                 + "compared and is left out" + (siblings.UnparsedNames > 0 ? " (" + siblings.UnparsedNames.ToString(CultureInfo.InvariantCulture) + " here)" : string.Empty)
                 + ". Several pools are sometimes deliberate - a separate pool for a long-running job - in which case the check can be "
                 + "accepted with AcceptedChecks.",
@@ -110,8 +113,24 @@ internal sealed class SiblingPoolsCheck : HealthCheck<ConnectionFacts>
         });
     }
 
-    private static string Unparsed(ConnectionPoolSiblings siblings) =>
-        siblings.UnparsedNames == 0
-            ? string.Empty
-            : " " + siblings.UnparsedNames.ToString(CultureInfo.InvariantCulture) + " pool name(s) are not connection strings and were left out.";
+    /// <summary>
+    /// What a quiet verdict says. With every pool identified it counts none or one; with some unidentified it says the check did
+    /// not judge them - quiet is then not proof - and what it did find (issue #56).
+    /// </summary>
+    private static string QuietNote(ConnectionPoolSiblings siblings)
+    {
+        if (siblings.UnparsedNames == 0)
+        {
+            return siblings.Pools == 0
+                ? "No Npgsql pool of this process that connects to this database as this login reports to Npgsql's meter (pooling is off)."
+                : "Only one Npgsql pool in this process connects to this database as this login.";
+        }
+
+        return "Not judged for " + siblings.UnparsedNames.ToString(CultureInfo.InvariantCulture)
+            + " named pool(s) of this process that the studio cannot identify (a data source named with NpgsqlDataSourceBuilder.Name "
+            + "that the studio does not resolve); "
+            + (siblings.Pools == 0
+                ? "no pool it can identify connects to this database as this login."
+                : "one pool of this process connects to this database as this login.");
+    }
 }

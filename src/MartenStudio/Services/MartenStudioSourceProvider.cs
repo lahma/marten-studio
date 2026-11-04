@@ -174,6 +174,35 @@ internal sealed class MartenStudioSourceProvider : IStudioSourceProvider
                 new ResolvedScope(new StudioScope(registration.Key, database.Id.Identity, null), registration, store, database));
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// The data source of every database each store's tenancy already holds (<see cref="HeldDatabases" />, which never builds
+    /// one, D27 and hard rule 14), in registration order. A store that will not build, or whose held databases cannot be listed,
+    /// contributes none (logged as 9210 or 9213, throttled).
+    /// </remarks>
+    public async IAsyncEnumerable<Npgsql.NpgsqlDataSource> HeldDataSourcesAsync([EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        foreach (MartenStoreRegistration registration in registry.Registrations(options))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            (_, HeldDatabaseList? listed) = await HeldAsync(registration).ConfigureAwait(false);
+
+            if (listed is null)
+            {
+                continue;
+            }
+
+            foreach (IMartenDatabase database in listed.Databases)
+            {
+                if (MartenStudioDatabase.Of(database).DataSource is { } dataSource)
+                {
+                    yield return dataSource;
+                }
+            }
+        }
+    }
+
     /// <summary>The store and the databases its tenancy holds, or nulls when it will not build or cannot say (both logged).</summary>
     private async Task<(IDocumentStore? Store, HeldDatabaseList? Listed)> HeldAsync(MartenStoreRegistration registration)
     {

@@ -228,6 +228,57 @@ internal sealed class PostgresStudioSourceProvider : IStudioSourceProvider
                 : StudioUnattendedResolution.NotFound("Data source '" + registration.Key + "' no longer has a database named '" + name + "'.");
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// Each data source registration's instance (the one the studio builds for the source, once), then, for a host's database
+    /// source, the data source the host hands over for each name it lists - the host's own cached instances, which it must
+    /// return rather than build (<see cref="IPostgresDatabaseSource" />). Streamed, so the reader that stops early opens no
+    /// more of them than it needs.
+    /// </remarks>
+    public async IAsyncEnumerable<NpgsqlDataSource> HeldDataSourcesAsync([EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        foreach (StudioSourceRegistration registration in Registrations())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            // TryResolve has logged why a source would not build, throttled (9210).
+            if (!TryResolve(registration, out IStudioSource? source).IsAvailable)
+            {
+                continue;
+            }
+
+            if (source is PostgresDataSourceSource single)
+            {
+                yield return single.Database.DataSource;
+                continue;
+            }
+
+            if (source is not PostgresHostSource host)
+            {
+                continue;
+            }
+
+            IReadOnlyList<string>? names = await host.TryListAsync(cancellationToken).ConfigureAwait(false);
+
+            if (names is null)
+            {
+                continue;
+            }
+
+            foreach (string name in names)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                (DataSourceDatabase? opened, _) = await host.TryOpenAsync(name, cancellationToken).ConfigureAwait(false);
+
+                if (opened is not null)
+                {
+                    yield return opened.DataSource;
+                }
+            }
+        }
+    }
+
     /// <summary>The host's list, through the registry's minute-long cache.</summary>
     internal ValueTask<IReadOnlyList<string>> ListAsync(string key, IPostgresDatabaseSource host, CancellationToken cancellationToken) =>
         registry.ListAsync(key, host, options.Value.QueryTimeout, logger, throttle, cancellationToken);

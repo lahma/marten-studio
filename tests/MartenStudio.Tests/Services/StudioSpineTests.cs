@@ -313,6 +313,65 @@ public class StudioSpineTests
         (await sources.ResolveUnattendedAsync(listed[0].Source.Key, "", Token)).Outcome.Should().Be(StudioUnattendedOutcome.NotReached);
     }
 
+    /// <summary>
+    /// Issue #56: C18 identifies a pool the host named through the data sources the studio resolves, and a Marten store's databases
+    /// are among them - the data source a store was handed (<c>UseNpgsqlDataSource()</c>) is offered under the name the host gave it,
+    /// from the databases the tenancy already holds, without building anything.
+    /// </summary>
+    [Fact]
+    public async Task A_stores_held_data_source_is_offered_to_the_pool_identification_under_the_name_the_host_gave_it()
+    {
+        await using Npgsql.NpgsqlDataSource named = new Npgsql.NpgsqlDataSourceBuilder(DummyConnectionString) { Name = "orders-pool" }.Build();
+
+        ServiceCollection services = new();
+        services.AddSingleton(named);
+        services.AddMarten(x => x.DatabaseSchemaName = "spine").UseNpgsqlDataSource();
+        await using ServiceProvider provider = services.BuildServiceProvider();
+
+        IOptions<MartenStudioOptions> options = Options.Create(new MartenStudioOptions());
+        MartenStudioSourceProvider sources = new(
+            options,
+            new MartenStoreRegistry(services),
+            new TenantDiscovery(options, NullLogger<TenantDiscovery>.Instance),
+            provider,
+            NullLogger<MartenStudioSourceProvider>.Instance);
+
+        List<Npgsql.NpgsqlDataSource> held = [];
+        await foreach (Npgsql.NpgsqlDataSource dataSource in sources.HeldDataSourcesAsync(Token))
+        {
+            held.Add(dataSource);
+        }
+
+        Npgsql.NpgsqlDataSource only = held.Should().ContainSingle().Subject;
+        PostgresStudio.Services.Connection.NamedPoolIdentities.NameOf(only).Should().Be("orders-pool");
+        PostgresStudio.Services.Connection.ConnectionPoolSiblings.IdentityOf(only.ConnectionString)
+            .Should().Be(PostgresStudio.Services.Connection.ConnectionPoolSiblings.IdentityOf(DummyConnectionString));
+    }
+
+    [Fact]
+    public async Task A_store_that_will_not_build_offers_no_data_source_to_the_pool_identification()
+    {
+        ServiceCollection services = new();
+        services.AddSingleton<MartenStoreRegistryTest.IBrokenStore>(static _ => throw new InvalidOperationException("broken"));
+        await using ServiceProvider provider = services.BuildServiceProvider();
+
+        IOptions<MartenStudioOptions> options = Options.Create(new MartenStudioOptions());
+        MartenStudioSourceProvider sources = new(
+            options,
+            new MartenStoreRegistry(services),
+            new TenantDiscovery(options, NullLogger<TenantDiscovery>.Instance),
+            provider,
+            NullLogger<MartenStudioSourceProvider>.Instance);
+
+        int count = 0;
+        await foreach (Npgsql.NpgsqlDataSource _ in sources.HeldDataSourcesAsync(Token))
+        {
+            count++;
+        }
+
+        count.Should().Be(0);
+    }
+
     // ---------------------------------------------------------------------------------------------
     // The pass-throughs' pure parts
     // ---------------------------------------------------------------------------------------------
