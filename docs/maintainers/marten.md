@@ -12,6 +12,13 @@ verified non-generic) keep metadata columns, soft-delete semantics and tenancy e
 them. The studio never hand-writes document DML; writes go through the session — re-implementing Marten's
 write path is how a UI corrupts a store (and there is no upsert function to call: decision-notes.md, D6).
 
+The event flow (1.2) reads the projection graph by JasperFx's own rule (`SubscriptionDescriptor.appliedEventsFor`: an
+aggregation's `AllEventTypes`, anything else's `IncludedEventTypes`), restated over public members; it never calls
+`Describe`, `TryCreateUsage` or `CreateSchemaObjects`. An event type a projection declares that the registry has not met
+yet is shown, marked not registered. `Identity<T>()` groups events and does not declare `T`. A hidden document type's
+whole hierarchy is hidden, and when Marten will not give the store's document types the model fails closed: every
+document type counts as hidden and no source lists what it writes.
+
 ## D7
 
 **D7 — Document edit shows a round-trip diff before saving.** Marten has no untyped store API, so saving

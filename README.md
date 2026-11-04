@@ -661,7 +661,13 @@ discards a record, marks the underlying event as skipped — only on a store tha
 because it writes `mt_events.is_skipped` and a store without that column has no way to express the idea —
 or rewinds the projection's subscription to the event that failed, behind a typed confirmation that states
 what gets replayed, where the daemon is hosted in this process. A *Grouped by cause* view groups them by projection,
-event type, exception type and message fingerprint, and opens a group as the list.
+event type, exception type and message fingerprint, and opens a group as the list. *Event flow* (1.2) draws which
+projections and subscriptions read each event type and what each one writes, from `StoreOptions` alone: the event types
+(by alias and .NET type); the projections that take them in, whether exactly, through a base type or interface they
+declare, or as every event for one that declares none; and the document types, flat tables and live aggregates they
+produce, along with the event types nothing reads. It filters to one projection or one event type, and the tables below
+the picture list everything. Hidden document types, and the subclasses of a hidden root, are absent. Nothing on it reads
+the database.
 
 **Projections** — every registered projection with its shards, their state and progression against the
 high-water mark, refreshed from a lazy observer on `ShardStateTracker` where the daemon is hosted in
