@@ -194,10 +194,9 @@ public class NavigationScenarioTests(BrowserSuiteFixture fixture)
     }
 
     /// <remarks>
-    /// Between two pages that run no live loop of their own (the database browser and Relationships): leaving a page that does -
-    /// Sessions, the Overview - while its first render is still starting the loop trips <c>StudioLiveUpdates.StartAsync</c> against
-    /// its <c>DisposeAsync</c> (a <c>NullReferenceException</c> that ends the circuit). That race is older than interception and is
-    /// reported with this packet; it is not what this scenario is about.
+    /// Through live pages on purpose: the Overview and Sessions each start a polling loop in their first render, and the visitor leaves
+    /// each as soon as its heading shows - Back out of Sessions straight after the title, focus and scroll checks. That used to end the
+    /// circuit (1.2-LIVE-FIX: <c>StudioLiveUpdates.StartAsync</c> against its <c>DisposeAsync</c>).
     /// </remarks>
     [BrowserFact]
     public async Task A_rail_click_renders_in_the_circuit_changes_the_title_focuses_the_heading_and_Back_and_Forward_land_on_the_right_page()
@@ -206,23 +205,22 @@ public class NavigationScenarioTests(BrowserSuiteFixture fixture)
         {
             IPage page = studio.Page;
 
-            // A short viewport, so the tables list scrolls: a move to another page starts at the top.
+            // A short viewport, so the Overview scrolls: a move to another page starts at the top.
             await page.SetViewportSizeAsync(StudioPage.ViewportWidth, 400);
-            await studio.GoAsync(fixture.Host.StudioUrl("database"));
-            await page.Locator("h1.ms-page-title", new PageLocatorOptions { HasTextString = "Database" }).WaitForAsync();
-            await page.Locator("a.ms-db-name[title='quartz.qrtz_triggers']").WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
+            await studio.GoAsync(fixture.Host.StudioUrl());
+            await page.Locator("h1.ms-page-title", new PageLocatorOptions { HasTextString = "Overview" }).WaitForAsync();
 
-            string listTitle = await page.TitleAsync();
+            string overviewTitle = await page.TitleAsync();
 
             await page.EvaluateAsync("() => window.scrollTo(0, 200)");
             await page.WaitForFunctionAsync("() => window.scrollY > 0", null, new PageWaitForFunctionOptions { Timeout = 30_000 });
 
-            await Rail(page, "Relationships").ClickAsync();
-            await studio.WaitForLocationAsync("location.pathname.endsWith('/relationships')");
-            await page.Locator("h1.ms-page-title", new PageLocatorOptions { HasTextString = "Relationships" }).WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
+            await Rail(page, "Sessions").ClickAsync();
+            await studio.WaitForLocationAsync("location.pathname.endsWith('/database/sessions')");
+            await page.Locator("h1.ms-page-title", new PageLocatorOptions { HasTextString = "Sessions" }).WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
 
-            await page.WaitForFunctionAsync("title => document.title !== title", listTitle, new PageWaitForFunctionOptions { Timeout = 30_000 });
-            (await page.TitleAsync()).Should().Contain("Relationships", "<PageTitle> follows a move the circuit renders");
+            await page.WaitForFunctionAsync("title => document.title !== title", overviewTitle, new PageWaitForFunctionOptions { Timeout = 30_000 });
+            (await page.TitleAsync()).Should().Contain("Sessions", "<PageTitle> follows a move the circuit renders");
 
             await page.WaitForFunctionAsync(
                 "() => document.activeElement !== null && document.activeElement.tagName === 'H1'",
@@ -231,13 +229,18 @@ public class NavigationScenarioTests(BrowserSuiteFixture fixture)
             await page.WaitForFunctionAsync("() => window.scrollY === 0", null, new PageWaitForFunctionOptions { Timeout = 30_000 });
 
             await GoBackAsync(page);
-            await studio.WaitForLocationAsync("!location.pathname.endsWith('/relationships')");
-            await page.Locator("a.ms-db-name[title='quartz.qrtz_triggers']").WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
-            (await page.TitleAsync()).Should().Be(listTitle);
+            await studio.WaitForLocationAsync("!location.pathname.endsWith('/database/sessions')");
+            await page.Locator("h1.ms-page-title", new PageLocatorOptions { HasTextString = "Overview" }).WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
+            (await page.TitleAsync()).Should().Be(overviewTitle);
 
             await GoForwardAsync(page);
-            await studio.WaitForLocationAsync("location.pathname.endsWith('/relationships')");
-            await page.Locator("h1.ms-page-title", new PageLocatorOptions { HasTextString = "Relationships" }).WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
+            await studio.WaitForLocationAsync("location.pathname.endsWith('/database/sessions')");
+            await page.Locator("h1.ms-page-title", new PageLocatorOptions { HasTextString = "Sessions" }).WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
+
+            // And away again at once, with the circuit asked for nothing in between: the page's start is still under way.
+            await GoBackAsync(page);
+            await page.Locator("h1.ms-page-title", new PageLocatorOptions { HasTextString = "Overview" }).WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
+            await page.Locator(".ms-overview-tiles .ms-stat-card").First.WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
 
             studio.AssertNoPageFetch("moving by the rail, Back and Forward");
             studio.AssertClean("moving by the rail, Back and Forward");

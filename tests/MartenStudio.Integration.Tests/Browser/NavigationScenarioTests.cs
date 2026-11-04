@@ -315,10 +315,9 @@ public class NavigationScenarioTests(BrowserSuiteFixture fixture)
     }
 
     /// <remarks>
-    /// Between two pages that run no live loop of their own (Streams and Event types): leaving a page that does - the Overview, the Feed
-    /// - while its first render is still starting the loop trips <c>StudioLiveUpdates.StartAsync</c> against its <c>DisposeAsync</c> (a
-    /// <c>NullReferenceException</c> that ends the circuit). That race is older than interception and is reported with this packet; it
-    /// is not what this scenario is about.
+    /// Through a live page on purpose: the Overview starts a polling loop in its first render, and the visitor leaves it as soon as its
+    /// tiles show and comes back to it by Back. That used to end the circuit (1.2-LIVE-FIX: <c>StudioLiveUpdates.StartAsync</c> against
+    /// its <c>DisposeAsync</c>).
     /// </remarks>
     [BrowserFact]
     public async Task A_rail_click_renders_in_the_circuit_changes_the_title_focuses_the_heading_and_Back_and_Forward_land_on_the_right_page()
@@ -327,23 +326,23 @@ public class NavigationScenarioTests(BrowserSuiteFixture fixture)
         {
             IPage page = studio.Page;
 
-            // A short viewport, so the streams list scrolls: a move to another page starts at the top.
+            // A short viewport, so the Overview scrolls: a move to another page starts at the top.
             await page.SetViewportSizeAsync(StudioPage.ViewportWidth, 400);
-            await studio.GoAsync(fixture.Root.StudioUrl("events/streams"));
-            await page.Locator("h1.ms-page-title", new PageLocatorOptions { HasTextString = "Streams" }).WaitForAsync();
-            await SettledAsync(page);
+            await studio.GoAsync(fixture.Root.StudioUrl());
+            await page.Locator("h1.ms-page-title", new PageLocatorOptions { HasTextString = "Overview" }).WaitForAsync();
+            await page.Locator(".ms-overview-tiles .ms-stat-card").Nth(6).WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
 
-            string streamsTitle = await page.TitleAsync();
+            string overviewTitle = await page.TitleAsync();
 
             await page.EvaluateAsync("() => window.scrollTo(0, 200)");
             await page.WaitForFunctionAsync("() => window.scrollY > 0", null, new PageWaitForFunctionOptions { Timeout = 30_000 });
 
-            await Rail(page, "Event types").ClickAsync();
-            await studio.WaitForLocationAsync("location.pathname.endsWith('/events/types')");
-            await page.Locator("h1.ms-page-title", new PageLocatorOptions { HasTextString = "Event types" }).WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
+            await Rail(page, "Streams").ClickAsync();
+            await studio.WaitForLocationAsync("location.pathname.endsWith('/events/streams')");
+            await page.Locator("h1.ms-page-title", new PageLocatorOptions { HasTextString = "Streams" }).WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
 
-            await page.WaitForFunctionAsync("title => document.title !== title", streamsTitle, new PageWaitForFunctionOptions { Timeout = 30_000 });
-            (await page.TitleAsync()).Should().Contain("Event types", "<PageTitle> follows a move the circuit renders");
+            await page.WaitForFunctionAsync("title => document.title !== title", overviewTitle, new PageWaitForFunctionOptions { Timeout = 30_000 });
+            (await page.TitleAsync()).Should().Contain("Streams", "<PageTitle> follows a move the circuit renders");
 
             await page.WaitForFunctionAsync(
                 "() => document.activeElement !== null && document.activeElement.tagName === 'H1'",
@@ -352,13 +351,17 @@ public class NavigationScenarioTests(BrowserSuiteFixture fixture)
             await page.WaitForFunctionAsync("() => window.scrollY === 0", null, new PageWaitForFunctionOptions { Timeout = 30_000 });
 
             await GoBackAsync(page);
-            await studio.WaitForLocationAsync("!location.pathname.endsWith('/events/types')");
-            await page.Locator("h1.ms-page-title", new PageLocatorOptions { HasTextString = "Streams" }).WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
-            (await page.TitleAsync()).Should().Be(streamsTitle);
+            await studio.WaitForLocationAsync("!location.pathname.endsWith('/events/streams')");
+            await page.Locator("h1.ms-page-title", new PageLocatorOptions { HasTextString = "Overview" }).WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
+            (await page.TitleAsync()).Should().Be(overviewTitle);
 
+            // Away from the Overview again at once, while its start is still under way, and back to it.
             await GoForwardAsync(page);
-            await studio.WaitForLocationAsync("location.pathname.endsWith('/events/types')");
-            await page.Locator("h1.ms-page-title", new PageLocatorOptions { HasTextString = "Event types" }).WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
+            await studio.WaitForLocationAsync("location.pathname.endsWith('/events/streams')");
+            await page.Locator("h1.ms-page-title", new PageLocatorOptions { HasTextString = "Streams" }).WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
+            await GoBackAsync(page);
+            await page.Locator("h1.ms-page-title", new PageLocatorOptions { HasTextString = "Overview" }).WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
+            await page.Locator(".ms-overview-tiles .ms-stat-card").Nth(6).WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
 
             studio.AssertNoPageFetch("moving by the rail, Back and Forward");
             studio.AssertClean("moving by the rail, Back and Forward");

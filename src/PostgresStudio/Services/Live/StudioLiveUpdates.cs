@@ -118,6 +118,21 @@ internal sealed class StudioLiveUpdates : IAsyncDisposable
     /// <param name="interval">How often to tick - <c>MartenStudioOptions.RefreshInterval</c>.</param>
     /// <param name="tick">What to do on each tick. Its cancellation token is cancelled on dispose.</param>
     /// <param name="cancellationToken">Cancels the start itself, not the loop.</param>
+    /// <remarks>
+    /// <para>
+    /// <b>Never <c>ConfigureAwait(false)</c> on this method's own awaits.</b> A component calls it from <c>OnAfterRenderAsync</c>,
+    /// on the renderer's dispatcher, and <see cref="DisposeAsync" /> is called from the same dispatcher: keeping the context means
+    /// the two run one at a time, so a dispose that arrives while the watch call is in flight is seen by the continuation below
+    /// without a data race, and every interop call (watch, unwatch) is issued from the renderer, in order. Resuming on the thread
+    /// pool is what let a dispose null the source under the start (a <see cref="NullReferenceException" /> that ended the circuit) and
+    /// two instances' interop calls reach a JS runtime from two threads at once (1.2-LIVE-FIX). The loop itself, <c>RunAsync</c>, does
+    /// run on the pool.
+    /// </para>
+    /// <para>
+    /// The source and its token are taken before the await, and <c>disposed</c> is checked after it: a page left during the watch
+    /// call has already cancelled and disposed that source and sent its unwatch, so the start starts nothing.
+    /// </para>
+    /// </remarks>
     public async Task StartAsync(TimeSpan interval, Func<CancellationToken, Task> tick, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(tick);
@@ -130,11 +145,21 @@ internal sealed class StudioLiveUpdates : IAsyncDisposable
         }
 
         onTick = tick;
-        cancellation = CancellationTokenSource.CreateLinkedTokenSource(CancellationToken.None);
 
-        await WatchVisibilityAsync(cancellationToken).ConfigureAwait(false);
+        CancellationTokenSource source = CancellationTokenSource.CreateLinkedTokenSource(CancellationToken.None);
+        cancellation = source;
+        CancellationToken token = source.Token;
 
-        loop = RunAsync(interval, cancellation.Token);
+        await WatchVisibilityAsync(cancellationToken);
+
+        if (disposed)
+        {
+            // Left during the watch call: DisposeAsync cancelled and disposed the source, and unwatched (after the watch, in the order
+            // the browser received them). Nothing is left to start.
+            return;
+        }
+
+        loop = RunAsync(interval, token);
     }
 
     /// <summary>
@@ -164,6 +189,11 @@ internal sealed class StudioLiveUpdates : IAsyncDisposable
     }
 
     /// <summary>Stops the loop, unwatches the tab and releases the .NET reference the browser holds.</summary>
+    /// <remarks>
+    /// Idempotent, and it never throws for interop loss. Like <see cref="StartAsync" /> it keeps the caller's synchronization context
+    /// (no <c>ConfigureAwait(false)</c>): it is called on the renderer's dispatcher, so it never runs beside a start, and its unwatch
+    /// is issued from the renderer like every other interop call, one instance at a time (1.2-LIVE-FIX).
+    /// </remarks>
     public async ValueTask DisposeAsync()
     {
         if (disposed)
@@ -175,14 +205,14 @@ internal sealed class StudioLiveUpdates : IAsyncDisposable
 
         if (cancellation is not null)
         {
-            await cancellation.CancelAsync().ConfigureAwait(false);
+            await cancellation.CancelAsync();
         }
 
         if (loop is not null)
         {
             try
             {
-                await loop.ConfigureAwait(false);
+                await loop;
             }
             catch (OperationCanceledException)
             {
@@ -190,7 +220,7 @@ internal sealed class StudioLiveUpdates : IAsyncDisposable
             }
         }
 
-        await UnwatchVisibilityAsync().ConfigureAwait(false);
+        await UnwatchVisibilityAsync();
 
         selfReference?.Dispose();
         selfReference = null;
@@ -293,9 +323,7 @@ internal sealed class StudioLiveUpdates : IAsyncDisposable
         try
         {
             selfReference = DotNetObjectReference.Create(this);
-            hidden = await jsRuntime
-                .InvokeAsync<bool>("martenStudio.visibility.watch", cancellationToken, watchToken, selfReference)
-                .ConfigureAwait(false);
+            hidden = await jsRuntime.InvokeAsync<bool>("martenStudio.visibility.watch", cancellationToken, watchToken, selfReference);
         }
         catch (Exception exception) when (IsInteropUnavailable(exception))
         {
@@ -316,7 +344,7 @@ internal sealed class StudioLiveUpdates : IAsyncDisposable
 
         try
         {
-            await jsRuntime.InvokeVoidAsync("martenStudio.visibility.unwatch", watchToken).ConfigureAwait(false);
+            await jsRuntime.InvokeVoidAsync("martenStudio.visibility.unwatch", watchToken);
         }
         catch (Exception exception) when (IsInteropUnavailable(exception))
         {

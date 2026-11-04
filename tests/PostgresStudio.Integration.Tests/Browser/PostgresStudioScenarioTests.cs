@@ -198,10 +198,13 @@ public class PostgresStudioScenarioTests(BrowserSuiteFixture fixture)
             frames.Should().BeGreaterThan(1, "the plan's nodes are frames");
             (await page.Locator(".ms-plan-icicle .ms-plan-icicle-frame").First.GetAttributeAsync("aria-label"))!.Should().Contain("with what is below it");
 
-            await page.Locator(".ms-plan-icicle .ms-plan-icicle-frame").Last.ClickAsync();
-            await page.Locator(".ms-plan-icicle-selected").WaitForAsync();
+            // The node the click selects is read from the frame itself and then waited for: the table's earlier pick is already the
+            // selection, so "some frame is selected" holds before the click has reached the circuit (the read raced it with 1.1's navigation).
+            ILocator lastFrame = page.Locator(".ms-plan-icicle .ms-plan-icicle-frame").Last;
+            string selectedNode = (await lastFrame.GetAttributeAsync("data-node"))!;
+            await lastFrame.ClickAsync();
+            await page.Locator(".ms-plan-icicle-selected[data-node='" + selectedNode + "']").WaitForAsync();
             (await page.Locator(".ms-plan-icicle-selected").CountAsync()).Should().Be(1);
-            string selectedNode = (await page.Locator(".ms-plan-icicle-selected").GetAttributeAsync("data-node"))!;
 
             await page.Locator(".ms-plan-icicle .ms-plan-icicle-frame").First.FocusAsync();
             int scrolled = await page.EvaluateAsync<int>("window.scrollY");
@@ -215,7 +218,8 @@ public class PostgresStudioScenarioTests(BrowserSuiteFixture fixture)
             await page.Locator(".ms-plan-node-selected").WaitForAsync();
             (await page.Locator(".ms-plan-node-selected").CountAsync()).Should().Be(1, "the icicle's selection is the tree's");
             await page.Locator(".ms-plan-view-icicle").ClickAsync();
-            (await page.Locator(".ms-plan-icicle-selected").GetAttributeAsync("data-node")).Should().Be(selectedNode);
+            await page.Locator(".ms-plan-icicle-selected[data-node='" + selectedNode + "']").WaitForAsync();
+            (await page.Locator(".ms-plan-icicle-selected").CountAsync()).Should().Be(1, "the tree's selection is the icicle's");
 
             await studio.AssertNoSidewaysScrollAsync("a drawn plan as an icicle");
             await page.SetViewportSizeAsync(390, 800);
