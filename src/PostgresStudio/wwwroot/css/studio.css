@@ -15542,6 +15542,7 @@ a.ms-schema-health-mark:focus-visible {
 .ms-shape-kind-readasnothing,
 .ms-shape-kind-notwritable,
 .ms-shape-kind-unknownsubclass,
+.ms-shape-kind-unregisteredeventtype,
 .ms-shape-kind-unknowneventtype {
     background: var(--ms-color-danger-bg);
     color: var(--ms-color-danger);

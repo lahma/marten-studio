@@ -10,6 +10,7 @@ using Marten.Storage;
 
 using MartenStudio.Internal.Sql;
 using MartenStudio.Services.Events;
+using MartenStudio.Services.Health.Checks;
 using MartenStudio.Services.Query;
 
 using Microsoft.Extensions.Logging;
@@ -96,6 +97,9 @@ internal sealed class EventShapeCheckService : IEventShapeCheck
     /// <summary>The wall budget of one check; a test shortens it to prove the partial result.</summary>
     internal TimeSpan Budget { get; init; } = ShapeCheckLimits.Budget;
 
+    /// <summary>The server-side statement timeout, in place of min(<c>QueryTimeout</c>, 5 s); a test sets it to force a timeout.</summary>
+    internal TimeSpan? StatementTimeoutOverride { get; init; }
+
     /// <inheritdoc />
     public async Task<ShapeCheckResult> CheckAsync(StudioScope scope, string eventTypeName, bool force, CancellationToken cancellationToken)
     {
@@ -119,6 +123,30 @@ internal sealed class EventShapeCheckService : IEventShapeCheck
             .ConfigureAwait(false);
     }
 
+    /// <inheritdoc />
+    public async Task<bool> HasTypeIndexAsync(StudioScope scope, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+
+        ResolvedScope resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            string schema = resolved.Store.Options.Events.DatabaseSchemaName;
+
+            await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
+            await connection.OpenStudioAsync(cancellationToken).ConfigureAwait(false);
+
+            TableColumns events = await columnCatalog.GetAsync(connection, schema, EventTableInfo.EventsTable, cancellationToken).ConfigureAwait(false);
+
+            return !events.Exists || await HasTypeIndexAsync(connection, schema, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return true;
+        }
+    }
+
     /// <summary>
     /// Whether <paramref name="name" /> is an event type the page lists: bounded, and registered by the store or present in its events
     /// table. The second half is a listing the Event types page makes itself, kept five minutes per scope, and read only for a name the
@@ -139,42 +167,61 @@ internal sealed class EventShapeCheckService : IEventShapeCheck
             }
         }
 
-        try
-        {
-            IReadOnlySet<string> observed = await cache
-                .EventTypeNamesAsync(
-                    resolved,
-                    async token =>
-                    {
-                        EventTypeList list = await eventTypes.ListEventTypesAsync(scope, withCounts: true, token).ConfigureAwait(false);
+        // The page's own counted listing, shared with it and kept half a minute per resolved scope: read only for a name the store does
+        // not register. A listing that failed shows the page nothing either, so the name is not one it can show.
+        EventTypeList list = await eventTypes.ListEventTypesAsync(scope, withCounts: true, cancellationToken).ConfigureAwait(false);
 
-                        return list.Error is not null
-                            ? throw new InvalidOperationException("The event types could not be listed.")
-                            : new HashSet<string>(list.Types.Select(static x => x.Name), StringComparer.Ordinal);
-                    },
-                    cancellationToken)
-                .ConfigureAwait(false);
+        return list.Error is null && list.Types.Any(x => string.Equals(x.Name, name, StringComparison.Ordinal));
+    }
 
-            return observed.Contains(name);
-        }
-        catch (InvalidOperationException)
+    /// <summary>
+    /// What is decided once per run, from <c>StoreOptions</c> and without a statement: what a rebuild would do, whether the alias is
+    /// mapped, and whether a tenant is named. <b>An unmapped alias's rows never reach Marten's resolver</b>: for an alias with no mapping the
+    /// resolver loads <c>mt_dotnet_type</c> with <c>Type.GetType</c> and registers the type on the host's store, which silences E05 until a
+    /// restart. So the stored name is classified with <see cref="EventHealth.ResolveLoaded" />, which loads nothing.
+    /// </summary>
+    private static RunState Prepare(ResolvedScope resolved, string eventType)
+    {
+        IReadOnlyStoreOptions storeOptions = resolved.Store.Options;
+        Func<string, bool>? known = EventHealth.KnownAliases(storeOptions.Events);
+
+        bool mapped = known is not null
+            ? known(eventType)
+            : storeOptions.Events.AllKnownEventTypes().Any(x => string.Equals(x.EventTypeName, eventType, StringComparison.Ordinal));
+
+        RunState state = new()
         {
-            // The listing failed: the name is not one the page can show either.
-            return false;
+            Mapped = mapped,
+            Loaded = mapped ? null : EventHealth.LoadedAssemblies(),
+            NameTenants = resolved.TenantId is null && storeOptions.Events.UseTenantPartitionedEvents,
+            RealTenants = storeOptions.Events.UseTenantPartitionedEvents
+                || storeOptions.Events.TenancyStyle == JasperFx.MultiTenancy.TenancyStyle.Conjoined,
+        };
+
+        if (storeOptions is StoreOptions concrete)
+        {
+            state.Policy = new RebuildPolicy(
+                concrete.Projections.RebuildErrors.SkipUnknownEvents,
+                concrete.Projections.Errors.SkipUnknownEvents,
+                concrete.Projections.RebuildErrors.SkipSerializationErrors,
+                concrete.Projections.Errors.SkipSerializationErrors);
         }
+
+        return state;
     }
 
     private async Task<ShapeCheckResult> RunAsync(ResolvedScope resolved, string eventType, CancellationToken shared)
     {
         long started = Stopwatch.GetTimestamp();
-        RunState state = new();
+        RunState state = Prepare(resolved, eventType);
 
         using CancellationTokenSource budget = CancellationTokenSource.CreateLinkedTokenSource(shared);
         budget.CancelAfter(Budget);
 
-        TimeSpan statementTimeout = options.Value.QueryTimeout < ShapeCheckLimits.StatementTimeout
-            ? options.Value.QueryTimeout
-            : ShapeCheckLimits.StatementTimeout;
+        TimeSpan statementTimeout = StatementTimeoutOverride
+            ?? (options.Value.QueryTimeout < ShapeCheckLimits.StatementTimeout
+                ? options.Value.QueryTimeout
+                : ShapeCheckLimits.StatementTimeout);
 
         if (statementTimeout <= TimeSpan.Zero)
         {
@@ -282,12 +329,12 @@ internal sealed class EventShapeCheckService : IEventShapeCheck
             state.LeftOut.Add(ShapeCheckText.SkippedLeftOut);
         }
 
-        (bool rebuildUnknown, bool daemonUnknown, bool rebuildSerialization, bool daemonSerialization) = storeOptions is StoreOptions concrete
-            ? (concrete.Projections.RebuildErrors.SkipUnknownEvents,
-                concrete.Projections.Errors.SkipUnknownEvents,
-                concrete.Projections.RebuildErrors.SkipSerializationErrors,
-                concrete.Projections.Errors.SkipSerializationErrors)
-            : (false, true, false, true);
+        // Known before a statement runs, so a run that is stopped on the budget or a statement timeout still says it.
+        if (!typeIndex)
+        {
+            state.Reason = ShapeCheckText.NoTypeIndex;
+            state.Remedy = ShapeCheckText.TypeIndexRemedy;
+        }
 
         ISerializer serializer = storeOptions.Serializer();
         ReadOnlySqlSession readOnly = new(new ReadOnlySqlOptions { StatementTimeout = statementTimeout });
@@ -306,76 +353,29 @@ internal sealed class EventShapeCheckService : IEventShapeCheck
                 token)
             .ConfigureAwait(false);
 
-        return Finish(eventType, state, started, rebuildUnknown, daemonUnknown, rebuildSerialization, daemonSerialization);
-    }
-
-    private ShapeCheckResult Finish(
-        string eventType,
-        RunState state,
-        long started,
-        bool rebuildUnknown,
-        bool daemonUnknown,
-        bool rebuildSerialization,
-        bool daemonSerialization)
-    {
-        IReadOnlyList<ShapeTypeResult> types = state.Aggregator.Build();
-        List<string> rebuild = [];
-        List<string> remedies = [];
-
-        long? firstUnknown = FirstSequence(types, ShapeFailureKind.UnknownEventType);
-        long? firstUnreadable = FirstSequence(types, ShapeFailureKind.Unreadable);
-
-        if (HasKind(types, ShapeFailureKind.UnknownEventType))
-        {
-            rebuild.Add(ShapeCheckText.RebuildUnknown(firstUnknown, rebuildUnknown, daemonUnknown));
-        }
-
-        if (HasKind(types, ShapeFailureKind.Unreadable))
-        {
-            rebuild.Add(ShapeCheckText.RebuildSerialization(eventType, firstUnreadable, rebuildSerialization, daemonSerialization));
-            remedies.Add(ShapeCheckText.UpcasterRemedy);
-        }
-
-        if (state.Remedy is not null)
-        {
-            remedies.Add(state.Remedy);
-        }
-
-        return new ShapeCheckResult(
-            eventType,
-            state.Complete ? ShapeCoverage.Complete : ShapeCoverage.Sampled,
-            timeProvider.GetUtcNow(),
-            Stopwatch.GetElapsedTime(started),
-            state.Examined,
-            state.TooLarge,
-            state.Lowest,
-            state.Highest,
-            state.Spread,
-            state.Reason,
-            remedies.Count == 0 ? null : string.Join(" ", remedies),
-            state.LeftOut,
-            types,
-            rebuild.Count == 0 ? null : string.Join(" ", rebuild),
-            null,
-            state.Statements);
+        return Compose(eventType, state, timeProvider.GetUtcNow(), Stopwatch.GetElapsedTime(started));
     }
 
     private static bool HasKind(IReadOnlyList<ShapeTypeResult> types, ShapeFailureKind kind) =>
         types.Any(x => x.Failures.Any(f => f.Kind == kind) || (x.MoreFailures > 0 && kind == ShapeFailureKind.Unreadable));
 
-    private static long? FirstSequence(IReadOnlyList<ShapeTypeResult> types, ShapeFailureKind kind)
+    /// <summary>The lowest failing sequence of a kind and, when each tenant numbers its own, whose it is.</summary>
+    private static (long? Sequence, string? Tenant) FirstFailure(IReadOnlyList<ShapeTypeResult> types, ShapeFailureKind kind, bool nameTenant)
     {
         long? first = null;
+        string? tenant = null;
 
         foreach (ShapeFailureGroup failure in types.SelectMany(static x => x.Failures).Where(x => x.Kind == kind))
         {
-            if (failure.FirstSequence is { } sequence && (first is null || sequence < first))
+            if (failure.FirstSequence is { } sequence
+                && (first is null || sequence < first || (sequence == first && string.CompareOrdinal(failure.Example.TenantId, tenant) < 0)))
             {
                 first = sequence;
+                tenant = failure.Example.TenantId;
             }
         }
 
-        return first;
+        return (first, nameTenant ? tenant : null);
     }
 
     private async Task<bool> HasTypeIndexAsync(NpgsqlConnection connection, string schema, CancellationToken token)
@@ -410,6 +410,13 @@ internal sealed class EventShapeCheckService : IEventShapeCheck
         }
 
         state.Complete = size <= ShapeCheckLimits.SampleSize;
+
+        if (state.Complete)
+        {
+            // Everything in scope is read, so the index is not what limits it.
+            state.Reason = null;
+            state.Remedy = null;
+        }
 
         // Phase 1: keys and stored sizes. Spread probes need an index leading with type, and a sequence one number line to interpolate on.
         bool spread = typeIndex && !(perTenantSequences && scope.TenantId is null && table.HasTenantId);
@@ -482,6 +489,7 @@ internal sealed class EventShapeCheckService : IEventShapeCheck
             perTenantSequences,
             [.. chosen.Select(static x => x.Sequence)],
             [.. chosen.Select(static x => x.Tenant)],
+            ShapeCheckLimits.MaxItemBytes,
             commandTimeout);
 
         Attach(rows, connection, transaction, state);
@@ -497,19 +505,23 @@ internal sealed class EventShapeCheckService : IEventShapeCheck
         int tenantOrdinal = table.HasTenantId ? reader.GetOrdinal("tenant_id") : -1;
 
         ISelector<IEvent> selector = storage;
+        int returned = 0;
+        Dictionary<string, ShapeFailure> unmapped = new(StringComparer.Ordinal);
 
         while (await reader.ReadAsync(token).ConfigureAwait(false))
         {
             token.ThrowIfCancellationRequested();
+            returned++;
 
             long sequence = reader.GetInt64(sequenceOrdinal);
             string? tenant = tenantOrdinal >= 0 && !await reader.IsDBNullAsync(tenantOrdinal, token).ConfigureAwait(false)
                 ? reader.GetString(tenantOrdinal)
                 : null;
 
+            // A single-tenanted store's tenant_id is the default tenant's marker, which names nothing a link or a sentence can use.
             ShapeItemKey key = new(
                 Convert.ToString(reader.GetValue(streamOrdinal), CultureInfo.InvariantCulture) ?? string.Empty,
-                tenant,
+                state.RealTenants ? tenant : null,
                 sequence,
                 reader.GetInt64(versionOrdinal));
 
@@ -517,7 +529,14 @@ internal sealed class EventShapeCheckService : IEventShapeCheck
             bool binary = !await reader.IsDBNullAsync(bdataOrdinal, token).ConfigureAwait(false);
             string? json = await reader.IsDBNullAsync(shapeOrdinal, token).ConfigureAwait(false) ? null : reader.GetString(shapeOrdinal);
 
-            Judge(state, eventType, key, storedDotNet, binary, json, serializer, await ResolveAsync(selector, reader, json, eventType, storedDotNet, token).ConfigureAwait(false));
+            if (state.Mapped)
+            {
+                Judge(state, eventType, key, storedDotNet, binary, json, serializer, await ResolveAsync(selector, reader, json, eventType, storedDotNet, token).ConfigureAwait(false));
+            }
+            else
+            {
+                JudgeUnmapped(state, eventType, key, storedDotNet, unmapped);
+            }
 
             switch (parts.GetValueOrDefault((tenant, sequence)))
             {
@@ -534,6 +553,35 @@ internal sealed class EventShapeCheckService : IEventShapeCheck
                     break;
             }
         }
+
+        // Rows the text-size guard removed in the statement: counted, never read.
+        state.TooLarge += Math.Max(0, chosen.Count - returned);
+    }
+
+    /// <summary>
+    /// A row whose alias no mapping answers to, without Marten's resolver: always an unknown event type, and the stored .NET type name
+    /// says whether it is one this process has loaded (Marten would read it as that type and register it on first read) or not.
+    /// </summary>
+    private static void JudgeUnmapped(RunState state, string eventType, ShapeItemKey key, string? storedDotNet, Dictionary<string, ShapeFailure> classified)
+    {
+        state.Examined++;
+
+        string name = storedDotNet is null ? "(none)" : Bound(storedDotNet);
+
+        if (!classified.TryGetValue(name, out ShapeFailure? failure))
+        {
+            Type? loaded = storedDotNet is { Length: > 0 } && !string.IsNullOrWhiteSpace(storedDotNet) && state.Loaded is { } assemblies
+                ? EventHealth.ResolveLoaded(storedDotNet, assemblies)
+                : null;
+
+            failure = ShapeFailureDescriber.Of(
+                loaded is null ? ShapeFailureKind.UnknownEventType : ShapeFailureKind.UnregisteredEventType,
+                nameof(UnknownEventTypeException),
+                Bound(eventType) + " / " + name);
+            classified[name] = failure;
+        }
+
+        state.Aggregator.Add(eventType, null, key, failure, []);
     }
 
     /// <summary>One row through Marten's resolver: the event it made, or why it could not.</summary>
@@ -732,23 +780,69 @@ internal sealed class EventShapeCheckService : IEventShapeCheck
     private static string Bound(string name) => name.Length <= ShapeCheckLimits.MaxSubjectLength ? name : name[..ShapeCheckLimits.MaxSubjectLength];
 
     private ShapeCheckResult Partial(string subject, RunState state, string reason, long started) =>
-        new(
-            subject,
-            ShapeCoverage.Partial,
-            timeProvider.GetUtcNow(),
-            Stopwatch.GetElapsedTime(started),
+        Compose(subject, state, timeProvider.GetUtcNow(), Stopwatch.GetElapsedTime(started), ShapeCoverage.Partial, reason);
+
+    /// <summary>
+    /// The result of a run, finished or stopped: one place builds the rebuild sentence and the remedy, so a run that stopped on the budget
+    /// or a statement timeout keeps what it had found (the sequence a rebuild stops at) and what it knows about the index.
+    /// </summary>
+    /// <param name="eventType">The event type.</param>
+    /// <param name="state">What the run read.</param>
+    /// <param name="now">When it ended.</param>
+    /// <param name="elapsed">How long it took.</param>
+    /// <param name="stopped"><see cref="ShapeCoverage.Partial" /> for a run that was stopped; <see langword="null" /> for one that finished.</param>
+    /// <param name="stopReason">Why it stopped; the index reason, if there is one, follows it.</param>
+    internal static ShapeCheckResult Compose(
+        string eventType,
+        RunState state,
+        DateTimeOffset now,
+        TimeSpan elapsed,
+        ShapeCoverage? stopped = null,
+        string? stopReason = null)
+    {
+        IReadOnlyList<ShapeTypeResult> types = state.Aggregator.Build();
+        List<string> rebuild = [];
+        List<string> remedies = [];
+
+        if (HasKind(types, ShapeFailureKind.UnknownEventType))
+        {
+            (long? sequence, string? tenant) = FirstFailure(types, ShapeFailureKind.UnknownEventType, state.NameTenants);
+            rebuild.Add(ShapeCheckText.RebuildUnknown(sequence, state.Policy.RebuildSkipsUnknown, state.Policy.DaemonSkipsUnknown, tenant));
+        }
+
+        if (HasKind(types, ShapeFailureKind.Unreadable))
+        {
+            (long? sequence, string? tenant) = FirstFailure(types, ShapeFailureKind.Unreadable, state.NameTenants);
+            rebuild.Add(ShapeCheckText.RebuildSerialization(
+                eventType, sequence, state.Policy.RebuildSkipsSerialization, state.Policy.DaemonSkipsSerialization, tenant));
+            remedies.Add(ShapeCheckText.UpcasterRemedy);
+        }
+
+        if (state.Remedy is not null)
+        {
+            remedies.Add(state.Remedy);
+        }
+
+        string? reason = stopped is null ? state.Reason : string.Join(" ", new[] { stopReason, state.Reason }.Where(static x => x is { Length: > 0 }));
+
+        return new ShapeCheckResult(
+            eventType,
+            stopped ?? (state.Complete ? ShapeCoverage.Complete : ShapeCoverage.Sampled),
+            now,
+            elapsed,
             state.Examined,
             state.TooLarge,
             state.Lowest,
             state.Highest,
             state.Spread,
             reason,
-            state.Remedy,
+            remedies.Count == 0 ? null : string.Join(" ", remedies),
             state.LeftOut,
-            state.Aggregator.Build(),
-            null,
+            types,
+            rebuild.Count == 0 ? null : string.Join(" ", rebuild),
             null,
             state.Statements);
+    }
 
     private ShapeCheckResult Failed(string subject, RunState state, string reason, long started) =>
         ShapeCheckResult.Failed(
@@ -757,9 +851,31 @@ internal sealed class EventShapeCheckService : IEventShapeCheck
     /// <summary>One key phase 1 read.</summary>
     internal sealed record KeyRow(long Sequence, string? Tenant, long StoredBytes, int Part);
 
+    /// <summary>What a rebuild and the running daemon do about unreadable and unknown events, from <c>StoreOptions</c>.</summary>
+    internal sealed record RebuildPolicy(
+        bool RebuildSkipsUnknown = false,
+        bool DaemonSkipsUnknown = true,
+        bool RebuildSkipsSerialization = false,
+        bool DaemonSkipsSerialization = true);
+
     /// <summary>What a run has read so far, so that a stopped run can still say what it found.</summary>
-    private sealed class RunState
+    internal sealed class RunState
     {
+        /// <summary>What <c>StoreOptions</c> says a rebuild and the daemon do.</summary>
+        public RebuildPolicy Policy { get; set; } = new();
+
+        /// <summary>Whether the alias is mapped: only then do its rows reach Marten's resolver, which registers a type it has to look up.</summary>
+        public bool Mapped { get; set; } = true;
+
+        /// <summary>The assemblies this process has loaded, for classifying an unmapped alias's stored type name without loading anything.</summary>
+        public IReadOnlyDictionary<string, System.Reflection.Assembly>? Loaded { get; set; }
+
+        /// <summary>Whether a failure's tenant is named: each tenant numbers its own events and every tenant is in scope.</summary>
+        public bool NameTenants { get; set; }
+
+        /// <summary>Whether the events table's <c>tenant_id</c> means a tenant: conjoined or tenant-partitioned events.</summary>
+        public bool RealTenants { get; set; }
+
         public ShapeAggregator Aggregator { get; } = new();
 
         public List<ShapeStatement> Statements { get; } = [];

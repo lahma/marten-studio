@@ -57,6 +57,12 @@ internal enum ShapeFailureKind
 
     /// <summary>An event whose type alias no registered type, and no loadable <c>mt_dotnet_type</c>, answers to.</summary>
     UnknownEventType,
+
+    /// <summary>
+    /// An event whose alias no registered type answers to, but whose <c>mt_dotnet_type</c> is a type this process has loaded: Marten would
+    /// read it as that type and register it on its first read. The check never lets it (it would change what the host's store is).
+    /// </summary>
+    UnregisteredEventType,
 }
 
 /// <summary>

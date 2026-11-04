@@ -188,18 +188,14 @@ public abstract class EventShapeCheckLargeLiveTests(EventShapeCheckLargeLiveTest
     {
         ShapeCheckResult result = await CheckAsync("shape_rare", null);
 
+        // 250 events a tenant of a rare type: more than a check reads whole, and found in seconds - by the index on type where there is one, and
+        // by walking the primary key where there is not (its plan is the test below). That the walk can run to the statement timeout on a
+        // table big enough to need it, and says so, is EventShapeCheckLiveTests' forced-timeout test.
         result.Error.Should().BeNull();
-        result.Elapsed.Should().BeLessThan(ShapeCheckLimits.Budget);
-        (result.Coverage is ShapeCoverage.Sampled or ShapeCoverage.Complete or ShapeCoverage.Partial).Should().BeTrue();
-
-        if (data.TypeIndex)
-        {
-            result.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(3), "with the index on type a rare type is as quick as a common one");
-        }
-        else if (result.Coverage == ShapeCoverage.Partial)
-        {
-            result.CoverageReason.Should().Contain("statement timeout");
-        }
+        result.Coverage.Should().Be(ShapeCoverage.Sampled);
+        result.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(3));
+        result.CoverageReason.Should().Be(
+            data.TypeIndex ? (data.Partitioned ? ShapeCheckText.EventsAllTenantsEdgesOnly : null) : ShapeCheckText.NoTypeIndex);
     }
 
     [PostgresFact]
@@ -230,7 +226,7 @@ public abstract class EventShapeCheckLargeLiveTests(EventShapeCheckLargeLiveTest
                 using NpgsqlCommand edges = EventShapeQueries.BuildEdgeKeys(table, type, scope, ShapeCheckLimits.Edge, 30);
                 using NpgsqlCommand spread = EventShapeQueries.BuildSpreadKeys(table, type, scope, [5_000, 9_000], 30);
                 using NpgsqlCommand rows = EventShapeQueries.BuildRows(
-                    table, type, scope, fields, data.Partitioned, [1, 2, 3], [tenant ?? data.Tenants[0], tenant ?? data.Tenants[0], tenant ?? data.Tenants[0]], 30);
+                    table, type, scope, fields, data.Partitioned, [1, 2, 3], [tenant ?? data.Tenants[0], tenant ?? data.Tenants[0], tenant ?? data.Tenants[0]], ShapeCheckLimits.MaxItemBytes, 30);
 
                 string edgePlan = await ExplainAsync(edges);
                 string spreadPlan = await ExplainAsync(spread);
@@ -245,6 +241,11 @@ public abstract class EventShapeCheckLargeLiveTests(EventShapeCheckLargeLiveTest
                 spreadPlan.Should().NotContain("Seq Scan", where);
                 HasSortNode(spreadPlan).Should().BeFalse($"the spread of {where} is an index order:\n{spreadPlan}");
                 rowPlan.Should().NotContain("Seq Scan", where);
+
+                // The text-size guard and the shape_json column read the lateral's one rendering of data::text (the double parentheses
+                // EXPLAIN prints for a reference to a child's column), and do not render the jsonb again.
+                System.Text.RegularExpressions.Regex.Count(rowPlan, @"(?<!\()\(e(_\d+)?\.data\)::text")
+                    .Should().Be(1, $"the jsonb is rendered as text once a row, not once for the guard and once for the column:\n{rowPlan}");
             }
         }
     }

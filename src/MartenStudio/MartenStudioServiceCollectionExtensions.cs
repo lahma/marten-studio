@@ -180,6 +180,7 @@ public static partial class MartenStudioServiceCollectionExtensions
         // 1.2-SHAPE: the shape check - a plain read under the store policy, one check per resolved scope and subject per five
         // minutes across circuits.
         services.TryAddSingleton<ShapeCheckCache>();
+        services.TryAddSingleton<EventTypeListingCache>();
         services.TryAddScoped<IDocumentShapeCheck, DocumentShapeCheckService>();
         services.TryAddScoped<IEventShapeCheck, EventShapeCheckService>();
         services.TryAddScoped<ISchemaDataService, SchemaDataService>();

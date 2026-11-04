@@ -248,6 +248,52 @@ public class EventShapePanelTests
     }
 
     [Fact]
+    public async Task With_the_index_a_click_that_runs_past_its_minute_stops_and_says_press_again_and_the_next_press_continues_without_forcing()
+    {
+        ManualClock clock = new(new DateTimeOffset(2026, 11, 4, 10, 0, 0, TimeSpan.Zero));
+        (StudioComponentContext context, FakeEventShapeCheck check) = await RigAsync(clock, ["OrderPlaced", "OrderShipped", "OrderPaid"]);
+        using (context)
+        {
+            check.Indexed = true;
+            check.OnCall = () => clock.Advance(TimeSpan.FromSeconds(40));
+            IRenderedComponent<EventTypes> page = context.Render<EventTypes>();
+
+            await ClickAsync(page, "Check shapes");
+
+            page.WaitForAssertion(() => page.Markup.Should().Contain("Checked 2 of 3 types; press again for the rest."));
+            check.Calls.Select(static x => x.Name).Should().Equal("OrderPlaced", "OrderShipped");
+            Button(page, "Check again")!.HasAttribute("disabled").Should().BeFalse("the press that continues is offered at once");
+
+            check.OnCall = null;
+            await ClickAsync(page, "Check again");
+
+            page.WaitForAssertion(() => check.Calls.Select(static x => x.Name).Should().Equal("OrderPlaced", "OrderShipped", "OrderPlaced", "OrderShipped", "OrderPaid"));
+            check.Calls.Skip(2).Should().OnlyContain(static x => !x.Force, "the types already reached are cached: the press continues, it does not force");
+            page.Markup.Should().NotContain("press again for the rest");
+        }
+    }
+
+    [Fact]
+    public async Task Without_the_index_the_counts_come_first_empty_types_cost_no_call_and_the_minute_ends_with_the_remedy()
+    {
+        ManualClock clock = new(new DateTimeOffset(2026, 11, 4, 10, 0, 0, TimeSpan.Zero));
+        (StudioComponentContext context, FakeEventShapeCheck check) = await RigAsync(clock, ["A", "B", "C", "D"]);
+        using (context)
+        {
+            check.Indexed = false;
+            check.OnCall = () => clock.Advance(TimeSpan.FromSeconds(40));
+            IRenderedComponent<EventTypes> page = context.Render<EventTypes>();
+
+            await ClickAsync(page, "Check shapes");
+
+            // The page never counted, so the panel read the (cached) listing: B has no events, and is not sent to the check.
+            page.WaitForAssertion(() => page.Markup.Should().Contain("Checked 3 of 4 types; the rest need the index on type to be checked quickly"));
+            page.Find(".ms-shape-panel").TextContent.Should().Contain("opts.Events.EnableEventTypeIndex = true;");
+            check.Calls.Select(static x => x.Name).Should().Equal("A", "C");
+        }
+    }
+
+    [Fact]
     public async Task Close_removes_the_panel()
     {
         (StudioComponentContext context, _) = await RigAsync("OrderPlaced");
@@ -323,10 +369,19 @@ public class EventShapePanelTests
 
         public List<StudioScope> Scopes { get; } = [];
 
+        /// <summary>Whether the store has the index on type.</summary>
+        public bool Indexed { get; set; } = true;
+
+        /// <summary>Run at every call, before it answers: a test moves its clock here.</summary>
+        public Action? OnCall { get; set; }
+
+        public Task<bool> HasTypeIndexAsync(StudioScope scope, CancellationToken cancellationToken) => Task.FromResult(Indexed);
+
         public Task<ShapeCheckResult> CheckAsync(StudioScope scope, string eventTypeName, bool force, CancellationToken cancellationToken)
         {
             Calls.Add((eventTypeName, force));
             Scopes.Add(scope);
+            OnCall?.Invoke();
 
             if (Gate is { } gate && string.Equals(GateFor, eventTypeName, StringComparison.Ordinal))
             {

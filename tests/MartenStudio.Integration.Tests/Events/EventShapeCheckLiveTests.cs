@@ -6,6 +6,7 @@ using Marten;
 using MartenStudio.Internal.Sql;
 using MartenStudio.Services;
 using MartenStudio.Services.Events;
+using MartenStudio.Services.Health.Checks;
 using MartenStudio.Services.Shapes;
 
 using Microsoft.Extensions.DependencyInjection;
@@ -92,6 +93,14 @@ public class EventShapeCheckLiveTests(EventShapeCheckLiveTests.Fixture fixture)
                 await InsertAsync(
                     connection, Schema, stream, 110 + i, "shape_order_old", typeof(ShapeOrderOld).FullName + ", " + typeof(ShapeOrderOld).Assembly.GetName().Name,
                     $"{{\"Total\":{i + 1},\"Extra\":\"{Sentinel}\"}}", null, token);
+            }
+
+            // An alias no mapping answers to, whose stored .NET type this process has loaded: Marten would register it on first read.
+            for (int i = 0; i < 3; i++)
+            {
+                await InsertAsync(
+                    connection, Schema, stream, 130 + i, "loadable_v1", typeof(ShapeLoadable).FullName + ", " + typeof(ShapeLoadable).Assembly.GetName().Name,
+                    $"{{\"Total\":{i},\"Extra\":\"{Sentinel}\"}}", null, token);
             }
 
             for (int i = 0; i < 2; i++)
@@ -243,6 +252,102 @@ public class EventShapeCheckLiveTests(EventShapeCheckLiveTests.Fixture fixture)
     }
 
     [PostgresFact]
+    public async Task An_unmapped_alias_whose_dotnet_type_is_loaded_is_classified_and_never_registered_on_the_hosts_store()
+    {
+        var events = Store.Options.Events;
+        string[] before = [.. events.AllKnownEventTypes().Select(static x => x.EventTypeName).Order(StringComparer.Ordinal)];
+        Func<string, bool> known = EventHealth.KnownAliases(events)!;
+
+        known("loadable_v1").Should().BeFalse("the arrangement: nothing maps this alias");
+
+        ShapeCheckResult result = await CheckAsync("loadable_v1");
+
+        result.Error.Should().BeNull();
+        result.Examined.Should().Be(3);
+
+        ShapeTypeResult type = result.Types.Should().ContainSingle().Subject;
+        ShapeFailureGroup failure = type.Failures.Should().ContainSingle().Subject;
+
+        failure.Kind.Should().Be(ShapeFailureKind.UnregisteredEventType);
+        failure.Count.Should().Be(3);
+        failure.Detail.Should().StartWith("loadable_v1 / " + typeof(ShapeLoadable).FullName);
+        type.Members.Should().BeEmpty("their members are not compared");
+        result.RebuildSentence.Should().BeNull("Marten would read them as the loaded type: a rebuild does not stop");
+
+        // The point: a press registered nothing. E05's own predicate still calls the alias unmapped, and the registered types are as they were.
+        events.AllKnownEventTypes().Select(static x => x.EventTypeName).Order(StringComparer.Ordinal).Should().Equal(before);
+        EventHealth.KnownAliases(events)!("loadable_v1").Should().BeFalse();
+        JsonSerializer.Serialize(result).Should().NotContain(Sentinel);
+    }
+
+    [PostgresFact]
+    public async Task The_counted_listing_is_one_read_shared_by_every_circuit_and_by_the_check()
+    {
+        using MartenFixture.ScopedService<IEventDataService> circuitA = Marten.Resolve<IEventDataService>();
+        EventTypeList first = await circuitA.Service.ListEventTypesAsync(Scope, withCounts: true, Token);
+
+        // Another circuit's own scoped service, and the check's name validation, are handed the listing the first one read.
+        using MartenFixture.ScopedService<IEventDataService> circuitB = Marten.Resolve<IEventDataService>();
+        EventTypeList second = await circuitB.Service.ListEventTypesAsync(Scope, withCounts: true, Token);
+
+        first.Error.Should().BeNull();
+        second.Should().BeSameAs(first);
+
+        // The uncounted listing is the registered types alone and is never shared.
+        (await circuitB.Service.ListEventTypesAsync(Scope, withCounts: false, Token)).CountsLoaded.Should().BeFalse();
+    }
+
+    [PostgresFact]
+    public async Task An_unmapped_alias_whose_dotnet_type_cannot_be_loaded_never_reaches_the_resolver_either()
+    {
+        var events = Store.Options.Events;
+
+        await CheckAsync("order_placed_v1");
+
+        EventHealth.KnownAliases(events)!("order_placed_v1").Should().BeFalse();
+        events.AllKnownEventTypes().Select(static x => x.EventTypeName).Should().NotContain("order_placed_v1");
+    }
+
+    [PostgresFact]
+    public async Task A_statement_that_runs_past_its_timeout_without_the_index_keeps_the_reason_and_the_remedy()
+    {
+        using IServiceScope scope = Services.CreateScope();
+        IServiceProvider provider = scope.ServiceProvider;
+
+        EventShapeCheckService service = new(
+            provider.GetRequiredService<IOptions<MartenStudioOptions>>(),
+            provider.GetRequiredService<StudioScopeResolver>(),
+            provider.GetRequiredService<ColumnCatalog>(),
+            provider.GetRequiredService<IndexCatalog>(),
+            provider.GetRequiredService<IEventDataService>(),
+            new ShapeCheckCache(),
+            NullLogger<EventShapeCheckService>.Instance)
+        {
+            StatementTimeoutOverride = TimeSpan.FromMilliseconds(300),
+        };
+
+        // The catalogs are cached from a first, unlocked check: only the check's own statements are then left to wait on the lock.
+        (await service.CheckAsync(Scope, "shape_order", false, Token)).Error.Should().BeNull();
+
+        // The events table is locked by someone else, so the first statement waits until PostgreSQL's own statement_timeout ends it.
+        await using NpgsqlConnection locker = await Postgres.OpenAsync(Token);
+        await using NpgsqlTransaction transaction = await locker.BeginTransactionAsync(Token);
+        await using (NpgsqlCommand lockCommand = new($"lock table {EventsTable(Schema)} in access exclusive mode", locker, transaction))
+        {
+            await lockCommand.ExecuteNonQueryAsync(Token);
+        }
+
+        ShapeCheckResult result = await service.CheckAsync(Scope, "shape_bulk", false, Token);
+
+        await transaction.RollbackAsync(Token);
+
+        result.Error.Should().BeNull();
+        result.Coverage.Should().Be(ShapeCoverage.Partial);
+        result.CoverageReason.Should().Contain("statement timeout").And.Contain(ShapeCheckText.NoTypeIndex);
+        result.Remedy.Should().Contain(ShapeCheckText.TypeIndexRemedy);
+    }
+
+    [PostgresFact]
     public async Task A_budget_that_has_run_out_gives_a_partial_result_and_not_a_throw()
     {
         using IServiceScope scope = Services.CreateScope();
@@ -285,6 +390,12 @@ public sealed class ShapeOrderPlaced
     public decimal Total { get; set; }
 
     public string Note { get; set; } = string.Empty;
+}
+
+/// <summary>A loadable event type no store registers: what an unmapped alias's stored .NET type names.</summary>
+public sealed class ShapeLoadable
+{
+    public decimal Total { get; set; }
 }
 
 /// <summary>The old shape an upcaster maps.</summary>

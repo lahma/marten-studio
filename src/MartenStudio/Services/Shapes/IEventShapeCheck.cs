@@ -13,4 +13,13 @@ internal interface IEventShapeCheck
     /// <param name="force">Run again, once the cached result is older than <see cref="ShapeCheckLimits.RecheckAfter" />.</param>
     /// <param name="cancellationToken">Cancels the caller's wait, never the shared work.</param>
     Task<ShapeCheckResult> CheckAsync(StudioScope scope, string eventTypeName, bool force, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Whether <c>mt_events</c> has an index leading with <c>type</c> (<c>opts.Events.EnableEventTypeIndex</c>), read from the catalog
+    /// under the store policy. Without one a check of a rare type walks the primary key, and a click over many types needs a bound.
+    /// Unknown (no table, no connection) is answered <see langword="true" />: the caller's bound is then the gentler one.
+    /// </summary>
+    /// <param name="scope">The scope; resolved under the store policy before anything else.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    Task<bool> HasTypeIndexAsync(StudioScope scope, CancellationToken cancellationToken);
 }

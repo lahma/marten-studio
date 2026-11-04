@@ -130,6 +130,12 @@ internal static class ShapeCheckText
                     : ", and the row names no .NET type to load";
 
                 return $"{Of(failure.Count, examined)} `{typeName}` events cannot be read: no type is registered for `{names[0]}`{dotNet}.";
+            case ShapeFailureKind.UnregisteredEventType:
+                string[] stored = (failure.Detail ?? string.Empty).Split(" / ", 2);
+                string clr = stored.Length > 1 ? ClrName(stored[1]) : "a loaded type";
+
+                return $"{Of(failure.Count, examined)} `{typeName}` events have no registered type, but `{stored.ElementAtOrDefault(1)}` is loaded: Marten would read these as `{clr}` "
+                    + $"and register it on first read; register it with `opts.Events.AddEventType<{clr}>()`. Their members are not compared.";
             case ShapeFailureKind.ReadAsNothing:
                 return $"{head} are read as nothing at all: projections never see them.";
             case ShapeFailureKind.NotWritable:
@@ -145,14 +151,30 @@ internal static class ShapeCheckText
         }
     }
 
+    /// <summary>The short name of the type a stored <c>mt_dotnet_type</c> ("Shop.Orders.OrderPlaced, Shop") names.</summary>
+    private static string ClrName(string stored)
+    {
+        int comma = stored.LastIndexOf(", ", StringComparison.Ordinal);
+        string full = comma > 0 ? stored[..comma] : stored;
+        int dot = full.LastIndexOf('.');
+
+        return dot >= 0 ? full[(dot + 1)..] : full;
+    }
+
+    private static string At(long? firstSequence, string? firstTenant) =>
+        firstSequence is { } sequence
+            ? $"stops at sequence {sequence.ToString("N0", CultureInfo.InvariantCulture)}{(firstTenant is null ? string.Empty : $" (tenant {firstTenant})")}, the first of them, "
+            : "stops at the first of them, ";
+
     /// <summary>What a rebuild and the running daemon do about the events that cannot be deserialized.</summary>
     /// <param name="typeName">The event type.</param>
     /// <param name="firstSequence">The lowest sequence of a failing event.</param>
     /// <param name="rebuildSkips"><c>Projections.RebuildErrors.SkipSerializationErrors</c>.</param>
     /// <param name="daemonSkips"><c>Projections.Errors.SkipSerializationErrors</c>.</param>
-    public static string RebuildSerialization(string typeName, long? firstSequence, bool rebuildSkips, bool daemonSkips)
+    /// <param name="firstTenant">The tenant of that event, named when each tenant numbers its own events and every tenant is in scope.</param>
+    public static string RebuildSerialization(string typeName, long? firstSequence, bool rebuildSkips, bool daemonSkips, string? firstTenant = null)
     {
-        string at = firstSequence is { } sequence ? $"stops at sequence {sequence.ToString("N0", CultureInfo.InvariantCulture)}, the first of them, " : "stops at the first of them, ";
+        string at = At(firstSequence, firstTenant);
 
         string rebuild = rebuildSkips
             ? "A rebuild skips them and records each as a dead letter (`RebuildErrors.SkipSerializationErrors` is on): its projections leave them out."
@@ -169,9 +191,10 @@ internal static class ShapeCheckText
     /// <param name="firstSequence">The lowest sequence of a failing event.</param>
     /// <param name="rebuildSkips"><c>Projections.RebuildErrors.SkipUnknownEvents</c>.</param>
     /// <param name="daemonSkips"><c>Projections.Errors.SkipUnknownEvents</c>.</param>
-    public static string RebuildUnknown(long? firstSequence, bool rebuildSkips, bool daemonSkips)
+    /// <param name="firstTenant">The tenant of that event, named when each tenant numbers its own events and every tenant is in scope.</param>
+    public static string RebuildUnknown(long? firstSequence, bool rebuildSkips, bool daemonSkips, string? firstTenant = null)
     {
-        string at = firstSequence is { } sequence ? $"stops at sequence {sequence.ToString("N0", CultureInfo.InvariantCulture)}, the first of them, " : "stops at the first of them, ";
+        string at = At(firstSequence, firstTenant);
 
         string rebuild = rebuildSkips
             ? "A rebuild skips them (`RebuildErrors.SkipUnknownEvents` is on): its projections leave them out."

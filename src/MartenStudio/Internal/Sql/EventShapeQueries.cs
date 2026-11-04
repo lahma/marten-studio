@@ -195,6 +195,7 @@ internal static partial class EventShapeQueries
     /// <param name="perTenantSequences">Whether <c>seq_id</c> is per tenant (<c>UseTenantPartitionedEvents</c>): then a key is (tenant, sequence).</param>
     /// <param name="sequences">The sequences phase 1 read.</param>
     /// <param name="tenants">Each sequence's tenant, parallel to <paramref name="sequences" />.</param>
+    /// <param name="maxItemBytes">The largest event text read: a row over it is not returned, and the caller counts it as too large.</param>
     /// <param name="commandTimeoutSeconds">The command timeout.</param>
     /// <exception cref="InvalidOperationException">A select field is not a plain column name the builder can quote.</exception>
     public static NpgsqlCommand BuildRows(
@@ -205,6 +206,7 @@ internal static partial class EventShapeQueries
         bool perTenantSequences,
         IReadOnlyList<long> sequences,
         IReadOnlyList<string?> tenants,
+        int maxItemBytes,
         int commandTimeoutSeconds)
     {
         ArgumentNullException.ThrowIfNull(table);
@@ -241,10 +243,16 @@ internal static partial class EventShapeQueries
                 sql.Append(Alias + ".").Append(SqlIdentifier.Quote(field)).Append(", ");
             }
 
-            sql.Append(Alias + ".\"data\"::text as shape_json\n");
+            sql.Append("t.j as shape_json\n");
             sql.Append("from ").Append(table.QualifiedEvents).Append(" as " + Alias + "\n");
+
+            // "offset 0" keeps the planner from pulling the subquery up: inlined, e.data::text is computed once for the guard and once for
+            // the column, and rendering a jsonb as text is the costly thing here. A binary event's data is null, so its text is too.
+            sql.Append("cross join lateral (select " + Alias + ".\"data\"::text as j offset 0) as t\n");
             sql.Append("where true\n");
             sql.Append(predicates);
+            sql.Append("      and (t.j is null or octet_length(t.j) <= ")
+                .Append(parameters.Add(NpgsqlDbType.Integer, maxItemBytes, "maxBytes")).Append(")\n");
 
             if (perTenantSequences && scope.TenantId is null && table.HasTenantId)
             {

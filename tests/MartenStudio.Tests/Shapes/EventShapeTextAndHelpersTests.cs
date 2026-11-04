@@ -65,6 +65,54 @@ public class EventShapeTextAndHelpersTests
     }
 
     [Fact]
+    public void Under_per_tenant_sequences_the_first_failure_names_its_tenant()
+    {
+        ShapeCheckText.RebuildSerialization("OrderPlaced", 1042, false, true, "acme").Should().StartWith(
+            "A rebuild of a projection that reads `OrderPlaced` stops at sequence 1,042 (tenant acme), the first of them, because");
+        ShapeCheckText.RebuildUnknown(7, false, true, "globex").Should().Contain("stops at sequence 7 (tenant globex), the first of them");
+    }
+
+    [Fact]
+    public void An_unregistered_alias_whose_dotnet_type_is_loaded_says_marten_would_register_it_and_what_to_do()
+    {
+        ShapeFailureGroup failure = new(
+            ShapeFailureKind.UnregisteredEventType, "UnknownEventTypeException", null, null, "order_placed_v1 / Shop.Orders.OrderPlaced, Shop", 4, Key, 7);
+
+        ShapeCheckText.EventFailure(failure, 4, "order_placed_v1").Should().Be(
+            "4 of 4 `order_placed_v1` events have no registered type, but `Shop.Orders.OrderPlaced, Shop` is loaded: Marten would read these as `OrderPlaced` "
+            + "and register it on first read; register it with `opts.Events.AddEventType<OrderPlaced>()`. Their members are not compared.");
+    }
+
+    [Fact]
+    public void A_stopped_run_keeps_the_index_reason_the_remedy_and_the_rebuild_sentence_for_what_it_found()
+    {
+        EventShapeCheckService.RunState state = new()
+        {
+            Reason = ShapeCheckText.NoTypeIndex,
+            Remedy = ShapeCheckText.TypeIndexRemedy,
+            NameTenants = true,
+            Examined = 5,
+        };
+
+        state.Aggregator.Add("shape_order", null, new ShapeItemKey("s", "acme", 42, 3), ShapeFailureDescriber.Of(ShapeFailureKind.Unreadable, "JsonException"), []);
+
+        ShapeCheckResult result = EventShapeCheckService.Compose(
+            "shape_order", state, DateTimeOffset.UnixEpoch, TimeSpan.FromSeconds(5), ShapeCoverage.Partial, ShapeCheckText.StatementTimedOut(TimeSpan.FromSeconds(5)));
+
+        result.Coverage.Should().Be(ShapeCoverage.Partial);
+        result.CoverageReason.Should().Be(ShapeCheckText.StatementTimedOut(TimeSpan.FromSeconds(5)) + " " + ShapeCheckText.NoTypeIndex);
+        result.Remedy.Should().Be(ShapeCheckText.UpcasterRemedy + " " + ShapeCheckText.TypeIndexRemedy);
+        result.RebuildSentence.Should().Contain("stops at sequence 42 (tenant acme)");
+
+        EventShapeCheckService.RunState quiet = new() { Reason = ShapeCheckText.NoTypeIndex, Remedy = ShapeCheckText.TypeIndexRemedy };
+        ShapeCheckResult nothingFound = EventShapeCheckService.Compose(
+            "shape_order", quiet, DateTimeOffset.UnixEpoch, TimeSpan.Zero, ShapeCoverage.Partial, "the budget ran out.");
+
+        nothingFound.Remedy.Should().Be(ShapeCheckText.TypeIndexRemedy);
+        nothingFound.RebuildSentence.Should().BeNull();
+    }
+
+    [Fact]
     public void The_other_event_sentences()
     {
         ShapeCheckText.EventsReadAsOtherType(80, 200, "OrderPlaced").Should().Be(

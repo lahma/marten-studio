@@ -43,6 +43,9 @@ internal static class ShapeCheckLimits
     /// <summary>The wall budget of one check; past it the result is partial, never a throw.</summary>
     public static readonly TimeSpan Budget = TimeSpan.FromSeconds(15);
 
+    /// <summary>The wall bound of one click of Event types › Check shapes over every type: past it the loop ends and says how far it got.</summary>
+    public static readonly TimeSpan ClickBudget = TimeSpan.FromSeconds(60);
+
     /// <summary>How long a result is served: the <c>BoundedData</c> tier's five minutes.</summary>
     public static readonly TimeSpan TimeToLive = TimeSpan.FromMinutes(5);
 

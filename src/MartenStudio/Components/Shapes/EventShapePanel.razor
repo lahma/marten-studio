@@ -4,6 +4,7 @@
 @using PostgresStudio.Components.Shared
 @implements IDisposable
 @inject IEventShapeCheck Check
+@inject IEventDataService EventData
 @inject StudioState State
 @inject IOptions<MartenStudioOptions> Options
 @inject NavigationManager Navigation
@@ -52,6 +53,11 @@
     @if (entries.Count > 0)
     {
         <p class="ms-shape-summary" role="status">@Summary</p>
+
+        @if (stoppedNote is { Length: > 0 })
+        {
+            <p class="ms-shape-note" role="status">@Text(stoppedNote)</p>
+        }
 
         @foreach (Entry entry in entries.Where(static x => x.HasProblem))
         {
@@ -111,6 +117,9 @@
     private string? problem;
     private bool running;
 
+    // Why the last click stopped before the end of the list, or null: the click's own bound (ShapeCheckLimits.ClickBudget) ran out.
+    private string? stoppedNote;
+
     // The scope the last run used: links to examples are built from it, never from whatever scope is active when this renders.
     private StudioScope? ranScope;
     private ITimer? recheckTimer;
@@ -138,7 +147,8 @@
         .Select(static x => (DateTimeOffset?) x.Result.RecheckAt)
         .Min();
 
-    private bool RecheckDisabled => !running && NextRecheck is { } at && clock.GetUtcNow() < at;
+    // A click that stopped early offers its next press at once: the types it did reach are cached, and it continues with the rest.
+    private bool RecheckDisabled => !running && stoppedNote is null && NextRecheck is { } at && clock.GetUtcNow() < at;
 
     private string? RecheckTitle => RecheckDisabled && NextRecheck is { } at
         ? ShapeCheckText.AvailableAt(State.FormatInSelectedTimeZone(at, "HH:mm:ss"))
@@ -164,7 +174,7 @@
         return RunAsync(force: false);
     }
 
-    private Task CheckAgainAsync() => RunAsync(force: true);
+    private Task CheckAgainAsync() => RunAsync(force: stoppedNote is null);
 
     private Task CloseAsync() => OnClose.InvokeAsync();
 
@@ -194,16 +204,42 @@
         problem = null;
         ranScope = scope;
         entries.Clear();
+        stoppedNote = null;
         recheckTimer?.Dispose();
         recheckTimer = null;
 
         try
         {
+            DateTimeOffset begun = clock.GetUtcNow();
+
+            // Without the index on type, a rare type's check walks the primary key: the counts come first (the page's, or the same cached
+            // listing), so a type with no events costs no call at all.
+            bool indexed = await Check.HasTypeIndexAsync(scope, token);
+            IReadOnlyDictionary<string, long> counts = Counts;
+
+            if (!indexed && counts.Count == 0)
+            {
+                EventTypeList listing = await EventData.ListEventTypesAsync(scope, withCounts: true, token);
+
+                if (listing.Error is null)
+                {
+                    counts = listing.Types.Where(static x => x.Count is not null).ToDictionary(static x => x.Name, static x => x.Count!.Value, StringComparer.Ordinal);
+                }
+            }
+
             foreach (string name in TypeNames)
             {
                 token.ThrowIfCancellationRequested();
 
-                ShapeCheckResult result = Counts.TryGetValue(name, out long count) && count == 0
+                if (entries.Count > 0 && clock.GetUtcNow() - begun >= ShapeCheckLimits.ClickBudget)
+                {
+                    stoppedNote = indexed
+                        ? $"Checked {entries.Count} of {TypeNames.Count} types; press again for the rest."
+                        : $"Checked {entries.Count} of {TypeNames.Count} types; the rest need the index on type to be checked quickly (`{ShapeCheckText.TypeIndexRemedy}`).";
+                    break;
+                }
+
+                ShapeCheckResult result = counts.TryGetValue(name, out long count) && count == 0
                     ? ShapeCheckResult.NotChecked(name, ShapeCheckText.NoEventsInScope, clock.GetUtcNow())
                     : await Check.CheckAsync(scope, name, force, token);
 

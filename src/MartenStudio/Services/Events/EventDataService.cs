@@ -104,6 +104,7 @@ internal sealed partial class EventDataService : IEventDataService
     private readonly DatabaseReachAuthorization reach;
     private readonly DeadLetterGroupCache groups;
     private readonly EventFlowCache flows;
+    private readonly EventTypeListingCache listings;
 
     public EventDataService(
         StudioScopeResolver resolver,
@@ -117,8 +118,10 @@ internal sealed partial class EventDataService : IEventDataService
         StudioLogThrottle throttle,
         ILogger<EventDataService> logger,
         DeadLetterGroupCache groups,
-        EventFlowCache flows)
+        EventFlowCache flows,
+        EventTypeListingCache listings)
     {
+        this.listings = listings;
         this.resolver = resolver;
         this.capabilities = capabilities;
         this.audit = audit;
@@ -689,10 +692,39 @@ internal sealed partial class EventDataService : IEventDataService
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// The counted listing is shared per resolved scope for half a minute (<see cref="EventTypeListingCache" />): the page's "Load counts" and
+    /// the shape check read the same <c>group by type</c> once. The scope is resolved under the store policy first, on every call.
+    /// </remarks>
     public async Task<EventTypeList> ListEventTypesAsync(
         StudioScope scope,
         bool withCounts,
         CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+
+        if (!withCounts)
+        {
+            return await ReadEventTypesAsync(scope, withCounts, cancellationToken).ConfigureAwait(false);
+        }
+
+        try
+        {
+            ResolvedScope resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
+
+            return await listings.GetAsync(resolved, scope, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (IsReadFailure(exception))
+        {
+            return EventTypeList.Failed(Describe(scope, exception, "list the event types"));
+        }
+    }
+
+    /// <summary>The listing itself, read now: what <see cref="EventTypeListingCache" /> shares.</summary>
+    internal async Task<EventTypeList> ReadEventTypesAsync(
+        StudioScope scope,
+        bool withCounts,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(scope);
 

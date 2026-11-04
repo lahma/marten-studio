@@ -45,7 +45,7 @@ public class EventShapeQueriesTests
         using NpgsqlCommand complete = EventShapeQueries.BuildCompleteKeys(table, "order_placed", scope, 200, 10);
         using NpgsqlCommand edges = EventShapeQueries.BuildEdgeKeys(table, "order_placed", scope, 25, 10);
         using NpgsqlCommand spread = EventShapeQueries.BuildSpreadKeys(table, "order_placed", scope, [10, 20], 10);
-        using NpgsqlCommand rows = EventShapeQueries.BuildRows(table, "order_placed", scope, MartenFields, false, [1, 2], [null, null], 10);
+        using NpgsqlCommand rows = EventShapeQueries.BuildRows(table, "order_placed", scope, MartenFields, false, [1, 2], [null, null], 262144, 10);
 
         return [probe.CommandText, complete.CommandText, edges.CommandText, spread.CommandText, rows.CommandText];
     }
@@ -126,10 +126,10 @@ public class EventShapeQueriesTests
     public void The_rows_start_with_martens_select_list_unaltered_and_end_with_the_studios_one_column()
     {
         using NpgsqlCommand rows = EventShapeQueries.BuildRows(
-            Table(tenant: true), "t", new EventShapeQueries.EventScope("acme", false), MartenFields, false, [1, 2], ["acme", "acme"], 10);
+            Table(tenant: true), "t", new EventShapeQueries.EventScope("acme", false), MartenFields, false, [1, 2], ["acme", "acme"], 262144, 10);
 
         string select = rows.CommandText[..rows.CommandText.IndexOf("\nfrom", StringComparison.Ordinal)];
-        string expected = "select " + string.Join(", ", MartenFields.Select(static x => "e.\"" + x + "\"")) + ", e.\"data\"::text as shape_json";
+        string expected = "select " + string.Join(", ", MartenFields.Select(static x => "e.\"" + x + "\"")) + ", t.j as shape_json";
 
         select.Should().Be(expected);
         rows.CommandText.Should().Contain("e.\"seq_id\" = any(@seqs)").And.Contain("order by e.\"seq_id\"");
@@ -137,10 +137,22 @@ public class EventShapeQueriesTests
     }
 
     [Fact]
+    public void The_rows_have_a_text_size_guard_over_a_lateral_that_renders_the_json_once()
+    {
+        using NpgsqlCommand rows = EventShapeQueries.BuildRows(
+            Table(), "t", new EventShapeQueries.EventScope(null, false), MartenFields, false, [1], [null], 4096, 10);
+
+        rows.CommandText.Should().Contain("cross join lateral (select e.\"data\"::text as j offset 0) as t")
+            .And.Contain("octet_length(t.j) <= @maxBytes");
+        rows.Parameters["maxBytes"].Value.Should().Be(4096);
+        rows.CommandText.Split("\"data\"::text").Length.Should().Be(2, "the jsonb is rendered as text in one place");
+    }
+
+    [Fact]
     public void A_select_field_that_is_not_a_plain_column_is_refused()
     {
         FluentActions.Invoking(() => EventShapeQueries.BuildRows(
-                Table(), "t", new EventShapeQueries.EventScope(null, false), ["data", "id; drop table x"], false, [1], [null], 10))
+                Table(), "t", new EventShapeQueries.EventScope(null, false), ["data", "id; drop table x"], false, [1], [null], 262144, 10))
             .Should().Throw<InvalidOperationException>();
     }
 
@@ -150,11 +162,11 @@ public class EventShapeQueriesTests
         EventTableInfo table = Table(tenant: true);
 
         using NpgsqlCommand partitionedAll = EventShapeQueries.BuildRows(
-            table, "t", new EventShapeQueries.EventScope(null, false), MartenFields, true, [1, 1], ["a", "b"], 10);
+            table, "t", new EventShapeQueries.EventScope(null, false), MartenFields, true, [1, 1], ["a", "b"], 262144, 10);
         using NpgsqlCommand partitionedOne = EventShapeQueries.BuildRows(
-            table, "t", new EventShapeQueries.EventScope("a", false), MartenFields, true, [1, 2], ["a", "a"], 10);
+            table, "t", new EventShapeQueries.EventScope("a", false), MartenFields, true, [1, 2], ["a", "a"], 262144, 10);
         using NpgsqlCommand conjoinedAll = EventShapeQueries.BuildRows(
-            table, "t", new EventShapeQueries.EventScope(null, false), MartenFields, false, [1, 2], ["a", "b"], 10);
+            table, "t", new EventShapeQueries.EventScope(null, false), MartenFields, false, [1, 2], ["a", "b"], 262144, 10);
 
         partitionedAll.CommandText.Should().Contain("(e.\"tenant_id\", e.\"seq_id\") in (select * from unnest(@tenants, @seqs))");
         partitionedAll.Parameters["tenants"].Value.Should().BeOfType<string[]>();

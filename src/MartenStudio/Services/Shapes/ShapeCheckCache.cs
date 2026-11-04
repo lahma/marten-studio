@@ -144,24 +144,6 @@ internal sealed class ShapeCheckCache
             cancellationToken);
     }
 
-    /// <summary>
-    /// The event type names this scope's events table holds besides the ones the store registers, read by <paramref name="read" /> at most
-    /// once per five minutes per resolved scope: what an event check validates a name against before it reaches the check's cache or any
-    /// statement. A read that throws is not kept.
-    /// </summary>
-    /// <param name="resolved">The scope as it resolved.</param>
-    /// <param name="read">The read: the Event types page's own listing.</param>
-    /// <param name="cancellationToken">Cancels this caller's wait.</param>
-    public Task<IReadOnlySet<string>> EventTypeNamesAsync(
-        ResolvedScope resolved,
-        Func<CancellationToken, Task<IReadOnlySet<string>>> read,
-        CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(read);
-
-        return cache.GetAsync(KeyOf(resolved, "event-type-names", string.Empty), read, cancellationToken);
-    }
-
     private void Remember(string key, DateTimeOffset at)
     {
         finished[key] = at;
