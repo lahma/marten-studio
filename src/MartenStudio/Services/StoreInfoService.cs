@@ -335,7 +335,9 @@ internal sealed class StoreInfoService : IStoreInfoService
             LogLevel level = throttle.WarningOrDebug("Store.Databases", storeKey, null, StudioLogThrottle.KindOf(exception));
             logger.StoreDatabasesUnreadable(level, exception, storeKey);
 
-            return [new DatabaseOverview(string.Empty, string.Empty, string.Empty, [], exception.Message)];
+            // The host's own sentence, said escaped and bounded - and Postgres' words withheld (StudioHostFailure): this card is on the
+            // Overview and the Stores page, whose visitor may not see every schema a Postgres message can name.
+            return [new DatabaseOverview(string.Empty, string.Empty, string.Empty, [], StudioHostFailure.Words(exception))];
         }
     }
 

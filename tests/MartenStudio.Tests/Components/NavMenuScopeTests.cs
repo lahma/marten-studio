@@ -61,6 +61,20 @@ public class NavMenuScopeTests
     }
 
     [Fact]
+    public async Task One_listed_store_and_one_whose_databases_could_not_be_listed_are_two_stores()
+    {
+        await using StudioComponentContext context = new();
+        context.Catalog
+            .WithStore("default", "Default", databaseIdentities: "localhost.marten")
+            .WithUnlistableStore("master", "Master table store");
+        await context.State.EnsureInitializedAsync(Token);
+
+        IRenderedComponent<NavMenu> nav = context.Render<NavMenu>();
+
+        nav.FindAll("a.ms-nav-link .ms-nav-link-text").Select(static x => x.TextContent.Trim()).Should().Contain("Stores");
+    }
+
+    [Fact]
     public void The_stores_entry_carries_a_scope_condition_and_the_overview_does_not()
     {
         StudioNavItem[] items = [.. MartenStudioDescriptor.Instance.Navigation.SelectMany(static x => x.Items)];

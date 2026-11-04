@@ -8,6 +8,22 @@ namespace PostgresStudio.Services;
 /// <summary>One source as the picker offers it.</summary>
 internal sealed record StoreListing(string Key, string DisplayName, StoreAvailability Availability);
 
+/// <summary>
+/// The sources the visitor may see, in the two groups the studio keeps apart (1.2): the ones the picker offers, and the ones whose
+/// databases could not be listed.
+/// </summary>
+/// <param name="Listed">Every source the visitor may see, unavailable ones included and marked.</param>
+/// <param name="Unlistable">
+/// Sources that built and whose databases could not be listed (an unreachable master database), and that the source policy passes
+/// for the source as a whole. Not selectable - there is no database to select - but known, so a page that names the sources can
+/// say so rather than let the source vanish.
+/// </param>
+internal sealed record StoreListings(IReadOnlyList<StoreListing> Listed, IReadOnlyList<StoreListing> Unlistable)
+{
+    /// <summary>No source at all.</summary>
+    public static StoreListings None { get; } = new([], []);
+}
+
 /// <summary>One database as the picker offers it. The key is the database's stable identity, never a connection string.</summary>
 internal sealed record DatabaseListing(string Identity, string Name, string Server);
 
@@ -41,8 +57,8 @@ internal sealed record StoreScopeFacts(
 /// </remarks>
 internal interface IStudioScopeCatalog
 {
-    /// <summary>Every source the visitor may see, unavailable ones included and marked.</summary>
-    Task<IReadOnlyList<StoreListing>> ListStoresAsync(CancellationToken cancellationToken = default);
+    /// <summary>Every source the visitor may see, unavailable ones included and marked - and, apart, the ones whose databases could not be listed.</summary>
+    Task<StoreListings> ListStoresAsync(CancellationToken cancellationToken = default);
 
     /// <summary>Every database of one source the visitor may see.</summary>
     Task<IReadOnlyList<DatabaseListing>> ListDatabasesAsync(string storeKey, CancellationToken cancellationToken = default);
@@ -91,9 +107,10 @@ internal sealed class StudioScopeCatalog : IStudioScopeCatalog
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<StoreListing>> ListStoresAsync(CancellationToken cancellationToken = default)
+    public async Task<StoreListings> ListStoresAsync(CancellationToken cancellationToken = default)
     {
         List<StoreListing> stores = [];
+        List<StoreListing> unlistable = [];
 
         foreach (StudioSourceRegistration registration in sources.Registrations())
         {
@@ -111,14 +128,21 @@ internal sealed class StudioScopeCatalog : IStudioScopeCatalog
                 continue;
             }
 
-            IReadOnlyList<DatabaseListing> databases = await ListDatabasesAsync(registration.Key, source, cancellationToken).ConfigureAwait(false);
+            (IReadOnlyList<DatabaseListing> databases, bool failed) = await ListDatabasesCoreAsync(registration.Key, source, cancellationToken).ConfigureAwait(false);
             if (databases.Count > 0)
             {
                 stores.Add(new StoreListing(registration.Key, registration.DisplayName, availability));
             }
+            else if (failed
+                && await authorization.IsAuthorizedAsync(new StudioScope(registration.Key, string.Empty, null), null, cancellationToken).ConfigureAwait(false))
+            {
+                // A source whose databases could not be listed is not selectable, but it is not nothing: it is kept, apart, for
+                // the pages that name every source - and only for a visitor the policy passes for the source as a whole.
+                unlistable.Add(new StoreListing(registration.Key, registration.DisplayName, availability));
+            }
         }
 
-        return stores;
+        return new StoreListings(stores, unlistable);
     }
 
     /// <inheritdoc />
@@ -298,6 +322,13 @@ internal sealed class StudioScopeCatalog : IStudioScopeCatalog
     private async Task<IReadOnlyList<DatabaseListing>> ListDatabasesAsync(
         string storeKey,
         IStudioSource source,
+        CancellationToken cancellationToken) =>
+        (await ListDatabasesCoreAsync(storeKey, source, cancellationToken).ConfigureAwait(false)).Databases;
+
+    /// <summary>The same list, and whether the enumeration failed (as distinct from a source with no database the visitor may see).</summary>
+    private async Task<(IReadOnlyList<DatabaseListing> Databases, bool Failed)> ListDatabasesCoreAsync(
+        string storeKey,
+        IStudioSource source,
         CancellationToken cancellationToken)
     {
         List<DatabaseListing> listings = [];
@@ -328,15 +359,15 @@ internal sealed class StudioScopeCatalog : IStudioScopeCatalog
                 logger.StoreDatabasesUnreadable(level, exception, storeKey);
             }
 
-            return [];
+            return ([], true);
         }
 
-        return await authorization
+        return (await authorization
             .FilterAsync(
                 listings,
                 x => new StudioScope(storeKey, x.Identity, null),
                 take: null,
                 cancellationToken)
-            .ConfigureAwait(false);
+            .ConfigureAwait(false), false);
     }
 }

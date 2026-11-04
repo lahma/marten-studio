@@ -23,7 +23,7 @@ public class OverviewStoresStripTests
         page.FindAll(".ms-stores-strip-link").Select(static x => x.TextContent.Trim()).Should().Equal("Default", "Other");
 
         page.FindAll(".ms-stores-strip-link").Select(static x => x.GetAttribute("href")).Should().Equal("?store=default", "?store=other");
-        page.Find(".ms-stores-strip-all").GetAttribute("href").Should().Be("stores");
+        page.Find(".ms-stores-strip-all").GetAttribute("href").Should().Be("stores?store=default&db=localhost.marten", "the link keeps the scope");
         page.Find(".ms-stores-strip-all").TextContent.Trim().Should().Be("All stores");
 
         page.FindAll(".ms-stores-strip-link").Single(static x => x.GetAttribute("aria-current") == "true").TextContent.Trim()
@@ -44,6 +44,57 @@ public class OverviewStoresStripTests
 
         page.FindAll(".ms-stores-strip-link").Select(static x => x.TextContent.Trim()).Should().Equal("Default", "Broken (unavailable)");
         page.FindAll(".ms-stores-strip-link")[1].GetAttribute("href").Should().Be("?store=broken");
+    }
+
+    [Fact]
+    public async Task A_store_whose_databases_could_not_be_listed_is_named_in_the_strip_and_opens_the_stores_page()
+    {
+        await using StudioComponentContext context = new();
+        context.StoreInfo.WithStore();
+        context.Catalog
+            .WithStore("default", "Default", databaseIdentities: "localhost.marten")
+            .WithUnlistableStore("master", "Master table store");
+        await context.State.EnsureInitializedAsync(Token);
+
+        IRenderedComponent<Overview> page = context.Render<Overview>();
+
+        page.FindAll(".ms-stores-strip-link").Select(static x => x.TextContent.Trim())
+            .Should().Equal(["Default", "Master table store (could not be listed)"], "one listed store and one that could not be listed are two stores");
+        page.Find(".ms-stores-strip-unlistable").GetAttribute("href").Should().StartWith("stores?");
+    }
+
+    [Fact]
+    public async Task A_slow_read_for_a_store_the_visitor_has_left_does_not_replace_the_card_of_the_store_they_are_on()
+    {
+        await using StudioComponentContext context = new();
+        context.StoreInfo
+            .WithStore("a", "A", databaseIdentity: "db-a")
+            .WithStore("b", "B", databaseIdentity: "db-b")
+            .WithStore("c", "C", databaseIdentity: "db-c");
+        context.Catalog
+            .WithStore("a", "A", databaseIdentities: "db-a")
+            .WithStore("b", "B", databaseIdentities: "db-b")
+            .WithStore("c", "C", databaseIdentities: "db-c");
+        await context.State.EnsureInitializedAsync(Token);
+
+        IRenderedComponent<Overview> page = context.Render<Overview>();
+        page.WaitForAssertion(() => page.Find(".ms-overview-store .ms-section-key").TextContent.Trim().Should().Be("a"));
+
+        // The read for B is held; the visitor moves to B (whose notification waits for the read) and on to C before it answers.
+        TaskCompletionSource holdB = new();
+        context.StoreInfo.Holds["b"] = holdB;
+
+        Task toB = page.InvokeAsync(() => context.State.SetScopeAsync("b", string.Empty, tenantId: null, Token));
+        page.WaitForAssertion(() => context.StoreInfo.Keys.Should().Contain("b"));
+
+        await page.InvokeAsync(() => context.State.SetScopeAsync("c", string.Empty, tenantId: null, Token));
+        page.WaitForAssertion(() => page.Find(".ms-overview-store .ms-section-key").TextContent.Trim().Should().Be("c"));
+
+        holdB.SetResult();
+        await toB;
+
+        page.Find(".ms-overview-store .ms-section-key").TextContent.Trim().Should().Be("c", "B's late answer is not drawn over C's card");
+        context.State.ActiveScope!.StoreKey.Should().Be("c");
     }
 
     [Fact]

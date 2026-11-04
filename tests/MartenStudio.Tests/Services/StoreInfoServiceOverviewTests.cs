@@ -180,6 +180,43 @@ public class StoreInfoServiceOverviewTests
     }
 
     /// <summary>
+    /// 1.2-SCOPE-1-FIX follow-up 4: the card that says a store's databases could not be listed is on the Overview and the Stores page,
+    /// whose visitor may not see every schema a Postgres message can name - so it says what <c>StudioHostFailure</c> says, never the
+    /// exception's own text.
+    /// </summary>
+    [Theory]
+    [InlineData("postgres")]
+    [InlineData("connection")]
+    public async Task The_databases_card_never_carries_postgres_own_words(string kind)
+    {
+        const string Sentinel = "relation secret_schema.salaries does not exist";
+
+        await using Harness harness = Harness.Create(
+            static tenancy => tenancy.AddMultipleTenantDatabase(FirstConnectionString, "tenants-a").ForTenants("acme"),
+            services => services.AddMartenStore<IUnlistableDatabasesStore>(options =>
+            {
+                options.MultiTenantedDatabases(tenancy =>
+                    tenancy.AddMultipleTenantDatabase(SecondConnectionString, "unlistable").ForTenants("globex"));
+                options.DatabaseSchemaName = "unlistable";
+
+                ObservedTenancy observed = ObservedTenancy.Over(options.Tenancy, masterTableShape: true);
+                observed.OnBuildDatabases = () => throw (kind == "postgres"
+                    ? new Npgsql.PostgresException(Sentinel, "ERROR", "ERROR", "42P01")
+                    : new Npgsql.NpgsqlException(Sentinel));
+                options.Tenancy = (ITenancy) (object) observed;
+            }));
+
+        StudioOverview overview = await harness.Overview.GetOverviewAsync(nameof(IUnlistableDatabasesStore), Token);
+
+        string? error = overview.Stores.Should().ContainSingle().Which.Databases.Should().ContainSingle().Which.Error;
+
+        error.Should().NotBeNull().And.NotContain(Sentinel, "Postgres' and the driver's words are withheld");
+        error.Should().Be(kind == "postgres"
+            ? "Postgres refused a read (42P01); its own words are withheld: the schemas they may name could not be checked for you"
+            : "the database could not be reached");
+    }
+
+    /// <summary>
     /// CL1 item 9: a store with no default database has no store-wide server version, and that is a configured state
     /// rather than an anomaly. A static multi-tenancy with nothing marked <c>AsDefault()</c> (the default store here)
     /// and a master-table-shaped tenancy whose <c>Default</c> throws <see cref="NotSupportedException" /> (the second

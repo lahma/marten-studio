@@ -74,6 +74,28 @@ public class HealthCheckAsyncTests
         glance.Suggestions.Should().Be(1);
     }
 
+    [Fact]
+    public async Task A_check_that_could_not_run_is_counted_so_no_chip_reads_nothing_to_report()
+    {
+        await using HealthHarness harness = HealthHarness.Create();
+        harness.Script.Throws("K90", new InvalidOperationException("a check nobody chose to fail"));
+
+        HealthGlance glance = (await harness.Health.CheckAsync(harness.Scope, Token))!;
+
+        glance.Critical.Should().Be(0);
+        glance.Warning.Should().Be(0);
+        glance.FailedChecks.Should().Be(1, "K90 failed for a reason nobody chose");
+        (await harness.Health.GlanceAsync(harness.Scope, Token))!.FailedChecks.Should().Be(1, "the cache-only read says the same");
+    }
+
+    [Fact]
+    public async Task A_sweep_in_which_every_check_ran_counts_none()
+    {
+        await using HealthHarness harness = HealthHarness.Create();
+
+        (await harness.Health.CheckAsync(harness.Scope, Token))!.FailedChecks.Should().Be(0);
+    }
+
     /// <summary>
     /// A report that shows an Activity-gated finding records "Read health session details"; Check shows no evidence and records
     /// nothing. The control proves the finding would have been audited by a report.

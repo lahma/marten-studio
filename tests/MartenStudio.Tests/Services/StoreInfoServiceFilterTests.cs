@@ -8,13 +8,15 @@ using MartenStudio.Tests.Support;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 
 namespace MartenStudio.Tests.Services;
 
 /// <summary>
 /// 1.2-SCOPE-1 S3: <c>GetOverviewAsync(storeKey)</c> builds, asks the policy about and enumerates only that store, so the
-/// Overview's one store card costs one enumeration whatever the host registered. Each store's tenancy is wrapped in
+/// Overview's one store card costs one enumeration whatever the host registered. The default store's factory counts each time it is
+/// asked for the store - and throws, so a build of it could not be missed - and the other store's tenancy is wrapped in
 /// <see cref="ObservedTenancy" />, which counts every <c>BuildDatabases()</c> - what <c>AllDatabases()</c> is.
 /// </summary>
 public class StoreInfoServiceFilterTests
@@ -26,14 +28,14 @@ public class StoreInfoServiceFilterTests
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
     [Fact]
-    public async Task Asking_for_one_store_builds_and_enumerates_only_that_store()
+    public async Task Asking_for_one_store_resolves_and_enumerates_only_that_store()
     {
         await using Harness harness = Harness.Create();
 
         StudioOverview overview = await harness.Info.GetOverviewAsync(nameof(IScopeOneOtherStore), Token);
 
         overview.Stores.Select(static x => x.Key).Should().Equal(nameof(IScopeOneOtherStore));
-        harness.DefaultEnumerations.Should().Be(0, "the default store's tenancy is never enumerated");
+        harness.DefaultBuilds.Should().Be(0, "the default store's factory is never asked for the store");
         harness.OtherEnumerations.Should().Be(1, "the wanted store is enumerated once");
     }
 
@@ -55,7 +57,7 @@ public class StoreInfoServiceFilterTests
         StudioOverview overview = await harness.Info.GetOverviewAsync("ghost", Token);
 
         overview.Stores.Should().BeEmpty();
-        harness.DefaultEnumerations.Should().Be(0);
+        harness.DefaultBuilds.Should().Be(0);
         harness.OtherEnumerations.Should().Be(0);
     }
 
@@ -68,7 +70,7 @@ public class StoreInfoServiceFilterTests
         StudioOverview overview = await harness.Info.GetOverviewAsync(cancellationToken: Token);
 
         overview.Stores.Select(static x => x.Key).Should().BeEquivalentTo([MartenStoreRegistry.DefaultStoreKey, nameof(IScopeOneOtherStore)]);
-        harness.DefaultEnumerations.Should().Be(1);
+        harness.DefaultBuilds.Should().Be(1, "the premise: with no key the default store's factory is asked");
         harness.OtherEnumerations.Should().Be(1);
     }
 
@@ -77,26 +79,26 @@ public class StoreInfoServiceFilterTests
     {
         private readonly ServiceProvider provider;
         private readonly IServiceScope scope;
-        private readonly Counter defaultEnumerations;
+        private readonly Counter defaultBuilds;
         private readonly Counter otherEnumerations;
 
-        private Harness(ServiceProvider provider, Counter defaultEnumerations, Counter otherEnumerations)
+        private Harness(ServiceProvider provider, Counter defaultBuilds, Counter otherEnumerations)
         {
             this.provider = provider;
-            this.defaultEnumerations = defaultEnumerations;
+            this.defaultBuilds = defaultBuilds;
             this.otherEnumerations = otherEnumerations;
             scope = provider.CreateScope();
         }
 
         public IStoreInfoService Info => scope.ServiceProvider.GetRequiredService<IStoreInfoService>();
 
-        public int DefaultEnumerations => defaultEnumerations.Value;
+        public int DefaultBuilds => defaultBuilds.Value;
 
         public int OtherEnumerations => otherEnumerations.Value;
 
         public static Harness Create()
         {
-            Counter defaultEnumerations = new();
+            Counter defaultBuilds = new();
             Counter otherEnumerations = new();
 
             TestAuthenticationStateProvider users = new();
@@ -108,7 +110,6 @@ public class StoreInfoServiceFilterTests
             {
                 options.MultiTenantedDatabases(static tenancy => tenancy.AddMultipleTenantDatabase(FirstConnectionString, "tenants-a").ForTenants("acme"));
                 options.DatabaseSchemaName = "scope1_default";
-                options.Tenancy = (ITenancy) (object) CountedTenancy(options.Tenancy, defaultEnumerations);
             });
             services.AddMartenStore<IScopeOneOtherStore>(options =>
             {
@@ -118,10 +119,17 @@ public class StoreInfoServiceFilterTests
             });
             services.AddMartenStudio(static options => options.QueryTimeout = TimeSpan.FromSeconds(5));
 
+            // The default store cannot be had: its factory counts the ask and throws, which the registry reports as a store that will not build.
+            services.Replace(ServiceDescriptor.Singleton<IDocumentStore>(_ =>
+            {
+                defaultBuilds.Increment();
+                throw new InvalidOperationException("The default store must not be resolved for another store's card.");
+            }));
+
             services.AddSingleton<IAuthorizationService>(new TestStoreAuthorizationService());
             services.AddScoped<AuthenticationStateProvider>(_ => users);
 
-            return new Harness(services.BuildServiceProvider(), defaultEnumerations, otherEnumerations);
+            return new Harness(services.BuildServiceProvider(), defaultBuilds, otherEnumerations);
         }
 
         public async ValueTask DisposeAsync()

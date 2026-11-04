@@ -96,6 +96,18 @@ internal sealed class StudioState
     /// <summary>Every store the visitor may see, unavailable ones included and marked.</summary>
     public IReadOnlyList<StoreListing> AvailableStores { get; private set; } = [];
 
+    /// <summary>
+    /// The sources the visitor may see whose databases could not be listed (1.2): not selectable, so not in <see cref="AvailableStores" />
+    /// and not in the header's picker, but known - the Stores page and the Overview's strip name them, with the reason, rather than let
+    /// them vanish. Only sources the source policy passes for the source as a whole.
+    /// </summary>
+    public IReadOnlyList<StoreListing> UnlistableStores { get; private set; } = [];
+
+    /// <summary>
+    /// How many sources the visitor may see, the unlistable ones included: what decides whether the sidebar offers the Stores page.
+    /// </summary>
+    public int KnownStoreCount => AvailableStores.Count + UnlistableStores.Count;
+
     /// <summary>Every database of the active store the visitor may see.</summary>
     public IReadOnlyList<DatabaseListing> AvailableDatabases { get; private set; } = [];
 
@@ -171,7 +183,9 @@ internal sealed class StudioState
     {
         StudioScope? previous = ActiveScope;
 
-        AvailableStores = await catalog.ListStoresAsync(cancellationToken).ConfigureAwait(false);
+        StoreListings listings = await catalog.ListStoresAsync(cancellationToken).ConfigureAwait(false);
+        AvailableStores = listings.Listed;
+        UnlistableStores = listings.Unlistable;
 
         StoreListing? store = FindStore(previous?.StoreKey) ?? (AvailableStores.Count > 0 ? AvailableStores[0] : null);
         if (store is null)

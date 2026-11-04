@@ -247,7 +247,7 @@
         }
         catch (Exception exception)
         {
-            loadError = exception.Message;
+            loadError = StudioHostFailure.Words(exception);
             loading = false;
             await InvokeAsync(StateHasChanged);
         }
@@ -271,7 +271,7 @@
         }
         catch (Exception exception)
         {
-            actionError = exception.Message;
+            actionError = StudioHostFailure.Words(exception);
         }
     }
 
@@ -293,7 +293,7 @@
         catch (Exception exception)
         {
             // On the page rather than in the log only: a failure the visitor cannot see is a page that silently shows nothing.
-            loadError = exception.Message;
+            loadError = StudioHostFailure.Words(exception);
         }
         finally
         {
@@ -378,7 +378,7 @@
         }
         catch (Exception exception)
         {
-            actionError = exception.Message;
+            actionError = StudioHostFailure.Words(exception);
         }
         finally
         {
@@ -409,6 +409,7 @@
             ];
 
             List<(StoreOverview Store, DatabaseOverview Database)> batch = [.. stale.Take(CheckAllBatch)];
+            int couldNot = 0;
 
             foreach ((StoreOverview store, DatabaseOverview database) in batch)
             {
@@ -424,20 +425,21 @@
                 {
                     row.Checking = false;
                 }
+
+                if (row.Glance is null)
+                {
+                    couldNot++;
+                }
             }
 
-            checkAllMessage = stale.Count == 0
-                ? "Every database listed has a recent sweep."
-                : stale.Count > batch.Count
-                    ? $"Checked {batch.Count} of {stale.Count}; press again for the next {Math.Min(CheckAllBatch, stale.Count - batch.Count)}."
-                    : $"Checked {batch.Count} of {stale.Count}.";
+            checkAllMessage = CheckAllMessage(stale.Count, batch.Count, couldNot);
         }
         catch (OperationCanceledException)
         {
         }
         catch (Exception exception)
         {
-            actionError = exception.Message;
+            actionError = StudioHostFailure.Words(exception);
         }
         finally
         {
@@ -450,7 +452,47 @@
         HealthGlance? glance = await HealthData.CheckAsync(new StudioScope(store.Key, database.Identity, null), pageCancellation.Token);
 
         row.Glance = glance;
-        row.Attempted = true;
+
+        // Tried and left without a sweep (refused, or the sweep failed): Check all does not pick it again and again. A row that has a
+        // sweep is not "attempted" - it is checked.
+        row.Attempted = glance is null;
+    }
+
+    /// <summary>
+    /// What "Check all" says it did. "Every database listed has a recent sweep" is said only when it is true: a row a Check left
+    /// without a sweep is counted, not hidden.
+    /// </summary>
+    /// <param name="stale">How many rows were waiting for a sweep.</param>
+    /// <param name="attempted">How many of them this press tried.</param>
+    /// <param name="couldNot">How many of those still have no sweep.</param>
+    private string CheckAllMessage(int stale, int attempted, int couldNot)
+    {
+        if (stale == 0)
+        {
+            List<(StoreOverview Store, DatabaseOverview Database)> shown = ShownDatabases();
+            int without = shown.Count(x => Row(x.Store.Key, x.Database.Identity).Glance is null);
+            string noun = without == 1 ? "database" : "databases";
+
+            return without == 0
+                ? "Every database listed has a recent sweep."
+                : without == shown.Count
+                    ? $"{without} {noun} could not be checked (refused or failed)."
+                    : $"{without} {noun} could not be checked (refused or failed); the others have a recent sweep.";
+        }
+
+        string message = $"Checked {attempted - couldNot} of {stale}";
+
+        if (couldNot > 0)
+        {
+            message += $", {couldNot} could not be checked";
+        }
+
+        if (stale > attempted)
+        {
+            message += $"; press again for the next {Math.Min(CheckAllBatch, stale - attempted)}";
+        }
+
+        return message + ".";
     }
 
     /// <summary>Whether "Check all" should sweep this row: it has no recent sweep and was not already tried and refused.</summary>
@@ -534,6 +576,14 @@
         {
             return (
                 glance.Warning.ToString(CultureInfo.InvariantCulture) + (glance.Warning == 1 ? " warning" : " warnings"),
+                "ms-stores-chip ms-health-severity ms-health-severity-warning");
+        }
+
+        if (glance.FailedChecks > 0)
+        {
+            // Never an all-clear while a check could not run: the sweep is incomplete, and green would say it is not.
+            return (
+                glance.FailedChecks.ToString(CultureInfo.InvariantCulture) + (glance.FailedChecks == 1 ? " check could not run" : " checks could not run"),
                 "ms-stores-chip ms-health-severity ms-health-severity-warning");
         }
 

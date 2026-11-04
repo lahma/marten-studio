@@ -43,7 +43,7 @@
        each opening that store's Overview, and "All stores" opening the Stores page. The root stays the Overview at every store
        count: it is never a redirect (D-SCOPE S2).
        ---------------------------------------------------------------------------------------------- *@
-    @if (State.AvailableStores.Count > 1)
+    @if (State.KnownStoreCount > 1)
     {
         <nav class="ms-stores-strip" aria-label="Stores">
             <ul class="ms-stores-strip-list">
@@ -55,8 +55,17 @@
                            aria-current="@(IsActiveStore(listing.Key) ? "true" : null)">@(listing.DisplayName + (listing.Availability.IsAvailable ? string.Empty : " (unavailable)"))</a>
                     </li>
                 }
+
+                @* A store that built and whose databases could not be listed is not in the picker, but it is a store the visitor may
+                   see: named here, and opened on the Stores page, which says why. *@
+                @foreach (StoreListing listing in State.UnlistableStores)
+                {
+                    <li class="ms-stores-strip-item" @key="listing.Key">
+                        <a class="ms-stores-strip-link ms-stores-strip-unlistable" href="@Link(MartenStudioDescriptor.StoresRoute)">@(listing.DisplayName + " (could not be listed)")</a>
+                    </li>
+                }
             </ul>
-            <a class="ms-stores-strip-all" href="@EventLinks.To(Options.Value, MartenStudioDescriptor.StoresRoute, null)">All stores</a>
+            <a class="ms-stores-strip-all" href="@Link(MartenStudioDescriptor.StoresRoute)">All stores</a>
         </nav>
     }
 
@@ -585,6 +594,9 @@
             ? []
             : [.. health.Findings.Where(x => x.Counts(HealthMutes.IsMuted)).Take(TopFindingCount)];
 
+    /// <summary>How many checks of the sweep behind <see cref="health" /> could not run for a reason nobody chose.</summary>
+    private int FailedChecks => health?.Checks.Count(static x => x.Outcome == HealthCheckOutcome.Failed) ?? 0;
+
     private string HealthValue
     {
         get
@@ -606,6 +618,12 @@
             if (warning > 0)
             {
                 return HealthPresentation.Count(warning, "warning");
+            }
+
+            // Never green while a check could not run: the sweep is incomplete, and "nothing to report" would say it is not.
+            if (FailedChecks > 0)
+            {
+                return HealthPresentation.Count(FailedChecks, "check") + " could not run";
             }
 
             // Findings this visitor is not shown are not "nothing to report": the tile says they exist, with the count
@@ -630,6 +648,12 @@
             }
 
             HealthSeverity? worst = health.Findings.Where(x => x.Counts(HealthMutes.IsMuted)).Select(static x => (HealthSeverity?) x.Severity).Min();
+
+            if (worst is null && FailedChecks > 0)
+            {
+                return "warning";
+            }
+
             return worst is null && health.WithheldCount > 0 ? "info" : HealthPresentation.TileColor(worst);
         }
     }
@@ -897,11 +921,23 @@
         // 1.2: only the selected store's card (one enumeration, not one per registered store). Before a scope exists - a bare
         // component in a test, or a visitor who may see no store - every store the visitor may see is read, as it was.
         string? storeKey = State.ActiveScope?.StoreKey;
+        bool outrun = false;
 
         try
         {
-            overview = await StoreInfo.GetOverviewAsync(storeKey, pageCancellation.Token);
-            loadedStoreKey = storeKey;
+            StudioOverview read = await StoreInfo.GetOverviewAsync(storeKey, pageCancellation.Token);
+
+            // Stamped with the store it was asked for, as the other regions are with their scope: a read the selector outran is
+            // not drawn, or a slow read for B would land over the card of C the visitor has since moved to.
+            if (string.Equals(State.ActiveScope?.StoreKey, storeKey, StringComparison.OrdinalIgnoreCase))
+            {
+                overview = read;
+                loadedStoreKey = storeKey;
+            }
+            else
+            {
+                outrun = true;
+            }
         }
         catch (OperationCanceledException)
         {
@@ -914,7 +950,11 @@
         }
         finally
         {
-            loading = false;
+            // An outrun read leaves the page as it was: the read of the store the visitor moved to is what ends the loading state.
+            if (!outrun)
+            {
+                loading = false;
+            }
         }
     }
 

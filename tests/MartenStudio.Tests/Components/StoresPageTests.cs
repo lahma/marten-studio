@@ -20,8 +20,12 @@ public class StoresPageTests
 {
     private static CancellationToken Token => Xunit.TestContext.Current.CancellationToken;
 
-    private static HealthGlance Glance(int critical = 0, int warning = 0, int withheld = 0, int suggestions = 0) =>
-        new(new DateTimeOffset(2026, 11, 4, 9, 0, 0, TimeSpan.Zero), critical, warning, [], withheld) { Suggestions = suggestions };
+    private static HealthGlance Glance(int critical = 0, int warning = 0, int withheld = 0, int suggestions = 0, int failedChecks = 0) =>
+        new(new DateTimeOffset(2026, 11, 4, 9, 0, 0, TimeSpan.Zero), critical, warning, [], withheld)
+        {
+            Suggestions = suggestions,
+            FailedChecks = failedChecks,
+        };
 
     // -----------------------------------------------------------------------------------------------
     // Reads
@@ -127,6 +131,21 @@ public class StoresPageTests
         reason.Should().StartWith("This store could not be built: no connection string was configured");
         reason.Length.Should().BeLessThan(4_100, "the host's exception text is bounded at 4,000 characters (S7)");
         broken.QuerySelectorAll("table").Should().BeEmpty("no databases are listed for a store that did not build");
+    }
+
+    /// <summary>A store that built and whose databases could not be listed is on the page with the reason, and a retry.</summary>
+    [Fact]
+    public async Task A_store_whose_databases_could_not_be_listed_is_on_the_page_with_the_reason()
+    {
+        await using StudioComponentContext context = new();
+        context.StoreInfo.WithStore("master", "Master table store", databaseIdentity: string.Empty, databaseError: "the database could not be reached");
+
+        IRenderedComponent<Stores> page = context.Render<Stores>();
+
+        page.WaitForAssertion(() => page.Find(".ms-stores-store .ms-section-key").TextContent.Trim().Should().Be("master"));
+        page.Find(".ms-stores-store .ms-error-alert").TextContent.Should().Contain("the database could not be reached");
+        page.FindAll(".ms-stores-databases").Should().BeEmpty("there is no database to list");
+        page.Find(".ms-stores-store .ms-error-alert button").TextContent.Trim().Should().Be("Retry");
     }
 
     [Fact]
@@ -345,11 +364,13 @@ public class StoresPageTests
         page.WaitForAssertion(() => page.FindAll(".ms-stores-check").Should().ContainSingle());
 
         page.Find(".ms-stores-check-all").Click();
-        page.WaitForAssertion(() => page.Find(".ms-stores-check-message").TextContent.Trim().Should().Be("Checked 1 of 1."));
+        page.WaitForAssertion(() => page.Find(".ms-stores-check-message").TextContent.Trim()
+            .Should().Be("Checked 0 of 1, 1 could not be checked."));
 
         page.Find(".ms-stores-check-all").Click();
 
-        page.WaitForAssertion(() => page.Find(".ms-stores-check-message").TextContent.Trim().Should().Be("Every database listed has a recent sweep."));
+        page.WaitForAssertion(() => page.Find(".ms-stores-check-message").TextContent.Trim()
+            .Should().Be("1 database could not be checked (refused or failed).", "never 'every database has a recent sweep' when one has none"));
         context.Health.Checks.Should().ContainSingle("the refused database was tried once");
     }
 
@@ -366,6 +387,24 @@ public class StoresPageTests
     [InlineData(0, 0, 0, 0, "nothing to report")]
     public void The_chip_text(int critical, int warning, int withheld, int suggestions, string text) =>
         Stores.Chip(Glance(critical, warning, withheld, suggestions)).Text.Should().Be(text);
+
+    /// <summary>A chip is never green when a check could not run: the sweep is incomplete, and "nothing to report" would say it is not.</summary>
+    [Theory]
+    [InlineData(1, 0, 0, "1 check could not run")]
+    [InlineData(3, 0, 0, "3 checks could not run")]
+    [InlineData(2, 5, 0, "2 checks could not run")]
+    [InlineData(1, 0, 4, "1 check could not run")]
+    public void A_failed_check_is_never_nothing_to_report_nor_green(int failedChecks, int suggestions, int withheld, string text)
+    {
+        (string chipText, string css) = Stores.Chip(Glance(suggestions: suggestions, withheld: withheld, failedChecks: failedChecks));
+
+        chipText.Should().Be(text);
+        css.Should().Contain("ms-health-severity-warning").And.NotContain("ms-stores-chip-ok");
+    }
+
+    [Fact]
+    public void A_critical_finding_still_outranks_a_failed_check() =>
+        Stores.Chip(Glance(critical: 1, failedChecks: 2)).Text.Should().Be("1 critical");
 
     [Fact]
     public void No_glance_is_not_checked_recently() => Stores.Chip(null).Text.Should().Be("not checked recently");

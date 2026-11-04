@@ -12,7 +12,8 @@ namespace PostgresStudio.Services.Health;
 /// <para>
 /// <b>No background work.</b> There is no timer here, no hosted service and nothing that runs on its own: a
 /// sweep happens when <see cref="GetAsync" /> is called, and only the Health page and the Overview call it,
-/// from their own polling loops, which stop when the page goes away (plan §3.2). A studio nobody has open
+/// from their own polling loops, which stop when the page goes away (plan §3.2), and the Stores page's "Check" (1.2), which a person presses
+/// on one database at a time. A studio nobody has open
 /// sweeps nothing; <see cref="SweepCount" /> is how a test proves it.
 /// </para>
 /// <para>

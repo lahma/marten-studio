@@ -18,6 +18,9 @@ internal sealed class FakeStudioScopeCatalog : IStudioScopeCatalog
     /// <summary>The stores the picker is offered, in order.</summary>
     public List<StoreListing> Stores { get; } = [];
 
+    /// <summary>The stores whose databases could not be listed (1.2): known, and not selectable.</summary>
+    public List<StoreListing> Unlistable { get; } = [];
+
     /// <summary>The databases of each store, by store key.</summary>
     public Dictionary<string, List<DatabaseListing>> Databases { get; } = new(StringComparer.OrdinalIgnoreCase);
 
@@ -47,6 +50,13 @@ internal sealed class FakeStudioScopeCatalog : IStudioScopeCatalog
         return this;
     }
 
+    /// <summary>Adds a store that built and whose databases could not be listed.</summary>
+    public FakeStudioScopeCatalog WithUnlistableStore(string key, string displayName)
+    {
+        Unlistable.Add(new StoreListing(key, displayName, StoreAvailability.Available));
+        return this;
+    }
+
     /// <summary>Adds a store the application registered that will not build.</summary>
     public FakeStudioScopeCatalog WithUnavailableStore(string key, string displayName, string message)
     {
@@ -67,8 +77,8 @@ internal sealed class FakeStudioScopeCatalog : IStudioScopeCatalog
         return this;
     }
 
-    public Task<IReadOnlyList<StoreListing>> ListStoresAsync(CancellationToken cancellationToken = default) =>
-        Task.FromResult<IReadOnlyList<StoreListing>>(Stores);
+    public Task<StoreListings> ListStoresAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(new StoreListings([.. Stores], [.. Unlistable]));
 
     public Task<IReadOnlyList<DatabaseListing>> ListDatabasesAsync(string storeKey, CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<DatabaseListing>>(

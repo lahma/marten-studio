@@ -331,6 +331,12 @@ internal sealed record HealthGlance(
     /// Never drawn on the sidebar's badge, which is for Critical and Warning alone.
     /// </summary>
     public int Suggestions { get; init; }
+
+    /// <summary>
+    /// How many checks of the last regular sweep failed for a reason nobody chose (1.2), (a check's outcome is shown at every gate). The
+    /// Stores chip and the Overview's tile say "N checks could not run" with it, and are never green while it is above zero.
+    /// </summary>
+    public int FailedChecks { get; init; }
 }
 
 /// <summary>

@@ -1,5 +1,6 @@
 @inherits LayoutComponentBase
 @implements IDisposable
+@using Microsoft.Extensions.Logging
 @using PostgresStudio.Internal
 @using PostgresStudio.Services
 @using PostgresStudio.Services.Live
@@ -12,6 +13,7 @@
 @inject NavigationManager Navigation
 @inject PersistentComponentState PersistentState
 @inject StudioMappedEndpoints MappedEndpoints
+@inject ILogger<StudioLayout> Logger
 
 @* The stylesheet is not linked from here. It is static markup in StudioDocument's own <head>: a
    <HeadContent> put it inside the <HeadOutlet> marker, and the interactive outlet's first render - which
@@ -110,6 +112,7 @@
     private bool preferencesLoaded;
     private bool interactive;
     private bool addressScopeApplied;
+    private bool locationSubscribed;
     private PersistingComponentStateSubscription persistingSubscription;
 
     /// <summary>
@@ -152,7 +155,78 @@
         addressScopeApplied = true;
         SyncScopeToUrl();
 
+        // From here on a link the visitor clicks may name another scope (1.2, SCOPE-1-FIX).
+        Navigation.LocationChanged += OnLocationChanged;
+        locationSubscribed = true;
+
         await UpdateAccessAsync();
+    }
+
+    /// <summary>
+    /// Follows a link the visitor clicked, and nothing else: when the location changed because a link was intercepted
+    /// (<see cref="LocationChangedEventArgs.IsNavigationIntercepted" />) and its address names a store, database or tenant other than
+    /// the active scope's, the shell moves to it - a link to another store (the Overview's strip, a row of the Stores page) would
+    /// otherwise change the address and leave the scope, and with it every page that reads the scope, on the old store (D9).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>A programmatic navigation never changes the scope.</b> A page's own push, <see cref="SyncScopeToUrl" />'s replace and any
+    /// other <c>NavigateTo</c> report <c>IsNavigationIntercepted == false</c>, so none of them is read here. That is what keeps the
+    /// window in which a page's push, built from the address before a picker change, lands after the change (N5b) from turning into a
+    /// scope flip: the address follows the scope, except for a click.
+    /// </para>
+    /// <para>
+    /// Back and Forward are not intercepted links either, so they do not move the scope. An address naming nothing, or the scope the
+    /// shell is already on, does nothing - no <see cref="StudioState.SetScopeAsync" /> call. The handler is synchronous, an
+    /// <see cref="EventHandler{TEventArgs}" /> that starts the async work and does not wait for it, never an <c>async</c> lambda
+    /// (hard rule 6).
+    /// </para>
+    /// </remarks>
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        if (!e.IsNavigationIntercepted)
+        {
+            return;
+        }
+
+        (string? storeKey, string? databaseId, string? tenantId) = StudioScopeQuery.Read(e.Location, Descriptor.SourceQueryParameter);
+        if (!NamesAnotherScope(State.ActiveScope, storeKey, databaseId, tenantId))
+        {
+            return;
+        }
+
+        _ = InvokeAsync(() => ApplyAddressScopeAsync(storeKey, databaseId, tenantId));
+    }
+
+    /// <summary>
+    /// Whether an address names a store, database or tenant that is not the active scope's: each part it names is compared, and a part
+    /// it leaves out says nothing. An address naming no scope, or the scope the shell is on, is not another scope.
+    /// </summary>
+    internal static bool NamesAnotherScope(StudioScope? active, string? storeKey, string? databaseId, string? tenantId)
+    {
+        return (storeKey is not null && !string.Equals(storeKey, active?.StoreKey, StringComparison.OrdinalIgnoreCase))
+            || (databaseId is not null && !string.Equals(databaseId, active?.DatabaseId, StringComparison.OrdinalIgnoreCase))
+            || (tenantId is not null && !string.Equals(tenantId, active?.TenantId, StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The call the first load makes, for a clicked link: a value the listings do not carry, or the policy refuses, is ignored by
+    /// <see cref="StudioState" /> exactly as it is at first load. A failure leaves the scope as it was.
+    /// </summary>
+    private async Task ApplyAddressScopeAsync(string? storeKey, string? databaseId, string? tenantId)
+    {
+        try
+        {
+            await State.SetScopeAsync(storeKey, databaseId, tenantId);
+        }
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
+        {
+            // The circuit went away while the scope was being read: nothing to apply it to.
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            Logger.LogDebug(e, "The studio could not apply the scope a clicked link names; the scope stays as it was");
+        }
     }
 
     private Task PersistPreferences()
@@ -361,6 +435,12 @@
     public void Dispose()
     {
         State.ScopeChanged -= OnScopeChanged;
+
+        if (locationSubscribed)
+        {
+            Navigation.LocationChanged -= OnLocationChanged;
+        }
+
         persistingSubscription.Dispose();
     }
 }

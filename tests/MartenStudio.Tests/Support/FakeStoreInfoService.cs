@@ -28,6 +28,12 @@ internal sealed class FakeStoreInfoService : IStoreInfoService
     /// </summary>
     public TaskCompletionSource? Gate { get; set; }
 
+    /// <summary>
+    /// Reads for a store key that wait for the task completion source before answering, so a test can hold the read of one store while
+    /// the visitor moves to another.
+    /// </summary>
+    public Dictionary<string, TaskCompletionSource> Holds { get; } = new(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>Adds a store with one database and the facts the tiles show.</summary>
     public FakeStoreInfoService WithStore(
         string key = "default",
@@ -106,6 +112,11 @@ internal sealed class FakeStoreInfoService : IStoreInfoService
         if (Gate is { } gate)
         {
             await gate.Task.WaitAsync(cancellationToken);
+        }
+
+        if (storeKey is not null && Holds.TryGetValue(storeKey, out TaskCompletionSource? hold))
+        {
+            await hold.Task.WaitAsync(cancellationToken);
         }
 
         if (Failure is not null)

@@ -320,6 +320,26 @@ public class HealthPageTests
         page.Find(".ms-overview-health-list a").GetAttribute("href").Should().StartWith("health?").And.EndWith("#finding-d01");
     }
 
+    /// <summary>1.2-SCOPE-1-FIX: a tile is never green while a check could not run - "nothing to report" would say the sweep was complete.</summary>
+    [Fact]
+    public async Task The_overview_tile_is_never_nothing_to_report_while_a_check_could_not_run()
+    {
+        await using StudioComponentContext context = await ReadyAsync(static x => x.StoreInfo.WithStore());
+        context.Health.Report = context.Health.Report with
+        {
+            Checks =
+            [
+                new HealthCheckStatus("D01", "Daemon", HealthArea.Daemon, HealthCostTier.Catalog, HealthCheckOutcome.Failed, 0, null, "it failed", null, "https://example.invalid", []),
+                new HealthCheckStatus("K01", "Config", HealthArea.Configuration, HealthCostTier.InProcess, HealthCheckOutcome.Checked, 0, null, null, null, "https://example.invalid", []),
+            ],
+        };
+
+        var page = context.Render<Overview>();
+
+        page.WaitForAssertion(() => page.StatCardValue("Health").Should().Be("1 check could not run"));
+        page.StatCardClasses("Health").Should().Contain("ms-stat-card-warning").And.NotContain("ms-stat-card-success");
+    }
+
     [Fact]
     public async Task An_overview_with_nothing_to_report_says_so_and_links_to_what_was_checked()
     {

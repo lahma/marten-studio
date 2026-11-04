@@ -332,7 +332,7 @@ internal sealed class HealthService : IHealthService
         ArgumentNullException.ThrowIfNull(scope);
 
         // A badge shows counts and titles, never evidence: nothing is revealed, so nothing is audited.
-        (HealthSweep? sweep, List<HealthReportFinding> unmuted, int withheld) =
+        (HealthSweep? sweep, List<HealthReportFinding> unmuted, int withheld, int failedChecks) =
             await CachedAsync(scope, static _ => true, audit: false, cancellationToken).ConfigureAwait(false);
 
         if (sweep is null)
@@ -351,6 +351,7 @@ internal sealed class HealthService : IHealthService
             // when the glance reaches it.
             Scope = scope,
             Suggestions = unmuted.Count(static x => x.Severity == HealthSeverity.Info),
+            FailedChecks = failedChecks,
         };
     }
 
@@ -398,7 +399,7 @@ internal sealed class HealthService : IHealthService
             return [];
         }
 
-        (_, List<HealthReportFinding> unmuted, _) = await CachedAsync(
+        (_, List<HealthReportFinding> unmuted, _, _) = await CachedAsync(
                 scope,
                 result => codes.Contains(result.Check.Code, StringComparer.Ordinal),
                 audit: true,
@@ -434,7 +435,7 @@ internal sealed class HealthService : IHealthService
     /// findings of the checks <paramref name="wanted" /> picks that this visitor may see and has not muted - with how
     /// many they are not shown. The badge's and the banners' shared read, which never starts a sweep.
     /// </summary>
-    private async Task<(HealthSweep? Sweep, List<HealthReportFinding> Unmuted, int Withheld)> CachedAsync(
+    private async Task<(HealthSweep? Sweep, List<HealthReportFinding> Unmuted, int Withheld, int FailedChecks)> CachedAsync(
         StudioScope scope,
         Func<HealthCheckResult, bool> wanted,
         bool audit,
@@ -445,7 +446,7 @@ internal sealed class HealthService : IHealthService
         if (sweep is null || cache.Now - sweep.MeasuredAt > GlanceFreshness)
         {
             // Nothing recent to say, and nothing is started to find out: a badge or a banner is a decoration.
-            return (null, [], 0);
+            return (null, [], 0, 0);
         }
 
         // The swept store and database as the sweep names them - the registered key and the identity, which the cache
@@ -455,7 +456,7 @@ internal sealed class HealthService : IHealthService
 
         if (!await InSweptDatabaseAsync(scope, whole, cancellationToken).ConfigureAwait(false))
         {
-            return (null, [], 0);
+            return (null, [], 0, 0);
         }
 
         HealthVisitorGate gate = new(settings, authorization, capabilities, whole);
@@ -474,8 +475,13 @@ internal sealed class HealthService : IHealthService
                 browserGate: null)
             .ConfigureAwait(false);
 
+        // The checks of the wanted set that could not run for a reason nobody chose (HealthCheckOutcome.Failed). A check's outcome is
+        // shown on the Health page at every gate (StatusesAsync keeps it below the gate too), so the count says nothing the page does
+        // not. A chip that read "nothing to report" while one failed would be an all-clear that is not true.
+        int failedChecks = sweep.Results.Count(x => wanted(x) && x.Outcome == HealthCheckOutcome.Failed);
+
         // An accepted finding (issue #35) counts for neither the badge, the toast nor a banner: both read this list.
-        return (sweep, [.. findings.Where(x => x.Counts(mutes.IsMuted))], withheld);
+        return (sweep, [.. findings.Where(x => x.Counts(mutes.IsMuted))], withheld, failedChecks);
     }
 
     /// <summary>

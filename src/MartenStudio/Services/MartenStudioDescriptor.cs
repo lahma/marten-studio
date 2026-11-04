@@ -92,7 +92,7 @@ internal static class MartenStudioDescriptor
             // test. A single-store host never sees it; the address still works and shows the one store.
             new("Stores", StoresRoute, "grid", Title: "Every store you may see: whether it builds, its tenancy, its databases and their health")
             {
-                IsShownInScope = static state => state.AvailableStores.Count > 1,
+                IsShownInScope = static state => state.KnownStoreCount > 1,
             },
             new("Documents", "documents", "doc"),
 
