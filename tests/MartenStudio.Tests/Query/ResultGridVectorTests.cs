@@ -25,6 +25,14 @@ public class ResultGridVectorTests
 
     private static readonly PgVectorColumn Vector = PgVector.Column("vector", "vector", -1)!;
 
+    private static readonly IReadOnlySet<int> NoCut = new HashSet<int>();
+
+    private static readonly IReadOnlyList<(object? Vector, IReadOnlySet<int> CutRows)> VectorAtOne =
+        [(null, NoCut), (Vector, NoCut), (null, NoCut)];
+
+    private static readonly IReadOnlyList<(object? Vector, IReadOnlySet<int> CutRows)> CutVectorAtOne =
+        [(null, NoCut), (Vector, new HashSet<int> { 0 }), (null, NoCut)];
+
     private static IReadOnlyList<(string Name, string Type)> Columns { get; } =
         [("id", "integer"), ("embedding", "vector"), ("seen", "timestamp with time zone")];
 
@@ -39,7 +47,7 @@ public class ResultGridVectorTests
         var grid = context.Render<ResultGrid>(parameters => parameters
             .Add(x => x.Columns, Columns)
             .Add(x => x.Rows, Rows(Five))
-            .Add(x => x.Vectors, [null, Vector, null]));
+            .Add(x => x.VectorColumns, VectorAtOne));
 
         grid.Find("button.ms-vector-chip").TextContent.Should().Be("vector");
         grid.Find(".ms-vector-preview").TextContent.Should().Be("[0.0123, -0.0441, 0.2, …]");
@@ -74,7 +82,7 @@ public class ResultGridVectorTests
         var grid = context.Render<ResultGrid>(parameters => parameters
             .Add(x => x.Columns, Columns)
             .Add(x => x.Rows, Rows(Five))
-            .Add(x => x.Vectors, [null, Vector, null]));
+            .Add(x => x.VectorColumns, VectorAtOne));
 
         grid.FindAll(".ms-query-json-panel").Should().BeEmpty();
 
@@ -98,8 +106,7 @@ public class ResultGridVectorTests
         var grid = context.Render<ResultGrid>(parameters => parameters
             .Add(x => x.Columns, Columns)
             .Add(x => x.Rows, Rows("[0.1,0.2,0.3,0.4…"))
-            .Add(x => x.Vectors, [null, Vector, null])
-            .Add(x => x.CutCells, new HashSet<(int Row, int Column)> { (0, 1) }));
+            .Add(x => x.VectorColumns, CutVectorAtOne));
 
         grid.Find(".ms-vector-preview").TextContent.Should().Be("[0.1, 0.2, 0.3, …]");
         grid.Find(".ms-vector-preview").GetAttribute("title").Should().Contain("more components than were read");
@@ -119,7 +126,7 @@ public class ResultGridVectorTests
             .Add(x => x.Columns, Columns)
             .Add(x => x.Rows, Rows(string.Empty).Select(static row => (IReadOnlyList<(string Text, string Kind)>)
                 [row[0], ("NULL", ResultGrid.NullKind), row[2]]).ToList())
-            .Add(x => x.Vectors, [null, Vector, null]));
+            .Add(x => x.VectorColumns, VectorAtOne));
 
         grid.FindAll(".ms-vector-chip").Should().BeEmpty();
         grid.Find(".ms-query-null").TextContent.Should().Be("NULL");

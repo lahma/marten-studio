@@ -706,7 +706,14 @@ internal sealed class SqlConsoleService : ISqlConsoleService
             await connection.OpenStudioAsync(cancellationToken).ConfigureAwait(false);
 
             SqlResultSet result = await session
-                .ExecuteAsync(connection, statement, bind, cancellationToken)
+                .ExecuteAsync(
+                    connection,
+                    statement,
+                    bind,
+                    // Postgres raises some notices when it parses a statement (an identifier it will truncate) and again when
+                    // it runs it: the describe's are dropped here, the statement's kept. A describe that fails never gets here.
+                    notices.Clear,
+                    cancellationToken)
                 .ConfigureAwait(false);
 
             long elapsed = (long) result.Duration.TotalMilliseconds;

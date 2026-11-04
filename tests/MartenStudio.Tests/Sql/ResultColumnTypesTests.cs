@@ -133,20 +133,68 @@ public class ResultColumnTypesTests
         ResultColumnTypes.PgVectorTypesSql.Should().NotContain("information_schema");
     }
 
+    /// <summary>
+    /// A result keeps a budget of vector text in all: past it a vector cell falls back to the kilobyte of an ordinary cell and
+    /// is marked cut, so many vector columns over many rows cannot hold the per-cell cap times every cell.
+    /// </summary>
+    [Fact]
+    public void A_result_wide_budget_of_vector_text_sends_the_cells_past_it_back_to_the_kilobyte()
+    {
+        var formatter = new SqlValueFormatter(new SqlValueFormatterOptions { MaxVectorLength = 5_000, MaxVectorResultLength = 12_000 });
+        string text = "[" + new string('1', 3_000) + "]";
+        long used = 0;
+
+        List<SqlCell> cells = [];
+
+        for (int i = 0; i < 6; i++)
+        {
+            cells.Add(formatter.FormatPgVector(text, ref used));
+        }
+
+        cells.Take(3).Should().OnlyContain(static x => !x.IsTruncated && x.Text.Length == 3_002, "three cells fit in the budget whole");
+        cells.Skip(3).Should().OnlyContain(static x => x.IsTruncated && x.Text.Length == 1_025,
+            "the fourth would pass 12 000 characters: the kilobyte and the mark of a cut");
+        cells[5].FullLength.Should().Be(3_002);
+
+        new SqlValueFormatterOptions().MaxVectorResultLength.Should().Be(8L * 1024 * 1024);
+    }
+
+    [Fact]
+    public void A_connection_prepares_statements_automatically_when_its_string_says_Max_Auto_Prepare()
+    {
+        using var off = new Npgsql.NpgsqlConnection("Host=h;Database=d");
+        using var on = new Npgsql.NpgsqlConnection("Host=h;Database=d;Max Auto Prepare=50;Auto Prepare Min Usages=2");
+        using var zero = new Npgsql.NpgsqlConnection("Host=h;Database=d;Max Auto Prepare=0");
+
+        ReadOnlySqlSession.AutoPrepares(off).Should().BeFalse();
+        ReadOnlySqlSession.AutoPrepares(on).Should().BeTrue();
+        ReadOnlySqlSession.AutoPrepares(zero).Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("seg", "(cannot read seg) - cast it to ::text in the statement to see it")]
+    [InlineData("public.vector", "(cannot read public.vector) - this connection prepares statements automatically (Max Auto Prepare), so the console cannot ask for text: cast it to ::text in the statement to see it")]
+    [InlineData("halfvec", "(cannot read halfvec) - this connection prepares statements automatically (Max Auto Prepare), so the console cannot ask for text: cast it to ::text in the statement to see it")]
+    public void A_cell_that_could_not_be_read_says_how_to_see_it(string type, string expected) =>
+        ReadOnlySqlSession.Unreadable(type).Should().Be(expected);
+
     [Fact]
     public void A_vector_is_cut_at_its_own_cap_and_an_ordinary_cell_at_the_kilobyte()
     {
         var formatter = new SqlValueFormatter(new SqlValueFormatterOptions { MaxVectorLength = 30 });
         string text = "[" + string.Join(',', Enumerable.Range(0, 40)) + "]";
 
-        SqlCell vector = formatter.FormatPgVector(text);
+        long used = 0;
+        SqlCell vector = formatter.FormatPgVector(text, ref used);
 
         vector.IsTruncated.Should().BeTrue();
         vector.Text.Should().Be(text[..30] + "…");
         vector.FullLength.Should().Be(text.Length);
         vector.Kind.Should().Be(SqlCellKind.Text);
+        used.Should().Be(30);
 
-        formatter.FormatPgVector("[1,2,3]").Should().Be(new SqlCell("[1,2,3]", SqlCellKind.Text, false, 7));
+        formatter.FormatPgVector("[1,2,3]", ref used).Should().Be(new SqlCell("[1,2,3]", SqlCellKind.Text, false, 7));
+        used.Should().Be(37);
         formatter.Format(new string('x', 2000)).IsTruncated.Should().BeTrue("an ordinary cell keeps the kilobyte");
         new SqlValueFormatterOptions().MaxVectorLength.Should().BeGreaterThan(15_000, "an embedding of 1536 dimensions fits whole");
     }

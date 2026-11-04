@@ -53,7 +53,7 @@ public sealed class PgVectorConsoleLiveTests : IAsyncLifetime
         await using var seed = new NpgsqlCommand(
             """
             create extension vector;
-            create extension cube;
+            create extension seg;
             create schema pgv;
             create type pgv.vector as enum ('up', 'down');
             create table pgv.items (id int primary key, embedding vector(3), half halfvec(3), sparse sparsevec(5), n numeric);
@@ -107,15 +107,87 @@ public sealed class PgVectorConsoleLiveTests : IAsyncLifetime
         await using NpgsqlConnection connection = await OpenAsync();
         var session = new ReadOnlySqlSession();
 
-        SqlResultSet cube = await session.ExecuteAsync(connection, "select '(1,2,3)'::cube as c");
-        cube.Succeeded.Should().BeTrue(cube.Error?.MessageText);
-        cube.Columns[0].Vector.Should().BeNull();
-        cube.Rows.Single()[0].Text.Should().Be("(1, 2, 3)");
+        // seg, not cube: no Npgsql version has a handler for it (Npgsql 10 reads cube).
+        SqlResultSet seg = await session.ExecuteAsync(connection, "select '1 .. 2'::seg as c");
+        seg.Succeeded.Should().BeTrue(seg.Error?.MessageText);
+        seg.Columns[0].Vector.Should().BeNull();
+        seg.Rows.Single()[0].Text.Should().Be("1 .. 2");
 
         SqlResultSet lookalike = await session.ExecuteAsync(connection, "select 'up'::pgv.vector as v");
         lookalike.Succeeded.Should().BeTrue(lookalike.Error?.MessageText);
         lookalike.Columns[0].Vector.Should().BeNull("the vector extension does not own pgv.vector");
         lookalike.Rows.Single()[0].Text.Should().Be("up");
+    }
+
+    /// <summary>
+    /// Npgsql keys an auto-prepared statement by its SQL text alone and fixes its result formats into it, so asking for text on
+    /// such a connection would disagree with the cached formats from the second or third run - and leave a text-format prepared
+    /// statement on the host's pooled connection. There the console asks for no text: each statement runs four times with no
+    /// exception and the same cells, and afterwards a plain command with the same text on that one pooled connection reads
+    /// its binary values.
+    /// </summary>
+    [PostgresFact]
+    public async Task On_a_connection_that_prepares_statements_nothing_is_asked_for_as_text_and_the_pool_is_left_as_it_was()
+    {
+        Assert.SkipWhen(unavailable is not null, unavailable ?? string.Empty);
+
+        string connectionString = container!.GetConnectionString() + ";Max Auto Prepare=50;Auto Prepare Min Usages=2;Maximum Pool Size=1";
+        const string Vector = "select id, embedding, n from pgv.items order by id";
+        const string Unknown = "select '1 .. 2'::seg as c, 7 as n";
+
+        // The vector has a binary output function and no Npgsql handler: "(cannot read ...)", as before 1.2. seg has no binary
+        // output function, so Postgres refuses to send it in binary: an error, as before 1.2. Either way the same every run.
+        foreach (string statement in new[] { Vector, Unknown })
+        {
+            string first = string.Empty;
+
+            for (int run = 0; run < 4; run++)
+            {
+                await using var connection = new NpgsqlConnection(connectionString);
+                await connection.OpenAsync(Token);
+
+                SqlResultSet result = await new ReadOnlySqlSession().ExecuteAsync(connection, statement);
+
+                result.Columns.Should().OnlyContain(static x => x.Vector == null);
+
+                string outcome = result.Succeeded
+                    ? string.Join(" | ", result.Rows.SelectMany(static x => x).Select(static x => x.Text))
+                    : "error " + result.Error!.SqlState + " " + result.Error.MessageText;
+
+                if (run == 0)
+                {
+                    first = outcome;
+                }
+                else
+                {
+                    outcome.Should().Be(first, "run " + run + " of " + statement);
+                }
+            }
+
+            if (statement == Vector)
+            {
+                first.Should().Contain("(cannot read").And.Contain("::text");
+            }
+            else
+            {
+                first.Should().StartWith("error ").And.Contain("seg");
+            }
+        }
+
+        // The same text, as the host's own command on the same pooled connection (Maximum Pool Size=1): the statement the
+        // console ran must not have left a text-format description behind.
+        await using var host = new NpgsqlConnection(connectionString);
+        await host.OpenAsync(Token);
+
+        for (int run = 0; run < 3; run++)
+        {
+            await using var command = new NpgsqlCommand(Vector, host);
+            await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(Token);
+
+            (await reader.ReadAsync(Token)).Should().BeTrue();
+            reader.GetInt32(0).Should().Be(1);
+            reader.GetDecimal(2).Should().Be(1.5m);
+        }
     }
 
     [PostgresFact]

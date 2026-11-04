@@ -178,26 +178,22 @@ else
     public string EmptyText { get; set; } = "This statement returned no result set.";
 
     /// <summary>
-    /// For each column, in order, its <c>PgVectorColumn</c> when the column holds pgvector values and <see langword="null" />
-    /// when it does not - the type the console learned from the extension that owns the column's type. Typed
-    /// <see cref="object" /> for the reason <c>SqlCellView.Vector</c> gives: a public parameter cannot have an internal type.
-    /// A list shorter than <see cref="Columns" /> (or none) means no column is a vector.
+    /// For each column, in order: its <c>PgVectorColumn</c> when the column holds pgvector values and <see langword="null" />
+    /// when it does not - the type the console learned from the extension that owns the column's type - together with the
+    /// zero-based rows whose text was cut. A cut value is collapsed from what was read and is never offered for copying; the
+    /// two travel as one so a caller cannot name the vectors and forget the cuts. Typed <see cref="object" /> for the reason
+    /// <c>SqlCellView.Vector</c> gives: a public parameter cannot have an internal type. A list shorter than
+    /// <see cref="Columns" /> (or none) means the rest are not vectors.
     /// </summary>
     [Parameter]
-    public IReadOnlyList<object?> Vectors { get; set; } = [];
+    public IReadOnlyList<(object? Vector, IReadOnlySet<int> CutRows)> VectorColumns { get; set; } = [];
 
-    /// <summary>
-    /// The (row, column) positions, zero-based, of the pgvector cells whose text the server cut. A cut value is collapsed from
-    /// what was read and is never offered for copying.
-    /// </summary>
-    [Parameter]
-    public IReadOnlySet<(int Row, int Column)> CutCells { get; set; } = new HashSet<(int Row, int Column)>();
-
-    private object? VectorOf(int column) => column < Vectors.Count ? Vectors[column] : null;
+    private object? VectorOf(int column) => column < VectorColumns.Count ? VectorColumns[column].Vector : null;
 
     private bool IsVector(int column) => VectorOf(column) is not null;
 
-    private bool IsCut(int row, int column) => CutCells.Contains((row, column));
+    private bool IsCut(int row, int column) =>
+        column < VectorColumns.Count && VectorColumns[column].CutRows.Contains(row);
 
     private Task OpenAsync(int row, int column)
     {

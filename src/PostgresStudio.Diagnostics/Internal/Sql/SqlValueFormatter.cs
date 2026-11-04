@@ -65,6 +65,13 @@ internal sealed record SqlValueFormatterOptions
     /// </summary>
     public int MaxVectorLength { get; init; } = 64 * 1024;
 
+    /// <summary>
+    /// How many characters of pgvector text one result keeps in all: 8 Mi, a hundred and twenty-eight cells at the cap. Past it a
+    /// vector cell falls back to the ordinary <see cref="MaxCellLength" /> and is marked cut, so a statement that selects
+    /// many vector columns of many rows cannot hold the cap times its cells in memory.
+    /// </summary>
+    public long MaxVectorResultLength { get; init; } = 8 * 1024 * 1024;
+
     /// <summary>How many bytes of a <c>bytea</c> value are rendered as hex.</summary>
     public int MaxBinaryBytes { get; init; } = 32;
 
@@ -166,11 +173,26 @@ internal sealed class SqlValueFormatter
     /// kilobyte of an ordinary cell. It is text, and stays <see cref="SqlCellKind.Text" />: the grid knows it is a vector from
     /// its column.
     /// </summary>
-    public SqlCell FormatPgVector(string text)
+    /// <param name="text">The value's text.</param>
+    /// <param name="used">
+    /// The characters of vector text this result has kept so far, which the call adds to. Once a value would take the result
+    /// past <see cref="SqlValueFormatterOptions.MaxVectorResultLength" />, it falls back to the ordinary cell cap and, being
+    /// longer than that, is marked cut.
+    /// </param>
+    public SqlCell FormatPgVector(string text, ref long used)
     {
         ArgumentNullException.ThrowIfNull(text);
 
-        return Cut(text, SqlCellKind.Text, options.MaxVectorLength);
+        long wanted = Math.Min(text.Length, options.MaxVectorLength);
+
+        if (used + wanted <= options.MaxVectorResultLength)
+        {
+            used += wanted;
+            return Cut(text, SqlCellKind.Text, options.MaxVectorLength);
+        }
+
+        used += Math.Min(text.Length, options.MaxCellLength);
+        return Cut(text, SqlCellKind.Text, options.MaxCellLength);
     }
 
     private static bool IsJson(string? postgresType) =>

@@ -209,10 +209,27 @@ internal sealed class ReadOnlySqlSession
     /// planned: a Mode A <c>EXPLAIN</c> carries the same <c>@tenant</c> and <c>@limit</c> the query did,
     /// and without them Postgres answers "there is no parameter $1" instead of a plan.
     /// </remarks>
+    public Task<SqlResultSet> ExecuteAsync(
+        NpgsqlConnection connection,
+        string sql,
+        Action<NpgsqlCommand>? bind,
+        CancellationToken cancellationToken = default) =>
+        ExecuteAsync(connection, sql, bind, null, cancellationToken);
+
+    /// <summary>
+    /// The same run, calling <paramref name="beforeExecute" /> just before the statement itself is executed - after the
+    /// describe, which can raise the same notices again.
+    /// </summary>
+    /// <remarks>
+    /// A caller that collects the connection's notices clears them there: Postgres raises some at parse time (an over-long
+    /// identifier that will be truncated) and raises them again when the statement runs, so without it each is listed twice.
+    /// A describe that fails runs nothing after it, so its notices are kept.
+    /// </remarks>
     public async Task<SqlResultSet> ExecuteAsync(
         NpgsqlConnection connection,
         string sql,
         Action<NpgsqlCommand>? bind,
+        Action? beforeExecute,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(connection);
@@ -220,7 +237,7 @@ internal sealed class ReadOnlySqlSession
 
         return await InTransactionAsync(
                 connection,
-                (transaction, token) => ReadAsync(connection, transaction, sql, bind, token),
+                (transaction, token) => ReadAsync(connection, transaction, sql, bind, beforeExecute, token),
                 cancellationToken)
             .ConfigureAwait(false);
     }
@@ -340,8 +357,10 @@ internal sealed class ReadOnlySqlSession
         NpgsqlTransaction transaction,
         string sql,
         Action<NpgsqlCommand>? bind,
+        Action? beforeExecute,
         CancellationToken cancellationToken)
     {
+        long vectorCharacters = 0;
         List<SqlResultColumn> columns = [];
         List<IReadOnlyList<SqlCell>> rows = [];
         var truncated = false;
@@ -354,7 +373,16 @@ internal sealed class ReadOnlySqlSession
             // One extra round trip, before the statement runs and inside the same transaction: which columns the driver cannot
             // read as a value. An error here is the error the statement would have raised (it is the same Parse), and is
             // answered by the same handlers below.
-            ResultTextPlan textPlan = await DescribeAsync(connection, transaction, sql, bind, cancellationToken).ConfigureAwait(false);
+            //
+            // Not on a connection that prepares statements automatically (Max Auto Prepare > 0): Npgsql keys an auto-prepared
+            // statement by its SQL text alone and fixes the result formats into it, so a text request made now would be
+            // replayed on a host command with the same text, and a later run's request would disagree with the cached formats.
+            // There the statement runs exactly as it did before 1.2, and a column Npgsql cannot read says how to see it.
+            ResultTextPlan textPlan = AutoPrepares(connection)
+                ? ResultTextPlan.None(0)
+                : await DescribeAsync(connection, transaction, sql, bind, cancellationToken).ConfigureAwait(false);
+
+            beforeExecute?.Invoke();
 
             // The duration is the execution's alone, as it always was: the describe is not the statement's time.
             stopwatch.Restart();
@@ -411,7 +439,7 @@ internal sealed class ReadOnlySqlSession
                 {
                     for (var i = 0; i < reader.FieldCount; i++)
                     {
-                        row[i] = ReadCell(reader, i, columns[i]);
+                        row[i] = ReadCell(reader, i, columns[i], ref vectorCharacters);
                     }
                 }
 
@@ -549,24 +577,44 @@ internal sealed class ReadOnlySqlSession
         }
     }
 
-    private SqlCell ReadCell(NpgsqlDataReader reader, int ordinal, SqlResultColumn column)
+    /// <summary>
+    /// Whether the connection's string asks Npgsql to prepare statements automatically (<c>Max Auto Prepare</c> above zero),
+    /// read from the string as <see cref="StudioDatabaseTime.KeyOf" /> reads its host.
+    /// </summary>
+    internal static bool AutoPrepares(NpgsqlConnection connection) =>
+        new NpgsqlConnectionStringBuilder(connection.ConnectionString).MaxAutoPrepare > 0;
+
+    private SqlCell ReadCell(NpgsqlDataReader reader, int ordinal, SqlResultColumn column, ref long vectorCharacters)
     {
         try
         {
             object value = reader.GetValue(ordinal);
 
             // A pgvector value is the text Postgres prints (ResultColumnTypes), kept to a cap of its own: a 1536-dimension
-            // embedding is some 15 000 characters, which the 1 KiB a cell gets would cut in the middle of the export.
+            // embedding is some 15 000 characters, which the 1 KiB a cell gets would cut in the middle of the export. The
+            // result as a whole has a budget of them.
             return column.Vector is not null && value is string text
-                ? formatter.FormatPgVector(text)
+                ? formatter.FormatPgVector(text, ref vectorCharacters)
                 : formatter.Format(value, column.PostgresType);
         }
-        catch (Exception exception) when (exception is InvalidCastException or NotSupportedException)
+        catch (Exception exception) when (exception is InvalidCastException or NotSupportedException or ArgumentException)
         {
-            // A type the driver has no handler for that was not requested as text. Since the describe above that is rare -
-            // an unknown type arrives as text - but a failure to read one value must not fail the whole run.
-            return new SqlCell($"(cannot read {column.PostgresType})", SqlCellKind.Text, false, 0);
+            // A type the driver has no handler for that was not requested as text: only on a connection that prepares
+            // statements automatically, where the console asks for no text. ArgumentException is the base of the decoder's
+            // fallback exception, which a binary value read as text raises - nothing may escape from here unaudited.
+            return new SqlCell(Unreadable(column.PostgresType), SqlCellKind.Text, false, 0);
         }
+    }
+
+    /// <summary>What a cell says when its value could not be read, and how to see it.</summary>
+    internal static string Unreadable(string postgresType)
+    {
+        int dot = postgresType.LastIndexOf('.');
+        string name = (dot >= 0 ? postgresType[(dot + 1)..] : postgresType).Trim('"');
+
+        return name is "vector" or "halfvec" or "sparsevec"
+            ? $"(cannot read {postgresType}) - this connection prepares statements automatically (Max Auto Prepare), so the console cannot ask for text: cast it to ::text in the statement to see it"
+            : $"(cannot read {postgresType}) - cast it to ::text in the statement to see it";
     }
 
     private static async Task SetLocalAsync(

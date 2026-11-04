@@ -115,7 +115,7 @@ public class PgVectorConsoleLiveTests(PgVectorServerFixture server) : IClassFixt
         await using NpgsqlConnection setup = await server.OpenAsync();
         await using (var command = new NpgsqlCommand(
                          """
-                         create extension if not exists cube;
+                         create extension if not exists seg;
                          drop schema if exists vec_console cascade;
                          create schema vec_console;
                          create type vec_console.vector as enum ('up', 'down');
@@ -129,11 +129,12 @@ public class PgVectorConsoleLiveTests(PgVectorServerFixture server) : IClassFixt
 
         await using Host host = Host.Build(server);
 
-        SqlConsoleResult cube = await host.RunAsync("select '(1,2,3)'::cube as c, 7 as n");
-        cube.Succeeded.Should().BeTrue(cube.Error?.MessageText);
-        cube.Columns[0].Vector.Should().BeNull("cube is not pgvector's");
-        cube.Rows.Single()[0].Text.Should().Be("(1, 2, 3)", "the text Postgres prints, not \"(cannot read cube)\"");
-        cube.Rows.Single()[1].Kind.Should().Be(SqlCellKind.Number);
+        // seg, not cube: no Npgsql version has a handler for it (Npgsql 10 reads cube).
+        SqlConsoleResult seg = await host.RunAsync("select '1 .. 2'::seg as c, 7 as n");
+        seg.Succeeded.Should().BeTrue(seg.Error?.MessageText);
+        seg.Columns[0].Vector.Should().BeNull("seg is not pgvector's");
+        seg.Rows.Single()[0].Text.Should().Be("1 .. 2", "the text Postgres prints, not \"(cannot read seg)\"");
+        seg.Rows.Single()[1].Kind.Should().Be(SqlCellKind.Number);
 
         SqlConsoleResult lookalike = await host.RunAsync("select v, id from vec_console.lookalike");
         lookalike.Succeeded.Should().BeTrue(lookalike.Error?.MessageText);
@@ -230,6 +231,113 @@ public class PgVectorConsoleLiveTests(PgVectorServerFixture server) : IClassFixt
         PgVector.Preview(wide.Text, wide.IsTruncated)!.Total.Should().BeNull("a cut value is never counted");
     }
 
+    /// <summary>
+    /// Postgres raises some notices when it parses a statement - an identifier it will truncate - and again when it runs it.
+    /// The describe's are dropped just before the statement executes, so each is listed once.
+    /// </summary>
+    [PostgresFact]
+    public async Task A_notice_raised_at_parse_time_is_listed_once_and_a_failed_describe_keeps_its_own()
+    {
+        SkipIfUnavailable();
+
+        await using Host host = Host.Build(server);
+        string longName = new('a', 70);
+
+        SqlConsoleResult result = await host.RunAsync($"select 1 as {longName}");
+
+        result.Succeeded.Should().BeTrue(result.Error?.MessageText);
+        result.Notices.Should().ContainSingle(static x => x.Contains("will be truncated", StringComparison.Ordinal));
+
+        SqlConsoleResult failed = await host.RunAsync($"select 1 as {longName} from pgv_docs.no_such_table");
+
+        failed.Succeeded.Should().BeFalse();
+        failed.Notices.Should().ContainSingle(static x => x.Contains("will be truncated", StringComparison.Ordinal),
+            "the describe failed, nothing ran after it, and what it raised is all there is");
+    }
+
+    /// <summary>
+    /// 1.2-VEC-FIX: Npgsql keys an auto-prepared statement by its SQL text alone and fixes its result formats into it, so on a
+    /// connection that prepares statements the console asks for no text at all (exactly the 1.1 behaviour): the vector says
+    /// how to see it, a type Npgsql cannot read says so, nothing throws, and every run is the same.
+    /// </summary>
+    [PostgresFact]
+    public async Task On_a_connection_that_prepares_statements_the_console_asks_for_no_text_and_every_run_is_the_same()
+    {
+        SkipIfUnavailable();
+
+        await using NpgsqlConnection setup = await server.OpenAsync();
+        await using (var command = new NpgsqlCommand("create extension if not exists seg", setup))
+        {
+            await command.ExecuteNonQueryAsync(Token);
+        }
+
+        await using Host host = Host.Build(server, ";Max Auto Prepare=50;Auto Prepare Min Usages=2;Maximum Pool Size=1");
+
+        // The vector has a binary output function and no Npgsql handler: "(cannot read ...)", as before 1.2. seg has no binary
+        // output function, so Postgres refuses to send it in binary: an error, as before 1.2. Either way the same every run.
+        foreach (string statement in new[]
+                 {
+                     $"select id, embedding from {Embeddings} order by id",
+                     "select '1 .. 2'::seg as c, 7 as n",
+                 })
+        {
+            string first = string.Empty;
+
+            for (int run = 0; run < 4; run++)
+            {
+                SqlConsoleResult result = await host.RunAsync(statement);
+
+                result.Columns.Should().OnlyContain(static x => x.Vector == null, "the console asked for no text, so it knows no vector");
+
+                string outcome = result.Succeeded
+                    ? string.Join(" | ", result.Rows.SelectMany(static x => x).Select(static x => x.Text))
+                    : "error " + result.Error!.SqlState + " " + result.Error.MessageText;
+
+                if (run == 0)
+                {
+                    first = outcome;
+                }
+                else
+                {
+                    outcome.Should().Be(first, "run " + run + " of " + statement);
+                }
+            }
+
+            if (statement.Contains("embedding", StringComparison.Ordinal))
+            {
+                first.Should().Contain("(cannot read").And.Contain("::text");
+            }
+            else
+            {
+                first.Should().StartWith("error ").And.Contain("seg");
+            }
+        }
+    }
+
+    [PostgresFact]
+    public async Task Many_vector_columns_share_a_budget_and_the_cells_past_it_are_cut_to_the_kilobyte()
+    {
+        SkipIfUnavailable();
+
+        await using NpgsqlConnection connection = await server.OpenAsync();
+        var session = new ReadOnlySqlSession(new ReadOnlySqlOptions
+        {
+            Formatting = new SqlValueFormatterOptions { MaxVectorLength = 100_000, MaxVectorResultLength = 3_000 },
+        });
+
+        SqlResultSet result = await session.ExecuteAsync(
+            connection, $"select wide, wide as w2, wide as w3, embedding from {Embeddings} where id = 1");
+
+        result.Succeeded.Should().BeTrue(result.Error?.MessageText);
+        IReadOnlyList<SqlCell> row = result.Rows.Single();
+
+        row[0].IsTruncated.Should().BeFalse("the first fits whole");
+        row[1].IsTruncated.Should().BeTrue("the second would pass the budget");
+        row[1].Text.Length.Should().Be(1025);
+        row[2].IsTruncated.Should().BeTrue();
+        row[3].Text.Should().Be("[1,2,3]", "a value that is under the kilobyte is whole whatever the budget");
+    }
+
     [PostgresFact]
     public async Task The_export_carries_the_whole_text_of_a_vector()
     {
@@ -261,7 +369,7 @@ public class PgVectorConsoleLiveTests(PgVectorServerFixture server) : IClassFixt
             scope = provider.CreateAsyncScope();
         }
 
-        public static Host Build(PgVectorServerFixture server)
+        public static Host Build(PgVectorServerFixture server, string connectionSuffix = "")
         {
             var services = new ServiceCollection();
 
@@ -271,7 +379,7 @@ public class PgVectorConsoleLiveTests(PgVectorServerFixture server) : IClassFixt
 
             services.AddMarten(options =>
             {
-                options.Connection(server.ConnectionString);
+                options.Connection(server.ConnectionString + connectionSuffix);
                 options.DatabaseSchemaName = PgVectorServerFixture.DocumentSchema;
                 options.Events.DatabaseSchemaName = PgVectorServerFixture.EventSchema;
                 options.AutoCreateSchemaObjects = JasperFx.AutoCreate.None;
