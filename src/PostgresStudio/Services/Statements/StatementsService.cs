@@ -5,6 +5,7 @@ using PostgresStudio.Services.Database;
 using PostgresStudio.Services.Health;
 using PostgresStudio.Services.Health.Checks;
 using PostgresStudio.Services.Query;
+using PostgresStudio.Services.Schema;
 using PostgresStudio.Services.Settings;
 using PostgresStudio.Services.Sources;
 
@@ -326,6 +327,28 @@ internal interface IStatementsService
     /// <param name="index">The index to imagine, as the drill-in's plan suggested it.</param>
     /// <param name="cancellationToken">Cancels the what-if; never the reset after it.</param>
     Task<WhatIfResult> WhatIfAsync(StudioScope scope, long queryId, HypotheticalIndex index, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 1.2-INDEX-A: the index advisor - the statements with the most execution time that this visitor may see, planned now and again
+    /// under each index their plans suggest, imagined one at a time with hypopg, ranked by the planner's cost saved times calls.
+    /// Behind the Statements page's own gate, asked again here; one audit entry per run. Nothing is created, and nothing is applied.
+    /// Never throws but for cancellation: a refusal, hypopg's absence and every failure are values.
+    /// </summary>
+    /// <param name="scope">The visitor's scope; its tenant is dropped.</param>
+    /// <param name="request">Every table, or one - and the visitor's own index on it.</param>
+    /// <param name="cancellationToken">Cancels the run; hypopg is reset and the connection cleaned up first.</param>
+    Task<IndexAdviceView> AdviseIndexesAsync(StudioScope scope, IndexAdviceRequest request, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// As <see cref="AdviseIndexesAsync(StudioScope, IndexAdviceRequest, CancellationToken)" />, for a caller that records the press
+    /// itself: a card action's runner writes the one audit entry, with this run's counts (<see cref="IndexAdviceView.AuditOutcome" />),
+    /// so a press is one entry and not two. The gate is asked all the same.
+    /// </summary>
+    /// <param name="scope">The visitor's scope; its tenant is dropped.</param>
+    /// <param name="request">Every table, or one - and the visitor's own index on it.</param>
+    /// <param name="recordAudit">Whether this run writes its own audit entry; the Statements page's does, a card action's does not.</param>
+    /// <param name="cancellationToken">Cancels the run.</param>
+    Task<IndexAdviceView> AdviseIndexesAsync(StudioScope scope, IndexAdviceRequest request, bool recordAudit, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -440,7 +463,13 @@ internal sealed class StatementsService : IStatementsService
     private readonly StudioDatabaseTime meter;
     private readonly StatementPlanReader planner;
     private readonly TimeProvider timeProvider;
+    private readonly HypotheticalIndexReader hypothetical;
+    private readonly IReadOnlyList<IIndexCandidateContributor> contributors;
+    private readonly IndexAdvisorFlights flights;
     private readonly TableRowAuditLedger ledger = new();
+
+    // 1.2-INDEX-A: one index-advice run at a time in this tab (the service is the circuit's).
+    private int advising;
 
     public StatementsService(
         IStudioSettings settings,
@@ -454,7 +483,10 @@ internal sealed class StatementsService : IStatementsService
         DatabaseAccess? access = null,
         StudioDatabaseTime? meter = null,
         StatementPlanReader? planner = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        HypotheticalIndexReader? hypothetical = null,
+        IEnumerable<IIndexCandidateContributor>? contributors = null,
+        IndexAdvisorFlights? flights = null)
     {
         this.settings = settings;
         this.capabilities = capabilities;
@@ -468,6 +500,9 @@ internal sealed class StatementsService : IStatementsService
         this.meter = meter ?? StudioDatabaseTime.Shared;
         this.planner = planner ?? new StatementPlanReader(settings, Microsoft.Extensions.Logging.Abstractions.NullLogger<StatementPlanReader>.Instance);
         this.timeProvider = timeProvider ?? TimeProvider.System;
+        this.hypothetical = hypothetical ?? new HypotheticalIndexReader(settings, Microsoft.Extensions.Logging.Abstractions.NullLogger<HypotheticalIndexReader>.Instance);
+        this.contributors = [.. contributors ?? []];
+        this.flights = flights ?? new IndexAdvisorFlights();
     }
 
     /// <summary>How many first reads this circuit has recorded, for a test.</summary>
@@ -795,6 +830,662 @@ internal sealed class StatementsService : IStatementsService
 
         audit.Record(WhatIfAction, target, succeeded: result.Before is not null, result.Outcome(), StudioCapability.ViewDatabaseActivity, whole);
         return result;
+    }
+
+    /// <summary>What the audit ring calls a run of the index advisor (1.2-INDEX-A).</summary>
+    internal const string IndexAdviceAction = "Advise indexes for database statements";
+
+    /// <inheritdoc />
+    public Task<IndexAdviceView> AdviseIndexesAsync(StudioScope scope, IndexAdviceRequest request, CancellationToken cancellationToken = default) =>
+        AdviseIndexesAsync(scope, request, recordAudit: true, cancellationToken);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// <para>
+    /// <b>The page's gate, asked here.</b> <see cref="PassAsync" /> first - <c>ViewDatabaseActivity</c>, the scope with no tenant, the
+    /// store policy, the write policy with the capability named - then one run per tab and one per database in the process
+    /// (<see cref="IndexAdvisorFlights" />, refused and never joined: two visitors' masks differ), then hypopg (not installed, or not
+    /// usable by the role the studio plans as, and nothing at all is planned), then the statement sweep's own statements: the advisor
+    /// never reads <c>pg_stat_statements</c>, so T02's fence holds and no other role's statement can be among them.
+    /// </para>
+    /// <para>
+    /// <b>Only what the drill-in would plan and show to this visitor.</b> Each statement kept is one <see cref="IndexAdvisor.Select" />
+    /// accepts; each is planned as the drill-in plans it (<see cref="StatementPlanReader.ReadAsync" />: <c>SqlConsoleRole</c>, the
+    /// visitor's <c>search_path</c>, the crossing walk) and admitted only if its plan reads nothing the visitor may not see. Candidates
+    /// come from admitted plans alone; every plan under an imagined index is held to <see cref="WithheldPlan" /> again; the view holds
+    /// no plan and no text, only <c>queryid</c>s, captions built from visible plans, costs and remedies.
+    /// </para>
+    /// <para>
+    /// <b>Bounded</b> (<see cref="IndexAdvisor.MaxStatements" />, <see cref="IndexAdvisor.MaxCandidates" />,
+    /// <see cref="IndexAdvisor.MaxTrialPlans" />, <see cref="IndexAdvisor.RunBudget" />), and run only on a press. <b>One audit entry</b>
+    /// per run, success or failure, with counts alone - unless the caller records the press itself (<paramref name="recordAudit" />).
+    /// </para>
+    /// </remarks>
+    public async Task<IndexAdviceView> AdviseIndexesAsync(StudioScope scope, IndexAdviceRequest request, bool recordAudit, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        ArgumentNullException.ThrowIfNull(request);
+
+        // 1. The page's own gate. A refusal is the page's: not audited, as the page's own is not.
+        (StatementsView? refused, ResolvedSource? passed, StudioScope whole) = await PassAsync(scope, cancellationToken).ConfigureAwait(false);
+
+        if (refused is not null || passed is not { } database)
+        {
+            return IndexAdviceView.Refused(refused?.Refusal ?? DatabaseRefusal.Unavailable, refused?.Reason ?? "The database could not be resolved.");
+        }
+
+        // 2. One run at a time in this tab.
+        if (Interlocked.CompareExchange(ref advising, 1, 0) != 0)
+        {
+            return new IndexAdviceView { Reason = IndexAdvisor.AlreadyRunningInTab };
+        }
+
+        try
+        {
+            // 3. One run at a time on this database, in the process: refused, never joined.
+            string flight = whole.StoreKey + "\u001f" + whole.DatabaseId;
+
+            if (!flights.TryEnter(flight))
+            {
+                const string Busy = "Not run: another run holds this database.";
+
+                RecordAdvice(recordAudit, request, selected: 0, succeeded: false, Busy, whole);
+                return new IndexAdviceView { Reason = IndexAdvisor.AlreadyRunningForDatabase, Table = request.Table, AuditOutcome = Busy };
+            }
+
+            try
+            {
+                return await AdviseCoreAsync(database, whole, request, recordAudit, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                flights.Exit(flight);
+            }
+        }
+        finally
+        {
+            Interlocked.Exchange(ref advising, 0);
+        }
+    }
+
+    /// <summary>Counts the audit entry names and a run fills in as it goes.</summary>
+    private sealed class AdviceRun
+    {
+        public int Selected { get; set; }
+    }
+
+    /// <summary>One run, from hypopg's state to the ranked view, and its one audit entry: success, failure and cancellation alike.</summary>
+    private async Task<IndexAdviceView> AdviseCoreAsync(
+        ResolvedSource database,
+        StudioScope whole,
+        IndexAdviceRequest request,
+        bool recordAudit,
+        CancellationToken cancellationToken)
+    {
+        long started = timeProvider.GetTimestamp();
+        DateTimeOffset deadline = timeProvider.GetUtcNow() + IndexAdvisor.RunBudget;
+        AdviceRun run = new();
+        IndexAdviceView view;
+        bool succeeded;
+
+        try
+        {
+            (view, succeeded) = await RunAdviceAsync(database, whole, request, deadline, run, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // The tab left or Cancel was pressed: hypopg was reset and the connection cleaned up by the engine on the way out.
+            RecordAdvice(recordAudit, request, run.Selected, succeeded: false, "Stopped: the run was cancelled.", whole);
+            throw;
+        }
+        catch (Exception exception)
+        {
+            if (logger.IsEnabled(LogLevel.Debug))
+            {
+                logger.LogDebug(exception, "The index advisor failed for {DatabaseId}", database.Target.Identity);
+            }
+
+            string reason = PostgresFailure.IsConnectionFailure(exception)
+                ? "Index advice failed: " + PostgresFailure.CouldNotConnectClause(exception) + "."
+                : "Index advice failed (" + (exception is PostgresException postgres ? "SQLSTATE " + postgres.SqlState : exception.GetType().Name) + ").";
+
+            view = new IndexAdviceView { Reason = reason, Table = request.Table, AuditOutcome = reason };
+            succeeded = false;
+        }
+
+        view = view with { RanAt = timeProvider.GetUtcNow(), Took = timeProvider.GetElapsedTime(started) };
+
+        RecordAdvice(recordAudit, request, run.Selected, succeeded, view.AuditOutcome ?? view.Reason ?? view.Unavailable, whole);
+        return view;
+    }
+
+    /// <summary>The run's one audit entry: the table is named through <see cref="StudioLogValue" /> and nothing else read is.</summary>
+    private void RecordAdvice(bool recordAudit, IndexAdviceRequest request, int selected, bool succeeded, string? outcome, StudioScope whole)
+    {
+        if (!recordAudit)
+        {
+            return;
+        }
+
+        string target = request.Table is { } table
+            ? "statements on " + StudioLogValue.Cap(table)
+            : "the top " + selected.ToString(CultureInfo.InvariantCulture) + " statements";
+
+        audit.Record(IndexAdviceAction, target, succeeded, outcome, StudioCapability.ViewDatabaseActivity, whole);
+    }
+
+    private async Task<(IndexAdviceView View, bool Succeeded)> RunAdviceAsync(
+        ResolvedSource database,
+        StudioScope whole,
+        IndexAdviceRequest request,
+        DateTimeOffset deadline,
+        AdviceRun run,
+        CancellationToken cancellationToken)
+    {
+        IStudioDatabase target = database.Target;
+        StudioText text = settings.Text;
+
+        // 4. hypopg, before anything is planned: an unevaluated list of CREATE INDEX lines is the guess this tool exists to replace.
+        HypotheticalIndexAvailability usable = await hypothetical.GetAvailabilityAsync(target, cancellationToken).ConfigureAwait(false);
+
+        if (usable.Sentence is { } unavailable)
+        {
+            return (new IndexAdviceView
+            {
+                Unavailable = unavailable,
+                Table = request.Table,
+                AuditOutcome = usable.State == HypotheticalIndexState.NotInstalled
+                    ? "Not run: hypopg is not installed."
+                    : "Not run: the role the studio plans as may not use hypopg.",
+            }, false);
+        }
+
+        // 5. The statements, as this visitor may see them: the statement sweep's read, joined or taken while fresh.
+        StatementFacts read;
+
+        try
+        {
+            read = await facts.ReadAsync(database, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            string failure = Failure(exception, database);
+            return (new IndexAdviceView { Reason = failure, Table = request.Table, AuditOutcome = "Not run: the statements could not be read." }, false);
+        }
+
+        if (read.State != StatementsState.Read)
+        {
+            return (new IndexAdviceView { Reason = Status(read, text) ?? NotAmong, Table = request.Table, AuditOutcome = "Not run: the statements were not read." }, false);
+        }
+
+        DatabaseGateRead? gate = await GateAsync(whole, database, cancellationToken).ConfigureAwait(false);
+        StatementScreen screen = StatementScreen.Of(gate, settings.IsDocumentTypeVisible is not null);
+        Dictionary<long, StatementRowView> rows = [];
+
+        foreach (StatementRowView row in Show(read, gate).Rows)
+        {
+            rows.TryAdd(row.QueryId, row);
+        }
+
+        // 6. Selection.
+        WorkloadStatements selection = IndexAdvisor.Select(read.Statements, rows, screen.Withheld, request.Table);
+        run.Selected = selection.Kept.Count;
+
+        if (selection.Kept.Count == 0 || screen.Withheld is not { } withheld)
+        {
+            return (new IndexAdviceView
+            {
+                Reason = request.Table is null ? "No statement that the studio can plan is among the ones you may see." : IndexAdvisor.NoStatementNamesTable,
+                Table = request.Table,
+                Skipped = selection.Skipped,
+                AuditOutcome = "Not run: no statement to plan.",
+            }, false);
+        }
+
+        StudioTable? table = request.Table is null
+            ? null
+            : selection.Kept.SelectMany(static x => x.Tables).First(x => string.Equals(x.Key, request.Table, StringComparison.Ordinal));
+
+        TimeSpan statementTimeout = settings.QueryTimeout < HealthSweeper.MaxStatementTimeout ? settings.QueryTimeout : HealthSweeper.MaxStatementTimeout;
+        int commandTimeout = (int) Math.Ceiling(statementTimeout.TotalSeconds) + 5;
+
+        // Phase 1: the plans now, the drill-in's own. A statement is admitted only when its plan reads nothing this visitor may not see.
+        List<AdvisedStatement> admitted = [];
+        int noParameterType = 0, crossing = 0, withheldPlan = 0, refusedByPostgres = 0, noPlan = 0, unreadable = 0, failed = 0;
+        IReadOnlyList<HealthStatement> planStatements = [];
+        string? stopped = null;
+
+        foreach (SelectedStatement statement in selection.Kept)
+        {
+            if (timeProvider.GetUtcNow() >= deadline)
+            {
+                stopped = "Stopped after " + ((int) IndexAdvisor.RunBudget.TotalSeconds).ToString(CultureInfo.InvariantCulture) + " seconds: planned "
+                    + admitted.Count.ToString(CultureInfo.InvariantCulture) + " of " + selection.Kept.Count.ToString(CultureInfo.InvariantCulture) + " statements.";
+                break;
+            }
+
+            StatementPlanRead planned;
+
+            try
+            {
+                planned = await planner.ReadAsync(target, statement.QueryId, statement.Text, statement.Truncated, withheld, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException && !PostgresFailure.IsConnectionFailure(exception))
+            {
+                failed++;
+                continue;
+            }
+
+            if (planStatements.Count == 0)
+            {
+                planStatements = planned.Statements;
+            }
+
+            if (planned.Json is not { } json)
+            {
+                if (planned.NotPlanned == ReachesWithheldSchema || planned.NotPlanned == NamesWithheldSchema)
+                {
+                    crossing++;
+                }
+                else if (planned.SqlState == PostgresErrorCodes.IndeterminateDatatype)
+                {
+                    noParameterType++;
+                }
+                else if (planned.SqlState is not null)
+                {
+                    refusedByPostgres++;
+                }
+                else
+                {
+                    noPlan++;
+                }
+
+                continue;
+            }
+
+            if (WithheldPlan(json, screen, withheld) is not null)
+            {
+                withheldPlan++;
+                continue;
+            }
+
+            QueryPlan? plan = QueryPlanReader.Read(json).Plan;
+
+            if (plan?.Root.TotalCost is not { } before || StatementPlanQueries.GenericPlan(statement.Text, statement.Truncated) is not { } batch)
+            {
+                unreadable++;
+                continue;
+            }
+
+            admitted.Add(new AdvisedStatement(statement.QueryId, statement.Text, statement.Truncated, statement.Calls, before, plan, batch));
+        }
+
+        IReadOnlyList<string> skipped =
+        [
+            .. selection.Skipped,
+            .. IndexAdvisor.Counted(
+                (noParameterType, "statement whose placeholders' types Postgres cannot infer", "statements whose placeholders' types Postgres cannot infer"),
+                (crossing, "statement that reaches a schema you may not see", "statements that reach a schema you may not see"),
+                (withheldPlan, "statement whose plan reads a table you may not see", "statements whose plans read a table you may not see"),
+                (refusedByPostgres, "statement Postgres refused to plan", "statements Postgres refused to plan"),
+                (noPlan, "statement with no plan to read (too long, or none returned)", "statements with no plan to read (too long, or none returned)"),
+                (unreadable, "statement whose plan could not be read", "statements whose plans could not be read"),
+                (failed, "statement whose plan failed", "statements whose plans failed")),
+        ];
+
+        IndexAdviceView Base(IndexAdviceView view) => view with
+        {
+            Table = request.Table,
+            Skipped = skipped,
+            StatementsSelected = selection.Kept.Count,
+            StatementsTried = admitted.Count,
+            Workload = admitted.Sum(static x => x.Calls * x.Before),
+            Stopped = view.Stopped ?? stopped,
+            ComparedColumns = table is null ? [] : IndexAdvisor.ComparedColumns(admitted.Select(static x => x.Plan), table.Schema, table.Table),
+            Statements = Shown(planStatements, usable.Schema, view.Statements),
+        };
+
+        if (admitted.Count == 0)
+        {
+            return (Base(new IndexAdviceView
+            {
+                Reason = "None of the " + IndexAdvisor.Statements(selection.Kept.Count) + " could be planned.",
+                AuditOutcome = "Planned 0 of " + selection.Kept.Count.ToString(CultureInfo.InvariantCulture) + " statements.",
+            }), false);
+        }
+
+        // The visitor's own index: only a column these runs' plans compare on that table.
+        List<HypotheticalIndex> own = [];
+        List<string> notTried = [];
+
+        if (request.Columns.Count > 0)
+        {
+            IReadOnlyList<string> compared = IndexAdvisor.ComparedColumns(admitted.Select(static x => x.Plan), table?.Schema ?? string.Empty, table?.Table ?? string.Empty);
+            string[] columns = [.. request.Columns.Distinct(StringComparer.Ordinal)];
+
+            if (table is null || columns.Length is 0 or > HypotheticalIndexCandidates.MaxColumns)
+            {
+                return (Base(new IndexAdviceView
+                {
+                    Reason = "Not tried: your own index needs a table, and one to " + HypotheticalIndexCandidates.MaxColumns.ToString(CultureInfo.InvariantCulture) + " different columns.",
+                    AuditOutcome = "Not run: the column list was not one the studio tries.",
+                }), false);
+            }
+
+            if (columns.FirstOrDefault(x => !compared.Contains(x, StringComparer.Ordinal)) is { } unknown)
+            {
+                return (Base(new IndexAdviceView
+                {
+                    Reason = "Not tried: " + StudioLogValue.Cap(unknown) + " is not a column these statements compare.",
+                    AuditOutcome = "Not run: a column was not one these statements compare.",
+                }), false);
+            }
+
+            if (PlanWhatIfCandidates.Candidate(table.Schema, table.Table, columns) is { } yours)
+            {
+                own.AddRange(await OwnAsync(yours with { Key = "visitor:" + yours.Key }, admitted, table, whole, cancellationToken).ConfigureAwait(false));
+
+                if (own.Count == 0)
+                {
+                    notTried.Add(yours.Caption + ": No StoreOptions line declares that index on a document table.");
+                }
+            }
+        }
+
+        // The indexes the admitted plans suggest, through the studio's contributors, and merged.
+        List<CandidateSource> sources = [];
+
+        for (int i = 0; i < admitted.Count; i++)
+        {
+            IReadOnlyList<HypotheticalIndex> offered = await ContributeAsync(
+                    admitted[i].Plan, WorkloadIndexCandidates.FromPlan(admitted[i].Plan), whole, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (table is not null)
+            {
+                offered = [.. offered.Where(x => string.Equals(x.Schema, table.Schema, StringComparison.Ordinal) && string.Equals(x.Table, table.Table, StringComparison.Ordinal))];
+            }
+
+            sources.Add(new CandidateSource(i, admitted[i].Calls, admitted[i].Plan, offered));
+        }
+
+        IReadOnlyList<AdvisedCandidate> merged = IndexAdvisor.Merge(sources, own);
+
+        // Which tables may have an index imagined: one catalog read, for the candidates' tables only.
+        IReadOnlyList<IndexAdvisorRelation> relations = merged.Count == 0
+            ? []
+            : await ReadRelationsAsync(target, merged, statementTimeout, commandTimeout, cancellationToken).ConfigureAwait(false);
+
+        Dictionary<string, IndexAdvisorRelation> relationByTable = new(StringComparer.Ordinal);
+
+        foreach (IndexAdvisorRelation relation in relations)
+        {
+            relationByTable[SchemaKey.For(relation.Schema, relation.Table)] = relation;
+        }
+
+        List<AdvisedCandidate> eligible = [];
+
+        foreach (AdvisedCandidate candidate in merged)
+        {
+            string key = SchemaKey.For(candidate.Index.Schema ?? string.Empty, candidate.Index.Table);
+
+            if (!relationByTable.TryGetValue(key, out IndexAdvisorRelation? relation))
+            {
+                notTried.Add(candidate.Index.Caption + ": the table could not be found when the studio looked.");
+            }
+            else if (relation.Kind == 'p' || relation.IsPartition)
+            {
+                notTried.Add(candidate.Index.Caption + ": a partition's index is declared on its partitioned table, which the studio does not imagine an index on.");
+            }
+            else if (relation.Kind != 'r')
+            {
+                notTried.Add(candidate.Index.Caption + ": only an ordinary table can have an index imagined on it.");
+            }
+            else
+            {
+                eligible.Add(candidate);
+            }
+        }
+
+        IReadOnlyList<AdvisedCandidate> capped = IndexAdvisor.Cap(eligible, out int overCap);
+        IReadOnlyList<HypotheticalIndexTrial> trials = IndexAdvisor.Trials(capped, admitted, out int overPlans);
+
+        if (overCap > 0)
+        {
+            notTried.Add(overCap.ToString(CultureInfo.InvariantCulture) + (overCap == 1 ? " more index was" : " more indexes were") + " not tried: the cap is "
+                + IndexAdvisor.MaxCandidates.ToString(CultureInfo.InvariantCulture) + " indexes.");
+        }
+
+        if (overPlans > 0)
+        {
+            notTried.Add(overPlans.ToString(CultureInfo.InvariantCulture) + (overPlans == 1 ? " more index was" : " more indexes were") + " not tried: the cap is "
+                + IndexAdvisor.MaxTrialPlans.ToString(CultureInfo.InvariantCulture) + " plans under imagined indexes.");
+        }
+
+        // Phase 2: each index alone, in a read-only transaction of its own, hypopg reset last; every plan under it held to the mask again.
+        HypotheticalWorkloadPlanner workloadPlanner = new(
+            PrepareAsync: async (connection, transaction, token) =>
+            {
+                IReadOnlyList<string> path = await StatementPlanQueries.ReadSearchPathAsync(connection, transaction, commandTimeout, token).ConfigureAwait(false);
+                await StatementPlanQueries
+                    .SetSearchPathAsync(connection, transaction, StatementPlanQueries.SearchPath(path.Where(x => !withheld.Contains(x))), commandTimeout, token)
+                    .ConfigureAwait(false);
+            },
+            PlanAsync: async (statement, connection, transaction, token) =>
+            {
+                (string? json, _) = await StatementPlanQueries
+                    .ReadPlanAsync(connection, transaction, admitted[statement].Batch, ExplainStatements.MaxPlanCharacters, commandTimeout, token)
+                    .ConfigureAwait(false);
+                return json;
+            },
+            AfterFailureAsync: planner.ForgetAsync)
+        {
+            StatementTimeout = statementTimeout,
+        };
+
+        HypotheticalWorkloadRead workload = trials.Count == 0
+            ? new HypotheticalWorkloadRead { Availability = usable }
+            : await hypothetical.ReadTrialsAsync(target, trials, workloadPlanner, deadline, timeProvider, cancellationToken).ConfigureAwait(false);
+
+        if (workload.Availability.Sentence is { } gone)
+        {
+            return (Base(new IndexAdviceView { Unavailable = gone, AuditOutcome = "Not run: hypopg is no longer usable." }), false);
+        }
+
+        List<IndexTrialResult> results = [];
+        int plansRun = 0;
+
+        foreach (HypotheticalTrialRead made in workload.Trials)
+        {
+            AdvisedCandidate candidate = capped.First(x => IndexAdvisor.Identity(x.Index) == IndexAdvisor.Identity(made.Index));
+
+            if (made.SqlState is { } sqlState)
+            {
+                results.Add(new IndexTrialResult(candidate, sqlState, []));
+                continue;
+            }
+
+            List<IndexTrialStatement> compared = [];
+
+            foreach ((int statement, string? json) in made.After)
+            {
+                plansRun++;
+                double? after = null;
+                bool used = false;
+
+                if (json is not null && WithheldPlan(json, screen, withheld) is null && QueryPlanReader.Read(json).Plan is { } underIndex)
+                {
+                    after = underIndex.Root.TotalCost;
+                    used = WhatIfResult.Reads(underIndex, made.Made?.Name);
+                }
+
+                compared.Add(new IndexTrialStatement(statement, after, used));
+            }
+
+            results.Add(new IndexTrialResult(candidate, null, compared));
+        }
+
+        IndexRanking ranking = IndexAdvisor.Rank(
+            admitted,
+            results,
+            index => index.Schema is { } schema && relationByTable.TryGetValue(SchemaKey.For(schema, index.Table), out IndexAdvisorRelation? relation) && (relation.Inserts is not null || relation.Updates is not null)
+                ? (relation.Inserts ?? 0) + (relation.Updates ?? 0)
+                : null);
+
+        notTried.AddRange(ranking.NotTried);
+
+        string? ended = workload.Stopped switch
+        {
+            HypotheticalWorkloadStop.Budget => "Stopped after " + ((int) IndexAdvisor.RunBudget.TotalSeconds).ToString(CultureInfo.InvariantCulture) + " seconds: "
+                + workload.Trials.Count.ToString(CultureInfo.InvariantCulture) + " of " + trials.Count.ToString(CultureInfo.InvariantCulture) + " indexes tried.",
+            HypotheticalWorkloadStop.SessionEnded => "Stopped: hypopg could not be reset on the studio's session, so the studio ended it, after "
+                + workload.Trials.Count.ToString(CultureInfo.InvariantCulture) + " of " + trials.Count.ToString(CultureInfo.InvariantCulture) + " indexes.",
+            _ => null,
+        };
+
+        string outcome = "Planned " + admitted.Count.ToString(CultureInfo.InvariantCulture) + " of " + selection.Kept.Count.ToString(CultureInfo.InvariantCulture)
+            + " statements; tried " + workload.Trials.Count.ToString(CultureInfo.InvariantCulture) + " of " + merged.Count.ToString(CultureInfo.InvariantCulture)
+            + (merged.Count == 1 ? " index" : " indexes") + " in " + plansRun.ToString(CultureInfo.InvariantCulture) + " plans; "
+            + ranking.Recommended.Count.ToString(CultureInfo.InvariantCulture) + " would help."
+            + ((ended ?? stopped) is { } why ? " " + why : string.Empty);
+
+        return (Base(new IndexAdviceView
+        {
+            Recommended = ranking.Recommended,
+            NotUsed = ranking.NotUsed,
+            NotTried = notTried,
+            CandidatesFound = merged.Count,
+            CandidatesTried = workload.Trials.Count,
+            PlansRun = plansRun,
+            Stopped = ended,
+            AuditOutcome = outcome,
+        }), true);
+    }
+
+    /// <summary>
+    /// The visitor's own index as the studio offers it: through the contributors, against the first admitted plan that reads its
+    /// table - what a contributor adds for that plan's own sake is not "the visitor's", so it is told apart by asking twice. With no
+    /// contributor, the index itself.
+    /// </summary>
+    private async Task<IReadOnlyList<HypotheticalIndex>> OwnAsync(
+        HypotheticalIndex yours,
+        IReadOnlyList<AdvisedStatement> admitted,
+        StudioTable table,
+        StudioScope whole,
+        CancellationToken cancellationToken)
+    {
+        if (contributors.Count == 0)
+        {
+            return [yours];
+        }
+
+        AdvisedStatement? reading = admitted.FirstOrDefault(x => WorkloadIndexCandidates.Reads(x.Plan, table.Schema, table.Table));
+
+        if (reading is null)
+        {
+            return [];
+        }
+
+        IReadOnlyList<HypotheticalIndex> fromPlan = WorkloadIndexCandidates.FromPlan(reading.Plan);
+        IReadOnlyList<HypotheticalIndex> without = await ContributeAsync(reading.Plan, fromPlan, whole, cancellationToken).ConfigureAwait(false);
+        IReadOnlyList<HypotheticalIndex> with = await ContributeAsync(reading.Plan, [.. fromPlan, yours], whole, cancellationToken).ConfigureAwait(false);
+
+        HashSet<string> already = [.. without.Select(IndexAdvisor.Identity)];
+
+        // Added by asking about it - its own, or a Marten replacement of it - or already offered by the plan: then it is that one.
+        List<HypotheticalIndex> added = [.. with.Where(x => !already.Contains(IndexAdvisor.Identity(x)))];
+
+        if (added.Count == 0 && already.Contains(IndexAdvisor.Identity(yours)))
+        {
+            added.Add(yours);
+        }
+
+        return added;
+    }
+
+    /// <summary>The indexes a plan offers once every contributor has been through them, each given the previous one's output.</summary>
+    private async Task<IReadOnlyList<HypotheticalIndex>> ContributeAsync(
+        QueryPlan plan,
+        IReadOnlyList<HypotheticalIndex> fromPlan,
+        StudioScope whole,
+        CancellationToken cancellationToken)
+    {
+        IReadOnlyList<HypotheticalIndex> current = fromPlan;
+
+        foreach (IIndexCandidateContributor contributor in contributors)
+        {
+            try
+            {
+                current = await contributor.ContributeAsync(plan, current, whole, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                // A studio that cannot say what its tables declare offers none of its tables' indexes - fail closed.
+                if (logger.IsEnabled(LogLevel.Debug))
+                {
+                    logger.LogDebug(exception, "An index candidate contributor failed; the plan offers no index");
+                }
+
+                return [];
+            }
+        }
+
+        return current;
+    }
+
+    /// <summary>The one catalog read of a run: which of the candidates' tables are ordinary tables, and what has been written to them.</summary>
+    private async Task<IReadOnlyList<IndexAdvisorRelation>> ReadRelationsAsync(
+        IStudioDatabase target,
+        IReadOnlyList<AdvisedCandidate> candidates,
+        TimeSpan statementTimeout,
+        int commandTimeout,
+        CancellationToken cancellationToken)
+    {
+        List<(string Schema, string Table)> pairs =
+        [
+            .. candidates
+                .Where(static x => x.Index.Schema is { Length: > 0 })
+                .Select(static x => (x.Index.Schema!, x.Index.Table))
+                .Distinct(),
+        ];
+
+        ReadOnlySqlSession session = new(new ReadOnlySqlOptions { StatementTimeout = statementTimeout, Role = settings.SqlConsoleRole });
+
+        await using NpgsqlConnection connection = target.CreateConnection(StudioConnectionUsage.Read);
+        await connection.OpenStudioAsync(cancellationToken).ConfigureAwait(false);
+
+        return await session.InTransactionAsync(
+                connection,
+                (transaction, token) => IndexAdvisorQueries.ReadRelationsAsync(
+                    connection, transaction, [.. pairs.Select(static x => x.Schema)], [.. pairs.Select(static x => x.Table)], commandTimeout, token),
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>"Show SQL": the drill-in's statements, the relation read and hypopg's two calls - shapes, never a text or a value.</summary>
+    private static List<HealthStatement> Shown(IReadOnlyList<HealthStatement> plan, string? hypopgSchema, IReadOnlyList<HealthStatement> more)
+    {
+        List<HealthStatement> shown =
+        [
+            .. plan.Select(static x => x with { Label = x.Label ?? "a statement's plan" }),
+            new(IndexAdvisorQueries.RelationsSql, [IndexAdvisorQueries.SchemasParameter, IndexAdvisorQueries.TablesParameter]) { Label = "the tables the candidates are on" },
+        ];
+
+        if (hypopgSchema is not null)
+        {
+            if (HypotheticalIndexQueries.Create(hypopgSchema) is { } create)
+            {
+                shown.Add(new HealthStatement(create, [HypotheticalIndexQueries.DefinitionParameter]) { Label = "hypopg's create call" });
+            }
+
+            if (HypotheticalIndexQueries.Reset(hypopgSchema) is { } reset)
+            {
+                shown.Add(new HealthStatement(reset, []) { Label = "hypopg's reset" });
+            }
+        }
+
+        shown.AddRange(more);
+        return shown;
     }
 
     /// <summary>

@@ -66,6 +66,21 @@ public class StatementsPageTests
             return Task.FromResult(WhatIf?.Invoke(index)
                 ?? WhatIfResult.NotCompared(index, HypotheticalIndexAvailability.NotInstalledSentence, HypotheticalIndexState.NotInstalled));
         }
+
+        /// <summary>Every index-advisor run the panel asked for (1.2-INDEX-A).</summary>
+        public List<IndexAdviceRequest> Advised { get; } = [];
+
+        /// <summary>What a run answers; an empty view when a test says nothing.</summary>
+        public Func<IndexAdviceRequest, IndexAdviceView>? Advice { get; set; }
+
+        public Task<IndexAdviceView> AdviseIndexesAsync(StudioScope scope, IndexAdviceRequest request, CancellationToken cancellationToken = default) =>
+            AdviseIndexesAsync(scope, request, recordAudit: true, cancellationToken);
+
+        public Task<IndexAdviceView> AdviseIndexesAsync(StudioScope scope, IndexAdviceRequest request, bool recordAudit, CancellationToken cancellationToken = default)
+        {
+            Advised.Add(request);
+            return Task.FromResult(Advice?.Invoke(request) ?? new IndexAdviceView());
+        }
     }
 
     private static async Task<(PostgresStudioComponentContext Context, FakeStatements Service)> ContextAsync(
@@ -411,5 +426,149 @@ public class StatementsPageTests
         page.WaitForAssertion(() => page.FindAll(".ms-stmts-table tbody tr").Should().HaveCount(2, "the statement with no storage reads is not among them"));
         page.FindAll(".ms-stmts-table tbody tr")[0].TextContent.Should().Contain("queryid 2", "900 storage reads rank above 10");
         page.FindAll(".ms-stmts-table th").Select(static x => x.TextContent.Trim()).Should().Contain("Storage reads");
+    }
+
+    // ---- 1.2-INDEX-A: the index advisor's panel --------------------------------------------------------------------------
+
+    private static IndexAdviceView Advised() => new()
+    {
+        StatementsTried = 20,
+        StatementsSelected = 20,
+        CandidatesFound = 1,
+        CandidatesTried = 1,
+        RanAt = Now,
+        Took = TimeSpan.FromSeconds(4.2),
+        Recommended =
+        [
+            new IndexAdviceItem
+            {
+                Index = PlanWhatIfCandidates.Candidate("public", "orders", ["customer_id"])!,
+                TableKey = "public.orders",
+                Remedy = "CREATE INDEX CONCURRENTLY ON \"public\".\"orders\" (\"customer_id\");",
+                TableWrites = 1_204_331,
+                Saved = 3_800,
+                Share = 0.38,
+                Helped = 4,
+                Statements = [new IndexAdviceStatement(1, 100, 500, 50, true), new IndexAdviceStatement(2, 10, 400, null, false)],
+            },
+        ],
+        Skipped = ["2 writes"],
+        NotTried = ["An index on public.big (a): a partition."],
+        ComparedColumns = ["customer_id", "total"],
+    };
+
+    [Fact]
+    public async Task The_advisor_opens_from_the_address_and_plans_nothing_until_Run_is_pressed()
+    {
+        (PostgresStudioComponentContext context, FakeStatements service) = await ContextAsync(Shown(ThreeStatements()), address: "postgres/statements?advise=all");
+        await using PostgresStudioComponentContext owned = context;
+        service.Advice = _ => Advised();
+
+        var page = context.Render<StatementsPage>();
+        page.WaitForAssertion(() => page.FindAll(".ms-advisor").Should().ContainSingle());
+        page.Find(".ms-advisor-idle").TextContent.Should().Contain("Press Run");
+        page.Find(".ms-advisor-caveat").TextContent.Should().Contain("Planner estimates, not measurements");
+        service.Advised.Should().BeEmpty("opening the panel, the load and the poll never run the advisor");
+
+        page.Find(".ms-advisor-run").Click();
+
+        page.WaitForAssertion(() => service.Advised.Should().ContainSingle());
+        service.Advised[0].Table.Should().BeNull();
+        service.Advised[0].Columns.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Without_the_parameter_there_is_no_panel_and_the_header_links_to_it_carrying_the_scope()
+    {
+        (PostgresStudioComponentContext context, _) = await ContextAsync(Shown(ThreeStatements()));
+        await using PostgresStudioComponentContext owned = context;
+
+        var page = context.Render<StatementsPage>();
+        page.WaitForAssertion(() => page.FindAll(".ms-advisor-open").Should().ContainSingle());
+
+        page.FindAll(".ms-advisor").Should().BeEmpty();
+        page.Find(".ms-advisor-open").GetAttribute("href").Should().Contain("advise=all");
+    }
+
+    [Fact]
+    public async Task A_run_draws_the_headline_the_remedy_with_a_copy_button_and_the_statements_with_their_links_in_a_scroll_region()
+    {
+        (PostgresStudioComponentContext context, FakeStatements service) = await ContextAsync(Shown(ThreeStatements()), address: "postgres/statements?advise=all");
+        await using PostgresStudioComponentContext owned = context;
+        service.Advice = _ => Advised();
+
+        var page = context.Render<StatementsPage>();
+        page.WaitForAssertion(() => page.Find(".ms-advisor-run"));
+        page.Find(".ms-advisor-run").Click();
+        page.WaitForAssertion(() => page.FindAll(".ms-advisor-card").Should().ContainSingle());
+
+        page.Find(".ms-advisor-headline").TextContent.Should()
+            .Be("Add this index: saves ~38% of the planned cost of the 20 statements tried, weighted by calls, across 4 statements.");
+        page.Find(".ms-advisor-caption").TextContent.Should().Be("An index on public.orders (customer_id)");
+        page.Find(".ms-advisor-writes").TextContent.Should().Contain("1,204,331 inserts and updates on public.orders");
+        page.Find(".ms-advisor-remedy-title").TextContent.Should().Be("To create it");
+        page.Find(".ms-advisor-remedy-code").TextContent.Should().Contain("CREATE INDEX CONCURRENTLY");
+        page.FindAll(".ms-advisor-remedy .ms-copy-button").Should().ContainSingle();
+        page.Find(".ms-advisor-remedy").TextContent.Should().Contain("Run it yourself, outside the studio");
+        page.FindAll(".ms-advisor-card [role=region]").Should().ContainSingle();
+        page.FindAll(".ms-advisor-statements tbody tr").Should().HaveCount(2);
+        page.FindAll(".ms-advisor-statements a").Select(static x => x.GetAttribute("href")).Should().OnlyContain(static x => x!.Contains("queryid=", StringComparison.Ordinal));
+        page.Find(".ms-advisor-skipped").TextContent.Should().Contain("2 writes");
+        page.Find(".ms-advisor-ran").TextContent.Should().Contain("in 4.2 s");
+        page.FindAll(".ms-advisor-picker").Should().BeEmpty("the picker is only for a run that names a table");
+    }
+
+    [Fact]
+    public async Task A_run_naming_a_table_offers_the_picker_and_Try_this_index_sends_the_columns()
+    {
+        (PostgresStudioComponentContext context, FakeStatements service) = await ContextAsync(
+            Shown(ThreeStatements()), address: "postgres/statements?advise=public.orders");
+        await using PostgresStudioComponentContext owned = context;
+        service.Advice = _ => Advised();
+
+        var page = context.Render<StatementsPage>();
+        page.WaitForAssertion(() => page.Find(".ms-advisor-run"));
+        page.Find(".ms-advisor-run").Click();
+        page.WaitForAssertion(() => page.FindAll(".ms-advisor-picker").Should().ContainSingle());
+
+        service.Advised[0].Table.Should().Be("public.orders");
+        page.FindAll(".ms-advisor-picker-select").Should().HaveCount(3);
+        page.Find(".ms-advisor-try").HasAttribute("disabled").Should().BeTrue();
+
+        page.FindAll(".ms-advisor-picker-select")[0].Change("customer_id");
+        page.Find(".ms-advisor-try").Click();
+
+        page.WaitForAssertion(() => service.Advised.Should().HaveCount(2));
+        service.Advised[1].Columns.Should().Equal("customer_id");
+        service.Advised[1].Table.Should().Be("public.orders");
+    }
+
+    [Fact]
+    public async Task Hypopgs_sentence_is_the_answer_when_it_is_not_there()
+    {
+        (PostgresStudioComponentContext context, FakeStatements service) = await ContextAsync(Shown(ThreeStatements()), address: "postgres/statements?advise=all");
+        await using PostgresStudioComponentContext owned = context;
+        service.Advice = _ => new IndexAdviceView { Unavailable = HypotheticalIndexAvailability.NotInstalledSentence };
+
+        var page = context.Render<StatementsPage>();
+        page.WaitForAssertion(() => page.Find(".ms-advisor-run"));
+        page.Find(".ms-advisor-run").Click();
+
+        page.WaitForAssertion(() => page.Find(".ms-advisor-unavailable").TextContent.Should().Contain("hypopg is not installed in this database"));
+        page.FindAll(".ms-advisor-card").Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task A_failure_is_on_the_panel()
+    {
+        (PostgresStudioComponentContext context, FakeStatements service) = await ContextAsync(Shown(ThreeStatements()), address: "postgres/statements?advise=all");
+        await using PostgresStudioComponentContext owned = context;
+        service.Advice = _ => throw new InvalidOperationException("the advisor failed");
+
+        var page = context.Render<StatementsPage>();
+        page.WaitForAssertion(() => page.Find(".ms-advisor-run"));
+        page.Find(".ms-advisor-run").Click();
+
+        page.WaitForAssertion(() => page.Find(".ms-advisor").TextContent.Should().Contain("the advisor failed"));
     }
 }

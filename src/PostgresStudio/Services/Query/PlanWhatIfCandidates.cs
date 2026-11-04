@@ -41,31 +41,114 @@ internal static class PlanWhatIfCandidates
 
             IReadOnlyList<string> columns = HypotheticalIndexCandidates.Columns(filter, node.Alias ?? table);
 
-            if (columns.Count == 0 || MigrationSqlText.CreateIndex(node.Schema, table, columns) is not { } definition)
+            if (Candidate(node.Schema, table, columns) is { } candidate && keys.Add(candidate.Key))
             {
-                continue;
+                found.Add(candidate);
             }
-
-            string key = HypotheticalIndexCandidates.Key(node.Schema, table, columns);
-
-            if (!keys.Add(key))
-            {
-                continue;
-            }
-
-            found.Add(new HypotheticalIndex
-            {
-                Key = key,
-                Definition = definition,
-                Caption = "An index on " + (node.Schema is null ? table : node.Schema + "." + table) + " (" + string.Join(", ", columns) + ")",
-                Origin = HypotheticalIndexOrigin.Plan,
-                Schema = node.Schema,
-                Table = table,
-                Columns = columns,
-                Note = DatabaseObjectClassifier.IsMartenName(table) ? HypotheticalIndexCandidates.MartenTableNote : null,
-            });
         }
 
         return found;
     }
+
+    /// <summary>
+    /// The index on <paramref name="columns" /> of <paramref name="table" />, as <see cref="MigrationSqlText.CreateIndex" /> writes it
+    /// - or <see langword="null" /> when there is no column or a name cannot be printed honestly.
+    /// </summary>
+    /// <param name="schema">The table's schema, when the plan printed it.</param>
+    /// <param name="table">The table.</param>
+    /// <param name="columns">The plain columns the plan's condition compares.</param>
+    internal static HypotheticalIndex? Candidate(string? schema, string table, IReadOnlyList<string> columns)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+        ArgumentNullException.ThrowIfNull(columns);
+
+        if (columns.Count == 0 || MigrationSqlText.CreateIndex(schema, table, columns) is not { } definition)
+        {
+            return null;
+        }
+
+        return new HypotheticalIndex
+        {
+            Key = HypotheticalIndexCandidates.Key(schema, table, columns),
+            Definition = definition,
+            Caption = "An index on " + (schema is null ? table : schema + "." + table) + " (" + string.Join(", ", columns) + ")",
+            Origin = HypotheticalIndexOrigin.Plan,
+            Schema = schema,
+            Table = table,
+            Columns = columns,
+            Note = DatabaseObjectClassifier.IsMartenName(table) ? HypotheticalIndexCandidates.MartenTableNote : null,
+        };
+    }
+}
+
+/// <summary>
+/// 1.2-INDEX-A: the indexes one plan of the index advisor's workload suggests - X2's two shapes (P04's sequential scan with a
+/// filter, P05's nested loop over a sequential scan) and P10's shape without <c>ANALYZE</c>: the plain columns the filter of an
+/// index or bitmap scan compares, read off the node itself because a plain plan has no rows removed to count. Every index is
+/// written by <see cref="MigrationSqlText.CreateIndex" />. Not P17's expression-index remedy, which no builder writes, and not P26's
+/// JSON filter, which is MartenStudio's (<see cref="IIndexCandidateContributor" />). Pure.
+/// </summary>
+internal static class WorkloadIndexCandidates
+{
+    /// <summary>The indexes <paramref name="plan" /> suggests on tables it names the schema of, the first <see cref="HypotheticalIndexCandidates.MaxCandidates" />.</summary>
+    /// <param name="plan">A plan drawn with <c>VERBOSE</c>, so each relation names its schema.</param>
+    public static IReadOnlyList<HypotheticalIndex> FromPlan(QueryPlan plan)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+
+        List<HypotheticalIndex> found = [.. HypotheticalIndexCandidates.FromPlan(plan)];
+        HashSet<string> keys = new(found.Select(static x => x.Key), StringComparer.Ordinal);
+
+        foreach (PlanNode node in plan.Nodes)
+        {
+            if (found.Count >= HypotheticalIndexCandidates.MaxCandidates)
+            {
+                break;
+            }
+
+            if (node.NodeType is not ("Index Scan" or "Index Only Scan" or "Bitmap Heap Scan") || node.RelationName is not { } table || node.Filter is not { } filter)
+            {
+                continue;
+            }
+
+            if (PlanWhatIfCandidates.Candidate(node.Schema, table, HypotheticalIndexCandidates.Columns(filter, node.Alias ?? table)) is { } candidate && keys.Add(candidate.Key))
+            {
+                found.Add(candidate);
+            }
+        }
+
+        // The advisor finds a table by the schema and name a plan prints: an index it cannot place is not tried.
+        return [.. found.Where(static x => x.Schema is { Length: > 0 })];
+    }
+
+    /// <summary>
+    /// The planner's cost of the costliest node of <paramref name="plan" /> that reads <paramref name="schema" />.<paramref name="table" />:
+    /// what an index on that table could save at most, in the plan's own unit.
+    /// </summary>
+    public static double ScanCost(QueryPlan plan, string schema, string table)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+
+        double cost = 0;
+
+        foreach (PlanNode node in plan.Nodes)
+        {
+            if (Reads(node, schema, table) && node.TotalCost is { } total && total > cost)
+            {
+                cost = total;
+            }
+        }
+
+        return cost;
+    }
+
+    /// <summary>Whether <paramref name="plan" /> has a node that reads <paramref name="schema" />.<paramref name="table" />.</summary>
+    public static bool Reads(QueryPlan plan, string schema, string table)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        return plan.Nodes.Any(x => Reads(x, schema, table));
+    }
+
+    private static bool Reads(PlanNode node, string schema, string table) =>
+        string.Equals(node.Schema, schema, StringComparison.Ordinal) && string.Equals(node.RelationName, table, StringComparison.Ordinal);
 }

@@ -50,6 +50,12 @@ public class SinceMarkPagesTests
 
         public Task<WhatIfResult> WhatIfAsync(StudioScope scope, long queryId, HypotheticalIndex index, CancellationToken cancellationToken = default) =>
             Task.FromResult(WhatIfResult.NotCompared(index, "none"));
+
+        public Task<IndexAdviceView> AdviseIndexesAsync(StudioScope scope, IndexAdviceRequest request, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new IndexAdviceView());
+
+        public Task<IndexAdviceView> AdviseIndexesAsync(StudioScope scope, IndexAdviceRequest request, bool recordAudit, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new IndexAdviceView());
     }
 
     private sealed class FakeMaintenance : IMaintenanceService

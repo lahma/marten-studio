@@ -357,11 +357,27 @@ internal sealed class StatementPlanReader
         };
 
     /// <summary>
+    /// 1.2-INDEX-A: <see cref="ForgetAsync(NpgsqlConnection, ReadOnlySqlSession, int, long)" /> for a connection the index advisor's trials
+    /// planned on, which has no single statement: the same read-only session and bound as the drill-in's. Never throws.
+    /// </summary>
+    /// <param name="connection">The connection a trial failed on.</param>
+    internal Task ForgetAsync(NpgsqlConnection connection)
+    {
+        TimeSpan statementTimeout = settings.QueryTimeout < HealthSweeper.MaxStatementTimeout ? settings.QueryTimeout : HealthSweeper.MaxStatementTimeout;
+
+        return ForgetAsync(
+            connection,
+            new ReadOnlySqlSession(new ReadOnlySqlOptions { StatementTimeout = statementTimeout, Role = settings.SqlConsoleRole }),
+            (int) Math.Ceiling(statementTimeout.TotalSeconds) + 5,
+            queryId: 0);
+    }
+
+    /// <summary>
     /// Takes the plan's prepared statement back, under a bound of its own and never the caller's token - a cancelled plan is
     /// exactly the one that has to - in a read-only transaction of its own. If that fails, the session keeps the one name, and a
     /// Debug line says so.
     /// </summary>
-    private async Task ForgetAsync(NpgsqlConnection connection, ReadOnlySqlSession session, int commandTimeout, long queryId)
+    internal async Task ForgetAsync(NpgsqlConnection connection, ReadOnlySqlSession session, int commandTimeout, long queryId)
     {
         if (connection.State is not System.Data.ConnectionState.Open)
         {

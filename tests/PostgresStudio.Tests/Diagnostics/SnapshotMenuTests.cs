@@ -51,6 +51,12 @@ public class SnapshotMenuTests
         public Task<PostgresStudio.Services.Query.WhatIfResult> WhatIfAsync(
             StudioScope scope, long queryId, PostgresStudio.Services.Query.HypotheticalIndex index, CancellationToken cancellationToken = default) =>
             throw new InvalidOperationException("The Snapshot menu never imagines an index.");
+
+        public Task<IndexAdviceView> AdviseIndexesAsync(StudioScope scope, IndexAdviceRequest request, CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("The Snapshot menu never runs the index advisor.");
+
+        public Task<IndexAdviceView> AdviseIndexesAsync(StudioScope scope, IndexAdviceRequest request, bool recordAudit, CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("The Snapshot menu never runs the index advisor.");
     }
 
     private sealed class FakeServer : IServerPageService

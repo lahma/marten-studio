@@ -81,6 +81,74 @@ internal enum HypotheticalIndexCleanup
     Failed,
 }
 
+/// <summary>1.2-INDEX-A: one candidate index, and the statements (indexes into the planner's list) to plan again under it.</summary>
+/// <param name="Index">The index to imagine.</param>
+/// <param name="Statements">The statements to plan under it, by their position in the planner's list.</param>
+internal sealed record HypotheticalIndexTrial(HypotheticalIndex Index, IReadOnlyList<int> Statements);
+
+/// <summary>How the index advisor plans its statements inside each trial's transaction (1.2-INDEX-A).</summary>
+/// <param name="PrepareAsync">Runs first in every trial's transaction: the visitor's <c>search_path</c>.</param>
+/// <param name="PlanAsync">
+/// Plans statement <c>i</c> and returns <c>EXPLAIN (FORMAT JSON)</c>'s text, or <see langword="null" /> when Postgres returned none.
+/// </param>
+/// <param name="AfterFailureAsync">
+/// Runs on the same connection after a trial that threw, once hypopg is reset and before the next trial: the drill-in's deallocate.
+/// Must not throw.
+/// </param>
+internal sealed record HypotheticalWorkloadPlanner(
+    Func<NpgsqlConnection, NpgsqlTransaction, CancellationToken, Task> PrepareAsync,
+    Func<int, NpgsqlConnection, NpgsqlTransaction, CancellationToken, Task<string?>> PlanAsync,
+    Func<NpgsqlConnection, Task>? AfterFailureAsync = null)
+{
+    /// <summary>
+    /// The <c>statement_timeout</c> of every transaction of the run, when shorter than the studio's <c>QueryTimeout</c>;
+    /// <see langword="null" /> for <c>QueryTimeout</c> itself.
+    /// </summary>
+    public TimeSpan? StatementTimeout { get; init; }
+}
+
+/// <summary>What one trial came to: the plans of its statements under the index, or the SQLSTATE Postgres refused it with.</summary>
+internal sealed record HypotheticalTrialRead
+{
+    /// <summary>The index imagined.</summary>
+    public required HypotheticalIndex Index { get; init; }
+
+    /// <summary>The index hypopg made, when the trial ran to its reset.</summary>
+    public HypotheticalIndexMade? Made { get; init; }
+
+    /// <summary>Each statement's plan under the index, unmasked, by its position in the planner's list; <see langword="null" /> when Postgres returned none.</summary>
+    public IReadOnlyDictionary<int, string?> After { get; init; } = new Dictionary<int, string?>();
+
+    /// <summary>The SQLSTATE Postgres or hypopg refused this candidate with, or <see langword="null" />.</summary>
+    public string? SqlState { get; init; }
+}
+
+/// <summary>Why a run of trials ended before every trial was made.</summary>
+internal enum HypotheticalWorkloadStop
+{
+    /// <summary>It did not: every trial was made.</summary>
+    None,
+
+    /// <summary>The deadline passed between two trials.</summary>
+    Budget,
+
+    /// <summary>A reset failed and the studio ended its own session (or the connection broke): no further trial could be made on it.</summary>
+    SessionEnded,
+}
+
+/// <summary>What a run of trials read (1.2-INDEX-A).</summary>
+internal sealed record HypotheticalWorkloadRead
+{
+    /// <summary>hypopg in this database, for the role the studio plans as.</summary>
+    public required HypotheticalIndexAvailability Availability { get; init; }
+
+    /// <summary>The trials that were made, in order.</summary>
+    public IReadOnlyList<HypotheticalTrialRead> Trials { get; init; } = [];
+
+    /// <summary>Why it ended early, if it did.</summary>
+    public HypotheticalWorkloadStop Stopped { get; init; }
+}
+
 /// <summary>
 /// X2's engine: one statement planned before and after one hypothetical index, in the read-only transaction, with hypopg reset
 /// on the same connection before it goes back to the pool - or the session ended when the reset cannot be.
@@ -261,7 +329,237 @@ internal sealed class HypotheticalIndexReader
     }
 
     /// <summary>
-    /// After a what-if that asked hypopg for an index and did not reset it: reset it in a transaction of its own, and if that
+    /// 1.2-INDEX-A: whether hypopg can be used in <paramref name="database" />, from the catalog cache or - on a miss - one read in a
+    /// read-only transaction of its own, so the index advisor can say "hypopg is not installed" before it plans anything.
+    /// </summary>
+    /// <param name="database">The database, resolved through the surface's own gate.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    public async Task<HypotheticalIndexAvailability> GetAvailabilityAsync(IStudioDatabase database, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(database);
+
+        string key = CacheKey(database);
+
+        if (availability.TryGet(key, out HypotheticalIndexAvailability cached))
+        {
+            return cached;
+        }
+
+        await using NpgsqlConnection connection = database.CreateConnection(StudioConnectionUsage.Read);
+        await connection.OpenStudioAsync(cancellationToken).ConfigureAwait(false);
+
+        return await AvailabilityAsync(connection, Session(), key, CommandTimeoutSeconds(), cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// 1.2-INDEX-A: the index advisor's engine - several candidate indexes, each imagined alone and every statement it helps planned
+    /// under it, on one connection of one database. <b>A read-only transaction per candidate</b>, with hypopg reset as its last
+    /// statement: planning takes <c>AccessShareLock</c> on every table and index it reads, held to the rollback, so one transaction
+    /// for the whole run would hold them for its whole budget and an <c>ALTER TABLE</c> queued behind them would queue the
+    /// application behind it. hypopg's index survives each rollback (<see cref="HypotheticalIndexQueries" />), so the per-trial reset
+    /// is what clears it, exactly as <see cref="ReadAsync" />' is - and every way out after hypopg was asked resets again in a
+    /// transaction of its own under <see cref="CleanupBound" />, or ends the session.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The deadline is checked between trials only; a trial in flight is bounded by <c>statement_timeout</c>. A trial that Postgres or
+    /// hypopg refuses (a <see cref="PostgresException" /> on a connection that is still open) is recorded with its SQLSTATE and the
+    /// next trial still runs, once the session is clean; one whose reset cannot be made ends the run (<see cref="HypotheticalWorkloadStop.SessionEnded" />).
+    /// A name left on the pooled session by a plan that could not take it back (<c>42P05</c>) is taken back and that trial made once more.
+    /// The caller's cancellation resets, then rethrows.
+    /// </para>
+    /// </remarks>
+    /// <param name="database">The database, resolved through the surface's own gate.</param>
+    /// <param name="trials">The candidates, in the order they are tried.</param>
+    /// <param name="planner">How the advisor plans its statements.</param>
+    /// <param name="deadline">When no further trial is started.</param>
+    /// <param name="time">The clock the deadline is read from.</param>
+    /// <param name="cancellationToken">Cancels the run; never the cleanup.</param>
+    public async Task<HypotheticalWorkloadRead> ReadTrialsAsync(
+        IStudioDatabase database,
+        IReadOnlyList<HypotheticalIndexTrial> trials,
+        HypotheticalWorkloadPlanner planner,
+        DateTimeOffset deadline,
+        TimeProvider time,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(database);
+        ArgumentNullException.ThrowIfNull(trials);
+        ArgumentNullException.ThrowIfNull(planner);
+        ArgumentNullException.ThrowIfNull(time);
+
+        string key = CacheKey(database);
+        ReadOnlySqlSession session = Session(planner.StatementTimeout);
+        int commandTimeout = CommandTimeoutSeconds(planner.StatementTimeout);
+
+        await using NpgsqlConnection connection = database.CreateConnection(StudioConnectionUsage.Read);
+        await connection.OpenStudioAsync(cancellationToken).ConfigureAwait(false);
+
+        HypotheticalIndexAvailability usable = await AvailabilityAsync(connection, session, key, commandTimeout, cancellationToken).ConfigureAwait(false);
+
+        if (usable.State != HypotheticalIndexState.Available || usable.Schema is not { } installedIn)
+        {
+            return new HypotheticalWorkloadRead { Availability = usable };
+        }
+
+        List<HypotheticalTrialRead> read = [];
+
+        foreach (HypotheticalIndexTrial trial in trials)
+        {
+            if (time.GetUtcNow() >= deadline)
+            {
+                return new HypotheticalWorkloadRead { Availability = usable, Trials = read, Stopped = HypotheticalWorkloadStop.Budget };
+            }
+
+            (HypotheticalTrialRead made, HypotheticalIndexCleanup cleanup) = await TrialAsync(
+                    connection, session, installedIn, commandTimeout, trial, planner, database, cancellationToken)
+                .ConfigureAwait(false);
+
+            read.Add(made);
+
+            if (cleanup is HypotheticalIndexCleanup.SessionEnded or HypotheticalIndexCleanup.ConnectionBroken or HypotheticalIndexCleanup.Failed)
+            {
+                return new HypotheticalWorkloadRead { Availability = usable, Trials = read, Stopped = HypotheticalWorkloadStop.SessionEnded };
+            }
+        }
+
+        return new HypotheticalWorkloadRead { Availability = usable, Trials = read };
+    }
+
+    /// <summary>One trial: its transaction, its reset, and - whatever went wrong - the cleanup that leaves the connection as it was.</summary>
+    private async Task<(HypotheticalTrialRead Read, HypotheticalIndexCleanup Cleanup)> TrialAsync(
+        NpgsqlConnection connection,
+        ReadOnlySqlSession session,
+        string schema,
+        int commandTimeout,
+        HypotheticalIndexTrial trial,
+        HypotheticalWorkloadPlanner planner,
+        IStudioDatabase database,
+        CancellationToken cancellationToken)
+    {
+        int processId = connection.ProcessID;
+        HypotheticalIndexCleanup cleanup = HypotheticalIndexCleanup.NothingMade;
+
+        try
+        {
+            for (int attempt = 0; ; attempt++)
+            {
+                bool asked = false;
+                bool reset = false;
+                bool completed = false;
+                bool retry = false;
+                string? sqlState = null;
+                HypotheticalIndexMade? made = null;
+                Dictionary<int, string?> after = [];
+
+                try
+                {
+                    await session.InTransactionAsync(
+                            connection,
+                            async (transaction, token) =>
+                            {
+                                await planner.PrepareAsync(connection, transaction, token).ConfigureAwait(false);
+
+                                asked = true;
+                                made = await HypotheticalIndexQueries
+                                    .CreateAsync(connection, transaction, schema, trial.Index.Definition, commandTimeout, token)
+                                    .ConfigureAwait(false);
+
+                                if (observer is not null)
+                                {
+                                    await observer.MadeAsync(processId, made, token).ConfigureAwait(false);
+                                }
+
+                                foreach (int statement in trial.Statements)
+                                {
+                                    after[statement] = await planner.PlanAsync(statement, connection, transaction, token).ConfigureAwait(false);
+                                }
+
+                                // The last statement, on the same connection, before the rollback: the index is gone before the pool sees it.
+                                await HypotheticalIndexQueries.ResetAsync(connection, transaction, ResetSql(schema), commandTimeout, token).ConfigureAwait(false);
+                                reset = true;
+                                return 0;
+                            },
+                            cancellationToken)
+                        .ConfigureAwait(false);
+
+                    completed = true;
+                }
+                catch (PostgresException exception) when (connection.State == System.Data.ConnectionState.Open
+                    && !(exception.SqlState == PostgresErrorCodes.DuplicatePreparedStatement && attempt == 0))
+                {
+                    // Postgres or hypopg refused this candidate: it is recorded, and the next one still runs once the session is clean
+                    // (the finally below).
+                    sqlState = exception.SqlState;
+                }
+                catch (PostgresException exception) when (exception.SqlState == PostgresErrorCodes.DuplicatePreparedStatement && attempt == 0)
+                {
+                    // The name was on that session - left by a plan that could not take it back. The finally below takes it back; once more.
+                    retry = true;
+                }
+                finally
+                {
+                    if (completed)
+                    {
+                        cleanup = HypotheticalIndexCleanup.Reset;
+                    }
+                    else
+                    {
+                        // Resets again in a transaction of its own when hypopg was asked and the reset was not made - and ends the
+                        // session when that fails - then takes the plan's prepared statement back: the caller's cancellation and every
+                        // other way out included.
+                        cleanup = asked && !reset
+                            ? await CleanUpAsync(connection, session, schema, commandTimeout, database).ConfigureAwait(false)
+                            : HypotheticalIndexCleanup.NothingMade;
+
+                        if (planner.AfterFailureAsync is { } afterFailure && connection.State == System.Data.ConnectionState.Open)
+                        {
+                            await afterFailure(connection).ConfigureAwait(false);
+                        }
+                    }
+                }
+
+                if (retry)
+                {
+                    continue;
+                }
+
+                return completed
+                    ? (new HypotheticalTrialRead { Index = trial.Index, Made = made, After = after }, cleanup)
+                    : (new HypotheticalTrialRead { Index = trial.Index, SqlState = sqlState }, cleanup);
+            }
+        }
+        finally
+        {
+            observer?.Finished(processId, cleanup);
+        }
+    }
+
+    private async Task<HypotheticalIndexAvailability> AvailabilityAsync(
+        NpgsqlConnection connection,
+        ReadOnlySqlSession session,
+        string key,
+        int commandTimeout,
+        CancellationToken cancellationToken)
+    {
+        if (availability.TryGet(key, out HypotheticalIndexAvailability cached))
+        {
+            return cached;
+        }
+
+        HypotheticalIndexAvailability read = await session.InTransactionAsync(
+                connection,
+                async (transaction, token) => HypotheticalIndexAvailability.Of(
+                    await HypotheticalIndexQueries.ReadAvailabilityAsync(connection, transaction, commandTimeout, token).ConfigureAwait(false)),
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        availability.Set(key, read);
+        return read;
+    }
+
+    /// <summary>
+    /// After a what-if that asked hypopg for an index: reset it in a transaction of its own, and if that
     /// fails end the session, so the backend never goes back to the pool holding it.
     /// </summary>
     private async Task<HypotheticalIndexCleanup> CleanUpAsync(
@@ -341,13 +639,15 @@ internal sealed class HypotheticalIndexReader
     private string ResetSql(string schema) =>
         ResetSqlOverride ?? HypotheticalIndexQueries.Reset(schema) ?? throw new InvalidOperationException("hypopg's schema is not a name the studio quotes.");
 
-    private ReadOnlySqlSession Session()
+    private ReadOnlySqlSession Session(TimeSpan? shorter = null)
     {
-        TimeSpan statementTimeout = settings.QueryTimeout;
+        TimeSpan statementTimeout = StatementTimeout(shorter);
         return new ReadOnlySqlSession(new ReadOnlySqlOptions { StatementTimeout = statementTimeout, Role = settings.SqlConsoleRole, MaxRows = 1 });
     }
 
-    private int CommandTimeoutSeconds() => (int) Math.Ceiling(settings.QueryTimeout.TotalSeconds) + 5;
+    private int CommandTimeoutSeconds(TimeSpan? shorter = null) => (int) Math.Ceiling(StatementTimeout(shorter).TotalSeconds) + 5;
+
+    private TimeSpan StatementTimeout(TimeSpan? shorter) => shorter is { } cap && cap < settings.QueryTimeout ? cap : settings.QueryTimeout;
 
     /// <summary>
     /// The database and the role the studio plans as: what decides whether hypopg is there and usable. Never a connection

@@ -15566,3 +15566,192 @@ a.ms-schema-health-mark:focus-visible {
         padding: var(--ms-space-sm);
     }
 }
+
+/* ===== 1.2-INDEX Index advisor ===== */
+
+/* --------------------------------------------------------------------------
+   The Statements page's index advisor panel: a bordered section above the list, a header with Run and Close, one card per
+   recommended index, and the small print under them. Appended in D26 order; only `ms-advisor*` selectors are new, so nothing
+   earlier is re-declared. Each card's statements sit in a labelled scroll region (D25, `TableScroll`).
+   -------------------------------------------------------------------------- */
+
+.ms-advisor {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-sm);
+    min-width: 0;
+    margin-bottom: var(--ms-space-lg);
+    padding: var(--ms-space-md);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-lg);
+    background: var(--ms-color-surface);
+}
+
+.ms-advisor-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--ms-space-sm);
+}
+
+.ms-advisor-title {
+    margin: 0;
+    font-size: var(--ms-font-size-xl);
+    overflow-wrap: anywhere;
+}
+
+.ms-advisor-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-sm);
+}
+
+.ms-advisor-lead,
+.ms-advisor-ran,
+.ms-advisor-stopped,
+.ms-advisor-none,
+.ms-advisor-skipped,
+.ms-advisor-caveat {
+    margin: 0;
+    max-width: 90ch;
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-advisor-caveat {
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-advisor-stopped {
+    color: var(--ms-color-warning);
+}
+
+.ms-advisor-running {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-sm);
+}
+
+.ms-advisor-running p {
+    margin: 0;
+}
+
+.ms-advisor-cards {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-md);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.ms-advisor-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-xs);
+    min-width: 0;
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface-alt);
+}
+
+.ms-advisor-headline {
+    margin: 0;
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-advisor-caption,
+.ms-advisor-note,
+.ms-advisor-folded,
+.ms-advisor-writes {
+    margin: 0;
+    max-width: 90ch;
+    font-size: var(--ms-font-size-sm);
+    overflow-wrap: anywhere;
+}
+
+.ms-advisor-remedy {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-xs);
+    min-width: 0;
+}
+
+.ms-advisor-remedy-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-sm);
+}
+
+.ms-advisor-remedy-title {
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-advisor-remedy-code {
+    margin: 0;
+    max-width: 100%;
+    overflow-x: auto;
+    white-space: pre;
+}
+
+.ms-advisor-number {
+    text-align: right;
+    white-space: nowrap;
+}
+
+.ms-advisor-group summary {
+    cursor: pointer;
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-advisor-group ul {
+    margin: var(--ms-space-xs) 0 0;
+    padding-left: var(--ms-space-lg);
+    font-size: var(--ms-font-size-sm);
+    overflow-wrap: anywhere;
+}
+
+.ms-advisor-picker {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-xs);
+}
+
+.ms-advisor-picker-title {
+    margin: 0;
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-advisor-picker-columns {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-sm);
+}
+
+.ms-advisor-picker-select {
+    min-width: 0;
+    max-width: 100%;
+    padding: var(--ms-space-xs) var(--ms-space-sm);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface);
+    color: var(--ms-color-text);
+    font-family: var(--ms-font-family);
+    font-size: var(--ms-font-size-sm);
+}
+
+@media (max-width: 640px) {
+    .ms-advisor {
+        padding: var(--ms-space-sm);
+    }
+
+    .ms-advisor-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+}

@@ -44,6 +44,12 @@ internal sealed class MartenPlanTable
     /// <summary>The indexes the type declares.</summary>
     public required IReadOnlyList<MartenDeclaredIndex> Indexes { get; init; }
 
+    /// <summary>
+    /// 1.2-INDEX-A: the type's mapping, which Marten's own index classes are built from (<see cref="MartenIndexDdl" />); set by
+    /// <see cref="From" />.
+    /// </summary>
+    public IDocumentType? Mapping { get; init; }
+
     /// <summary>How the store's serializer writes a member's name into the JSON; <see langword="null" /> writes the member's own.</summary>
     public JsonNamingPolicy? Naming { get; init; }
 
@@ -95,6 +101,7 @@ internal sealed class MartenPlanTable
             TypeName = mapping.DocumentType.Name,
             DocumentType = mapping.DocumentType,
             Info = DocumentTableInfo.FromDocumentType(mapping),
+            Mapping = mapping,
             Indexes = indexes,
             Naming = naming,
         };
@@ -156,7 +163,17 @@ internal static class MartenJsonMembers
     /// <param name="root">The document type.</param>
     /// <param name="jsonPath">The keys, outermost first.</param>
     /// <param name="naming">The serializer's naming policy, or <see langword="null" /> to write a member's own name.</param>
-    public static string? Resolve(Type root, IReadOnlyList<string> jsonPath, JsonNamingPolicy? naming)
+    public static string? Resolve(Type root, IReadOnlyList<string> jsonPath, JsonNamingPolicy? naming) =>
+        ResolveMembers(root, jsonPath, naming) is { } members ? string.Join('.', members.Select(static x => x.Name)) : null;
+
+    /// <summary>
+    /// 1.2-INDEX-A: the members (outermost first) <paramref name="jsonPath" /> names on <paramref name="root" />, or <see langword="null" />
+    /// - the walk <see cref="Resolve" /> makes, as <see cref="MemberInfo" />s, for Marten's own index constructor.
+    /// </summary>
+    /// <param name="root">The document type.</param>
+    /// <param name="jsonPath">The keys, outermost first.</param>
+    /// <param name="naming">The serializer's naming policy, or <see langword="null" /> to write a member's own name.</param>
+    public static IReadOnlyList<MemberInfo>? ResolveMembers(Type root, IReadOnlyList<string> jsonPath, JsonNamingPolicy? naming)
     {
         ArgumentNullException.ThrowIfNull(root);
         ArgumentNullException.ThrowIfNull(jsonPath);
@@ -167,7 +184,7 @@ internal static class MartenJsonMembers
         }
 
         Type current = root;
-        List<string> members = [];
+        List<MemberInfo> members = [];
 
         foreach (string key in jsonPath)
         {
@@ -179,13 +196,13 @@ internal static class MartenJsonMembers
                 return null;
             }
 
-            List<(string Name, Type Type)> matches = [];
+            List<(MemberInfo Member, Type Type)> matches = [];
 
             foreach (MemberInfo member in Members(current))
             {
                 if (JsonNameOf(member, naming) is { } written && string.Equals(written, key, StringComparison.Ordinal))
                 {
-                    matches.Add((member.Name, member is PropertyInfo property ? property.PropertyType : ((FieldInfo) member).FieldType));
+                    matches.Add((member, member is PropertyInfo property ? property.PropertyType : ((FieldInfo) member).FieldType));
                 }
             }
 
@@ -194,11 +211,11 @@ internal static class MartenJsonMembers
                 return null;
             }
 
-            members.Add(matches[0].Name);
+            members.Add(matches[0].Member);
             current = matches[0].Type;
         }
 
-        return string.Join('.', members);
+        return members;
     }
 
     private static Type Unwrap(Type type) => Nullable.GetUnderlyingType(type) ?? type;

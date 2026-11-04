@@ -144,6 +144,10 @@ public static partial class MartenStudioServiceCollectionExtensions
         // 1.0-P3C: Marten Studio's plan insights (P26 to P28), judged against the document tables the store in scope declares.
         services.TryAddEnumerable(ServiceDescriptor.Scoped<IPlanInsightContributor, MartenPlanInsightContributor>());
 
+        // 1.2-INDEX-A: the Statements page's index advisor, in Marten's terms - a document table's indexes are the StoreOptions lines
+        // that declare them (Postgres Studio's service takes any number of these; it has none of its own).
+        services.TryAddEnumerable(ServiceDescriptor.Scoped<IIndexCandidateContributor, MartenIndexCandidateContributor>());
+
         // 1.2-H-C: E06's on-demand action, "Find the 20 longest streams". The runner and its flights are PostgresStudio's
         // (StudioCoreRegistration); a finding offers an action only if one is registered here.
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHealthFindingAction, LongestStreamsAction>());

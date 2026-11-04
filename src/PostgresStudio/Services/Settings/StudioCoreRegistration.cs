@@ -212,6 +212,10 @@ internal static class StudioCoreRegistration
         // X2: the what-if engine - hypopg's availability cached per database, every hypothetical index reset on the connection
         // it was made on - shared by the console, the drill-in and MartenStudio's advisors.
         services.TryAddSingleton<HypotheticalIndexReader>();
+        // 1.2-INDEX-A: the index advisor on Statements. One run per database at once is the process's; what a visitor is shown of it
+        // is the circuit's. The contributors (IIndexCandidateContributor) are a studio's own and need no registration here: Postgres
+        // Studio has none, and the service takes any number of them.
+        services.TryAddSingleton<IndexAdvisorFlights>();
 
         // W5-API: the Health page's Snapshot menu. The circuit's, because it asks each page's service as this visitor; it never
         // reaches the diagnostics API, which each Add*Studio registers for host code alone.

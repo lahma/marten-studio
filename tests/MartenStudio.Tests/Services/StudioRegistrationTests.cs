@@ -167,6 +167,9 @@ public class StudioRegistrationTests
         // 1.0-P3C: Marten Studio's plan insights P26 to P28, the one registration the packet adds.
         (typeof(IPlanInsightContributor), ServiceLifetime.Scoped, How.Type, typeof(MartenPlanInsightContributor)),
 
+        // 1.2-INDEX-A: the index advisor's Marten half, the one registration the packet adds.
+        (typeof(IIndexCandidateContributor), ServiceLifetime.Scoped, How.Type, typeof(MartenIndexCandidateContributor)),
+
         // 1.2-H-C: E06's on-demand action, the one finding action 1.2 registers.
         (typeof(IHealthFindingAction), ServiceLifetime.Singleton, How.Type, typeof(MartenStudio.Services.Health.LongestStreamsAction)),
 
@@ -237,6 +240,7 @@ public class StudioRegistrationTests
         (typeof(SinceMarks), ServiceLifetime.Scoped, How.Type, typeof(SinceMarks)),
         // 0.6 (X2): the what-if engine - hypopg's availability cached per database, every hypothetical index reset - the process's.
         (typeof(PostgresStudio.Services.Query.HypotheticalIndexReader), ServiceLifetime.Singleton, How.Type, typeof(PostgresStudio.Services.Query.HypotheticalIndexReader)),
+        (typeof(PostgresStudio.Services.Statements.IndexAdvisorFlights), ServiceLifetime.Singleton, How.Type, typeof(PostgresStudio.Services.Statements.IndexAdvisorFlights)),
 
         // W5-API: the Health page's Snapshot menu, the circuit's - built from the page services as the visitor.
         (typeof(PostgresStudio.Services.Diagnostics.VisitorSnapshotBuilder), ServiceLifetime.Scoped, How.Type, typeof(PostgresStudio.Services.Diagnostics.VisitorSnapshotBuilder)),

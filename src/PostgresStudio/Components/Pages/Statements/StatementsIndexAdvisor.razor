@@ -1,0 +1,400 @@
+@using System.Globalization
+@using PostgresStudio.Internal.Sql
+@using PostgresStudio.Services.Database
+@using PostgresStudio.Services.Health
+@using PostgresStudio.Services.Query
+@using PostgresStudio.Services.Settings
+@using PostgresStudio.Services.Statements
+@using PostgresStudio.Components.Shared
+@using PostgresStudio.Services
+@implements IAsyncDisposable
+@inject IStatementsService StatementsData
+@inject StudioState State
+@inject IStudioSettings Settings
+@inject StudioDescriptor Descriptor
+
+@*
+    The index advisor (1.2-INDEX-A): the Statements page's panel, opened by ?advise=all or ?advise=<schema.table> (D9: a pasted link
+    reopens the same panel). It never runs on its own - not on render, not on the page's poll, not on a scope change, not on
+    navigation: Run does, and Cancel stops a run the way a tab leaving does (the lifetime token; the engine resets hypopg first).
+
+    What it shows is IStatementsService.AdviseIndexesAsync's view: queryids, captions built from plans the visitor may see, planned
+    costs and remedies - never a plan and never a text. A statement is reached through the drill-in's own link, which plans it and
+    masks it as it always does. The result is kept here for the scope it ran for only, and cleared when the scope changes.
+
+    Every class is ms-advisor-, in studio.css's 1.2-INDEX section. Each recommendation's statements sit in a labelled scroll region (D25).
+*@
+
+<section class="ms-advisor" aria-labelledby="ms-advisor-title">
+    <div class="ms-advisor-header">
+        <h2 class="ms-advisor-title" id="ms-advisor-title">Index advisor@(Table is { Length: > 0 } named ? " · " + named : string.Empty)</h2>
+        <div class="ms-advisor-actions">
+            @if (running)
+            {
+                <button type="button" class="ms-button ms-advisor-cancel" @onclick="CancelAsync">Cancel</button>
+            }
+            else
+            {
+                <button type="button" class="ms-button ms-button-primary ms-advisor-run" @onclick="() => RunAsync(null)" disabled="@(!interactive)">@(view is null ? "Run" : "Run again")</button>
+            }
+            <a class="ms-button ms-advisor-close" href="@StatementLinks.ToStatements(Settings, Descriptor, State.ActiveScope)">Close</a>
+        </div>
+    </div>
+
+    <p class="ms-advisor-lead">
+        The studio plans the @IndexAdvisor.MaxStatements statements with the most execution time that you may see, imagines each index
+        their plans suggest with hypopg, and plans them again. Nothing is created.
+        @if (Table is { Length: > 0 } only)
+        {
+            <text> Only the indexes on <span class="ms-mono">@only</span> are tried.</text>
+        }
+    </p>
+
+    @if (running)
+    {
+        <div class="ms-advisor-running" role="status">
+            <LoadingSpinner />
+            <p class="ms-muted">Planning the statements, then each index in turn. This takes up to a minute; Cancel stops it and the studio resets hypopg first.</p>
+        </div>
+    }
+    else if (error is { Length: > 0 } failed)
+    {
+        <ErrorAlert Message="@failed" OnRetry="() => RunAsync(null)" />
+    }
+    else if (view is null)
+    {
+        <p class="ms-muted ms-advisor-idle">@(interactive ? "Press Run to plan the statements and try the indexes." : "Waiting for the page to become interactive.")</p>
+    }
+    else
+    {
+        @Result(view)
+    }
+
+    <p class="ms-advisor-caveat" role="note">@IndexAdvisor.Caveat</p>
+</section>
+
+@code {
+    private readonly CancellationTokenSource lifetime = new();
+    private CancellationTokenSource? run;
+    private IndexAdviceView? view;
+    private StudioScope? ranFor;
+    private string? error;
+    private bool running;
+    private bool interactive;
+    private bool disposed;
+
+    // The picker (with a table only): up to three columns, in order; "" is none.
+    private readonly string[] picked = [string.Empty, string.Empty, string.Empty];
+
+    /// <summary>The table the address names (<c>?advise=schema.table</c>), or <see langword="null" /> for every table.</summary>
+    [Parameter]
+    public string? Table { get; set; }
+
+    protected override void OnInitialized()
+    {
+        // Nothing is read here: this runs during prerendering too.
+        State.ScopeChanged += OnScopeChangedAsync;
+    }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender && !disposed)
+        {
+            interactive = true;
+            StateHasChanged();
+        }
+    }
+
+    private async Task OnScopeChangedAsync()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        // What was advised was about another database: it is dropped, and a run in flight is cancelled.
+        CancelRun();
+        view = null;
+        ranFor = null;
+        error = null;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private Task CancelAsync()
+    {
+        CancelRun();
+        return Task.CompletedTask;
+    }
+
+    private void CancelRun()
+    {
+        try
+        {
+            run?.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
+
+    /// <summary>One run, on a press: <paramref name="columns" /> is the visitor's own index, or <see langword="null" />.</summary>
+    private async Task RunAsync(IReadOnlyList<string>? columns)
+    {
+        if (disposed || running || State.ActiveScope is not { } scope)
+        {
+            return;
+        }
+
+        // Read before anything is awaited: once the panel is disposed, its source is gone with it.
+        using CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+        run = linked;
+        running = true;
+        error = null;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            IndexAdviceView advised = await StatementsData.AdviseIndexesAsync(
+                scope,
+                new IndexAdviceRequest { Table = Table, Columns = columns ?? [] },
+                linked.Token);
+
+            // The scope moved while it ran: the answer is about a database nobody is looking at.
+            if (!disposed && State.ActiveScope == scope)
+            {
+                view = advised;
+                ranFor = scope;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            // On the panel, not only in the log: a run that failed out of sight is a panel that silently shows nothing.
+            error = exception.Message;
+        }
+        finally
+        {
+            run = null;
+            running = false;
+
+            if (!disposed)
+            {
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+    }
+
+    private async Task TryOwnAsync()
+    {
+        string[] columns = [.. picked.Where(static x => x.Length > 0)];
+
+        if (columns.Length > 0)
+        {
+            await RunAsync(columns);
+        }
+    }
+
+    private RenderFragment Result(IndexAdviceView shown) => __builder =>
+    {
+        @if (shown.Refusal != DatabaseRefusal.None || shown.Reason is { Length: > 0 })
+        {
+            <div class="ms-alert ms-alert-warning ms-advisor-reason" role="status">
+                <div class="ms-alert-content">
+                    <p>@shown.Reason</p>
+                </div>
+            </div>
+        }
+
+        @if (shown.Unavailable is { Length: > 0 } unavailable)
+        {
+            <div class="ms-alert ms-alert-info ms-advisor-unavailable" role="status">
+                <div class="ms-alert-content">
+                    <p>@unavailable</p>
+                </div>
+            </div>
+        }
+
+        @if (shown.RanAt is { } ranAt)
+        {
+            <p class="ms-advisor-ran">
+                Ran @State.FormatInSelectedTimeZone(ranAt)@(shown.Took is { } took ? " in " + took.TotalSeconds.ToString("0.#", CultureInfo.InvariantCulture) + " s" : string.Empty).
+                @if (shown.StatementsSelected > 0)
+                {
+                    <text> Planned @shown.StatementsTried of @shown.StatementsSelected statements@(shown.CandidatesTried > 0 || shown.CandidatesFound > 0 ? "; tried " + shown.CandidatesTried + " of " + shown.CandidatesFound + " indexes" : string.Empty).</text>
+                }
+            </p>
+        }
+
+        @if (shown.Stopped is { Length: > 0 } stopped)
+        {
+            <p class="ms-advisor-stopped" role="note">@stopped</p>
+        }
+
+        @if (shown.Recommended.Count > 0)
+        {
+            <ul class="ms-advisor-cards">
+                @foreach (IndexAdviceItem item in shown.Recommended)
+                {
+                    <li class="ms-advisor-card" @key="item.Index.Key">
+                        <p class="ms-advisor-headline">@IndexAdvisor.Headline(item, shown.StatementsTried)</p>
+                        <p class="ms-advisor-caption">@item.Index.Caption</p>
+
+                        @if (item.Index.Note is { Length: > 0 } note && item.Remedy is null)
+                        {
+                            <p class="ms-muted ms-advisor-note">@note</p>
+                        }
+
+                        @if (item.FoldedNote is { Length: > 0 } folded)
+                        {
+                            <p class="ms-muted ms-advisor-folded">@folded</p>
+                        }
+
+                        @if (IndexAdvisor.Writes(item) is { Length: > 0 } writes)
+                        {
+                            <p class="ms-muted ms-advisor-writes">@writes</p>
+                        }
+
+                        @if (item.Remedy is { Length: > 0 } remedy)
+                        {
+                            <div class="ms-advisor-remedy">
+                                <div class="ms-advisor-remedy-header">
+                                    <span class="ms-advisor-remedy-title">@(item.Index.Origin == HypotheticalIndexOrigin.Marten ? "To declare it" : "To create it")</span>
+                                    <CopyButton Value="@remedy" Label="@("Copy the remedy for " + item.Index.Caption)" />
+                                </div>
+                                <pre class="ms-code ms-advisor-remedy-code"><code>@remedy</code></pre>
+                                @if (item.RemedyNote is { Length: > 0 } remedyNote)
+                                {
+                                    <p class="ms-muted ms-advisor-note">@remedyNote</p>
+                                }
+                                else if (item.Index.Origin != HypotheticalIndexOrigin.Marten)
+                                {
+                                    <p class="ms-muted ms-advisor-note">Run it yourself, outside the studio: CONCURRENTLY does not block writes, and takes longer.</p>
+                                }
+                            </div>
+                        }
+
+                        <TableScroll Label="@("Statements the index " + item.Index.Caption + " was tried against")">
+                            <table class="ms-table ms-advisor-statements">
+                                <thead>
+                                    <tr>
+                                        <th scope="col">Statement</th>
+                                        <th scope="col" class="ms-advisor-number">Calls</th>
+                                        <th scope="col" class="ms-advisor-number">Planned cost now</th>
+                                        <th scope="col" class="ms-advisor-number">With the index</th>
+                                        <th scope="col">Uses it</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (IndexAdviceStatement statement in item.Statements)
+                                    {
+                                        <tr @key="statement.QueryId">
+                                            <td><a class="ms-plan-open" href="@StatementLinks.ToStatement(Settings, Descriptor, State.ActiveScope, statement.QueryId)">queryid @statement.QueryId.ToString(CultureInfo.InvariantCulture)</a></td>
+                                            <td class="ms-advisor-number">@TableTextCount(statement.Calls)</td>
+                                            <td class="ms-advisor-number">@Cost(statement.Before)</td>
+                                            <td class="ms-advisor-number">@(statement.After is { } after ? Cost(after) : "–")</td>
+                                            <td>@(statement.Used ? "yes" : "no")</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </TableScroll>
+                    </li>
+                }
+            </ul>
+        }
+        else if (shown.StatementsTried > 0 && shown.Unavailable is null && shown.Reason is null)
+        {
+            <p class="ms-advisor-none">
+                No index these plans suggest would help the @IndexAdvisor.Statements(shown.StatementsTried) tried.
+            </p>
+        }
+
+        @if (shown.NotUsed.Count > 0)
+        {
+            <details class="ms-advisor-group ms-advisor-notused">
+                <summary>Tried, not used (@shown.NotUsed.Count)</summary>
+                <ul>
+                    @foreach (IndexAdviceItem item in shown.NotUsed)
+                    {
+                        <li @key="item.Index.Key">@item.Index.Caption</li>
+                    }
+                </ul>
+            </details>
+        }
+
+        @if (shown.NotTried.Count > 0)
+        {
+            <details class="ms-advisor-group ms-advisor-nottried">
+                <summary>Not tried (@shown.NotTried.Count)</summary>
+                <ul>
+                    @foreach (string reason in shown.NotTried)
+                    {
+                        <li>@reason</li>
+                    }
+                </ul>
+            </details>
+        }
+
+        @if (shown.Skipped.Count > 0)
+        {
+            <p class="ms-muted ms-advisor-skipped">Passed over: @string.Join(", ", shown.Skipped).</p>
+        }
+
+        @if (Table is { Length: > 0 } && shown.ComparedColumns.Count > 0 && ranFor is not null)
+        {
+            <div class="ms-advisor-picker" role="group" aria-label="Try your own index on @Table">
+                <p class="ms-advisor-picker-title">Try your own index on <span class="ms-mono">@Table</span></p>
+                <p class="ms-muted">The columns these statements' plans compare on it, in the order of the index:</p>
+                <div class="ms-advisor-picker-columns">
+                    @for (int i = 0; i < picked.Length; i++)
+                    {
+                        int position = i;
+                        <select class="ms-advisor-picker-select" aria-label="@("Column " + (position + 1).ToString(CultureInfo.InvariantCulture))" @onchange="e => picked[position] = e.Value?.ToString() ?? string.Empty">
+                            <option value="" selected="@(picked[position].Length == 0)">@(position == 0 ? "choose a column" : "none")</option>
+                            @foreach (string column in shown.ComparedColumns)
+                            {
+                                <option value="@column" selected="@(string.Equals(picked[position], column, StringComparison.Ordinal))">@column</option>
+                            }
+                        </select>
+                    }
+                    <button type="button" class="ms-button ms-advisor-try" @onclick="TryOwnAsync" disabled="@(running || picked[0].Length == 0)">Try this index</button>
+                </div>
+            </div>
+        }
+
+        @foreach (HealthStatement statement in shown.Statements)
+        {
+            <SqlDisclosure Sql="@statement.Sql" ParameterNames="statement.ParameterNames" Reads="@statement.Label" />
+        }
+    };
+
+    private static string TableTextCount(double value) => value.ToString("N0", CultureInfo.InvariantCulture);
+
+    private static string Cost(double value) => value.ToString("#,0.00", CultureInfo.InvariantCulture);
+
+    public async ValueTask DisposeAsync()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        disposed = true;
+
+        State.ScopeChanged -= OnScopeChangedAsync;
+        CancelRun();
+
+        try
+        {
+            await lifetime.CancelAsync();
+        }
+        finally
+        {
+            lifetime.Dispose();
+        }
+
+        GC.SuppressFinalize(this);
+    }
+}

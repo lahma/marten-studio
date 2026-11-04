@@ -40,6 +40,10 @@
     behind the page's own gate, and the service decides whether a plan may be shown and masks it (IStatementsService.PlanAsync).
     The link is D9's: the queryid and the scope in the query string reopen the same statement.
 
+    The index advisor (1.2-INDEX-A): ?advise=all (or ?advise=schema.table) opens a panel above the list, below a drill-in
+    (StatementsIndexAdvisor). It runs nothing on its own - not on load, a poll, a scope change or the navigation that opened it;
+    its Run button plans the top statements and imagines the indexes their plans suggest (IStatementsService.AdviseIndexesAsync).
+
     Mark (1.2-H-A, X6): remembers the counters on screen - numbers only, in this circuit's memory - and counts each statement's
     change since then in place of the advisor's window, until it is cleared or a reset of pg_stat_statements, or a restart that
     began the counters again, ends it (StatementsSinceMark). `raw` is the read as the service gave it; `view` is what the page
@@ -53,6 +57,11 @@
         <h1 class="ms-page-title">Statements</h1>
         <div class="ms-stmts-actions">
             <button type="button" class="ms-button" @onclick="RefreshAsync" disabled="@(!interactive || busy)">Refresh</button>
+            @if (view is { Refusal: DatabaseRefusal.None })
+            {
+                @* 1.2-INDEX-A: opens the panel (?advise=all, D9) and runs nothing; the panel's Run does. *@
+                <a class="ms-button ms-advisor-open" href="@StatementLinks.ToAdvisor(Settings, Descriptor, State.ActiveScope)" aria-current="@(Advising ? "true" : null)">Index advisor</a>
+            }
             <SinceMarkControl MarkedAt="@mark?.At" Invalid="@(markEnded is null ? null : EndedConsequence)" Disabled="@(!interactive || loading || !CanMark)" ClearDisabled="@(!interactive)" OnMark="MarkAsync" OnClear="ClearMarkAsync" />
         </div>
     </div>
@@ -102,6 +111,8 @@
             </div>
         </div>
 
+        @Advisor()
+
         @Footer(view)
     }
     else
@@ -110,6 +121,8 @@
         {
             @Drill(drilled)
         }
+
+        @Advisor()
 
         @if (markEnded is { } ended && mark is { } held)
         {
@@ -360,6 +373,28 @@
     public string? QueryIdParameter { get; set; }
 
     private long? QueryId => StatementLinks.ParseQueryId(QueryIdParameter);
+
+    /// <summary>The index advisor's panel, as the query string carries it (D9): <c>all</c>, or a <c>schema.table</c>.</summary>
+    [SupplyParameterFromQuery(Name = IndexAdvisor.AdviseParameter)]
+    public string? AdviseParameter { get; set; }
+
+    /// <summary>Whether the address asks for the index advisor's panel.</summary>
+    private bool Advising => !string.IsNullOrWhiteSpace(AdviseParameter);
+
+    /// <summary>The table the panel is narrowed to, or <see langword="null" /> for every table.</summary>
+    private string? AdviseTable => string.Equals(AdviseParameter, IndexAdvisor.AdviseAll, StringComparison.Ordinal) ? null : AdviseParameter;
+
+    /// <summary>
+    /// 1.2-INDEX-A: the index advisor's panel - above the list, below a drill-in - when the address names it. It plans nothing until
+    /// its Run is pressed, and a visitor short of the page's gate never reaches it (the page draws no list for them).
+    /// </summary>
+    private RenderFragment Advisor() => __builder =>
+    {
+        @if (Advising && view is { Refusal: DatabaseRefusal.None })
+        {
+            <StatementsIndexAdvisor @key="@(AdviseParameter + "|" + State.ActiveScope)" Table="@AdviseTable" />
+        }
+    };
 
     protected override void OnInitialized()
     {

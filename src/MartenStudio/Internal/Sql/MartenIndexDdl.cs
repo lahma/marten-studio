@@ -115,6 +115,9 @@ internal static class MartenIndexDdl
             Schema = table.Schema,
             Table = table.Table,
             Note = duplicate ? DuplicateNote + " " + DeclareNote : DeclareNote,
+
+            // 1.2-INDEX-A: the index advisor's remedy for this index - the line to declare, never SQL.
+            Line = line,
         };
     }
 }

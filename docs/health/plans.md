@@ -667,3 +667,53 @@ per database, and says which: hypopg is not installed (installing it - its packa
 `CREATE EXTENSION hypopg` - is the host's decision), or it is installed and that role may not use it (it needs `USAGE`
 on hypopg's schema and `EXECUTE` on `hypopg_create_index` and `hypopg_reset`). On a managed platform, whether hypopg is
 offered at all is in the provider's list of supported extensions.
+
+### The index advisor (1.2)
+
+Statements has an **Index advisor** (`?advise=all`, or `?advise=schema.table` from a link): a panel that never runs on its own -
+not on load, a poll, a scope change or the navigation that opened it - and plans only when you press **Run**. It is X2's
+what-if over several statements and several indexes.
+
+**What it does.** It takes the 20 statements with the most execution time that you may see (the statement checks' own read,
+so only the statements of the role the studio reads as, in this database; never a write, a utility statement, a cut text, a
+statement that names a schema you may not see, or one the checks could not tie to a table), plans each as the drill-in does
+(the generic plan, as `SqlConsoleRole` under your own `search_path`), reads the indexes those plans suggest - P04's and P05's
+shapes, and P10's shape without `ANALYZE` (the plain columns an index or bitmap scan's filter compares) - and merges them. It
+then imagines each index, one at a time, in a read-only transaction of its own with `hypopg_reset()` as its last statement, and
+plans again the statements whose plan reads that index's table. Nothing is created and nothing is applied; no lock is held
+between two indexes.
+
+**How it ranks.** Per statement and index, the index is *used* when the plan under it reads it, and *helps* when it is used and the
+planner's total cost is at least 10% lower. Its saving is the cost saved times the statement's calls over the window, summed over
+the statements it helps; its *share* is that sum over the workload (every tried statement's calls times its cost now). Indexes
+that help are recommended, the most saved first. A longer index that extends a shorter one and saves under 1.1 times as much is
+folded into it ("also tried (a, b), no better"). Both thresholds are judgements to revisit, not measurements.
+
+**What to do about it.** On a table Marten owns a document table's index is the `StoreOptions` line that declares it - an
+`Index(x => x.Member)` on a duplicated field, `IndexLastModified()`, or the `Duplicate(x => x.Member)` a JSON comparison
+needs (imagined as the computed index on the same member, which says so) - and an index Marten's next apply would drop is never
+offered as SQL. On any other table it is `CREATE INDEX CONCURRENTLY`, which you run yourself, outside the studio. Nothing offers
+to run it. A containment or key-existence test yields no index: hypopg does not imagine GIN.
+
+**Bounds.** 20 statements, 12 indexes (and your own, besides), 150 plans under imagined indexes, 60 seconds - checked between
+plans and between indexes - one run per tab and one per database in the process (a second is refused, never joined). A run a
+bound stopped returns what it has and names the bound.
+
+**Partitioned tables get no candidate in 1.2.** hypopg's changelog claims support for hypothetical indexes on partitioned
+tables from 1.1.4, but whether the planner uses one for a partition's scan, and what a generic plan with runtime pruning costs, is
+unmeasured here; an index read off a plan of a partitioned table names a partition, whose index is declared on its parent. The
+advisor says "not tried" and why.
+
+**Your own index.** With a table (`?advise=schema.table`), after a run, three selects offer the columns the tried plans compare on
+that table, and **Try this index** runs again with them. A column no tried plan compares is refused before anything is imagined.
+
+**Gate and audit.** The Statements page's own gate (`ViewDatabaseActivity`, the scope with no tenant, the store policy and the
+write policy with the capability named), asked again by the advisor; the plans are the drill-in's, so a statement is tried only if
+the drill-in would plan and show it to you, and every plan under an imagined index is held to the same mask again. A run is one
+Activity entry, "Advise indexes for database statements", with counts alone - never a name, a text or a cost. Without hypopg, or
+for a role that may not use it, the answer is the sentence of [What if?](#what-if-a-hypothetical-index) and nothing is planned.
+
+**What the numbers are.** The planner's estimates, not measurements: a cost is the planner's unit, weighted by calls - not time -
+and a generic plan is not the plan a given value gets. Every insert and update maintains every index, and an index takes disk and
+cache: those writes are not in the sum (the table's inserts and updates since its counters began are shown beside each
+recommendation).

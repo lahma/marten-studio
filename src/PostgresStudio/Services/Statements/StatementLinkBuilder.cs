@@ -20,6 +20,19 @@ internal static class StatementLinkBuilder
             return PostgresStudio.Components.StudioScopeQuery.Append(PostgresStudio.Components.StudioLink.To(settings, StatementLinks.Route), scope, descriptor.SourceQueryParameter);
         }
 
+        /// <summary>
+        /// The page with the index advisor open (1.2-INDEX-A, D9): for every table, or for one (a <c>schema.table</c> key). Opening it
+        /// runs nothing - the panel's Run button does.
+        /// </summary>
+        public static string ToAdvisor(IStudioSettings settings, StudioDescriptor descriptor, StudioScope? scope, string? table = null)
+        {
+            ArgumentNullException.ThrowIfNull(settings);
+            ArgumentNullException.ThrowIfNull(descriptor);
+
+            string url = PostgresStudio.Components.StudioLink.To(settings, StatementLinks.Route) + "?" + IndexAdvisor.AdviseParameter + "=" + Uri.EscapeDataString(table ?? IndexAdvisor.AdviseAll);
+            return PostgresStudio.Components.StudioScopeQuery.Append(url, scope, descriptor.SourceQueryParameter);
+        }
+
         /// <summary>One statement's drill-in: the page, its <c>queryid</c> and the scope - a link that reopens the same statement.</summary>
         public static string ToStatement(IStudioSettings settings, StudioDescriptor descriptor, StudioScope? scope, long queryId)
         {

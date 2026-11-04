@@ -46,6 +46,12 @@ internal sealed record HypotheticalIndex
     /// <summary>Anything a person should know before acting on what the what-if shows.</summary>
     public string? Note { get; init; }
 
+    /// <summary>
+    /// 1.2-INDEX-A: the <c>StoreOptions</c> line a Marten-origin index stands for (<c>options.Schema.For&lt;T&gt;().Index(x =&gt; x.Member);</c>),
+    /// the remedy the index advisor shows in place of SQL; <see langword="null" /> for an index read off a plan.
+    /// </summary>
+    public string? Line { get; init; }
+
     /// <summary>Whether <paramref name="other" /> is this index: the same key, origin and definition - what a server finds it again by.</summary>
     public bool Same(HypotheticalIndex? other) =>
         other is not null && Origin == other.Origin
@@ -417,6 +423,24 @@ internal static class HypotheticalIndexCandidates
     /// <param name="prefixedOnly">Whether a bare name never counts - a join filter always names two tables.</param>
     internal static IReadOnlyList<string> Columns(string expression, string alias, bool prefixedOnly = false)
     {
+        List<(string Column, bool Equality)> columns = Compared(expression, alias, prefixedOnly);
+
+        return [.. columns.Where(static x => x.Equality).Concat(columns.Where(static x => !x.Equality)).Select(static x => x.Column).Take(MaxColumns)];
+    }
+
+    /// <summary>
+    /// 1.2-INDEX-A: every plain column of the table <paramref name="alias" /> names that <paramref name="expression" /> compares, as
+    /// <see cref="Columns" /> reads them but uncapped and in the order the expression first names them - the columns the index
+    /// advisor offers a visitor's own index on. Pure.
+    /// </summary>
+    /// <param name="expression">A filter, index condition or join condition as a plan printed it.</param>
+    /// <param name="alias">The scan's alias, or its table's name when it has none.</param>
+    /// <param name="prefixedOnly">Whether a bare name never counts - a join condition always names two tables.</param>
+    internal static IReadOnlyList<string> ColumnsCompared(string expression, string alias, bool prefixedOnly = false) =>
+        [.. Compared(expression, alias, prefixedOnly).Select(static x => x.Column)];
+
+    private static List<(string Column, bool Equality)> Compared(string expression, string alias, bool prefixedOnly)
+    {
         ArgumentNullException.ThrowIfNull(expression);
         ArgumentNullException.ThrowIfNull(alias);
 
@@ -512,7 +536,7 @@ internal static class HypotheticalIndexCandidates
             }
         }
 
-        return [.. columns.Where(static x => x.Equality).Concat(columns.Where(static x => !x.Equality)).Select(static x => x.Column).Take(MaxColumns)];
+        return columns;
     }
 
     private static bool IsName(Token token) => token.Kind is TokenKind.Word or TokenKind.Quoted;
