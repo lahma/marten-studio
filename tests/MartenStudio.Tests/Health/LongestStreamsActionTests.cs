@@ -239,6 +239,23 @@ namespace MartenStudio.Tests.Health
         }
 
         [Fact]
+        public async Task A_finding_about_a_tenant_the_store_policy_hides_is_refused_audited_once_and_the_action_never_runs()
+        {
+            await using HealthHarness harness = Harness(conjoined: false, activity: true, policies: true);
+            harness.Policies.Allow(static resource => resource.TenantId != "acme");
+
+            HealthReportFinding about = E06() with { Finding = E06().Finding with { TenantId = "acme" } };
+
+            HealthActionResult result = await harness.Circuit.GetRequiredService<IHealthActionService>().RunAsync(harness.Scope, about, Id, Token);
+
+            // A Failed result would mean it reached the (refused) connection: Refused means the tenant question stopped it first.
+            result.Outcome.Should().Be(HealthActionOutcome.Refused);
+            result.Reason.Should().Be("This finding names a tenant the store policy does not show you.").And.NotContain("acme");
+            AuditEntries(harness).Should().ContainSingle().Which.Succeeded.Should().BeFalse();
+            harness.Policies.Calls.Should().Contain(static x => x.Resource.TenantId == "acme", "the tenant's own store-policy question was asked");
+        }
+
+        [Fact]
         public async Task Every_press_is_audited_whatever_it_ends_in()
         {
             await using HealthHarness harness = Harness(conjoined: false);

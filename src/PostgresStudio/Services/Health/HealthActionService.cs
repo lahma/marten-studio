@@ -190,50 +190,65 @@ internal sealed class HealthActionService : IHealthActionService
         }
 
         // 3. The scope, as the visitor selected it: the store policy is the resolver's first question.
+        // Steps 3 to 6 ask the host's own code - its authorization policies, its tenant listing - and anything that code throws is
+        // the press's failure, not the circuit's: logged as 9223, audited, answered as Failed. No flight is held until step 7.
         ResolvedSource resolved;
+        StudioScope whole;
+        StudioScope audited;
+        HealthVisitorGate gate;
 
         try
         {
-            resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
-        }
-        catch (StudioNotAuthorizedException exception)
-        {
-            audit.RecordScopeDenied(scope, DatabaseAccess.StorePolicyName(settings), action.AuditAction, action.AuditTarget);
-            logger.HealthActionRefused(settings.Text.Product, action.Id, scope.StoreKey, scope.DatabaseId, exception.Message);
-            return HealthActionResult.Refused(exception.Message, now);
-        }
-        catch (Exception exception) when (exception is KeyNotFoundException or StudioStoreUnavailableException)
-        {
-            return Audited(scope, action, capability: null, HealthActionResult.Refused(exception.Message, now));
-        }
+            try
+            {
+                resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
+            }
+            catch (StudioNotAuthorizedException exception)
+            {
+                audit.RecordScopeDenied(scope, DatabaseAccess.StorePolicyName(settings), action.AuditAction, action.AuditTarget);
+                logger.HealthActionRefused(settings.Text.Product, action.Id, scope.StoreKey, scope.DatabaseId, exception.Message);
+                return HealthActionResult.Refused(exception.Message, now);
+            }
+            catch (Exception exception) when (exception is KeyNotFoundException or StudioStoreUnavailableException)
+            {
+                return Audited(scope, action, capability: null, HealthActionResult.Refused(exception.Message, now));
+            }
 
-        // 4. The database as a whole, by the registered key and its identity - never the visitor's spelling of either (D29) - and
-        // this visitor's gates.
-        StudioScope whole = new(resolved.Source.Key, resolved.Target.Identity, null);
-        StudioScope audited = whole with { TenantId = scope.TenantId };
-        HealthVisitorGate gate = new(settings, authorization, capabilities, whole);
+            // 4. The database as a whole, by the registered key and its identity - never the visitor's spelling of either (D29) - and
+            // this visitor's gates.
+            whole = new(resolved.Source.Key, resolved.Target.Identity, null);
+            audited = whole with { TenantId = scope.TenantId };
+            gate = new(settings, authorization, capabilities, whole);
 
-        // 5. At least the finding's own gate, and its tenant's store policy.
-        HealthGate required = Stricter(action.Gate, HealthGateRule.Required(finding.Finding));
+            // 5. At least the finding's own gate, and its tenant's store policy.
+            HealthGate required = Stricter(action.Gate, HealthGateRule.Required(finding.Finding));
 
-        if (!await gate.PassesAsync(required).ConfigureAwait(false))
-        {
-            return Audited(audited, action, action.Capability, HealthActionResult.Refused(
-                "This action " + gate.WhyNot(required) + ".", now));
+            if (!await gate.PassesAsync(required).ConfigureAwait(false))
+            {
+                return Audited(audited, action, action.Capability, HealthActionResult.Refused(
+                    "This action " + gate.WhyNot(required) + ".", now));
+            }
+
+            if (finding.Finding.TenantId is { } findingTenant && !await gate.TenantAsync(findingTenant).ConfigureAwait(false))
+            {
+                return Audited(audited, action, action.Capability, HealthActionResult.Refused(
+                    "This finding names a tenant the store policy does not show you.", now));
+            }
+
+            // 6. The write policy, if a capability is declared: the question the capability exists to be asked.
+            if (action.Capability is { } declared
+                && !await authorization.IsAuthorizedAsync(whole, declared, cancellationToken).ConfigureAwait(false))
+            {
+                return Audited(audited, action, declared, HealthActionResult.Refused(
+                    "Your account's write policy does not allow " + declared + " for this database.", now));
+            }
         }
-
-        if (finding.Finding.TenantId is { } findingTenant && !await gate.TenantAsync(findingTenant).ConfigureAwait(false))
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
-            return Audited(audited, action, action.Capability, HealthActionResult.Refused(
-                "This finding names a tenant the store policy does not show you.", now));
-        }
+            logger.HealthActionFailed(settings.Text.Product, exception, action.Id, scope.StoreKey, scope.DatabaseId, (exception as PostgresException)?.SqlState);
 
-        // 6. The write policy, if a capability is declared: the question the capability exists to be asked.
-        if (action.Capability is { } declared
-            && !await authorization.IsAuthorizedAsync(whole, declared, cancellationToken).ConfigureAwait(false))
-        {
-            return Audited(audited, action, declared, HealthActionResult.Refused(
-                "Your account's write policy does not allow " + declared + " for this database.", now));
+            return Audited(scope, action, capability: null, HealthActionResult.Failed(
+                "The action failed (" + exception.GetType().Name + "); the server log has the details.", now));
         }
 
         // 7. One run of this action per database, process-wide. Refused, never joined.
@@ -319,7 +334,9 @@ internal sealed class HealthActionService : IHealthActionService
             action.AuditAction,
             action.AuditTarget,
             succeeded,
-            result.AuditMessage ?? result.Reason ?? result.Summary,
+            // Never the summary: it is what the action read. An action says what the ring may hold in AuditMessage, and without
+            // one a refusal holds its reason (a studio sentence) and a done press holds nothing but that it was done.
+            result.AuditMessage ?? result.Reason ?? (succeeded ? "Done." : null),
             capability,
             scope);
 

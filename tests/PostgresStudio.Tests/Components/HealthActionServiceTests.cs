@@ -365,6 +365,82 @@ public sealed class HealthActionServiceTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task A_summary_is_what_the_action_read_and_never_reaches_the_audit_ring_or_a_log_line()
+    {
+        context.Services.AddLogging(builder => builder.SetMinimumLevel(LogLevel.Trace).AddProvider(logs));
+        const string Sentinel = "SENTINEL-STREAM-ID-5f8b3a52";
+
+        TestAction action = new("a.applies", "T01") { Summary = "Found " + Sentinel };
+
+        HealthActionResult result = await Service(action).RunAsync(Scope, Finding("T01"), "a.applies", Token);
+
+        result.Summary.Should().Contain(Sentinel, "the page is given what was found");
+        Audited().Should().ContainSingle().Which.Message.Should().Be("Done.");
+        logs.Entries.Should().NotBeEmpty().And.OnlyContain(x => !x.Message.Contains(Sentinel, StringComparison.Ordinal));
+        logs.Entries.Should().Contain(x => x.EventId.Id == 9200, "the press was written to the application's log too");
+    }
+
+    [Fact]
+    public async Task A_policy_that_throws_in_the_resolver_is_a_failed_press_logged_audited_and_holds_no_flight()
+    {
+        context.Options.SourceAuthorizationPolicy = "source";
+        context.AuthorizationService.Allow(static _ => throw new InvalidOperationException("host policy bug"));
+
+        TestAction action = new("a.applies", "T01");
+
+        HealthActionResult result = await Service(action).RunAsync(Scope, Finding("T01"), "a.applies", Token);
+
+        AssertContained(result, action);
+    }
+
+    [Fact]
+    public async Task A_policy_that_throws_in_the_gate_is_a_failed_press_logged_audited_and_holds_no_flight()
+    {
+        context.Options.SourceAuthorizationPolicy = "source";
+
+        // The resolver's questions pass; the gate's, which come after them, throw.
+        int before = context.AuthorizationService.Calls.Count;
+        await ResolveAsync();
+        int resolverQuestions = context.AuthorizationService.Calls.Count - before;
+        int asked = 0;
+        context.AuthorizationService.Allow(_ => ++asked <= resolverQuestions ? true : throw new InvalidOperationException("host policy bug"));
+
+        TestAction action = new("a.applies", "T01") { Gate = HealthGate.Database };
+
+        HealthActionResult result = await Service(action).RunAsync(Scope, Finding("T01"), "a.applies", Token);
+
+        AssertContained(result, action);
+    }
+
+    [Fact]
+    public async Task A_policy_that_throws_on_a_cancelled_press_is_the_cancellation_not_a_failure()
+    {
+        context.Options.SourceAuthorizationPolicy = "source";
+        using CancellationTokenSource cancel = new();
+        context.AuthorizationService.Allow(_ =>
+        {
+            cancel.Cancel();
+            throw new OperationCanceledException(cancel.Token);
+        });
+
+        await FluentActions.Awaiting(() => Service(new TestAction("a.applies", "T01")).RunAsync(Scope, Finding("T01"), "a.applies", cancel.Token))
+            .Should().ThrowAsync<OperationCanceledException>();
+
+        Audited().Should().BeEmpty();
+        logs.Entries.Should().NotContain(x => x.EventId.Id == 9223);
+    }
+
+    private void AssertContained(HealthActionResult result, TestAction action)
+    {
+        result.Outcome.Should().Be(HealthActionOutcome.Failed);
+        result.Reason.Should().Be("The action failed (InvalidOperationException); the server log has the details.").And.NotContain("host policy bug");
+        action.Runs.Should().Be(0);
+        Audited().Should().ContainSingle().Which.Should().Match<StudioActionLogEntry>(x => !x.Succeeded && !x.Message!.Contains("host policy bug"));
+        logs.Entries.Should().ContainSingle(x => x.EventId.Id == 9223 && x.Level == LogLevel.Warning);
+        flights.Count.Should().Be(0);
+    }
+
+    [Fact]
     public async Task A_result_is_cut_at_the_row_cap_and_says_so()
     {
         TestAction action = new("a.applies", "T01") { RowCount = HealthActionResult.MaxRows + 25 };
