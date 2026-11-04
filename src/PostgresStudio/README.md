@@ -191,6 +191,7 @@ schema only `"*"` admits `BrowseDatabase`, each with the write policy. A name in
 |---|---|---|
 | `Path` | `/postgres` | Where the studio is mounted. `MapPostgresStudio(pattern)` overrides it. |
 | `Title` | `Postgres Studio` | Browser tab and sidebar heading. |
+| `ApplicationPath` | `null` | Where the header's "Back to application" link goes; no link when `null`. A path that starts with a single `/` (`/`, `/app`; a host behind `UsePathBase` includes its base, `/myapp/`) or an absolute `http` or `https` URL, used exactly as written and never re-rooted under the studio's mount path. Anything else fails startup. |
 | `AuthorizationPolicy`, `SourceAuthorizationPolicy`, `WriteAuthorizationPolicy` | `null` | The three layers above. |
 | `ReadOnly` | `false` | Every capability off. |
 | `Capabilities` | all off | `BrowseDatabase`, `ViewDefinitions`, `ViewDatabaseActivity`, `RunSql`. |

@@ -400,6 +400,7 @@ fails the host with a message that names the option.
 |---|---|---|
 | `Path` | `/marten` | Where the studio is mounted. A plain rooted URL path. `MapMartenStudio(pattern)` overrides it. |
 | `Title` | `Marten Studio` | Browser tab and sidebar heading. |
+| `ApplicationPath` | `null` | Where the header's "Back to application" link goes; no link when `null`. A path that starts with a single `/` (`/`, `/app`; a host behind `UsePathBase` includes its base, `/myapp/`) or an absolute `http` or `https` URL, used exactly as written and never re-rooted under the studio's mount path. Anything else fails startup. |
 | `AuthorizationPolicy` | `null` | Policy applied to every studio endpoint — pages, circuit and static assets. |
 | `StoreAuthorizationPolicy` | `null` | Policy evaluated against `MartenStoreResource` before a store, database or tenant is listed, framed or read. |
 | `WriteAuthorizationPolicy` | `null` | Policy evaluated against `MartenStoreResource` with the capability named, before every mutation. Falls back to `StoreAuthorizationPolicy`. |
