@@ -432,11 +432,17 @@ fails the host with a message that names the option.
 
 ## Screens
 
-**Overview** — one card per registered store: databases, document types, event types, the PostgreSQL
-version, tenancy, stream identity, event append mode and the schemas in play. A store that will not
-build gets its own error region rather than blanking the page for the ones that do. A Health tile and the
-three worst findings of the selected database sit beside the store cards, and one line, "Connection: TLS verified · pool
-100 · 2 things worth a look", links to Database › Connection.
+**Overview** — the selected store's card (with two or more stores, a line linking to Stores): databases, document
+types, event types, the PostgreSQL version, tenancy, stream identity, event append mode and the schemas in play. A store
+that will not build gets its own error region rather than blanking the page. A Health tile and the three worst findings
+of the selected database sit beside the store card, and one line, "Connection: TLS verified · pool 100 · 2 things worth a
+look", links to Database › Connection.
+
+**Stores** (`/marten/stores`, 1.2, shown when you may see two or more stores) — every store you may see: whether it
+builds and why not, its tenancy in words, its document types and event store, whether this process hosts its daemon, and
+each database with a health chip from the last sweep. The page never starts a sweep by being opened; Check runs the one
+a database's Overview would. A link to another store, database or tenant that you click moves the studio to it; Back and
+Forward do not.
 
 **Health** — the health advisor, at `/marten/health` (the long form is
 [`docs/health.md`](docs/health.md), and every code, its variants and what its subject names are in
