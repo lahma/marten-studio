@@ -15,7 +15,7 @@ else
             class="ms-chip ms-chip-button"
             popovertarget="ms-capability-popover"
             aria-label="@($"{Capabilities.EnabledCount} of {Capabilities.Offered.Count} capabilities enabled")">
-        @Capabilities.EnabledCount / @Capabilities.Offered.Count capabilities
+        @Capabilities.EnabledCount / @Capabilities.Offered.Count<span class="ms-chip-word"> capabilities</span>
     </button>
 
     @* Native popover: no positioning library, no third-party menu component (AGENTS.md hard rule 3).

@@ -142,6 +142,8 @@ public class StudioRegistrationTests
         // 1.0 (#44): MaxStudioConnections and StudioApplicationName, two more of the shared bounds.
         (typeof(IValidateOptions<MartenStudioOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenStudioOptions>)),
         (typeof(IValidateOptions<MartenStudioOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenStudioOptions>)),
+        // 1.2-HEADER: ApplicationPath, one more of the shared bounds.
+        (typeof(IValidateOptions<MartenStudioOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenStudioOptions>)),
         (typeof(IValidateOptions<MartenStudioOptions>), ServiceLifetime.Singleton, How.Factory, typeof(IValidateOptions<MartenStudioOptions>)),
         // 1.2-PROJ: ProjectionThresholds' validator, a type of its own because its message names the projection.
         (typeof(IValidateOptions<MartenStudioOptions>), ServiceLifetime.Singleton, How.Type, typeof(ProjectionThresholdsValidator)),

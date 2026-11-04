@@ -40,6 +40,7 @@ namespace MartenStudio
     {
         public MartenStudioOptions() { }
         public System.Collections.Generic.IDictionary<string, string> AcceptedChecks { get; }
+        public string? ApplicationPath { get; set; }
         public string? AuthorizationPolicy { get; set; }
         public System.Collections.Generic.IList<string> BrowsableSchemas { get; }
         public MartenStudio.MartenStudioCapabilities Capabilities { get; set; }

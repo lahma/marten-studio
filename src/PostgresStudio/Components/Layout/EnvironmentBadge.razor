@@ -1,0 +1,49 @@
+@using Microsoft.Extensions.DependencyInjection
+@using Microsoft.Extensions.Hosting
+@inject IServiceProvider Services
+
+@* The host's environment, in the header, so nobody mistakes the studio of the production database for the studio of a laptop's.
+
+   Production is drawn in the danger token's colour, Staging in the warning token's, Development in the success token's and any
+   other name neutral. Always on, and it changes nothing in the host: it reads IHostEnvironment.EnvironmentName and nothing else. A
+   host that registers no IHostEnvironment (a hand-built container) simply has no badge, as the Configuration page says it has none.
+
+   The text is the name as the host spelled it, not a translation of it. The colour is a second cue, never the only one (the name
+   is the text), and the badge is a plain span: it is context, not a control, so it takes no focus and no tab stop. *@
+
+@if (name is not null)
+{
+    <span class="ms-env-badge @CssClass" data-ms-environment="@name" title="@($"This application is running in the {name} environment")">@name</span>
+}
+
+@code {
+    private string? name;
+
+    protected override void OnInitialized()
+    {
+        // Read once: a host's environment name does not change while it runs. A name that is blank says nothing, so it draws nothing.
+        string? read = Services.GetService<IHostEnvironment>()?.EnvironmentName;
+        name = string.IsNullOrWhiteSpace(read) ? null : read.Trim();
+    }
+
+    /// <summary>The kind of environment a name is, by the names ASP.NET Core itself uses (compared as it compares them).</summary>
+    private string CssClass
+    {
+        get
+        {
+            if (string.Equals(name, Environments.Production, StringComparison.OrdinalIgnoreCase))
+            {
+                return "ms-env-badge-production";
+            }
+
+            if (string.Equals(name, Environments.Staging, StringComparison.OrdinalIgnoreCase))
+            {
+                return "ms-env-badge-staging";
+            }
+
+            return string.Equals(name, Environments.Development, StringComparison.OrdinalIgnoreCase)
+                ? "ms-env-badge-development"
+                : "ms-env-badge-other";
+        }
+    }
+}

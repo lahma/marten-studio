@@ -35,6 +35,14 @@ public sealed class PostgresStudioOptions : PostgresDiagnosticsOptions
     public string Title { get; set; } = "Postgres Studio";
 
     /// <summary>
+    /// Where the header's "Back to application" link goes, or <see langword="null" /> (the default) for no link. Either a
+    /// host-relative path that starts with a single <c>/</c> (<c>/</c>, <c>/app</c>) or an absolute <c>http</c> or
+    /// <c>https</c> URL. It is used exactly as written and is never re-rooted under the studio's mount path, so
+    /// <c>/</c> is the host's own front page, not the studio's. Validated at startup.
+    /// </summary>
+    public string? ApplicationPath { get; set; }
+
+    /// <summary>
     /// When set, the policy applied to every studio endpoint: pages, the Blazor circuit and the static assets. When
     /// <see langword="null" /> the studio adds no policy of its own and refuses to start unless the mapping calls
     /// <c>RequireAuthorization()</c> or <c>AllowAnonymous()</c>, or the host has an

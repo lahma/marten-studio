@@ -529,6 +529,20 @@
         }
     }, true);
 
+    // A read-only text box that exists to be copied from (the header's copy-link fallback, 1.2) selects its text when it takes focus,
+    // so the visitor's next key is Ctrl+C. Delegated, because the box is added to the page by the circuit long after this script ran,
+    // and in the capture phase for the same reason as the click handlers above. Nothing happens to a box without the attribute.
+    document.addEventListener("focusin", function (event) {
+        const field = event.target;
+        if (field && field.tagName === "INPUT" && field.getAttribute("data-ms-select-on-focus") === "true") {
+            try {
+                field.select();
+            } catch (e) {
+                // A field that cannot select (a type that does not support it) is still on the page to be selected by hand.
+            }
+        }
+    }, true);
+
     // JSON toolkit helpers (folded in from the W1 packet). Every C# call site degrades when these
     // are missing (prerender), so each function is defensive and idempotent.
     window.martenStudio.json = window.martenStudio.json || {

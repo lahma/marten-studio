@@ -227,5 +227,6 @@ public static partial class MartenStudioServiceCollectionExtensions
         options.Capabilities is not null,
         options.BrowsableSchemas,
         options.MaxStudioConnections,
-        options.StudioApplicationName);
+        options.StudioApplicationName,
+        options.ApplicationPath);
 }

@@ -64,6 +64,9 @@ internal sealed class PostgresStudioSettings : IStudioSettings
     public bool HasCustomPath => Value.HasCustomPath;
 
     /// <inheritdoc />
+    public string? ApplicationPath => Value.ApplicationPath;
+
+    /// <inheritdoc />
     public string? AuthorizationPolicy => Value.AuthorizationPolicy;
 
     /// <inheritdoc />

@@ -17,6 +17,7 @@ namespace PostgresStudio
     public sealed class PostgresStudioOptions : PostgresStudio.PostgresDiagnosticsOptions
     {
         public PostgresStudioOptions() { }
+        public string? ApplicationPath { get; set; }
         public string? AuthorizationPolicy { get; set; }
         public PostgresStudio.PostgresStudioCapabilities Capabilities { get; set; }
         public int DefaultPageSize { get; set; }

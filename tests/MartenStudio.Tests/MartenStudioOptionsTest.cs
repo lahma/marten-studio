@@ -95,6 +95,43 @@ public class MartenStudioOptionsTest
         Resolve(options => options.Path = path).Path.Should().Be(path);
     }
 
+    /// <summary>1.2-HEADER: no link unless the host sets one.</summary>
+    [Fact]
+    public void ApplicationPath_is_null_by_default()
+    {
+        Resolve(static _ => { }).ApplicationPath.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData("/")]
+    [InlineData("/app")]
+    [InlineData("/ops/portal?tab=1")]
+    [InlineData("http://localhost:5000/")]
+    [InlineData("https://example.com/app")]
+    [InlineData("HTTPS://EXAMPLE.COM")]
+    public void An_application_path_that_is_rooted_or_an_absolute_http_url_is_accepted(string path)
+    {
+        Resolve(options => options.ApplicationPath = path).ApplicationPath.Should().Be(path);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("app")]
+    [InlineData("../app")]
+    [InlineData("//evil.example/app")]
+    [InlineData("/\\evil.example")]
+    [InlineData("/app with space")]
+    [InlineData("ftp://example.com/")]
+    [InlineData("javascript:alert(1)")]
+    [InlineData("https://")]
+    [InlineData("mailto:ops@example.com")]
+    public void An_application_path_that_is_neither_is_refused_at_startup(string path)
+    {
+        ResolveAction(options => options.ApplicationPath = path).Should().Throw<OptionsValidationException>()
+            .WithMessage("*MartenStudioOptions.ApplicationPath must be null*absolute http or https URL*");
+    }
+
     [Theory]
     [InlineData(0, 500)]
     [InlineData(-1, 500)]

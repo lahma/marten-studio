@@ -83,6 +83,10 @@ builder.Services.AddPostgresStudio(options =>
 });
 #endregion
 
+// Outside the README's snippet on purpose: the header's "Back to application" link, to the sample's own landing page. Absent
+// unless a host sets it; a path that starts with "/" or an absolute http(s) URL, and never re-rooted under the mount path.
+builder.Services.Configure<PostgresStudioOptions>(static options => options.ApplicationPath = "/");
+
 #region readme_health
 // Optional, and AddPostgresStudio() does not do it for you: the health advisor's checks as one ASP.NET Core health
 // check. It reports codes and counts, never a name, and runs the checks at most once per HealthInterval however often

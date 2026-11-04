@@ -43,6 +43,7 @@ internal sealed class StudioState
     private string selectedTimeZoneId = TimeZoneInfo.Local.Id;
     private long preferenceVersion;
     private bool initialized;
+    private StudioScope? applyingScope;
 
     /// <param name="catalog">The sources, databases and tenants this visitor may see.</param>
     /// <param name="logger">Where a page's failed scope-change handler goes.</param>
@@ -97,8 +98,49 @@ internal sealed class StudioState
     /// </remarks>
     public event Func<Task>? ScopeChanged;
 
+    /// <summary>
+    /// Raised, synchronously and on the caller's thread, the moment the scope the studio's <em>links</em> should carry
+    /// (<see cref="LinkScope" />) moves: when a scope starts to be applied and again when it becomes the active one (1.2).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>A second event beside <see cref="ScopeChanged" />, because that one is awaited one handler after another.</b> The shell's
+    /// own handler is first in line and reads the authorization policy before it returns, so the rail's handler ran a policy read
+    /// and a round trip after the scope moved, and for that long a rail link a visitor clicked carried the old scope. This event is
+    /// raised before anything is awaited and its handlers must not wait for anything: they ask for a render and return. It is an
+    /// <see cref="Action" /> because it is synchronous by contract; a handler is a method, never an <c>async</c> lambda (hard rule 6).
+    /// </para>
+    /// <para>
+    /// Raised only when <see cref="LinkScope" /> actually changed, so a page that re-validates the address it was opened with
+    /// (<see cref="SetScopeAsync" /> with the scope the studio is already on) draws nothing.
+    /// </para>
+    /// </remarks>
+    public event Action? LinkScopeChanged;
+
     /// <summary>The store, database and tenant every page on this circuit reads for.</summary>
     public StudioScope? ActiveScope { get; private set; }
+
+    /// <summary>
+    /// The scope a link built now should carry: the one <see cref="SetScopeAsync" /> is applying while it reads the catalog, and
+    /// otherwise <see cref="ActiveScope" />.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Applying a scope is a few awaited reads (the new store's databases, the database's tenants), and until they finish
+    /// <see cref="ActiveScope" /> is still the old one. A link drawn from it in that window - the rail's - sends a visitor who
+    /// clicks it to the old store, and the shell then follows the click's address back (<c>StudioLayout</c> applies the scope of an
+    /// intercepted link). So a link is drawn from what is being applied: the scope a pasted address names while the first load
+    /// reads, the scope a picker was just moved to while the picker's change reads. The values are the request's, filled in from
+    /// the active scope where the request leaves a part out and checked against what the last listings carry where that needs no
+    /// await; a name the final resolution replaces (a database the new store does not list) is replaced by the same rule when the
+    /// scope is applied, as it is when the address is followed.
+    /// </para>
+    /// <para>
+    /// For links only. Authorization, data reads and the address bar's rewrite all read <see cref="ActiveScope" />, which moves
+    /// only when the scope really has.
+    /// </para>
+    /// </remarks>
+    public StudioScope? LinkScope => applyingScope ?? ActiveScope;
 
     /// <summary>Every store the visitor may see, unavailable ones included and marked.</summary>
     public IReadOnlyList<StoreListing> AvailableStores { get; private set; } = [];
@@ -245,30 +287,108 @@ internal sealed class StudioState
         StoreListing? store = FindStore(storeKey ?? previous?.StoreKey);
         if (store is null)
         {
+            // Nothing is applied. The first load names the address's scope before the listings exist (BeginApplying), so a pending
+            // one is dropped here rather than left standing.
+            EndApplying();
             return;
         }
 
         bool storeChanged = !string.Equals(store.Key, previous?.StoreKey, StringComparison.OrdinalIgnoreCase);
-        if (storeChanged)
+
+        // Before the first await: from here until the scope is the active one, a link is drawn from the scope being applied.
+        SetApplying(PendingScopeFor(store.Key, databaseId, tenantId, previous, storeChanged));
+
+        try
         {
-            AvailableDatabases = await catalog.ListDatabasesAsync(store.Key, cancellationToken).ConfigureAwait(false);
+            if (storeChanged)
+            {
+                AvailableDatabases = await catalog.ListDatabasesAsync(store.Key, cancellationToken).ConfigureAwait(false);
+            }
+
+            string resolvedDatabaseId = PickDatabase(databaseId ?? (storeChanged ? null : previous?.DatabaseId));
+
+            if (storeChanged || !string.Equals(resolvedDatabaseId, previous?.DatabaseId, StringComparison.OrdinalIgnoreCase))
+            {
+                ApplyFacts(await catalog.DescribeAsync(store.Key, resolvedDatabaseId, cancellationToken).ConfigureAwait(false));
+            }
+
+            // A tenant the listing does not carry falls back to the previous one only while this store and database still
+            // accept it: after a store or database change the previous tenant is the old scope's, and is checked against the
+            // new listing like any other name - or dropped, as RefreshAsync drops one.
+            string? resolvedTenantId = TenantList.IsAcceptable(AvailableTenants, tenantId)
+                ? NullIfBlank(tenantId)
+                : TenantList.IsAcceptable(AvailableTenants, previous?.TenantId) ? NullIfBlank(previous?.TenantId) : null;
+
+            await SetActiveScopeAsync(new StudioScope(store.Key, resolvedDatabaseId, resolvedTenantId), previous, endsApplying: true).ConfigureAwait(false);
+        }
+        finally
+        {
+            // A read that threw or was cancelled applied nothing: the links go back to the scope that is still the active one.
+            // (A no-op after the scope was applied: SetActiveScopeAsync ended it before it notified anyone.)
+            EndApplying();
+        }
+    }
+
+    /// <summary>
+    /// Says, before anything is read, that the shell is about to apply the scope a pasted address names, so the links drawn while
+    /// the listings load carry it instead of the scope the studio is still on (1.2). The first load calls it with the address's
+    /// parts; <see cref="SetScopeAsync" /> replaces it with its own, resolved against the listings, and every way out of the first
+    /// load ends it (<see cref="EndApplying" />). A part the address does not name is left out of the links, never defaulted.
+    /// </summary>
+    /// <param name="storeKey">The address's source key, or <see langword="null" />.</param>
+    /// <param name="databaseId">The address's database, or <see langword="null" />.</param>
+    /// <param name="tenantId">The address's tenant, or <see langword="null" />.</param>
+    public void BeginApplying(string? storeKey, string? databaseId, string? tenantId)
+    {
+        if (storeKey is null && databaseId is null && tenantId is null)
+        {
+            return;
         }
 
-        string resolvedDatabaseId = PickDatabase(databaseId ?? (storeChanged ? null : previous?.DatabaseId));
+        SetApplying(new StudioScope(storeKey ?? ActiveScope?.StoreKey ?? string.Empty, databaseId ?? string.Empty, NullIfBlank(tenantId)));
+    }
 
-        if (storeChanged || !string.Equals(resolvedDatabaseId, previous?.DatabaseId, StringComparison.OrdinalIgnoreCase))
-        {
-            ApplyFacts(await catalog.DescribeAsync(store.Key, resolvedDatabaseId, cancellationToken).ConfigureAwait(false));
-        }
+    /// <summary>Ends <see cref="BeginApplying" />: links are drawn from <see cref="ActiveScope" /> again.</summary>
+    public void EndApplying() => SetApplying(null);
 
-        // A tenant the listing does not carry falls back to the previous one only while this store and database still
-        // accept it: after a store or database change the previous tenant is the old scope's, and is checked against the
-        // new listing like any other name - or dropped, as RefreshAsync drops one.
-        string? resolvedTenantId = TenantList.IsAcceptable(AvailableTenants, tenantId)
+    /// <summary>
+    /// The scope a link should carry while <see cref="SetScopeAsync" /> is still reading, built without an await from the request
+    /// and the active scope with the same rules the final resolution uses where the listings already in memory can apply them.
+    /// </summary>
+    private StudioScope PendingScopeFor(string storeKey, string? databaseId, string? tenantId, StudioScope? previous, bool storeChanged)
+    {
+        // The new store's databases are not read yet, so a database named with it is the request's word; with the same store
+        // the listing is the current one and the name is resolved as PickDatabase will.
+        string pendingDatabase = storeChanged
+            ? NullIfBlank(databaseId) ?? string.Empty
+            : PickDatabase(databaseId ?? previous?.DatabaseId);
+
+        bool databaseChanged = storeChanged || !string.Equals(pendingDatabase, previous?.DatabaseId, StringComparison.OrdinalIgnoreCase);
+
+        // The current tenant listing answers only for the scope it was read for. After a store or database change the request's
+        // tenant is taken as named: it is checked against the new listing when the scope is applied.
+        string? pendingTenant = databaseChanged
             ? NullIfBlank(tenantId)
-            : TenantList.IsAcceptable(AvailableTenants, previous?.TenantId) ? NullIfBlank(previous?.TenantId) : null;
+            : TenantList.IsAcceptable(AvailableTenants, tenantId)
+                ? NullIfBlank(tenantId)
+                : TenantList.IsAcceptable(AvailableTenants, previous?.TenantId) ? NullIfBlank(previous?.TenantId) : null;
 
-        await SetActiveScopeAsync(new StudioScope(store.Key, resolvedDatabaseId, resolvedTenantId), previous).ConfigureAwait(false);
+        return new StudioScope(storeKey, pendingDatabase, pendingTenant);
+    }
+
+    private void SetApplying(StudioScope? scope)
+    {
+        StudioScope? before = LinkScope;
+        applyingScope = scope;
+        RaiseLinkScopeChanged(before);
+    }
+
+    private void RaiseLinkScopeChanged(StudioScope? before)
+    {
+        if (LinkScope != before)
+        {
+            LinkScopeChanged?.Invoke();
+        }
     }
 
     /// <summary>Re-reads everything from scratch, for the refresh button beside a dynamic database list.</summary>
@@ -369,9 +489,20 @@ internal sealed class StudioState
         ActiveStoreUnavailableMessage = facts.UnavailableMessage;
     }
 
-    private async Task SetActiveScopeAsync(StudioScope? scope, StudioScope? previous)
+    private async Task SetActiveScopeAsync(StudioScope? scope, StudioScope? previous, bool endsApplying = false)
     {
+        // The links move first and synchronously (LinkScopeChanged); only then does the awaited ScopeChanged walk its handlers. The
+        // scope being applied ends here when it is the one that has just become active, and stands when a refresh of the listings
+        // sets the opening scope while a pasted address's own is still to be applied.
+        StudioScope? linkBefore = LinkScope;
         ActiveScope = scope;
+        if (endsApplying)
+        {
+            applyingScope = null;
+        }
+
+        RaiseLinkScopeChanged(linkBefore);
+
         if (scope != previous)
         {
             await NotifyAsync().ConfigureAwait(false);

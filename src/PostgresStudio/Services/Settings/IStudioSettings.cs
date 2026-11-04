@@ -41,6 +41,12 @@ internal interface IStudioSettings : IDiagnosticsSettings
     /// <summary>Whether <see cref="TrimmedPath" /> differs from the studio's compile-time default. A fact, not a mode.</summary>
     bool HasCustomPath { get; }
 
+    /// <summary>
+    /// The header's "Back to application" target, exactly as the host wrote it (a host-relative path or an absolute http(s) URL;
+    /// never re-rooted under the mount), or <see langword="null" /> for no link.
+    /// </summary>
+    string? ApplicationPath { get; }
+
     /// <summary>The endpoint policy every studio endpoint requires, or <see langword="null" /> for none of its own.</summary>
     string? AuthorizationPolicy { get; }
 

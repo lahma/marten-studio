@@ -46,10 +46,16 @@
         <div class="ms-main">
             <header class="ms-header">
                 <div class="ms-header-left">
+                    @* The environment first: it is context like the scope, and the first thing to check before doing anything to a
+                       database (1.2). *@
+                    <EnvironmentBadge />
                     <ScopeSelector />
                 </div>
                 <div class="ms-header-right">
                     <CapabilityBanner />
+                    @* The way out (ApplicationPath, absent unless the host set it) and the address of this page with its scope in it. *@
+                    <BackToApplication />
+                    <CopyLinkButton />
                     @* The scope selector on the left is the context of every screen in the studio, so it
                        keeps the header row at every width. Theme and time zone are set once and then left
                        alone, so they are behind the gear - which is what turns a four-row header on a
@@ -141,14 +147,25 @@
 
         persistingSubscription = PersistentState.RegisterOnPersisting(PersistPreferences);
 
-        await State.EnsureInitializedAsync();
-
         // The scope travels in the query string so a pasted link reopens the same thing (plan D9).
         // Anything the listings do not carry is ignored by StudioState rather than reported.
         (string? storeKey, string? databaseId, string? tenantId) = StudioScopeQuery.Read(Navigation.Uri, Descriptor.SourceQueryParameter);
-        if (storeKey is not null || databaseId is not null || tenantId is not null)
+
+        // The rail is drawn while the listings load and the scope is applied below, and a link a visitor clicks in that time must
+        // carry the scope the address names, not the one the studio is still on (1.2). Ended whatever happens next.
+        State.BeginApplying(storeKey, databaseId, tenantId);
+        try
         {
-            await State.SetScopeAsync(storeKey, databaseId, tenantId);
+            await State.EnsureInitializedAsync();
+
+            if (storeKey is not null || databaseId is not null || tenantId is not null)
+            {
+                await State.SetScopeAsync(storeKey, databaseId, tenantId);
+            }
+        }
+        finally
+        {
+            State.EndApplying();
         }
 
         // From here on the address's own scope has been read, so the shell may write its scope into it (1.2, N5a). A no-op until the

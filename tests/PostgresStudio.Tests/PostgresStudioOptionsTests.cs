@@ -214,6 +214,35 @@ public class PostgresStudioOptionsTests
         ResolveAction(options => options.Path = path).Should().Throw<OptionsValidationException>().WithMessage("PostgresStudioOptions.Path*");
     }
 
+    /// <summary>1.2-HEADER: no link unless the host sets one, and MartenStudio's rule in PostgresStudio's names.</summary>
+    [Fact]
+    public void ApplicationPath_is_null_by_default()
+    {
+        Resolve(static _ => { }).ApplicationPath.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData("/")]
+    [InlineData("/app")]
+    [InlineData("https://example.com/app")]
+    public void An_application_path_that_is_rooted_or_an_absolute_http_url_is_accepted(string path)
+    {
+        Resolve(options => options.ApplicationPath = path).ApplicationPath.Should().Be(path);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("app")]
+    [InlineData("//evil.example/app")]
+    [InlineData("/\\evil.example")]
+    [InlineData("/app with space")]
+    [InlineData("javascript:alert(1)")]
+    public void An_application_path_that_is_neither_is_refused_at_startup(string path)
+    {
+        ResolveAction(options => options.ApplicationPath = path).Should().Throw<OptionsValidationException>()
+            .WithMessage("*PostgresStudioOptions.ApplicationPath must be null*absolute http or https URL*");
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(64 * 1024 * 1024 + 1)]

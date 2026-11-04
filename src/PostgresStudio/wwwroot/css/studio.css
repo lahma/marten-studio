@@ -16131,3 +16131,225 @@ dialog.ms-modal::backdrop {
 .ms-alert.ms-query-error > .ms-query-caret {
     min-width: min(18rem, 100%);
 }
+
+/* ===== 1.2-HEADER environment badge, back to application, copy link ===== */
+
+/* The header's three additions (HEADER). The environment is context, like the scope, so its badge sits left of the scope selector; the
+   back link and the copy-link button are actions, so they sit with the capability chip and the gear. A later rule of an earlier
+   selector wins on purpose (D26). */
+
+/* The environment badge. The colour is the cue (the token's border and dot) and the name is the text: the text keeps the page's own
+   text colour on the token's tint, because a warning or success token used as small text does not reach contrast on its own tint. */
+.ms-env-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ms-space-xs);
+    flex-shrink: 0;
+    max-width: 10rem;
+    padding: 2px var(--ms-space-sm);
+    border: 1px solid var(--ms-color-border-strong);
+    border-radius: var(--ms-radius-full);
+    background: var(--ms-color-surface-alt);
+    color: var(--ms-color-text);
+    font-size: var(--ms-font-size-xs);
+    font-weight: var(--ms-font-weight-semibold);
+    line-height: 1.4;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ms-env-badge::before {
+    content: "";
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: var(--ms-radius-full);
+    background: var(--ms-color-text-muted);
+}
+
+.ms-env-badge-production {
+    border-color: var(--ms-color-danger);
+    background: var(--ms-color-danger-bg);
+}
+
+.ms-env-badge-production::before {
+    background: var(--ms-color-danger);
+}
+
+.ms-env-badge-staging {
+    border-color: var(--ms-color-warning);
+    background: var(--ms-color-warning-bg);
+}
+
+.ms-env-badge-staging::before {
+    background: var(--ms-color-warning);
+}
+
+.ms-env-badge-development {
+    border-color: var(--ms-color-success);
+    background: var(--ms-color-success-bg);
+}
+
+.ms-env-badge-development::before {
+    background: var(--ms-color-success);
+}
+
+/* Back to application. A text link with an arrow; on a phone the arrow alone, and the words stay in the accessibility tree. */
+.ms-back-link {
+    flex-shrink: 0;
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-back-link:hover {
+    color: var(--ms-color-text);
+}
+
+.ms-back-link-icon {
+    width: 14px;
+    height: 14px;
+}
+
+/* Copy link. The button is the preferences gear's twin; the status and the fallback are placed under it and take no room in the header. */
+.ms-copy-link {
+    position: relative;
+    display: inline-flex;
+    flex-shrink: 0;
+}
+
+.ms-copy-link-button {
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-copy-link-button:hover {
+    color: var(--ms-color-text);
+}
+
+.ms-copy-link-icon {
+    width: 18px;
+    height: 18px;
+}
+
+.ms-copy-link-status {
+    position: absolute;
+    top: calc(100% + var(--ms-space-xs));
+    right: 0;
+    z-index: 20;
+    padding: 2px var(--ms-space-sm);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface);
+    color: var(--ms-color-text);
+    box-shadow: var(--ms-shadow-md);
+    font-size: var(--ms-font-size-xs);
+    white-space: nowrap;
+    pointer-events: none;
+}
+
+.ms-copy-link-status:empty {
+    display: none;
+}
+
+.ms-copy-link-fallback {
+    position: absolute;
+    top: calc(100% + var(--ms-space-xs));
+    right: 0;
+    z-index: 20;
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-xs);
+    width: min(32rem, calc(100vw - 2 * var(--ms-space-md)));
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-lg);
+    background: var(--ms-color-surface);
+    color: var(--ms-color-text);
+    box-shadow: var(--ms-shadow-lg);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-copy-link-fallback-label {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-copy-link-fallback-row {
+    display: flex;
+    align-items: center;
+    gap: var(--ms-space-sm);
+}
+
+.ms-copy-link-text {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+}
+
+/* The header on a phone (HEADER). Section 5 holds the header to one nowrap row below 900 px, and with the badge, the back link and the
+   copy button added three more things want that row. Up to 900 px the back link keeps its arrow and the words stay in the accessibility
+   tree. Up to 720 px the header is two rows when it has a scope to show: the scope selector alone on the first, with the width to be
+   legible (UX-5 held its pickers to a 6rem floor squeezed beside the chip), and on the second the environment on the left and the
+   actions on the right, the capability chip shortened to its count. A single store, single database host has no scope selector, and
+   its header stays one row. */
+@media (max-width: 900px) {
+    .ms-back-link {
+        width: 32px;
+        padding: 0;
+    }
+
+    .ms-back-link-text {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border-width: 0;
+    }
+}
+
+@media (max-width: 720px) {
+    .ms-header {
+        flex-wrap: wrap;
+        row-gap: var(--ms-space-xs);
+    }
+
+    /* The left region dissolves into the header, so its two children can be ordered against the right region. */
+    .ms-header-left {
+        display: contents;
+    }
+
+    .ms-header .ms-scope-selector {
+        order: 1;
+        flex: 1 1 100%;
+    }
+
+    .ms-header .ms-scope-selector:not(:has(*)) {
+        display: none;
+    }
+
+    .ms-header .ms-env-badge {
+        order: 2;
+        margin-right: auto;
+    }
+
+    .ms-header .ms-header-right {
+        order: 3;
+        margin-left: auto;
+    }
+
+    .ms-chip-word {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border-width: 0;
+    }
+}

@@ -123,6 +123,10 @@ builder.Services.AddMartenStudio(options =>
 });
 #endregion
 
+// Outside the README's snippet on purpose: the header's "Back to application" link, to the sample's own landing page. Absent
+// unless a host sets it; a path that starts with "/" or an absolute http(s) URL, and never re-rooted under the mount path.
+builder.Services.Configure<MartenStudioOptions>(static options => options.ApplicationPath = "/");
+
 if (consoleRole)
 {
     // Outside the README's snippet on purpose: what a host's SqlConsoleRole is depends on its own database's roles.

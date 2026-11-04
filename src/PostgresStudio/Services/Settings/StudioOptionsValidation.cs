@@ -19,6 +19,7 @@ namespace PostgresStudio.Services.Settings;
 /// <param name="BrowsableSchemas">The browsable schemas.</param>
 /// <param name="MaxStudioConnections">The cap on the studio's connections per pool (issue #44).</param>
 /// <param name="StudioApplicationName">The studio sessions' application_name, if the host set one (issue #44).</param>
+/// <param name="ApplicationPath">The header's "Back to application" target, or <see langword="null" /> for none (1.2).</param>
 internal sealed record StudioOptionsShape(
     string? Path,
     int DefaultPageSize,
@@ -33,7 +34,8 @@ internal sealed record StudioOptionsShape(
     bool HasCapabilities,
     IEnumerable<string> BrowsableSchemas,
     int MaxStudioConnections = Internal.Sql.StudioConnectionPools.DefaultMax,
-    string? StudioApplicationName = null);
+    string? StudioApplicationName = null,
+    string? ApplicationPath = null);
 
 /// <summary>
 /// One validation chain for the options both studios have - the same bounds, and sentences that differ only in the type
@@ -101,7 +103,42 @@ internal static class StudioOptionsValidation
                 DiagnosticsOptionsValidation.MaxStudioConnectionsMessage(optionsType))
             .Validate(
                 options => DiagnosticsOptionsValidation.IsStudioApplicationName(shape(options).StudioApplicationName),
-                DiagnosticsOptionsValidation.StudioApplicationNameMessage(optionsType));
+                DiagnosticsOptionsValidation.StudioApplicationNameMessage(optionsType))
+            .Validate(
+                options => IsApplicationPath(shape(options).ApplicationPath),
+                optionsType + ".ApplicationPath must be null (no link), a host-relative path that starts with a single '/' ('/' or '/app'), or an absolute http or https URL");
+    }
+
+    /// <summary>
+    /// Whether <paramref name="value" /> may be the "Back to application" target: <see langword="null" />, a host-relative path that
+    /// starts with a single <c>/</c>, or an absolute <c>http</c> or <c>https</c> URL.
+    /// </summary>
+    /// <remarks>
+    /// <c>//host</c> and <c>/\host</c> are refused: they start with <c>/</c> but a browser reads them as a network-path reference
+    /// to another host, which is neither of the two shapes the option names. A value with whitespace or a control character in it
+    /// is refused whole, so a stray space in a configuration file is a startup error rather than a link that does not work.
+    /// An empty string is refused as well: the option's "no link" is <see langword="null" />.
+    /// </remarks>
+    internal static bool IsApplicationPath(string? value)
+    {
+        if (value is null)
+        {
+            return true;
+        }
+
+        if (value.Length == 0 || value.Any(static c => char.IsWhiteSpace(c) || char.IsControl(c)))
+        {
+            return false;
+        }
+
+        if (value[0] == '/')
+        {
+            return value.Length == 1 || (value[1] != '/' && value[1] != '\\');
+        }
+
+        return Uri.TryCreate(value, UriKind.Absolute, out Uri? uri)
+            && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps)
+            && !string.IsNullOrEmpty(uri.Host);
     }
 
     /// <summary>The capabilities object, which a host may set to <see langword="null" /> by mistake.</summary>

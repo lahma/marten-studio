@@ -138,6 +138,7 @@
         UpdateCurrentRelativePath(Navigation.Uri);
         Navigation.LocationChanged += OnLocationChanged;
         State.ScopeChanged += OnScopeChangedAsync;
+        State.LinkScopeChanged += OnLinkScopeChanged;
         HealthMutes.Changed += OnHealthMutesChangedAsync;
 
         await RefreshIndicatorsAsync(cancellation.Token);
@@ -187,8 +188,31 @@
         await InvokeAsync(StateHasChanged);
     }
 
+    /// <summary>
+    /// Redraws the rail's links at once when the scope they carry moves (1.2). <see cref="StudioState.ScopeChanged" /> is awaited
+    /// one handler after another, the shell's first, so by the time this component's handler runs the scope has been the new one
+    /// for a policy read; the visitor who clicks a link in that time must get the new scope's, and it is this synchronous event
+    /// that raises the render - before anything is awaited - from the scope being applied.
+    /// </summary>
+    private void OnLinkScopeChanged()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        _ = InvokeAsync(StateHasChanged);
+    }
+
     private async Task OnScopeChangedAsync()
     {
+        // Before the indicator read: the links and the scope-dependent entries (Stores, Tenants) are drawn from state that is
+        // already the new scope's, and a round trip to the indicator service is no reason to leave them stale.
+        if (!disposed)
+        {
+            _ = InvokeAsync(StateHasChanged);
+        }
+
         NavIndicators? read = await RefreshIndicatorsAsync(cancellation.Token);
 
         if (started && read is not null)
@@ -301,10 +325,13 @@
     /// <summary>
     /// The rail's href for a page: the page, carrying the scope the studio is about (1.2). A rail click is a client-side navigation, and
     /// an address without <c>store=&amp;db=</c> would show the previous scope's page under no scope until the shell rewrote it. Read at
-    /// render, and the rail renders again on every location and scope change, so it is never older than the address.
+    /// render, and the rail renders again on every location change and, synchronously, whenever the scope its links carry moves
+    /// (<see cref="StudioState.LinkScopeChanged" />), so it is never older than the address. The scope is
+    /// <see cref="StudioState.LinkScope" />: the one being applied while the catalog is read (a pasted address, a picker just
+    /// moved), else the active one.
     /// </summary>
     private string Link(string subPath) =>
-        StudioScopeQuery.Append(StudioLink.To(Settings, subPath), State.ActiveScope, Descriptor.SourceQueryParameter);
+        StudioScopeQuery.Append(StudioLink.To(Settings, subPath), State.LinkScope, Descriptor.SourceQueryParameter);
 
     private void UpdateCurrentRelativePath(string uri)
     {
@@ -371,6 +398,7 @@
 
         Navigation.LocationChanged -= OnLocationChanged;
         State.ScopeChanged -= OnScopeChangedAsync;
+        State.LinkScopeChanged -= OnLinkScopeChanged;
         HealthMutes.Changed -= OnHealthMutesChangedAsync;
 
         try

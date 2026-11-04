@@ -1,0 +1,198 @@
+@using PostgresStudio.Services.Live
+@implements IDisposable
+@inject Microsoft.JSInterop.IJSRuntime JsRuntime
+@inject NavigationManager Navigation
+
+@* Copies the address of the page the visitor is on. The address carries the scope (?store=&db=&tenant=, plan D9), so a link pasted
+   into a chat reopens the same store, database and tenant, which is what this button is for.
+
+   The clipboard is the browser's, reached through studio.js (martenStudio.clipboard.copyText: navigator.clipboard.writeText, then
+   a hidden textarea and execCommand where the first is not allowed). It answers false when neither worked, which is what a page
+   without a secure context gets, and interop can be unavailable altogether (rule 15). In both cases the address is shown in a
+   read-only text box, selected, to copy from by hand: a button that can fail silently is worse than no button.
+
+   "Link copied" is a word in a polite live region that is always in the DOM and changes its text, which is what makes it announce;
+   one added with its text already in it is not reliably read. It is a short bubble under the button, not part of the header's flow,
+   so it never moves the controls beside it. *@
+
+<div class="ms-copy-link">
+    <button type="button"
+            class="ms-button ms-btn-icon ms-copy-link-button"
+            aria-label="Copy link to this page"
+            title="Copy link to this page"
+            @onclick="CopyAsync">
+        @if (state == CopyState.Copied)
+        {
+            <svg class="ms-copy-link-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="m3.5 9.5 3.75 3.75L14.5 5.5" />
+            </svg>
+        }
+        else
+        {
+            <svg class="ms-copy-link-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M7.75 10.25a3.25 3.25 0 0 0 4.6 0l2.4-2.4a3.25 3.25 0 0 0-4.6-4.6l-.7.7" />
+                <path d="M10.25 7.75a3.25 3.25 0 0 0-4.6 0l-2.4 2.4a3.25 3.25 0 0 0 4.6 4.6l.7-.7" />
+            </svg>
+        }
+    </button>
+    <span class="ms-copy-link-status" role="status" aria-live="polite">@(state == CopyState.Copied ? "Link copied" : string.Empty)</span>
+
+    @if (state == CopyState.Fallback)
+    {
+        <div class="ms-copy-link-fallback" role="group" aria-label="Link to this page">
+            <label class="ms-copy-link-fallback-label" for="ms-copy-link-text">The browser would not copy it. Copy this link:</label>
+            <div class="ms-copy-link-fallback-row">
+                <input id="ms-copy-link-text"
+                       @ref="fallbackInput"
+                       class="ms-input ms-copy-link-text"
+                       type="text"
+                       readonly
+                       value="@copiedAddress"
+                       data-ms-select-on-focus="true" />
+                <button type="button" class="ms-btn ms-btn-sm" @onclick="CloseFallback">Close</button>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    /// <summary>How long "Link copied" stays after a copy that worked.</summary>
+    private static readonly TimeSpan ConfirmationDuration = TimeSpan.FromMilliseconds(2500);
+
+    private enum CopyState
+    {
+        Idle,
+        Copied,
+        Fallback
+    }
+
+    private CopyState state;
+    private string copiedAddress = string.Empty;
+    private ElementReference fallbackInput;
+    private bool focusFallback;
+    private bool subscribed;
+    private bool disposed;
+    private Timer? confirmation;
+
+    protected override void OnInitialized()
+    {
+        // The address the fallback box shows is the one that was copied from; once the visitor is on another page it is a stale one.
+        Navigation.LocationChanged += OnLocationChanged;
+        subscribed = true;
+    }
+
+    private async Task CopyAsync()
+    {
+        // The address is read at the click: NavigationManager.Uri is the circuit's current location, scope included, which the shell
+        // keeps in the address bar (StudioLayout.SyncScopeToUrl).
+        string address = Navigation.Uri;
+        bool worked;
+
+        try
+        {
+            worked = await JsRuntime.InvokeAsync<bool>("martenStudio.clipboard.copyText", new object?[] { address });
+        }
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
+        {
+            // No clipboard was reached, so the text box is the way. (A circuit that has gone away draws nothing, and that is fine.)
+            worked = false;
+        }
+
+        // The await is a round trip, and the component can be disposed while it is in flight (copy, then navigate away).
+        if (disposed)
+        {
+            return;
+        }
+
+        confirmation?.Dispose();
+        confirmation = null;
+
+        if (worked)
+        {
+            state = CopyState.Copied;
+            focusFallback = false;
+            confirmation = new Timer(OnConfirmationElapsed, state: null, ConfirmationDuration, Timeout.InfiniteTimeSpan);
+            return;
+        }
+
+        copiedAddress = address;
+        state = CopyState.Fallback;
+        focusFallback = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!focusFallback || state != CopyState.Fallback)
+        {
+            return;
+        }
+
+        focusFallback = false;
+
+        try
+        {
+            // Focus selects the text (studio.js: data-ms-select-on-focus), so the visitor's next key is Ctrl+C.
+            await fallbackInput.FocusAsync();
+        }
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
+        {
+            // The box is on screen and can be selected by hand.
+        }
+    }
+
+    private void CloseFallback()
+    {
+        if (state == CopyState.Fallback)
+        {
+            state = CopyState.Idle;
+        }
+    }
+
+    /// <summary>Runs on a thread-pool thread, so the clear is dispatched back onto the renderer.</summary>
+    private void OnConfirmationElapsed(object? timerState)
+    {
+        _ = InvokeAsync(ClearConfirmation);
+    }
+
+    private void ClearConfirmation()
+    {
+        if (disposed || state != CopyState.Copied)
+        {
+            return;
+        }
+
+        state = CopyState.Idle;
+        StateHasChanged();
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        if (state != CopyState.Fallback || disposed)
+        {
+            return;
+        }
+
+        _ = InvokeAsync(() =>
+        {
+            if (disposed || state != CopyState.Fallback)
+            {
+                return;
+            }
+
+            state = CopyState.Idle;
+            StateHasChanged();
+        });
+    }
+
+    public void Dispose()
+    {
+        disposed = true;
+        confirmation?.Dispose();
+        confirmation = null;
+
+        if (subscribed)
+        {
+            Navigation.LocationChanged -= OnLocationChanged;
+        }
+    }
+}
