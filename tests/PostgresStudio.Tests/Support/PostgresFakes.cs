@@ -155,7 +155,7 @@ internal sealed class FakeSqlConsole : ISqlConsoleService
 
         if (PlanGate is { } gate)
         {
-            await gate.Task;
+            await gate.Task.Bounded();
         }
 
         if (QueuedPlans.Count > 0)
@@ -175,7 +175,7 @@ internal sealed class FakeSqlConsole : ISqlConsoleService
 
         if (WhatIfGate is { } gate)
         {
-            await gate.Task;
+            await gate.Task.Bounded();
         }
 
         return WhatIf?.Invoke(index)

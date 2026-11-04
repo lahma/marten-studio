@@ -3,7 +3,8 @@ using System.Text.RegularExpressions;
 namespace MartenStudio.Tests.Conventions;
 
 /// <summary>
-/// 1.2-HANG: a test that holds a gate shut never awaits it without a bound.
+/// 1.2-HANG: a test that holds a gate shut never awaits it without a bound. Since 1.2-HANG-2 the scan covers both fast suites, each
+/// with its own <c>TestBounds</c>.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -15,7 +16,7 @@ namespace MartenStudio.Tests.Conventions;
 /// caller's token ends the read - turns the same mistake into a <see cref="TimeoutException" /> on the test that held the gate.
 /// </para>
 /// <para>
-/// The scan is for the await of a gate in the fast suite's own sources: <c>await x.Task;</c>, and an await of a variable called
+/// The scan is for the await of a gate in the fast suites' own sources:<c>await x.Task;</c>, and an await of a variable called
 /// <c>gate</c>, <c>hold</c> or <c>release</c> (a <see cref="Task" /> handed in), with nothing after it. It cannot see a test that
 /// awaits the service's task, which a gate it holds feeds; the fakes' and work lambdas' gates being bounded is what ends that wait.
 /// </para>
@@ -23,9 +24,11 @@ namespace MartenStudio.Tests.Conventions;
 public class NoUnboundedGateAwaitTests
 {
     private static readonly Regex UnboundedAwait = new(
-        @"\bawait\s+(?:[A-Za-z_]\w*\.)*(?:[A-Za-z_]\w*\.Task|gate|hold|release|proceed|never)\s*(?:;|\)|\.ConfigureAwait)",
+        @"\bawait\s+(?:[A-Za-z_]\w*\.)*(?:[A-Za-z_]\w*\.Task|gate|hold|release|proceed|never)\s*(?:;|\)|\.ConfigureAwait|\.ContinueWith)",
         RegexOptions.Compiled,
         TimeSpan.FromSeconds(5));
+
+    private static readonly string[] FastSuites = ["MartenStudio.Tests", "PostgresStudio.Tests"];
 
     [Fact]
     public void No_test_or_fake_awaits_a_gate_without_a_bound()
@@ -63,6 +66,7 @@ public class NoUnboundedGateAwaitTests
     [InlineData("class C { async Task M() { await gate.WaitAsync(timeout, token); } }", false)]
     [InlineData("class C { async Task M() { await started.Task.WaitAsync(Generous, Token); } }", false)]
     [InlineData("class C { async Task M() { await Task.WhenAll(first, second); } }", false)]
+    [InlineData("class C { async Task M() { await release.Task.ContinueWith(static _ => 0, TaskScheduler.Default); } }", true)]
     [InlineData("// await gate.Task;\nclass C { }", false)]
     [InlineData("class C { string s = \"await gate.Task;\"; }", false)]
     public void The_pattern_finds_an_unbounded_await_and_lets_a_bounded_one_through(string source, bool expected)
@@ -70,9 +74,10 @@ public class NoUnboundedGateAwaitTests
         UnboundedAwait.IsMatch(SourceScanner.StripCommentsAndStrings(source)).Should().Be(expected);
     }
 
+    /// <summary>Both fast suites' sources (1.2-HANG-2): this one guard scans <c>tests/MartenStudio.Tests</c> and <c>tests/PostgresStudio.Tests</c>.</summary>
     private static string[] TestSourceFiles() =>
-        [.. Directory
-            .EnumerateFiles(RepositoryRoot.Combine("tests", "MartenStudio.Tests"), "*.cs", SearchOption.AllDirectories)
+        [.. FastSuites
+            .SelectMany(static project => Directory.EnumerateFiles(RepositoryRoot.Combine("tests", project), "*.cs", SearchOption.AllDirectories))
             .Where(static x => !x.Contains(Path.DirectorySeparatorChar + "bin" + Path.DirectorySeparatorChar, StringComparison.Ordinal)
                 && !x.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar, StringComparison.Ordinal))];
 }

@@ -170,7 +170,7 @@ public sealed class CapacityReaderTests : IDisposable
         Source source = new(async (_, _, _) =>
         {
             // Ignores its token on purpose: the reader's own wait is what bounds it.
-            await never.Task;
+            await never.Task.Bounded();
             return null;
         });
 

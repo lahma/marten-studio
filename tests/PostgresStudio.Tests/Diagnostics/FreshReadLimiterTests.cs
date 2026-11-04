@@ -1,4 +1,5 @@
 using PostgresStudio.Services.Diagnostics;
+using PostgresStudio.Tests.Support;
 
 namespace PostgresStudio.Tests.Diagnostics;
 
@@ -22,7 +23,7 @@ public class FreshReadLimiterTests
             .. Enumerable.Range(0, 10).Select(i => limiter.RunAsync(cached: false, async _ =>
             {
                 Interlocked.Increment(ref started);
-                await release.Task;
+                await release.Task.Bounded();
                 return i;
             }, Token)),
         ];
@@ -43,8 +44,8 @@ public class FreshReadLimiterTests
         using FreshReadLimiter limiter = new();
         TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        Task first = limiter.RunAsync(cached: false, async _ => await release.Task.ContinueWith(static _ => 0, TaskScheduler.Default), Token);
-        Task second = limiter.RunAsync(cached: false, async _ => await release.Task.ContinueWith(static _ => 0, TaskScheduler.Default), Token);
+        Task first = limiter.RunAsync(cached: false, async _ => { await release.Task.Bounded(); return 0; }, Token);
+        Task second = limiter.RunAsync(cached: false, async _ => { await release.Task.Bounded(); return 0; }, Token);
 
         (await limiter.RunAsync(cached: true, static _ => Task.FromResult(42), Token).WaitAsync(TimeSpan.FromSeconds(10), Token))
             .Should().Be(42, "a cache hit is answered while both permits are held");
@@ -58,7 +59,7 @@ public class FreshReadLimiterTests
     {
         using FreshReadLimiter limiter = new(concurrency: 1);
         TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        Task holder = limiter.RunAsync(cached: false, async _ => await release.Task.ContinueWith(static _ => 0, TaskScheduler.Default), Token);
+        Task holder = limiter.RunAsync(cached: false, async _ => { await release.Task.Bounded(); return 0; }, Token);
 
         using CancellationTokenSource impatient = new();
         Task waiting = limiter.RunAsync(cached: false, static _ => Task.FromResult(1), impatient.Token);
@@ -86,7 +87,7 @@ public class FreshReadLimiterTests
         Task<int> first = limiter.RunAsync(cached: false, async token =>
         {
             readToken = token;
-            await release.Task;
+            await release.Task.Bounded();
             return 1;
         }, impatient.Token);
 

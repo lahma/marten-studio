@@ -156,6 +156,23 @@ partial class Build : FalloutBuild,
         .SetProperty(MartenVersionProperty, ResolvedMartenVersion)
         .SetProperty(NpgsqlVersionProperty, NpgsqlFloor);
 
+    // 1.2-HANG-2: the two fast suites run with a ten-minute blame-hang timeout, so a test that waits for ever fails the run within ten
+    // minutes with a dump and a sequence file naming it (in artifacts/test-results, which the workflows upload), instead of running to the
+    // job's own timeout with nothing said. Not the two integration suites: their Playwright and live tests may legitimately run long.
+    Configure<DotNetTestSettings, Project> ITest.TestProjectSettings => (_, project) => WithBlameHang(_, project);
+
+    /// <summary>The test projects that run without Docker or a browser: nothing in them takes ten minutes, so a test that does is hung.</summary>
+    static readonly string[] BlameHangTestProjects = ["MartenStudio.Tests", "PostgresStudio.Tests"];
+
+    /// <summary>How long a single fast-suite test may run before the run is stopped and a mini dump taken (<c>--blame-hang-timeout</c>).</summary>
+    const string BlameHangTimeout = "10m";
+
+    /// <summary>Adds the blame-hang collector to <paramref name="settings" /> when <paramref name="project" /> is one of the fast suites.</summary>
+    static DotNetTestSettings WithBlameHang(DotNetTestSettings settings, Project project) =>
+        BlameHangTestProjects.Contains(project.Name, StringComparer.Ordinal)
+            ? settings.EnableBlameHang().SetBlameHangTimeout(BlameHangTimeout).SetBlameHangDumpType("mini")
+            : settings;
+
     string ICreateGitHubRelease.Name => $"v{Version}";
 
     /// <summary>A version with a pre-release suffix (1.0.0-rc.1, 0.0.1-test) never gets marked "Latest".</summary>

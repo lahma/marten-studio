@@ -173,7 +173,7 @@ partial class Build
                         .SetProperty("Version", Version)
                         .SetProperty(MartenVersionProperty, ResolvedMartenVersion)
                         .SetProperty(NpgsqlVersionProperty, ResolvedNpgsqlVersion)
-                        .CombineWith(testProjects, (_, project) => _
+                        .CombineWith(testProjects, (_, project) => WithBlameHang(_, project)
                             .SetProjectFile(project.Path)
                             .AddLoggers($"trx;LogFileName={project.Name}.npgsql-{ResolvedNpgsqlVersion}.trx")
                             .When(GitHubActions.Instance != null && project.HasPackageReference("GitHubActionsTestLogger"),

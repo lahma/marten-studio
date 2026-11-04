@@ -7,6 +7,7 @@ using Microsoft.JSInterop;
 
 using PostgresStudio.Components.Pages.Database;
 using PostgresStudio.Services.Live;
+using PostgresStudio.Tests.Support;
 
 namespace PostgresStudio.Tests.Components;
 
@@ -167,6 +168,6 @@ public class StudioLiveUpdatesLifetimeTests
             return ValueTask.FromResult(default(TValue)!);
         }
 
-        private async Task<TValue> WaitAsync<TValue>() => (TValue) (object) await WatchResult.Task;
+        private async Task<TValue> WaitAsync<TValue>() => (TValue) (object) await WatchResult.Task.Bounded();
     }
 }

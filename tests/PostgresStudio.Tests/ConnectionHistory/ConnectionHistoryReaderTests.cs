@@ -250,7 +250,7 @@ public class ConnectionHistoryReaderTests
 
             if (Gate is { } waiting)
             {
-                await waiting.Task;
+                await waiting.Task.Bounded();
             }
 
             return [.. Held.Where(x => x.Server == server && x.At >= since).OrderBy(static x => x.At)];

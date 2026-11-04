@@ -587,7 +587,7 @@ public class ConnectionHistoryBacklogTests
         await using Rig rig = new(shouldSample: async _ =>
         {
             inRound.TrySetResult();
-            await proceed.Task;
+            await proceed.Task.Bounded();
             return true;
         });
 
