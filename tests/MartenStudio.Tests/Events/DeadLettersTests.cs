@@ -442,7 +442,7 @@ public class DeadLettersTests
         await RewindButton(page).ClickAsync(new());
 
         // The confirm button stays disabled until the projection's own name is typed out.
-        page.Find(".ms-confirm-actions button.ms-button-danger").HasAttribute("disabled").Should().BeTrue();
+        page.Find(".ms-confirm-actions button.ms-button-danger").IsBlocked().Should().BeTrue();
 
         await page.Find(".ms-confirm-input").InputAsync(new() { Value = "OrderSummary" });
         await page.Find(".ms-confirm-actions button.ms-button-danger").ClickAsync(new());

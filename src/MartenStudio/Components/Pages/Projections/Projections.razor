@@ -440,7 +440,7 @@
                                     @key="shard.ShardName"
                                     data-shard="@shard.ShardName">
                                     <td class="ms-table-cell ms-table-cell-mono ms-shard-name">
-                                        @shard.ShardName
+                                        <BreakableName Value="@shard.ShardName" />
                                         @if (shard.IsLive)
                                         {
                                             <span class="ms-badge ms-shard-live" title="Pushed by the in-process daemon's tracker">live</span>

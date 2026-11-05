@@ -250,6 +250,10 @@
         try
         {
             await State.SetScopeAsync(storeKey, databaseId, tenantId);
+
+            // A scope the listings do not carry, or the policy refuses, was ignored and the scope did not move: the address stops naming
+            // the refused value and names the scope on screen (1.2-UX-FIX-FU). A no-op when the scope moved, which has already been written.
+            SyncScopeToUrl();
         }
         catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
         {

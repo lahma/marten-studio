@@ -16691,6 +16691,19 @@ dialog.ms-modal::backdrop {
     color: var(--ms-color-text-secondary);
 }
 
+/* A typed confirmation's Confirm while the phrase does not match: aria-disabled, so Tab still lands on it, and drawn as a disabled button. */
+.ms-button[aria-disabled="true"] {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}
+
+.ms-button-danger[aria-disabled="true"]:hover {
+    background-color: var(--ms-color-danger);
+    border-color: var(--ms-color-danger);
+}
+
 /* Refresh beside Mark's chip: the chip wraps to two lines at 390 px, and Refresh stretched to the row. */
 .ms-maint-actions,
 .ms-storage-actions,

@@ -90,6 +90,29 @@ public sealed class StudioRoutesTests
         routes.Markup.Should().NotContain("The requested page was not found.");
     }
 
+    /// <summary>
+    /// 1.2-UX-FIX-FU (U8): the shell makes the address follow the scope after a location change, but never for an address no studio page
+    /// matches - a file, an endpoint - which is the browser's to load as named. Without the route guard in <c>StudioLayout</c> the shell
+    /// replaced it with the same address plus the scope, a request of its own beside the force-load.
+    /// </summary>
+    [Fact]
+    public async Task An_intercepted_address_no_page_matches_is_not_given_the_scope_by_the_shell()
+    {
+        Rig rig = await NewRigAsync();
+        await using PostgresStudioComponentContext context = rig.Context;
+        var routes = context.Render<StudioRoutes>();
+        routes.Find("h1").TextContent.Should().Be("Connection", "the premise");
+        await SettleAsync(routes);
+        int before = rig.Navigation.Requests.Count;
+
+        rig.Navigation.Simulate("postgres/no-such-page", intercepted: true);
+        await SettleAsync(routes);
+
+        (string Uri, NavigationOptions Options) only = rig.Navigation.Requests.Skip(before).Should().ContainSingle("only the force-load, and no rewrite of the address").Subject;
+        only.Options.ForceLoad.Should().BeTrue();
+        only.Uri.Should().Be("http://localhost/postgres/no-such-page");
+    }
+
     [Fact]
     public async Task An_address_no_page_matches_that_the_browser_did_not_intercept_shows_not_found_and_loads_nothing()
     {

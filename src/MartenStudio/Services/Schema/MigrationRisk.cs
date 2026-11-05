@@ -36,10 +36,7 @@ internal sealed record DestructiveStatement(string Kind, string Statement);
 /// </remarks>
 internal static partial class MigrationRisk
 {
-    /// <summary>What the red block says above the list.</summary>
-    internal const string Warning = WarningHeadline + " " + WarningDetail;
-
-    /// <summary>The block's headline, which the page sets in bold. It is said once: <see cref="WarningDetail" /> is the rest.</summary>
+    /// <summary>What the red block says above the list: its headline, which the page sets in bold. It is said once: <see cref="WarningDetail" /> is the rest.</summary>
     internal const string WarningHeadline = "This migration removes or rewrites objects.";
 
     /// <summary>What follows the headline.</summary>

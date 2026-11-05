@@ -29,9 +29,13 @@
         }
 
         <div class="ms-confirm-actions">
+            @* While the phrase does not match, Confirm is aria-disabled and not disabled (1.2-UX-FIX-FU): a disabled button is skipped by Tab,
+               so Tab pressed before the round trip that enables it landed on Cancel. It stays focusable, looks disabled, and ConfirmAsync
+               refuses until CanConfirm. A blocked reason from the owner (an action that is a no-op) still disables it outright. *@
             <button type="button"
-                    class="ms-button ms-button-danger"
-                    disabled="@(!CanConfirm)"
+                    class="@(AwaitsPhrase ? "ms-button ms-button-danger ms-button-aria-disabled" : "ms-button ms-button-danger")"
+                    disabled="@HardBlocked"
+                    aria-disabled="@(AwaitsPhrase ? "true" : null)"
                     title="@ConfirmBlockedReason"
                     @onclick="ConfirmAsync">
                 @ConfirmText
@@ -108,6 +112,10 @@
     public EventCallback OnCancel { get; set; }
 
     private bool RequiresTypedConfirmation => !string.IsNullOrWhiteSpace(ConfirmationPhrase);
+
+    private bool HardBlocked => !string.IsNullOrEmpty(ConfirmBlockedReason);
+
+    private bool AwaitsPhrase => !HardBlocked && RequiresTypedConfirmation && !string.Equals(typed.Trim(), ConfirmationPhrase, StringComparison.Ordinal);
 
     private bool CanConfirm =>
         string.IsNullOrEmpty(ConfirmBlockedReason)

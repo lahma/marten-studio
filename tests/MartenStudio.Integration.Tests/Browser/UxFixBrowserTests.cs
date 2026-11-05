@@ -59,11 +59,12 @@ public class UxFixBrowserTests(BrowserSuiteFixture fixture)
         });
 
     /// <summary>
-    /// A typed confirmation from the keyboard: the phrase is typed, Confirm turns on as it is typed, and Tab lands on it - not past it on
-    /// Cancel, which is where it landed when the box was bound on <c>change</c>. Nothing is confirmed.
+    /// A typed confirmation from the keyboard (1.2-UX-FIX-FU): Confirm is aria-disabled, not disabled, until the phrase matches, so Tab
+    /// lands on it whatever the round trip - typed and Tab pressed with no wait for it to enable - and a press on it before the phrase
+    /// matches does nothing. Nothing is confirmed.
     /// </summary>
     [BrowserFact]
-    public Task Typing_the_phrase_of_a_confirmation_and_pressing_Tab_lands_on_Confirm() =>
+    public Task Tab_after_typing_the_phrase_of_a_confirmation_lands_on_Confirm_with_no_wait_and_a_press_before_the_match_does_nothing() =>
         RunAsync("uxfix-confirm-tab", async studio =>
         {
             IPage page = studio.Page;
@@ -77,17 +78,22 @@ public class UxFixBrowserTests(BrowserSuiteFixture fixture)
 
             await page.WaitForFunctionAsync("() => document.activeElement && document.activeElement.id === 'ms-confirm-input'", null, Wait);
 
+            const string FocusedText = "() => document.activeElement.textContent.trim()";
+
+            // Before the match: Confirm is reachable by Tab, says it is disabled, and pressing it does nothing.
+            await page.Keyboard.PressAsync("Tab");
+            (await page.EvaluateAsync<string>(FocusedText)).Should().StartWith("Rebuild", "Tab from an empty box lands on Confirm");
+            (await page.Locator(".ms-confirm-actions .ms-button-danger").GetAttributeAsync("aria-disabled")).Should().Be("true");
+            await page.Keyboard.PressAsync("Enter");
+            await page.Keyboard.PressAsync("Shift+Tab");
+            await page.WaitForFunctionAsync("() => document.activeElement && document.activeElement.id === 'ms-confirm-input'", null, Wait);
+            (await page.EvaluateAsync<bool>("() => document.querySelector('dialog.ms-confirm-overlay') !== null")).Should().BeTrue("a press on Confirm before the phrase matches confirms nothing");
+
+            // Typed, and Tab at once: no wait for Confirm to enable.
             await page.Keyboard.TypeAsync(name);
-
-            // Confirm turns on from the typing itself, with no change event: the box lost no focus.
-            await page.WaitForFunctionAsync(
-                "() => { const b = document.querySelector('.ms-confirm-actions .ms-button-danger'); return b !== null && !b.disabled && document.activeElement.id === 'ms-confirm-input'; }",
-                null,
-                Wait);
-
             await page.Keyboard.PressAsync("Tab");
 
-            (await page.EvaluateAsync<string>("() => document.activeElement.textContent.trim()")).Should().StartWith("Rebuild", "Tab from the box lands on Confirm");
+            (await page.EvaluateAsync<string>(FocusedText)).Should().StartWith("Rebuild", "Tab after the last character lands on Confirm, never past it on Cancel");
 
             await page.Keyboard.PressAsync("Escape");
             await page.WaitForFunctionAsync("() => document.querySelector('dialog.ms-confirm-overlay') === null", null, Wait);

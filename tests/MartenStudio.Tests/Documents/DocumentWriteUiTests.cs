@@ -431,7 +431,7 @@ public class DocumentWriteUiTests
 
         page.Find(".ms-confirm-label").TextContent.Should().Contain(Id);
         page.Find(".ms-confirm-dialog p").TextContent.Should().Contain("can be undeleted");
-        page.Find(".ms-confirm-actions button").HasAttribute("disabled").Should().BeTrue(
+        page.Find(".ms-confirm-actions button").IsBlocked().Should().BeTrue(
             "the phrase has not been typed yet");
     }
 

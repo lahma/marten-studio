@@ -157,10 +157,10 @@ public class StreamCompactionPageTests
         page.FindAll(".ms-compact-fact").Select(static x => x.TextContent)
             .Should().Equal(StreamCompactionRules.WhatHappens(plan));
 
-        page.Find(ConfirmButton).HasAttribute("disabled").Should().BeTrue();
+        page.Find(ConfirmButton).IsBlocked().Should().BeTrue();
 
         await page.Find(".ms-confirm-dialog input").InputAsync(new() { Value = "not-the-id" });
-        page.Find(ConfirmButton).HasAttribute("disabled").Should().BeTrue();
+        page.Find(ConfirmButton).IsBlocked().Should().BeTrue();
     }
 
     /// <summary>
@@ -342,7 +342,7 @@ public class StreamCompactionPageTests
         await page.Find(".ms-confirm-dialog input").InputAsync(new() { Value = StreamId });
 
         IElement confirm = page.Find(ConfirmButton);
-        confirm.HasAttribute("disabled").Should().BeTrue("a stream Marten would leave alone is not offered for confirmation");
+        confirm.IsBlocked().Should().BeTrue("a stream Marten would leave alone is not offered for confirmation");
         confirm.GetAttribute("title").Should().Be(StreamCompactionRules.NothingToCompact("OrderSummary", 3));
         context.EventData.Compactions.Should().BeEmpty();
     }
@@ -364,7 +364,7 @@ public class StreamCompactionPageTests
         context.EventData.CompactionFoldChecks.Should().Equal(StreamId + "/3");
         page.FindAll(".ms-compact-fold").Should().BeEmpty("the answer was for version 2, the dialog is about version 3");
         IElement confirm = page.Find(ConfirmButton);
-        confirm.HasAttribute("disabled").Should().BeFalse();
+        confirm.IsBlocked().Should().BeFalse();
         confirm.HasAttribute("title").Should().BeFalse();
     }
 
@@ -382,7 +382,7 @@ public class StreamCompactionPageTests
 
         page.FindAll(".ms-compact-fold").Should().BeEmpty();
         IElement confirm = page.Find(ConfirmButton);
-        confirm.HasAttribute("disabled").Should().BeFalse();
+        confirm.IsBlocked().Should().BeFalse();
         confirm.HasAttribute("title").Should().BeFalse();
     }
 
@@ -403,7 +403,7 @@ public class StreamCompactionPageTests
             .Contain("could not check in advance").And.Contain("30 s").And.Contain("Marten leaves the stream as it is"));
 
         await page.Find(".ms-confirm-dialog input").InputAsync(new() { Value = StreamId });
-        page.Find(ConfirmButton).HasAttribute("disabled").Should().BeFalse();
+        page.Find(ConfirmButton).IsBlocked().Should().BeFalse();
     }
 
     /// <summary>While the fold runs the button is dead, so a confirmation cannot race the answer.</summary>
@@ -422,7 +422,7 @@ public class StreamCompactionPageTests
 
         page.WaitForAssertion(() => page.Find(".ms-compact-fold").TextContent.Should().Contain("Checking whether the events through version 3"));
         await page.Find(".ms-confirm-dialog input").InputAsync(new() { Value = StreamId });
-        page.Find(ConfirmButton).HasAttribute("disabled").Should().BeTrue();
+        page.Find(ConfirmButton).IsBlocked().Should().BeTrue();
 
         context.EventData.CompactionFoldGate.SetResult();
         await opening;
@@ -430,7 +430,7 @@ public class StreamCompactionPageTests
         page.WaitForAssertion(() =>
         {
             page.FindAll(".ms-compact-fold").Should().BeEmpty();
-            page.Find(ConfirmButton).HasAttribute("disabled").Should().BeFalse();
+            page.Find(ConfirmButton).IsBlocked().Should().BeFalse();
         });
     }
 

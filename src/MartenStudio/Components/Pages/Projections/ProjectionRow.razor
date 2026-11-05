@@ -1,4 +1,5 @@
 @using MartenStudio.Services.Events
+@using PostgresStudio.Components.Shared
 @* One projection, as the table's group header row: what the host registered, and what can be done to it.
 
    Parameters are primitives and callbacks for the same reason as everywhere else on this screen - a
@@ -7,7 +8,7 @@
 <tr class="ms-table-row ms-projection-row" id="@EventLinks.ProjectionAnchor(Name)" data-projection="@Name">
     @* The header's name is the projection's and its lifecycle, not the link that follows them. *@
     <th scope="rowgroup" class="ms-table-cell ms-projection-name" aria-labelledby="@(EventLinks.ProjectionAnchor(Name) + "-name " + EventLinks.ProjectionAnchor(Name) + "-lifecycle")">
-        <span class="ms-mono" id="@(EventLinks.ProjectionAnchor(Name) + "-name")">@Name</span>
+        <span class="ms-mono" id="@(EventLinks.ProjectionAnchor(Name) + "-name")"><BreakableName Value="@Name" /></span>
         <span class="ms-badge ms-lifecycle ms-lifecycle-@Lifecycle.ToLowerInvariant()" id="@(EventLinks.ProjectionAnchor(Name) + "-lifecycle")">@Lifecycle</span>
         @if (!IsAsync)
         {

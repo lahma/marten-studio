@@ -202,7 +202,7 @@ public class SchemaPageTests
 
         // The dialog is up, the confirm button is disabled, and the box says what to type.
         page.Find(".ms-confirm-dialog").TextContent.Should().Contain("localhost.marten");
-        page.Find(".ms-confirm-actions .ms-button-danger").HasAttribute("disabled").Should().BeTrue();
+        page.Find(".ms-confirm-actions .ms-button-danger").IsBlocked().Should().BeTrue();
 
         page.Find(".ms-confirm-input").Input("localhost.marten");
         page.Find(".ms-confirm-actions .ms-button-danger").Click();
@@ -222,7 +222,7 @@ public class SchemaPageTests
         page.Find(".ms-button-danger").Click();
         page.Find(".ms-confirm-input").Input("some other database");
 
-        page.Find(".ms-confirm-actions .ms-button-danger").HasAttribute("disabled").Should().BeTrue();
+        page.Find(".ms-confirm-actions .ms-button-danger").IsBlocked().Should().BeTrue();
         schema.Applies.Should().Be(0);
     }
 

@@ -121,12 +121,48 @@ public class ModalDialogTests
         using BunitContext context = Context();
         IRenderedComponent<ConfirmDialog> dialog = Typed(context, []);
         IElement confirm = dialog.Find(".ms-confirm-actions .ms-button-danger");
-        confirm.HasAttribute("disabled").Should().BeTrue();
+        confirm.GetAttribute("aria-disabled").Should().Be("true");
+        confirm.HasAttribute("disabled").Should().BeFalse("aria-disabled, not disabled: Tab still lands on it before the round trip that enables it (1.2-UX-FIX-FU)");
 
         // An input event and no change event: the keyboard visitor types and presses Tab, and Tab must land on Confirm.
         dialog.Find("#ms-confirm-input").Input("DailySales");
 
-        dialog.Find(".ms-confirm-actions .ms-button-danger").HasAttribute("disabled").Should().BeFalse();
+        confirm = dialog.Find(".ms-confirm-actions .ms-button-danger");
+        confirm.HasAttribute("aria-disabled").Should().BeFalse();
+        confirm.HasAttribute("disabled").Should().BeFalse();
+    }
+
+    [Fact]
+    public void A_press_on_Confirm_before_the_phrase_matches_confirms_nothing_even_though_it_can_be_pressed()
+    {
+        using BunitContext context = Context();
+        List<string> confirmed = [];
+        IRenderedComponent<ConfirmDialog> dialog = Typed(context, confirmed);
+
+        dialog.Find(".ms-confirm-actions .ms-button-danger").Click();
+        dialog.Find("#ms-confirm-input").Input("Daily");
+        dialog.Find(".ms-confirm-actions .ms-button-danger").Click();
+
+        confirmed.Should().BeEmpty();
+
+        dialog.Find("#ms-confirm-input").Input("DailySales");
+        dialog.Find(".ms-confirm-actions .ms-button-danger").Click();
+
+        confirmed.Should().Equal("DailySales");
+    }
+
+    [Fact]
+    public void A_reason_the_owner_gives_still_disables_Confirm_outright()
+    {
+        using BunitContext context = Context();
+        IRenderedComponent<ConfirmDialog> dialog = context.Render<ConfirmDialog>(parameters => parameters
+            .Add(x => x.IsOpen, true)
+            .Add(x => x.ConfirmBlockedReason, "Nothing to do."));
+
+        IElement confirm = dialog.Find(".ms-confirm-actions .ms-button-danger");
+
+        confirm.HasAttribute("disabled").Should().BeTrue();
+        confirm.HasAttribute("aria-disabled").Should().BeFalse();
     }
 
     [Fact]

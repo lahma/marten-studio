@@ -175,6 +175,9 @@ public class ScopeFollowsClickedLinkTests
 
         context.State.ActiveScope.Should().Be(new StudioScope("default", "db-a", null), "ignored exactly as at first load");
         rig.Scopes.Should().HaveCount(changes);
+
+        // U5: and the address stops naming the refused value; it names the scope on screen.
+        rig.Routes.WaitForAssertion(() => rig.Navigation.Uri.Should().Contain("store=default").And.NotContain("nowhere"));
     }
 
     /// <summary>
@@ -253,6 +256,7 @@ public class ScopeFollowsClickedLinkTests
         await rig.Routes.InvokeAsync(() => { });
 
         context.State.ActiveScope!.StoreKey.Should().Be("default", "ignored exactly as at first load");
+        rig.Routes.WaitForAssertion(() => rig.Navigation.Uri.Should().Contain("store=default").And.NotContain("nowhere"));
     }
 
     [Theory]

@@ -147,15 +147,24 @@ internal sealed record MigrationImpact(IReadOnlyList<TableImpact> Tables, IReadO
             }
 
             CultureInfo culture = CultureInfo.InvariantCulture;
-            TableFootprint[] known = [.. exclusive.Select(static x => x.Footprint).OfType<TableFootprint>().Where(static x => x.RowsKnown)];
+            TableFootprint[] footprints = [.. exclusive.Select(static x => x.Footprint).OfType<TableFootprint>()];
+            TableFootprint[] known = [.. footprints.Where(static x => x.RowsKnown)];
             long rows = known.Sum(static x => x.EstimatedRows);
-            long bytes = exclusive.Select(static x => x.Footprint).OfType<TableFootprint>().Sum(static x => x.TotalBytes);
+            long bytes = footprints.Sum(static x => x.TotalBytes);
+            int unanalyzed = footprints.Length - known.Length;
             int rewritten = exclusive.Count(static x => x.Rewrite == TableRewrite.Yes);
             int unsure = exclusive.Count(static x => x.Rewrite is TableRewrite.Maybe or TableRewrite.Unknown);
 
-            string size = known.Length == 0 && bytes == 0
+            // Never a row count the per-table list contradicts: a table nobody has analyzed is listed as "rows unknown (not analyzed yet)",
+            // so the line leaves its rows out, or says "at least" when only some are unanalyzed.
+            string withIndexes = SchemaFormat.Bytes(bytes) + " with indexes and TOAST";
+            string size = footprints.Length == 0
                 ? "sizes not in the catalog yet"
-                : $"about {rows.ToString("N0", culture)} rows, {SchemaFormat.Bytes(bytes)} with indexes and TOAST";
+                : known.Length == 0
+                    ? withIndexes + ", rows not analyzed yet"
+                    : unanalyzed > 0
+                        ? $"at least {rows.ToString("N0", culture)} rows ({unanalyzed.ToString(culture)} not analyzed yet), {withIndexes}"
+                        : $"about {rows.ToString("N0", culture)} rows, {withIndexes}";
 
             string rewrites = (rewritten, unsure) switch
             {

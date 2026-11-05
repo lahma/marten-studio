@@ -310,10 +310,10 @@ public class StreamDetailTests
         await page.Find("button.ms-button-danger").ClickAsync(new());
 
         page.Find(".ms-confirm-dialog").TextContent.Should().Contain("Type");
-        page.Find(".ms-confirm-actions button.ms-button-danger").HasAttribute("disabled").Should().BeTrue();
+        page.Find(".ms-confirm-actions button.ms-button-danger").IsBlocked().Should().BeTrue();
 
         await page.Find(".ms-confirm-dialog input").InputAsync(new() { Value = "not-the-id" });
-        page.Find(".ms-confirm-actions button.ms-button-danger").HasAttribute("disabled").Should().BeTrue();
+        page.Find(".ms-confirm-actions button.ms-button-danger").IsBlocked().Should().BeTrue();
 
         await page.Find(".ms-confirm-dialog input").InputAsync(new() { Value = StreamId });
         await page.Find(".ms-confirm-actions button.ms-button-danger").ClickAsync(new());

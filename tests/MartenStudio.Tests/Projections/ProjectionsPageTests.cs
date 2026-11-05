@@ -341,18 +341,18 @@ public class ProjectionsPageTests
         dialog.TextContent.Should().Contain("mt_doc_dailysales");
 
         // Nothing typed: the button is there and refuses.
-        page.Find(ConfirmButton).HasAttribute("disabled").Should().BeTrue();
+        page.Find(ConfirmButton).IsBlocked().Should().BeTrue();
 
         page.Find(ConfirmButton).Click();
         context.ProjectionData.Calls.Should().NotContain("Rebuild:DailySales");
 
         // The wrong name does not do either.
         page.Find(".ms-confirm-input").Input("dailysales");
-        page.WaitForAssertion(() => page.Find(ConfirmButton).HasAttribute("disabled").Should().BeTrue());
+        page.WaitForAssertion(() => page.Find(ConfirmButton).IsBlocked().Should().BeTrue());
 
         // The right one does.
         page.Find(".ms-confirm-input").Input("DailySales");
-        page.WaitForAssertion(() => page.Find(ConfirmButton).HasAttribute("disabled").Should().BeFalse());
+        page.WaitForAssertion(() => page.Find(ConfirmButton).IsBlocked().Should().BeFalse());
 
         page.Find(ConfirmButton).Click();
 
@@ -468,7 +468,7 @@ public class ProjectionsPageTests
         page.WaitForElement(ConfirmDialog);
 
         page.Find(".ms-confirm-input").Input("DailySales");
-        page.WaitForAssertion(() => page.Find(ConfirmButton).HasAttribute("disabled").Should().BeFalse());
+        page.WaitForAssertion(() => page.Find(ConfirmButton).IsBlocked().Should().BeFalse());
 
         page.Find(ConfirmButton).Click();
 
@@ -665,6 +665,23 @@ public class ProjectionsPageTests
         await context.ReadyAsync();
 
         context.Render<Page>().ShouldPutEveryTableInALabelledScrollRegion();
+    }
+
+    /// <summary>1.2-UX-FIX-FU (U7): a projection's name and its shard's name may wrap after an underscore or a dot, and read as written.</summary>
+    [Fact]
+    public async Task A_long_projection_name_and_its_shard_name_break_after_an_underscore_and_read_as_written()
+    {
+        await using var context = new StudioComponentContext();
+        context.ProjectionData.WithProjection("daily_sales_by_customer_and_region");
+        await context.ReadyAsync();
+
+        var page = context.Render<Page>();
+
+        IElement name = page.Find("[data-projection='daily_sales_by_customer_and_region'] .ms-projection-name .ms-mono");
+        name.InnerHtml.Should().Contain("daily_<wbr>sales_<wbr>by_<wbr>customer_<wbr>and_<wbr>region");
+        name.TextContent.Should().Be("daily_sales_by_customer_and_region", "<wbr> adds no character");
+
+        page.Find(".ms-shard-name").InnerHtml.Should().Contain("_<wbr>");
     }
 
     /// <summary>

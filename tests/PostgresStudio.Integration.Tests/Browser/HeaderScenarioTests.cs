@@ -234,6 +234,10 @@ public class HeaderScenarioTests(BrowserSuiteFixture fixture)
             await link.WaitForAsync();
             (await link.GetAttributeAsync("href")).Should().Be("/", "the option as written, not re-rooted under /postgres");
 
+            // With interception switched off the shell's first scope rewrite is an enhanced navigation of its own (1.1's way): it has
+            // happened by now (GoAsync waited for it), and is discounted, so only what the click itself does is judged.
+            int enhancedBefore = studio.EnhancedNavigations.Count;
+
             // A document that survives a circuit navigation keeps this; a full load does not.
             await page.EvaluateAsync("() => { window.__msBeforeBack = 1; }");
 
@@ -243,7 +247,7 @@ public class HeaderScenarioTests(BrowserSuiteFixture fixture)
             await page.Locator("p", new PageLocatorOptions { HasTextString = "Signed in as" }).WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
 
             (await page.EvaluateAsync<bool>("() => window.__msBeforeBack === undefined")).Should().BeTrue("the host's page was loaded afresh, not rendered by the studio's circuit");
-            studio.EnhancedNavigations.Should().BeEmpty("leaving the studio is not an enhanced navigation");
+            studio.EnhancedNavigations.Skip(enhancedBefore).Should().BeEmpty("leaving the studio is not an enhanced navigation, in either mode");
             page.Url.Should().Be(fixture.Host.Url("/"));
         });
 }

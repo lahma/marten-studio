@@ -648,6 +648,37 @@ public class MigrationImpactTests
             .LockSummary.Should().Be("Takes ACCESS EXCLUSIVE on 1 table (sizes not in the catalog yet); may rewrite 1.");
     }
 
+    /// <summary>1.2-UX-FIX-FU (U4): the line never states a row count the per-table list ("rows unknown (not analyzed yet)") contradicts.</summary>
+    [Fact]
+    public void The_summary_leaves_out_rows_nobody_has_analyzed_and_says_at_least_when_only_some_are()
+    {
+        const string sql =
+            "alter table studio.mt_doc_order alter column total type numeric;\n"
+            + "alter table studio.mt_doc_customer alter column total type numeric;";
+
+        MigrationImpact none = MigrationImpact.Assemble(
+            MigrationRisk.LockStatements(sql),
+            [
+                new RelationFootprintRow(0, 1, "studio", "mt_doc_order", false, -1, 8192, 16384),
+                new RelationFootprintRow(1, 2, "studio", "mt_doc_customer", false, -1, 8192, 16384),
+            ],
+            null);
+
+        none.LockSummary.Should().Be("Takes ACCESS EXCLUSIVE on 2 tables (32.0 KiB with indexes and TOAST, rows not analyzed yet); may rewrite 2.");
+        none.Tables.Select(static x => x.Footprint!.RowsText).Should().OnlyContain(static x => x == "rows unknown (not analyzed yet)");
+
+        MigrationImpact some = MigrationImpact.Assemble(
+            MigrationRisk.LockStatements(sql),
+            [
+                new RelationFootprintRow(0, 1, "studio", "mt_doc_order", false, 200_000, 100_000_000, 209_715_200),
+                new RelationFootprintRow(1, 2, "studio", "mt_doc_customer", false, -1, 8192, 16384),
+            ],
+            null);
+
+        some.LockSummary.Should().StartWith("Takes ACCESS EXCLUSIVE on 2 tables (at least 200,000 rows (1 not analyzed yet), ")
+            .And.Contain("with indexes and TOAST); may rewrite 2.");
+    }
+
     // ------------------------------------------------------------------------------------------------
     // The statements: nothing that locks, nothing that says who
     // ------------------------------------------------------------------------------------------------

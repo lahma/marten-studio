@@ -354,10 +354,10 @@ public class DeadLetterGroupsTests
         dialog.TextContent.Should().Contain(group.Key.Describe()).And.Contain("Already skipped");
 
         IElement confirm = page.Find(".ms-confirm-actions button.ms-button-danger");
-        confirm.HasAttribute("disabled").Should().BeTrue("nothing is typed yet");
+        confirm.IsBlocked().Should().BeTrue("nothing is typed yet");
 
         await page.Find("#ms-confirm-input").InputAsync(new() { Value = "36" });
-        page.Find(".ms-confirm-actions button.ms-button-danger").HasAttribute("disabled").Should().BeTrue("the wrong count");
+        page.Find(".ms-confirm-actions button.ms-button-danger").IsBlocked().Should().BeTrue("the wrong count");
 
         await TypeAndConfirmAsync(page, "37");
 

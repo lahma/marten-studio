@@ -83,7 +83,7 @@ public class StreamDetailStreamChangeTests
 
         await page.Find("button.ms-stream-archive").ClickAsync(new());
         await page.Find(".ms-confirm-dialog input").InputAsync(new() { Value = First });
-        page.Find(ConfirmButton).HasAttribute("disabled").Should().BeFalse("the premise: what was typed would confirm");
+        page.Find(ConfirmButton).IsBlocked().Should().BeFalse("the premise: what was typed would confirm");
 
         await page.InvokeAsync(() => context.State.SetScopeAsync("default", "localhost.marten", "globex", Token));
 
@@ -94,7 +94,7 @@ public class StreamDetailStreamChangeTests
         await page.Find("button.ms-stream-archive").ClickAsync(new());
 
         page.Find(".ms-confirm-dialog input").GetAttribute("value").Should().BeNullOrEmpty("opened again, the box starts empty");
-        page.Find(ConfirmButton).HasAttribute("disabled").Should().BeTrue();
+        page.Find(ConfirmButton).IsBlocked().Should().BeTrue();
     }
 
     [Fact]
