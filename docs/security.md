@@ -472,7 +472,8 @@ On Documents and Event types: a plain read under the store policy, like the list
 round-trips each document through the store's serializer and hands each event to Marten's resolver only for an alias this
 process maps, and reports paths, kinds, counts, ids and sequences - never a value or an exception's message. A hidden,
 unknown or Marten-owned alias gets one sentence. Results are shared for five minutes between visitors who resolve the same
-store, database and tenant. Events › Event flow (1.2) is a configuration read under the store policy: no connection,
+store, database and tenant. With a tenant selected, the event types only the log holds are taken only from that tenant's
+counted listing; the planner's statistics, which span every tenant, are read only with every tenant in scope. Events › Event flow (1.2) is a configuration read under the store policy: no connection,
 nothing audited, and its model shared by every visitor of the store.
 
 ### What `IsDocumentTypeVisible` hides
