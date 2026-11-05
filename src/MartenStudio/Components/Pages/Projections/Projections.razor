@@ -1064,6 +1064,7 @@
         {
             view = await ProjectionData.GetProjectionsAsync(scope, cancellationToken);
             operations = await ProjectionData.RunningOperationsAsync(scope, cancellationToken);
+            await ReportFinishedOperationsAsync();
             loadError = null;
 
             // Both read what the health advisor already has - its cache and its in-memory history - and neither asks
@@ -1086,6 +1087,47 @@
         }
     }
 
+    /// <summary>The operations this page last drew as running, by id (1.2-FINAL-FIX-3).</summary>
+    private readonly HashSet<string> shownRunning = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// An operation the page showed as running and no longer lists is read once more, and its last word is a toast: the rebuild's result
+    /// line (what was handed back, what the pause left, that a cancelled or failed one handed nothing back) is otherwise only in the
+    /// Activity log.
+    /// </summary>
+    private async Task ReportFinishedOperationsAsync()
+    {
+        HashSet<string> now = [.. operations.Where(static x => x.IsRunning).Select(static x => x.Id)];
+
+        foreach (string id in shownRunning.Where(x => !now.Contains(x)).ToArray())
+        {
+            shownRunning.Remove(id);
+
+            if (ProjectionData.FindOperation(id) is not { IsRunning: false } finished)
+            {
+                continue;
+            }
+
+            string text = $"{finished.Kind} of {finished.Target}: {finished.Message ?? finished.State.ToString()}";
+            switch (finished.State)
+            {
+                case StudioOperationState.Succeeded:
+                    await Toasts.Success(text);
+                    break;
+
+                case StudioOperationState.Failed:
+                    await Toasts.Error(text);
+                    break;
+
+                default:
+                    await Toasts.Info(text);
+                    break;
+            }
+        }
+
+        shownRunning.UnionWith(now);
+    }
+
     private async Task RefreshAsync()
     {
         loading = view is null;
@@ -1104,6 +1146,9 @@
         // scope and keeps this page, with its dialogs (1.2-FINAL-FIX).
         CancelPending();
         CancelRebuild();
+
+        // What was running under the last scope is not this scope's to report.
+        shownRunning.Clear();
 
         ReleaseLease();
         await SubscribeToLiveStateAsync();

@@ -216,6 +216,9 @@
             WritePreview built = await Writes.PreviewAsync(scope, Alias, Id, edited, cancellation.Token);
             preview = built;
 
+            // The scope the preview was built under: a save of it acts on this and on nothing else (1.2-FINAL-FIX-3).
+            previewScope = scope;
+
             if (built.Status == WritePreviewStatus.Ready)
             {
                 return built;
@@ -243,11 +246,16 @@
         }
     }
 
+    /// <summary>The scope the current <see cref="preview" /> was built under (1.2-FINAL-FIX-3).</summary>
+    private StudioScope? previewScope;
+
     private async Task CommitAsync(WritePreview ready, bool acknowledgeDrops)
     {
-        StudioScope? scope = State.ActiveScope;
+        // The scope the preview was built under, and only if it is still the page's: a click can land while a scope change is still
+        // being announced, before the page has closed the editor.
+        StudioScope? scope = previewScope;
 
-        if (scope is null || ready.EditedJson is not { } edited || busy)
+        if (scope is null || scope != State.ActiveScope || ready.EditedJson is not { } edited || busy)
         {
             return;
         }

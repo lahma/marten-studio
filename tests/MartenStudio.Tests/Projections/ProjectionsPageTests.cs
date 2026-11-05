@@ -300,6 +300,36 @@ public class ProjectionsPageTests
         page.Find("[data-operation='abc123']").TextContent.Should().Contain("Rebuild DailySales");
     }
 
+    /// <summary>
+    /// 1.2-FINAL-FIX-3 (G2): an operation the page showed as running and no longer lists has its last word read from the tracker and shown
+    /// as a toast - the rebuild's result line, however it ended.
+    /// </summary>
+    [Theory]
+    [InlineData(nameof(StudioOperationState.Succeeded), "Completed. Handed DailySales:All back to the coordinator, which starts it again.", "Success")]
+    [InlineData(nameof(StudioOperationState.Failed), "the replay timed out. Nothing was handed back to the coordinator: the shards of DailySales are as the rebuild left them.", "Error")]
+    [InlineData(nameof(StudioOperationState.Cancelled), "Cancelled. Nothing was handed back to the coordinator: the shards of DailySales are as the rebuild left them.", "Info")]
+    public async Task A_finished_operation_the_page_showed_as_running_is_reported_as_a_toast(string stateName, string message, string level)
+    {
+        await using var context = new StudioComponentContext().WithAllCapabilities();
+        context.ProjectionData.WithProjection("DailySales").WithRunningOperation("abc123", "DailySales");
+        await context.ReadyAsync();
+
+        var page = context.Render<Page>();
+        page.Find("[data-operation='abc123']").Should().NotBeNull();
+        context.Toasts.Messages.Should().BeEmpty("nothing has finished yet");
+
+        context.ProjectionData.FinishOperation("abc123", Enum.Parse<StudioOperationState>(stateName), message);
+        page.Find(".ms-projections-refresh").Click();
+
+        page.WaitForAssertion(() => context.Toasts.Messages.Should().ContainSingle(x => x.Message == "Rebuild of DailySales: " + message));
+        context.Toasts.Messages.Single().Level.ToString().Should().Be(level);
+        page.FindAll("[data-operation='abc123']").Should().BeEmpty();
+
+        // And only once: the next poll finds nothing new.
+        page.Find(".ms-projections-refresh").Click();
+        context.Toasts.Messages.Should().ContainSingle();
+    }
+
     // --------------------------------------------------------------------------------------------
     // The rebuild dialog
     // --------------------------------------------------------------------------------------------

@@ -349,6 +349,12 @@
     private bool replaying;
     private bool archiving;
     private bool archiveDialogOpen;
+
+    /// <summary>The scope the Archive dialog was opened under (1.2-FINAL-FIX-3).</summary>
+    private StudioScope? archiveDialogScope;
+
+    /// <summary>The scope the Compact dialog was opened under (1.2-FINAL-FIX-3).</summary>
+    private StudioScope? compactDialogScope;
     private string? archiveError;
     private string? signature;
     private long lastVersionLoaded;
@@ -631,7 +637,9 @@
     private void CloseDialogs()
     {
         archiveDialogOpen = false;
+        archiveDialogScope = null;
         compactDialogOpen = false;
+        compactDialogScope = null;
         compactFoldChecks++;
         compactFoldChecking = false;
     }
@@ -887,15 +895,25 @@
         }
 
         archiveError = null;
+        archiveDialogScope = State.ActiveScope;
         archiveDialogOpen = true;
     }
 
-    private void CloseArchiveDialog() => archiveDialogOpen = false;
+    private void CloseArchiveDialog()
+    {
+        archiveDialogOpen = false;
+        archiveDialogScope = null;
+    }
 
     private async Task ArchiveAsync()
     {
         // The dialog is closed first (1.2-UX-FIX-FU4): a confirm that is refused below is never dropped silently with the dialog left up.
         archiveDialogOpen = false;
+
+        // The scope the dialog was opened under, and only if it is still the page's: a click can land while a scope change is still
+        // being announced (StudioState awaits each ScopeChanged handler), before the handler that closes the dialog has run (1.2-FINAL-FIX-3).
+        StudioScope? scope = archiveDialogScope;
+        archiveDialogScope = null;
 
         // One archive at a time (1.2-UX-FIX-FU3): the dialog refuses a second confirm itself, and this is the defence in depth.
         if (archiving)
@@ -903,9 +921,7 @@
             return;
         }
 
-        StudioScope? scope = State.ActiveScope;
-
-        if (scope is null || string.IsNullOrWhiteSpace(Id) || stream is not { Exists: true })
+        if (scope is null || scope != State.ActiveScope || string.IsNullOrWhiteSpace(Id) || stream is not { Exists: true })
         {
             return;
         }
@@ -952,6 +968,7 @@
         ClearCompactResult();
         compactFold = null;
         compactFoldChecking = scope is not null;
+        compactDialogScope = scope;
         compactDialogOpen = true;
         int check = ++compactFoldChecks;
 
@@ -994,6 +1011,7 @@
     private void CloseCompactDialog()
     {
         compactDialogOpen = false;
+        compactDialogScope = null;
         compactFoldChecks++;
         compactFoldChecking = false;
     }
@@ -1023,12 +1041,14 @@
     /// </summary>
     private async Task CompactAsync(string typed)
     {
-        StudioScope? scope = State.ActiveScope;
+        // The scope the dialog was opened under, and only if it is still the page's (1.2-FINAL-FIX-3; see ArchiveAsync).
+        StudioScope? scope = compactDialogScope;
+        compactDialogScope = null;
         compactDialogOpen = false;
         compactFoldChecks++;
         compactFoldChecking = false;
 
-        if (scope is null || string.IsNullOrWhiteSpace(Id) || compaction is not { IsOffered: true } plan)
+        if (scope is null || scope != State.ActiveScope || string.IsNullOrWhiteSpace(Id) || compaction is not { IsOffered: true } plan)
         {
             return;
         }

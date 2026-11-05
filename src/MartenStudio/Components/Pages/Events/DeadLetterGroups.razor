@@ -232,6 +232,9 @@
     private EventStoreShape? shape;
     private DeadLetterGroup? pending;
     private StudioScope? pendingScope;
+
+    /// <summary>The page's scope (store, database and tenant) when the dialog was opened (1.2-FINAL-FIX-3).</summary>
+    private StudioScope? pendingOpenedUnder;
     private DeadLetterGroupSkipPlan? plan;
     private bool loading = true;
     private bool working;
@@ -414,6 +417,7 @@
 
             plan = described;
             pendingScope = scope;
+            pendingOpenedUnder = openedUnder;
             pending = group;
         }
         catch (OperationCanceledException)
@@ -433,6 +437,7 @@
     {
         pending = null;
         pendingScope = null;
+        pendingOpenedUnder = null;
         plan = null;
     }
 
@@ -440,13 +445,12 @@
     {
         DeadLetterGroup? group = pending;
         StudioScope? scope = pendingScope;
+        StudioScope? openedUnder = pendingOpenedUnder;
         CancelDialog();
 
-        // The scope the dialog was opened under, if the page is still in that database (the scope change closes the dialog; this is the
-        // second line of defence). A tenant filter inside the same database may differ, as SkipScope(group) chose it.
-        if (group is null || scope is null
-            || !string.Equals(scope.StoreKey, State.ActiveScope?.StoreKey, StringComparison.Ordinal)
-            || !string.Equals(scope.DatabaseId, State.ActiveScope?.DatabaseId, StringComparison.Ordinal))
+        // The scope the page was in when the dialog opened - store, database and tenant - and only if it still is (the scope change
+        // closes the dialog; this is the second line of defence). The skip itself acts on `scope`, which SkipScope(group) chose.
+        if (group is null || scope is null || openedUnder is null || openedUnder != State.ActiveScope)
         {
             return;
         }

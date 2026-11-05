@@ -505,7 +505,18 @@ internal sealed class FakeProjectionDataService : IProjectionDataService
 
     /// <inheritdoc />
     public StudioOperation? FindOperation(string? operationId) =>
-        running.FirstOrDefault(x => x.Id == operationId);
+        running.Concat(finished).FirstOrDefault(x => x.Id == operationId);
+
+    private readonly List<StudioOperation> finished = [];
+
+    /// <summary>Ends a running operation the way the tracker would: it leaves the running list and its final record says how it ended.</summary>
+    public FakeProjectionDataService FinishOperation(string id, StudioOperationState state, string message)
+    {
+        StudioOperation operation = running.Single(x => x.Id == id);
+        running.Remove(operation);
+        finished.Add(operation with { State = state, Message = message, FinishedAt = DateTimeOffset.UnixEpoch.AddSeconds(2) });
+        return this;
+    }
 
     /// <inheritdoc />
     public async Task<bool> CancelOperationAsync(StudioScope scope, string operationId, CancellationToken cancellationToken = default)

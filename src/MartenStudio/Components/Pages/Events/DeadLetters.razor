@@ -1071,6 +1071,15 @@
             return;
         }
 
+        // Copied before the first await: a scope change that lands during one runs CancelDialog, which clears the pending fields, and the
+        // toast after the service call must still name what was done (1.2-FINAL-FIX-3).
+        Guid discardId = pendingDiscard;
+        long skipSequence = pendingSkip;
+        string? skipTenant = pendingSkipTenant;
+        DeadLetterRow? rewindRow = pendingRewind;
+        long rewindFloor = RewindFloor;
+        bool rewindsOneTenant = RewindsOneTenant;
+
         working = true;
         actionError = null;
 
@@ -1078,25 +1087,25 @@
         {
             if (kind == DialogKind.Discard)
             {
-                await Events.DiscardDeadLetterAsync(scope, pendingDiscard, pageCancellation.Token);
+                await Events.DiscardDeadLetterAsync(scope, discardId, pageCancellation.Token);
                 await Toasts.Success("The dead letter is discarded.");
             }
             else if (kind == DialogKind.Skip)
             {
-                await Events.SkipEventAsync(WriteScope(scope, pendingSkipTenant), pendingSkip, pageCancellation.Token);
+                await Events.SkipEventAsync(WriteScope(scope, skipTenant), skipSequence, pageCancellation.Token);
                 await Toasts.Success(
-                    $"Event #{pendingSkip.ToString(CultureInfo.InvariantCulture)} is marked as skipped"
-                    + (PerTenantSequences ? $" in tenant {pendingSkipTenant}." : "."));
+                    $"Event #{skipSequence.ToString(CultureInfo.InvariantCulture)} is marked as skipped"
+                    + (PerTenantSequences ? $" in tenant {skipTenant}." : "."));
             }
-            else if (pendingRewind is { } rewind)
+            else if (rewindRow is { } rewind)
             {
                 await Events.RewindSubscriptionAsync(
                     WriteScope(scope, rewind.TenantId), rewind.ProjectionName, rewind.EventSequence, pageCancellation.Token);
 
                 await Toasts.Success(
                     $"'{rewind.ProjectionName}' is rewound to #"
-                    + RewindFloor.ToString(CultureInfo.InvariantCulture)
-                    + (RewindsOneTenant ? $" in tenant {rewind.TenantId}" : string.Empty)
+                    + rewindFloor.ToString(CultureInfo.InvariantCulture)
+                    + (rewindsOneTenant ? $" in tenant {rewind.TenantId}" : string.Empty)
                     + $", so event #{rewind.EventSequence.ToString(CultureInfo.InvariantCulture)} is re-applied.");
             }
 

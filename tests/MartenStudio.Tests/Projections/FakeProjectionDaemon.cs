@@ -107,7 +107,16 @@ internal sealed class FakeProjectionDaemon : IProjectionDaemon
     /// <summary>The agents <see cref="CurrentAgents" /> answers with - none unless a test adds some.</summary>
     public List<ISubscriptionAgent> Agents { get; } = [];
 
-    public IReadOnlyList<ISubscriptionAgent> CurrentAgents() => Agents;
+    /// <summary>Called with the number of this <see cref="CurrentAgents" /> call before it answers, for a test about agents that change under the caller.</summary>
+    public Action<int>? OnCurrentAgents { get; set; }
+
+    private int currentAgentsCalls;
+
+    public IReadOnlyList<ISubscriptionAgent> CurrentAgents()
+    {
+        OnCurrentAgents?.Invoke(++currentAgentsCalls);
+        return [.. Agents];
+    }
 
     public bool HasAnyPaused() => throw NotUsed();
 

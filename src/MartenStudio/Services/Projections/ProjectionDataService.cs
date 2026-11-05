@@ -708,9 +708,13 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
     /// Stopping the registered agent removes it, and the coordinator then sees none and starts the shard.
     /// </para>
     /// <para>
-    /// Only through the daemon the DI-registered coordinator hands out (hard rule 11), only for a shard that was Running, or held no
-    /// agent, before the rebuild, and only when a leadership loop exists to start it again. While the studio's own pause is in effect
-    /// the same agents are cleared but nothing is started, and the result line says so. A rebuild that failed or was cancelled hands nothing back, and says what state it leaves the shards in.
+    /// Only through the daemon the DI-registered coordinator hands out (hard rule 11), for every shard of the projection that is
+    /// Stopped after a rebuild that succeeded, whatever its status was before (the studio's own Stop removes the agent, so a Stopped
+    /// agent left behind is the rebuild's or a failure's leftover, never an operator's choice; a Paused one the coordinator restarts
+    /// by itself), and only when a leadership loop exists to start it again. While the studio's own pause is in effect the same agents
+    /// are cleared but nothing is started, and the result line says so. A rebuild that failed or was cancelled hands nothing back, and
+    /// says what state it leaves the shards in. Each stop re-reads the daemon's agents and stops only the same instance, still Stopped,
+    /// so an agent the coordinator started in the meantime is never touched.
     /// </para>
     /// </remarks>
     internal static async Task<string?> RebuildAndHandBackAsync(
@@ -723,12 +727,6 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
     {
         ArgumentNullException.ThrowIfNull(daemon);
         ArgumentNullException.ThrowIfNull(studioPauseInEffect);
-
-        Dictionary<string, JasperFx.AgentStatus> before = [];
-        foreach (ISubscriptionAgent agent in daemon.CurrentAgents().Where(x => string.Equals(x.Name.Name, projectionName, StringComparison.Ordinal)))
-        {
-            before[agent.Name.Identity] = agent.Status;
-        }
 
         string notHandedBack =
             $" Nothing was handed back to the coordinator: the shards of {projectionName} are as the rebuild left them.";
@@ -743,7 +741,15 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
         }
         catch (Exception failure)
         {
-            throw new InvalidOperationException(failure.Message + notHandedBack, failure);
+            // A separator between the failure and the sentence after it, whatever punctuation the failure ended with.
+            throw new InvalidOperationException(failure.Message.TrimEnd().TrimEnd('.', ':', ';') + "." + notHandedBack, failure);
+        }
+
+        // JasperFx returns without an error when the token is cancelled mid-rebuild, leaving the replay partial: that is a cancelled
+        // operation, not a completed one, and nothing is handed back.
+        if (cancellationToken.IsCancellationRequested)
+        {
+            throw new StudioOperationCancelledException("Cancelled." + notHandedBack);
         }
 
         if (!coordinatorRestartsShards)
@@ -758,16 +764,17 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
 
         List<string> handedBack = [];
         List<string> failed = [];
-        List<string> left = [];
 
-        foreach (ISubscriptionAgent agent in daemon.CurrentAgents()
+        foreach (ISubscriptionAgent seen in daemon.CurrentAgents()
             .Where(x => string.Equals(x.Name.Name, projectionName, StringComparison.Ordinal) && x.Status == JasperFx.AgentStatus.Stopped)
             .ToArray())
         {
-            string shard = agent.Name.Identity;
-            if (before.TryGetValue(shard, out JasperFx.AgentStatus was) && was != JasperFx.AgentStatus.Running)
+            string shard = seen.Name.Identity;
+
+            // Re-read just before the stop: the coordinator may have replaced the agent since, and a running one is never stopped.
+            ISubscriptionAgent? now = daemon.CurrentAgents().FirstOrDefault(x => string.Equals(x.Name.Identity, shard, StringComparison.Ordinal));
+            if (!ReferenceEquals(now, seen) || seen.Status != JasperFx.AgentStatus.Stopped)
             {
-                left.Add(shard);
                 continue;
             }
 
@@ -788,27 +795,28 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
         {
             sentences.Add(
                 "Marten Studio's pause is in effect, so nothing was started; cleared the Stopped agent the rebuild left for "
-                + string.Join(", ", handedBack) + ", which resuming the daemon starts.");
+                + ShardList(handedBack) + ", which resuming the daemon starts.");
         }
         else if (handedBack.Count > 0)
         {
             sentences.Add(
-                "Handed " + string.Join(", ", handedBack) + " back to the coordinator, which starts "
+                "Handed " + ShardList(handedBack) + " back to the coordinator, which starts "
                 + (handedBack.Count == 1 ? "it" : "them") + " again.");
-        }
-
-        if (left.Count > 0)
-        {
-            sentences.Add("Left " + string.Join(", ", left) + " as it was before the rebuild (it was not running).");
         }
 
         if (failed.Count > 0)
         {
-            sentences.Add("Could not hand " + string.Join(", ", failed) + " back; start it from the Start button.");
+            sentences.Add("Could not hand " + ShardList(failed) + " back; start it from the Start button.");
         }
 
         return sentences.Count == 0 ? null : "Completed. " + string.Join(' ', sentences);
     }
+
+    /// <summary>Up to five shard names, then "and N more": a composite or a per-tenant projection has hundreds, and the line is logged and kept.</summary>
+    private static string ShardList(List<string> shards) =>
+        shards.Count <= 5
+            ? string.Join(", ", shards)
+            : string.Join(", ", shards.Take(5)) + " and " + (shards.Count - 5).ToString(System.Globalization.CultureInfo.InvariantCulture) + " more";
 
     // ------------------------------------------------------------------------------------------------
     // Reading

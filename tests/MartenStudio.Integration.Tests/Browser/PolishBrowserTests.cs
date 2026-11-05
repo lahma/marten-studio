@@ -45,7 +45,7 @@ public class PolishBrowserTests(BrowserSuiteFixture fixture)
 
             (await studio.Page.EvaluateAsync<double>(
                 "() => document.querySelector('.ms-maint-name').getBoundingClientRect().width"))
-                .Should().BeLessThanOrEqualTo(15 * 16 + 20 + (widerMetrics ? 40 : 0), "the name column stops at 15rem, whatever the identifier");
+                .Should().BeLessThanOrEqualTo(15 * 16 + 20, "the name column stops at 15rem (a max-width, which wider fonts do not move), whatever the identifier");
 
             studio.AssertClean("the Maintenance page at 1280 px");
         });

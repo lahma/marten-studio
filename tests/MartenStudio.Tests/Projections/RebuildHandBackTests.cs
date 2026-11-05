@@ -86,8 +86,10 @@ public class RebuildHandBackTests
     }
 
     [Fact]
-    public async Task A_shard_that_was_stopped_or_paused_before_the_rebuild_stays_as_it_was()
+    public async Task A_shard_that_was_stopped_or_paused_before_the_rebuild_is_handed_back_too()
     {
+        // The studio's own Stop removes the agent, so a Stopped agent left after a rebuild is the rebuild's (or a failure's) leftover,
+        // never an operator's choice; and a Paused one the coordinator would have restarted itself.
         using var daemon = new FakeProjectionDaemon();
         daemon.Agents.Add(StatusAgent.For(Shard, AgentStatus.Stopped));
         daemon.Agents.Add(StatusAgent.For("DailySales:Other", AgentStatus.Paused));
@@ -95,8 +97,64 @@ public class RebuildHandBackTests
 
         string? line = await RunAsync(daemon);
 
+        daemon.StoppedAgents.Should().Equal(Shard, "DailySales:Other");
+        line.Should().Be("Completed. Handed DailySales:All, DailySales:Other back to the coordinator, which starts them again.");
+    }
+
+    [Fact]
+    public async Task An_agent_the_coordinator_replaced_before_the_stop_is_left_alone()
+    {
+        using var daemon = new FakeProjectionDaemon();
+        daemon.OnRebuild = () => LeaveStoppedAgents(daemon, Shard);
+
+        // The first CurrentAgents() call after the rebuild lists the Stopped agent; by the second (the re-read before the stop) a
+        // running one has taken its place.
+        daemon.OnCurrentAgents = call =>
+        {
+            if (call == 2)
+            {
+                daemon.Agents.Clear();
+                daemon.Agents.Add(StatusAgent.For(Shard, AgentStatus.Running));
+            }
+        };
+
+        string? line = await RunAsync(daemon);
+
+        daemon.StoppedAgents.Should().BeEmpty("the agent now registered is another instance, and running");
+        line.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task A_long_list_of_shards_is_summarised_in_the_line()
+    {
+        using var daemon = new FakeProjectionDaemon();
+        string[] shards = [.. Enumerable.Range(1, 42).Select(static i => "DailySales:S" + i)];
+        daemon.OnRebuild = () => LeaveStoppedAgents(daemon, shards);
+
+        string? line = await RunAsync(daemon);
+
+        daemon.StoppedAgents.Should().HaveCount(42);
+        line.Should().Be("Completed. Handed DailySales:S1, DailySales:S2, DailySales:S3, DailySales:S4, DailySales:S5 and 37 more back to the coordinator, which starts them again.");
+    }
+
+    [Fact]
+    public async Task A_rebuild_that_returned_because_it_was_cancelled_is_cancelled_and_hands_nothing_back()
+    {
+        using var daemon = new FakeProjectionDaemon();
+        using var cancellation = new CancellationTokenSource();
+        daemon.Agents.Add(StatusAgent.For(Shard, AgentStatus.Running));
+        daemon.OnRebuild = () =>
+        {
+            LeaveStoppedAgents(daemon, Shard);
+            cancellation.Cancel();
+        };
+
+        Func<Task> run = () => ProjectionDataService.RebuildAndHandBackAsync(
+            daemon, "DailySales", TimeSpan.FromHours(1), true, () => false, cancellation.Token);
+
+        (await run.Should().ThrowAsync<StudioOperationCancelledException>())
+            .WithMessage("Cancelled. Nothing was handed back*");
         daemon.StoppedAgents.Should().BeEmpty();
-        line.Should().Be("Completed. Left DailySales:All, DailySales:Other as it was before the rebuild (it was not running).");
     }
 
     [Fact]
@@ -115,7 +173,7 @@ public class RebuildHandBackTests
     }
 
     [Fact]
-    public async Task While_the_studios_pause_is_in_effect_a_shard_that_was_stopped_before_is_still_left_alone()
+    public async Task While_the_studios_pause_is_in_effect_a_shard_that_was_stopped_before_is_cleared_too()
     {
         using var daemon = new FakeProjectionDaemon();
         daemon.Agents.Add(StatusAgent.For(Shard, AgentStatus.Stopped));
@@ -123,8 +181,8 @@ public class RebuildHandBackTests
 
         string? line = await RunAsync(daemon, paused: true);
 
-        daemon.StoppedAgents.Should().BeEmpty();
-        line.Should().Contain("Left DailySales:All as it was before the rebuild");
+        daemon.StoppedAgents.Should().Equal(Shard);
+        line.Should().Contain("nothing was started").And.Contain("DailySales:All");
     }
 
     [Fact]
@@ -151,7 +209,7 @@ public class RebuildHandBackTests
         Func<Task> run = () => RunAsync(daemon);
 
         (await run.Should().ThrowAsync<InvalidOperationException>())
-            .WithMessage("the replay timed out Nothing was handed back to the coordinator: the shards of DailySales are as the rebuild left them.");
+            .WithMessage("the replay timed out. Nothing was handed back to the coordinator: the shards of DailySales are as the rebuild left them.");
         daemon.StoppedAgents.Should().BeEmpty();
     }
 

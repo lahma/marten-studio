@@ -482,7 +482,7 @@ internal sealed class StudioOperationTracker : IDisposable
         string outcome = state switch
         {
             StudioOperationState.Succeeded => message is { Length: > 0 } and not "Completed."
-                ? nameof(StudioOperationState.Succeeded) + ": " + StudioLogValue.Cap(message)
+                ? nameof(StudioOperationState.Succeeded) + ": " + StudioLogValue.CapText(message)
                 : nameof(StudioOperationState.Succeeded),
             StudioOperationState.Failed => nameof(StudioOperationState.Failed),
             StudioOperationState.Cancelled => nameof(StudioOperationState.Cancelled),
