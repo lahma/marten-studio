@@ -72,6 +72,50 @@ public class DialogFocusBrowserTests(BrowserSuiteFixture fixture)
         });
     }
 
+    /// <summary>
+    /// 1.2-FINAL-FIX: after a confirmed Rebuild the Rebuild button that opened the dialog is disabled (and its row is re-rendered), and a
+    /// browser moves focus to the body when the element that has it goes. Focus goes to the same row's next control, or the row, or the
+    /// page's heading, and at no moment in the seconds after is it left on the body.
+    /// </summary>
+    [BrowserFact]
+    public async Task Focus_after_a_confirmed_Rebuild_whose_button_is_gone_is_never_left_on_the_body()
+    {
+        await BrowserScenario.RunAsync(fixture.Browser, "dialog-rebuild-focus", fixture.Root, "admin", async studio =>
+        {
+            IPage page = studio.Page;
+            await page.SetViewportSizeAsync(1280, 900);
+            await studio.GoAsync(fixture.Root.StudioUrl("projections"));
+
+            ILocator rebuild = page.Locator(".ms-projection-rebuild:not([disabled])").First;
+            await rebuild.WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
+            string name = await rebuild.EvaluateAsync<string>("b => b.closest('tr').dataset.projection");
+            await rebuild.ClickAsync();
+
+            await page.WaitForFunctionAsync("() => document.activeElement && document.activeElement.id === 'ms-confirm-input'", null, Wait);
+            await page.Keyboard.TypeAsync(name);
+            await page.Keyboard.PressAsync("Tab");
+            await page.Keyboard.PressAsync("Enter");
+
+            await page.WaitForFunctionAsync("() => document.querySelector('dialog.ms-confirm-overlay') === null", null, Wait);
+
+            // Sampled in the page for two seconds, from the moment the dialog went: the page re-renders while the rebuild starts.
+            string[] seen = await page.EvaluateAsync<string[]>(
+                """
+                () => new Promise(resolve => {
+                    const seen = [];
+                    const sample = () => { const a = document.activeElement; seen.push(!a ? 'none' : a === document.body ? 'BODY' : a.tagName + '.' + a.className); };
+                    sample();
+                    let n = 0;
+                    const timer = setInterval(() => { sample(); if (++n >= 20) { clearInterval(timer); resolve(seen); } }, 100);
+                })
+                """);
+
+            seen.Should().NotContain(x => x == "BODY" || x == "none", "focus is on the row, a control in it or the heading, never on the body: " + string.Join(", ", seen.Distinct()));
+
+            studio.AssertClean("confirming a Rebuild");
+        });
+    }
+
     [BrowserFact]
     public async Task The_question_mark_opens_the_shortcut_sheet_and_Esc_closes_it_and_returns_focus()
     {

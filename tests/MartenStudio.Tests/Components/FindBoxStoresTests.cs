@@ -187,6 +187,17 @@ public class FindBoxStoresTests
         box.Find(".ms-find-other").GetAttribute("aria-label").Should().Be("Search in another store");
     }
 
+    /// <summary>1.2-FINAL-FIX: Marten Studio keeps its hint, with documents, streams and natural keys in it.</summary>
+    [Fact]
+    public async Task Marten_Studios_hint_names_documents_streams_and_natural_keys()
+    {
+        await using StudioComponentContext context = await ReadyAsync(new Recording(), TwoStores);
+        IRenderedComponent<FindBox> box = context.Render<FindBox>();
+
+        string hintId = box.Find("input#ms-find-input").GetAttribute("aria-describedby")!;
+        box.Find("#" + hintId).TextContent.Should().Be("A document or stream id, a natural key, #sequence, an exact table or view name or a queryid");
+    }
+
     [Fact]
     public async Task A_search_narrowed_to_the_visitors_tenants_does_not_say_all_tenants()
     {

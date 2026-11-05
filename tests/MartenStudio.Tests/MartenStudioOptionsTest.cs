@@ -139,6 +139,16 @@ public class MartenStudioOptionsTest
             .WithMessage("*MartenStudioOptions.ApplicationPath must be null*absolute http or https URL*");
     }
 
+    /// <summary>1.2-FINAL-FIX: a host with <c>https://user@host/</c> is told why it failed, not just which shapes are allowed.</summary>
+    [Theory]
+    [InlineData("https://user@host.example/")]
+    [InlineData("https://user:pass@host.example/")]
+    public void An_application_URL_with_user_information_is_refused_and_the_message_says_so(string path)
+    {
+        ResolveAction(options => options.ApplicationPath = path).Should().Throw<OptionsValidationException>()
+            .WithMessage("*MartenStudioOptions.ApplicationPath must be null*no user information*'https://user@host/'*");
+    }
+
     [Theory]
     [InlineData(0, 500)]
     [InlineData(-1, 500)]

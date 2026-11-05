@@ -76,6 +76,19 @@ internal sealed class StudioText
     /// </summary>
     public required string SourcePossessive { get; init; }
 
+    /// <summary>
+    /// What the header's Find box offers to find, for a screen reader (1.2-FINAL-FIX): Marten Studio's has documents, streams, natural
+    /// keys and sequences, which a plain data source has none of. Not <see langword="required" />, so a hand-built text keeps Marten's.
+    /// </summary>
+    public string FindHint { get; init; } =
+        "A document or stream id, a natural key, #sequence, an exact table or view name or a queryid";
+
+    /// <summary>
+    /// Whether Find's empty result names the scope as the header's pickers do, with their labels ("Source Default › Database admin")
+    /// rather than bare ("Default › primary"). Postgres Studio's does (1.2-FINAL-FIX); Marten Studio's wording stays as it was.
+    /// </summary>
+    public bool FindNamesScopeLikeThePickers { get; init; }
+
     // ---------------------------------------------------------------------------------------------------------------
     // The database browser.
 

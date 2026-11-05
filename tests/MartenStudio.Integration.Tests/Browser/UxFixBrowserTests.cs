@@ -20,24 +20,31 @@ public class UxFixBrowserTests(BrowserSuiteFixture fixture)
     /// </summary>
     [BrowserFact]
     public Task The_Projections_table_shows_Last_progress_and_Actions_inside_its_region_at_1280_px() =>
-        RunAsync("uxfix-projections-1280", async studio =>
+        ProjectionsFitAsync("uxfix-projections-1280", widerMetrics: false);
+
+    /// <summary>
+    /// The same, with every text run drawn about 5 % wider (a stand-in for ubuntu-latest's fonts, on which the fit had no margin): the
+    /// table must hold with slack, so Actions wraps its buttons rather than running out of the region.
+    /// </summary>
+    [BrowserFact]
+    public Task The_Projections_table_fits_its_region_at_1280_px_with_wider_fonts() =>
+        ProjectionsFitAsync("uxfix-projections-1280-wide", widerMetrics: true);
+
+    private Task ProjectionsFitAsync(string name, bool widerMetrics) =>
+        RunAsync(name, async studio =>
         {
             await studio.Page.SetViewportSizeAsync(1280, 800);
             await studio.GoAsync(fixture.Root.StudioUrl("projections"));
             await studio.Page.Locator(".ms-projections-table tbody tr.ms-shard-row").First.WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
 
-            string[] outside = await studio.Page.EvaluateAsync<string[]>(
-                """
-                () => {
-                    const table = document.querySelector('.ms-projections-table');
-                    const region = table.closest('.ms-table-scroll').getBoundingClientRect();
-                    return [...table.querySelectorAll('thead th')]
-                        .filter(th => { const r = th.getBoundingClientRect(); return r.left < region.left - 1 || r.right > region.right + 1; })
-                        .map(th => th.textContent.trim());
-                }
-                """);
+            if (widerMetrics)
+            {
+                await TableFit.WidenAsync(studio.Page);
+            }
 
-            outside.Should().BeEmpty("every column of the Projections table, Last progress and Actions included, is inside its region at 1280 px");
+            TableFit.Report report = await TableFit.MeasureAsync(studio.Page, ".ms-projections-table");
+
+            report.Outside().Should().BeEmpty("every column of the Projections table, Last progress and Actions included, is inside its region at 1280 px: " + report.Describe());
 
             string[] buttonsOutside = await studio.Page.EvaluateAsync<string[]>(
                 """
@@ -50,10 +57,7 @@ public class UxFixBrowserTests(BrowserSuiteFixture fixture)
                 """);
 
             buttonsOutside.Should().BeEmpty("Rebuild, Start and Stop are in view");
-
-            (await studio.Page.EvaluateAsync<bool>(
-                "() => { const r = document.querySelector('.ms-projections-table').closest('.ms-table-scroll'); return r.scrollWidth <= r.clientWidth + 1; }"))
-                .Should().BeTrue("the region has nothing to scroll to");
+            report.Fits.Should().BeTrue("the region has nothing to scroll to: " + report.Describe());
 
             studio.AssertClean("the Projections page at 1280 px");
         });
@@ -218,8 +222,9 @@ public class UxFixBrowserTests(BrowserSuiteFixture fixture)
 
     /// <summary>
     /// A clicked link to a tenant moves the picker to it; Back then returns to an address that names no tenant. The address follows the
-    /// scope on screen again, instead of being left naming none while the picker still shows the tenant (the sweep's D13). Also run with
-    /// <c>PostgresStudio.DisableNavigationInterception</c> on (<see cref="StudioPage.InterceptionOffVariable" />).
+    /// scope on screen again, instead of being left naming none while the picker still shows the tenant (the sweep's D13). With
+    /// <c>PostgresStudio.DisableNavigationInterception</c> on (<see cref="StudioPage.InterceptionOffVariable" />) the shell writes nothing
+    /// on a Back (1.2-FINAL-FIX), so there the address stays as the entry Back returned to.
     /// </summary>
     [BrowserFact]
     public Task Back_after_a_link_to_a_tenant_rewrites_the_address_to_name_the_tenant_the_picker_shows() =>
@@ -237,6 +242,16 @@ public class UxFixBrowserTests(BrowserSuiteFixture fixture)
 
             await page.EvaluateAsync("() => history.back()");
             await studio.WaitForLocationAsync("location.pathname.endsWith('/tenants')");
+
+            if (StudioPage.InterceptionIsOff)
+            {
+                // With the switch on (1.1's navigation) the shell writes nothing on a Back (1.2-FINAL-FIX): the address is the entry Back
+                // returned to, and the pages that follow their address are the ones that act on it. The picker did not move.
+                (await page.EvaluateAsync<string>("() => document.querySelector('#ms-tenant-select').value")).Should().Be("acme", "the picker did not move");
+                (await page.EvaluateAsync<bool>("() => location.search.includes('tenant=acme')")).Should().BeFalse("the shell did not rewrite the address");
+                studio.AssertClean("following a link to a tenant and moving Back, with navigation interception off");
+                return;
+            }
 
             // The entry Back returned to named no tenant. The scope on screen is still acme, so the address is written to say so.
             await studio.WaitForLocationAsync("location.pathname.endsWith('/tenants') && location.search.includes('tenant=acme')");

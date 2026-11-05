@@ -175,7 +175,7 @@ else if (previewed)
     }
 }
 
-<h2 class="ms-section-title">Apply</h2>
+<h2 class="ms-section-title ms-schema-apply-heading">Apply</h2>
 
 @if (!Capabilities.IsEnabled(StudioCapability.ApplySchemaChanges))
 {
@@ -239,7 +239,9 @@ else
        index build that makes writers wait (a tag table's on the way to Marten 9.51 among them), and Weasel 9.46's
        partition-index rebuild, which reads like a drop and is not. Nothing to tick: the destructive list above is
        the one the apply waits for. *@
-    @if (preview.Notes is { Count: > 0 } notes)
+    @* A statement the lock table below already prints is printed there only (1.2-FINAL-FIX): with index-only drift the two lists were
+       the same statements twice. *@
+    @if (NotesNotInLockTable(preview) is { Count: > 0 } notes)
     {
         <div class="ms-alert ms-alert-info ms-schema-notes" role="note">
             <div class="ms-alert-content">
@@ -449,12 +451,51 @@ else
     /// </remarks>
     private bool mayApply = true;
 
+    /// <summary>
+    /// The preview's notes whose statement the lock table (<see cref="MigrationPreview.Impact" />) does not list: with that table on
+    /// screen, a statement in both is printed once, in the table, which says more about it (the lock it takes and whether it rewrites).
+    /// </summary>
+    internal static IReadOnlyList<MigrationNote> NotesNotInLockTable(MigrationPreview preview)
+    {
+        if (preview.Notes is not { Count: > 0 } notes)
+        {
+            return [];
+        }
+
+        if (preview.Impact is not { HasContent: true } impact)
+        {
+            return notes;
+        }
+
+        HashSet<string> listed = new(
+            impact.Tables.SelectMany(static table => table.Statements).Select(static statement => statement.Statement),
+            StringComparer.Ordinal);
+
+        return [.. notes.Where(note => !listed.Contains(note.Statement))];
+    }
+
     private string ApplyTitle => mayApply
         ? "Runs the previewed migration against this database - every tenant's tables included"
         : WritePolicyRefusal.For(StudioCapability.ApplySchemaChanges);
 
+    /// <summary>The scope the Apply dialog was opened under: its confirmation acts on this and on nothing else (1.2-FINAL-FIX).</summary>
+    private StudioScope? applyScope;
+
+    /// <summary>
+    /// The Schema page tears this tab down when the scope moves; this is the tab holding to it on its own, so the dialog is closed
+    /// whoever hosts the tab.
+    /// </summary>
+    private Task OnScopeChangedAsync()
+    {
+        applyOpen = false;
+        applyScope = null;
+        return InvokeAsync(StateHasChanged);
+    }
+
     protected override async Task OnInitializedAsync()
     {
+        State.ScopeChanged += OnScopeChangedAsync;
+
         StudioScope? scope = State.ActiveScope;
         if (scope is null)
         {
@@ -552,6 +593,7 @@ else
             }
         }
 
+        applyScope = State.ActiveScope;
         applyOpen = true;
         await InvokeAsync(StateHasChanged);
     }
@@ -559,6 +601,7 @@ else
     private Task CancelApply()
     {
         applyOpen = false;
+        applyScope = null;
         return InvokeAsync(StateHasChanged);
     }
 
@@ -575,20 +618,20 @@ else
         // The dialog is closed first (1.2-UX-FIX-FU4): a confirm that is refused below is never dropped silently with the dialog left up.
         applyOpen = false;
 
+        // The scope the dialog was opened under, and only if it is still the page's (the scope change closes the dialog).
+        StudioScope? openedUnder = applyScope;
+        applyScope = null;
+
         // One apply at a time (1.2-UX-FIX-FU3), whatever reaches here twice: the dialog refuses a second confirm itself, and this is the
         // defence in depth for a migration that must not run twice.
-        if (busy)
+        if (busy || openedUnder is null || openedUnder != State.ActiveScope)
         {
             return;
         }
 
         await RunAsync("Applying...", async token =>
         {
-            StudioScope? scope = State.ActiveScope;
-            if (scope is null)
-            {
-                return;
-            }
+            StudioScope? scope = openedUnder;
 
             applyResult = await SchemaData.ApplyAsync(scope, typed, token);
 
@@ -671,6 +714,7 @@ else
 
     public void Dispose()
     {
+        State.ScopeChanged -= OnScopeChangedAsync;
         lifetime.Cancel();
         lifetime.Dispose();
     }

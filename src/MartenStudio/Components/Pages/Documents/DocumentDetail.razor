@@ -200,6 +200,9 @@
     private bool editing;
     private bool writing;
     private bool deleteDialogOpen;
+
+    /// <summary>The scope the delete dialog was opened under (1.2-FINAL-FIX).</summary>
+    private StudioScope? deleteDialogScope;
     private string? writeError;
     private string? editRefusal;
     private WritePreview? editProbe;
@@ -574,17 +577,27 @@
         return Task.CompletedTask;
     }
 
-    private void OpenDeleteDialog() => deleteDialogOpen = true;
+    private void OpenDeleteDialog()
+    {
+        deleteDialogScope = State.ActiveScope;
+        deleteDialogOpen = true;
+    }
 
-    private void CloseDeleteDialog() => deleteDialogOpen = false;
+    private void CloseDeleteDialog()
+    {
+        deleteDialogOpen = false;
+        deleteDialogScope = null;
+    }
 
     private async Task DeleteAsync()
     {
         deleteDialogOpen = false;
 
-        StudioScope? scope = State.ActiveScope;
+        // The scope the dialog was opened under, and only if it is still the page's (the scope change closes the dialog).
+        StudioScope? scope = deleteDialogScope;
+        deleteDialogScope = null;
 
-        if (scope is null || result?.Detail is not { } detail || writing)
+        if (scope is null || scope != State.ActiveScope || result?.Detail is not { } detail || writing)
         {
             return;
         }
@@ -811,6 +824,12 @@
 
     private Task OnScopeChangedAsync() => InvokeAsync(async () =>
     {
+        // The delete dialog names a document of the last scope: closed before anything is read, not after (1.2-FINAL-FIX).
+        CloseDeleteDialog();
+
+        // So is the editor and the save-preview dialog it owns, which would save against the new scope.
+        editing = false;
+        editProbe = null;
         loadedSignature = null;
         await OnParametersSetAsync();
     });

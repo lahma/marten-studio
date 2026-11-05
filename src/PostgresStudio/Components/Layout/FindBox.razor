@@ -4,6 +4,7 @@
 @using PostgresStudio.Services.Database
 @using PostgresStudio.Services.Live
 @using PostgresStudio.Services.Settings
+@using PostgresStudio.Services.Sources
 @implements IAsyncDisposable
 @inject FindService Finder
 @inject StudioState State
@@ -53,7 +54,7 @@
                        autocomplete="off"
                        spellcheck="false"
                        enterkeyhint="search" />
-                <span id="ms-find-hint" class="ms-sr-only">A document or stream id, a natural key, #sequence, an exact table or view name or a queryid</span>
+                <span id="ms-find-hint" class="ms-sr-only">@Settings.Text.FindHint</span>
 
                 @* Always in the DOM and changing its text, which is what makes a polite live region announce. *@
                 <div class="ms-find-status" role="status" aria-live="polite">@StatusText</div>
@@ -371,12 +372,26 @@
         StoreListing? store = State.AvailableStores.FirstOrDefault(x => string.Equals(x.Key, scope.StoreKey, StringComparison.OrdinalIgnoreCase));
         string name = store?.DisplayName ?? scope.StoreKey;
 
+        // Postgres Studio names the scope as its header does - "Source Default › Database admin" - and the database by the identity the
+        // header's picker shows; Marten Studio's wording is as it was (D30).
+        bool likeThePickers = Settings.Text.FindNamesScopeLikeThePickers;
+        if (likeThePickers)
+        {
+            name = Settings.SourceLabelOf(Descriptor) + " " + name;
+        }
+
         if (State.ActiveScope is { } active && string.Equals(active.StoreKey, scope.StoreKey, StringComparison.OrdinalIgnoreCase))
         {
             DatabaseListing? database = State.AvailableDatabases.FirstOrDefault(x => string.Equals(x.Identity, scope.DatabaseId, StringComparison.OrdinalIgnoreCase));
-            if (database is not null)
+            if (database is not null && !likeThePickers)
             {
                 name += " › " + database.Name;
+            }
+            else if (database is not null
+                && State.Cardinality is StudioDatabaseCardinality.StaticMultiple or StudioDatabaseCardinality.DynamicMultiple)
+            {
+                // The database is named where the header has a picker for it, with its label.
+                name += " › Database " + database.Identity;
             }
 
 

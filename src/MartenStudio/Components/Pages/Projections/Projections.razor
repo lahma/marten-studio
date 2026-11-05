@@ -852,6 +852,12 @@
 
     /// <summary>The orphaned progression row the Remove dialog is about, by the name the page drew.</summary>
     private string? pendingOrphan;
+
+    /// <summary>The scope the Rebuild dialog was opened under: its confirmation acts on this and on nothing else (1.2-FINAL-FIX).</summary>
+    private StudioScope? rebuildDialogScope;
+
+    /// <summary>The scope the pending action's dialog was opened under: its confirmation acts on this and on nothing else (1.2-FINAL-FIX).</summary>
+    private StudioScope? pendingDialogScope;
     private IDisposable? liveLease;
     private bool loading = true;
     private bool started;
@@ -1093,6 +1099,11 @@
         // explain the new scope with the old one's facts. The Explain was about that database's sessions.
         agentRefusal = null;
         explanation = null;
+
+        // A confirmation opened under the last scope's header confirms nothing about this one: an intercepted Back or Forward moves the
+        // scope and keeps this page, with its dialogs (1.2-FINAL-FIX).
+        CancelPending();
+        CancelRebuild();
 
         ReleaseLease();
         await SubscribeToLiveStateAsync();
@@ -1619,8 +1630,18 @@
         try
         {
             RebuildScope described = await ProjectionData.DescribeRebuildAsync(scope, projectionName, pageCancellation.Token);
-            rebuildWarnings = await RebuildWarningsAsync(scope, described.ProjectionName);
-            rebuildEventTypes = await EventTypesReadAsync(scope, described.ProjectionName);
+            IReadOnlyList<string> warnings = await RebuildWarningsAsync(scope, described.ProjectionName);
+            string? eventTypes = await EventTypesReadAsync(scope, described.ProjectionName);
+
+            // The scope moved while this was read: the answer is about a scope the page has left, and opens no dialog.
+            if (scope != State.ActiveScope)
+            {
+                return;
+            }
+
+            rebuildWarnings = warnings;
+            rebuildEventTypes = eventTypes;
+            rebuildDialogScope = scope;
             rebuild = described;
         }
         catch (OperationCanceledException)
@@ -1632,7 +1653,13 @@
         }
     }
 
-    private void CancelRebuild() => rebuild = null;
+    private void CancelRebuild()
+    {
+        rebuild = null;
+        rebuildWarnings = [];
+        rebuildEventTypes = null;
+        rebuildDialogScope = null;
+    }
 
     /// <summary>The Event flow drawn for one projection (1.2).</summary>
     private string FlowHref(string projectionName) =>
@@ -1666,10 +1693,12 @@
             return;
         }
 
-        rebuild = null;
+        StudioScope? studioScope = rebuildDialogScope;
+        CancelRebuild();
 
-        StudioScope? studioScope = State.ActiveScope;
-        if (studioScope is null)
+        // The scope the dialog was opened under, and only if it is still the page's (the scope change closes the dialog; this is the
+        // second line of defence).
+        if (studioScope is null || studioScope != State.ActiveScope)
         {
             return;
         }
@@ -1710,6 +1739,7 @@
     {
         pending = action;
         pendingOperationId = null;
+        pendingDialogScope = State.ActiveScope;
         return Task.CompletedTask;
     }
 
@@ -1718,6 +1748,7 @@
     {
         pending = PendingAction.CancelOperation;
         pendingOperationId = operationId;
+        pendingDialogScope = State.ActiveScope;
         return Task.CompletedTask;
     }
 
@@ -1727,6 +1758,7 @@
         pending = PendingAction.RemoveOrphan;
         pendingOperationId = null;
         pendingOrphan = rowName;
+        pendingDialogScope = State.ActiveScope;
         return Task.CompletedTask;
     }
 
@@ -1735,6 +1767,7 @@
         pending = PendingAction.None;
         pendingOperationId = null;
         pendingOrphan = null;
+        pendingDialogScope = null;
     }
 
     private async Task ConfirmPendingAsync()
@@ -1742,10 +1775,16 @@
         PendingAction action = pending;
         string? operationId = pendingOperationId;
         string? orphan = pendingOrphan;
+        StudioScope? openedUnder = pendingDialogScope;
 
-        pending = PendingAction.None;
-        pendingOperationId = null;
-        pendingOrphan = null;
+        CancelPending();
+
+        // The scope the dialog was opened under, and only if it is still the page's (the scope change closes the dialog; this is the
+        // second line of defence, and every action below runs on the page's scope, which is then that one).
+        if (openedUnder is null || openedUnder != State.ActiveScope)
+        {
+            return;
+        }
 
         switch (action)
         {

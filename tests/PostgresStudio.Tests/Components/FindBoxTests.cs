@@ -79,7 +79,9 @@ public class FindBoxTests
         input.HasAttribute("value").Should().BeFalse("the field is never bound, so a render never touches what was typed");
 
         string hintId = input.GetAttribute("aria-describedby")!;
-        box.Find("#" + hintId).TextContent.Should().Be("A document or stream id, a natural key, #sequence, an exact table or view name or a queryid");
+        box.Find("#" + hintId).TextContent.Should().Be(
+            "An exact table or view name, or a statement's queryid",
+            "Postgres Studio has no documents, streams or natural keys to offer (1.2-FINAL-FIX)");
 
         IElement toggle = box.Find("button.ms-find-toggle");
         toggle.GetAttribute("popovertarget").Should().Be("ms-find-popover");
@@ -220,6 +222,20 @@ public class FindBoxTests
         await box.InvokeAsync(() => box.Instance.FindAsync("orders"));
 
         box.FindAll("a.ms-find-browse").Should().BeEmpty();
+    }
+
+    /// <summary>1.2-FINAL-FIX: the empty message names the scope with the header's picker label, not as a bare "Default › admin".</summary>
+    [Fact]
+    public async Task The_empty_message_names_the_scope_with_the_headers_source_label()
+    {
+        using PostgresStudioComponentContext context = Context(new FakeFindContributor(10, "Tables").Returns("tables and views"));
+
+        IRenderedComponent<FindBox> box = await RenderReadyAsync(context);
+        await box.InvokeAsync(() => box.Instance.FindAsync("nope"));
+
+        string panel = box.Find("[data-ms-find-panel]").TextContent;
+        // No source is registered in this context, so the header's picker is labelled with the descriptor's word, "Database".
+        panel.Should().Contain("Nothing in Database ").And.Contain(" matched \"nope\".");
     }
 
     [Fact]

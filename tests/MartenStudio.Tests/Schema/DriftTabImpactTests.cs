@@ -122,6 +122,53 @@ public class DriftTabImpactTests
         tab.Find(".ms-schema-apply").HasAttribute("disabled").Should().BeFalse("the notes never gate the apply");
     }
 
+    /// <summary>1.2-FINAL-FIX: with index-only drift an index statement is printed once, in the lock table, and not again under "Worth knowing".</summary>
+    [Fact]
+    public async Task An_index_statement_is_printed_once_in_the_lock_table_and_not_again_in_the_notes()
+    {
+        const string indexOnly = "CREATE INDEX mt_doc_customer_idx_name ON studio.mt_doc_customer USING btree ((data ->> 'Name'));";
+        MigrationRisk.Notes(indexOnly).Should().NotBeEmpty("the premise: an index build on an existing table is a note");
+
+        IReadOnlyList<TableLockStatement> statements = MigrationRisk.LockStatements(indexOnly);
+        MigrationImpact impact = MigrationImpact.Assemble(
+            statements,
+            [new RelationFootprintRow(0, 1, "studio", "mt_doc_customer", false, 1_200_000, 300_000_000, 380_000_000)],
+            null);
+        MigrationPreview preview = new(indexOnly, 1, [], "Update", null) { Impact = impact };
+        await using StudioComponentContext context = new();
+        context.Services.AddSingleton<ISchemaDataService>(new FakeSchemaData(preview));
+
+        IRenderedComponent<DriftTab> tab = await RenderAsync(context, preview);
+
+        tab.FindAll(".ms-schema-notes").Should().ContainSingle("the lock table is the one box; 'Worth knowing' has nothing left to say");
+        tab.Markup.Should().NotContain("Worth knowing before you apply");
+        tab.FindAll("code.ms-destructive-statement").Count(static x => x.TextContent.Contains("mt_doc_customer_idx_name", StringComparison.Ordinal))
+            .Should().Be(1, "the statement is printed once, in the lock table");
+    }
+
+    /// <summary>With no lock table to carry a note, the note is still printed.</summary>
+    [Fact]
+    public void Notes_are_all_kept_when_there_is_no_lock_table_to_print_them()
+    {
+        const string indexOnly = "CREATE INDEX mt_doc_customer_idx_name ON studio.mt_doc_customer USING btree ((data ->> 'Name'));";
+        MigrationPreview preview = new(indexOnly, 1, [], "Update", null);
+
+        DriftTab.NotesNotInLockTable(preview).Should().HaveCount(MigrationRisk.Notes(indexOnly).Count);
+        DriftTab.NotesNotInLockTable(preview).Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public async Task The_Apply_heading_carries_the_class_that_gives_it_air_above()
+    {
+        MigrationPreview preview = new(Sql, 2, [], "Update", null) { Impact = Impact(withSessions: true) };
+        await using StudioComponentContext context = new();
+        context.Services.AddSingleton<ISchemaDataService>(new FakeSchemaData(preview));
+
+        IRenderedComponent<DriftTab> tab = await RenderAsync(context, preview);
+
+        tab.Find("h2.ms-schema-apply-heading").TextContent.Should().Be("Apply");
+    }
+
     [Fact]
     public async Task A_script_that_locks_no_existing_table_draws_no_impact_block()
     {

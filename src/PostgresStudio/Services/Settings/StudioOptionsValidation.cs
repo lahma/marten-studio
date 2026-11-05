@@ -106,7 +106,7 @@ internal static class StudioOptionsValidation
                 DiagnosticsOptionsValidation.StudioApplicationNameMessage(optionsType))
             .Validate(
                 options => IsApplicationPath(shape(options).ApplicationPath),
-                optionsType + ".ApplicationPath must be null (no link), a host-relative path that starts with a single '/' ('/' or '/app'), or an absolute http or https URL");
+                optionsType + ".ApplicationPath must be null (no link), a host-relative path that starts with a single '/' ('/' or '/app'), or an absolute http or https URL (with no user information: 'https://user@host/' and 'https://user:pass@host/' are refused, because the part before the '@' reads as the destination and the browser goes to what follows it)");
     }
 
     /// <summary>

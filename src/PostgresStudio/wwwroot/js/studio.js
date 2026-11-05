@@ -258,15 +258,109 @@
             return !active || active === document.body || active === document.documentElement;
         }
 
-        // Only when focus is nowhere: a page that has already moved it on (FocusOnNavigate puts it on the new heading) keeps it.
-        function restore(invoker) {
-            if (invoker && invoker.isConnected && !invoker.disabled && typeof invoker.focus === "function" && nobodyHasFocus()) {
-                try {
-                    invoker.focus({ preventScroll: true });
+        function usable(element) {
+            return !!element && element.isConnected && !element.disabled && typeof element.focus === "function"
+                && element.getClientRects().length > 0;
+        }
+
+        function focusElement(element) {
+            // A row or a heading is not focusable by nature; tabindex="-1" makes it a target for script and keeps it out of the Tab order.
+            if (!element.matches(focusable) && !element.hasAttribute("tabindex")) {
+                element.setAttribute("tabindex", "-1");
+            }
+
+            try {
+                element.focus({ preventScroll: true });
+            }
+            catch {
+            }
+        }
+
+        // Where focus goes when the control that opened the dialog is gone or disabled (a Rebuild button is both while it rebuilds), so
+        // that it is never left on <body> (1.2-FINAL-FIX): the same row's first usable control, else the row itself, else the page's
+        // main heading, else the main region.
+        function fallbackTarget(state) {
+            let row = state.row && state.row.isConnected ? state.row : null;
+            if (!row && state.rowId) {
+                row = document.getElementById(state.rowId);
+            }
+
+            if (row) {
+                return Array.prototype.find.call(row.querySelectorAll(focusable), usable) || row;
+            }
+
+            return document.querySelector("main h1, h1, [role='main'] h1")
+                || document.querySelector("main, [role='main'], .ms-main");
+        }
+
+        // The page re-renders after a confirmation (the Rebuild button is replaced, or disabled, once the operation starts), and a browser
+        // moves focus to <body> when the element that has it goes. So for a few seconds after the dialog closed, a focus that is nowhere
+        // is put on the fallback; the first key or pointer press of the visitor ends it, and focus that is somewhere is never touched.
+        function settle(state) {
+            if (state.settling) {
+                return;
+            }
+
+            state.settling = true;
+            let ticks = 0;
+            let timer = 0;
+            const recover = function () {
+                if (nobodyHasFocus()) {
+                    const target = fallbackTarget(state);
+                    if (target) {
+                        focusElement(target);
+                    }
                 }
-                catch {
+            };
+
+            // After every DOM change as well as on the clock: a re-render that replaces the focused control is put right before the browser
+            // paints or anything samples focus, not up to a tick later.
+            const watcher = typeof MutationObserver === "function" && document.body ? new MutationObserver(recover) : null;
+            if (watcher) {
+                watcher.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["disabled"] });
+            }
+
+            const stop = function () {
+                clearInterval(timer);
+                if (watcher) {
+                    watcher.disconnect();
+                }
+
+                document.removeEventListener("keydown", stop, true);
+                document.removeEventListener("pointerdown", stop, true);
+            };
+
+            document.addEventListener("keydown", stop, true);
+            document.addEventListener("pointerdown", stop, true);
+            timer = setInterval(function () {
+                ticks++;
+                recover();
+
+                if (ticks >= 60) {
+                    stop();
+                }
+            }, 50);
+        }
+
+        // Only when focus is nowhere: a page that has already moved it on (FocusOnNavigate puts it on the new heading) keeps it.
+        function restore(state) {
+            if (!state) {
+                return;
+            }
+
+            if (nobodyHasFocus()) {
+                if (usable(state.invoker)) {
+                    focusElement(state.invoker);
+                }
+                else {
+                    const target = fallbackTarget(state);
+                    if (target) {
+                        focusElement(target);
+                    }
                 }
             }
+
+            settle(state);
         }
 
         function tabbable(dialog) {
@@ -351,7 +445,7 @@
                 }
                 else {
                     live.delete(dialog.id);
-                    restore(state.invoker);
+                    restore(state);
                 }
             });
         }
@@ -388,7 +482,26 @@
                 return false;
             }
 
-            live.set(dialog.id, { dialog: dialog, invoker: invoker, ref: ref || null, released: false });
+            const row = invoker && typeof invoker.closest === "function" ? invoker.closest("tr") : null;
+            const state = { dialog: dialog, invoker: invoker, row: row, rowId: row ? row.id : "", ref: ref || null, released: false, settling: false, watcher: null };
+            live.set(dialog.id, state);
+
+            // The server removes the dialog from the page and only afterwards tells us (release, one round trip later), and the browser
+            // moves focus to <body> the moment the element that has it goes. So the removal itself is watched, and focus is put back at
+            // once (1.2-FINAL-FIX) - release finds it already there.
+            if (ref && typeof MutationObserver === "function" && document.body) {
+                state.watcher = new MutationObserver(function () {
+                    if (!dialog.isConnected) {
+                        state.watcher.disconnect();
+                        state.watcher = null;
+                        if (!state.released) {
+                            restore(state);
+                        }
+                    }
+                });
+                state.watcher.observe(document.body, { childList: true, subtree: true });
+            }
+
             wire(dialog);
             moveFocus(dialog);
             return true;
@@ -406,6 +519,10 @@
 
                 state.released = true;
                 live.delete(id);
+                if (state.watcher) {
+                    state.watcher.disconnect();
+                    state.watcher = null;
+                }
 
                 // Disposed with the page still showing the dialog: the page is inert until it is closed, and focus cannot go back to
                 // a control that is inert.
@@ -414,7 +531,7 @@
                     dialog.close();
                 }
 
-                restore(state.invoker);
+                restore(state);
                 return true;
             },
             openStatic: function (id) {

@@ -16710,3 +16710,44 @@ dialog.ms-modal::backdrop {
 .ms-page-header > :has(> .ms-mark) {
     align-items: flex-start;
 }
+
+/* ===== 1.2-FINAL: the final round's fixes ===== */
+
+/* Fixes from the final review (1.2-FINAL-FIX). A later rule of an earlier selector wins on purpose (D26). */
+
+/* Projections at 1280 px, with slack. The fit of 1.2-UX-FIX had none: ubuntu-latest's fonts are wider than Windows', and Actions ran 15 px out of
+   the region there (reproduced here with 5 % letter spacing). The Actions cell now wraps its buttons - Start and Stop sit side by side when
+   there is room and stack when there is not, so the column's least width is its widest single button - and what else can give does: the Type
+   column (clipped, the full name is its title), the progress bar and the name column's least width. */
+.ms-projections-table .ms-projection-type {
+    width: 7rem;
+    max-width: 7rem;
+}
+
+.ms-projections-table .ms-projection-name,
+.ms-projections-table .ms-shard-name {
+    min-width: 7.5rem;
+}
+
+.ms-projections-table .ms-shard-progress {
+    min-width: 6.5rem;
+}
+
+.ms-projections-table .ms-shard-progress-bar {
+    min-width: 3rem;
+}
+
+.ms-projections-table .ms-shard-start,
+.ms-projections-table .ms-shard-stop {
+    display: inline-block;
+    margin: 0 0 var(--ms-space-xs) var(--ms-space-xs);
+}
+
+.ms-projections-table .ms-shard-stop {
+    margin-bottom: var(--ms-space-xs);
+}
+
+/* Schema › Drift: air above the Apply heading, which sat flush against the drift table or the preview above it. */
+.ms-schema-apply-heading {
+    margin-top: var(--ms-space-xl);
+}

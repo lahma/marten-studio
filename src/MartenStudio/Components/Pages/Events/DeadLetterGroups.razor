@@ -265,6 +265,9 @@
 
     private async Task OnScopeChangedAsync()
     {
+        // A dialog opened under the last scope's header confirms nothing about this one (1.2-FINAL-FIX).
+        CancelDialog();
+
         await ReloadIfChangedAsync();
         await InvokeAsync(StateHasChanged);
     }
@@ -382,6 +385,7 @@
             return;
         }
 
+        StudioScope? openedUnder = State.ActiveScope;
         working = true;
 
         try
@@ -389,6 +393,12 @@
             // Asked now, not taken from the table: the dialog's count is the count the service will check the typed one
             // against, and the table may be a refresh interval old.
             DeadLetterGroupSkipPlan described = await Events.DescribeDeadLetterGroupSkipAsync(scope, group.Key, pageCancellation.Token);
+
+            // The scope moved while this was read: the answer is about a scope the page has left, and opens no dialog.
+            if (openedUnder != State.ActiveScope)
+            {
+                return;
+            }
 
             if (described.Refusal is { } refused)
             {
@@ -432,7 +442,11 @@
         StudioScope? scope = pendingScope;
         CancelDialog();
 
-        if (group is null || scope is null)
+        // The scope the dialog was opened under, if the page is still in that database (the scope change closes the dialog; this is the
+        // second line of defence). A tenant filter inside the same database may differ, as SkipScope(group) chose it.
+        if (group is null || scope is null
+            || !string.Equals(scope.StoreKey, State.ActiveScope?.StoreKey, StringComparison.Ordinal)
+            || !string.Equals(scope.DatabaseId, State.ActiveScope?.DatabaseId, StringComparison.Ordinal))
         {
             return;
         }

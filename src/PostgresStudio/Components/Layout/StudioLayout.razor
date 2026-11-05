@@ -219,6 +219,16 @@
             return;
         }
 
+        // With navigation interception switched off (1.1's navigation) the shell writes nothing here (1.2-FINAL-FIX): Back and Forward are
+        // reported as not intercepted, the pages that follow their own address (Documents, Document, Database objects and rows) apply the
+        // scope it names as they did in 1.1, and a rewrite from here, racing a page's own scope change under a policy that yields, bounced
+        // the address between two databases with a page fetch on each turn. The switch exists to restore 1.1's navigation, so the address
+        // is the pages' to follow; a scope change (OnScopeChanged) still writes the scope on screen into it.
+        if (!StudioNavigationSwitch.InterceptionEnabled)
+        {
+            return;
+        }
+
         // Anything else - a push built from an address before a picker change, an address that names no scope or only part of the scope
         // on screen (Back to the entry from before a link to a tenant was followed names no tenant, 1.2-UX-FIX), the same scope - leaves
         // the scope where it is, and the address follows it: the bar names what is on screen. Nothing is written when it already does.

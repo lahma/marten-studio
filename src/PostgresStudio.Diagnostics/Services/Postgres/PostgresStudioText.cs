@@ -51,6 +51,8 @@ internal static class PostgresStudioText
         SourceNoun = "data source",
         ScopeDeniedEntry = "Not authorized for this data source or database.",
         SourcePossessive = "the data source's",
+        FindHint = "An exact table or view name, or a statement's queryid",
+        FindNamesScopeLikeThePickers = true,
 
         BrowseReadOnlyDenial =
             "PostgresStudioOptions.ReadOnly is true, which turns PostgresStudioOptions.Capabilities.BrowseDatabase off with every "

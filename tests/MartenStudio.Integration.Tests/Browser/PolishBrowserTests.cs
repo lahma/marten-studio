@@ -19,34 +19,33 @@ public class PolishBrowserTests(BrowserSuiteFixture fixture)
     /// scrolled would still be correct (D25); this is the table not needing it.
     /// </summary>
     [BrowserFact]
-    public async Task The_Triggers_table_fits_its_region_at_1280_px()
+    public Task The_Triggers_table_fits_its_region_at_1280_px() => TriggersFitAsync("polish-triggers-1280", widerMetrics: false);
+
+    /// <summary>The same with every text run about 5 % wider, a stand-in for CI's fonts (1.2-FINAL-FIX).</summary>
+    [BrowserFact]
+    public Task The_Triggers_table_fits_its_region_at_1280_px_with_wider_fonts() => TriggersFitAsync("polish-triggers-1280-wide", widerMetrics: true);
+
+    private async Task TriggersFitAsync(string name, bool widerMetrics)
     {
-        await BrowserScenario.RunAsync(fixture.Browser, "polish-triggers-1280", fixture.Root, "admin", async studio =>
+        await BrowserScenario.RunAsync(fixture.Browser, name, fixture.Root, "admin", async studio =>
         {
             await studio.Page.SetViewportSizeAsync(1280, 800);
             await studio.GoAsync(fixture.Root.StudioUrl("maintenance"));
             await studio.Page.Locator(".ms-maint-table").First.WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
 
-            string[] clipped = await studio.Page.EvaluateAsync<string[]>(
-                """
-                () => {
-                    const table = document.querySelector('.ms-maint-table');
-                    const region = table.closest('.ms-table-scroll').getBoundingClientRect();
-                    return [...table.querySelectorAll('thead th')]
-                        .filter(th => { const r = th.getBoundingClientRect(); return r.left < region.left - 1 || r.right > region.right + 1; })
-                        .map(th => th.textContent.trim());
-                }
-                """);
+            if (widerMetrics)
+            {
+                await TableFit.WidenAsync(studio.Page);
+            }
 
-            clipped.Should().BeEmpty("every column of the Triggers table is inside its scroll region at 1280 px");
+            TableFit.Report report = await TableFit.MeasureAsync(studio.Page, ".ms-maint-table");
 
-            (await studio.Page.EvaluateAsync<bool>(
-                "() => { const r = document.querySelector('.ms-maint-table').closest('.ms-table-scroll'); return r.scrollWidth <= r.clientWidth + 1; }"))
-                .Should().BeTrue("the region has nothing to scroll to");
+            report.Outside().Should().BeEmpty("every column of the Triggers table is inside its scroll region at 1280 px: " + report.Describe());
+            report.Fits.Should().BeTrue("the region has nothing to scroll to: " + report.Describe());
 
             (await studio.Page.EvaluateAsync<double>(
                 "() => document.querySelector('.ms-maint-name').getBoundingClientRect().width"))
-                .Should().BeLessThanOrEqualTo(15 * 16 + 20, "the name column stops at 15rem, whatever the identifier");
+                .Should().BeLessThanOrEqualTo(15 * 16 + 20 + (widerMetrics ? 40 : 0), "the name column stops at 15rem, whatever the identifier");
 
             studio.AssertClean("the Maintenance page at 1280 px");
         });

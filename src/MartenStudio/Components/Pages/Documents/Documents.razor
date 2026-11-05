@@ -119,6 +119,9 @@
     private string? loadedSignature;
     private bool preferencesLoaded;
     private bool bulkDialogOpen;
+
+    /// <summary>The scope the bulk-delete dialog was opened under (1.2-FINAL-FIX).</summary>
+    private StudioScope? bulkDialogScope;
     private bool bulkDeleting;
     private string? selectionKey;
 
@@ -342,6 +345,10 @@
 
     private Task OnScopeChangedAsync() => InvokeAsync(async () =>
     {
+        // The bulk-delete dialog was opened under the last scope's header and its selection: closed before anything is read, not after
+        // (1.2-FINAL-FIX).
+        bulkDialogOpen = false;
+        bulkDialogScope = null;
         loadedSignature = null;
         await OnParametersSetAsync();
     });
@@ -847,20 +854,27 @@
 
     private Task OpenBulkDialogAsync()
     {
+        bulkDialogScope = State.ActiveScope;
         bulkDialogOpen = true;
         StateHasChanged();
         return Task.CompletedTask;
     }
 
-    private void CloseBulkDialog() => bulkDialogOpen = false;
+    private void CloseBulkDialog()
+    {
+        bulkDialogOpen = false;
+        bulkDialogScope = null;
+    }
 
     private async Task BulkDeleteAsync()
     {
         bulkDialogOpen = false;
 
-        StudioScope? scope = State.ActiveScope;
+        // The scope the dialog was opened under, and only if it is still the page's (the scope change closes the dialog).
+        StudioScope? scope = bulkDialogScope;
+        bulkDialogScope = null;
 
-        if (scope is null || Alias is not { Length: > 0 } alias || selected.Count == 0 || bulkDeleting)
+        if (scope is null || scope != State.ActiveScope || Alias is not { Length: > 0 } alias || selected.Count == 0 || bulkDeleting)
         {
             return;
         }

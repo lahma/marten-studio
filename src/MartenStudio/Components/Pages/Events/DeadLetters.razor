@@ -407,6 +407,9 @@
     private RebuildScope? rewindScope;
     private string? rewindScopeError;
     private DialogKind dialog = DialogKind.None;
+
+    /// <summary>The scope the open dialog was opened under: a confirmation acts on this and on nothing else (1.2-FINAL-FIX).</summary>
+    private StudioScope? dialogScope;
     private bool loading = true;
     private bool loadingEvent;
     private bool working;
@@ -777,6 +780,11 @@
     private async Task OnScopeChangedAsync()
     {
         signature = Signature();
+
+        // A dialog opened under the last scope's header confirms nothing about this one: an intercepted Back or Forward moves the scope
+        // and keeps this page (and its dialog), so a Skip opened for one database was confirmed against the other (1.2-FINAL-FIX).
+        CancelDialog();
+
         await LoadAsync();
         await InvokeAsync(StateHasChanged);
     }
@@ -928,6 +936,7 @@
     {
         actionError = null;
         pendingDiscard = id;
+        dialogScope = State.ActiveScope;
         dialog = DialogKind.Discard;
         return Task.CompletedTask;
     }
@@ -937,6 +946,7 @@
         actionError = null;
         pendingSkip = row.EventSequence;
         pendingSkipTenant = row.TenantId;
+        dialogScope = State.ActiveScope;
         dialog = DialogKind.Skip;
         return Task.CompletedTask;
     }
@@ -962,9 +972,10 @@
         rewindScope = null;
         rewindScopeError = null;
         pendingRewind = row;
+        dialogScope = State.ActiveScope;
         dialog = DialogKind.Rewind;
 
-        StudioScope? scope = State.ActiveScope;
+        StudioScope? scope = dialogScope;
         if (scope is null || shape?.EventTablesExist != true)
         {
             return;
@@ -972,14 +983,23 @@
 
         try
         {
-            rewindScope = await ProjectionData.DescribeRebuildAsync(scope, row.ProjectionName, pageCancellation.Token);
+            RebuildScope described = await ProjectionData.DescribeRebuildAsync(scope, row.ProjectionName, pageCancellation.Token);
+
+            // The scope moved, or the dialog was closed, while this was read: it describes a dialog that is no longer there.
+            if (dialog == DialogKind.Rewind && scope == dialogScope)
+            {
+                rewindScope = described;
+            }
         }
         catch (OperationCanceledException)
         {
         }
         catch (Exception exception)
         {
-            rewindScopeError = exception.Message;
+            if (dialog == DialogKind.Rewind && scope == dialogScope)
+            {
+                rewindScopeError = exception.Message;
+            }
         }
     }
 
@@ -1028,6 +1048,10 @@
     private void CancelDialog()
     {
         dialog = DialogKind.None;
+        dialogScope = null;
+        pendingDiscard = Guid.Empty;
+        pendingSkip = 0;
+        pendingSkipTenant = null;
         pendingRewind = null;
         rewindScope = null;
         rewindScopeError = null;
@@ -1036,10 +1060,13 @@
     private async Task ConfirmAsync()
     {
         DialogKind kind = dialog;
+        StudioScope? scope = dialogScope;
         dialog = DialogKind.None;
+        dialogScope = null;
 
-        StudioScope? scope = State.ActiveScope;
-        if (scope is null || kind == DialogKind.None)
+        // The scope the dialog was opened under, and only if it is still the page's (the scope change closes the dialog, so this is the
+        // second line of defence).
+        if (scope is null || kind == DialogKind.None || scope != State.ActiveScope)
         {
             return;
         }
