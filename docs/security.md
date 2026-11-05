@@ -52,7 +52,8 @@ provided `StoreAuthorizationPolicy` (`SourceAuthorizationPolicy` in Postgres Stu
 studio authorized by `AuthorizationPolicy` alone asks no policy per call. A link the visitor clicks that names another
 store, database or tenant, and a Back or Forward to such an address (the browser reports both the same way), moves the
 studio to it only when the visitor's own listings carry it, as the store policy decided them; a page's own navigation never
-moves the scope.
+moves the scope. With `PostgresStudio.DisableNavigationInterception` on, Back and Forward never move it either: the address
+is rewritten to the scope on screen.
 
 Find (1.2), the header box, runs each probe through the service of the page it opens, under that page's gates, and audits
 nothing itself. A hidden document type, a schema the browser's gate withholds, a tenant the store policy refuses and a
