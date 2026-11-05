@@ -915,6 +915,9 @@ public class StudioLayoutTests
             .WithStore("default", "Default", databaseIdentities: "localhost.marten")
             .WithStore("IInvoicingStore", "Invoicing Store", databaseIdentities: "localhost.invoicing");
 
+        // On a studio page: the shell writes the scope only into one (1.2-UX-FIX-FU4).
+        context.Navigate("marten");
+
         var layout = RenderLayout(context);
         layout.Find("#ms-store-select").Change("IInvoicingStore");
 
@@ -992,6 +995,7 @@ public class StudioLayoutTests
     {
         using var context = new StudioComponentContext().WithPolicy("default");
         context.Catalog.WithStore("default", "Default", DatabaseCardinality.StaticMultiple, "db-a", "db-b");
+        context.Navigate("marten");
 
         var layout = RenderLayout(context);
         layout.WaitForAssertion(() => layout.Markup.Should().Contain(BodyMarker));

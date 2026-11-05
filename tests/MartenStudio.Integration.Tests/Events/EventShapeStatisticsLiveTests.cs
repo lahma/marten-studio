@@ -190,6 +190,15 @@ public class EventShapeStatisticsLiveTests(EventShapeStatisticsLiveTests.Fixture
     }
 
     [PostgresFact]
+    public async Task A_name_absent_from_a_truncated_listing_is_not_confirmed_and_never_no_such_type()
+    {
+        ShapeCheckResult result = await CheckHoldingAsync("late_ghost", key => Listing(key, TimeSpan.FromMinutes(1), "something_else") with { IsTruncated = true });
+
+        result.Coverage.Should().Be(ShapeCoverage.NotChecked);
+        result.CoverageReason.Should().Be(ShapeCheckText.CouldNotConfirm);
+    }
+
+    [PostgresFact]
     public async Task A_fresh_listing_of_this_scope_that_does_not_hold_the_name_is_no_such_type()
     {
         ShapeCheckResult result = await CheckHoldingAsync("late_ghost", key => Listing(key, TimeSpan.FromMinutes(1), "something_else"));

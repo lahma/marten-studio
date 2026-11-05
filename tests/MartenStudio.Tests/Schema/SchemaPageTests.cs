@@ -211,6 +211,35 @@ public class SchemaPageTests
         schema.LastConfirmation.Should().Be("localhost.marten");
     }
 
+    /// <summary>
+    /// 1.2-UX-FIX-FU4: an apply refused because the tab is busy (a preview under way behind the dialog) closes the dialog all the same,
+    /// so a confirm is never dropped silently with the dialog left up. The confirm is handed to the page directly, as the dialog's own
+    /// guard would not let it through.
+    /// </summary>
+    [Fact]
+    public async Task A_confirm_refused_while_the_tab_is_busy_closes_the_dialog_and_applies_nothing()
+    {
+        using var context = NewContext(out FakeSchemaDataService schema, capabilities: true);
+        schema.Preview = new MigrationPreview("create index x on y (z);", 1, [], "Update", null);
+        schema.DatabaseIdentity = "localhost.marten";
+
+        var page = context.Render<SchemaPage>();
+        ClickPreview(page);
+        page.Find(".ms-button-danger").Click();
+        page.FindAll(".ms-confirm-dialog").Should().ContainSingle("the premise: the dialog is up");
+
+        schema.PreviewGate = new TaskCompletionSource<bool>();
+        ClickPreview(page);
+        page.WaitForAssertion(() => schema.Previews.Should().Be(2));
+
+        await page.InvokeAsync(() => page.FindComponent<PostgresStudio.Components.Shared.ConfirmDialog>().Instance.OnConfirm.InvokeAsync("localhost.marten"));
+
+        schema.Applies.Should().Be(0);
+        page.FindAll(".ms-confirm-dialog").Should().BeEmpty("the dialog is closed, not left up over a dropped confirm");
+
+        schema.PreviewGate.SetResult(true);
+    }
+
     [Fact]
     public void Typing_the_wrong_identity_leaves_the_confirm_button_disabled()
     {

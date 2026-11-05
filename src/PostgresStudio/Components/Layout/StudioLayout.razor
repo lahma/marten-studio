@@ -222,20 +222,7 @@
         // Anything else - a push built from an address before a picker change, an address that names no scope or only part of the scope
         // on screen (Back to the entry from before a link to a tenant was followed names no tenant, 1.2-UX-FIX), the same scope - leaves
         // the scope where it is, and the address follows it: the bar names what is on screen. Nothing is written when it already does.
-        SyncScopeToUrlForStudioPage();
-    }
-
-    /// <summary>
-    /// <see cref="SyncScopeToUrl" />, only while the address is a studio page: an address no page matches (a file, an endpoint) is the
-    /// browser's to load, as it was named (StudioRoutes), and a scope appended to it would change what is loaded. The scope-move branch
-    /// asks it too (1.2-UX-FIX-FU3), after the scope was read, so it judges the address as it is then.
-    /// </summary>
-    private void SyncScopeToUrlForStudioPage()
-    {
-        if (StudioLink.ToDashboardRelativePath(Navigation.Uri, Navigation.BaseUri, Settings) is { } relative && Descriptor.Routes.Match(relative, Settings) is not null)
-        {
-            SyncScopeToUrl();
-        }
+        SyncScopeToUrl();
     }
 
     /// <summary>
@@ -261,7 +248,7 @@
 
             // A scope the listings do not carry, or the policy refuses, was ignored and the scope did not move: the address stops naming
             // the refused value and names the scope on screen (1.2-UX-FIX-FU). A no-op when the scope moved, which has already been written.
-            SyncScopeToUrlForStudioPage();
+            SyncScopeToUrl();
         }
         catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
         {
@@ -332,6 +319,15 @@
         // Not before the address's own scope was read (addressScopeApplied): the catalog may still be loading, ActiveScope is null until
         // it has, and a rewrite then would strip a pasted ?store=&db= or write the default database over it (D9).
         if (!interactive || !addressScopeApplied)
+        {
+            return;
+        }
+
+        // Only a studio page is ever rewritten (1.2-UX-FIX-FU4), by every writer - first load, a render, a scope change, a location change:
+        // an address no page matches (a file, an endpoint) is the browser's to load, as it was named (StudioRoutes), and a scope appended
+        // to it would change what is loaded - while a force-load of it is in flight, say.
+        if (StudioLink.ToDashboardRelativePath(Navigation.Uri, Navigation.BaseUri, Settings) is not { } relative
+            || Descriptor.Routes.Match(relative, Settings) is null)
         {
             return;
         }

@@ -1,4 +1,5 @@
 using MartenStudio.Services.Schema;
+using MartenStudio.Tests.Support;
 using PostgresStudio.Services;
 
 namespace MartenStudio.Tests.Schema;
@@ -69,10 +70,19 @@ internal sealed class FakeSchemaDataService : ISchemaDataService
         return Task.FromResult(Check);
     }
 
-    public Task<MigrationPreview> PreviewAsync(StudioScope scope, CancellationToken cancellationToken = default)
+    /// <summary>A gate the next previews wait on, when set: how a test keeps the tab busy while a dialog is open.</summary>
+    public TaskCompletionSource<bool>? PreviewGate { get; set; }
+
+    public async Task<MigrationPreview> PreviewAsync(StudioScope scope, CancellationToken cancellationToken = default)
     {
         Previews++;
-        return Task.FromResult(Preview);
+
+        if (PreviewGate is { } gate)
+        {
+            await gate.Task.Bounded();
+        }
+
+        return Preview;
     }
 
     public Task<SchemaApplyResult> ApplyAsync(

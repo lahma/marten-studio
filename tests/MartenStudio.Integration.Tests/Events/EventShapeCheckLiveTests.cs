@@ -242,14 +242,22 @@ public class EventShapeCheckLiveTests(EventShapeCheckLiveTests.Fixture fixture)
             result.Subject.Length.Should().BeLessThanOrEqualTo(ShapeCheckLimits.MaxSubjectLength);
         }
 
-        // A usable name nothing holds: "no such type" where a listing that can say does not hold it, and "could not confirm" - never the
-        // first for want of an answer - where none was at hand (1.2-UX-FIX-FU3). Which of the two depends on whether the counted listing
-        // another test read is still in hand, and both are one sentence and no read.
-        ShapeCheckResult unknown = await CheckAsync("nothing_like_it");
+        // A usable name nothing holds, asked of a fresh counted listing of this scope that the caller passes through
+        // (1.2-UX-FIX-FU4): "no such type" exactly, whatever other tests left in the shared half minute.
+        EventTypeList fresh;
+        using (MartenFixture.ScopedService<IEventDataService> events = Marten.Resolve<IEventDataService>())
+        {
+            fresh = await events.Service.ListEventTypesAsync(Scope, withCounts: true, Token);
+        }
+
+        fresh.Error.Should().BeNull();
+
+        using MartenFixture.ScopedService<IEventShapeCheck> check = Marten.Resolve<IEventShapeCheck>();
+        ShapeCheckResult unknown = await check.Service.CheckAsync(Scope, "nothing_like_it", false, fresh, Token);
 
         unknown.Coverage.Should().Be(ShapeCoverage.NotChecked);
         unknown.Statements.Should().BeEmpty();
-        unknown.CoverageReason.Should().BeOneOf(ShapeCheckText.NoSuchEventType("nothing_like_it"), ShapeCheckText.CouldNotConfirm);
+        unknown.CoverageReason.Should().Be(ShapeCheckText.NoSuchEventType("nothing_like_it"));
     }
 
     [PostgresFact]

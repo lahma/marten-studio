@@ -572,14 +572,15 @@ else
     /// </remarks>
     private async Task ApplyAsync(string typed)
     {
+        // The dialog is closed first (1.2-UX-FIX-FU4): a confirm that is refused below is never dropped silently with the dialog left up.
+        applyOpen = false;
+
         // One apply at a time (1.2-UX-FIX-FU3), whatever reaches here twice: the dialog refuses a second confirm itself, and this is the
         // defence in depth for a migration that must not run twice.
         if (busy)
         {
             return;
         }
-
-        applyOpen = false;
 
         await RunAsync("Applying...", async token =>
         {

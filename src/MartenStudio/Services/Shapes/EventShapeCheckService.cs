@@ -230,8 +230,11 @@ internal sealed class EventShapeCheckService : IEventShapeCheck
         return Confirmation.Unconfirmed;
     }
 
+    // A name a truncated listing does not hold may simply be past its cap: that is "not confirmed", never "no such type".
     private static Confirmation Holds(EventTypeList listing, string name) =>
-        listing.Types.Any(x => string.Equals(x.Name, name, StringComparison.Ordinal)) ? Confirmation.Known : Confirmation.NoSuchType;
+        listing.Types.Any(x => string.Equals(x.Name, name, StringComparison.Ordinal))
+            ? Confirmation.Known
+            : listing.IsTruncated ? Confirmation.Unconfirmed : Confirmation.NoSuchType;
 
     private Task<IReadOnlyList<string>?> StatisticsAliasesAsync(ResolvedScope resolved, CancellationToken cancellationToken) =>
         statisticsAliases.GetAsync(

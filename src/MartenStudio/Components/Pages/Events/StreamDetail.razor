@@ -894,6 +894,9 @@
 
     private async Task ArchiveAsync()
     {
+        // The dialog is closed first (1.2-UX-FIX-FU4): a confirm that is refused below is never dropped silently with the dialog left up.
+        archiveDialogOpen = false;
+
         // One archive at a time (1.2-UX-FIX-FU3): the dialog refuses a second confirm itself, and this is the defence in depth.
         if (archiving)
         {
@@ -901,7 +904,6 @@
         }
 
         StudioScope? scope = State.ActiveScope;
-        archiveDialogOpen = false;
 
         if (scope is null || string.IsNullOrWhiteSpace(Id) || stream is not { Exists: true })
         {

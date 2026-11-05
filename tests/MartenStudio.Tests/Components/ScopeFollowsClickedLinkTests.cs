@@ -181,6 +181,28 @@ public class ScopeFollowsClickedLinkTests
     }
 
     /// <summary>
+    /// 1.2-UX-FIX-FU4: an intercepted address no studio page matches, naming a valid second store and only part of a scope, moves the scope
+    /// (the link names one the listings carry) - and no writer of the shell's rewrite, the scope change's included, appends the rest of the
+    /// scope to it while the browser's force-load is in flight: only the force-load is recorded.
+    /// </summary>
+    [Fact]
+    public async Task An_intercepted_non_page_address_naming_a_valid_second_store_records_only_the_force_load()
+    {
+        Rig rig = await StartAsync();
+        await using StudioComponentContext context = rig.Context;
+        rig.Routes.WaitForAssertion(() => rig.Navigation.Uri.Should().Contain("store=default"));
+        int before = rig.Navigation.Requests.Count;
+
+        rig.Navigation.Click("no-such-page?store=other");
+
+        rig.Routes.WaitForAssertion(() => context.State.ActiveScope!.StoreKey.Should().Be("other"));
+        await rig.Routes.InvokeAsync(() => { });
+
+        rig.Navigation.Requests.Skip(before).Should().ContainSingle("only the force-load: no rewrite appended the database to it")
+            .Which.Options.ForceLoad.Should().BeTrue();
+    }
+
+    /// <summary>
     /// With navigation interception off the enhanced navigation reports Back as not intercepted: the scope does not move and the address
     /// follows it again, as it does for any programmatic navigation.
     /// </summary>
