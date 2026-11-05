@@ -52,7 +52,7 @@ and a .NET 11 SDK Debug start-up failure.
   9265). Provisioning tenants stays out.
 - Events > Event flow: which projections and subscriptions read each event type of the store, and the document types,
   flat tables and live aggregates they write, drawn from `StoreOptions` and the projection graph alone (no database
-  read), with filters by projection and by event type, and the event types nothing reads (M6). A document type the host
+  read), with filters by projection and by event type, and the event types nothing reads. A document type the host
   hides, and the subclasses of a hidden root, are absent. The Rebuild dialog says which event types a projection reads
   ("Event types read"), and the Projections and Event types screens link each projection and event type to its flow
   ("Show its flow").

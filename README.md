@@ -80,7 +80,7 @@ the same way; a missing or older one fails when `AddPostgresStudio()` is first c
 | | |
 |---|---|
 | [![Overview, light](https://raw.githubusercontent.com/lahma/marten-studio/main/docs/screenshots/overview-light.png)](docs/screenshots/overview-light.png) | [![Overview, dark](https://raw.githubusercontent.com/lahma/marten-studio/main/docs/screenshots/overview-dark.png)](docs/screenshots/overview-dark.png) |
-| Overview — one card per store, with tenancy, stream identity and the databases behind it | The same page in the dark theme, which follows the theme picker behind the header's gear button |
+| Overview — the selected store's card, with tenancy, stream identity and the databases behind it | The same page in the dark theme, which follows the theme picker behind the header's gear button |
 | [![Document list](https://raw.githubusercontent.com/lahma/marten-studio/main/docs/screenshots/documents-list.png)](docs/screenshots/documents-list.png) | [![Document detail](https://raw.githubusercontent.com/lahma/marten-studio/main/docs/screenshots/document-detail.png)](docs/screenshots/document-detail.png) |
 | Documents — the collections rail, the search grammar and its index verdict | One document: JSON on the left, everything the row's metadata columns say on the right |
 | [![Stream detail](https://raw.githubusercontent.com/lahma/marten-studio/main/docs/screenshots/stream-detail.png)](docs/screenshots/stream-detail.png) | [![Dead letters](https://raw.githubusercontent.com/lahma/marten-studio/main/docs/screenshots/dead-letters.png)](docs/screenshots/dead-letters.png) |
@@ -93,6 +93,8 @@ the same way; a missing or older one fails when `AddPostgresStudio()` is first c
 | Database — every table, view, function, trigger, sequence and type beside the store, Marten's own told apart; here a Quartz.NET job store | A table's rows: a filter with its index verdict, keyset paging over a composite key, typed headers and "≈ date" hints |
 | [![Row detail](https://raw.githubusercontent.com/lahma/marten-studio/main/docs/screenshots/database-row-detail.png)](docs/screenshots/database-row-detail.png) | [![Relationships over tables](https://raw.githubusercontent.com/lahma/marten-studio/main/docs/screenshots/relationships-quartz.png)](docs/screenshots/relationships-quartz.png) |
 | One row: every column, what it points at and what points at it | Relationships over plain tables beside the document types |
+| [![Event flow](https://raw.githubusercontent.com/lahma/marten-studio/main/docs/screenshots/event-flow.png)](docs/screenshots/event-flow.png) | |
+| Events › Event flow (1.2) — which projections and subscriptions read each event type, and what they write | |
 
 ## Install
 
@@ -415,7 +417,7 @@ fails the host with a message that names the option.
 |---|---|---|
 | `Path` | `/marten` | Where the studio is mounted. A plain rooted URL path. `MapMartenStudio(pattern)` overrides it. |
 | `Title` | `Marten Studio` | Browser tab and sidebar heading. |
-| `ApplicationPath` | `null` | Where the header's "Back to application" link goes; no link when `null`. A path that starts with a single `/` (`/`, `/app`; a host behind `UsePathBase` includes its base, `/myapp/`) or an absolute `http` or `https` URL, used exactly as written and never re-rooted under the studio's mount path. Anything else fails startup. |
+| `ApplicationPath` | `null` | Where the header's "Back to application" link goes; no link when `null`. A path that starts with a single `/` (`/`, `/app`; a host behind `UsePathBase` includes its base, `/myapp/`) or an absolute `http` or `https` URL without user information, used exactly as written and never re-rooted under the studio's mount path. Anything else fails startup. |
 | `AuthorizationPolicy` | `null` | Policy applied to every studio endpoint — pages, circuit and static assets. |
 | `StoreAuthorizationPolicy` | `null` | Policy evaluated against `MartenStoreResource` before a store, database or tenant is listed, framed or read. |
 | `WriteAuthorizationPolicy` | `null` | Policy evaluated against `MartenStoreResource` with the capability named, before every mutation. Falls back to `StoreAuthorizationPolicy`. |
@@ -432,7 +434,7 @@ fails the host with a message that names the option.
 | `ExactCountThreshold` | `100000` | Above this estimated row count, collection counts stay `pg_class.reltuples` estimates, prefixed `~`, instead of becoming `count(*)` — and asking for an exact count is **refused**, with the reason on the badge, rather than being paid for. A conjoined collection under a tenant scope is the exception: that count is `where tenant_id = …`, which Marten makes index-backed by putting `tenant_id` first in the primary key, so it is always counted exactly and this threshold never applies to it. |
 | `RefreshInterval` | 5 seconds | How often live pages poll. Paused while the tab is hidden. 1 second … 5 minutes. |
 | `HealthInterval` | 60 seconds | How often the health advisor re-checks a database while its Health page or the Overview is open. One check serves every open tab and circuit for that long, and nothing is checked while no page is open and nothing probes the opt-in health check, if you registered it (whose runs follow the same interval). 15 seconds … 1 hour, and never shorter than `RefreshInterval`: a longer `RefreshInterval` wins. The deeper checks are cached for five minutes whatever it says. |
-| `AcceptedChecks` | empty | Health checks the application accepts, by code with a reason (`options.AcceptedChecks["K05"] = "..."`): they still run and are shown, as accepted, but count nowhere - not in the Health page's state, the badge, the banners or the opt-in health check's status. Startup refuses an unknown code and a blank or over-long reason; an entry for a retired code (K10, retired in 1.1) is accepted and ignored, with one `Information` line (event 9490) saying it can be removed. See [docs/health.md](docs/health.md#accepting-a-check). |
+| `AcceptedChecks` | empty | Health checks the application accepts, by code with a reason (`options.AcceptedChecks["K05"] = "..."`): they still run and are shown, as accepted, but count nowhere - not in the Health page's state, the badge, the banners or the opt-in health check's status. Startup refuses an unknown code and a blank or over-long reason; an entry for a retired code (K10, retired in 1.1) is accepted and ignored, with one `Information` line (event 9490) saying it can be removed. Read once, when the options are validated at startup (1.2). See [docs/health.md](docs/health.md#accepting-a-check). |
 | `RebuildShardTimeout` | 1 hour | The per-shard replay budget handed to Marten's rebuild. At least 1 minute — see the warning below. |
 | `ProjectionThresholds` | empty | How far behind the high-water mark a projection may fall, in events, before the studio colours it amber and red, by projection name: `o.ProjectionThresholds["Trips"] = new(WarningBehind: 5_000, CriticalBehind: 50_000);` (`ProjectionLagThreshold`). It colours the Projections page and the Overview, draws the lines on a shard's chart and is what D04 judges a lag against, and it wins over numbers a host wrote into a progression row's `warning_behind_threshold` and `critical_behind_threshold` (Marten writes neither) and over the studio's own 1,000 and 100,000. It applies to **every store** by projection name alone; a name no projection of a store has is not an error, the Projections page's *Thresholds that apply* says so. Names are compared exactly. Startup refuses an entry whose numbers are not above zero or whose `CriticalBehind` is below its `WarningBehind`, naming the projection. |
 | `IsDocumentTypeVisible` | `null` | `Func<Type, bool>` filter over the registered document types, applied in the data layer and not only in navigation. Marten's own `DeadLetterEvent` is asked too, and hiding it hides the dead-letter screen, its navigation entry and Overview tile, Discard and Rewind, and the advisor's D06 — so a delegate written as an allow-list of your own types hides the dead letters unless it answers `true` for `typeof(DeadLetterEvent)`. A delegate that throws for it is read as hiding it. It must answer from the type alone and the same way every time: since 1.2 a shape check's result and the Event flow's model are shared between visitors who resolve the same scope, so it hides types, not visitors (keep a visitor from a type with `StoreAuthorizationPolicy`; see [docs/security.md](docs/security.md#what-isdocumenttypevisible-hides)). |
@@ -457,8 +459,10 @@ look", links to Database › Connection.
 **Stores** (`/marten/stores`, 1.2, shown when you may see two or more stores) — every store you may see: whether it
 builds and why not, its tenancy in words, its document types and event store, whether this process hosts its daemon, and
 each database with a health chip from the last sweep. The page never starts a sweep by being opened; Check runs the one
-a database's Overview would. A link to another store, database or tenant that you click moves the studio to it; Back and
-Forward do not (the address is rewritten back to the scope on screen).
+a database's Overview would. A link to another store, database or tenant that you click moves the studio to it, and so
+does Back or Forward to such an address when your own listings carry it; Back or Forward to an address that names only
+part of the scope on screen rewrites the address to the scope on screen. With `PostgresStudio.DisableNavigationInterception`
+on, Back and Forward never move it.
 
 **Tenants** (`/marten/tenants`, 1.2, shown for a store with conjoined data) — the tenants you may address, 25 a page:
 where each lives (its own database, its own partition, or shared tables), estimated documents, events and streams from
@@ -1013,7 +1017,7 @@ The long form is in [`docs/security.md`](docs/security.md). The short form:
   `StoreUnavailable`, 9211 `DocumentWriteRoundTripDropped`. A database browser's first read of a
   relation's rows is 9235 and an opened row 9236, a read of other sessions' details is 9245, a LINQ
   mode run, refusal and Postgres failure are 9260, 9261 and 9262, a bloat measure is audited as "Measure bloat", a
-  finding's action as its own name ("Find the longest streams"), and the Statements page's first read in a circuit is 9452. The ranges 9200–9299, 9300–9329 and 9400–9519 are
+  finding's action as its own name ("Find the longest streams", "What-if foreign key lookup", "Try indexes for a table"), an orphaned progression row's removal is 9225 and its refusal 9226, Tenants' first read of per-tenant estimates in a circuit is 9265, and the Statements page's first read in a circuit is 9452. The ranges 9200–9299, 9300–9329 and 9400–9519 are
   reserved. Every value a visitor could shape - a typed `?store=`, a statement, a reason - reaches the log escaped and
   bounded, so it cannot write a log line of any length or forge a second one.
 - **Log levels.** A state the host configured is not a warning. No async daemon in this process, a

@@ -86,7 +86,8 @@ withheld, and its reason is shown on the check's row only beside a finding the v
 list (the Server page, Marten Studio's Configuration page) is configuration, shown to anyone who may open that page.
 
 **Actions on a finding** (1.2). A finding may offer an on-demand action (`IHealthFindingAction`, internal; MartenStudio
-registers E06's "Find the 20 longest streams"), which `HealthActionService` runs for the visitor who pressed it and never
+registers E06's "Find the 20 longest streams", and PostgresStudio registers, for both studios, T15's "What if it had an
+index?" and T01's "Try indexes against this table's statements"), which `HealthActionService` runs for the visitor who pressed it and never
 in a sweep. Each press asks the finding's own gate (and its tenant's store policy) again, through the one
 `HealthVisitorGate` the report asks, before anything is read, then whatever else the action asks: E06's asks the
 `Activity` gate when it would list a conjoined store's streams across tenants, and is filed under `ViewDatabaseActivity`

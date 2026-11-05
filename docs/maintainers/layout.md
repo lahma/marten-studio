@@ -140,7 +140,7 @@ src/MartenStudio/Services/Find/           Find by id's Marten kinds (1.2-SCOPE-3
                                          contributors, each asking the data service of the page its hit opens, and the helper (FindScopes)
                                          that reads the event store's shape once per Find and decides the tenant restriction (FindTenants:
                                          under a store policy, the tenants the header lists, whatever discovery found)
-src/MartenStudio/Services/Shapes/         The shape check's core (1.2-SHAPE): sampler limits and cache, the round-trip classifier, the
+src/MartenStudio/Services/Shapes/         The shape check's core (1.2-SHAPE), `EventShapeCheckService` among it: sampler limits and cache, the round-trip classifier, the
                                          failure describer, the aggregator and the sentences; the documents' check service
 src/MartenStudio/Components/Shapes/       The shape check's panels and the findings table
 tests/MartenStudio.Tests/Shapes/          The shape check's classifier, sentences, queries, cache and panels - no database

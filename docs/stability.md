@@ -12,7 +12,7 @@ What a minor or patch release will not break:
 
 - **The public API** of each package, as its approved baseline lists it (`PublicApiTest*.verified.txt` in the test
   projects): Marten Studio's registration and options (`AddMartenStudio`, `MapMartenStudio`, `MartenStudioOptions`,
-  `MartenStudioCapabilities`, `MartenStoreResource`, the health-check extension), Postgres Studio's five registration
+  `MartenStudioCapabilities`, `MartenStoreResource`, `ProjectionLagThreshold`, the health-check extension), Postgres Studio's five registration
   types, and the diagnostics package's registration, options, inbound interfaces, the diagnostics read model and the
   connection history's types. Records and options gain members; enums gain members (with explicit values); interfaces a
   host implements gain members only with a default implementation. A member to be removed is marked `[Obsolete]` for at
@@ -25,9 +25,12 @@ What a minor or patch release will not break:
 - **The snapshot JSON** ([docs/diagnostics.md](diagnostics.md#snapshot-json)): versioned by `schemaVersion`, extend-only
   within a version; a reader should ignore keys it does not know.
 - **Capabilities and their defaults**: every capability is off by default, and a new one arrives off. A capability is not
-  renamed, and no release turns one on for you. `ReadOnly` keeps meaning that nothing writes.
-- **Authorization**: a release never widens who may see or do something without a setting the host changes. A fix that
-  narrows it (a gap closed) can arrive in a patch.
+  renamed, and no release turns one on for you. `ReadOnly` keeps meaning that nothing writes. A minor release can add an
+  operation under an existing capability only where that capability's own description already covers it, and
+  [docs/upgrading.md](upgrading.md) then names it (1.2: removing an orphaned progression row, under `CorrectProgression`,
+  "correct projection progression in the database").
+- **Authorization**: a release never widens who may see or do something without a setting the host changes, beyond such
+  an operation. A fix that narrows it (a gap closed) can arrive in a patch.
 - **Log event ids**: the reserved ranges (9200-9299, 9300-9329, 9400-9519) keep their meaning; an id is never reused for
   another event. Filter on the id, not the message.
 

@@ -85,7 +85,8 @@ The key is a check's code (compared ignoring case) and the value is the reason, 
 never empty. Startup refuses a key that is not a check of that studio - a typo can never silently accept nothing, and a
 Marten check's code is unknown to Postgres Studio - and a reason that is blank or too long. The one exception is a code a
 release retired (K10, retired in 1.1): an entry for it is accepted and ignored, so a host never fails to start because of an
-upgrade, and one `Information` line (event 9490) says the entry can be removed.
+upgrade, and one `Information` line (event 9490) says the entry can be removed. The list is read once, when the options
+are validated at startup (1.2): a change made to the resolved options afterwards is not seen.
 
 An accepted check **still runs**, and its finding is still **shown**, but it counts for nothing:
 
@@ -207,8 +208,11 @@ reads: anything that changes state has a screen and a capability of its own, nev
   its message and never a value it read. A failure for a reason nobody chose is logged once as event 9223; a refusal
   is logged at Debug as 9224.
 
-Marten Studio 1.2 has one: E06's **Find the 20 longest streams** ([E06](health/events.md#on-demand-the-20-longest-streams)).
-Postgres Studio has none, and its cards are as they were.
+1.2 has three. Marten Studio's E06 offers **Find the 20 longest streams**
+([E06](health/events.md#on-demand-the-20-longest-streams)). In both studios T15 (a foreign key without a covering index)
+offers **What if it had an index?**, at the finding's own gate, and T01 (sequential scans on a large table) offers **Try
+indexes against this table's statements**, which runs the Statements page's index advisor for that table under its own
+bounds (20 statements, at most 150 plans, 60 seconds) at the `Activity` gate ([tables.md](health/tables.md)).
 
 ## Who sees what
 

@@ -191,7 +191,7 @@ schema only `"*"` admits `BrowseDatabase`, each with the write policy. A name in
 |---|---|---|
 | `Path` | `/postgres` | Where the studio is mounted. `MapPostgresStudio(pattern)` overrides it. |
 | `Title` | `Postgres Studio` | Browser tab and sidebar heading. |
-| `ApplicationPath` | `null` | Where the header's "Back to application" link goes; no link when `null`. A path that starts with a single `/` (`/`, `/app`; a host behind `UsePathBase` includes its base, `/myapp/`) or an absolute `http` or `https` URL, used exactly as written and never re-rooted under the studio's mount path. Anything else fails startup. |
+| `ApplicationPath` | `null` | Where the header's "Back to application" link goes; no link when `null`. A path that starts with a single `/` (`/`, `/app`; a host behind `UsePathBase` includes its base, `/myapp/`) or an absolute `http` or `https` URL without user information, used exactly as written and never re-rooted under the studio's mount path. Anything else fails startup. |
 | `AuthorizationPolicy`, `SourceAuthorizationPolicy`, `WriteAuthorizationPolicy` | `null` | The three layers above. |
 | `ReadOnly` | `false` | Every capability off. |
 | `Capabilities` | all off | `BrowseDatabase`, `ViewDefinitions`, `ViewDatabaseActivity`, `RunSql`. |
@@ -207,7 +207,7 @@ schema only `"*"` admits `BrowseDatabase`, each with the write policy. A name in
 | `ExactCountThreshold` | `100000` | Above this estimate, counts stay `reltuples` estimates. |
 | `RefreshInterval` | 5 seconds | How often live pages poll. 1 second … 5 minutes. |
 | `HealthInterval` | 60 seconds | How often the health advisor re-checks a database while a page watches it. 15 seconds … 1 hour. |
-| `AcceptedChecks` | empty | Health checks the application accepts, by code with a reason: still run and shown, as accepted, but counted nowhere. |
+| `AcceptedChecks` | empty | Health checks the application accepts, by code with a reason: still run and shown, as accepted, but counted nowhere. Read once, at startup (1.2). |
 
 ## Screens
 

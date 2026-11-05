@@ -1,3 +1,34 @@
+# Upgrading to 1.2
+
+## 1.1 → 1.2: what changes without a setting
+
+1.2 moves no floor (Marten 9.57.0, Npgsql 9.0.4). Move all three packages to 1.2.0 together, as for any release. The
+public API only gains members: `ApplicationPath` on both options classes, `MartenStudioOptions.ProjectionThresholds` and
+the record `ProjectionLagThreshold`, and `PostgresStudioPage.Connection`. What a 1.1 host notices without changing a
+setting:
+
+- **`CorrectProgression` can also remove an orphaned progression row.** In 1.1 it advanced the high-water mark and
+  corrected progression; 1.2 adds Remove on a progression row the daemon no longer reads, after a confirmation, re-checked
+  at the click and audited (events 9225 and 9226). The write policy is asked with capability `CorrectProgression` about the
+  database as a whole (`TenantId = null`), as for its other operations, and cannot tell them apart: a host that granted
+  `CorrectProgression` (or `All()`) and does not want removals refuses `CorrectProgression` in its
+  `WriteAuthorizationPolicy`.
+- **Navigation stays inside the circuit.** Links, Back and Forward inside the studio are no longer page fetches, so host
+  JavaScript initializers no longer receive `enhancedload` for moves inside it. Back or Forward to an address that names
+  another store, database or tenant moves the studio there, as a click does, when the visitor's listings carry it.
+  `AppContext.SetSwitch("PostgresStudio.DisableNavigationInterception", true)` restores 1.1's navigation until 1.3
+  ([stability.md](stability.md)).
+- **`AcceptedChecks` (all three packages) and `ProjectionThresholds` are read once**, when the options are validated at
+  startup; a change made to the resolved options afterwards is not seen. 1.1 read `AcceptedChecks` live.
+- **The Overview shows the selected store's card**, and the new Stores page lists every store when you may see two or
+  more.
+- **C18 can now report pools of data sources the host named** (`NpgsqlDataSourceBuilder.Name`), which 1.1 left out. It
+  is Info, so the opt-in health check's status does not change because of it.
+- **Evidence spells every moment one way** (`2026-11-04 08:57:03 UTC`). Match on codes, never on text.
+- **The .NET 11 Debug workaround is no longer needed** (`-p:EnableHotReloadInRuntimeConfigDevFile=false`). At a sub-path
+  mount the studio maps `{Path}/_framework/{**file}`, which serves the host's own framework files to a visitor the host
+  would serve them to; at a root mount it maps nothing.
+
 # Upgrading to 1.1
 
 ## 1.0 → 1.1: the floors moved
