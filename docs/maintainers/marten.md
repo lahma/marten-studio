@@ -90,3 +90,14 @@ counted listing is one read shared by the Event types page and the check for 30 
 (`EventTypeListingCache`, which resolves nothing: the caller resolves under its visitor first). The event type name is
 validated before the cache, so an arbitrary string never becomes a cache key or reaches SQL. An error result is handed to
 those waiting on it and is not cached; each run has its own in-flight marker.
+
+**Unregistered aliases never come from a scan the visitor did not ask for (1.2-UX-FIX-FU).** The Event types page lists
+only registered types until Load counts, so the check learns which aliases only the log holds from, in order:
+- a counted listing in hand for the same resolved scope (the click's own, or the page's, read within five minutes);
+- the shared counted listing, peeked without inserting or starting a read;
+- with no tenant selected only, the planner's statistics on `mt_events.type` (E05's statement, `pg_class` and `pg_stats`
+  only), which can miss a rare alias, and the panel says so.
+
+With a tenant selected the statistics are never read, whatever the tenancy style: Marten stamps `mt_events.tenant_id`
+under every style, so they would name another tenant's aliases. A name that none of these confirms is "not checked",
+never "no such type". The unindexed click keeps its one shared `group by type`, which bounds its walk.

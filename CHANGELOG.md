@@ -62,12 +62,16 @@ and a .NET 11 SDK Debug start-up failure.
   primary-key order; choose a tenant for a spread sample) - and round-trips each document through the store's
   serializer. It lists documents that cannot be loaded, members the type no longer declares (the next save drops them),
   values that change or come back empty, and members the stored documents lack, each with a count and an example.
-  Nothing is written and no value is shown; it is a read under the store policy, cached for five minutes per scope.
+  Nothing is written and no value is shown; it is a read under the store policy, cached for five minutes per scope; a
+  cached result says when it was checked and offers Check again.
 - Event types: Check shapes does the same for each event type, reading every sampled event through Marten's own event
   reader - the one a rebuild uses, upcasters included - so an event a rebuild would stop on is found before the rebuild,
   with the sequence of the first and what RebuildErrors would do about it. An event type the store has not registered is
   never read through that reader (it would register the type on your store): its events are reported as unknown, or -
-  when their .NET type is loaded - as events Marten would register on first read. Without
+  when their .NET type is loaded - as events Marten would register on first read. Such a type is found from Event types'
+  counts when they have been read, and otherwise from the planner's statistics (which can miss a rare one), never by
+  scanning the log; the panel says which, and with a tenant selected it asks you to load the counts; a type nothing at
+  hand confirms is "could not confirm", never "no such event type". Event types says when its counts were read. Without
   opts.Events.EnableEventTypeIndex it reads each type's oldest and newest events only, and says so; a click over many
   types stops after a minute and says how far it got. With per-tenant sequences and every tenant in scope, only the
   oldest and newest events of each type are read.
@@ -128,8 +132,9 @@ and a .NET 11 SDK Debug start-up failure.
   statement; anyone else gets one line saying they are not shown. It advises
   `opts.Advanced.Migrator.BuildIndexesConcurrentlyOnAlter = true` for index builds that make writers wait, and a quiet
   time or a `lock_timeout` in the host's own migration path for `ACCESS EXCLUSIVE` statements, which keep the lock until
-  the whole command they are in has finished. These are notes: the apply, its typed confirmation and its authorization
-  are unchanged.
+  the whole command they are in has finished. The notes open with one line - the tables taken `ACCESS EXCLUSIVE`, their
+  estimated rows and size and how many are rewritten, a table nobody has analyzed counted as such - with that advice
+  under it. These are notes: the apply, its typed confirmation and its authorization are unchanged.
 - Schema › Indexes no longer queues behind a migration's lock (D27): the list used to print every index's statement with
   `pg_get_indexdef`, which opens the indexed table, so it waited out the 3-second `lock_timeout` while a migration held
   any store table. It now shows each index's keys from the catalogs (an expression key reads "(expression)", and where
@@ -158,8 +163,17 @@ and a .NET 11 SDK Debug start-up failure.
   wrote `2026-11-04 08:57:03Z` and others `2026-11-04 08:57 UTC`. A host that parsed an evidence value, a caveat or a
   title for a time must match on the finding's code instead: evidence labels, values and caveats are wording
   (docs/stability.md).
-- Maintenance's Triggers table no longer pushes its last columns out of sight at 1280 px: a long table name wraps and
-  the autovacuum bars need less room. A LINQ refusal's caret line keeps the width the SQL console's has.
+- Maintenance's Triggers table no longer pushes its last columns out of sight at 1280 px: a long table name wraps, only
+  after an underscore or a dot, and the autovacuum bars need less room. A LINQ refusal's caret line keeps the width the
+  SQL console's has.
+- Projections fits at 1280 px with Last progress and Actions in view, and a long projection name breaks only after an
+  underscore or a dot; the Overview's Health tile stays inside its card; Refresh no longer stretches beside a Mark chip.
+- A typed confirmation's Confirm is reached with Tab as soon as the phrase is typed (it is marked unavailable, not
+  disabled, until then), and Enter in the box confirms once the phrase matches; a dialog confirms once per opening,
+  however many clicks or Enters reach it. The Rebuild dialog no longer prints a measured rate that is not zero as "0
+  ev/s".
+- A refusal and its caret clear on the first keystroke after it, in LINQ mode, the SQL console and the Plan page; LINQ
+  mode's help example says it shows the syntax.
 - `PostgresStudioPage` gains `Connection` (Database › Connection), and `GetStudioPath` answers it with the same scope
   query as the other pages (#55).
 - C18 (several pools to one database in this process) counts the pools of data sources the host gave a `Name` with
