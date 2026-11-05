@@ -174,7 +174,8 @@ and a .NET 11 SDK Debug start-up failure.
 - Maintenance's Triggers table no longer pushes its last columns out of sight at 1280 px: a long table name wraps, only
   after an underscore or a dot, and the autovacuum bars need less room. A LINQ refusal's caret line keeps the width the
   SQL console's has.
-- Projections fits at 1280 px with Last progress and Actions in view, and a long projection name breaks only after an
+- Projections fits at 1280 px with Last progress and Actions in view: a projection's version and shard count are the
+  second line of its name ("v2 · 1 shard") instead of two columns, and a long projection name breaks only after an
   underscore or a dot; the Overview's Health tile stays inside its card; Refresh no longer stretches beside a Mark chip.
 - A typed confirmation's Confirm is reached with Tab as soon as the phrase is typed (it is marked unavailable, not
   disabled, until then), and Enter in the box confirms once the phrase matches; a dialog confirms once per opening,
