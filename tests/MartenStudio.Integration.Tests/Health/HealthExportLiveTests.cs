@@ -43,7 +43,18 @@ public class HealthExportLiveTests(PostgresFixture postgres)
     [PostgresFact]
     public async Task The_healthy_sample_store_reports_Healthy()
     {
-        await using HealthLiveHost host = await HostAsync("health_export_quiet", Environments.Development);
+        // C03 (connection headroom) and C13 (idle connections hoarded near the limit) judge the shared Testcontainers server, whose
+        // connection count the parallel live suite drives near max_connections; neither says anything about the sample store this test
+        // judges (a Warning on both CI legs, 1.2-FINAL-FIX-5). Accepted, they still run and are counted apart, and they are out of the
+        // state - which is what AcceptedChecks is for.
+        await using HealthLiveHost host = await HostAsync(
+            "health_export_quiet",
+            Environments.Development,
+            studio: static options =>
+            {
+                options.AcceptedChecks["C03"] = "the shared test server's connections belong to the parallel suite, not to this store";
+                options.AcceptedChecks["C13"] = "the shared test server's connections belong to the parallel suite, not to this store";
+            });
 
         HealthReportEntry entry = await ProbeAsync(host);
         TestContext.Current.TestOutputHelper?.WriteLine(entry.Description ?? "(no description)");
@@ -257,7 +268,8 @@ public class HealthExportLiveTests(PostgresFixture postgres)
         string schema,
         string environment,
         Action<StoreOptions>? store = null,
-        Action<IServiceCollection>? services = null)
+        Action<IServiceCollection>? services = null,
+        Action<MartenStudioOptions>? studio = null)
     {
         // A pool that is this test's alone: two pools with one connection string are one pool to Postgres, and
         // a connections check would be counting another test's sessions as this store's.
@@ -275,6 +287,7 @@ public class HealthExportLiveTests(PostgresFixture postgres)
                 options.Connection(connectionString);
                 store?.Invoke(options);
             },
+            studio: studio,
             services: collection =>
             {
                 collection.AddHealthChecks().AddMartenStudio(name: Name, tags: ["marten"]);
