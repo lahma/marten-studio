@@ -894,6 +894,12 @@
 
     private async Task ArchiveAsync()
     {
+        // One archive at a time (1.2-UX-FIX-FU3): the dialog refuses a second confirm itself, and this is the defence in depth.
+        if (archiving)
+        {
+            return;
+        }
+
         StudioScope? scope = State.ActiveScope;
         archiveDialogOpen = false;
 

@@ -123,6 +123,39 @@ internal sealed class StudioSnapshotCache
         return entries.TryGetValue(key, out Entry? entry) && IsUsable(entry, timeProvider.GetUtcNow(), timeToLive);
     }
 
+    /// <summary>
+    /// The value for <paramref name="key" /> if one is in hand and fresh, or its work is in flight - awaited - and
+    /// <see langword="null" /> otherwise (1.2-UX-FIX-FU3). It <b>inserts nothing and replaces nothing</b>: a stale entry is left as it is,
+    /// and no work is started that somebody did not already start, so a concurrent real read can never adopt a placeholder of the
+    /// peek's making. A failed or cancelled piece of work is <see langword="null" /> too.
+    /// </summary>
+    /// <typeparam name="T">What the work returns.</typeparam>
+    /// <param name="key">The key.</param>
+    /// <param name="cancellationToken">Cancels this caller's wait, never the shared work.</param>
+    public async Task<T?> PeekAsync<T>(string key, CancellationToken cancellationToken = default)
+        where T : class
+    {
+        ArgumentException.ThrowIfNullOrEmpty(key);
+
+        if (!entries.TryGetValue(key, out Entry? entry) || !IsUsable(entry, timeProvider.GetUtcNow(), timeToLive))
+        {
+            return null;
+        }
+
+        try
+        {
+            return await entry.Work.Value.WaitAsync(cancellationToken).ConfigureAwait(false) as T;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
     /// <summary>Drops one key, so the next read really reads. Called after anything is changed.</summary>
     public void Invalidate(string key)
     {

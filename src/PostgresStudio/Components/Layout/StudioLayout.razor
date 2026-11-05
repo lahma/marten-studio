@@ -222,9 +222,17 @@
         // Anything else - a push built from an address before a picker change, an address that names no scope or only part of the scope
         // on screen (Back to the entry from before a link to a tenant was followed names no tenant, 1.2-UX-FIX), the same scope - leaves
         // the scope where it is, and the address follows it: the bar names what is on screen. Nothing is written when it already does.
-        // Only for a studio page: an address no page matches (a file, an endpoint) is the browser's to load, as it was named
-        // (StudioRoutes), and a scope appended to it would change what is loaded.
-        if (StudioLink.ToDashboardRelativePath(e.Location, Navigation.BaseUri, Settings) is { } relative && Descriptor.Routes.Match(relative, Settings) is not null)
+        SyncScopeToUrlForStudioPage();
+    }
+
+    /// <summary>
+    /// <see cref="SyncScopeToUrl" />, only while the address is a studio page: an address no page matches (a file, an endpoint) is the
+    /// browser's to load, as it was named (StudioRoutes), and a scope appended to it would change what is loaded. The scope-move branch
+    /// asks it too (1.2-UX-FIX-FU3), after the scope was read, so it judges the address as it is then.
+    /// </summary>
+    private void SyncScopeToUrlForStudioPage()
+    {
+        if (StudioLink.ToDashboardRelativePath(Navigation.Uri, Navigation.BaseUri, Settings) is { } relative && Descriptor.Routes.Match(relative, Settings) is not null)
         {
             SyncScopeToUrl();
         }
@@ -253,7 +261,7 @@
 
             // A scope the listings do not carry, or the policy refuses, was ignored and the scope did not move: the address stops naming
             // the refused value and names the scope on screen (1.2-UX-FIX-FU). A no-op when the scope moved, which has already been written.
-            SyncScopeToUrl();
+            SyncScopeToUrlForStudioPage();
         }
         catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
         {

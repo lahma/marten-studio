@@ -289,10 +289,8 @@
     }
 
     /// <summary>The counts this page has loaded, by type name: a type the page counted as empty is not sent to the check.</summary>
-    private static Dictionary<string, long> ShapeCounts(EventTypeList source) =>
-        source.CountsLoaded
-            ? source.Types.Where(static x => x.Count is not null).ToDictionary(static x => x.Name, static x => x.Count!.Value, StringComparer.Ordinal)
-            : [];
+    /// <remarks>It carries the listing too (<see cref="CountedListingView" />), which the check confirms the names it lists against.</remarks>
+    private static CountedListingView ShapeCounts(EventTypeList source) => new(source);
 
     /// <summary>The store's DCB tag types; empty on a store with none.</summary>
     private EventTagTypeList tagTypes = EventTagTypeList.None;

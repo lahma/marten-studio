@@ -232,7 +232,7 @@ public class EventShapeCheckLiveTests(EventShapeCheckLiveTests.Fixture fixture)
     {
         string tooLong = new('x', 300);
 
-        foreach (string name in new[] { "nothing_like_it", tooLong, string.Empty })
+        foreach (string name in new[] { tooLong, string.Empty })
         {
             ShapeCheckResult result = await CheckAsync(name);
 
@@ -241,6 +241,15 @@ public class EventShapeCheckLiveTests(EventShapeCheckLiveTests.Fixture fixture)
             result.CoverageReason.Should().Be(ShapeCheckText.NoSuchEventType(result.Subject));
             result.Subject.Length.Should().BeLessThanOrEqualTo(ShapeCheckLimits.MaxSubjectLength);
         }
+
+        // A usable name nothing holds: "no such type" where a listing that can say does not hold it, and "could not confirm" - never the
+        // first for want of an answer - where none was at hand (1.2-UX-FIX-FU3). Which of the two depends on whether the counted listing
+        // another test read is still in hand, and both are one sentence and no read.
+        ShapeCheckResult unknown = await CheckAsync("nothing_like_it");
+
+        unknown.Coverage.Should().Be(ShapeCoverage.NotChecked);
+        unknown.Statements.Should().BeEmpty();
+        unknown.CoverageReason.Should().BeOneOf(ShapeCheckText.NoSuchEventType("nothing_like_it"), ShapeCheckText.CouldNotConfirm);
     }
 
     [PostgresFact]

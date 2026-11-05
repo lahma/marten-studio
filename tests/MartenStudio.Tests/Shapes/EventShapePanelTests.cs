@@ -374,6 +374,95 @@ public class EventShapePanelTests
         }
     }
 
+    /// <summary>1.2-UX-FIX-FU3 (F6): with a tenant selected no statistics are read, and the panel points to Load counts.</summary>
+    [Fact]
+    public async Task With_a_tenant_selected_the_statistics_are_not_used_and_the_panel_says_so_and_points_to_Load_counts()
+    {
+        (StudioComponentContext context, FakeEventShapeCheck check) = await RigAsync("OrderPlaced");
+        using (context)
+        {
+            check.Indexed = true;
+            check.Unregistered = new UnregisteredAliases([], UnregisteredAliasSource.NotForATenant);
+            IRenderedComponent<EventTypes> page = context.Render<EventTypes>();
+
+            await ClickAsync(page, "Check shapes");
+
+            page.WaitForAssertion(() => check.Calls.Select(static x => x.Name).Should().Equal("OrderPlaced"));
+            page.WaitForAssertion(() => page.Find(".ms-shape-panel").TextContent.Should().Contain(
+                "With a tenant selected the planner's statistics cover every tenant, so they are not used to look for unregistered types; press Load counts on Event types to check the ones this tenant holds."));
+            page.FindAll(".ms-shape-unregistered-source").Should().BeEmpty();
+        }
+    }
+
+    /// <summary>F6: without the index the click loads the listing; when that fails the registered types are still checked and it says so.</summary>
+    [Fact]
+    public async Task Without_the_index_a_listing_that_fails_leaves_the_registered_types_checked_and_says_the_others_were_not()
+    {
+        (StudioComponentContext context, FakeEventShapeCheck check) = await RigAsync("OrderPlaced");
+        using (context)
+        {
+            check.Indexed = false;
+            context.EventData.TypesWithCounts = EventTypeList.Failed(new EventDataError("busy", null, true));
+            IRenderedComponent<EventTypes> page = context.Render<EventTypes>();
+
+            await ClickAsync(page, "Check shapes");
+
+            page.WaitForAssertion(() => check.Calls.Select(static x => x.Name).Should().Equal("OrderPlaced"));
+            page.WaitForAssertion(() => page.Find(".ms-shape-panel").TextContent.Should().Contain("the store does not register could not be listed, so they were not checked"));
+            check.Listings.Should().ContainSingle().Which.Should().BeNull("a failed listing is never handed to the check");
+        }
+    }
+
+    /// <summary>
+    /// F2 (b): the unindexed click loads the listing itself - past the half minute the shared one lives, a fresh read - and hands that
+    /// very object to the check for every name, so a name the listing holds is confirmed against it, not a bare name.
+    /// </summary>
+    [Fact]
+    public async Task The_unindexed_click_hands_the_listing_it_loaded_to_the_check_for_every_name()
+    {
+        (StudioComponentContext context, FakeEventShapeCheck check) = await RigAsync("OrderPlaced");
+        using (context)
+        {
+            check.Indexed = false;
+            EventTypeList loaded = new(
+                [
+                    new EventTypeInfo("OrderPlaced", "Sample.OrderPlaced", true, 10),
+                    new EventTypeInfo("ghost_event", "Gone.Ghost, Gone", false, 3),
+                ],
+                true)
+            {
+                ListedAt = new DateTimeOffset(2026, 11, 5, 14, 5, 7, TimeSpan.Zero),
+                ListedFor = "defaultdb",
+            };
+            context.EventData.TypesWithCounts = loaded;
+            IRenderedComponent<EventTypes> page = context.Render<EventTypes>();
+
+            await ClickAsync(page, "Check shapes");
+
+            page.WaitForAssertion(() => check.Calls.Select(static x => x.Name).Should().Equal("OrderPlaced", "ghost_event"));
+            check.Listings.Should().HaveCount(2).And.OnlyContain(x => ReferenceEquals(x, loaded));
+        }
+    }
+
+    /// <summary>F2 (a): counts loaded on the page, then Check shapes - the page's own listing object is what the check is handed.</summary>
+    [Fact]
+    public async Task After_Load_counts_the_pages_own_listing_is_handed_to_the_check()
+    {
+        (StudioComponentContext context, FakeEventShapeCheck check) = await RigAsync("OrderPlaced", "OrderShipped");
+        using (context)
+        {
+            check.Indexed = true;
+            IRenderedComponent<EventTypes> page = context.Render<EventTypes>();
+
+            await page.Find(".ms-page-header button").ClickAsync(new MouseEventArgs());
+            page.WaitForAssertion(() => page.Markup.Should().Contain("OrderShipped"));
+            await ClickAsync(page, "Check shapes");
+
+            page.WaitForAssertion(() => check.Calls.Should().NotBeEmpty());
+            check.Listings.Should().OnlyContain(x => ReferenceEquals(x, context.EventData.TypesWithCounts), "the object, never a bare name");
+        }
+    }
+
     [Fact]
     public async Task When_the_statistics_cannot_be_read_the_registered_types_are_checked_and_the_panel_says_the_others_were_not()
     {
@@ -506,8 +595,15 @@ public class EventShapePanelTests
 
         public Task<UnregisteredAliases> ListUnregisteredAsync(StudioScope scope, CancellationToken cancellationToken) => Task.FromResult(Unregistered);
 
-        public Task<ShapeCheckResult> CheckAsync(StudioScope scope, string eventTypeName, bool force, CancellationToken cancellationToken)
+        /// <summary>The counted listing each call was handed (1.2-UX-FIX-FU3), in call order; null where the caller had none.</summary>
+        public List<EventTypeList?> Listings { get; } = [];
+
+        public Task<ShapeCheckResult> CheckAsync(StudioScope scope, string eventTypeName, bool force, CancellationToken cancellationToken) =>
+            CheckAsync(scope, eventTypeName, force, listing: null, cancellationToken);
+
+        public Task<ShapeCheckResult> CheckAsync(StudioScope scope, string eventTypeName, bool force, EventTypeList? listing, CancellationToken cancellationToken)
         {
+            Listings.Add(listing);
             Calls.Add((eventTypeName, force));
             Scopes.Add(scope);
             OnCall?.Invoke();

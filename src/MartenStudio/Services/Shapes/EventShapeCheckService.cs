@@ -38,8 +38,10 @@ namespace MartenStudio.Services.Shapes;
 /// <para>
 /// <b>A plain read under the store policy</b>, as the document check and the Event types page are: <c>ResolveAsync(scope, null)</c> on
 /// every call, before the cache. <b>The name is validated before the cache and before any statement:</b> bounded in length, and one the
-/// store registers or its events table holds (the Event types page's own list), so an arbitrary string never becomes a cache key or
-/// reaches SQL.
+/// store registers or a counted listing of this scope - the caller's (if it was read for this scope within five minutes), the shared one
+/// in hand, or for no tenant the planner's statistics - says its events table holds, so an arbitrary string never becomes a cache key or
+/// reaches SQL. A name nothing at hand can confirm is "could not confirm", not "no such event type"; and the check runs no
+/// <c>group by type</c> of its own.
 /// </para>
 /// <para>
 /// Events are read only through <c>IEventStorage</c> as <c>ISelector&lt;IEvent&gt;</c>, from a query session opened with
@@ -62,8 +64,12 @@ internal sealed class EventShapeCheckService : IEventShapeCheck
     private readonly ILogger<EventShapeCheckService> logger;
     private readonly TimeProvider timeProvider;
 
-    // What E05's statistics say the log holds, shared half a minute per database: one catalog read, however many names a click asks about.
-    private readonly PostgresStudio.Services.Live.StudioSnapshotCache statisticsAliases = new(TimeProvider.System, TimeSpan.FromSeconds(30));
+    // What E05's statistics say the log holds, kept half a minute per database by this service (one per circuit - the service is scoped,
+    // so this is not shared between visitors): one catalog read, however many names a click asks about. On the host's clock.
+    private readonly PostgresStudio.Services.Live.StudioSnapshotCache statisticsAliases;
+
+    /// <summary>How long a counted listing the caller holds is trusted to confirm a name: the cache's five minutes.</summary>
+    private static readonly TimeSpan ListingTrust = ShapeCheckLimits.TimeToLive;
 
     /// <summary>The service a host's container builds.</summary>
     public EventShapeCheckService(
@@ -96,6 +102,7 @@ internal sealed class EventShapeCheckService : IEventShapeCheck
         this.cache = cache;
         this.logger = logger;
         this.timeProvider = timeProvider;
+        statisticsAliases = new PostgresStudio.Services.Live.StudioSnapshotCache(timeProvider, TimeSpan.FromSeconds(30));
     }
 
     /// <summary>The wall budget of one check; a test shortens it to prove the partial result.</summary>
@@ -105,7 +112,11 @@ internal sealed class EventShapeCheckService : IEventShapeCheck
     internal TimeSpan? StatementTimeoutOverride { get; init; }
 
     /// <inheritdoc />
-    public async Task<ShapeCheckResult> CheckAsync(StudioScope scope, string eventTypeName, bool force, CancellationToken cancellationToken)
+    public Task<ShapeCheckResult> CheckAsync(StudioScope scope, string eventTypeName, bool force, CancellationToken cancellationToken) =>
+        CheckAsync(scope, eventTypeName, force, listing: null, cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<ShapeCheckResult> CheckAsync(StudioScope scope, string eventTypeName, bool force, EventTypeList? listing, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(scope);
         ArgumentNullException.ThrowIfNull(eventTypeName);
@@ -117,9 +128,12 @@ internal sealed class EventShapeCheckService : IEventShapeCheck
             ? eventTypeName
             : eventTypeName[..ShapeCheckLimits.MaxSubjectLength];
 
-        if (!await IsKnownAsync(scope, resolved, eventTypeName, cancellationToken).ConfigureAwait(false))
+        switch (await ConfirmAsync(scope, resolved, eventTypeName, listing, cancellationToken).ConfigureAwait(false))
         {
-            return ShapeCheckResult.NotChecked(shown, ShapeCheckText.NoSuchEventType(shown), timeProvider.GetUtcNow());
+            case Confirmation.NoSuchType:
+                return ShapeCheckResult.NotChecked(shown, ShapeCheckText.NoSuchEventType(shown), timeProvider.GetUtcNow());
+            case Confirmation.Unconfirmed:
+                return ShapeCheckResult.NotChecked(shown, ShapeCheckText.CouldNotConfirm, timeProvider.GetUtcNow());
         }
 
         return await cache
@@ -151,33 +165,79 @@ internal sealed class EventShapeCheckService : IEventShapeCheck
         }
     }
 
+    private enum Confirmation
+    {
+        /// <summary>The store registers it, or a listing that is this scope's and fresh holds it.</summary>
+        Known,
+
+        /// <summary>A listing that can say - this scope's, fresh - does not hold it, or the name is unusable.</summary>
+        NoSuchType,
+
+        /// <summary>Nothing that can say was at hand: not "no such type", only "not confirmed".</summary>
+        Unconfirmed,
+    }
+
     /// <summary>
     /// Whether <paramref name="name" /> is an event type the page lists: bounded, and registered by the store or present in its events
-    /// table. The second half is a listing the Event types page makes itself, kept five minutes per scope, and read only for a name the
-    /// store does not register.
+    /// table. For a name the store does not register, in this order (1.2-UX-FIX-FU3): the counted <paramref name="listing" /> the caller
+    /// holds, used only if it was read for this very scope and within five minutes; the shared listing in hand (half a minute); for no
+    /// tenant, the planner's statistics; and otherwise <see cref="Confirmation.Unconfirmed" />. Never a <c>group by type</c> of our own.
+    /// A name is "no such type" only where a listing that can say does not hold it - never for want of an answer.
     /// </summary>
-    private async Task<bool> IsKnownAsync(StudioScope scope, ResolvedScope resolved, string name, CancellationToken cancellationToken)
+    private async Task<Confirmation> ConfirmAsync(StudioScope scope, ResolvedScope resolved, string name, EventTypeList? listing, CancellationToken cancellationToken)
     {
         if (name.Length is 0 or > ShapeCheckLimits.MaxSubjectLength)
         {
-            return false;
+            return Confirmation.NoSuchType;
         }
 
         foreach (JasperFxEvents.IEventType registered in resolved.Store.Options.Events.AllKnownEventTypes())
         {
             if (string.Equals(registered.EventTypeName, name, StringComparison.Ordinal))
             {
-                return true;
+                return Confirmation.Known;
             }
         }
 
-        // A name the store does not register is one the log holds: the counted listing when somebody has read one within the last half
-        // minute, else the planner's statistics. Never a group by type of our own (1.2-UX-FIX): it is a scan of the log the visitor did
-        // not ask for. A listing that failed shows the page nothing either, so the name is not one it can show.
-        UnregisteredAliases held = await ListUnregisteredAsync(scope, cancellationToken).ConfigureAwait(false);
+        // (i) The listing the caller took the name from, if it is this scope's and not old.
+        if (listing is { Error: null, CountsLoaded: true, ListedFor: { } listedFor, ListedAt: { } listedAt }
+            && string.Equals(listedFor, EventTypeListingCache.KeyOf(resolved), StringComparison.Ordinal)
+            && timeProvider.GetUtcNow() - listedAt <= ListingTrust)
+        {
+            return Holds(listing, name);
+        }
 
-        return held.Names.Contains(name, StringComparer.Ordinal);
+        // (ii) The shared listing, when somebody has read one within the last half minute.
+        EventTypeList? shared = await eventTypes.SharedCountedListingAsync(scope, cancellationToken).ConfigureAwait(false);
+
+        if (shared is { Error: null, CountsLoaded: true })
+        {
+            return Holds(shared, name);
+        }
+
+        // (iii) The planner's statistics: a name they hold is confirmed; one they do not is not "no such type" (they are a sample).
+        if (resolved.TenantId is null)
+        {
+            IReadOnlyList<string>? fromStatistics = await StatisticsAliasesAsync(resolved, cancellationToken).ConfigureAwait(false);
+
+            if (fromStatistics is not null && fromStatistics.Contains(name, StringComparer.Ordinal))
+            {
+                return Confirmation.Known;
+            }
+        }
+
+        // (iv)
+        return Confirmation.Unconfirmed;
     }
+
+    private static Confirmation Holds(EventTypeList listing, string name) =>
+        listing.Types.Any(x => string.Equals(x.Name, name, StringComparison.Ordinal)) ? Confirmation.Known : Confirmation.NoSuchType;
+
+    private Task<IReadOnlyList<string>?> StatisticsAliasesAsync(ResolvedScope resolved, CancellationToken cancellationToken) =>
+        statisticsAliases.GetAsync(
+            resolved.Registration.Key + "\u001f" + resolved.Database.Id.Identity,
+            token => ReadStatisticsAliasesAsync(resolved, token),
+            cancellationToken);
 
     /// <inheritdoc />
     public async Task<UnregisteredAliases> ListUnregisteredAsync(StudioScope scope, CancellationToken cancellationToken)
@@ -196,20 +256,15 @@ internal sealed class EventShapeCheckService : IEventShapeCheck
                 shared.ListedAt);
         }
 
-        // The statistics span the whole table. With a tenant selected on a store that keeps every tenant's events in it, they would name
-        // another tenant's event types, which this scope may not see (D27, "Reach, not scope"): they are not read.
-        if (resolved.TenantId is not null
-            && (resolved.Store.Options.Events.TenancyStyle == JasperFx.MultiTenancy.TenancyStyle.Conjoined
-                || resolved.Store.Options.Events.UseTenantPartitionedEvents))
+        // The statistics span the whole table, and Marten stamps mt_events.tenant_id whatever the tenancy style, so with any tenant
+        // selected they may name another tenant's event types, which this scope may not see (D27, "Reach, not scope"): never read for a
+        // tenant, whatever the style. Load counts is tenant-scoped.
+        if (resolved.TenantId is not null)
         {
             return new UnregisteredAliases([], UnregisteredAliasSource.NotForATenant);
         }
 
-        string key = resolved.Registration.Key + "\u001f" + resolved.Database.Id.Identity;
-
-        IReadOnlyList<string>? names = await statisticsAliases
-            .GetAsync(key, token => ReadStatisticsAliasesAsync(resolved, token), cancellationToken)
-            .ConfigureAwait(false);
+        IReadOnlyList<string>? names = await StatisticsAliasesAsync(resolved, cancellationToken).ConfigureAwait(false);
 
         return names is null
             ? new UnregisteredAliases([], UnregisteredAliasSource.NotRead)

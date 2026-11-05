@@ -78,27 +78,17 @@ internal sealed class EventTypeListingCache
     {
         ArgumentNullException.ThrowIfNull(resolved);
 
-        string key = KeyOf(resolved);
-
-        if (!cache.Holds(key))
-        {
-            return null;
-        }
-
-        try
-        {
-            // The factory is only reached if the entry went stale between the two calls; it declines, and the entry it made is dropped.
-            return await cache.GetAsync<EventTypeList?>(key, static _ => throw new ListingNotHeldException(), cancellationToken).ConfigureAwait(false);
-        }
-        catch (ListingNotHeldException)
-        {
-            return null;
-        }
+        // A peek that inserts nothing and replaces nothing (StudioSnapshotCache.PeekAsync): a stale entry stays as it is, and a concurrent
+        // real read can never adopt a placeholder of ours.
+        return await cache.PeekAsync<EventTypeList>(KeyOf(resolved), cancellationToken).ConfigureAwait(false);
     }
 
-    private sealed class ListingNotHeldException : Exception;
-
-    private static string KeyOf(ResolvedScope resolved) =>
+    /// <summary>
+    /// The key of one scope's listing: the store's registered key, the database's own identity and the tenant. It is also what a listing
+    /// says it was read for (<see cref="EventTypeList.ListedFor" />), so a caller handed a listing can tell whether it is this scope's.
+    /// </summary>
+    /// <param name="resolved">The scope as it resolved.</param>
+    public static string KeyOf(ResolvedScope resolved) =>
         resolved.Registration.Key + "\u001f" + resolved.Database.Id.Identity + "\u001f" + (resolved.TenantId ?? string.Empty);
 
     // Stamped here, once, by the read that fills the cache: every caller handed the shared listing is handed the time it was read.
@@ -108,6 +98,6 @@ internal sealed class EventTypeListingCache
             ? await EventDataService.ReadCountedAsync(resolved, catalog, timeout, token).ConfigureAwait(false)
             : await read(resolved, token).ConfigureAwait(false);
 
-        return list.Error is null ? list with { ListedAt = clock.GetUtcNow() } : list;
+        return list.Error is null ? list with { ListedAt = clock.GetUtcNow(), ListedFor = KeyOf(resolved) } : list;
     }
 }

@@ -61,10 +61,10 @@ public class UxFixBrowserTests(BrowserSuiteFixture fixture)
     /// <summary>
     /// A typed confirmation from the keyboard (1.2-UX-FIX-FU): Confirm is aria-disabled, not disabled, until the phrase matches, so Tab
     /// lands on it whatever the round trip - typed and Tab pressed with no wait for it to enable - and a press on it before the phrase
-    /// matches does nothing. Nothing is confirmed.
+    /// matches does nothing (bUnit proves that half). Nothing is confirmed.
     /// </summary>
     [BrowserFact]
-    public Task Tab_after_typing_the_phrase_of_a_confirmation_lands_on_Confirm_with_no_wait_and_a_press_before_the_match_does_nothing() =>
+    public Task Tab_after_typing_the_phrase_of_a_confirmation_lands_on_Confirm_with_no_wait() =>
         RunAsync("uxfix-confirm-tab", async studio =>
         {
             IPage page = studio.Page;
@@ -84,10 +84,10 @@ public class UxFixBrowserTests(BrowserSuiteFixture fixture)
             await page.Keyboard.PressAsync("Tab");
             (await page.EvaluateAsync<string>(FocusedText)).Should().StartWith("Rebuild", "Tab from an empty box lands on Confirm");
             (await page.Locator(".ms-confirm-actions .ms-button-danger").GetAttributeAsync("aria-disabled")).Should().Be("true");
-            await page.Keyboard.PressAsync("Enter");
+
+            // (That a press on Confirm before the phrase matches confirms nothing is proved in bUnit, where the owner can be counted.)
             await page.Keyboard.PressAsync("Shift+Tab");
             await page.WaitForFunctionAsync("() => document.activeElement && document.activeElement.id === 'ms-confirm-input'", null, Wait);
-            (await page.EvaluateAsync<bool>("() => document.querySelector('dialog.ms-confirm-overlay') !== null")).Should().BeTrue("a press on Confirm before the phrase matches confirms nothing");
 
             // Typed, and Tab at once: no wait for Confirm to enable.
             await page.Keyboard.TypeAsync(name);

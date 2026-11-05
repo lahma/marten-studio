@@ -113,6 +113,29 @@ public sealed class StudioRoutesTests
         only.Uri.Should().Be("http://localhost/postgres/no-such-page");
     }
 
+    /// <summary>
+    /// 1.2-UX-FIX-FU3 (F5): the same, when the address also names a scope the listings do not carry. The scope does not move, and the
+    /// shell's rewrite - which would put the scope on screen into the address - is held to studio pages here too.
+    /// </summary>
+    [Fact]
+    public async Task An_intercepted_non_page_address_naming_a_refused_scope_records_only_the_force_load()
+    {
+        Rig rig = await NewRigAsync();
+        await using PostgresStudioComponentContext context = rig.Context;
+        var routes = context.Render<StudioRoutes>();
+        routes.Find("h1").TextContent.Should().Be("Connection", "the premise");
+        await SettleAsync(routes);
+        int before = rig.Navigation.Requests.Count;
+
+        rig.Navigation.Simulate("postgres/no-such-page?store=nowhere&db=db-q", intercepted: true);
+        await SettleAsync(routes);
+        await Task.Yield();
+        await SettleAsync(routes);
+
+        (string Uri, NavigationOptions Options) only = rig.Navigation.Requests.Skip(before).Should().ContainSingle("only the force-load, and no rewrite").Subject;
+        only.Options.ForceLoad.Should().BeTrue();
+    }
+
     [Fact]
     public async Task An_address_no_page_matches_that_the_browser_did_not_intercept_shows_not_found_and_loads_nothing()
     {

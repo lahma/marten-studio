@@ -33,7 +33,7 @@
                so Tab pressed before the round trip that enables it landed on Cancel. It stays focusable, looks disabled, and ConfirmAsync
                refuses until CanConfirm. A blocked reason from the owner (an action that is a no-op) still disables it outright. *@
             <button type="button"
-                    class="@(AwaitsPhrase ? "ms-button ms-button-danger ms-button-aria-disabled" : "ms-button ms-button-danger")"
+                    class="ms-button ms-button-danger"
                     disabled="@HardBlocked"
                     aria-disabled="@(AwaitsPhrase ? "true" : null)"
                     title="@ConfirmBlockedReason"
@@ -51,6 +51,7 @@
 @code {
     private string typed = string.Empty;
     private bool wasOpen;
+    private bool confirming;
 
     [Parameter]
     public bool IsOpen { get; set; }
@@ -128,6 +129,7 @@
         if (IsOpen && !wasOpen)
         {
             typed = string.Empty;
+            confirming = false;
         }
 
         wasOpen = IsOpen;
@@ -153,12 +155,25 @@
 
     private async Task ConfirmAsync()
     {
-        if (!CanConfirm)
+        // Once per opening (1.2-UX-FIX-FU3). Blazor keeps a removed handler's id until the client acknowledges the batch that removed it,
+        // so a double click, or Enter held down, reaches here twice for one dialog: the second finds the flag set, or the dialog closed.
+        // It is reset when the dialog is opened again, and if the owner's handler throws (nothing was confirmed).
+        if (!IsOpen || confirming || !CanConfirm)
         {
             return;
         }
 
-        await OnConfirm.InvokeAsync(typed.Trim());
+        confirming = true;
+
+        try
+        {
+            await OnConfirm.InvokeAsync(typed.Trim());
+        }
+        catch
+        {
+            confirming = false;
+            throw;
+        }
     }
 
     private async Task CancelAsync()

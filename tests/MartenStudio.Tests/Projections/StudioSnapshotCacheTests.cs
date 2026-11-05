@@ -180,4 +180,68 @@ public class StudioSnapshotCacheTests
 
         calls.Should().Be(4, "only the two keys under the prefix were dropped");
     }
+
+    // 1.2-UX-FIX-FU3 (F4): the peek inserts nothing and replaces nothing.
+
+    [Fact]
+    public async Task A_peek_at_a_key_that_is_not_held_is_null_and_starts_and_inserts_nothing()
+    {
+        var cache = new StudioSnapshotCache(new FakeTimeProvider(Now), TimeSpan.FromSeconds(30));
+
+        (await cache.PeekAsync<string>("k", Token)).Should().BeNull();
+
+        cache.Count.Should().Be(0, "no placeholder was inserted for a real read to adopt");
+    }
+
+    [Fact]
+    public async Task A_peek_at_a_value_in_hand_returns_it_and_one_in_flight_is_awaited()
+    {
+        var cache = new StudioSnapshotCache(new FakeTimeProvider(Now), TimeSpan.FromSeconds(30));
+        var gate = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        int calls = 0;
+
+        Task<string> real = cache.GetAsync("k", async _ =>
+        {
+            Interlocked.Increment(ref calls);
+            return await gate.Task.Bounded();
+        }, Token);
+
+        Task<string?> peek = cache.PeekAsync<string>("k", Token);
+        peek.IsCompleted.Should().BeFalse("it waits on the read that is under way");
+
+        gate.SetResult("counted");
+
+        (await peek).Should().Be("counted");
+        (await real).Should().Be("counted");
+        (await cache.PeekAsync<string>("k", Token)).Should().Be("counted");
+        calls.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task A_peek_at_a_stale_entry_is_null_and_leaves_it_alone_so_the_next_real_read_runs_its_own_work()
+    {
+        var clock = new FakeTimeProvider(Now);
+        var cache = new StudioSnapshotCache(clock, TimeSpan.FromSeconds(30));
+        int calls = 0;
+
+        await cache.GetAsync("k", _ => Task.FromResult("old" + ++calls), Token);
+        clock.Advance(TimeSpan.FromSeconds(31));
+
+        (await cache.PeekAsync<string>("k", Token)).Should().BeNull();
+        cache.Count.Should().Be(1, "the stale entry is neither replaced nor added to");
+
+        (await cache.GetAsync("k", _ => Task.FromResult("new" + ++calls), Token)).Should().Be("new2", "a real read runs its own factory: nothing of the peek's was adopted");
+        calls.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task A_peek_at_failed_work_is_null()
+    {
+        var cache = new StudioSnapshotCache(new FakeTimeProvider(Now), TimeSpan.FromSeconds(30));
+
+        Func<Task> failing = async () => await cache.GetAsync<string>("k", _ => throw new InvalidOperationException("no"), Token);
+        await failing.Should().ThrowAsync<InvalidOperationException>();
+
+        (await cache.PeekAsync<string>("k", Token)).Should().BeNull();
+    }
 }

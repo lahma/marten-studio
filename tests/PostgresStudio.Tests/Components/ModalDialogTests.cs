@@ -151,6 +151,84 @@ public class ModalDialogTests
         confirmed.Should().Equal("DailySales");
     }
 
+    /// <summary>
+    /// 1.2-UX-FIX-FU3 (F3): Blazor keeps a removed handler's id until the client acknowledges the batch that removed it, so a double click
+    /// or a held Enter reaches the dialog twice. The owner is invoked once, whichever way the second arrives.
+    /// </summary>
+    [Fact]
+    public void Two_Enters_invoke_the_owner_once()
+    {
+        using BunitContext context = Context();
+        List<string> confirmed = [];
+        IRenderedComponent<ConfirmDialog> dialog = Typed(context, confirmed);
+
+        dialog.Find("#ms-confirm-input").Input("DailySales");
+        IElement box = dialog.Find("#ms-confirm-input");
+        box.KeyDown(Key.Enter);
+        box.KeyDown(Key.Enter);
+
+        confirmed.Should().Equal("DailySales");
+    }
+
+    [Fact]
+    public void Two_clicks_invoke_the_owner_once()
+    {
+        using BunitContext context = Context();
+        List<string> confirmed = [];
+        IRenderedComponent<ConfirmDialog> dialog = Typed(context, confirmed);
+
+        dialog.Find("#ms-confirm-input").Input("DailySales");
+        IElement confirm = dialog.Find(".ms-confirm-actions .ms-button-danger");
+        confirm.Click();
+        confirm.Click();
+
+        confirmed.Should().Equal("DailySales");
+    }
+
+    [Fact]
+    public void A_click_after_an_Enter_and_the_dialog_opened_again_confirm_once_each()
+    {
+        using BunitContext context = Context();
+        List<string> confirmed = [];
+        IRenderedComponent<ConfirmDialog> dialog = Typed(context, confirmed);
+
+        dialog.Find("#ms-confirm-input").Input("DailySales");
+        dialog.Find("#ms-confirm-input").KeyDown(Key.Enter);
+        dialog.Find(".ms-confirm-actions .ms-button-danger").Click();
+
+        confirmed.Should().Equal("DailySales");
+
+        // The owner closed it and opens it again: a new opening confirms again, from an empty box.
+        dialog.Render(parameters => parameters.Add(x => x.IsOpen, false));
+        dialog.Render(parameters => parameters.Add(x => x.IsOpen, true));
+        dialog.Find("#ms-confirm-input").Input("DailySales");
+        dialog.Find(".ms-confirm-actions .ms-button-danger").Click();
+
+        confirmed.Should().Equal("DailySales", "DailySales");
+    }
+
+    [Fact]
+    public void An_owner_that_throws_confirmed_nothing_so_the_dialog_can_be_confirmed_again()
+    {
+        using BunitContext context = Context();
+        int calls = 0;
+        IRenderedComponent<ConfirmDialog> dialog = context.Render<ConfirmDialog>(parameters => parameters
+            .Add(x => x.IsOpen, true)
+            .Add(x => x.ConfirmationPhrase, "DailySales")
+            .Add(x => x.OnConfirm, EventCallback.Factory.Create<string>(context, _ =>
+            {
+                calls++;
+                throw new InvalidOperationException("refused");
+            })));
+
+        dialog.Find("#ms-confirm-input").Input("DailySales");
+
+        FluentActions.Invoking(() => dialog.Find(".ms-confirm-actions .ms-button-danger").Click()).Should().Throw<InvalidOperationException>();
+        FluentActions.Invoking(() => dialog.Find(".ms-confirm-actions .ms-button-danger").Click()).Should().Throw<InvalidOperationException>();
+
+        calls.Should().Be(2);
+    }
+
     [Fact]
     public void A_reason_the_owner_gives_still_disables_Confirm_outright()
     {

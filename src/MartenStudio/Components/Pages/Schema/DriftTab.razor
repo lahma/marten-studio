@@ -572,6 +572,13 @@ else
     /// </remarks>
     private async Task ApplyAsync(string typed)
     {
+        // One apply at a time (1.2-UX-FIX-FU3), whatever reaches here twice: the dialog refuses a second confirm itself, and this is the
+        // defence in depth for a migration that must not run twice.
+        if (busy)
+        {
+            return;
+        }
+
         applyOpen = false;
 
         await RunAsync("Applying...", async token =>

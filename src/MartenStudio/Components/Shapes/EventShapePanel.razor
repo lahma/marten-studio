@@ -277,12 +277,17 @@
             bool indexed = await Check.HasTypeIndexAsync(scope, token);
             IReadOnlyDictionary<string, long> counts = Counts;
 
+            // The counted listing the names of this run came from, when it came from one: handed to the check, which confirms a name the
+            // store does not register against it - the object, never the bare name - if it was read for this scope, within five minutes.
+            EventTypeList? held = (Counts as CountedListingView)?.Listing;
+
             if (counts.Count == 0 && !indexed)
             {
                 EventTypeList listing = await EventData.ListEventTypesAsync(scope, withCounts: true, token);
 
                 if (listing.Error is null)
                 {
+                    held = listing;
                     counts = listing.Types.Where(static x => x.Count is not null).ToDictionary(static x => x.Name, static x => x.Count!.Value, StringComparer.Ordinal);
                     names = [.. TypeNames, .. listing.Types.Select(static x => x.Name).Where(x => !TypeNames.Contains(x, StringComparer.Ordinal))];
                     unregisteredFrom = FromCounts(listing.ListedAt);
@@ -325,7 +330,7 @@
 
                 ShapeCheckResult result = counts.TryGetValue(name, out long count) && count == 0
                     ? ShapeCheckResult.NotChecked(name, ShapeCheckText.NoEventsInScope, clock.GetUtcNow())
-                    : await Check.CheckAsync(scope, name, force, token);
+                    : await Check.CheckAsync(scope, name, force, held, token);
 
                 entries.Add(new Entry(name, result));
                 StateHasChanged();

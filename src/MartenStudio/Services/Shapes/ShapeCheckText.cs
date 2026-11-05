@@ -227,6 +227,12 @@ internal static class ShapeCheckText
     /// <summary>The event type is not one the store registers or its events table holds; one sentence for every such name.</summary>
     public static string NoSuchEventType(string name) => $"There is no event type called '{name}' to check.";
 
+    /// <summary>
+    /// No listing that can say was at hand, so the name was neither confirmed nor refused (1.2-UX-FIX-FU3): never "no such event type" for
+    /// a name that came from a listing.
+    /// </summary>
+    public const string CouldNotConfirm = "Could not confirm that the log holds this type; press Load counts and check again.";
+
     /// <summary>No event of the type is in scope; the page's own count said so, or the table has none.</summary>
     public const string NoEventsInScope = "There are no events of this type in scope.";
 

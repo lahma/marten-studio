@@ -415,6 +415,13 @@ internal sealed record EventTypeList(
     /// older than their own press (1.2-UX-FIX).
     /// </summary>
     public DateTimeOffset? ListedAt { get; init; }
+
+    /// <summary>
+    /// The scope the counted listing was read for - the store's key, the database's identity and the tenant, as
+    /// <c>EventTypeListingCache.KeyOf</c> spells them - or <see langword="null" /> for the uncounted one. A caller handed a listing
+    /// trusts it for a check only where this is its own scope (1.2-UX-FIX-FU3).
+    /// </summary>
+    public string? ListedFor { get; init; }
 }
 
 /// <summary>One dead letter.</summary>
