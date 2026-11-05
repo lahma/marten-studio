@@ -39,6 +39,39 @@ public class TenantOverviewLiveTests(PostgresFixture postgres)
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
     [PostgresFact]
+    public async Task A_store_whose_events_are_not_kept_per_tenant_says_so_once_and_shows_a_dash_for_every_event_column()
+    {
+        await using OwnedDatabases owned = await OwnedDatabases.CreateAsync(postgres, [Prefix + "single_events"], Token);
+        string database = owned[0];
+
+        void Configure(StoreOptions options)
+        {
+            options.Connection(database);
+            Documents(options);
+
+            // Conjoined documents, and the event store left as it is: single-tenanted.
+        }
+
+        await using (DocumentStore seed = DocumentStore.For(Configure))
+        {
+            await seed.Storage.ApplyAllConfiguredChangesToDatabaseAsync();
+            await WriteAsync(seed, Acme, 5);
+            await WriteAsync(seed, Globex, 3);
+        }
+
+        await TenancyDatabases.ExecuteAsync(database, $"analyze {Schema}.mt_doc_tenancy_note;", Token);
+
+        await using TenancyStudio studio = TenancyStudio.Start(Configure, studio: Activity);
+        await using AsyncServiceScope circuit = studio.Services.CreateAsyncScope();
+        TenantOverview overview = await circuit.ServiceProvider.GetRequiredService<ITenantOverviewService>()
+            .GetAsync(Scope, new TenantOverviewRequest(), Token);
+
+        overview.EventsNotPerTenant.Should().BeTrue();
+        overview.Rows.Should().OnlyContain(static x => x.Events.Text == "—" && x.Streams.Text == "—" && x.LastEvent.Text == "—");
+        overview.Rows.Select(static x => x.Events.Title).Distinct().Should().Equal("The event store is not kept per tenant.");
+    }
+
+    [PostgresFact]
     public async Task Tenants_in_shared_tables_get_statistics_estimates_and_no_last_event()
     {
         await using OwnedDatabases owned = await OwnedDatabases.CreateAsync(postgres, [Prefix + "shared"], Token);

@@ -249,6 +249,7 @@ internal sealed class TenantOverviewService : ITenantOverviewService
             // Under a store policy the listing is never claimed complete, and "more than 200" is said to nobody: it would tell a visitor a
             // policy filters that discovery hit its cap, which is what the unfiltered list's count would give away (DB-0-fix-2, F7).
             ListTruncated = truncated && string.IsNullOrWhiteSpace(options.Value.StoreAuthorizationPolicy),
+            EventsNotPerTenant = rows.Any(static x => x.Events.Title == EventsNotPerTenantReason),
             UnderPolicy = !string.IsNullOrWhiteSpace(options.Value.StoreAuthorizationPolicy),
             ListUnavailable = listUnavailable && candidates.Count == 0,
             IdsWithoutDatabases = idsWithoutDatabases,
@@ -493,6 +494,9 @@ internal sealed class TenantOverviewService : ITenantOverviewService
                 Problem);
         }
     }
+
+    /// <summary>Why ~Events, ~Streams and Last event are a dash for a tenant of a store whose event store is not kept per tenant.</summary>
+    internal const string EventsNotPerTenantReason = "The event store is not kept per tenant.";
 
     private static readonly TenantCell NotRead = TenantCell.Dash("not read");
 
@@ -791,7 +795,7 @@ internal sealed class TenantOverviewService : ITenantOverviewService
             }
             else
             {
-                row.Events = TenantCell.Dash("The event store is not kept per tenant.");
+                row.Events = TenantCell.Dash(EventsNotPerTenantReason);
                 row.Streams = row.Events;
             }
         }
@@ -854,7 +858,7 @@ internal sealed class TenantOverviewService : ITenantOverviewService
         {
             foreach (RowDraft row in rows)
             {
-                row.LastEvent = TenantCell.Dash("The event store is not kept per tenant.");
+                row.LastEvent = TenantCell.Dash(EventsNotPerTenantReason);
             }
 
             return;

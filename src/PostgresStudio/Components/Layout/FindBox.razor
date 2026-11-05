@@ -1,11 +1,15 @@
 @using Microsoft.Extensions.Logging
 @using PostgresStudio.Services
 @using PostgresStudio.Services.Find
+@using PostgresStudio.Services.Database
 @using PostgresStudio.Services.Live
+@using PostgresStudio.Services.Settings
 @implements IAsyncDisposable
 @inject FindService Finder
 @inject StudioState State
 @inject IStudioScopeCatalog Catalog
+@inject IStudioSettings Settings
+@inject StudioDescriptor Descriptor
 @inject NavigationManager Navigation
 @inject IJSRuntime JsRuntime
 @inject ILogger<FindBox> Logger
@@ -49,7 +53,7 @@
                        autocomplete="off"
                        spellcheck="false"
                        enterkeyhint="search" />
-                <span id="ms-find-hint" class="ms-sr-only">A document or stream id, a natural key, #sequence, a table name or a queryid</span>
+                <span id="ms-find-hint" class="ms-sr-only">A document or stream id, a natural key, #sequence, an exact table or view name or a queryid</span>
 
                 @* Always in the DOM and changing its text, which is what makes a polite live region announce. *@
                 <div class="ms-find-status" role="status" aria-live="polite">@StatusText</div>
@@ -107,6 +111,11 @@
                         else
                         {
                             <p class="ms-find-note">Nothing in @Where(result.Scope) matched "@result.Value".</p>
+                            @if (NameFilterLink(result) is { } browse)
+                            {
+                                @* Find matches whole names and ids; a part of a name is the database browser's filter (its `q` address parameter). *@
+                                <p class="ms-find-note">Find matches whole names and ids. <a class="ms-find-browse" href="@browse">Filter Database › Tables by "@result.Value"</a>.</p>
+                            }
                         }
 
                         @if (result.Refusal is null)
@@ -121,7 +130,7 @@
                             }
                             @if (!result.Found && OtherStores.Count > 0)
                             {
-                                <div class="ms-find-other" role="group" aria-label="Search in another store">
+                                <div class="ms-find-other" role="group" aria-label="@("Search in another " + SourceWord)">
                                     <span class="ms-find-other-label">Search in</span>
                                     @foreach (StoreListing store in OtherStores)
                                     {
@@ -333,6 +342,18 @@
         && string.Equals(hit.DatabaseId, active.DatabaseId, StringComparison.OrdinalIgnoreCase)
         && string.Equals(hit.TenantId, active.TenantId, StringComparison.Ordinal);
 
+    /// <summary>The source picker's word in lower case: "store" in Marten Studio, "source" in Postgres Studio.</summary>
+    private string SourceWord => Settings.SourceLabelOf(Descriptor).ToLowerInvariant();
+
+    /// <summary>
+    /// A link to Database › Tables filtered by what was typed, when it could be (a part of) a table or view name and nothing matched:
+    /// the browser's name filter is a substring, where Find's match is exact.
+    /// </summary>
+    private string? NameFilterLink(FindResult found) =>
+        found.Refusal is null && FindQuery.Parse(found.Value).Identifier is { } identifier
+            ? DatabaseLinks.ToBrowser(Settings, Descriptor, found.Scope, nameFilter: identifier.Name)
+            : null;
+
     private string Where(StudioScope scope)
     {
         StoreListing? store = State.AvailableStores.FirstOrDefault(x => string.Equals(x.Key, scope.StoreKey, StringComparison.OrdinalIgnoreCase));
@@ -346,7 +367,12 @@
                 name += " › " + database.Name;
             }
 
-            name += scope.TenantId is { Length: > 0 } tenant ? $" (tenant {tenant})" : " (all tenants)";
+
+            // Only a source with tenants has any to name: Postgres Studio's data sources have none, and "(all tenants)" is not its word.
+            if (State.ShowTenantSelector)
+            {
+                name += scope.TenantId is { Length: > 0 } tenant ? $" (tenant {tenant})" : " (all tenants)";
+            }
         }
 
         return name;

@@ -79,7 +79,7 @@ public class FindBoxTests
         input.HasAttribute("value").Should().BeFalse("the field is never bound, so a render never touches what was typed");
 
         string hintId = input.GetAttribute("aria-describedby")!;
-        box.Find("#" + hintId).TextContent.Should().Be("A document or stream id, a natural key, #sequence, a table name or a queryid");
+        box.Find("#" + hintId).TextContent.Should().Be("A document or stream id, a natural key, #sequence, an exact table or view name or a queryid");
 
         IElement toggle = box.Find("button.ms-find-toggle");
         toggle.GetAttribute("popovertarget").Should().Be("ms-find-popover");
@@ -177,6 +177,63 @@ public class FindBoxTests
         panel.Should().Contain("Searched: 47 document types.");
         panel.Should().Contain("2 document types partitioned by tenant were not searched: select a tenant.");
         box.FindAll("a.ms-find-hit").Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task A_part_of_a_name_that_matched_nothing_offers_the_browsers_name_filter()
+    {
+        FakeFindContributor documents = new FakeFindContributor(10, "Tables").Returns("tables and views");
+        using PostgresStudioComponentContext context = Context(documents);
+
+        IRenderedComponent<FindBox> box = await RenderReadyAsync(context);
+        await box.InvokeAsync(() => box.Instance.FindAsync("qrtz"));
+
+        string panel = box.Find("[data-ms-find-panel]").TextContent;
+        panel.Should().Contain("Find matches whole names and ids.");
+        IElement link = box.Find("a.ms-find-browse");
+        link.TextContent.Should().Be("Filter Database › Tables by \"qrtz\"");
+        link.GetAttribute("href").Should().Contain("database").And.Contain("q=qrtz").And.Contain("store=default");
+    }
+
+    [Theory]
+    [InlineData("2f6c0e0a-1b2c-4d3e-8f90-123456789abc")]
+    [InlineData("#12")]
+    [InlineData("1234")]
+    public async Task A_value_that_could_not_be_a_name_offers_no_name_filter(string typed)
+    {
+        using PostgresStudioComponentContext context = Context(new FakeFindContributor(10, "Tables").Returns("tables and views"));
+
+        IRenderedComponent<FindBox> box = await RenderReadyAsync(context);
+        await box.InvokeAsync(() => box.Instance.FindAsync(typed));
+
+        box.FindAll("a.ms-find-browse").Should().BeEmpty();
+        box.Find("[data-ms-find-panel]").TextContent.Should().NotContain("Find matches whole names");
+    }
+
+    [Fact]
+    public async Task A_name_that_was_found_offers_no_name_filter()
+    {
+        FakeFindContributor tables = new FakeFindContributor(10, "Tables").Returns("tables and views", null, FakeFindContributor.Hit(Active, "Table", "public.orders"), FakeFindContributor.Hit(Active, "Table", "other.orders"));
+        using PostgresStudioComponentContext context = Context(tables);
+
+        IRenderedComponent<FindBox> box = await RenderReadyAsync(context);
+        await box.InvokeAsync(() => box.Instance.FindAsync("orders"));
+
+        box.FindAll("a.ms-find-browse").Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task A_source_with_no_tenants_never_says_all_tenants()
+    {
+        using PostgresStudioComponentContext context = Context(new FakeFindContributor(10, "Tables").Returns("tables and views"));
+
+        IRenderedComponent<FindBox> box = await RenderReadyAsync(context);
+        await box.InvokeAsync(() => box.Instance.FindAsync("nope"));
+
+        context.State.ShowTenantSelector.Should().BeFalse("the premise: a Postgres Studio source has no tenants");
+        string panel = box.Find("[data-ms-find-panel]").TextContent;
+        panel.Should().Contain("Nothing in ").And.Contain("matched \"nope\".");
+        panel.Should().NotContain("tenant");
     }
 
     [Fact]

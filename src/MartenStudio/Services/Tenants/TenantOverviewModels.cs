@@ -121,6 +121,9 @@ internal sealed record TenantOverview
     /// <summary>The union of the tenants listed was cut at <c>TenantList.MaxListedTenants</c>; never set under a store policy.</summary>
     public bool ListTruncated { get; init; }
 
+    /// <summary>The event store is not kept per tenant, so ~Events, ~Streams and Last event are a dash for every tenant: the page says so once above the table.</summary>
+    public bool EventsNotPerTenant { get; init; }
+
     /// <summary>The store policy filters the listing, so it is never claimed to be complete.</summary>
     public bool UnderPolicy { get; init; }
 

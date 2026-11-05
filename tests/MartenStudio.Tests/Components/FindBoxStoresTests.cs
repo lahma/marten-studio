@@ -168,6 +168,38 @@ public class FindBoxStoresTests
     }
 
     [Fact]
+    public async Task Marten_Studios_empty_message_says_all_tenants_for_a_store_with_a_tenant_selector_and_the_picker_is_a_store()
+    {
+        Recording contributor = new();
+        await using StudioComponentContext context = await ReadyAsync(contributor, catalog =>
+        {
+            TwoStores(catalog);
+            catalog.WithTenants("default", new TenantList(["acme"], false, TenantListSource.Configured));
+        });
+        await context.State.RefreshAsync(Token);
+        IRenderedComponent<FindBox> box = context.Render<FindBox>();
+
+        await box.InvokeAsync(() => box.Instance.FindAsync("nope"));
+
+        box.Find("[data-ms-find-panel]").TextContent.Should().Contain("Nothing in Default › primary (all tenants) matched \"nope\".");
+        box.Find(".ms-find-other").GetAttribute("aria-label").Should().Be("Search in another store");
+    }
+
+    [Fact]
+    public async Task A_store_with_no_tenant_selector_does_not_say_all_tenants_in_either_studio()
+    {
+        Recording contributor = new();
+        await using StudioComponentContext context = await ReadyAsync(contributor, TwoStores);
+        IRenderedComponent<FindBox> box = context.Render<FindBox>();
+
+        await box.InvokeAsync(() => box.Instance.FindAsync("nope"));
+
+        string panel = box.Find("[data-ms-find-panel]").TextContent;
+        panel.Should().Contain("Nothing in Default › primary matched \"nope\".");
+        panel.Should().NotContain("tenants");
+    }
+
+    [Fact]
     public async Task At_most_eight_other_stores_are_offered()
     {
         Recording contributor = new();

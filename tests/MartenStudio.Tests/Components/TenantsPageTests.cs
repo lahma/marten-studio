@@ -113,6 +113,36 @@ public class TenantsPageTests
     }
 
     [Fact]
+    public async Task A_store_whose_events_are_not_kept_per_tenant_says_why_the_event_columns_are_dashes_once_and_not_in_a_tooltip()
+    {
+        (StudioComponentContext context, _) = await StartAsync(static (_, _) => new TenantOverview
+        {
+            Rows = [FakeTenantOverviewService.Row("acme"), FakeTenantOverviewService.Row("globex")],
+            EventsNotPerTenant = true,
+        });
+        await using StudioComponentContext owned = context;
+
+        IRenderedComponent<Tenants> page = context.Render<Tenants>();
+        page.WaitForAssertion(() => page.FindAll("tr.ms-table-row").Should().HaveCount(2));
+
+        page.FindAll(".ms-tenants-events-shared").Should().ContainSingle()
+            .Which.TextContent.Should().Be("Events are not stored per tenant in this store, so ~Events, ~Streams and Last event show — for every tenant.");
+        page.FindAll(".ms-tenants-notes .ms-tenants-events-shared").Should().ContainSingle("it is in the notes above the table, as text");
+    }
+
+    [Fact]
+    public async Task A_store_whose_events_are_kept_per_tenant_says_nothing_of_it()
+    {
+        (StudioComponentContext context, _) = await StartAsync(static (_, _) => new TenantOverview { Rows = [FakeTenantOverviewService.Row("acme")] });
+        await using StudioComponentContext owned = context;
+
+        IRenderedComponent<Tenants> page = context.Render<Tenants>();
+        page.WaitForAssertion(() => page.FindAll("tr.ms-table-row").Should().ContainSingle());
+
+        page.FindAll(".ms-tenants-events-shared").Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task Without_a_policy_the_more_than_two_hundred_sentence_is_said_as_it_always_was()
     {
         (StudioComponentContext context, _) = await StartAsync(static (_, _) => new TenantOverview

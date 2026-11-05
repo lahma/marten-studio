@@ -89,6 +89,11 @@
                 <p class="ms-muted ms-tenants-truncated">More than @TenantList.MaxListedTenants.ToString(CultureInfo.InvariantCulture) tenants: the first @TenantList.MaxListedTenants.ToString(CultureInfo.InvariantCulture) by id are listed. Type any other in the header's tenant box.</p>
             }
 
+            @if (view.EventsNotPerTenant)
+            {
+                <p class="ms-muted ms-tenants-events-shared">Events are not stored per tenant in this store, so ~Events, ~Streams and Last event show — for every tenant.</p>
+            }
+
             @if (view.IdsWithoutDatabases)
             {
                 <p class="ms-muted ms-tenants-unplaced">KnownTenantIds names tenants without their databases; pick a database in the header to read one.</p>
