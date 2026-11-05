@@ -24,6 +24,11 @@ internal sealed record StoreListings(IReadOnlyList<StoreListing> Listed, IReadOn
     public static StoreListings None { get; } = new([], []);
 }
 
+/// <summary>The databases of one source the visitor may see, and whether they could not be listed at all.</summary>
+/// <param name="Databases">The databases, filtered for the visitor.</param>
+/// <param name="Failed">Whether the enumeration failed (or the source will not build), as distinct from a visitor who may see none.</param>
+internal sealed record StoreDatabaseListing(IReadOnlyList<DatabaseListing> Databases, bool Failed);
+
 /// <summary>One database as the picker offers it. The key is the database's stable identity, never a connection string.</summary>
 internal sealed record DatabaseListing(string Identity, string Name, string Server);
 
@@ -62,6 +67,13 @@ internal interface IStudioScopeCatalog
 
     /// <summary>Every database of one source the visitor may see.</summary>
     Task<IReadOnlyList<DatabaseListing>> ListDatabasesAsync(string storeKey, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The same listing as <see cref="ListDatabasesAsync" />, and whether the source's databases could not be enumerated: an empty list
+    /// that means "this visitor may see none" and one that means "could not be read" are different answers (Find's "Search in").
+    /// </summary>
+    async Task<StoreDatabaseListing> TryListDatabasesAsync(string storeKey, CancellationToken cancellationToken = default) =>
+        new(await ListDatabasesAsync(storeKey, cancellationToken).ConfigureAwait(false), false);
 
     /// <summary>The facts the header renders about one source and database.</summary>
     Task<StoreScopeFacts> DescribeAsync(string storeKey, string databaseId, CancellationToken cancellationToken = default);
@@ -158,6 +170,26 @@ internal sealed class StudioScopeCatalog : IStudioScopeCatalog
         return availability.IsAvailable && source is not null
             ? await ListDatabasesAsync(registration.Key, source, cancellationToken).ConfigureAwait(false)
             : [];
+    }
+
+    /// <inheritdoc />
+    public async Task<StoreDatabaseListing> TryListDatabasesAsync(string storeKey, CancellationToken cancellationToken = default)
+    {
+        StudioSourceRegistration? registration = sources.Find(storeKey);
+        if (registration is null)
+        {
+            return new StoreDatabaseListing([], false);
+        }
+
+        StoreAvailability availability = sources.TryResolve(registration, out IStudioSource? source);
+        if (!availability.IsAvailable || source is null)
+        {
+            return new StoreDatabaseListing([], true);
+        }
+
+        // A policy handler that throws while the databases are filtered propagates: the caller says it could not search, as for a failure.
+        (IReadOnlyList<DatabaseListing> databases, bool failed) = await ListDatabasesCoreAsync(registration.Key, source, cancellationToken).ConfigureAwait(false);
+        return new StoreDatabaseListing(databases, failed);
     }
 
     /// <inheritdoc />
@@ -309,7 +341,7 @@ internal sealed class StudioScopeCatalog : IStudioScopeCatalog
                 cancellationToken)
             .ConfigureAwait(false);
 
-        return tenants with { Ids = allowed, IsTruncated = true, IsComplete = !tenants.IsTruncated && tenants.Source != TenantListSource.Unavailable };
+        return tenants with { Ids = allowed, IsTruncated = true };
     }
 
     /// <summary>The databases of one source the visitor may see, one per identity.</summary>

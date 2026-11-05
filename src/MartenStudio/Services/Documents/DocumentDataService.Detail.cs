@@ -341,7 +341,7 @@ internal sealed partial class DocumentDataService
         List<DocumentFindHit> hits = [];
         int visible = 0;
         int partitionedSkipped = 0;
-        int tenantedSkipped = 0;
+        bool tenantRestricted = false;
         int probed = 0;
         bool limited = false;
 
@@ -371,20 +371,15 @@ internal sealed partial class DocumentDataService
                     .GetAsync(connection, documentType.TableName.Schema, documentType.TableName.Name, cancellationToken)
                     .ConfigureAwait(false));
 
-            // A policy that limits the tenants the visitor may address, over a store with more tenants than the header can list: nothing is
-            // read across tenants, and the visitor is asked to select one (FindTenants).
-            if (resolved.TenantId is null && tenants.SelectionNeeded && table.TenancyStyle == JasperFx.MultiTenancy.TenancyStyle.Conjoined)
-            {
-                tenantedSkipped++;
-                continue;
-            }
-
             if (!DocumentQueryBuilder.TryBuildFind(table, value, resolved.TenantId, tenants.Only, CommandTimeoutSeconds, out NpgsqlCommand? command, out DocumentFindShape shape))
             {
                 continue;
             }
 
             probed++;
+
+            // A conjoined collection read across tenants under a policy is read in the visitor's tenants only, and the Find says so.
+            tenantRestricted |= resolved.TenantId is null && tenants.Only is not null && shape.Tenant;
 
             List<DocumentFindRow> rows = [];
 
@@ -453,7 +448,7 @@ internal sealed partial class DocumentDataService
                 maybeMore));
         }
 
-        return new DocumentFindResult(hits, visible, partitionedSkipped, limited, concrete, tenantedSkipped);
+        return new DocumentFindResult(hits, visible, partitionedSkipped, limited, concrete, tenantRestricted);
     }
 
     /// <summary>The name of the subclass a row is, or <see langword="null" /> for the collection's own type or an alias nothing claims.</summary>

@@ -79,14 +79,12 @@ internal sealed class StreamFindContributor : IFindContributor
             return new FindContribution([], null, [FindContext.PerTenantNote]);
         }
 
-        if (context.StreamsNeedTenant)
-        {
-            return new FindContribution([], null, [FindTenants.SelectionNeededNote]);
-        }
-
         List<FindHit> hits = [];
         List<string> searched = [];
         List<string> notes = [];
+
+        // Whether a read was made across tenants in the visitor's tenants only: said once, the same words in every case (FindTenants).
+        bool restricted = false;
 
         // A stream id: a GUID for a store whose streams are, or any text for one whose streams are strings.
         if (context.Shape.StreamIdentity == StreamIdentity.AsString || Guid.TryParse(query.Value, out _))
@@ -97,6 +95,8 @@ internal sealed class StreamFindContributor : IFindContributor
                     new StreamListRequest { StreamId = query.Value, IncludeArchived = true, PageSize = RowLimit, Tenants = context.StreamTenants },
                     cancellationToken)
                 .ConfigureAwait(false);
+
+            restricted |= context.StreamTenants is not null;
 
             if (page.Error is null)
             {
@@ -120,6 +120,8 @@ internal sealed class StreamFindContributor : IFindContributor
                 .FindStreamsByNaturalKeyAsync(scope, query.Value, includeArchived: true, context.StreamTenants, cancellationToken)
                 .ConfigureAwait(false);
 
+            restricted |= context.StreamTenants is not null;
+
             if (lookup.Error is not null)
             {
                 notes.Add("Natural keys: could not be searched.");
@@ -141,6 +143,11 @@ internal sealed class StreamFindContributor : IFindContributor
                         byKey.Key + "\u001f" + query.Value);
                 }
             }
+        }
+
+        if (restricted)
+        {
+            notes.Add(FindTenants.RestrictedNote);
         }
 
         return new FindContribution(hits, searched.Count == 0 ? null : string.Join(", ", searched), notes);

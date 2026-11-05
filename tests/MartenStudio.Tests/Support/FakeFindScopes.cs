@@ -7,8 +7,11 @@ using PostgresStudio.Services.Find;
 namespace MartenStudio.Tests.Support;
 
 /// <summary>What the Marten Find contributors share, said outright: the context, and which tenants the policy admits.</summary>
-internal sealed class FakeFindScopes(FindContext? context, Func<string?, bool>? admits = null) : IFindScopes
+internal sealed class FakeFindScopes(FindContext? context, Func<string?, bool>? admits = null, FindTenants? tenants = null, bool tenantsUnreadable = false) : IFindScopes
 {
+    /// <summary>How many times a contributor asked for the tenant restriction.</summary>
+    public int TenantReads { get; private set; }
+
     /// <summary>How many times a contributor asked for the context.</summary>
     public int Contexts { get; private set; }
 
@@ -27,6 +30,12 @@ internal sealed class FakeFindScopes(FindContext? context, Func<string?, bool>? 
                 Scope = scope,
             },
             tenants ?? FindTenants.Unrestricted);
+
+    public Task<FindTenants?> TenantsAsync(StudioScope scope, FindQuery query, CancellationToken cancellationToken)
+    {
+        TenantReads++;
+        return Task.FromResult(tenantsUnreadable ? null : tenants ?? context?.Tenants ?? FindTenants.Unrestricted);
+    }
 
     public Task<FindContext?> ContextAsync(StudioScope scope, FindQuery query, CancellationToken cancellationToken)
     {

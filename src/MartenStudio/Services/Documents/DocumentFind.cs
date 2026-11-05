@@ -29,9 +29,9 @@ internal sealed record DocumentFindHit(string Alias, int Hue, string Id, IReadOn
 /// The scope as the resolver matched it - the registered store key and the database's own identity, with the tenant selected - which
 /// is what a link carries and what a policy is asked about a tenant.
 /// </param>
-/// <param name="TenantedSkipped">
-/// How many tenanted collections were not read across tenants because the visitor's policy limits the tenants they may address and the
-/// store has more than can be listed: they must select a tenant (<c>FindTenants.SelectionNeeded</c>).
+/// <param name="TenantRestricted">
+/// Whether a conjoined collection was read across tenants in the visitor's tenants only (<c>FindTenants.Only</c>), which the Find says in
+/// one note, the same in every case.
 /// </param>
 internal sealed record DocumentFindResult(
     IReadOnlyList<DocumentFindHit> Hits,
@@ -39,7 +39,7 @@ internal sealed record DocumentFindResult(
     int PartitionedSkipped,
     bool ProbeLimitReached,
     StudioScope? Scope = null,
-    int TenantedSkipped = 0)
+    bool TenantRestricted = false)
 {
     /// <summary>Nothing searched.</summary>
     public static DocumentFindResult Empty { get; } = new([], 0, 0, false);

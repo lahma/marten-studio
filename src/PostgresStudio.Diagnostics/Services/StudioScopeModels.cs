@@ -47,14 +47,6 @@ internal enum TenantListSource
 /// <param name="Source">Where the ids came from.</param>
 internal sealed record TenantList(IReadOnlyList<string> Ids, bool IsTruncated, TenantListSource Source)
 {
-    /// <summary>
-    /// Whether <see cref="Ids" /> is every tenant the visitor may address although the list says <see cref="IsTruncated" /> (1.2, Find by
-    /// id): a filtered listing is always marked truncated, because the policy may admit a tenant that nobody listed, but when discovery
-    /// itself found every tenant (it was not cut off at <see cref="MaxListedTenants" /> and something answered) the ids that survived the
-    /// policy are all there are. Set by the catalog's filter; false for every other list.
-    /// </summary>
-    public bool IsComplete { get; init; }
-
     /// <summary>How many tenants the selector will list before it becomes a free-text box.</summary>
     public const int MaxListedTenants = 200;
 

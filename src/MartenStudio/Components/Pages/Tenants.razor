@@ -81,10 +81,10 @@
         <div class="ms-tenants-notes">
             @if (view.UnderPolicy)
             {
-                <p class="ms-muted ms-tenants-policy">These are the tenants you may address; there may be others.</p>
+                <p class="ms-muted ms-tenants-policy">These are the tenants you may address; there may be others. To open one that is not listed, choose Other… in the header's tenant box.</p>
             }
 
-            @if (view.ListTruncated)
+            @if (view.ListTruncated && !view.UnderPolicy)
             {
                 <p class="ms-muted ms-tenants-truncated">More than @TenantList.MaxListedTenants.ToString(CultureInfo.InvariantCulture) tenants: the first @TenantList.MaxListedTenants.ToString(CultureInfo.InvariantCulture) by id are listed. Type any other in the header's tenant box.</p>
             }

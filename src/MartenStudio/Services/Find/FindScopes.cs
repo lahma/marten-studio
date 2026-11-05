@@ -22,9 +22,6 @@ internal sealed record FindContext(StudioScope Scope, EventStoreShape Shape, Fin
     /// <summary>Whether streams, natural keys and sequences are skipped: events are per tenant and none is selected.</summary>
     public bool NeedsTenant => Shape.PerTenantSequences && Scope.TenantId is null;
 
-    /// <summary>Whether streams and natural keys are not read across tenants, because the visitor's policy limits them and the store has more tenants than can be listed.</summary>
-    public bool StreamsNeedTenant => Tenants.SelectionNeeded && Shape.EventsConjoined && Scope.TenantId is null;
-
     /// <summary>The tenants streams are read across: only when the event store is conjoined, because otherwise <c>*DEFAULT*</c> is every row's tenant.</summary>
     public IReadOnlyList<string>? StreamTenants => Shape.EventsConjoined && Scope.TenantId is null ? Tenants.Only : null;
 
@@ -45,6 +42,15 @@ internal interface IFindScopes
     /// <param name="query">The Find's parsed value; contributors of one Find pass the same instance.</param>
     /// <param name="cancellationToken">Cancels the read.</param>
     Task<FindContext?> ContextAsync(StudioScope scope, FindQuery query, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Which tenants a conjoined probe may read across for this scope: independent of the event store, so that documents do not depend on
+    /// it. <see langword="null" /> means the restriction itself could not be read, and a probe must not then read across tenants.
+    /// </summary>
+    /// <param name="scope">The scope being searched.</param>
+    /// <param name="query">The Find's parsed value; contributors of one Find pass the same instance.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    Task<FindTenants?> TenantsAsync(StudioScope scope, FindQuery query, CancellationToken cancellationToken);
 
     /// <summary>The rows whose tenant the store policy admits for this database: the rest are dropped and never counted.</summary>
     /// <typeparam name="T">The rows.</typeparam>
@@ -77,7 +83,8 @@ internal sealed class FindScopes : IFindScopes
     private readonly IStudioScopeCatalog catalog;
     private readonly StudioAuthorization authorization;
     private readonly Lock gate = new();
-    private (FindQuery Query, StudioScope Scope, Task<FindContext?> Context)? last;
+    private (FindQuery Query, StudioScope Scope, Task<FindContext?> Context)? lastContext;
+    private (FindQuery Query, StudioScope Scope, Task<FindTenants?> Tenants)? lastTenants;
 
     public FindScopes(IEventDataService events, IStudioScopeCatalog catalog, StudioAuthorization authorization)
     {
@@ -91,13 +98,29 @@ internal sealed class FindScopes : IFindScopes
     {
         lock (gate)
         {
-            if (last is { } held && ReferenceEquals(held.Query, query) && held.Scope == scope && !held.Context.IsCanceled && !held.Context.IsFaulted)
+            if (lastContext is { } held && ReferenceEquals(held.Query, query) && held.Scope == scope && !held.Context.IsCanceled && !held.Context.IsFaulted)
             {
                 return held.Context;
             }
 
-            Task<FindContext?> started = ReadAsync(scope, cancellationToken);
-            last = (query, scope, started);
+            Task<FindContext?> started = ReadContextAsync(scope, query, cancellationToken);
+            lastContext = (query, scope, started);
+            return started;
+        }
+    }
+
+    /// <inheritdoc />
+    public Task<FindTenants?> TenantsAsync(StudioScope scope, FindQuery query, CancellationToken cancellationToken)
+    {
+        lock (gate)
+        {
+            if (lastTenants is { } held && ReferenceEquals(held.Query, query) && held.Scope == scope && !held.Tenants.IsCanceled && !held.Tenants.IsFaulted)
+            {
+                return held.Tenants;
+            }
+
+            Task<FindTenants?> started = ReadTenantsAsync(scope, cancellationToken);
+            lastTenants = (query, scope, started);
             return started;
         }
     }
@@ -110,7 +133,7 @@ internal sealed class FindScopes : IFindScopes
             .ConfigureAwait(false);
     }
 
-    private async Task<FindContext?> ReadAsync(StudioScope scope, CancellationToken cancellationToken)
+    private async Task<FindContext?> ReadContextAsync(StudioScope scope, FindQuery query, CancellationToken cancellationToken)
     {
         try
         {
@@ -120,7 +143,9 @@ internal sealed class FindScopes : IFindScopes
                 return null;
             }
 
-            return new FindContext(concrete, shape, await TenantsAsync(concrete, cancellationToken).ConfigureAwait(false));
+            return await TenantsAsync(scope, query, cancellationToken).ConfigureAwait(false) is { } tenants
+                ? new FindContext(concrete, shape, tenants)
+                : null;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -129,22 +154,40 @@ internal sealed class FindScopes : IFindScopes
         }
     }
 
-    private async Task<FindTenants> TenantsAsync(StudioScope concrete, CancellationToken cancellationToken)
+    private async Task<FindTenants?> ReadTenantsAsync(StudioScope scope, CancellationToken cancellationToken)
     {
-        if (!authorization.IsEnabled || concrete.TenantId is not null)
+        try
         {
-            return FindTenants.Unrestricted;
+            if (!authorization.IsEnabled || scope.TenantId is not null)
+            {
+                return FindTenants.Unrestricted;
+            }
+
+            // A scope that names no database (a caller that has not matched one) is the store's first database the catalog lists for the
+            // visitor, as the box's "Search in" chooses it; none to name is a restriction that cannot be read.
+            string databaseId = scope.DatabaseId;
+            if (databaseId.Length == 0)
+            {
+                StoreDatabaseListing listing = await catalog.TryListDatabasesAsync(scope.StoreKey, cancellationToken).ConfigureAwait(false);
+                if (listing.Failed || listing.Databases.Count == 0)
+                {
+                    return null;
+                }
+
+                databaseId = listing.Databases[0].Identity;
+            }
+
+            StoreScopeFacts facts = await catalog.DescribeAsync(scope.StoreKey, databaseId, cancellationToken).ConfigureAwait(false);
+
+            // A store with no tenant selector has nothing tenanted to read across. Any other is read in the tenants the header lists for the
+            // visitor - always, whether or not discovery was cut off, found none, or could not answer: the list is never claimed to be the
+            // whole truth, and which of those it was is not for a visitor under a policy to learn (FindTenants).
+            return facts.ShowTenantSelector ? FindTenants.OnlyThese(facts.Tenants.Ids) : FindTenants.Unrestricted;
         }
-
-        StoreScopeFacts facts = await catalog.DescribeAsync(concrete.StoreKey, concrete.DatabaseId, cancellationToken).ConfigureAwait(false);
-
-        // A store with no tenant selector has nothing tenanted to read across; one whose list may not be the whole truth cannot say what
-        // "all of the visitor's tenants" is.
-        if (!facts.ShowTenantSelector)
+        catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            return FindTenants.Unrestricted;
+            // The restriction could not be read: never fall back to reading across every tenant.
+            return null;
         }
-
-        return facts.Tenants.IsComplete ? FindTenants.OnlyThese(facts.Tenants.Ids) : FindTenants.Selection;
     }
 }

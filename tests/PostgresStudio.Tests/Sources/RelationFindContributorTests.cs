@@ -142,7 +142,7 @@ public class RelationFindContributorTests
         PostgresStudioDescriptor.Instance);
 
     [Fact]
-    public async Task An_exact_name_past_the_first_fifty_that_contain_it_is_still_found()
+    public async Task An_exact_name_past_the_first_hundred_that_contain_it_is_still_found_with_one_ask_a_kind()
     {
         CrowdedObjects objects = new(count: 120, cap: 5000);
 
@@ -150,7 +150,7 @@ public class RelationFindContributorTests
 
         found.Hits.Should().ContainSingle().Which.Title.Should().Be("app.orders");
         found.Notes.Should().BeEmpty();
-        objects.Limits.Should().Contain(RelationFindContributor.ListLimit, "the first ask is small").And.Contain(5000, "and the second is as many as the browser reads");
+        objects.Limits.Should().Equal([5000, 5000], "one ask a kind, for as many as the browser reads: a second ask would run the same statement");
     }
 
     [Fact]

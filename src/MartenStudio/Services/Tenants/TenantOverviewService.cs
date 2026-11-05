@@ -246,7 +246,9 @@ internal sealed class TenantOverviewService : ITenantOverviewService
             Rows = rows,
             Page = page,
             HasNext = hasNext,
-            ListTruncated = truncated,
+            // Under a store policy the listing is never claimed complete, and "more than 200" is said to nobody: it would tell a visitor a
+            // policy filters that discovery hit its cap, which is what the unfiltered list's count would give away (DB-0-fix-2, F7).
+            ListTruncated = truncated && string.IsNullOrWhiteSpace(options.Value.StoreAuthorizationPolicy),
             UnderPolicy = !string.IsNullOrWhiteSpace(options.Value.StoreAuthorizationPolicy),
             ListUnavailable = listUnavailable && candidates.Count == 0,
             IdsWithoutDatabases = idsWithoutDatabases,

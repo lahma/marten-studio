@@ -92,7 +92,7 @@ public class TenantsPageTests
     }
 
     [Fact]
-    public async Task The_policy_sentence_the_truncation_sentence_and_the_unplaced_sentence_are_said()
+    public async Task Under_a_policy_the_one_sentence_is_said_and_never_the_more_than_two_hundred_one()
     {
         (StudioComponentContext context, _) = await StartAsync(static (_, _) => new TenantOverview
         {
@@ -106,10 +106,43 @@ public class TenantsPageTests
         IRenderedComponent<Tenants> page = context.Render<Tenants>();
         page.WaitForAssertion(() => page.FindAll("tr.ms-table-row").Should().ContainSingle());
 
-        page.Find(".ms-tenants-policy").TextContent.Should().Be("These are the tenants you may address; there may be others.");
-        page.Find(".ms-tenants-truncated").TextContent.Should().Be("More than 200 tenants: the first 200 by id are listed. Type any other in the header's tenant box.");
+        page.Find(".ms-tenants-policy").TextContent.Should().Be("These are the tenants you may address; there may be others. To open one that is not listed, choose Other… in the header's tenant box.");
+        page.FindAll(".ms-tenants-truncated").Should().BeEmpty("a visitor a policy filters is not told whether discovery found more than 200 tenants");
         page.Find(".ms-tenants-unplaced").TextContent.Should().Be("KnownTenantIds names tenants without their databases; pick a database in the header to read one.");
         page.FindAll(".ms-tenants-open a").Should().BeEmpty("a tenant placed in no database has no page to open");
+    }
+
+    [Fact]
+    public async Task Without_a_policy_the_more_than_two_hundred_sentence_is_said_as_it_always_was()
+    {
+        (StudioComponentContext context, _) = await StartAsync(static (_, _) => new TenantOverview
+        {
+            Rows = [FakeTenantOverviewService.Row("acme")],
+            ListTruncated = true,
+        });
+        await using StudioComponentContext owned = context;
+
+        IRenderedComponent<Tenants> page = context.Render<Tenants>();
+        page.WaitForAssertion(() => page.FindAll("tr.ms-table-row").Should().ContainSingle());
+
+        page.Find(".ms-tenants-truncated").TextContent.Should().Be("More than 200 tenants: the first 200 by id are listed. Type any other in the header's tenant box.");
+        page.FindAll(".ms-tenants-policy").Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Under_a_policy_the_notes_are_the_same_whether_discovery_found_few_tenants_or_was_cut_off()
+    {
+        (StudioComponentContext few, _) = await StartAsync(static (_, _) => new TenantOverview { Rows = [FakeTenantOverviewService.Row("acme")], UnderPolicy = true, ListTruncated = false });
+        (StudioComponentContext many, _) = await StartAsync(static (_, _) => new TenantOverview { Rows = [FakeTenantOverviewService.Row("acme")], UnderPolicy = true, ListTruncated = true });
+        await using StudioComponentContext ownedFew = few;
+        await using StudioComponentContext ownedMany = many;
+
+        IRenderedComponent<Tenants> fewPage = few.Render<Tenants>();
+        IRenderedComponent<Tenants> manyPage = many.Render<Tenants>();
+        fewPage.WaitForAssertion(() => fewPage.FindAll("tr.ms-table-row").Should().ContainSingle());
+        manyPage.WaitForAssertion(() => manyPage.FindAll("tr.ms-table-row").Should().ContainSingle());
+
+        manyPage.Find(".ms-tenants-notes").TextContent.Should().Be(fewPage.Find(".ms-tenants-notes").TextContent);
     }
 
     [Fact]

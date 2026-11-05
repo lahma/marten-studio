@@ -51,13 +51,15 @@ internal sealed class DocumentFindContributor : IFindContributor
             return FindContribution.NotApplicable;
         }
 
-        FindContext? context = await scopes.ContextAsync(scope, query, cancellationToken).ConfigureAwait(false);
-        if (context is null)
+        // Not the event store's context: documents do not depend on it. If the tenant restriction itself cannot be read, the probe is not
+        // made - never made unrestricted under a policy.
+        FindTenants? tenants = await scopes.TenantsAsync(scope, query, cancellationToken).ConfigureAwait(false);
+        if (tenants is null)
         {
             return new FindContribution([], null, ["Documents: could not be searched."]);
         }
 
-        DocumentFindResult found = await documents.FindByIdAsync(scope, query.Value, context.Tenants, cancellationToken).ConfigureAwait(false);
+        DocumentFindResult found = await documents.FindByIdAsync(scope, query.Value, tenants, cancellationToken).ConfigureAwait(false);
 
         List<FindHit> hits = [];
         foreach (DocumentFindHit hit in found.Hits)
@@ -96,9 +98,9 @@ internal sealed class DocumentFindContributor : IFindContributor
             notes.Add($"{found.PartitionedSkipped.ToString(CultureInfo.InvariantCulture)} document {(found.PartitionedSkipped == 1 ? "type" : "types")} partitioned by tenant {(found.PartitionedSkipped == 1 ? "was" : "were")} not searched: select a tenant.");
         }
 
-        if (found.TenantedSkipped > 0)
+        if (found.TenantRestricted)
         {
-            notes.Add(FindTenants.SelectionNeededNote);
+            notes.Add(FindTenants.RestrictedNote);
         }
 
         if (found.ProbeLimitReached)

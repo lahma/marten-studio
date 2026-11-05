@@ -376,17 +376,30 @@ public class EventFindContributorTests
     }
 
     [Fact]
-    public async Task When_the_visitors_tenants_cannot_be_listed_nothing_is_read_across_tenants_and_the_visitor_is_asked_to_select_one()
+    public async Task A_read_across_tenants_in_the_visitors_tenants_only_says_so_once_in_the_same_words_found_or_not()
+    {
+        FindTenants tenants = FindTenants.OnlyThese(["acme"]);
+        FakeEventDataService hit = new() { StreamsForId = [FakeEventDataService.Stream(StreamId, tenantId: "acme")] };
+        FakeEventDataService miss = new() { StreamsForId = [] };
+
+        FindContribution found = await Streams(hit, new FakeFindScopes(Context(Shape(naturalKeys: "Order.Number"), tenants: tenants))).FindAsync(Asked, FindQuery.Parse(StreamId), CancellationToken.None);
+        FindContribution none = await Streams(miss, new FakeFindScopes(Context(Shape(naturalKeys: "Order.Number"), tenants: tenants))).FindAsync(Asked, FindQuery.Parse(StreamId), CancellationToken.None);
+
+        // The stream read and the natural-key lookup are one note.
+        found.Notes.Should().Equal(FindTenants.RestrictedNote);
+        none.Notes.Should().Equal(FindTenants.RestrictedNote);
+    }
+
+    [Fact]
+    public async Task A_read_that_was_not_restricted_says_nothing_of_tenants()
     {
         FakeEventDataService events = new() { StreamsForId = [FakeEventDataService.Stream(StreamId, tenantId: "acme")] };
 
-        FindContribution found = await Streams(events, new FakeFindScopes(Context(Shape(naturalKeys: "Order.Number"), tenants: FindTenants.Selection)))
-            .FindAsync(Asked, FindQuery.Parse(StreamId), CancellationToken.None);
+        FindContribution found = await Streams(events, new FakeFindScopes(Context(Shape()))).FindAsync(Asked, FindQuery.Parse(StreamId), CancellationToken.None);
+        FindContribution notConjoined = await Streams(events, new FakeFindScopes(Context(Shape(conjoined: false), tenants: FindTenants.OnlyThese(["acme"])))).FindAsync(Asked, FindQuery.Parse(StreamId), CancellationToken.None);
 
-        found.Notes.Should().Equal(FindTenants.SelectionNeededNote);
-        found.Hits.Should().BeEmpty();
-        events.StreamRequests.Should().BeEmpty();
-        events.NaturalKeyLookups.Should().BeEmpty();
+        found.Notes.Should().BeEmpty();
+        notConjoined.Notes.Should().BeEmpty("a store whose events are not conjoined has no tenant to restrict by");
     }
 
     [Fact]

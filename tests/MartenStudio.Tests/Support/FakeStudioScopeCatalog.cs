@@ -84,6 +84,24 @@ internal sealed class FakeStudioScopeCatalog : IStudioScopeCatalog
         Task.FromResult<IReadOnlyList<DatabaseListing>>(
             Databases.TryGetValue(storeKey, out List<DatabaseListing>? databases) ? databases : []);
 
+    /// <summary>The stores whose databases could not be enumerated: <see cref="TryListDatabasesAsync" /> says it failed.</summary>
+    public HashSet<string> EnumerationFails { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The stores whose listing throws, as a policy handler that throws does.</summary>
+    public HashSet<string> ListingThrows { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    public async Task<StoreDatabaseListing> TryListDatabasesAsync(string storeKey, CancellationToken cancellationToken = default)
+    {
+        if (ListingThrows.Contains(storeKey))
+        {
+            throw new InvalidOperationException("the policy handler threw");
+        }
+
+        return new StoreDatabaseListing(
+            EnumerationFails.Contains(storeKey) ? [] : await ListDatabasesAsync(storeKey, cancellationToken).ConfigureAwait(false),
+            EnumerationFails.Contains(storeKey));
+    }
+
     public async Task<StoreScopeFacts> DescribeAsync(string storeKey, string databaseId, CancellationToken cancellationToken = default)
     {
         if (DescribeGate is { } gate)

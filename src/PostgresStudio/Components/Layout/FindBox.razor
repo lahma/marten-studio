@@ -222,30 +222,30 @@
     private async Task SearchInAsync(StoreListing store)
     {
         // The store's first database the catalog admits for this visitor - not the first one the store knows, which may be one the policy
-        // refuses - and no tenant. A store with no such database has nothing to search in.
+        // refuses - and no tenant. A visitor who may see none has nothing to search in ("Nothing found"); a store whose databases could
+        // not be listed, or a policy handler that threw, is a failure the box says so about, never in the same words.
         StudioScope? scope = null;
+        bool failed = false;
 
         try
         {
-            IReadOnlyList<DatabaseListing> databases = await Catalog.ListDatabasesAsync(store.Key);
-            if (databases.Count > 0)
+            StoreDatabaseListing listing = await Catalog.TryListDatabasesAsync(store.Key);
+            failed = listing.Failed;
+            if (listing.Databases.Count > 0)
             {
-                scope = new StudioScope(store.Key, databases[0].Identity, null);
+                scope = new StudioScope(store.Key, listing.Databases[0].Identity, null);
             }
-        }
-        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
-        {
-            return;
         }
         catch (Exception e) when (e is not OperationCanceledException)
         {
             Logger.LogDebug(e, "Find could not list the databases of '{Store}'", StudioLogValue.Cap(store.Key));
+            failed = true;
         }
 
         if (scope is null)
         {
-            result = FindResult.Nothing(lastValue, new StudioScope(store.Key, string.Empty, null));
-            error = null;
+            result = failed ? null : FindResult.Nothing(lastValue, new StudioScope(store.Key, string.Empty, null));
+            error = failed ? $"Find could not search {store.DisplayName}. Try again." : null;
             busy = false;
             await InvokeAsync(StateHasChanged);
             return;

@@ -20,7 +20,7 @@ namespace PostgresStudio.Services.Find;
 internal sealed class RelationFindContributor : IFindContributor
 {
     /// <summary>How many rows of each list Find asks for before it compares names.</summary>
-    internal const int ListLimit = 50;
+    internal const int ListLimit = DatabaseCatalog.ListCap;
 
     private readonly IDatabaseObjectService objects;
     private readonly IStudioSettings settings;
@@ -56,17 +56,11 @@ internal sealed class RelationFindContributor : IFindContributor
 
         foreach (DatabaseObjectCategory category in new[] { DatabaseObjectCategory.Tables, DatabaseObjectCategory.Views })
         {
+            // One ask, for as many as the browser ever reads: the list is bounded and ordered by owner and name, so an exact name can sit
+            // past any smaller window that merely contains it, and a second ask would run the same statement.
             DatabaseObjectList list = await ListAsync(scope, category, identifier.Name, ListLimit, cancellationToken).ConfigureAwait(false);
             List<DatabaseObjectSummary> exact = Exact(list, identifier);
-
-            // The list is bounded and ordered by owner and name, so an exact name can sit past the first fifty that merely contain it:
-            // when the list came back full and held no exact match, ask once more for as many as the browser ever reads.
-            if (list.Truncated && exact.Count == 0 && list.Refusal == DatabaseRefusal.None)
-            {
-                list = await ListAsync(scope, category, identifier.Name, DatabaseCatalog.ListCap, cancellationToken).ConfigureAwait(false);
-                exact = Exact(list, identifier);
-                tooMany |= list.Truncated && exact.Count == 0;
-            }
+            tooMany |= list.Truncated && exact.Count == 0 && list.Refusal == DatabaseRefusal.None;
 
             failed |= list.Refusal == DatabaseRefusal.Unavailable;
 

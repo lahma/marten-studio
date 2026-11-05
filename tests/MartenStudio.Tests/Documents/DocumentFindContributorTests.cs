@@ -159,24 +159,48 @@ public class DocumentFindContributorTests
     }
 
     [Fact]
-    public async Task Tenanted_collections_left_unread_because_the_visitor_must_select_a_tenant_say_so()
+    public async Task A_probe_read_across_tenants_in_the_visitors_tenants_only_says_so_in_the_same_words_found_or_not()
     {
-        FakeDocumentDataService documents = new() { FindResult = new([], 3, 0, false, Matched, TenantedSkipped: 2) };
+        FakeDocumentDataService found = new() { FindResult = new([Hit("customer", "c-1", new DocumentFindRow("acme", null, false))], 3, 0, false, Matched, TenantRestricted: true) };
+        FakeDocumentDataService nothing = new() { FindResult = new([], 3, 0, false, Matched, TenantRestricted: true) };
 
-        FindContribution found = await Contributor(documents).FindAsync(Asked, FindQuery.Parse("c-1"), CancellationToken.None);
+        FindContribution withHit = await Contributor(found).FindAsync(Asked, FindQuery.Parse("c-1"), CancellationToken.None);
+        FindContribution withoutHit = await Contributor(nothing).FindAsync(Asked, FindQuery.Parse("c-1"), CancellationToken.None);
 
-        found.Notes.Should().Equal(FindTenants.SelectionNeededNote);
-        found.Notes[0].Should().Contain("select a tenant to search documents and streams");
+        withHit.Notes.Should().Equal(FindTenants.RestrictedNote);
+        withoutHit.Notes.Should().Equal(FindTenants.RestrictedNote);
+        FindTenants.RestrictedNote.Should().Be("Documents and streams: searched in the tenants the header lists for you. To search another tenant, select it in the header.");
     }
 
     [Fact]
-    public async Task A_scope_that_could_not_be_read_is_a_note_and_the_probe_is_not_made()
+    public async Task A_probe_that_was_not_restricted_says_nothing_of_tenants()
+    {
+        FakeDocumentDataService documents = new() { FindResult = new([], 3, 0, false, Matched) };
+
+        (await Contributor(documents).FindAsync(Asked, FindQuery.Parse("c-1"), CancellationToken.None)).Notes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task A_restriction_that_could_not_be_read_is_a_note_and_the_probe_is_never_made_unrestricted()
     {
         FakeDocumentDataService documents = new();
 
-        FindContribution found = await Contributor(documents, new FakeFindScopes(null)).FindAsync(Asked, FindQuery.Parse("c-1"), CancellationToken.None);
+        FindContribution found = await Contributor(documents, new FakeFindScopes(null, tenantsUnreadable: true)).FindAsync(Asked, FindQuery.Parse("c-1"), CancellationToken.None);
 
         found.Notes.Should().Equal("Documents: could not be searched.");
         documents.Finds.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Documents_are_found_when_the_event_store_cannot_be_described_or_there_is_none()
+    {
+        FindTenants tenants = FindTenants.OnlyThese(["acme"]);
+        FakeDocumentDataService documents = new() { FindResult = new([Hit("customer", "c-1", new DocumentFindRow("acme", null, false))], 1, 0, false, Matched, TenantRestricted: true) };
+
+        // No event context at all (the describe failed), and the restriction is still the visitor's.
+        FindContribution found = await Contributor(documents, new FakeFindScopes(null, tenants: tenants)).FindAsync(Asked, FindQuery.Parse("c-1"), CancellationToken.None);
+
+        found.Hits.Should().ContainSingle();
+        documents.FindTenantsAsked.Should().ContainSingle().Which.Should().BeSameAs(tenants);
     }
 }

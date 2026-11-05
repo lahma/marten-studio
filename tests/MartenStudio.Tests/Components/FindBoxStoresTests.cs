@@ -148,6 +148,25 @@ public class FindBoxStoresTests
         box.Find(".ms-find-status").TextContent.Should().Be("Nothing found");
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_store_whose_databases_could_not_be_listed_is_a_failure_the_box_says_so_about_not_nothing_found(bool policyThrows)
+    {
+        Recording contributor = new();
+        await using StudioComponentContext context = await ReadyAsync(contributor, TwoStores);
+        (policyThrows ? context.Catalog.ListingThrows : context.Catalog.EnumerationFails).Add("invoicing");
+        IRenderedComponent<FindBox> box = context.Render<FindBox>();
+        await box.InvokeAsync(() => box.Instance.FindAsync("INV-77"));
+        int asked = contributor.Calls.Count;
+
+        await box.InvokeAsync(() => box.FindAll(".ms-find-other-store").Single(static x => x.TextContent.Trim() == "Invoicing").Click());
+
+        box.Find(".ms-find-error").TextContent.Should().Be("Find could not search Invoicing. Try again.");
+        box.Find(".ms-find-status").TextContent.Should().BeEmpty("it is not 'Nothing found'");
+        contributor.Calls.Should().HaveCount(asked);
+    }
+
     [Fact]
     public async Task At_most_eight_other_stores_are_offered()
     {

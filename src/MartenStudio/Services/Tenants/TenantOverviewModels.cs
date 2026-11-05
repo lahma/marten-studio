@@ -118,7 +118,7 @@ internal sealed record TenantOverview
     /// <summary>Whether a page follows.</summary>
     public bool HasNext { get; init; }
 
-    /// <summary>The union of the tenants listed was cut at <c>TenantList.MaxListedTenants</c>.</summary>
+    /// <summary>The union of the tenants listed was cut at <c>TenantList.MaxListedTenants</c>; never set under a store policy.</summary>
     public bool ListTruncated { get; init; }
 
     /// <summary>The store policy filters the listing, so it is never claimed to be complete.</summary>
