@@ -50,8 +50,9 @@ to end sooner revalidates the circuit's authentication state (`RevalidatingServe
 the visitor from `AuthenticationStateProvider` on every call, so a visitor the provider has dropped is refused by the next one,
 provided `StoreAuthorizationPolicy` (`SourceAuthorizationPolicy` in Postgres Studio) is a policy that refuses that visitor; a
 studio authorized by `AuthorizationPolicy` alone asks no policy per call. A link the visitor clicks that names another
-store, database or tenant moves the studio to it only when the visitor's own listings carry it, as the store policy decided
-them; Back, Forward and a page's own navigation never move the scope.
+store, database or tenant, and a Back or Forward to such an address (the browser reports both the same way), moves the
+studio to it only when the visitor's own listings carry it, as the store policy decided them; a page's own navigation never
+moves the scope.
 
 Find (1.2), the header box, runs each probe through the service of the page it opens, under that page's gates, and audits
 nothing itself. A hidden document type, a schema the browser's gate withholds, a tenant the store policy refuses and a

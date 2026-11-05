@@ -16,8 +16,9 @@ and a .NET 11 SDK Debug start-up failure.
   (docs/stability.md).
 - The address keeps the store and database in two cases where it could lose them: a link pasted with a scope other than
   the first, on a host whose scope listing is slow, and the SQL, Plan and Query pages reached from the navigation rail.
-  A link to another store, database or tenant that you click moves the studio to it; Back and Forward rewrite the
-  address back to the scope on screen. The sidebar's links follow a scope change at once.
+  A link to another store, database or tenant that you click moves the studio to it, and so does Back or Forward to an
+  address that names another scope; Back or Forward to an address that names only part of the scope on screen (no
+  tenant, say) rewrites the address to the scope on screen. The sidebar's links follow a scope change at once.
 - Find by id, a box in both studios' header (`/` or Ctrl+K): a document id, stream id, natural key, `#sequence`, table
   or view name, or a statement's queryid, tried against the selected store and database with each probe made by the page
   it opens and under its gates. One match opens it, several are listed, and nothing found offers the other stores.
