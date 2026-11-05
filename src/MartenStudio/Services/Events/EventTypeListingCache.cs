@@ -60,13 +60,46 @@ internal sealed class EventTypeListingCache
     {
         ArgumentNullException.ThrowIfNull(resolved);
 
-        string key = resolved.Registration.Key + "\u001f" + resolved.Database.Id.Identity + "\u001f" + (resolved.TenantId ?? string.Empty);
+        string key = KeyOf(resolved);
         int timeout = (int) Math.Ceiling(options.Value.QueryTimeout.TotalSeconds);
 
         return await cache
             .GetAsync(key, token => ReadAsync(resolved, timeout, token), cancellationToken)
             .ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// The listing for <paramref name="resolved" /> if one is in hand or being read, and <see langword="null" /> if the next
+    /// <see cref="GetAsync" /> would start the <c>group by</c>. It never starts one itself (1.2-UX-FIX).
+    /// </summary>
+    /// <param name="resolved">The scope as it resolved: every policy applied already, by the caller, under its visitor.</param>
+    /// <param name="cancellationToken">Cancels this caller's wait, never the shared read.</param>
+    public async Task<EventTypeList?> TryGetAsync(ResolvedScope resolved, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(resolved);
+
+        string key = KeyOf(resolved);
+
+        if (!cache.Holds(key))
+        {
+            return null;
+        }
+
+        try
+        {
+            // The factory is only reached if the entry went stale between the two calls; it declines, and the entry it made is dropped.
+            return await cache.GetAsync<EventTypeList?>(key, static _ => throw new ListingNotHeldException(), cancellationToken).ConfigureAwait(false);
+        }
+        catch (ListingNotHeldException)
+        {
+            return null;
+        }
+    }
+
+    private sealed class ListingNotHeldException : Exception;
+
+    private static string KeyOf(ResolvedScope resolved) =>
+        resolved.Registration.Key + "\u001f" + resolved.Database.Id.Identity + "\u001f" + (resolved.TenantId ?? string.Empty);
 
     // Stamped here, once, by the read that fills the cache: every caller handed the shared listing is handed the time it was read.
     private async Task<EventTypeList> ReadAsync(ResolvedScope resolved, int timeout, CancellationToken token)

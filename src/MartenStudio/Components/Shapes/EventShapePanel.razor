@@ -66,6 +66,11 @@
             <p class="ms-shape-note" role="status">@notListed</p>
         }
 
+        @if (unregisteredFrom is { Length: > 0 })
+        {
+            <p class="ms-shape-note ms-shape-unregistered-source" role="status">@unregisteredFrom</p>
+        }
+
         @if (stoppedNote is { Length: > 0 })
         {
             <p class="ms-shape-note" role="status">@Text(stoppedNote)</p>
@@ -137,6 +142,22 @@
 
     // Set when the counted listing could not be read: the registered types were checked, and the ones only the log holds were not.
     private string? notListed;
+
+    // Where the event types only the log holds were taken from, when this run looked for them.
+    private string? unregisteredFrom;
+
+    private const string NotListedSentence = "The event types in the log that the store does not register could not be listed, so they were not checked.";
+
+    private const string NotForATenantSentence =
+        "With a tenant selected the planner's statistics cover every tenant, so they are not used to look for unregistered types; press Load counts on Event types to check the ones this tenant holds.";
+
+    private const string StatisticsSentence =
+        "Unregistered types are taken from the planner's statistics, which may miss a rare one; press Load counts on Event types to check every alias the log holds.";
+
+    private string FromCounts(DateTimeOffset? listedAt) =>
+        listedAt is { } at
+            ? "Unregistered types are taken from the counts read at " + State.FormatInSelectedTimeZone(at, "HH:mm:ss") + "."
+            : "Unregistered types are taken from the counts in hand.";
 
     // Why the last click stopped before the end of the list, or null: the click's own bound (ShapeCheckLimits.ClickBudget) ran out.
     private string? stoppedNote;
@@ -245,31 +266,48 @@
             ranAt = begun;
             names = TypeNames;
             notListed = null;
+            unregisteredFrom = null;
 
-            // The counts come first (the page's, or the same cached listing): without the index on type a rare type's check walks the
-            // primary key, so a type with no events must cost no call at all. The listing is also where an event type the store does not
-            // register is found, which the page's uncounted list never holds: a row in the log with an alias nothing maps would otherwise
-            // be checked by nobody (1.2-UX-FIX; SHAPE-B reports it as an unknown event type).
+            // The counts come first where the check would otherwise walk the primary key: without the index on type a rare type's check
+            // does, so a type with no events must cost no call at all, and the group by type is the price of knowing which (the page's
+            // counts, or the same shared listing). With the index there is no such need, so nothing here runs a group by type the visitor
+            // did not ask for (1.2-UX-FIX): an event type the store does not register - a row in the log with an alias nothing maps,
+            // which the page's uncounted list never holds - is taken from the counted listing when one is in hand, else from the
+            // planner's statistics, and the panel says which. SHAPE-B reports it as an unknown event type.
             bool indexed = await Check.HasTypeIndexAsync(scope, token);
             IReadOnlyDictionary<string, long> counts = Counts;
 
-            if (counts.Count == 0)
+            if (counts.Count == 0 && !indexed)
             {
                 EventTypeList listing = await EventData.ListEventTypesAsync(scope, withCounts: true, token);
 
                 if (listing.Error is null)
                 {
-                    // The counts decide what is skipped only where the check would otherwise walk the primary key (no index on type).
-                    if (!indexed)
-                    {
-                        counts = listing.Types.Where(static x => x.Count is not null).ToDictionary(static x => x.Name, static x => x.Count!.Value, StringComparer.Ordinal);
-                    }
-
+                    counts = listing.Types.Where(static x => x.Count is not null).ToDictionary(static x => x.Name, static x => x.Count!.Value, StringComparer.Ordinal);
                     names = [.. TypeNames, .. listing.Types.Select(static x => x.Name).Where(x => !TypeNames.Contains(x, StringComparer.Ordinal))];
+                    unregisteredFrom = FromCounts(listing.ListedAt);
                 }
                 else
                 {
-                    notListed = "The event types in the log that the store does not register could not be listed, so they were not checked.";
+                    notListed = NotListedSentence;
+                }
+            }
+            else if (counts.Count == 0)
+            {
+                UnregisteredAliases found = await Check.ListUnregisteredAsync(scope, token);
+
+                if (found.Source == UnregisteredAliasSource.NotRead)
+                {
+                    notListed = NotListedSentence;
+                }
+                else if (found.Source == UnregisteredAliasSource.NotForATenant)
+                {
+                    notListed = NotForATenantSentence;
+                }
+                else
+                {
+                    names = [.. TypeNames, .. found.Names.Where(x => !TypeNames.Contains(x, StringComparer.Ordinal))];
+                    unregisteredFrom = found.Source == UnregisteredAliasSource.Counts ? FromCounts(found.ListedAt) : StatisticsSentence;
                 }
             }
 

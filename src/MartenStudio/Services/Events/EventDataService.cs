@@ -720,6 +720,25 @@ internal sealed partial class EventDataService : IEventDataService
         }
     }
 
+    /// <inheritdoc />
+    public async Task<EventTypeList?> SharedCountedListingAsync(StudioScope scope, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+
+        try
+        {
+            ResolvedScope resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
+
+            EventTypeList? held = await listings.TryGetAsync(resolved, cancellationToken).ConfigureAwait(false);
+
+            return held is { Error: null } ? held : null;
+        }
+        catch (Exception exception) when (IsReadFailure(exception))
+        {
+            return null;
+        }
+    }
+
     /// <summary>The event types the store registers, by name.</summary>
     private static Dictionary<string, EventTypeInfo> RegisteredTypes(ResolvedScope resolved)
     {

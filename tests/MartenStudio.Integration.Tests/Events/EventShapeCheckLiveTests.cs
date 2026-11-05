@@ -121,6 +121,10 @@ public class EventShapeCheckLiveTests(EventShapeCheckLiveTests.Fixture fixture)
             BulkEdges = (bulk[0], bulk[^1]);
 
             await ExecuteAsync(connection, $"update {events} set data = '{{\"N\":\"x\"}}'::jsonb where seq_id in ({BulkEdges.Oldest}, {BulkEdges.Newest})", token);
+
+            // What the planner knows of the log, so that an alias nothing maps is visible to the statistics (1.2-UX-FIX): the check
+            // takes the aliases the log holds from them, never from a group by type of its own.
+            await ExecuteAsync(connection, $"analyze {events}", token);
         }
     }
 

@@ -439,6 +439,31 @@ public class PlanPageTests
         page.WaitForAssertion(() => page.Find(".ms-query-caret").TextContent.Should().EndWith("       ^"), Wait);
     }
 
+    /// <summary>1.2-UX-FIX: the error and its caret were about the text as it was; the first keystroke after one takes them away.</summary>
+    [Fact]
+    public async Task The_first_keystroke_after_an_error_takes_it_and_its_caret_away()
+    {
+        await using PostgresStudioComponentContext context = await ReadyAsync();
+        int sent = "explain (format json) ".Length + "select ".Length + 1;
+        context.SqlConsole.NextPlan = new PlanRunResult
+        {
+            Error = new SqlError("42703", "column \"nope\" does not exist", sent, null, null),
+            ErrorOffset = "explain (format json) ".Length,
+        };
+
+        IRenderedComponent<PlanPage> page = context.Render<PlanPage>();
+        page.Find("#ms-plan-sql").Change("select nope from t");
+        await page.InvokeAsync(() => page.Find(".ms-query-run").Click());
+        page.WaitForAssertion(() => page.Find(".ms-query-caret").Should().NotBeNull(), Wait);
+
+        page.Find("#ms-plan-sql").Input("select nop from t");
+
+        page.FindAll(".ms-query-error").Should().BeEmpty();
+        page.FindAll(".ms-query-caret").Should().BeEmpty();
+        FluentActions.Invoking(() => page.Find("#ms-plan-sql").Input("select no from t")).Should().Throw<Bunit.MissingEventHandlerException>(
+            "with no error showing the editor listens for no input: typing costs no round trip");
+    }
+
     [Fact]
     public async Task An_error_in_another_command_than_the_statement_points_at_no_character_of_it()
     {

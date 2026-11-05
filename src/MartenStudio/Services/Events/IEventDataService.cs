@@ -99,6 +99,15 @@ internal interface IEventDataService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// The counted listing, if one is in hand for the scope - read by anyone within the last half minute, or being read now - and
+    /// <see langword="null" /> otherwise (1.2-UX-FIX). It never starts the <c>group by type</c>: the shape check asks it before it falls
+    /// back to the planner's statistics, so a click on Check shapes costs the log no scan the visitor did not ask for.
+    /// </summary>
+    /// <param name="scope">The store, database and tenant; resolved under the store policy first, as every read is.</param>
+    /// <param name="cancellationToken">Cancels the wait for a listing that is being read.</param>
+    Task<EventTypeList?> SharedCountedListingAsync(StudioScope scope, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Which projections and subscriptions read each event type of the scope's store, and what each writes (1.2, M6).
     /// </summary>
     /// <remarks>

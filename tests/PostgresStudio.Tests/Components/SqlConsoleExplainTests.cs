@@ -107,6 +107,29 @@ public class SqlConsoleExplainTests
         panel.WaitForAssertion(() => panel.Find(".ms-query-caret").TextContent.Should().EndWith("       ^"));
     }
 
+    /// <summary>1.2-UX-FIX: the error and its caret were about the text as it was; the first keystroke after one takes them away.</summary>
+    [Fact]
+    public async Task The_first_keystroke_after_an_error_takes_it_and_its_caret_away()
+    {
+        await using PostgresStudioComponentContext context = new();
+        context.WithAllCapabilities();
+        await context.ReadyAsync();
+
+        int sentPosition = ExplainStatements.PlanPrefix.Length + "select ".Length + 1;
+        context.SqlConsole.Next = new SqlConsoleResult([], [], false, 500, TimeSpan.Zero, [], new SqlError("42703", "column \"nope\" does not exist", sentPosition, null, null), null);
+
+        var panel = context.Render<SqlConsolePanel>();
+        panel.Find("#ms-query-sql").Change("select nope from t");
+        await panel.InvokeAsync(() => panel.Find(".ms-query-explain").Click());
+        panel.WaitForAssertion(() => panel.Find(".ms-query-caret").Should().NotBeNull());
+
+        panel.Find("#ms-query-sql").Input("select nop from t");
+
+        panel.FindAll(".ms-query-error").Should().BeEmpty();
+        panel.FindAll(".ms-query-caret").Should().BeEmpty();
+        FluentActions.Invoking(() => panel.Find("#ms-query-sql").Input("select no from t")).Should().Throw<Bunit.MissingEventHandlerException>();
+    }
+
     // ---------------------------------------------------------------------------------------------------------------
     // The console itself: the guard over what was typed, and the audit
     // ---------------------------------------------------------------------------------------------------------------

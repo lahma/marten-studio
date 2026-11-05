@@ -91,6 +91,7 @@
                          Rows="8"
                          Value="@statement"
                          ValueChanged="OnTextChangedAsync"
+                         OnInput="OnTextInput"
                          Running="running"
                          ElapsedMilliseconds="elapsedMilliseconds"
                          ErrorMessage="@error"
@@ -524,6 +525,14 @@
     }
 
     // ---- The statement, the mode, the options and the values ----------------------------------------------------------
+
+    // The error and its caret were about the text as it was: the first keystroke after one takes them away, not the next Run (1.2-UX-FIX).
+    private Task OnTextInput()
+    {
+        error = null;
+        errorPosition = -1;
+        return Task.CompletedTask;
+    }
 
     private Task OnTextChangedAsync(string value)
     {

@@ -223,6 +223,10 @@ public class CapabilityGatingMatrixTests
             "GetStreamAsync", "GetStreamEventsAsync", "ListAggregateCandidatesAsync", "ListDeadLettersAsync",
             "ListEventTypesAsync", "ListStreamsAsync", "ListTagTypesAsync",
 
+            // 1.2-UX-FIX: the shape check's peek at the counted listing - the store policy for the scope, resolved first, as
+            // ListEventTypesAsync is; it reads nothing and starts no read.
+            "SharedCountedListingAsync",
+
             // 1.2 (M6): Event flow reads StoreOptions and the projection graph and opens no connection, as the Event types page
             // without counts does; the scope resolution in front of its cache is the store policy.
             "GetEventFlowAsync",

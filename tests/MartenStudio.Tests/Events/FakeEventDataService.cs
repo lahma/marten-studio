@@ -295,6 +295,12 @@ internal sealed partial class FakeEventDataService : IEventDataService
         return Task.FromResult(withCounts ? TypesWithCounts : TypesWithoutCounts);
     }
 
+    /// <summary>The counted listing a test says is in hand, or <see langword="null" /> for none.</summary>
+    public EventTypeList? SharedCounted { get; set; }
+
+    public Task<EventTypeList?> SharedCountedListingAsync(StudioScope scope, CancellationToken cancellationToken = default) =>
+        Task.FromResult(SharedCounted);
+
     public Task<IReadOnlyList<AggregateTypeCandidate>> ListAggregateCandidatesAsync(
         StudioScope scope,
         CancellationToken cancellationToken = default) =>

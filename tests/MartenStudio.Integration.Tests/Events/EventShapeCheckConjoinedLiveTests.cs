@@ -1,5 +1,6 @@
 using Marten;
 
+using MartenStudio.Services.Events;
 using MartenStudio.Services.Shapes;
 
 using Npgsql;
@@ -68,7 +69,11 @@ public class EventShapeCheckConjoinedLiveTests(EventShapeCheckConjoinedLiveTests
             await ExecuteAsync(connection, $"update {events} set data = jsonb_set(data, '{{Total}}', '\"x\"') where seq_id = {BadSequence}", token);
 
             // A type only tenant B has, that no registered type answers to.
+            // Twice: a value seen once is neither a common value nor a histogram bound, and the statistics do not name it.
             await InsertAsync(connection, Schema, globexStream, 50, "globex_only_v1", "Shop.Gone, Gone", "{\"Total\":1}", "globex", token);
+            await InsertAsync(connection, Schema, globexStream, 51, "globex_only_v1", "Shop.Gone, Gone", "{\"Total\":2}", "globex", token);
+
+            await ExecuteAsync(connection, $"analyze {events}", token);
         }
     }
 
@@ -119,6 +124,15 @@ public class EventShapeCheckConjoinedLiveTests(EventShapeCheckConjoinedLiveTests
     [PostgresFact]
     public async Task A_type_only_another_tenant_has_is_not_one_this_tenants_scope_can_check()
     {
+        // Each tenant's visitor loads the counts, which is tenant-scoped (the page's own button): that is where an unregistered type is known.
+        using (MartenFixture.ScopedService<IEventDataService> events = Marten.Resolve<IEventDataService>())
+        {
+            foreach (string tenant in new[] { "acme", "globex" })
+            {
+                (await events.Service.ListEventTypesAsync(MartenFixture.ScopeFor(tenant), withCounts: true, Token)).Error.Should().BeNull();
+            }
+        }
+
         ShapeCheckResult mine = await CheckAsync("acme", "globex_only_v1");
         ShapeCheckResult theirs = await CheckAsync("globex", "globex_only_v1");
 
@@ -127,5 +141,25 @@ public class EventShapeCheckConjoinedLiveTests(EventShapeCheckConjoinedLiveTests
         mine.Statements.Should().BeEmpty();
 
         theirs.Types.Single().Failures.Should().ContainSingle().Which.Kind.Should().Be(ShapeFailureKind.UnknownEventType);
+    }
+
+    /// <summary>
+    /// 1.2-UX-FIX: the planner's statistics span every tenant's events, so with a tenant selected they would name another tenant's event
+    /// types. They are not read for a tenant (and no listing of that tenant's is in hand here); with every tenant in scope they are.
+    /// </summary>
+    [PostgresFact]
+    public async Task The_statistics_are_not_used_for_a_tenant_and_are_for_every_tenant()
+    {
+        using MartenFixture.ScopedService<IEventShapeCheck> check = Marten.Resolve<IEventShapeCheck>();
+
+        UnregisteredAliases acme = await check.Service.ListUnregisteredAsync(MartenFixture.ScopeFor("acme"), Token);
+        UnregisteredAliases all = await check.Service.ListUnregisteredAsync(MartenFixture.ScopeFor(null), Token);
+
+        // Whether a counted listing of the tenant's is in hand depends on the other tests; what may never happen is the statistics.
+        acme.Source.Should().NotBe(UnregisteredAliasSource.Statistics);
+        acme.Names.Should().NotContain("globex_only_v1", "tenant A's scope never learns of a type only tenant B has");
+
+        all.Source.Should().Be(UnregisteredAliasSource.Statistics);
+        all.Names.Should().Contain("globex_only_v1");
     }
 }

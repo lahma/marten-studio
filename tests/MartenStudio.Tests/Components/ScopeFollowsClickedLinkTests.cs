@@ -129,23 +129,13 @@ public class ScopeFollowsClickedLinkTests
         rig.Scopes.Should().HaveCount(changes, "no ScopeChanged was raised");
     }
 
+    // Back and Forward. The browser reports a popstate as an intercepted navigation (blazor.web.js onBrowserInitiatedPopState:
+    // notifyLocationChanged(true)), so the shell cannot tell it from a click: HistoryMove models it that way by default, and as not
+    // intercepted where navigation interception is off and the enhanced navigation reports it.
+
+    /// <summary>(a) Back to an address naming another scope the visitor's listings carry moves the scope, as a click does.</summary>
     [Fact]
-    public async Task Back_and_Forward_do_not_move_the_scope()
-    {
-        Rig rig = await StartAsync();
-        await using StudioComponentContext context = rig.Context;
-        int changes = rig.Scopes.Count;
-
-        rig.Navigation.HistoryMove("?store=other&db=db-x");
-        await rig.Routes.InvokeAsync(() => { });
-
-        context.State.ActiveScope!.StoreKey.Should().Be("default", "Back and Forward are not intercepted links");
-        rig.Scopes.Should().HaveCount(changes);
-        rig.Navigation.Uri.Should().Contain("store=default").And.NotContain("store=other", "the address follows the scope again");
-    }
-
-    [Fact]
-    public async Task Back_after_a_clicked_link_rewrites_the_address_to_the_scope_on_screen()
+    public async Task Back_to_an_address_naming_another_scope_the_listings_carry_moves_the_scope_as_a_click_does()
     {
         Rig rig = await StartAsync();
         await using StudioComponentContext context = rig.Context;
@@ -159,13 +149,82 @@ public class ScopeFollowsClickedLinkTests
             context.State.ActiveScope!.StoreKey.Should().Be("other");
             rig.Navigation.Uri.Should().Contain("store=other");
         });
+        string after = rig.Navigation.Uri;
 
-        // Back: the browser returns to the address before the click, which names the first store. The scope stays on Other.
-        int requests = rig.Navigation.Requests.Count;
+        // Back: the browser returns to the address before the click, which names the first store.
         rig.Navigation.HistoryMove(before);
 
-        rig.Routes.WaitForAssertion(() => rig.Navigation.Uri.Should().Contain("store=other").And.NotContain("store=default"));
-        context.State.ActiveScope!.StoreKey.Should().Be("other", "Back never moves the scope");
+        rig.Routes.WaitForAssertion(() => context.State.ActiveScope!.StoreKey.Should().Be("default", "the address names a store the listings carry"));
+        rig.Navigation.Uri.Should().Contain("store=default").And.NotContain("store=other");
+
+        // And Forward again.
+        rig.Navigation.HistoryMove(after);
+        rig.Routes.WaitForAssertion(() => context.State.ActiveScope!.StoreKey.Should().Be("other"));
+    }
+
+    /// <summary>(b) Back to an address naming a scope the listings do not carry does not move the scope.</summary>
+    [Fact]
+    public async Task Back_to_an_address_naming_a_scope_the_listings_do_not_carry_does_not_move_the_scope()
+    {
+        Rig rig = await StartAsync();
+        await using StudioComponentContext context = rig.Context;
+        int changes = rig.Scopes.Count;
+
+        rig.Navigation.HistoryMove("?store=nowhere&db=db-q");
+        await rig.Routes.InvokeAsync(() => { });
+
+        context.State.ActiveScope.Should().Be(new StudioScope("default", "db-a", null), "ignored exactly as at first load");
+        rig.Scopes.Should().HaveCount(changes);
+    }
+
+    /// <summary>
+    /// With navigation interception off the enhanced navigation reports Back as not intercepted: the scope does not move and the address
+    /// follows it again, as it does for any programmatic navigation.
+    /// </summary>
+    [Fact]
+    public async Task With_interception_off_Back_to_another_scopes_address_leaves_the_scope_and_rewrites_the_address()
+    {
+        Rig rig = await StartAsync();
+        await using StudioComponentContext context = rig.Context;
+        int changes = rig.Scopes.Count;
+
+        rig.Navigation.HistoryMove("?store=other&db=db-x", intercepted: false);
+        await rig.Routes.InvokeAsync(() => { });
+
+        context.State.ActiveScope!.StoreKey.Should().Be("default");
+        rig.Scopes.Should().HaveCount(changes);
+        rig.Navigation.Uri.Should().Contain("store=default").And.NotContain("store=other", "the address follows the scope again");
+    }
+
+    /// <summary>
+    /// (c) Back to an address naming only part of the scope on screen - or none of it - rewrites the address to the whole of it, and the
+    /// scope does not move. Reported both ways: as the browser reports a popstate, and as the enhanced navigation does with interception off.
+    /// </summary>
+    [Theory]
+    [InlineData("", true)]
+    [InlineData("", false)]
+    [InlineData("?store=other", true)]
+    [InlineData("?store=other", false)]
+    [InlineData("?db=db-x", true)]
+    [InlineData("?db=db-x", false)]
+    public async Task Back_to_an_address_naming_part_of_the_scope_on_screen_rewrites_the_address_and_leaves_the_scope(string named, bool intercepted)
+    {
+        Rig rig = await StartAsync();
+        await using StudioComponentContext context = rig.Context;
+        rig.Routes.WaitForAssertion(() => rig.Navigation.Uri.Should().Contain("store=default"));
+
+        string href = rig.Routes.FindAll(".ms-stores-strip-link").Single(static x => x.TextContent.Trim() == "Other").GetAttribute("href")!;
+        rig.Navigation.Click(href);
+        rig.Routes.WaitForAssertion(() => context.State.ActiveScope!.StoreKey.Should().Be("other"));
+        rig.Routes.WaitForAssertion(() => rig.Navigation.Uri.Should().Contain("store=other"));
+        int changes = rig.Scopes.Count;
+        int requests = rig.Navigation.Requests.Count;
+
+        rig.Navigation.HistoryMove(named, intercepted);
+
+        rig.Routes.WaitForAssertion(() => rig.Navigation.Uri.Should().Contain("store=other").And.Contain("db=db-x"));
+        context.State.ActiveScope.Should().Be(new StudioScope("other", "db-x", null), "an address that names no other scope moves nothing");
+        rig.Scopes.Should().HaveCount(changes);
         rig.Navigation.Requests.Skip(requests).Should().ContainSingle("one rewrite").Which.Options.ReplaceHistoryEntry.Should().BeTrue();
     }
 

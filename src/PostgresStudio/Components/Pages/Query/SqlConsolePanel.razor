@@ -62,6 +62,7 @@
                      Rows="8"
                      Value="@Current.Text"
                      ValueChanged="OnTextChangedAsync"
+                     OnInput="OnTextInput"
                      Running="running"
                      ElapsedMilliseconds="elapsedMilliseconds"
                      ErrorMessage="@Current.Error"
@@ -271,6 +272,14 @@
     private Task OnTextChangedAsync(string value)
     {
         Current.Text = value;
+        return Task.CompletedTask;
+    }
+
+    // The error and its caret were about the text as it was: the first keystroke after one takes them away, not the next Run (1.2-UX-FIX).
+    private Task OnTextInput()
+    {
+        Current.Error = null;
+        Current.ErrorPosition = -1;
         return Task.CompletedTask;
     }
 

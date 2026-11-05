@@ -62,6 +62,9 @@ internal sealed class EventShapeCheckService : IEventShapeCheck
     private readonly ILogger<EventShapeCheckService> logger;
     private readonly TimeProvider timeProvider;
 
+    // What E05's statistics say the log holds, shared half a minute per database: one catalog read, however many names a click asks about.
+    private readonly PostgresStudio.Services.Live.StudioSnapshotCache statisticsAliases = new(TimeProvider.System, TimeSpan.FromSeconds(30));
+
     /// <summary>The service a host's container builds.</summary>
     public EventShapeCheckService(
         IOptions<MartenStudioOptions> options,
@@ -168,11 +171,87 @@ internal sealed class EventShapeCheckService : IEventShapeCheck
             }
         }
 
-        // The page's own counted listing, shared with it and kept half a minute per resolved scope: read only for a name the store does
-        // not register. A listing that failed shows the page nothing either, so the name is not one it can show.
-        EventTypeList list = await eventTypes.ListEventTypesAsync(scope, withCounts: true, cancellationToken).ConfigureAwait(false);
+        // A name the store does not register is one the log holds: the counted listing when somebody has read one within the last half
+        // minute, else the planner's statistics. Never a group by type of our own (1.2-UX-FIX): it is a scan of the log the visitor did
+        // not ask for. A listing that failed shows the page nothing either, so the name is not one it can show.
+        UnregisteredAliases held = await ListUnregisteredAsync(scope, cancellationToken).ConfigureAwait(false);
 
-        return list.Error is null && list.Types.Any(x => string.Equals(x.Name, name, StringComparison.Ordinal));
+        return held.Names.Contains(name, StringComparer.Ordinal);
+    }
+
+    /// <inheritdoc />
+    public async Task<UnregisteredAliases> ListUnregisteredAsync(StudioScope scope, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+
+        ResolvedScope resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
+
+        EventTypeList? shared = await eventTypes.SharedCountedListingAsync(scope, cancellationToken).ConfigureAwait(false);
+
+        if (shared is { Error: null })
+        {
+            return new UnregisteredAliases(
+                [.. shared.Types.Where(static x => !x.IsRegistered).Select(static x => x.Name).Order(StringComparer.Ordinal)],
+                UnregisteredAliasSource.Counts,
+                shared.ListedAt);
+        }
+
+        // The statistics span the whole table. With a tenant selected on a store that keeps every tenant's events in it, they would name
+        // another tenant's event types, which this scope may not see (D27, "Reach, not scope"): they are not read.
+        if (resolved.TenantId is not null
+            && (resolved.Store.Options.Events.TenancyStyle == JasperFx.MultiTenancy.TenancyStyle.Conjoined
+                || resolved.Store.Options.Events.UseTenantPartitionedEvents))
+        {
+            return new UnregisteredAliases([], UnregisteredAliasSource.NotForATenant);
+        }
+
+        string key = resolved.Registration.Key + "\u001f" + resolved.Database.Id.Identity;
+
+        IReadOnlyList<string>? names = await statisticsAliases
+            .GetAsync(key, token => ReadStatisticsAliasesAsync(resolved, token), cancellationToken)
+            .ConfigureAwait(false);
+
+        return names is null
+            ? new UnregisteredAliases([], UnregisteredAliasSource.NotRead)
+            : new UnregisteredAliases(names, UnregisteredAliasSource.Statistics);
+    }
+
+    /// <summary>E05's statistics read for the aliases <c>mt_events</c> holds that Marten has no mapping for, or null when it cannot be read.</summary>
+    private async Task<IReadOnlyList<string>?> ReadStatisticsAliasesAsync(ResolvedScope resolved, CancellationToken cancellationToken)
+    {
+        try
+        {
+            IReadOnlyEventStoreOptions events = resolved.Store.Options.Events;
+            HashSet<string> registered = new(events.AllKnownEventTypes().Select(static x => x.EventTypeName), StringComparer.Ordinal);
+
+            // "Unregistered" as the page's counted listing means it: no registered mapping. An upcaster's old alias is not registered, so it
+            // is listed and checked ("read as another type"); E05's wider "known" (upcasters included) would leave it out.
+            Func<string, bool> isKnown = registered.Contains;
+
+            await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
+            await connection.OpenStudioAsync(cancellationToken).ConfigureAwait(false);
+
+            await using NpgsqlCommand command = EventAliasStatistics.Command(events.DatabaseSchemaName, options.Value.QueryTimeout);
+            command.Connection = connection;
+
+            List<EventStatisticsRow> rows = [];
+
+            await using (NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
+            {
+                while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    rows.Add(HealthEventQueries.ReadStatistics(reader));
+                }
+            }
+
+            return EventAliasStatistics.Unregistered(rows, isKnown);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // Not read is a value: the caller says the unregistered types were not checked.
+            logger.LogDebug(exception, "Marten Studio could not read the statistics of mt_events for the shape check's list of event types");
+            return null;
+        }
     }
 
     /// <summary>

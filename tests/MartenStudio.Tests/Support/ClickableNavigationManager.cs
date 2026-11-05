@@ -19,8 +19,12 @@ internal sealed class ClickableNavigationManager : NavigationManager
     /// <summary>The visitor clicked a link with this <c>href</c>: the browser reports the new location as an intercepted navigation.</summary>
     public void Click(string href) => Move(href, intercepted: true);
 
-    /// <summary>The browser moved on its own without a link (Back or Forward): reported as not intercepted.</summary>
-    public void HistoryMove(string href) => Move(href, intercepted: false);
+    /// <summary>
+    /// The browser moved through its history (Back or Forward). blazor.web.js reports a popstate as an <em>intercepted</em> navigation
+    /// ("to be safe", <c>onBrowserInitiatedPopState</c>: <c>notifyLocationChanged(true)</c>), so that is the default; with navigation
+    /// interception switched off the enhanced navigation reports it as not intercepted, which <paramref name="intercepted" /> models.
+    /// </summary>
+    public void HistoryMove(string href, bool intercepted = true) => Move(href, intercepted);
 
     private void Move(string href, bool intercepted)
     {

@@ -333,42 +333,87 @@ public class EventShapePanelTests
         }
     }
 
+    private const string StatisticsNote =
+        "Unregistered types are taken from the planner's statistics, which may miss a rare one; press Load counts on Event types to check every alias the log holds.";
+
     [Fact]
-    public async Task An_event_type_only_the_log_holds_is_checked_though_the_page_never_counted_and_the_store_has_the_index()
+    public async Task An_event_type_only_the_log_holds_is_checked_from_the_statistics_with_no_group_by_when_the_page_never_counted()
     {
         (StudioComponentContext context, FakeEventShapeCheck check) = await RigAsync("OrderPlaced", "OrderShipped");
         using (context)
         {
             check.Indexed = true;
-            context.EventData.TypesWithCounts = new EventTypeList(
-                [
-                    new EventTypeInfo("OrderPlaced", "Sample.OrderPlaced", true, 10),
-                    new EventTypeInfo("OrderShipped", "Sample.OrderShipped", true, 11),
-                    new EventTypeInfo("ghost_event", "Gone.Ghost, Gone", false, 3),
-                ],
-                true);
+            check.Unregistered = new UnregisteredAliases(["ghost_event"], UnregisteredAliasSource.Statistics);
             IRenderedComponent<EventTypes> page = context.Render<EventTypes>();
 
             await ClickAsync(page, "Check shapes");
 
             page.WaitForAssertion(() => check.Calls.Select(static x => x.Name).Should().Equal("OrderPlaced", "OrderShipped", "ghost_event"));
             page.WaitForAssertion(() => page.Find(".ms-shape-summary").TextContent.Should().Be("Checked 3 event types: 0 with problems, 3 fit."));
+            page.Find(".ms-shape-unregistered-source").TextContent.Should().Be(StatisticsNote);
+            context.EventData.CountsRequested.Should().BeFalse("no group by type ran: the click asked for the statistics, never the counts");
         }
     }
 
     [Fact]
-    public async Task When_the_log_cannot_be_listed_the_registered_types_are_checked_and_the_panel_says_the_others_were_not()
+    public async Task When_a_counted_listing_is_in_hand_the_panel_uses_it_and_says_when_it_was_read()
     {
         (StudioComponentContext context, FakeEventShapeCheck check) = await RigAsync("OrderPlaced");
         using (context)
         {
-            context.EventData.TypesWithCounts = EventTypeList.Failed(new EventDataError("busy", null, true));
+            check.Indexed = true;
+            check.Unregistered = new UnregisteredAliases(["ghost_event"], UnregisteredAliasSource.Counts, new DateTimeOffset(2026, 11, 5, 14, 5, 7, TimeSpan.Zero));
+            IRenderedComponent<EventTypes> page = context.Render<EventTypes>();
+
+            await ClickAsync(page, "Check shapes");
+
+            page.WaitForAssertion(() => check.Calls.Select(static x => x.Name).Should().Equal("OrderPlaced", "ghost_event"));
+            System.Text.RegularExpressions.Regex.IsMatch(page.Find(".ms-shape-unregistered-source").TextContent, @"^Unregistered types are taken from the counts read at \d\d:\d\d:07\.$")
+                .Should().BeTrue();
+            context.EventData.CountsRequested.Should().BeFalse();
+        }
+    }
+
+    [Fact]
+    public async Task When_the_statistics_cannot_be_read_the_registered_types_are_checked_and_the_panel_says_the_others_were_not()
+    {
+        (StudioComponentContext context, FakeEventShapeCheck check) = await RigAsync("OrderPlaced");
+        using (context)
+        {
+            check.Indexed = true;
+            check.Unregistered = new UnregisteredAliases([], UnregisteredAliasSource.NotRead);
             IRenderedComponent<EventTypes> page = context.Render<EventTypes>();
 
             await ClickAsync(page, "Check shapes");
 
             page.WaitForAssertion(() => check.Calls.Select(static x => x.Name).Should().Equal("OrderPlaced"));
             page.WaitForAssertion(() => page.Find(".ms-shape-panel").TextContent.Should().Contain("the store does not register could not be listed, so they were not checked"));
+            page.FindAll(".ms-shape-unregistered-source").Should().BeEmpty();
+        }
+    }
+
+    [Fact]
+    public async Task Without_the_index_the_group_by_the_counts_need_is_still_the_pages_shared_listing_and_names_its_time()
+    {
+        (StudioComponentContext context, FakeEventShapeCheck check) = await RigAsync("OrderPlaced");
+        using (context)
+        {
+            check.Indexed = false;
+            context.EventData.TypesWithCounts = new EventTypeList(
+                [
+                    new EventTypeInfo("OrderPlaced", "Sample.OrderPlaced", true, 10),
+                    new EventTypeInfo("ghost_event", "Gone.Ghost, Gone", false, 3),
+                ],
+                true)
+            {
+                ListedAt = new DateTimeOffset(2026, 11, 5, 14, 5, 7, TimeSpan.Zero),
+            };
+            IRenderedComponent<EventTypes> page = context.Render<EventTypes>();
+
+            await ClickAsync(page, "Check shapes");
+
+            page.WaitForAssertion(() => check.Calls.Select(static x => x.Name).Should().Equal("OrderPlaced", "ghost_event"));
+            page.Find(".ms-shape-unregistered-source").TextContent.Should().StartWith("Unregistered types are taken from the counts read at ");
         }
     }
 
@@ -455,6 +500,11 @@ public class EventShapePanelTests
         public Action? OnCall { get; set; }
 
         public Task<bool> HasTypeIndexAsync(StudioScope scope, CancellationToken cancellationToken) => Task.FromResult(Indexed);
+
+        /// <summary>What the check says the log holds beyond the registered types, and from where.</summary>
+        public UnregisteredAliases Unregistered { get; set; } = new([], UnregisteredAliasSource.Statistics);
+
+        public Task<UnregisteredAliases> ListUnregisteredAsync(StudioScope scope, CancellationToken cancellationToken) => Task.FromResult(Unregistered);
 
         public Task<ShapeCheckResult> CheckAsync(StudioScope scope, string eventTypeName, bool force, CancellationToken cancellationToken)
         {
