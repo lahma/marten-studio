@@ -34,7 +34,9 @@ and a .NET 11 SDK Debug start-up failure.
 - Every dialog is now a native modal. Opening one moves keyboard focus into it (to the box you type the confirmation
   into, to Cancel for an action that cannot be undone, or to "Back to the editor" in a document's save preview), Tab
   stays inside it, Esc is Cancel, the page behind it cannot be reached, and closing it puts focus back on the button
-  that opened it. A browser or page that cannot do this keeps the overlay it always had.
+  that opened it (or, when that button is gone, on its row or the page's heading). A browser or page that cannot do this
+  keeps the overlay it always had. A dialog is closed when the scope moves, and confirms only against the scope it was
+  opened under: in 1.1 a confirmation left open across a scope change could act on the newly selected database.
 - Press ? anywhere except in a text field to see every keyboard shortcut the studio has: the JSON viewer and its search
   box, menus, the SQL editor, table rows, the plan icicle, Find, and in Marten Studio the document list, the LINQ query
   boxes and the document editor. Esc closes it.
