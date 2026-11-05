@@ -107,6 +107,17 @@ internal sealed class StudioOperationRefusedException : InvalidOperationExceptio
 }
 
 /// <summary>
+/// An operation's own account of how it ended when it was cancelled: <see cref="StudioOperationState.Cancelled" /> is recorded, with
+/// this message in place of the tracker's "Cancelled." (1.2-FINAL-FIX-2: a cancelled rebuild says what state the shards are left in).
+/// </summary>
+internal sealed class StudioOperationCancelledException : OperationCanceledException
+{
+    public StudioOperationCancelledException(string message, Exception? inner = null) : base(message, inner)
+    {
+    }
+}
+
+/// <summary>
 /// Runs the operations that take longer than a request, and survives the page that started them.
 /// </summary>
 /// <remarks>
@@ -209,6 +220,43 @@ internal sealed class StudioOperationTracker : IDisposable
         StudioCapability capability,
         Func<CancellationToken, Task> work)
     {
+        ArgumentNullException.ThrowIfNull(work);
+        return StartReporting(
+            kind,
+            target,
+            storeKey,
+            databaseId,
+            user,
+            capability,
+            async token =>
+            {
+                await work(token).ConfigureAwait(false);
+                return null;
+            });
+    }
+
+    /// <summary>
+    /// <see cref="Start" /> for an operation with something to say about how it ended: the string <paramref name="work" /> returns
+    /// is the operation's message and is part of the outcome event 9208 logs. A failure carries its own exception message, and a
+    /// <see cref="StudioOperationCancelledException" /> its own.
+    /// </summary>
+    /// <param name="kind">What sort of operation this is.</param>
+    /// <param name="target">What it is being done to.</param>
+    /// <param name="storeKey">The store it runs against.</param>
+    /// <param name="databaseId">The database it runs against.</param>
+    /// <param name="user">Who started it.</param>
+    /// <param name="capability">The capability that let it start, for the audit entry.</param>
+    /// <param name="work">The operation, answering its message or <see langword="null" /> for "Completed.".</param>
+    /// <returns>The handle, as <see cref="Start" /> answers it.</returns>
+    public OperationStart StartReporting(
+        string kind,
+        string target,
+        string storeKey,
+        string databaseId,
+        string user,
+        StudioCapability capability,
+        Func<CancellationToken, Task<string?>> work)
+    {
         ArgumentException.ThrowIfNullOrEmpty(kind);
         ArgumentException.ThrowIfNullOrEmpty(target);
         ArgumentNullException.ThrowIfNull(work);
@@ -268,14 +316,14 @@ internal sealed class StudioOperationTracker : IDisposable
 
             try
             {
-                await work(entry.Cancellation.Token).ConfigureAwait(false);
+                string? reported = await work(entry.Cancellation.Token).ConfigureAwait(false);
                 state = StudioOperationState.Succeeded;
-                message = "Completed.";
+                message = reported is { Length: > 0 } ? reported : "Completed.";
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException cancelled)
             {
                 state = StudioOperationState.Cancelled;
-                message = "Cancelled.";
+                message = cancelled is StudioOperationCancelledException ? cancelled.Message : "Cancelled.";
             }
             catch (Exception exception)
             {
@@ -433,7 +481,9 @@ internal sealed class StudioOperationTracker : IDisposable
 
         string outcome = state switch
         {
-            StudioOperationState.Succeeded => nameof(StudioOperationState.Succeeded),
+            StudioOperationState.Succeeded => message is { Length: > 0 } and not "Completed."
+                ? nameof(StudioOperationState.Succeeded) + ": " + StudioLogValue.Cap(message)
+                : nameof(StudioOperationState.Succeeded),
             StudioOperationState.Failed => nameof(StudioOperationState.Failed),
             StudioOperationState.Cancelled => nameof(StudioOperationState.Cancelled),
             _ => nameof(StudioOperationState.Running)

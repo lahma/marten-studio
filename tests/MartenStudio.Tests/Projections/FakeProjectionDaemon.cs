@@ -41,11 +41,21 @@ internal sealed class FakeProjectionDaemon : IProjectionDaemon
 
     public bool IsHighWaterStale => false;
 
+    /// <summary>What a rebuild does to the daemon's agents, when a test is about the state it leaves behind (JasperFx registers a Stopped agent).</summary>
+    public Action? OnRebuild { get; set; }
+
+    /// <summary>Thrown by the rebuild that names a timeout, when set.</summary>
+    public Exception? RebuildFailure { get; set; }
+
+    /// <summary>Every agent <see cref="StopAgentAsync(string, Exception?)" /> was asked to stop.</summary>
+    public List<string> StoppedAgents { get; } = [];
+
     public Task RebuildProjectionAsync(string projectionName, TimeSpan shardTimeout, CancellationToken token)
     {
         Rebuilds.Add($"{projectionName}/{shardTimeout}");
         LastShardTimeout = shardTimeout;
-        return Task.CompletedTask;
+        OnRebuild?.Invoke();
+        return RebuildFailure is null ? Task.CompletedTask : Task.FromException(RebuildFailure);
     }
 
     public Task RebuildProjectionAsync(string projectionName, CancellationToken token)
@@ -69,7 +79,12 @@ internal sealed class FakeProjectionDaemon : IProjectionDaemon
 
     public Task<ISubscriptionAgent> StartAgentAsync(ShardName name, CancellationToken token) => throw NotUsed();
 
-    public Task StopAgentAsync(string shardName, Exception? ex = null) => throw NotUsed();
+    public Task StopAgentAsync(string shardName, Exception? ex = null)
+    {
+        StoppedAgents.Add(shardName);
+        Agents.RemoveAll(x => string.Equals(x.Name.Identity, shardName, StringComparison.Ordinal));
+        return Task.CompletedTask;
+    }
 
     public Task StopAgentAsync(ShardName shardName, Exception? ex = null) => throw NotUsed();
 

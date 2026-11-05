@@ -528,12 +528,21 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
 
             // Detached, with a cancellation token the tracker owns. A rebuild that a closing browser tab
             // could cancel would leave a projection's tables neither the old shape nor the new one.
-            OperationStart start = operations.Start(
+            bool coordinatorRestarts = hosting.Coordination == DaemonCoordination.LeadershipLoop;
+            OperationStart start = operations.StartReporting(
                 "Rebuild", name, storeKey, databaseId, user, StudioCapability.RebuildProjections,
                 async token =>
                 {
-                    await RebuildWithTimeoutAsync(daemon, name, shardTimeout, token).ConfigureAwait(false);
-                    cache.InvalidatePrefix(CachePrefix(resolved));
+                    try
+                    {
+                        return await RebuildAndHandBackAsync(
+                            daemon, name, shardTimeout, coordinatorRestarts, () => controlState.Find(storeKey) is not null, token)
+                            .ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        cache.InvalidatePrefix(CachePrefix(resolved));
+                    }
                 });
 
             audit.Record(
@@ -682,6 +691,123 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
     {
         ArgumentNullException.ThrowIfNull(daemon);
         return daemon.RebuildProjectionAsync(projectionName, shardTimeout, cancellationToken);
+    }
+
+    /// <summary>
+    /// A rebuild, and then the shards it stopped handed back to the coordinator that starts them (1.2-FINAL-FIX-2). Answers the
+    /// operation's result line, or <see langword="null" /> when there was nothing to say.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The cause.</b> JasperFx's rebuild stops the projection's running agents, replays through transient agents, and
+    /// <c>rebuildAgent</c> registers each transient agent in the daemon's own table under the shard's name
+    /// (<c>_agents.AddOrUpdate</c>, JasperFx V2.98.0); the daemon then drains and disposes it, which leaves a <em>Stopped</em> agent
+    /// under that name. The coordinator's <c>startAgentsIfNecessaryAsync</c> starts a shard only when it has no agent, or when its
+    /// agent is Paused for longer than <c>HealthCheckPollingTime</c>, so it leaves a Stopped one alone and the shard stays down. The
+    /// daemon's own contract (jasperfx#535) is that the driving caller restarts what a rebuild stopped; this is that caller.
+    /// Stopping the registered agent removes it, and the coordinator then sees none and starts the shard.
+    /// </para>
+    /// <para>
+    /// Only through the daemon the DI-registered coordinator hands out (hard rule 11), only for a shard that was Running, or held no
+    /// agent, before the rebuild, and only when a leadership loop exists to start it again. While the studio's own pause is in effect
+    /// the same agents are cleared but nothing is started, and the result line says so. A rebuild that failed or was cancelled hands nothing back, and says what state it leaves the shards in.
+    /// </para>
+    /// </remarks>
+    internal static async Task<string?> RebuildAndHandBackAsync(
+        IProjectionDaemon daemon,
+        string projectionName,
+        TimeSpan shardTimeout,
+        bool coordinatorRestartsShards,
+        Func<bool> studioPauseInEffect,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(daemon);
+        ArgumentNullException.ThrowIfNull(studioPauseInEffect);
+
+        Dictionary<string, JasperFx.AgentStatus> before = [];
+        foreach (ISubscriptionAgent agent in daemon.CurrentAgents().Where(x => string.Equals(x.Name.Name, projectionName, StringComparison.Ordinal)))
+        {
+            before[agent.Name.Identity] = agent.Status;
+        }
+
+        string notHandedBack =
+            $" Nothing was handed back to the coordinator: the shards of {projectionName} are as the rebuild left them.";
+
+        try
+        {
+            await RebuildWithTimeoutAsync(daemon, projectionName, shardTimeout, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException cancelled)
+        {
+            throw new StudioOperationCancelledException("Cancelled." + notHandedBack, cancelled);
+        }
+        catch (Exception failure)
+        {
+            throw new InvalidOperationException(failure.Message + notHandedBack, failure);
+        }
+
+        if (!coordinatorRestartsShards)
+        {
+            return $"Completed. This daemon has no coordinator loop to start {projectionName}'s shards again; start them from the Start buttons.";
+        }
+
+        // While the studio's pause is in effect the coordinator starts nothing, so removing the Stopped agent the rebuild registered starts
+        // nothing either: the shard is as an operator's stop leaves it (no agent). It is still removed, because otherwise resuming the daemon
+        // would leave the shard down exactly as the rebuild did (measured: RebuildResumesLiveTests).
+        bool paused = studioPauseInEffect();
+
+        List<string> handedBack = [];
+        List<string> failed = [];
+        List<string> left = [];
+
+        foreach (ISubscriptionAgent agent in daemon.CurrentAgents()
+            .Where(x => string.Equals(x.Name.Name, projectionName, StringComparison.Ordinal) && x.Status == JasperFx.AgentStatus.Stopped)
+            .ToArray())
+        {
+            string shard = agent.Name.Identity;
+            if (before.TryGetValue(shard, out JasperFx.AgentStatus was) && was != JasperFx.AgentStatus.Running)
+            {
+                left.Add(shard);
+                continue;
+            }
+
+            try
+            {
+                // Removes the Stopped agent the rebuild registered; the coordinator then finds none and starts the shard.
+                await daemon.StopAgentAsync(shard, null).ConfigureAwait(false);
+                handedBack.Add(shard);
+            }
+            catch (Exception e) when (e is not OperationCanceledException)
+            {
+                failed.Add(shard);
+            }
+        }
+
+        List<string> sentences = [];
+        if (handedBack.Count > 0 && paused)
+        {
+            sentences.Add(
+                "Marten Studio's pause is in effect, so nothing was started; cleared the Stopped agent the rebuild left for "
+                + string.Join(", ", handedBack) + ", which resuming the daemon starts.");
+        }
+        else if (handedBack.Count > 0)
+        {
+            sentences.Add(
+                "Handed " + string.Join(", ", handedBack) + " back to the coordinator, which starts "
+                + (handedBack.Count == 1 ? "it" : "them") + " again.");
+        }
+
+        if (left.Count > 0)
+        {
+            sentences.Add("Left " + string.Join(", ", left) + " as it was before the rebuild (it was not running).");
+        }
+
+        if (failed.Count > 0)
+        {
+            sentences.Add("Could not hand " + string.Join(", ", failed) + " back; start it from the Start button.");
+        }
+
+        return sentences.Count == 0 ? null : "Completed. " + string.Join(' ', sentences);
     }
 
     // ------------------------------------------------------------------------------------------------
