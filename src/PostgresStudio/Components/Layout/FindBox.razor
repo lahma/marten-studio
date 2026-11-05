@@ -65,6 +65,11 @@
                 else if (error is not null)
                 {
                     <p class="ms-find-note ms-find-error">@error</p>
+                    @if (searchInFailed && OtherStores.Count > 0)
+                    {
+                        @* Try again is pressing the same button: the failed store is still offered. *@
+                        @SearchInButtons()
+                    }
                 }
                 else if (result is not null)
                 {
@@ -110,7 +115,7 @@
                         }
                         else
                         {
-                            <p class="ms-find-note">Nothing in @Where(result.Scope) matched "@result.Value".</p>
+                            <p class="ms-find-note">Nothing in @Where(result.Scope, result.TenantsNarrowed) matched "@result.Value".</p>
                             @if (NameFilterLink(result) is { } browse)
                             {
                                 @* Find matches whole names and ids; a part of a name is the database browser's filter (its `q` address parameter). *@
@@ -130,13 +135,7 @@
                             }
                             @if (!result.Found && OtherStores.Count > 0)
                             {
-                                <div class="ms-find-other" role="group" aria-label="@("Search in another " + SourceWord)">
-                                    <span class="ms-find-other-label">Search in</span>
-                                    @foreach (StoreListing store in OtherStores)
-                                    {
-                                        <button type="button" class="ms-button ms-find-other-store" @key="store.Key" @onclick="() => SearchInAsync(store)">@store.DisplayName</button>
-                                    }
-                                </div>
+                                @SearchInButtons()
                             }
                         }
                     </div>
@@ -156,6 +155,8 @@
     private string? error;
     private string? searchingIn;
     private string lastValue = string.Empty;
+    private string? searchedKey;
+    private bool searchInFailed;
     private bool busy;
     private bool enhanced;
     private bool disposed;
@@ -181,11 +182,19 @@
 
     /// <summary>The other stores the visitor may select, at most eight, shown when nothing was found where they looked.</summary>
     private IReadOnlyList<StoreListing> OtherStores =>
-        result is null
+        result is null && !searchInFailed
             ? []
             : [.. State.AvailableStores
-                .Where(x => x.Availability.IsAvailable && !string.Equals(x.Key, result.Scope.StoreKey, StringComparison.OrdinalIgnoreCase))
+                .Where(x => x.Availability.IsAvailable && !string.Equals(x.Key, searchedKey ?? result?.Scope.StoreKey, StringComparison.OrdinalIgnoreCase))
                 .Take(MaxOtherStores)];
+
+    private RenderFragment SearchInButtons() => @<div class="ms-find-other" role="group" aria-label="@("Search in another " + SourceWord)">
+        <span class="ms-find-other-label">Search in</span>
+        @foreach (StoreListing store in OtherStores)
+        {
+            <button type="button" class="ms-button ms-find-other-store" @key="store.Key" @onclick="() => SearchInAsync(store)">@store.DisplayName</button>
+        }
+    </div>;
 
     protected override void OnInitialized()
     {
@@ -255,6 +264,7 @@
         {
             result = failed ? null : FindResult.Nothing(lastValue, new StudioScope(store.Key, string.Empty, null));
             error = failed ? $"Find could not search {store.DisplayName}. Try again." : null;
+            searchInFailed = failed;
             busy = false;
             await InvokeAsync(StateHasChanged);
             return;
@@ -271,6 +281,8 @@
         }
 
         lastValue = value ?? string.Empty;
+        searchedKey = scope.StoreKey;
+        searchInFailed = false;
         busy = true;
         error = null;
         result = null;
@@ -354,7 +366,7 @@
             ? DatabaseLinks.ToBrowser(Settings, Descriptor, found.Scope, nameFilter: identifier.Name)
             : null;
 
-    private string Where(StudioScope scope)
+    private string Where(StudioScope scope, bool narrowed)
     {
         StoreListing? store = State.AvailableStores.FirstOrDefault(x => string.Equals(x.Key, scope.StoreKey, StringComparison.OrdinalIgnoreCase));
         string name = store?.DisplayName ?? scope.StoreKey;
@@ -371,7 +383,7 @@
             // Only a source with tenants has any to name: Postgres Studio's data sources have none, and "(all tenants)" is not its word.
             if (State.ShowTenantSelector)
             {
-                name += scope.TenantId is { Length: > 0 } tenant ? $" (tenant {tenant})" : " (all tenants)";
+                name += scope.TenantId is { Length: > 0 } tenant ? $" (tenant {tenant})" : narrowed ? " (your tenants)" : " (all tenants)";
             }
         }
 

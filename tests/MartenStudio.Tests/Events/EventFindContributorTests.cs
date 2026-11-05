@@ -391,6 +391,33 @@ public class EventFindContributorTests
     }
 
     [Fact]
+    public async Task A_stream_read_that_failed_did_not_search_so_it_does_not_say_where()
+    {
+        FakeEventDataService events = new() { StreamPageForId = StreamPage.Failed(new EventDataError("down", null, true)) };
+
+        FindContribution found = await Streams(events, new FakeFindScopes(Context(Shape(), tenants: FindTenants.OnlyThese(["acme"]))))
+            .FindAsync(Asked, FindQuery.Parse(StreamId), CancellationToken.None);
+
+        found.Notes.Should().Equal("Streams: could not be searched.");
+    }
+
+    [Fact]
+    public async Task A_natural_key_lookup_that_failed_or_had_no_key_to_look_under_did_not_search_so_it_does_not_say_where()
+    {
+        FindTenants tenants = FindTenants.OnlyThese(["acme"]);
+        FakeEventDataService failed = new() { NaturalKeys = NaturalKeyLookup.Failed(new EventDataError("down", null, true)) };
+        FakeEventDataService unsearchable = new() { NaturalKeys = NaturalKeyLookup.None };
+
+        // A value that is not a GUID asks no stream read on a store whose streams are GUIDs, so only the lookup is in question.
+        FindContribution failure = await Streams(failed, new FakeFindScopes(Context(Shape(naturalKeys: "Order.Number"), tenants: tenants))).FindAsync(Asked, FindQuery.Parse("ORD-1"), CancellationToken.None);
+        FindContribution none = await Streams(unsearchable, new FakeFindScopes(Context(Shape(naturalKeys: "Order.Number"), tenants: tenants))).FindAsync(Asked, FindQuery.Parse("ORD-1"), CancellationToken.None);
+
+        failure.Notes.Should().Equal("Natural keys: could not be searched.");
+        none.Notes.Should().BeEmpty();
+        failed.NaturalKeyLookups.Should().ContainSingle("the lookups were made; they just did not search");
+    }
+
+    [Fact]
     public async Task A_read_that_was_not_restricted_says_nothing_of_tenants()
     {
         FakeEventDataService events = new() { StreamsForId = [FakeEventDataService.Stream(StreamId, tenantId: "acme")] };

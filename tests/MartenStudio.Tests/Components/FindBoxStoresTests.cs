@@ -165,6 +165,8 @@ public class FindBoxStoresTests
         box.Find(".ms-find-error").TextContent.Should().Be("Find could not search Invoicing. Try again.");
         box.Find(".ms-find-status").TextContent.Should().BeEmpty("it is not 'Nothing found'");
         contributor.Calls.Should().HaveCount(asked);
+        // Try again is pressing the same button: the store that failed is still offered, and the one just searched is not.
+        box.FindAll(".ms-find-other-store").Select(static x => x.TextContent.Trim()).Should().Equal("Invoicing", "Audit");
     }
 
     [Fact]
@@ -183,6 +185,25 @@ public class FindBoxStoresTests
 
         box.Find("[data-ms-find-panel]").TextContent.Should().Contain("Nothing in Default › primary (all tenants) matched \"nope\".");
         box.Find(".ms-find-other").GetAttribute("aria-label").Should().Be("Search in another store");
+    }
+
+    [Fact]
+    public async Task A_search_narrowed_to_the_visitors_tenants_does_not_say_all_tenants()
+    {
+        Recording contributor = new() { Answer = static _ => new FindContribution([], "documents", ["Documents and streams: searched in the tenants the header lists for you. To search another tenant, select it in the header."], TenantsNarrowed: true) };
+        await using StudioComponentContext context = await ReadyAsync(contributor, catalog =>
+        {
+            TwoStores(catalog);
+            catalog.WithTenants("default", new TenantList(["acme"], false, TenantListSource.Configured));
+        });
+        await context.State.RefreshAsync(Token);
+        IRenderedComponent<FindBox> box = context.Render<FindBox>();
+
+        await box.InvokeAsync(() => box.Instance.FindAsync("nope"));
+
+        string panel = box.Find("[data-ms-find-panel]").TextContent;
+        panel.Should().Contain("Nothing in Default › primary (your tenants) matched \"nope\".");
+        panel.Should().NotContain("all tenants");
     }
 
     [Fact]

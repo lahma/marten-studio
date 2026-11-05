@@ -96,10 +96,9 @@ internal sealed class StreamFindContributor : IFindContributor
                     cancellationToken)
                 .ConfigureAwait(false);
 
-            restricted |= context.StreamTenants is not null;
-
             if (page.Error is null)
             {
+                restricted |= context.StreamTenants is not null;
                 searched.Add("streams");
                 List<StreamRow> admitted = await scopes.AdmitAsync(context.Scope, page.Rows, x => context.TenantOf(x.TenantId), cancellationToken).ConfigureAwait(false);
 
@@ -120,7 +119,8 @@ internal sealed class StreamFindContributor : IFindContributor
                 .FindStreamsByNaturalKeyAsync(scope, query.Value, includeArchived: true, context.StreamTenants, cancellationToken)
                 .ConfigureAwait(false);
 
-            restricted |= context.StreamTenants is not null;
+            // Only a lookup that ran: a failed one, or one with no key whose column the value parses for, searched nothing.
+            restricted |= context.StreamTenants is not null && lookup.Error is null && lookup.Searchable;
 
             if (lookup.Error is not null)
             {
@@ -150,7 +150,7 @@ internal sealed class StreamFindContributor : IFindContributor
             notes.Add(FindTenants.RestrictedNote);
         }
 
-        return new FindContribution(hits, searched.Count == 0 ? null : string.Join(", ", searched), notes);
+        return new FindContribution(hits, searched.Count == 0 ? null : string.Join(", ", searched), notes, restricted);
     }
 
     private void AddStreamHits(

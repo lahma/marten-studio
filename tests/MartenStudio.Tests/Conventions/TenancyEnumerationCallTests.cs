@@ -88,15 +88,12 @@ public class TenancyEnumerationCallTests
         new("src/PostgresStudio/Services/StudioScopeCatalog.cs", "DatabasesAsync", 2,
             "names, for the database picker; and the instance tenant discovery reads, for the header. A Find under a store policy with no "
             + "tenant selected also calls catalog.DescribeAsync (once per Find, for the tenants the header lists), which reads the second"),
-        // 1.2-SCOPE-3-FU: Find's "Search in" another store, and Find's tenant restriction for a scope that names no database.
+        // 1.2-SCOPE-3-FU: Find's "Search in" another store.
         new("src/PostgresStudio/Components/Layout/FindBox.razor", "TryListDatabasesAsync", 1,
             "names, to search the first database the catalog lists for this visitor in another store: asked only when the visitor "
             + "presses that store's button, once, and it is the listing the header's picker makes when that store is selected - "
             + "never on a render, a poll or a keystroke. The store may be the active one (the button is offered for every other store "
             + "from a search made in another, so 'Search in' can name the store the box started in)"),
-        new("src/MartenStudio/Services/Find/FindScopes.cs", "TryListDatabasesAsync", 1,
-            "names, to read the tenant restriction of a scope that names no database: asked only when a Find is made under a store policy "
-            + "with no tenant selected and the scope has no database identity (the box's own scopes always have one), once per Find"),
         // Issue #20: Sessions > Holders names a database of the server only where a registered source holds it and the policy
         // admits it.
         new("src/PostgresStudio/Services/Database/SessionHolderNames.cs", "DatabasesAsync", 1,

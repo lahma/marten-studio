@@ -253,6 +253,16 @@ public class FindServiceTests
     }
 
     [Fact]
+    public async Task A_result_says_it_was_narrowed_to_the_visitors_tenants_when_any_kind_did()
+    {
+        FakeFindContributor plain = new FakeFindContributor(10, "Plain").Returns("plain");
+        FakeFindContributor narrowed = new(20, "Narrowed") { Behavior = static (_, _, _) => Task.FromResult(new FindContribution([], "narrowed", [], TenantsNarrowed: true)) };
+
+        (await Service(contributors: [plain]).FindAsync(Scope, "abc", TestContext.Current.CancellationToken)).TenantsNarrowed.Should().BeFalse();
+        (await Service(contributors: [plain, narrowed]).FindAsync(Scope, "abc", TestContext.Current.CancellationToken)).TenantsNarrowed.Should().BeTrue();
+    }
+
+    [Fact]
     public void Find_is_available_only_when_a_kind_is_registered()
     {
         Service().IsAvailable.Should().BeFalse();

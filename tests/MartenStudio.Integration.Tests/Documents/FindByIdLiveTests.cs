@@ -35,6 +35,14 @@ public class FindByIdLiveTests(PostgresFixture postgres)
 
     private const string Globex = "globex";
 
+    /// <summary>The scope the header is on, with its database identity: under a policy Find reads the tenants the header lists for that database.</summary>
+    private static async Task<StudioScope> OnScreenAsync(IServiceProvider services)
+    {
+        StudioState state = services.GetRequiredService<StudioState>();
+        await state.EnsureInitializedAsync(Token);
+        return state.ActiveScope!;
+    }
+
     private static readonly StudioScope Whole = new("default", string.Empty, null);
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
@@ -146,9 +154,10 @@ public class FindByIdLiveTests(PostgresFixture postgres)
             studio: static options => options.StoreAuthorizationPolicy = "NoTenant");
         await using AsyncServiceScope guarded = allowlisted.Services.CreateAsyncScope();
         FindService guardedFind = guarded.ServiceProvider.GetRequiredService<FindService>();
+        StudioScope guardedScope = await OnScreenAsync(guarded.ServiceProvider);
 
-        (await guardedFind.FindAsync(Whole, shared.ToString(), Token)).Hits.Select(static x => x.Kind).Should().Equal("Document", "Stream");
-        (await guardedFind.FindAsync(Whole, "#1", Token)).Hits.Should().ContainSingle().Which.Kind.Should().Be("Event");
+        (await guardedFind.FindAsync(guardedScope, shared.ToString(), Token)).Hits.Select(static x => x.Kind).Should().Equal("Document", "Stream");
+        (await guardedFind.FindAsync(guardedScope, "#1", Token)).Hits.Should().ContainSingle().Which.Kind.Should().Be("Event");
     }
 
     [PostgresFact]
@@ -209,7 +218,7 @@ public class FindByIdLiveTests(PostgresFixture postgres)
         await using AsyncServiceScope guardedCircuit = guarded.Services.CreateAsyncScope();
         FindService guardedFind = guardedCircuit.ServiceProvider.GetRequiredService<FindService>();
 
-        FindResult visible = await guardedFind.FindAsync(Whole, shared.ToString(), Token);
+        FindResult visible = await guardedFind.FindAsync(await OnScreenAsync(guardedCircuit.ServiceProvider), shared.ToString(), Token);
         visible.Hits.Should().ContainSingle().Which.Scope.TenantId.Should().Be(Acme);
         JsonSerializer.Serialize(visible).Should().NotContain(Globex, "a tenant the policy refuses is not named, counted or hinted at");
     }
@@ -481,7 +490,7 @@ public class FindByIdLiveTests(PostgresFixture postgres)
         await using TenancyStudio studio = OnlyOneTenant(options => ConfigureCrowd(options, database), TenantName(25));
         await using AsyncServiceScope circuit = studio.Services.CreateAsyncScope();
 
-        FindResult found = await circuit.ServiceProvider.GetRequiredService<FindService>().FindAsync(Whole, shared.ToString(), Token);
+        FindResult found = await circuit.ServiceProvider.GetRequiredService<FindService>().FindAsync(await OnScreenAsync(circuit.ServiceProvider), shared.ToString(), Token);
 
         found.Hits.Select(static x => x.Kind).Should().Equal("Document", "Stream");
         found.Hits.Should().OnlyContain(static x => x.Scope.TenantId == "t025" && x.TenantChip == "tenant t025");
@@ -507,8 +516,8 @@ public class FindByIdLiveTests(PostgresFixture postgres)
             await using AsyncServiceScope circuit = studio.Services.CreateAsyncScope();
             IServiceProvider services = circuit.ServiceProvider;
 
-            FindResult find = await services.GetRequiredService<FindService>().FindAsync(Whole, shared.ToString(), Token);
-            TenantOverview overview = await services.GetRequiredService<ITenantOverviewService>().GetAsync(Whole, new TenantOverviewRequest(), Token);
+            FindResult find = await services.GetRequiredService<FindService>().FindAsync(await OnScreenAsync(services), shared.ToString(), Token);
+            TenantOverview overview = await services.GetRequiredService<ITenantOverviewService>().GetAsync(await OnScreenAsync(services), new TenantOverviewRequest(), Token);
             answers.Add((find, overview));
         }
 

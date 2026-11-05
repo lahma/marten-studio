@@ -112,6 +112,6 @@ internal sealed class DocumentFindContributor : IFindContributor
             ? null
             : $"{found.VisibleTypes.ToString(CultureInfo.InvariantCulture)} document {(found.VisibleTypes == 1 ? "type" : "types")}";
 
-        return new FindContribution(hits, searched, notes);
+        return new FindContribution(hits, searched, notes, found.TenantRestricted);
     }
 }

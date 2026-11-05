@@ -145,6 +145,7 @@ internal sealed class FindService : IDisposable
         List<string> searched = [];
         List<string> notes = [];
         int omitted = 0;
+        bool narrowed = false;
 
         foreach (IFindContributor contributor in contributors)
         {
@@ -189,6 +190,7 @@ internal sealed class FindService : IDisposable
             }
 
             notes.AddRange(contribution.Notes);
+            narrowed |= contribution.TenantsNarrowed;
 
             foreach (FindHit hit in contribution.Hits)
             {
@@ -203,6 +205,6 @@ internal sealed class FindService : IDisposable
             }
         }
 
-        return new FindResult(query.Value, scope, hits, omitted, [.. searched.Distinct(StringComparer.Ordinal)], [.. notes.Distinct(StringComparer.Ordinal)], null);
+        return new FindResult(query.Value, scope, hits, omitted, [.. searched.Distinct(StringComparer.Ordinal)], [.. notes.Distinct(StringComparer.Ordinal)], null, narrowed);
     }
 }

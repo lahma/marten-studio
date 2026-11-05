@@ -21,12 +21,16 @@ internal sealed class FakeStudioSourceProvider : IStudioSourceProvider
 {
     private readonly List<FakeSource> sources = [];
 
+    /// <summary>The sources whose database enumeration throws, as an unreachable master database does.</summary>
+    public HashSet<string> FailingSources { get; } = new(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>Adds a source with <paramref name="databaseIdentities" />, in order: the first is an empty <c>?db=</c>'s.</summary>
     public FakeStudioSourceProvider WithSource(string key, params string[] databaseIdentities)
     {
         sources.Add(new FakeSource(
             new StudioSourceRegistration(key, key, StudioSourceKind.DataSource),
-            [.. databaseIdentities.Select(static x => (IStudioDatabase) new FakeDatabase(x))]));
+            [.. databaseIdentities.Select(static x => (IStudioDatabase) new FakeDatabase(x))],
+            this));
 
         return this;
     }
@@ -66,7 +70,7 @@ internal sealed class FakeStudioSourceProvider : IStudioSourceProvider
     public ValueTask<StudioUnattendedResolution> ResolveUnattendedAsync(string sourceKey, string databaseId, CancellationToken cancellationToken) =>
         throw new NotSupportedException("A visitor's resolution never resolves unattended.");
 
-    private sealed class FakeSource(StudioSourceRegistration registration, IReadOnlyList<IStudioDatabase> databases) : IStudioSource
+    private sealed class FakeSource(StudioSourceRegistration registration, IReadOnlyList<IStudioDatabase> databases, FakeStudioSourceProvider owner) : IStudioSource
     {
         public int Listings { get; private set; }
 
@@ -79,7 +83,9 @@ internal sealed class FakeStudioSourceProvider : IStudioSourceProvider
         public ValueTask<IReadOnlyList<IStudioDatabase>> DatabasesAsync(CancellationToken cancellationToken)
         {
             Listings++;
-            return ValueTask.FromResult(databases);
+            return owner.FailingSources.Contains(Registration.Key)
+                ? throw new InvalidOperationException("the master database is unreachable")
+                : ValueTask.FromResult(databases);
         }
 
         public ValueTask<TenantList> DiscoverTenantsAsync(IStudioDatabase database, IReadOnlyList<IStudioDatabase> all, CancellationToken cancellationToken) =>

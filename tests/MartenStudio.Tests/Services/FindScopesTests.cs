@@ -106,14 +106,12 @@ public class FindScopesTests
     }
 
     [Fact]
-    public async Task A_scope_that_names_no_database_is_read_in_the_first_database_the_catalog_lists_and_none_means_unreadable()
+    public async Task A_scope_that_names_no_database_fails_closed_under_a_policy_and_the_catalog_is_not_asked()
     {
-        FakeStudioScopeCatalog catalog = Catalog(new TenantList(["acme"], false, TenantListSource.Configured));
+        StudioScope noDatabase = Whole with { DatabaseId = string.Empty };
 
-        (await TenantsAsync(policy: true, Whole with { DatabaseId = string.Empty }, catalog))!.Only.Should().Equal("acme");
-
-        catalog.Databases["default"].Clear();
-        (await TenantsAsync(policy: true, Whole with { DatabaseId = string.Empty }, catalog)).Should().BeNull();
+        (await TenantsAsync(policy: true, noDatabase, new ThrowingCatalog())).Should().BeNull("an empty tenant list for it would read as no tenant");
+        (await TenantsAsync(policy: false, noDatabase, new ThrowingCatalog())).Should().BeSameAs(FindTenants.Unrestricted, "without a policy there is nothing to read");
     }
 
     [Fact]

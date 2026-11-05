@@ -163,21 +163,14 @@ internal sealed class FindScopes : IFindScopes
                 return FindTenants.Unrestricted;
             }
 
-            // A scope that names no database (a caller that has not matched one) is the store's first database the catalog lists for the
-            // visitor, as the box's "Search in" chooses it; none to name is a restriction that cannot be read.
-            string databaseId = scope.DatabaseId;
-            if (databaseId.Length == 0)
+            // A scope that names no database has no tenant listing to read - the catalog answers an empty list for it, which would read as
+            // "no tenant" - so the restriction cannot be read, and the Find fails closed. The box's own scopes always name one.
+            if (scope.DatabaseId.Length == 0)
             {
-                StoreDatabaseListing listing = await catalog.TryListDatabasesAsync(scope.StoreKey, cancellationToken).ConfigureAwait(false);
-                if (listing.Failed || listing.Databases.Count == 0)
-                {
-                    return null;
-                }
-
-                databaseId = listing.Databases[0].Identity;
+                return null;
             }
 
-            StoreScopeFacts facts = await catalog.DescribeAsync(scope.StoreKey, databaseId, cancellationToken).ConfigureAwait(false);
+            StoreScopeFacts facts = await catalog.DescribeAsync(scope.StoreKey, scope.DatabaseId, cancellationToken).ConfigureAwait(false);
 
             // A store with no tenant selector has nothing tenanted to read across. Any other is read in the tenants the header lists for the
             // visitor - always, whether or not discovery was cut off, found none, or could not answer: the list is never claimed to be the

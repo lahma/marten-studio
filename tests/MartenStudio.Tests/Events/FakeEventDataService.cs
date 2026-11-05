@@ -39,6 +39,9 @@ internal sealed partial class FakeEventDataService : IEventDataService
     /// <summary>What a streams list asked for one stream id answers, whatever the id, when set: the rows of every tenant that holds it.</summary>
     public IReadOnlyList<StreamRow>? StreamsForId { get; set; }
 
+    /// <summary>When set, the whole page a streams list asked for one stream id answers (a failed one, for Find by id).</summary>
+    public StreamPage? StreamPageForId { get; set; }
+
     /// <summary>The scope of every streams list, newest last.</summary>
     public List<StudioScope> StreamRequestScopes { get; } = [];
 
@@ -176,6 +179,11 @@ internal sealed partial class FakeEventDataService : IEventDataService
     {
         StreamRequests.Add(request);
         StreamRequestScopes.Add(scope);
+
+        if (request.StreamId is { Length: > 0 } && StreamPageForId is not null)
+        {
+            return Task.FromResult(StreamPageForId);
+        }
 
         if (request.StreamId is { Length: > 0 } && StreamsForId is not null)
         {
