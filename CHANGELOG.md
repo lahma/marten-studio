@@ -109,6 +109,12 @@ and a .NET 11 SDK Debug start-up failure.
   whole whatever tenant is selected (the button shows the policy's refusal rather than failing), says so when the row
   was already gone, and audits it under the database with no tenant (events 9225 and 9226). Marten's call first ensures
   the event store's storage, as every write to it does.
+- A projection rebuilt from Marten Studio on a daemon this process hosts starts again. JasperFx's rebuild leaves a
+  Stopped agent registered under each shard's name, which the coordinator does not restart, so in 1.1 the rebuilt shard
+  stayed Stopped. After a successful rebuild the studio hands every Stopped shard of the projection back to the
+  coordinator, and the Projections page says so in a toast (and the Activity log); a failed or cancelled rebuild hands
+  nothing back and says what it leaves, and while the studio's pause is in effect the stale agent is cleared and Resume
+  starts the shard.
 - The Rebuild dialog names the error policy a rebuild runs under (`Projections.RebuildErrors`) and says when it differs
   from the continuous agents' `Projections.Errors`, so a rebuild that stops where the live agent skipped is no surprise.
 - New option `MartenStudioOptions.ProjectionThresholds` (and the record `ProjectionLagThreshold`) sets amber and red lag
