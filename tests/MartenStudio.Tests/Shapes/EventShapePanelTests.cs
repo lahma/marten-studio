@@ -294,6 +294,85 @@ public class EventShapePanelTests
     }
 
     [Fact]
+    public async Task A_result_the_cache_handed_back_says_when_it_was_checked_and_how_long_ago_and_offers_Check_again_beside_it()
+    {
+        ManualClock clock = new(new DateTimeOffset(2026, 11, 4, 10, 0, 0, TimeSpan.Zero));
+        (StudioComponentContext context, FakeEventShapeCheck check) = await RigAsync(clock, ["OrderPlaced", "OrderShipped"]);
+        using (context)
+        {
+            check.Results["OrderPlaced"] = Fits("OrderPlaced", at: clock.GetUtcNow() - TimeSpan.FromMinutes(3));
+            check.Results["OrderShipped"] = Broken("OrderShipped") with { CheckedAt = clock.GetUtcNow() - TimeSpan.FromSeconds(40) };
+            IRenderedComponent<EventTypes> page = context.Render<EventTypes>();
+
+            await ClickAsync(page, "Check shapes");
+
+            page.WaitForAssertion(() => page.Find(".ms-shape-fits-fold li").TextContent.Should().Contain("(3 min ago, from the last check)"));
+            page.Find(".ms-shape-event-type h3").TextContent.Should().Contain("(40 s ago, from the last check)");
+
+            IElement beside = page.Find(".ms-shape-summary-row .ms-shape-recheck");
+            beside.TextContent.Trim().Should().Be("Check again");
+            beside.HasAttribute("disabled").Should().BeFalse("both checks are older than the thirty seconds after which a press runs again");
+        }
+    }
+
+    [Fact]
+    public async Task A_result_made_by_this_press_carries_no_age_and_no_second_Check_again()
+    {
+        ManualClock clock = new(new DateTimeOffset(2026, 11, 4, 10, 0, 0, TimeSpan.Zero));
+        (StudioComponentContext context, FakeEventShapeCheck check) = await RigAsync(clock, ["OrderPlaced"]);
+        using (context)
+        {
+            check.Results["OrderPlaced"] = Fits("OrderPlaced", at: clock.GetUtcNow());
+            IRenderedComponent<EventTypes> page = context.Render<EventTypes>();
+
+            await ClickAsync(page, "Check shapes");
+
+            page.WaitForAssertion(() => page.Find(".ms-shape-fits-fold li").TextContent.Should().Contain("Checked all 20 events at "));
+            page.Find(".ms-shape-fits-fold li").TextContent.Should().NotContain("from the last check");
+            page.FindAll(".ms-shape-recheck").Should().BeEmpty();
+        }
+    }
+
+    [Fact]
+    public async Task An_event_type_only_the_log_holds_is_checked_though_the_page_never_counted_and_the_store_has_the_index()
+    {
+        (StudioComponentContext context, FakeEventShapeCheck check) = await RigAsync("OrderPlaced", "OrderShipped");
+        using (context)
+        {
+            check.Indexed = true;
+            context.EventData.TypesWithCounts = new EventTypeList(
+                [
+                    new EventTypeInfo("OrderPlaced", "Sample.OrderPlaced", true, 10),
+                    new EventTypeInfo("OrderShipped", "Sample.OrderShipped", true, 11),
+                    new EventTypeInfo("ghost_event", "Gone.Ghost, Gone", false, 3),
+                ],
+                true);
+            IRenderedComponent<EventTypes> page = context.Render<EventTypes>();
+
+            await ClickAsync(page, "Check shapes");
+
+            page.WaitForAssertion(() => check.Calls.Select(static x => x.Name).Should().Equal("OrderPlaced", "OrderShipped", "ghost_event"));
+            page.WaitForAssertion(() => page.Find(".ms-shape-summary").TextContent.Should().Be("Checked 3 event types: 0 with problems, 3 fit."));
+        }
+    }
+
+    [Fact]
+    public async Task When_the_log_cannot_be_listed_the_registered_types_are_checked_and_the_panel_says_the_others_were_not()
+    {
+        (StudioComponentContext context, FakeEventShapeCheck check) = await RigAsync("OrderPlaced");
+        using (context)
+        {
+            context.EventData.TypesWithCounts = EventTypeList.Failed(new EventDataError("busy", null, true));
+            IRenderedComponent<EventTypes> page = context.Render<EventTypes>();
+
+            await ClickAsync(page, "Check shapes");
+
+            page.WaitForAssertion(() => check.Calls.Select(static x => x.Name).Should().Equal("OrderPlaced"));
+            page.WaitForAssertion(() => page.Find(".ms-shape-panel").TextContent.Should().Contain("the store does not register could not be listed, so they were not checked"));
+        }
+    }
+
+    [Fact]
     public async Task Close_removes_the_panel()
     {
         (StudioComponentContext context, _) = await RigAsync("OrderPlaced");

@@ -408,6 +408,13 @@ internal sealed record EventTypeList(
     /// (<c>UseTenantPartitionedEvents</c> with no tenant selected), so that neither names an event.
     /// </summary>
     public bool SequencesPerTenant { get; init; }
+
+    /// <summary>
+    /// When the counted listing was read, or <see langword="null" /> for the uncounted one (the registered types alone, built on the
+    /// spot). The counted listing is shared for half a minute, so this is the time of the read the visitor is looking at, which can be
+    /// older than their own press (1.2-UX-FIX).
+    /// </summary>
+    public DateTimeOffset? ListedAt { get; init; }
 }
 
 /// <summary>One dead letter.</summary>

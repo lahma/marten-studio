@@ -123,6 +123,32 @@ public class ShapeCheckTextTests
     }
 
     [Fact]
+    public void A_result_the_cache_handed_back_says_how_old_it_is_in_the_summary_of_either_kind()
+    {
+        ShapeCheckResult complete = Result(ShapeCoverage.Complete, examined: 37);
+
+        ShapeCheckText.Summary(complete, "10:42", TimeSpan.FromMinutes(3) + TimeSpan.FromSeconds(20)).Should().Be(
+            "Checked all 37 documents at 10:42 (3 min ago, from the last check).");
+        ShapeCheckText.EventSummary(complete, "10:42", TimeSpan.FromSeconds(40)).Should().Be(
+            "Checked all 37 events at 10:42 (40 s ago, from the last check).");
+        ShapeCheckText.Summary(complete, "10:42").Should().Be("Checked all 37 documents at 10:42.");
+        ShapeCheckText.EventSummary(Result(ShapeCoverage.Sampled, examined: 50, lowest: 25, highest: 25), "10:42", TimeSpan.FromMinutes(1))
+            .Should().Be("Checked 50 events at 10:42 (1 min ago, from the last check): the 25 oldest and 25 newest.");
+    }
+
+    [Theory]
+    [InlineData(0, "1 s ago")]
+    [InlineData(59, "59 s ago")]
+    [InlineData(60, "1 min ago")]
+    [InlineData(299, "4 min ago")]
+    [InlineData(3_600, "1 h ago")]
+    [InlineData(-5, "1 s ago")]
+    public void An_age_is_in_whole_units_and_never_zero(int seconds, string expected)
+    {
+        ShapeCheckText.Ago(TimeSpan.FromSeconds(seconds)).Should().Be(expected);
+    }
+
+    [Fact]
     public void A_sentence_splits_into_text_and_code_runs()
     {
         ShapeCheckText.Split("a `b` c `d`").Should().Equal(("a ", false), ("b", true), (" c ", false), ("d", true));

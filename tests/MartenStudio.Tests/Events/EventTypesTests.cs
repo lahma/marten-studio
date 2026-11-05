@@ -48,6 +48,32 @@ public class EventTypesTests
     }
 
     /// <summary>
+    /// 1.2-UX-FIX: the counted listing is shared for half a minute and kept by the page, so the page says when it was read; a listing
+    /// nobody counted says nothing.
+    /// </summary>
+    [Fact]
+    public async Task The_counted_listing_says_when_it_was_read_and_the_uncounted_one_says_nothing()
+    {
+        using StudioComponentContext context = await NewContextAsync();
+        context.EventData.TypesWithoutCounts = new EventTypeList(
+            [new EventTypeInfo("OrderPlaced", "Sample.OrderPlaced", true)], false);
+        context.EventData.TypesWithCounts = new EventTypeList(
+            [new EventTypeInfo("OrderPlaced", "Sample.OrderPlaced", true, 5, 1, 5)], true)
+        {
+            ListedAt = new DateTimeOffset(2026, 11, 5, 14, 5, 7, TimeSpan.Zero),
+        };
+
+        IRenderedComponent<EventTypes> page = context.Render<EventTypes>();
+
+        page.FindAll(".ms-event-types-listed").Should().BeEmpty("nothing was counted yet");
+
+        await page.Find(".ms-page-header button").ClickAsync(new());
+
+        string line = System.Text.RegularExpressions.Regex.Replace(page.Find(".ms-event-types-listed").TextContent, @"\s+", " ");
+        line.Should().Contain("Counted at ").And.Contain(":07").And.Contain("shared for 30 seconds");
+    }
+
+    /// <summary>
     /// SEC1-fix4: under per-tenant sequences with "All tenants", the lowest and highest seq_id across tenants name no
     /// event, so the two columns say "per tenant" rather than a number.
     /// </summary>

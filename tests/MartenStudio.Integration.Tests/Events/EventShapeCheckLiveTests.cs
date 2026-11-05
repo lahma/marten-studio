@@ -280,6 +280,37 @@ public class EventShapeCheckLiveTests(EventShapeCheckLiveTests.Fixture fixture)
         JsonSerializer.Serialize(result).Should().NotContain(Sentinel);
     }
 
+    /// <summary>
+    /// 1.2-UX-FIX (the sweep's "ghost_event"): an alias in <c>mt_events</c> that nothing maps and whose <c>mt_dotnet_type</c> does not load
+    /// is not in the listing the Event types page draws until its counts are loaded - the uncounted listing is the registered types
+    /// alone - so the page's Check shapes, which takes its names from that list, never asked about it. The counted listing has it,
+    /// says when it was read, and the check reports it as an unknown event type without resolving the alias.
+    /// </summary>
+    [PostgresFact]
+    public async Task An_alias_nothing_maps_is_absent_from_the_uncounted_listing_present_in_the_counted_one_and_checked_as_unknown()
+    {
+        string[] before = [.. Store.Options.Events.AllKnownEventTypes().Select(static x => x.EventTypeName).Order(StringComparer.Ordinal)];
+
+        using MartenFixture.ScopedService<IEventDataService> events = Marten.Resolve<IEventDataService>();
+
+        EventTypeList uncounted = await events.Service.ListEventTypesAsync(Scope, withCounts: false, Token);
+        EventTypeList counted = await events.Service.ListEventTypesAsync(Scope, withCounts: true, Token);
+
+        uncounted.Types.Select(static x => x.Name).Should().NotContain("order_placed_v1", "the uncounted list is what the store registers");
+        uncounted.ListedAt.Should().BeNull();
+
+        EventTypeInfo ghost = counted.Types.Should().ContainSingle(static x => x.Name == "order_placed_v1").Subject;
+        ghost.IsRegistered.Should().BeFalse();
+        ghost.Count.Should().Be(4);
+        counted.ListedAt.Should().NotBeNull().And.BeOnOrBefore(DateTimeOffset.UtcNow);
+
+        ShapeCheckResult result = await CheckAsync("order_placed_v1");
+
+        result.Types.Single().Failures.Should().ContainSingle().Which.Kind.Should().Be(ShapeFailureKind.UnknownEventType);
+        Store.Options.Events.AllKnownEventTypes().Select(static x => x.EventTypeName).Order(StringComparer.Ordinal).Should().Equal(before,
+            "listing and checking an unmapped alias resolved nothing and registered nothing (hard rule 14)");
+    }
+
     [PostgresFact]
     public async Task The_counted_listing_is_one_read_shared_by_every_circuit_and_by_the_check()
     {

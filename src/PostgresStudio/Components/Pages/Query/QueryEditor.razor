@@ -88,6 +88,7 @@
               aria-label="@Label"
               aria-describedby="@statusId"
               value="@Value"
+              @oninput="InputHandler"
               @onchange="OnChangedAsync"></textarea>
 
     <div id="@statusId" class="ms-query-editor-status" role="status" aria-live="polite">
@@ -123,6 +124,14 @@
     /// <summary>Raised when the textarea's value changes, so the page can keep the deep link in step.</summary>
     [Parameter]
     public EventCallback<string> ValueChanged { get; set; }
+
+    /// <summary>
+    /// Raised on the first keystroke after an error was drawn under the editor (1.2-UX-FIX), so the page can take the error and its
+    /// caret away: they were about the text as it was. While there is no error the textarea listens for no input at all, so typing costs
+    /// no round trip.
+    /// </summary>
+    [Parameter]
+    public EventCallback OnInput { get; set; }
 
     /// <summary>Raised with the live text when Run or Ctrl+Enter happens.</summary>
     [Parameter]
@@ -302,6 +311,14 @@
             selfReference = null;
         }
     }
+
+    // Empty (the attribute is not rendered) unless an error is showing and the page asked to hear of the next keystroke.
+    private EventCallback<ChangeEventArgs> InputHandler =>
+        OnInput.HasDelegate && !string.IsNullOrWhiteSpace(ErrorMessage)
+            ? EventCallback.Factory.Create<ChangeEventArgs>(this, OnInputAsync)
+            : default;
+
+    private async Task OnInputAsync(ChangeEventArgs args) => await OnInput.InvokeAsync();
 
     private async Task OnChangedAsync(ChangeEventArgs args) =>
         await CommitAsync(args.Value?.ToString());

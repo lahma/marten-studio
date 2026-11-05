@@ -247,6 +247,42 @@ public class DocumentShapePanelTests
     }
 
     [Fact]
+    public async Task A_result_the_cache_handed_back_says_how_long_ago_it_was_checked_and_offers_Check_again_beside_it()
+    {
+        (DocumentsComponentContext context, FakeShapeCheck check) = Rig();
+        using (context)
+        {
+            check.Result = Result(at: DateTimeOffset.UtcNow - TimeSpan.FromMinutes(4));
+            IRenderedComponent<ListPage> page = Render(context);
+
+            await ClickAsync(page, "Check shapes");
+
+            page.WaitForAssertion(() => page.Find(".ms-shape-summary").TextContent.Should().Contain("(4 min ago, from the last check)"));
+
+            IElement beside = page.Find(".ms-shape-summary-row .ms-shape-recheck");
+            beside.TextContent.Trim().Should().Be("Check again");
+            beside.HasAttribute("disabled").Should().BeFalse("a check four minutes old can be run again");
+        }
+    }
+
+    [Fact]
+    public async Task A_result_this_press_made_says_only_the_time()
+    {
+        (DocumentsComponentContext context, FakeShapeCheck check) = Rig();
+        using (context)
+        {
+            check.Result = Result(at: DateTimeOffset.UtcNow + TimeSpan.FromMinutes(1));
+            IRenderedComponent<ListPage> page = Render(context);
+
+            await ClickAsync(page, "Check shapes");
+
+            page.WaitForAssertion(() => page.Find(".ms-shape-summary").TextContent.Should().Contain("Checked all 37 documents at "));
+            page.Find(".ms-shape-summary").TextContent.Should().NotContain("from the last check");
+            page.FindAll(".ms-shape-recheck").Should().BeEmpty();
+        }
+    }
+
+    [Fact]
     public async Task Close_removes_the_panel_and_a_tenant_example_carries_the_tenant_in_its_link()
     {
         (DocumentsComponentContext context, FakeShapeCheck check) = Rig();

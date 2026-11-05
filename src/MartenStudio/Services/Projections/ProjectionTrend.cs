@@ -98,9 +98,24 @@ internal sealed record ShardTrend(
         _ => string.Empty,
     };
 
-    /// <summary>Events per second, for a person.</summary>
-    internal static string Rate(double perSecond) =>
-        (perSecond >= 10 ? perSecond.ToString("N0", CultureInfo.InvariantCulture) : perSecond.ToString("0.#", CultureInfo.InvariantCulture)) + " ev/s";
+    /// <summary>
+    /// Events per second, for a person: whole numbers from 10, one decimal from 1, and below 1 enough places that a rate that
+    /// is not zero is never printed as "0" (1.2-UX-FIX: "0.26 ev/s", not the "0.3" that hid a rebuild estimate of ten hours).
+    /// </summary>
+    internal static string Rate(double perSecond)
+    {
+        string number = perSecond switch
+        {
+            >= 10 => perSecond.ToString("N0", CultureInfo.InvariantCulture),
+            >= 1 => perSecond.ToString("0.#", CultureInfo.InvariantCulture),
+            >= 0.1 => perSecond.ToString("0.##", CultureInfo.InvariantCulture),
+            >= 0.001 => perSecond.ToString("0.###", CultureInfo.InvariantCulture),
+            > 0 => "<0.001",
+            _ => "0",
+        };
+
+        return number + " ev/s";
+    }
 }
 
 /// <summary>

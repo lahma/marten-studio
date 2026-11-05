@@ -255,9 +255,12 @@ internal static class ShapeCheckText
     /// <summary>The summary of a finished events check.</summary>
     /// <param name="result">The result.</param>
     /// <param name="checkedAt">When it finished, as text.</param>
-    public static string EventSummary(ShapeCheckResult result, string checkedAt)
+    /// <param name="age">How long before this press it finished, when the cache handed it back, else <see langword="null" />.</param>
+    public static string EventSummary(ShapeCheckResult result, string checkedAt, TimeSpan? age = null)
     {
         ArgumentNullException.ThrowIfNull(result);
+
+        checkedAt = WithAge(checkedAt, age);
 
         string count = result.Examined.ToString("N0", CultureInfo.InvariantCulture);
         string noun = result.Examined == 1 ? "event" : "events";
@@ -307,9 +310,12 @@ internal static class ShapeCheckText
     /// <summary>The summary line of a finished check.</summary>
     /// <param name="result">The result.</param>
     /// <param name="checkedAt">When it finished, in the visitor's time zone, as text.</param>
-    public static string Summary(ShapeCheckResult result, string checkedAt)
+    /// <param name="age">How long before this press it finished, when the cache handed it back, else <see langword="null" />.</param>
+    public static string Summary(ShapeCheckResult result, string checkedAt, TimeSpan? age = null)
     {
         ArgumentNullException.ThrowIfNull(result);
+
+        checkedAt = WithAge(checkedAt, age);
 
         string count = result.Examined.ToString("N0", CultureInfo.InvariantCulture);
 
@@ -342,6 +348,31 @@ internal static class ShapeCheckText
 
     /// <summary>The check could not be made.</summary>
     public static string Failed(string reason) => $"The shape check could not be completed: {reason}";
+
+    /// <summary>
+    /// "14:05 (3 min ago, from the last check)" for a result the cache handed back, else the time alone: a result that is not this
+    /// press's says so, rather than read as if it had just been made.
+    /// </summary>
+    /// <param name="checkedAt">When it finished, as text.</param>
+    /// <param name="age">How long before this press it finished, or <see langword="null" /> for a check this press made.</param>
+    public static string WithAge(string checkedAt, TimeSpan? age) =>
+        age is { } elapsed ? $"{checkedAt} ({Ago(elapsed)}, from the last check)" : checkedAt;
+
+    /// <summary>"40 s ago", "3 min ago", "2 h ago": whole units, never "0 min ago".</summary>
+    /// <param name="age">How long ago.</param>
+    public static string Ago(TimeSpan age)
+    {
+        if (age < TimeSpan.Zero)
+        {
+            age = TimeSpan.Zero;
+        }
+
+        return age.TotalMinutes < 1
+            ? $"{Math.Max(1, (int) age.TotalSeconds).ToString(CultureInfo.InvariantCulture)} s ago"
+            : age.TotalHours < 1
+                ? $"{((int) age.TotalMinutes).ToString(CultureInfo.InvariantCulture)} min ago"
+                : $"{((int) age.TotalHours).ToString(CultureInfo.InvariantCulture)} h ago";
+    }
 
     /// <summary>The disabled "Check again" button's title.</summary>
     public static string AvailableAt(string time) => $"Available at {time}";

@@ -37,8 +37,14 @@ internal sealed record DestructiveStatement(string Kind, string Statement);
 internal static partial class MigrationRisk
 {
     /// <summary>What the red block says above the list.</summary>
-    internal const string Warning =
-        "This migration removes or rewrites objects. AutoCreate.CreateOrUpdate is not additive: it drops " +
+    internal const string Warning = WarningHeadline + " " + WarningDetail;
+
+    /// <summary>The block's headline, which the page sets in bold. It is said once: <see cref="WarningDetail" /> is the rest.</summary>
+    internal const string WarningHeadline = "This migration removes or rewrites objects.";
+
+    /// <summary>What follows the headline.</summary>
+    internal const string WarningDetail =
+        "AutoCreate.CreateOrUpdate is not additive: it drops " +
         "indexes and columns the configuration does not declare, alters changed column types, and drops " +
         "and recreates a changed primary key.";
 

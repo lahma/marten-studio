@@ -42,7 +42,7 @@
     @if (running)
     {
         <LoadingSpinner />
-        <p class="ms-shape-note" role="status">Checking @Math.Min(entries.Count + 1, TypeNames.Count) of @TypeNames.Count...</p>
+        <p class="ms-shape-note" role="status">Checking @Math.Min(entries.Count + 1, names.Count) of @names.Count...</p>
     }
 
     @if (problem is { Length: > 0 })
@@ -52,7 +52,19 @@
 
     @if (entries.Count > 0)
     {
-        <p class="ms-shape-summary" role="status">@Summary</p>
+        <div class="ms-shape-summary-row">
+            <p class="ms-shape-summary" role="status">@Summary</p>
+            @if (!running && FromLastCheck)
+            {
+                @* The cache handed back a check made before this press: the time says so, and a new check is offered beside it. *@
+                <button type="button" class="ms-button ms-btn-sm ms-shape-recheck" disabled="@RecheckDisabled" title="@RecheckTitle" @onclick="CheckAgainAsync">Check again</button>
+            }
+        </div>
+
+        @if (notListed is { Length: > 0 })
+        {
+            <p class="ms-shape-note" role="status">@notListed</p>
+        }
 
         @if (stoppedNote is { Length: > 0 })
         {
@@ -64,7 +76,7 @@
             <section class="ms-shape-event-type" aria-label="@("Shape check of " + entry.Name)" @key="entry.Name">
                 <h3 class="ms-shape-type-title">
                     <code>@entry.Name</code>
-                    <span class="ms-shape-muted">@ShapeCheckText.EventSummary(entry.Result, State.FormatInSelectedTimeZone(entry.Result.CheckedAt, "HH:mm"))</span>
+                    <span class="ms-shape-muted">@EntrySummary(entry)</span>
                 </h3>
 
                 @if (entry.Result.Error is { Length: > 0 } error)
@@ -102,7 +114,7 @@
                     {
                         <li @key="entry.Name">
                             <code>@entry.Name</code>
-                            <span class="ms-shape-muted">@ShapeCheckText.EventSummary(entry.Result, State.FormatInSelectedTimeZone(entry.Result.CheckedAt, "HH:mm"))</span>
+                            <span class="ms-shape-muted">@EntrySummary(entry)</span>
                         </li>
                     }
                 </ul>
@@ -116,6 +128,15 @@
     private CancellationTokenSource? cts;
     private string? problem;
     private bool running;
+
+    // What this run checks: the page's names, then any the events table holds that the store does not register (1.2-UX-FIX).
+    private IReadOnlyList<string> names = [];
+
+    // When this run began: a result finished before it is the last check's, handed back by the cache.
+    private DateTimeOffset ranAt;
+
+    // Set when the counted listing could not be read: the registered types were checked, and the ones only the log holds were not.
+    private string? notListed;
 
     // Why the last click stopped before the end of the list, or null: the click's own bound (ShapeCheckLimits.ClickBudget) ran out.
     private string? stoppedNote;
@@ -153,6 +174,15 @@
     private string? RecheckTitle => RecheckDisabled && NextRecheck is { } at
         ? ShapeCheckText.AvailableAt(State.FormatInSelectedTimeZone(at, "HH:mm:ss"))
         : null;
+
+    // A result finished before this press began is the last check's, handed back by the shared cache (five minutes).
+    private bool FromLastCheck => entries.Any(x => x.Result.Error is null && x.Result.Coverage != ShapeCoverage.NotChecked && x.Result.CheckedAt < ranAt);
+
+    private string EntrySummary(Entry entry) =>
+        ShapeCheckText.EventSummary(
+            entry.Result,
+            State.FormatInSelectedTimeZone(entry.Result.CheckedAt, "HH:mm"),
+            entry.Result.CheckedAt < ranAt ? clock.GetUtcNow() - entry.Result.CheckedAt : null);
 
     private string Summary
     {
@@ -212,30 +242,46 @@
         {
             DateTimeOffset begun = clock.GetUtcNow();
 
-            // Without the index on type, a rare type's check walks the primary key: the counts come first (the page's, or the same cached
-            // listing), so a type with no events costs no call at all.
+            ranAt = begun;
+            names = TypeNames;
+            notListed = null;
+
+            // The counts come first (the page's, or the same cached listing): without the index on type a rare type's check walks the
+            // primary key, so a type with no events must cost no call at all. The listing is also where an event type the store does not
+            // register is found, which the page's uncounted list never holds: a row in the log with an alias nothing maps would otherwise
+            // be checked by nobody (1.2-UX-FIX; SHAPE-B reports it as an unknown event type).
             bool indexed = await Check.HasTypeIndexAsync(scope, token);
             IReadOnlyDictionary<string, long> counts = Counts;
 
-            if (!indexed && counts.Count == 0)
+            if (counts.Count == 0)
             {
                 EventTypeList listing = await EventData.ListEventTypesAsync(scope, withCounts: true, token);
 
                 if (listing.Error is null)
                 {
-                    counts = listing.Types.Where(static x => x.Count is not null).ToDictionary(static x => x.Name, static x => x.Count!.Value, StringComparer.Ordinal);
+                    // The counts decide what is skipped only where the check would otherwise walk the primary key (no index on type).
+                    if (!indexed)
+                    {
+                        counts = listing.Types.Where(static x => x.Count is not null).ToDictionary(static x => x.Name, static x => x.Count!.Value, StringComparer.Ordinal);
+                    }
+
+                    names = [.. TypeNames, .. listing.Types.Select(static x => x.Name).Where(x => !TypeNames.Contains(x, StringComparer.Ordinal))];
+                }
+                else
+                {
+                    notListed = "The event types in the log that the store does not register could not be listed, so they were not checked.";
                 }
             }
 
-            foreach (string name in TypeNames)
+            foreach (string name in names)
             {
                 token.ThrowIfCancellationRequested();
 
                 if (entries.Count > 0 && clock.GetUtcNow() - begun >= ShapeCheckLimits.ClickBudget)
                 {
                     stoppedNote = indexed
-                        ? $"Checked {entries.Count} of {TypeNames.Count} types; press again for the rest."
-                        : $"Checked {entries.Count} of {TypeNames.Count} types; the rest need the index on type to be checked quickly (`{ShapeCheckText.TypeIndexRemedy}`).";
+                        ? $"Checked {entries.Count} of {names.Count} types; press again for the rest."
+                        : $"Checked {entries.Count} of {names.Count} types; the rest need the index on type to be checked quickly (`{ShapeCheckText.TypeIndexRemedy}`).";
                     break;
                 }
 
@@ -251,7 +297,7 @@
         }
         catch (OperationCanceledException)
         {
-            problem = $"The check was cancelled after {entries.Count} of {TypeNames.Count} event types. Each one finished carries on for anyone else waiting for it; Check again shows its result.";
+            problem = $"The check was cancelled after {entries.Count} of {names.Count} event types. Each one finished carries on for anyone else waiting for it; Check again shows its result.";
         }
         catch (StudioNotAuthorizedException)
         {

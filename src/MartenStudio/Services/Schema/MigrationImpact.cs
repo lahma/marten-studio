@@ -130,6 +130,46 @@ internal sealed record MigrationImpact(IReadOnlyList<TableImpact> Tables, IReadO
     public bool HasContent => Tables.Count > 0;
 
     /// <summary>
+    /// One line over the per-table list (1.2-UX-FIX), built from the same notes: how many tables the migration takes
+    /// <c>ACCESS EXCLUSIVE</c> on, how big they are by the catalog's estimates, and how many of them it rewrites - or
+    /// <see langword="null" /> when no table is locked that hard. A line of notes, like everything here: the apply, its confirmation and
+    /// its authorization do not read it.
+    /// </summary>
+    public string? LockSummary
+    {
+        get
+        {
+            TableImpact[] exclusive = [.. Tables.Where(static x => !x.IsFunction && x.StrongestLock == TableLockMode.AccessExclusive)];
+
+            if (exclusive.Length == 0)
+            {
+                return null;
+            }
+
+            CultureInfo culture = CultureInfo.InvariantCulture;
+            TableFootprint[] known = [.. exclusive.Select(static x => x.Footprint).OfType<TableFootprint>().Where(static x => x.RowsKnown)];
+            long rows = known.Sum(static x => x.EstimatedRows);
+            long bytes = exclusive.Select(static x => x.Footprint).OfType<TableFootprint>().Sum(static x => x.TotalBytes);
+            int rewritten = exclusive.Count(static x => x.Rewrite == TableRewrite.Yes);
+            int unsure = exclusive.Count(static x => x.Rewrite is TableRewrite.Maybe or TableRewrite.Unknown);
+
+            string size = known.Length == 0 && bytes == 0
+                ? "sizes not in the catalog yet"
+                : $"about {rows.ToString("N0", culture)} rows, {SchemaFormat.Bytes(bytes)} with indexes and TOAST";
+
+            string rewrites = (rewritten, unsure) switch
+            {
+                (0, 0) => "rewrites none",
+                (_, 0) => $"rewrites {rewritten.ToString(culture)}",
+                (0, _) => $"may rewrite {unsure.ToString(culture)}",
+                _ => $"rewrites {rewritten.ToString(culture)}, may rewrite {unsure.ToString(culture)}",
+            };
+
+            return $"Takes ACCESS EXCLUSIVE on {exclusive.Length.ToString(culture)} {(exclusive.Length == 1 ? "table" : "tables")} ({size}); {rewrites}.";
+        }
+    }
+
+    /// <summary>
     /// The distinct qualified relations the statements name, in order of first appearance. A statement that names its relation
     /// without a schema is not looked up: Weasel qualifies every name, and an unqualified one would resolve through a search
     /// path this read does not know.

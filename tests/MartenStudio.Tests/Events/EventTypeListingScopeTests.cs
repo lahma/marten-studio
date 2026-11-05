@@ -86,6 +86,8 @@ public sealed class EventTypeListingScopeTests : IAsyncDisposable
         first.CountsLoaded.Should().BeTrue();
         first.Types.Should().ContainSingle().Which.Count.Should().Be(5);
         second.Should().BeSameAs(first);
+        first.ListedAt.Should().NotBeNull("1.2-UX-FIX: the listing says when it was read, and a second visitor is handed that time, not their own");
+        second.ListedAt.Should().Be(first.ListedAt);
         reads.Should().Be(1, "one group-by, however many visitors");
     }
 

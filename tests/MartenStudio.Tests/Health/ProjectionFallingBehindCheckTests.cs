@@ -327,6 +327,41 @@ public class ProjectionFallingBehindCheckTests
         ProjectionTrend.EstimateRebuild(36_000, throughput, history).Should().StartWith("About 1 h 0 min, at the 10 ev/s");
     }
 
+    /// <summary>1.2-UX-FIX: the dialog said "about 10 h 35 min, at the 0 ev/s" for a rate of 0.26.</summary>
+    [Theory]
+    [InlineData(0, "0 ev/s")]
+    [InlineData(0.0004, "<0.001 ev/s")]
+    [InlineData(0.004, "0.004 ev/s")]
+    [InlineData(0.26, "0.26 ev/s")]
+    [InlineData(3, "3 ev/s")]
+    [InlineData(12_345, "12,345 ev/s")]
+    public void A_rate_that_is_not_zero_is_never_printed_as_zero(double perSecond, string expected)
+    {
+        ShardTrend.Rate(perSecond).Should().Be(expected);
+    }
+
+    [Fact]
+    public void The_rebuild_estimate_names_a_slow_rate_with_its_decimals()
+    {
+        HealthHistoryView history = new([At(TimeSpan.FromMinutes(5), 0, 6_000), At(TimeSpan.Zero, 78, 6_000)]);
+
+        double? throughput = ProjectionTrend.Throughput(history, [Shard]);
+        throughput.Should().BeApproximately(0.26, 0.001);
+
+        string estimate = ProjectionTrend.EstimateRebuild(10_000, throughput, history);
+
+        estimate.Should().Contain("at the 0.26 ev/s").And.NotContain("0 ev/s");
+    }
+
+    [Fact]
+    public void A_zero_rate_gives_no_estimate()
+    {
+        HealthHistoryView history = new([At(TimeSpan.FromMinutes(5), 100, 6_000), At(TimeSpan.Zero, 100, 6_000)]);
+
+        ProjectionTrend.Throughput(history, [Shard]).Should().BeNull("a shard that did not move was not measured processing anything");
+        ProjectionTrend.EstimateRebuild(10_000, 0, history).Should().StartWith("No estimate yet").And.NotContain("About");
+    }
+
     private static TimeSpan WindowFor(TimeSpan? page) => DaemonThresholds.ShardQuiet(TimeSpan.FromSeconds(1), TimeSpan.FromMinutes(1), page);
 
     /// <summary>D03's calibration: a still run with work that ended in a move; a gap in the watching measures nothing.</summary>

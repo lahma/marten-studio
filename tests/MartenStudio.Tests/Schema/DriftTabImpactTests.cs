@@ -73,6 +73,35 @@ public class DriftTabImpactTests
         text.Should().Contain("BuildIndexesConcurrentlyOnAlter").And.Contain("lock_timeout");
     }
 
+    /// <summary>1.2-UX-FIX: one summary line over the list, the quiet-time advice directly under it, and the headline said once.</summary>
+    [Fact]
+    public async Task The_summary_line_sits_over_the_list_with_the_quiet_time_advice_under_it_and_the_destructive_headline_is_said_once()
+    {
+        MigrationPreview preview = new(Sql, 2, [], "Update", null) { Impact = Impact(withSessions: true) };
+        await using StudioComponentContext context = new();
+        context.Services.AddSingleton<ISchemaDataService>(new FakeSchemaData(preview));
+
+        IRenderedComponent<DriftTab> tab = await RenderAsync(context, preview);
+
+        AngleSharp.Dom.IElement impact = tab.Find(".ms-schema-impact");
+        AngleSharp.Dom.IElement summary = impact.QuerySelector(".ms-schema-lock-summary")!;
+
+        summary.TextContent.Should().StartWith("Takes ACCESS EXCLUSIVE on 1 table");
+        summary.NextElementSibling!.ClassList.Should().Contain("ms-schema-lock-advice");
+        summary.NextElementSibling.TextContent.Should().Contain("Apply at a quiet time").And.Contain("lock_timeout");
+        impact.InnerHtml.IndexOf("ms-schema-lock-summary", StringComparison.Ordinal)
+            .Should().BeLessThan(impact.InnerHtml.IndexOf("<table", StringComparison.Ordinal), "above the per-table list");
+
+        // It is moved, not repeated: the advice that is left under the list is the index build's.
+        impact.TextContent.Split("Apply at a quiet time").Should().HaveCount(2);
+        impact.QuerySelector(".ms-alert-content > ul.ms-destructive-list li")!.TextContent
+            .Should().Contain("BuildIndexesConcurrentlyOnAlter").And.NotContain("lock_timeout");
+
+        string destructive = tab.Find(".ms-schema-destructive").TextContent;
+        destructive.Split("removes or rewrites objects").Should().HaveCount(2, "the headline is printed once, not twice back to back");
+        destructive.Should().Contain("AutoCreate.CreateOrUpdate is not additive");
+    }
+
     [Fact]
     public async Task A_visitor_short_of_the_activity_gate_gets_the_one_line_and_no_sessions_column()
     {

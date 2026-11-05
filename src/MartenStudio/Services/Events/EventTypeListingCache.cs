@@ -28,6 +28,7 @@ internal sealed class EventTypeListingCache
     private readonly ColumnCatalog catalog;
     private readonly IOptions<MartenStudioOptions> options;
     private readonly StudioSnapshotCache cache;
+    private readonly TimeProvider clock;
     private readonly Func<ResolvedScope, CancellationToken, Task<EventTypeList>>? read;
 
     public EventTypeListingCache(ColumnCatalog catalog, IOptions<MartenStudioOptions> options)
@@ -48,6 +49,7 @@ internal sealed class EventTypeListingCache
         this.catalog = catalog;
         this.options = options;
         this.read = read;
+        clock = timeProvider;
         cache = new StudioSnapshotCache(timeProvider, TimeToLive);
     }
 
@@ -62,7 +64,17 @@ internal sealed class EventTypeListingCache
         int timeout = (int) Math.Ceiling(options.Value.QueryTimeout.TotalSeconds);
 
         return await cache
-            .GetAsync(key, token => read is null ? EventDataService.ReadCountedAsync(resolved, catalog, timeout, token) : read(resolved, token), cancellationToken)
+            .GetAsync(key, token => ReadAsync(resolved, timeout, token), cancellationToken)
             .ConfigureAwait(false);
+    }
+
+    // Stamped here, once, by the read that fills the cache: every caller handed the shared listing is handed the time it was read.
+    private async Task<EventTypeList> ReadAsync(ResolvedScope resolved, int timeout, CancellationToken token)
+    {
+        EventTypeList list = read is null
+            ? await EventDataService.ReadCountedAsync(resolved, catalog, timeout, token).ConfigureAwait(false)
+            : await read(resolved, token).ConfigureAwait(false);
+
+        return list.Error is null ? list with { ListedAt = clock.GetUtcNow() } : list;
     }
 }

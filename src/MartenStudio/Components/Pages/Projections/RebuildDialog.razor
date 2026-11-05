@@ -74,7 +74,9 @@
                     @ErrorPolicy
                     @if (ErrorPolicyDifference is { Length: > 0 })
                     {
-                        <span class="ms-rebuild-error-policy-difference"> @ErrorPolicyDifference</span>
+                        @* An explicit space: the compiler trims the one written inside the element, which ran the two sentences together
+                           ("skipped.Differs from ...", 1.2-UX-FIX). *@
+                        @(" ")<span class="ms-rebuild-error-policy-difference">@ErrorPolicyDifference</span>
                     }
                 </span>
             </div>

@@ -17,6 +17,77 @@ public class HeaderScenarioTests(BrowserSuiteFixture fixture)
     private Task RunAsync(string name, Func<StudioPage, Task> body, int viewportWidth = StudioPage.ViewportWidth) =>
         BrowserScenario.RunAsync(fixture.Browser, name, fixture.Host, "admin", body, viewportWidth);
 
+    /// <summary>
+    /// The header at 768 and 390 px with everything the sample draws in it: no part overlaps another or is cut off, and the Find box
+    /// opens, takes focus and fits (1.2-UX-FIX). <b>No host here can draw the sweep's three pickers</b> (store, database and tenant):
+    /// the sample's header drew fewer than two pickers when measured, and the Marten sample registers one store with one database, so
+    /// this checks the header around them. A host that registers a second store with a multi-tenant database would extend it; none
+    /// was built for it.
+    /// </summary>
+    [BrowserFact]
+    public Task The_header_has_no_overlap_and_nothing_cut_off_at_768_px() => HeaderLaidOutAsync(768);
+
+    /// <inheritdoc cref="The_header_has_no_overlap_and_nothing_cut_off_at_768_px" />
+    [BrowserFact]
+    public Task The_header_has_no_overlap_and_nothing_cut_off_at_390_px() => HeaderLaidOutAsync(390);
+
+    private Task HeaderLaidOutAsync(int width) =>
+        RunAsync(
+            "header-layout-" + width,
+            async studio =>
+            {
+                IPage page = studio.Page;
+
+                await studio.GoAsync(fixture.Host.StudioUrl());
+                await page.Locator(".ms-header-left > .ms-env-badge").WaitForAsync();
+
+                string[] problems = await page.EvaluateAsync<string[]>(
+                    """
+                    () => {
+                      const width = document.documentElement.clientWidth;
+                      const parts = [...document.querySelectorAll('.ms-header select, .ms-header button, .ms-header a, .ms-header input, .ms-header .ms-env-badge')]
+                        .filter(e => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(e).position !== 'absolute'; })
+                        .map(e => ({ e, r: e.getBoundingClientRect() }));
+                      const problems = [];
+                      for (const p of parts) {
+                        if (p.r.right > width + 0.5 || p.r.left < -0.5) problems.push('outside the screen: ' + (p.e.className || p.e.tagName) + ' ' + Math.round(p.r.left) + '-' + Math.round(p.r.right));
+                      }
+                      for (let i = 0; i < parts.length; i++) {
+                        for (let j = i + 1; j < parts.length; j++) {
+                          const a = parts[i], b = parts[j];
+                          if (a.e.contains(b.e) || b.e.contains(a.e)) continue;
+                          const w = Math.min(a.r.right, b.r.right) - Math.max(a.r.left, b.r.left);
+                          const h = Math.min(a.r.bottom, b.r.bottom) - Math.max(a.r.top, b.r.top);
+                          if (w > 1 && h > 1) problems.push('overlap: ' + (a.e.className || a.e.tagName) + ' and ' + (b.e.className || b.e.tagName));
+                        }
+                      }
+                      const doc = document.documentElement;
+                      if (doc.scrollWidth > doc.clientWidth) problems.push('the page scrolls sideways');
+                      return problems;
+                    }
+                    """);
+
+                problems.Should().BeEmpty("the header with its pickers is laid out at " + width + " px");
+
+                // The Find box is usable: on a phone or a narrow window it is the magnifier's popover; it opens, takes the typing and fits the screen.
+                ILocator toggle = page.Locator(".ms-find-toggle");
+                if (await toggle.IsVisibleAsync())
+                {
+                    await toggle.ClickAsync();
+                }
+
+                ILocator find = page.Locator(".ms-find input").First;
+                await find.WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Visible, Timeout = 30_000 });
+                await find.FocusAsync();
+
+                LocatorBoundingBoxResult box = (await find.BoundingBoxAsync())!;
+                box.Width.Should().BeGreaterThanOrEqualTo(120, "the Find box is wide enough to type an id into");
+                ((double) (box.X + box.Width)).Should().BeLessThanOrEqualTo(width + 0.5);
+
+                studio.AssertClean("showing the header with its pickers at " + width + " px");
+            },
+            viewportWidth: width);
+
     [BrowserFact]
     public Task Copy_link_writes_the_address_of_the_page_to_the_clipboard_and_says_so() =>
         RunAsync("header-copy-link", async studio =>

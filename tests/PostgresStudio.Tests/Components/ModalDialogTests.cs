@@ -109,6 +109,66 @@ public class ModalDialogTests
         marked.Should().ContainSingle().Which.Id.Should().Be("ms-confirm-input");
     }
 
+    private static IRenderedComponent<ConfirmDialog> Typed(BunitContext context, List<string> confirmed) =>
+        context.Render<ConfirmDialog>(parameters => parameters
+            .Add(x => x.IsOpen, true)
+            .Add(x => x.ConfirmationPhrase, "DailySales")
+            .Add(x => x.OnConfirm, EventCallback.Factory.Create<string>(context, confirmed.Add)));
+
+    [Fact]
+    public void The_typed_box_commits_on_input_so_Confirm_is_enabled_before_the_box_loses_focus()
+    {
+        using BunitContext context = Context();
+        IRenderedComponent<ConfirmDialog> dialog = Typed(context, []);
+        IElement confirm = dialog.Find(".ms-confirm-actions .ms-button-danger");
+        confirm.HasAttribute("disabled").Should().BeTrue();
+
+        // An input event and no change event: the keyboard visitor types and presses Tab, and Tab must land on Confirm.
+        dialog.Find("#ms-confirm-input").Input("DailySales");
+
+        dialog.Find(".ms-confirm-actions .ms-button-danger").HasAttribute("disabled").Should().BeFalse();
+    }
+
+    [Fact]
+    public void Enter_in_the_box_confirms_when_the_phrase_matches()
+    {
+        using BunitContext context = Context();
+        List<string> confirmed = [];
+        IRenderedComponent<ConfirmDialog> dialog = Typed(context, confirmed);
+
+        dialog.Find("#ms-confirm-input").Input(" DailySales ");
+        dialog.Find("#ms-confirm-input").KeyDown(Key.Enter);
+
+        confirmed.Should().Equal("DailySales");
+    }
+
+    [Fact]
+    public void Enter_in_the_box_does_nothing_while_the_phrase_does_not_match()
+    {
+        using BunitContext context = Context();
+        List<string> confirmed = [];
+        IRenderedComponent<ConfirmDialog> dialog = Typed(context, confirmed);
+
+        dialog.Find("#ms-confirm-input").KeyDown(Key.Enter);
+        dialog.Find("#ms-confirm-input").Input("DailySale");
+        dialog.Find("#ms-confirm-input").KeyDown(Key.Enter);
+
+        confirmed.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Another_key_in_a_matching_box_does_not_confirm()
+    {
+        using BunitContext context = Context();
+        List<string> confirmed = [];
+        IRenderedComponent<ConfirmDialog> dialog = Typed(context, confirmed);
+
+        dialog.Find("#ms-confirm-input").Input("DailySales");
+        dialog.Find("#ms-confirm-input").KeyDown(Key.Tab);
+
+        confirmed.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task Esc_from_the_browser_runs_the_owners_Cancel()
     {

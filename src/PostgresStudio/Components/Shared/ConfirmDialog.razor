@@ -24,7 +24,8 @@
                    spellcheck="false"
                    value="@typed"
                    data-ms-dialog-focus
-                   @oninput="OnTypedAsync" />
+                   @oninput="OnTypedAsync"
+                   @onkeydown="OnTypedKeyAsync" />
         }
 
         <div class="ms-confirm-actions">
@@ -128,6 +129,18 @@
     {
         typed = args.Value?.ToString() ?? string.Empty;
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Enter in the box confirms - when, and only when, the phrase matches (the button is the same gate). The box is bound on
+    /// <c>input</c>, so what is typed has reached the component before the key that follows it (1.2-UX-FIX).
+    /// </summary>
+    private async Task OnTypedKeyAsync(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter" && CanConfirm)
+        {
+            await ConfirmAsync();
+        }
     }
 
     private async Task ConfirmAsync()

@@ -56,7 +56,14 @@
         }
         else
         {
-            <p class="ms-shape-summary" role="status">@ShapeCheckText.Summary(shown, State.FormatInSelectedTimeZone(shown.CheckedAt, "HH:mm"))</p>
+            <div class="ms-shape-summary-row">
+                <p class="ms-shape-summary" role="status">@ShapeCheckText.Summary(shown, State.FormatInSelectedTimeZone(shown.CheckedAt, "HH:mm"), AgeOf(shown))</p>
+                @if (AgeOf(shown) is not null)
+                {
+                    @* The cache handed back a check made before this press: the time says so, and a new check is offered beside it. *@
+                    <button type="button" class="ms-button ms-btn-sm ms-shape-recheck" disabled="@RecheckDisabled" title="@RecheckTitle" @onclick="CheckAgainAsync">Check again</button>
+                }
+            </div>
 
             @if (shown.Coverage == ShapeCoverage.Sampled && shown.CoverageReason is { Length: > 0 } qualification)
             {
@@ -117,6 +124,11 @@
     private ITimer? recheckTimer;
     private TimeProvider clock = TimeProvider.System;
 
+    // When this press began: a result finished before it is the last check's, handed back by the shared cache (five minutes).
+    private DateTimeOffset ranAt;
+
+    private TimeSpan? AgeOf(ShapeCheckResult shown) => shown.CheckedAt < ranAt ? clock.GetUtcNow() - shown.CheckedAt : null;
+
     // A failed result is not held (the cache runs again at the next press), so the button is not held back for it either.
     private bool RecheckDisabled => result is { Error: null } shown && clock.GetUtcNow() < shown.RecheckAt;
 
@@ -163,6 +175,7 @@
         try
         {
             ranScope = scope;
+            ranAt = clock.GetUtcNow();
             result = await Check.CheckAsync(scope, Alias, force, token);
             ArmRecheck();
         }

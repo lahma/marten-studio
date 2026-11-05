@@ -151,7 +151,7 @@
                             {
                                 <tr class="ms-table-row" @key="table.Key">
                                     <td class="ms-table-cell ms-maint-name">
-                                        <span class="ms-mono">@table.Key</span>
+                                        <span class="ms-mono"><BreakableName Value="@table.Key" /></span>
                                         @if (table.Partitions > 0)
                                         {
                                             <span class="ms-maint-partitions">@SessionText.Count(table.Partitions, "partition")</span>

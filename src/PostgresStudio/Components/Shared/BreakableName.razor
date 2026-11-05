@@ -1,0 +1,43 @@
+@*
+    A name that may wrap after an underscore or a dot, and nowhere else (1.2-UX-FIX).
+
+    A schema-qualified table name or a trigger's name has no space in it, so the browser either keeps it on one line (and the column is
+    as wide as the longest identifier) or, with `overflow-wrap: anywhere`, breaks it in the middle of a word ("sweep_c / hild"). A
+    <wbr> after each `_` and `.` gives it break opportunities between the parts instead. <wbr> adds no character: the name reads,
+    selects and copies exactly as it is written.
+*@
+@foreach (string part in Parts(Value))
+{
+    @(part)<wbr />
+}
+
+@code {
+    /// <summary>The name to show.</summary>
+    [Parameter]
+    public string? Value { get; set; }
+
+    /// <summary>
+    /// The name cut after each <c>_</c> and <c>.</c> (the separator stays at the end of its part), so that joining the parts gives the
+    /// name back unchanged. A name with neither is one part.
+    /// </summary>
+    internal static IEnumerable<string> Parts(string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            yield break;
+        }
+
+        int start = 0;
+
+        for (int i = 0; i < value.Length - 1; i++)
+        {
+            if (value[i] is '_' or '.')
+            {
+                yield return value[start..(i + 1)];
+                start = i + 1;
+            }
+        }
+
+        yield return value[start..];
+    }
+}

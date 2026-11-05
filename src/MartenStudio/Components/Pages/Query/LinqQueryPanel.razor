@@ -114,6 +114,7 @@
                      Rows="4"
                      Value="@where"
                      ValueChanged="OnWhereChangedAsync"
+                     OnInput="OnWhereInputAsync"
                      Running="running"
                      ElapsedMilliseconds="elapsedMilliseconds"
                      Disabled="@(!eventsTarget && status.Types.Count == 0)"
@@ -135,6 +136,7 @@
                    placeholder="@OrderByPlaceholder"
                    value="@orderBy"
                    aria-describedby="ms-query-linq-orderby-status"
+                   @oninput="OrderByInputHandler"
                    @onchange="OnOrderByChangedAsync" />
             <div id="ms-query-linq-orderby-status" class="ms-query-linq-order-status" role="status" aria-live="polite">
                 @if (orderError is { Length: > 0 })
@@ -195,7 +197,9 @@
             members (<code>==</code> <code>!=</code> <code>&lt;</code> <code>&lt;=</code> <code>&gt;</code> <code>&gt;=</code>),
             combine them with <code>and</code>, <code>or</code> and <code>not</code>, call <code>StartsWith</code>,
             <code>EndsWith</code>, <code>Contains</code>, <code>ToLower</code> on text and <code>Any</code>, <code>All</code>,
-            <code>Count</code> and <code>Contains</code> on a collection - <code>Items.Any(Quantity &gt; 5)</code>. Values are
+            <code>Count</code> and <code>Contains</code> on a collection - the form is <code>Items.Any(Quantity &gt; 5)</code>, an
+            example of the syntax: <code>Items</code> and <code>Quantity</code> stand for members of your own type, and the type
+            picked above may have no such member. Values are
             literals: <code>"text"</code>, <code>42</code>, <code>3.5m</code>, <code>true</code>, <code>null</code>. No arithmetic,
             no type names and no methods of your own. Pages are read with <code>OFFSET</code> and stop at row
             @LinqQueryLimits.MaxOffset.ToString("N0", CultureInfo.InvariantCulture), inside a read-only transaction with a
@@ -741,6 +745,25 @@
     {
         where = value;
         await DraftAsync();
+    }
+
+    // The refusal and its caret were about the text as it was: the first keystroke after one takes them away, not the next Run (1.2-UX-FIX).
+    private Task OnWhereInputAsync()
+    {
+        whereError = null;
+        whereErrorPosition = -1;
+        return Task.CompletedTask;
+    }
+
+    // Null (nothing is listened for, so typing costs no round trip) unless a refusal of the ordering is showing.
+    private EventCallback<ChangeEventArgs> OrderByInputHandler =>
+        orderError is { Length: > 0 } ? EventCallback.Factory.Create<ChangeEventArgs>(this, OnOrderByInputAsync) : default;
+
+    private Task OnOrderByInputAsync(ChangeEventArgs args)
+    {
+        orderError = null;
+        orderErrorPosition = -1;
+        return Task.CompletedTask;
     }
 
     private async Task OnOrderByChangedAsync(ChangeEventArgs args)

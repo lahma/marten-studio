@@ -225,6 +225,66 @@ public class LinqQueryPanelTests
         linq.Requests[0].OrderBy.Should().Be("Nope");
     }
 
+    /// <summary>1.2-UX-FIX: the refusal and its caret were about the text as it was; the first keystroke takes them away.</summary>
+    [Fact]
+    public void The_first_keystroke_after_a_predicate_refusal_takes_the_error_and_its_caret_away_and_a_clean_editor_listens_for_none()
+    {
+        var linq = new FakeLinqQueryService().WithType("order");
+        linq.Result = LinqQueryResult.Refused(
+            "order",
+            new LinqRefusal(LinqStage.Screen, LinqClause.Where, "The predicate names 'System', which is not a member.", 8),
+            0,
+            50);
+
+        using StudioComponentContext context = CreateContext(linq);
+
+        var panel = context.Render<LinqQueryPanel>();
+        panel.Find("#ms-query-linq-where").Change("Name == System.IO.File.ReadAllText(\"x\")");
+        panel.Find(".ms-query-run").Click();
+        panel.Find(".ms-query-caret").Should().NotBeNull();
+
+        panel.Find("#ms-query-linq-where").Input("Name == 1");
+
+        panel.FindAll(".ms-query-error-message").Should().BeEmpty("the error described the old text");
+        panel.FindAll(".ms-query-caret").Should().BeEmpty("and so did its caret");
+
+        // With no error showing the textarea listens for no input at all: typing costs no round trip.
+        FluentActions.Invoking(() => panel.Find("#ms-query-linq-where").Input("Name == 12")).Should().Throw<MissingEventHandlerException>();
+        linq.Requests.Should().ContainSingle("typing runs nothing");
+    }
+
+    [Fact]
+    public void The_first_keystroke_in_the_ordering_box_after_its_refusal_takes_the_refusal_away()
+    {
+        var linq = new FakeLinqQueryService().WithType("order");
+        linq.Result = LinqQueryResult.Refused(
+            "order", new LinqRefusal(LinqStage.Screen, LinqClause.OrderBy, "The ordering names 'Nope'.", 0), 0, 50);
+
+        using StudioComponentContext context = CreateContext(linq);
+
+        var panel = context.Render<LinqQueryPanel>();
+        panel.Find("#ms-query-linq-orderby").Change("Nope");
+        panel.Find(".ms-query-run").Click();
+        panel.Find(".ms-query-linq-order-error").TextContent.Should().Contain("Nope");
+
+        panel.Find("#ms-query-linq-orderby").Input("Nop");
+
+        panel.FindAll(".ms-query-linq-order-error").Should().BeEmpty();
+    }
+
+    [Fact]
+    public void The_help_example_is_marked_as_an_example_of_the_syntax_and_not_a_member_of_the_picked_type()
+    {
+        var linq = new FakeLinqQueryService().WithType("order");
+        using StudioComponentContext context = CreateContext(linq);
+
+        var panel = context.Render<LinqQueryPanel>();
+
+        string note = System.Text.RegularExpressions.Regex.Replace(panel.Find(".ms-query-linq-note").TextContent, @"\s+", " ");
+        note.Should().Contain("Items.Any(Quantity > 5)").And.Contain("an example of the syntax")
+            .And.Contain("stand for members of your own type");
+    }
+
     [Fact]
     public void A_result_renders_its_rows_its_sql_and_the_index_advice_with_the_line_that_declares_it()
     {

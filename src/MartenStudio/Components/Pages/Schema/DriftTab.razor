@@ -207,7 +207,7 @@ else
     {
         <div class="ms-alert ms-alert-error ms-schema-destructive" role="alert">
             <div class="ms-alert-content">
-                <p><strong>This migration removes or rewrites objects.</strong> @MigrationRisk.Warning</p>
+                <p><strong>@MigrationRisk.WarningHeadline</strong> @MigrationRisk.WarningDetail</p>
                 @* Keyed on the ordinal: nothing guarantees two destructive statements differ as text,
                    and this is the one list that must never fail to render - it is what somebody reads
                    before typing the confirmation. *@
@@ -281,6 +281,19 @@ else
                 }
                 @{
                     bool showSessions = impact.Tables.Any(static x => x.Sessions is not null);
+
+                    // 1.2-UX-FIX: the quiet-time advice moves up under the summary line when there is one, rather than last of the paragraphs.
+                    bool adviceUnderSummary = impact.LockSummary is { Length: > 0 } && impact.Advice.Contains(MigrationRisk.AccessExclusiveAdvice);
+                    string[] laterAdvice = [.. impact.Advice.Where(x => !adviceUnderSummary || !string.Equals(x, MigrationRisk.AccessExclusiveAdvice, StringComparison.Ordinal))];
+                }
+                @if (impact.LockSummary is { Length: > 0 } lockSummary)
+                {
+                    @* The line a visitor needs first, built from the same statements as the list below. *@
+                    <p class="ms-schema-lock-summary" role="status"><strong>@lockSummary</strong></p>
+                    @if (adviceUnderSummary)
+                    {
+                        <p class="ms-schema-lock-advice">@MigrationRisk.AccessExclusiveAdvice</p>
+                    }
                 }
                 <TableScroll Label="Tables the migration locks">
                     <table class="ms-table">
@@ -343,12 +356,12 @@ else
                 {
                     <p class="ms-muted">@sessionsNotice</p>
                 }
-                @if (impact.Advice.Count > 0)
+                @if (laterAdvice.Length > 0)
                 {
                     <ul class="ms-destructive-list">
-                        @for (int ordinal = 0; ordinal < impact.Advice.Count; ordinal++)
+                        @for (int ordinal = 0; ordinal < laterAdvice.Length; ordinal++)
                         {
-                            <li @key="ordinal">@impact.Advice[ordinal]</li>
+                            <li @key="ordinal">@laterAdvice[ordinal]</li>
                         }
                     </ul>
                 }

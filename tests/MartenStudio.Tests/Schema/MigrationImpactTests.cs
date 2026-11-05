@@ -609,6 +609,46 @@ public class MigrationImpactTests
     }
 
     // ------------------------------------------------------------------------------------------------
+    // The summary line (1.2-UX-FIX): built from the same notes, over the per-table list
+    // ------------------------------------------------------------------------------------------------
+
+    [Fact]
+    public void The_summary_counts_the_tables_taken_ACCESS_EXCLUSIVE_with_their_estimated_rows_and_size_and_what_it_rewrites()
+    {
+        const string sql =
+            "alter table studio.mt_doc_order alter column total type numeric;\n"
+            + "alter table studio.mt_doc_customer add column code uuid default gen_random_uuid();\n"
+            + "CREATE INDEX mt_doc_invoice_idx_name ON studio.mt_doc_invoice USING btree ((data ->> 'Name'));";
+
+        MigrationImpact impact = MigrationImpact.Assemble(
+            MigrationRisk.LockStatements(sql),
+            [
+                new RelationFootprintRow(0, 1, "studio", "mt_doc_order", false, 200_000, 100_000_000, 209_715_200),
+                new RelationFootprintRow(1, 2, "studio", "mt_doc_customer", false, 1_000_000, 200_000_000, 314_572_800),
+                new RelationFootprintRow(2, 3, "studio", "mt_doc_invoice", false, 9_000_000, 900_000_000, 1_000_000_000),
+            ],
+            null);
+
+        impact.LockSummary.Should().Be(
+            "Takes ACCESS EXCLUSIVE on 2 tables (about 1,200,000 rows, 500 MiB with indexes and TOAST); rewrites 1, may rewrite 1.",
+            "the index build takes a SHARE lock and is not counted");
+        impact.Advice.Should().Contain(MigrationRisk.AccessExclusiveAdvice);
+    }
+
+    [Fact]
+    public void The_summary_is_absent_when_no_table_is_taken_that_hard_and_says_so_when_the_catalog_has_no_figures()
+    {
+        MigrationImpact.Assemble(
+                MigrationRisk.LockStatements("CREATE INDEX mt_doc_customer_idx_name ON studio.mt_doc_customer USING btree ((data ->> 'Name'));"),
+                [new RelationFootprintRow(0, 1, "studio", "mt_doc_customer", false, 10, 8192, 16384)],
+                null)
+            .LockSummary.Should().BeNull();
+
+        MigrationImpact.Assemble(MigrationRisk.LockStatements("alter table studio.mt_doc_order alter column total type numeric;"), [], null)
+            .LockSummary.Should().Be("Takes ACCESS EXCLUSIVE on 1 table (sizes not in the catalog yet); may rewrite 1.");
+    }
+
+    // ------------------------------------------------------------------------------------------------
     // The statements: nothing that locks, nothing that says who
     // ------------------------------------------------------------------------------------------------
 

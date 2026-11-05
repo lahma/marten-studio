@@ -101,6 +101,11 @@ public class RebuildErrorPolicyTests
         row.QuerySelector(".ms-kv-value")!.TextContent.Should().Contain("Runs under RebuildErrors: apply errors, unknown events and serialization errors stop the rebuild.");
         row.QuerySelector(".ms-rebuild-error-policy-difference")!.TextContent
             .Should().Contain("the continuous agents skip apply errors, unknown events and serialization errors, where this rebuild stops on them");
+
+        // 1.2-UX-FIX: the two sentences were run together ("...stop the rebuild.Differs from Projections.Errors").
+        row.QuerySelector(".ms-kv-value")!.TextContent
+            .Should().Contain("stop the rebuild. Differs from Projections.Errors:")
+            .And.NotContain("rebuild.Differs");
     }
 
     [Fact]

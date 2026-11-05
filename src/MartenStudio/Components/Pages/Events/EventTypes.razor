@@ -34,6 +34,17 @@
         collection counts are estimates by default. They are cached for this session once loaded.
     </p>
 
+    @* When the counted listing was read (1.2-UX-FIX). It is shared between visitors for half a minute and kept by this page until the
+       counts are loaded again, so a type written after that time is not in it, and the page says so rather than imply it is current. *@
+    @if (!loading && list is { Error: null, ListedAt: { } listedAt })
+    {
+        <p class="ms-muted ms-event-types-listed" role="status">
+            Counted at @State.FormatInSelectedTimeZone(listedAt, "HH:mm:ss"). The count is shared for
+            @EventTypeListingCache.TimeToLive.TotalSeconds.ToString("0", CultureInfo.InvariantCulture) seconds, so an event type written
+            since then appears after Load counts is pressed again.
+        </p>
+    }
+
     @* E05 from the health advisor's last regular sweep, read from its cache: this page never starts a sweep.
        With no recent sweep there is nothing here - and nothing here says the store is healthy either, because
        absence is "not checked", not "fine". The table's own "not registered" marks below are this page's own

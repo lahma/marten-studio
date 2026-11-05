@@ -9,6 +9,7 @@
 @inject StudioState State
 @inject StudioAuthorization Authorization
 @inject StudioDescriptor Descriptor
+@inject IStudioSettings Settings
 @inject IJSRuntime JsRuntime
 @inject NavigationManager Navigation
 @inject PersistentComponentState PersistentState
@@ -197,9 +198,13 @@
     /// scope flip: the address follows the scope, except for a click.
     /// </para>
     /// <para>
-    /// Back and Forward are not intercepted links either, so they do not move the scope - they rewrite the address instead
-    /// (<see cref="SyncScopeToUrl" />), so the bar names the scope on screen again. An address naming nothing, or the scope the
-    /// shell is already on, does nothing - no <see cref="StudioState.SetScopeAsync" /> call. The handler is synchronous, an
+    /// An address that names no other scope - nothing, only part of the scope on screen (Back to the entry from before a link to a
+    /// tenant was followed names no tenant), or the scope the shell is already on - makes no <see cref="StudioState.SetScopeAsync" />
+    /// call, and the address follows the scope instead (<see cref="SyncScopeToUrl" />), so the bar names the scope on screen again
+    /// (1.2-UX-FIX; it used to be left as it was). Note that the browser reports Back and Forward as intercepted too (blazor.web.js
+    /// <c>onBrowserInitiatedPopState</c> notifies with <c>interceptedLink: true</c>), so a Back to an address that names <em>another</em>
+    /// store, database or tenant moves the scope to it, as a click would; the window tests that report it as not intercepted prove the
+    /// rewrite for a programmatic push. The handler is synchronous, an
     /// <see cref="EventHandler{TEventArgs}" /> that starts the async work and does not wait for it, never an <c>async</c> lambda
     /// (hard rule 6).
     /// </para>
@@ -207,20 +212,22 @@
     private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
     {
         (string? storeKey, string? databaseId, string? tenantId) = StudioScopeQuery.Read(e.Location, Descriptor.SourceQueryParameter);
-        if (!NamesAnotherScope(State.ActiveScope, storeKey, databaseId, tenantId))
+
+        if (e.IsNavigationIntercepted && NamesAnotherScope(State.ActiveScope, storeKey, databaseId, tenantId))
         {
+            _ = InvokeAsync(() => ApplyAddressScopeAsync(storeKey, databaseId, tenantId));
             return;
         }
 
-        if (!e.IsNavigationIntercepted)
+        // Anything else - a push built from an address before a picker change, an address that names no scope or only part of the scope
+        // on screen (Back to the entry from before a link to a tenant was followed names no tenant, 1.2-UX-FIX), the same scope - leaves
+        // the scope where it is, and the address follows it: the bar names what is on screen. Nothing is written when it already does.
+        // Only for a studio page: an address no page matches (a file, an endpoint) is the browser's to load, as it was named
+        // (StudioRoutes), and a scope appended to it would change what is loaded.
+        if (StudioLink.ToDashboardRelativePath(e.Location, Navigation.BaseUri, Settings) is { } relative && Descriptor.Routes.Match(relative, Settings) is not null)
         {
-            // Back or Forward to an address of another scope, or a push built from one: the scope does not move (N5b), and the
-            // address follows the scope again, so the bar never names a scope other than the one on screen.
             SyncScopeToUrl();
-            return;
         }
-
-        _ = InvokeAsync(() => ApplyAddressScopeAsync(storeKey, databaseId, tenantId));
     }
 
     /// <summary>

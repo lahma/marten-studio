@@ -16584,3 +16584,116 @@ dialog.ms-modal::backdrop {
         gap: var(--ms-space-xs);
     }
 }
+
+/* ===== 1.2-UX: the sweep's fixes ===== */
+
+/* Fixes from the UI sweep (1.2-UX-FIX). A later rule of an earlier selector wins on purpose (D26). */
+
+/* Projections at 1280 px. The table is nine columns, and its Type (an assembly-qualified name), Version and Shards columns took the room
+   of Last progress and Actions, which sat out of sight in the region. Type is narrow and clipped (the full name is its title), Version and
+   Shards are as wide as their numbers, a long projection name wraps after an underscore or a dot, and a shard's Start and Stop stack so
+   the column is as wide as one button. The region stays the floor (D25). */
+.ms-projections-table th,
+.ms-projections-table td {
+    padding-inline: var(--ms-space-sm);
+}
+
+.ms-projections-table .ms-projection-name,
+.ms-projections-table .ms-shard-name {
+    min-width: 9rem;
+    overflow-wrap: break-word;
+}
+
+.ms-projections-table .ms-projection-type {
+    width: 10rem;
+    max-width: 10rem;
+}
+
+.ms-projections-table .ms-projection-row > td:nth-child(3),
+.ms-projections-table .ms-projection-row > td:nth-child(4) {
+    width: 1%;
+    white-space: nowrap;
+}
+
+.ms-projections-table .ms-shard-row .ms-table-cell-actions {
+    width: 1%;
+}
+
+.ms-projections-table .ms-shard-start,
+.ms-projections-table .ms-shard-stop {
+    display: block;
+    margin: 0 0 var(--ms-space-xs) auto;
+}
+
+.ms-projections-table .ms-shard-stop {
+    margin-bottom: 0;
+}
+
+.ms-projections-table .ms-shard-progress {
+    min-width: 9rem;
+}
+
+.ms-projections-table .ms-shard-progress-bar {
+    min-width: 4rem;
+}
+
+/* Maintenance > Triggers: a name breaks after an underscore or a dot (BreakableName's <wbr>), and only inside a segment too long for the
+   column. `anywhere` broke it in the middle of a word ("sweep_c / hild"). */
+.ms-maint-name {
+    overflow-wrap: break-word;
+}
+
+/* The Overview's tiles: a count word longer than the tile ("6 suggestions") wrapped nowhere and ran out of its card at 1440 px. The
+   Health tile's value is a phrase, not a number, so it takes the text size; any value breaks at the card's edge as the last resort. */
+.ms-overview-tiles > * {
+    min-width: 0;
+}
+
+.ms-overview-tiles .ms-stat-card-value {
+    overflow-wrap: anywhere;
+}
+
+.ms-overview-tiles .ms-overview-health-tile .ms-stat-card-value {
+    font-size: var(--ms-font-size-lg);
+    line-height: 1.3;
+    letter-spacing: 0;
+}
+
+/* A tile whose value is smaller is still as tall as its row: the card fills its link. */
+.ms-overview-tiles > .ms-stat-link {
+    display: flex;
+}
+
+.ms-overview-tiles > .ms-stat-link > .ms-stat-card {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+/* The shape check's summary line and the Check again beside it, when the result is the last check's. */
+.ms-shape-summary-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-xs) var(--ms-space-sm);
+}
+
+.ms-shape-summary-row > .ms-shape-summary {
+    margin: 0;
+}
+
+/* The Schema apply notes: the summary of the locks and the advice that goes with it. */
+.ms-schema-lock-summary {
+    margin: var(--ms-space-sm) 0 var(--ms-space-xs);
+}
+
+.ms-schema-lock-advice {
+    margin: 0 0 var(--ms-space-md);
+    color: var(--ms-color-text-secondary);
+}
+
+/* Refresh beside Mark's chip: the chip wraps to two lines at 390 px, and Refresh stretched to the row. */
+.ms-maint-actions,
+.ms-storage-actions,
+.ms-page-header > :has(> .ms-mark) {
+    align-items: flex-start;
+}
