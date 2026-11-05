@@ -59,6 +59,10 @@ public class UxFixBrowserTests(BrowserSuiteFixture fixture)
             buttonsOutside.Should().BeEmpty("Rebuild, Start and Stop are in view");
             report.Fits.Should().BeTrue("the region has nothing to scroll to: " + report.Describe());
 
+            // Slack, not just a fit (1.2-FINAL-FIX-4): the table fitted with zero to spare on Windows and ran 12 px over on ubuntu's fonts.
+            // With the stand-in's wider text the same table still has to fit; without it, it has room for a 5 % font difference twice over.
+            report.Slack.Should().BeGreaterThanOrEqualTo(widerMetrics ? 0 : 60, "the table's least width leaves room for a different font: " + report.Describe());
+
             studio.AssertClean("the Projections page at 1280 px");
         });
 

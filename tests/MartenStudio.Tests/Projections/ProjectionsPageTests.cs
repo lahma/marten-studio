@@ -301,6 +301,35 @@ public class ProjectionsPageTests
     }
 
     /// <summary>
+    /// 1.2-FINAL-FIX-4: Version and Shards are not columns of their own (a number each in a column as wide as its header ran Actions out
+    /// of its region on ubuntu's fonts); they are the second line of the projection's name cell, each value visible and the version with
+    /// its label for a screen reader.
+    /// </summary>
+    [Fact]
+    public async Task The_version_and_the_shard_count_are_the_second_line_of_the_name_cell_and_not_columns()
+    {
+        await using var context = new StudioComponentContext().WithAllCapabilities();
+        context.ProjectionData.WithProjection("DailySales");
+        await context.ReadyAsync();
+
+        var page = context.Render<Page>();
+
+        page.FindAll(".ms-projections-table thead th").Select(static x => x.TextContent.Trim())
+            .Should().Equal("Projection / shard", "Type", "Progress", "Lag", "Status", "Last progress", "Actions");
+
+        var meta = page.Find(".ms-projection-row .ms-projection-meta");
+        meta.ParentElement!.LocalName.Should().Be("th", "the line is in the name cell");
+        meta.QuerySelector(".ms-projection-version")!.TextContent.Should().Be("v1");
+        meta.QuerySelector(".ms-projection-shard-count")!.TextContent.Should().Be("1");
+        meta.TextContent.Replace("\n", " ").Split(' ', StringSplitOptions.RemoveEmptyEntries).Should().Contain(["Version", "v1", "1", "shard"]);
+        meta.QuerySelector(".ms-sr-only")!.TextContent.Should().Be("Version ");
+
+        // Every row of the table has the same seven columns' worth of cells.
+        page.Find(".ms-projection-row").Children.Sum(static x => int.Parse(x.GetAttribute("colspan") ?? "1", System.Globalization.CultureInfo.InvariantCulture)).Should().Be(7);
+        page.Find(".ms-shard-row").Children.Sum(static x => int.Parse(x.GetAttribute("colspan") ?? "1", System.Globalization.CultureInfo.InvariantCulture)).Should().Be(7);
+    }
+
+    /// <summary>
     /// 1.2-FINAL-FIX-3 (G2): an operation the page showed as running and no longer lists has its last word read from the tracker and shown
     /// as a toast - the rebuild's result line, however it ended.
     /// </summary>

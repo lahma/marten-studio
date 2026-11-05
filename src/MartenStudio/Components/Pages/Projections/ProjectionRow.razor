@@ -24,13 +24,18 @@
         {
             <a class="ms-projection-flow-link" href="@FlowHref" aria-label="@("Show its flow: " + Name)" title="@("Draw only " + Name + " and the event types it reads and what it writes")">Show its flow</a>
         }
+        @* Version and shard count were columns of their own, a number each in a column as wide as its header: on a narrower font the
+           table ran out of its region (1.2-FINAL-FIX-4). They are the second line of the name cell now, each with its label for a
+           screen reader. @( ... ) and not a bare @: an '@' with a word character in front of it and one behind it is an e-mail
+           address to the Razor parser. *@
+        <span class="ms-muted ms-projection-meta">
+            <span class="ms-sr-only">Version </span><span class="ms-mono ms-projection-version">v@(Version)</span>
+            <span aria-hidden="true">&middot;</span>
+            <span class="ms-mono ms-projection-shard-count">@ShardCount</span>
+            <span>@(ShardCount == 1 ? "shard" : "shards")</span>
+        </span>
     </th>
     <td class="ms-table-cell ms-table-cell-mono ms-projection-type" title="@ImplementationType">@ImplementationType</td>
-    @* @( ... ) and not a bare @: an '@' with a word character in front of it and one behind it is an
-       e-mail address to the Razor parser, so the bare form here reached the screen as its own source
-       text, in every row of the table. *@
-    <td class="ms-table-cell ms-table-cell-mono">v@(Version)</td>
-    <td class="ms-table-cell ms-table-cell-mono">@ShardCount</td>
     <td class="ms-table-cell ms-projection-subscription">@SubscriptionType</td>
     <td class="ms-table-cell ms-table-cell-actions" colspan="4">
         @Actions

@@ -19,7 +19,15 @@ internal static class TableFit
             const table = document.querySelector(selector);
             const region = table.closest('.ms-table-scroll');
             const box = region.getBoundingClientRect();
+
+            // The table is width: 100%, so its own width is the region's whatever it needs. What it needs is its width at min-content.
+            const before = table.style.width;
+            table.style.width = 'min-content';
+            const needed = Math.ceil(table.getBoundingClientRect().width);
+            table.style.width = before;
+
             return JSON.stringify({
+                minTableWidth: needed,
                 regionWidth: Math.round(box.width),
                 scrollWidth: region.scrollWidth,
                 clientWidth: region.clientWidth,
@@ -52,6 +60,12 @@ internal static class TableFit
         /// <summary>The region's client width.</summary>
         public int ClientWidth { get; set; }
 
+        /// <summary>The least width the table can be laid out in (at <c>width: min-content</c>), whatever the region gives it.</summary>
+        public int MinTableWidth { get; set; }
+
+        /// <summary>How many pixels the region has to spare over the table's least width: what a wider font has to use up before it scrolls.</summary>
+        public int Slack => ClientWidth - MinTableWidth;
+
         /// <summary>The header cells' boxes.</summary>
         public List<Column> Columns { get; set; } = [];
 
@@ -64,7 +78,7 @@ internal static class TableFit
 
         /// <summary>Each column's right edge against the region's width, for an assertion's reason.</summary>
         public string Describe() =>
-            "region " + RegionWidth + " px wide (scroll width " + ScrollWidth + "); right edges: "
+            "region " + RegionWidth + " px wide (scroll width " + ScrollWidth + ", least table width " + MinTableWidth + ", slack " + Slack + "); right edges: "
             + string.Join(", ", Columns.Select(c => c.Name + " " + c.Right));
     }
 

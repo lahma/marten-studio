@@ -16751,3 +16751,22 @@ dialog.ms-modal::backdrop {
 .ms-schema-apply-heading {
     margin-top: var(--ms-space-xl);
 }
+
+/* ===== 1.2-FINAL-FIX-4 Projections: Version and Shards move into the name cell ===== */
+
+/* Version and Shards were columns of their own, each as wide as its header for one small number: 91 and 86 px on ubuntu's fonts, which put
+   Actions 12 px out of the region at 1280 px. They are the second line of the projection's name cell now (v2 · 1 shard), so the table has
+   seven columns, and the lag chart's cell spans the one column that is left of the three it used to span. The older rule that shrank the
+   third and fourth cells of a projection row to their content was about those two columns; those cells are now Progress and Actions. */
+.ms-projections-table .ms-projection-row > td:nth-child(3),
+.ms-projections-table .ms-projection-row > td:nth-child(4) {
+    width: auto;
+    white-space: normal;
+}
+
+.ms-projections-table .ms-projection-meta {
+    display: block;
+    margin-top: var(--ms-space-xs);
+    font-weight: 400;
+    font-size: var(--ms-font-size-xs);
+}

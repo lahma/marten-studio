@@ -395,8 +395,6 @@
                         <tr>
                             <th scope="col">Projection / shard</th>
                             <th scope="col">Type</th>
-                            <th scope="col">Version</th>
-                            <th scope="col">Shards</th>
                             <th scope="col">Progress</th>
                             <th scope="col">Lag</th>
                             <th scope="col">Status</th>
@@ -462,7 +460,7 @@
                                                   title="@(leads ? "This node holds this shard's HotCold leadership lock, so it is the node that runs it." : "Another node holds this shard's HotCold leadership lock, or none does yet: this node does not run it.")">@(leads ? "this node" : "another node")</span>
                                         }
                                     </td>
-                                    <td class="ms-table-cell ms-shard-history-cell" colspan="3">
+                                    <td class="ms-table-cell ms-shard-history-cell">
                                         @if (!shard.HasProgressRow)
                                         {
                                             <span class="ms-muted">never started</span>
