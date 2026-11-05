@@ -62,6 +62,16 @@ Layer 2 filters listings rather than annotating them. A tenant you may not see i
 exists — the *count* of tenants in a process is itself something a tenant should not learn. In Postgres Studio layer 2
 is `SourceAuthorizationPolicy`, against a `PostgresStudioResource` ([Postgres Studio](#postgres-studio)).
 
+Under a store policy the studio's own words never say how many tenants a store has (1.2). The header's selector always
+offers its filtered list with "Other…". The Tenants page never says "more than 200". With no tenant selected, Find reads
+a conjoined store's documents and streams only in the tenants the header lists for the visitor, and says so in the same
+sentence however many tenants the store has. One thing still follows discovery, and is a known limit: whether a *typed*
+tenant opens. A tenant the policy admits but discovery did not list (one with no data yet, typed into "Other…") is
+refused as not a tenant of the database while discovery found between one and 200 tenants, and is accepted once it
+found more. When discovery found none, every typed tenant is refused. A visitor who types tenant ids their policy allows
+can therefore tell those cases apart. Accepting any admitted id instead would let a typed id reach a dynamic tenancy's
+database lookup, which is not read-only (hard rule 14), so that change is left for a later release.
+
 With no store policy configured, layers 2 and 3 ask nothing and everything passes. That is deliberate:
 an application that never set the option must be exactly the application it was.
 
