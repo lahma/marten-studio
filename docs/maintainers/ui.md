@@ -95,9 +95,11 @@ tested in `PlanCompareStylesheetTests`) and `UI-0.10` (the sweep's wrap for a no
 `PlanUiSweepStylesheetTests`), in that order.
 1.0.0 appended `1.0-UIFIX` (menus and the rail's credit), described next. 1.2.0 appended `1.2-H-A`, `1.2-H-C`, `1.2-FLOW`,
 `1.2-H-B`, `1.2-SHAPE` (SHAPE-B's event rules at its end), `1.2-INDEX`, `1.2-STORES`, `1.2-LOCKS`, `1.2-TENANTS`,
-`1.2-FLOW-LINKS`, `1.2-A11Y`, `1.2-POLISH`, `1.2-HEADER`, `1.2-FIND` and `1.2-UX`, in that order; `1.2-FIND` re-declares
+`1.2-FLOW-LINKS`, `1.2-A11Y`, `1.2-POLISH`, `1.2-HEADER`, `1.2-FIND`, `1.2-UX`, `1.2-FINAL` and `1.2-FINAL-FIX-4`, in that
+order; `1.2-FIND` re-declares
 `1.2-HEADER`'s phone gaps on purpose (the Find box needs them), and `1.2-UX` (the UI sweep's fixes) re-declares the
-Projections table's widths, `1.2-POLISH`'s Triggers name wrapping and the Overview's stat cards.
+Projections table's widths, `1.2-POLISH`'s Triggers name wrapping and the Overview's stat cards; `1.2-FINAL` and
+`1.2-FINAL-FIX-4` re-declare the Projections table again (seven columns, the version and shard count in the name cell).
 
 ## Menus and the rail (1.0-UIFIX)
 
