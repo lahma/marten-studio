@@ -82,7 +82,14 @@ public abstract class ReadNeverWritesMetadataLiveTests(KafkaFixture fixture)
 
                 while (DateTime.UtcNow < deadline && !TopicsExist(fixture, topic))
                 {
-                    consumer.Consume(TimeSpan.FromMilliseconds(250));
+                    try
+                    {
+                        consumer.Consume(TimeSpan.FromMilliseconds(250));
+                    }
+                    catch (ConsumeException)
+                    {
+                        // "Subscribed topic not available" until the broker has created it; the poll is the wait.
+                    }
                 }
 
                 consumer.Close();
