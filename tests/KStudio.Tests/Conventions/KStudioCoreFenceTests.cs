@@ -37,6 +37,9 @@ public class KStudioCoreFenceTests
         project.Descendants().Where(static x => x.Name.LocalName == "FrameworkReference").Should().BeEmpty(
             "KStudio.Core has no FrameworkReference: a worker host must not need ASP.NET Core to load it");
         References(project).Where(static name => StartsWithAny(name, ForbiddenInCore)).Should().BeEmpty();
+        References(project).Should().Contain("Confluent.Kafka", "the project file read is the real one");
+        ((string?) project.Root?.Attribute("Sdk")).Should().Be("Microsoft.NET.Sdk",
+            "a Web or Razor SDK brings ASP.NET Core without a FrameworkReference line");
     }
 
     [Fact]
@@ -51,6 +54,15 @@ public class KStudioCoreFenceTests
 
         libraries.Where(static name => StartsWithAny(name, ForbiddenInCore)).Should().BeEmpty(
             "the restore graph of KStudio.Core must not reach ASP.NET Core, a studio, Npgsql, the Marten family or Wolverine");
+        libraries.Should().Contain("Confluent.Kafka", "the restore graph is read");
+
+        var frameworks = document.RootElement.GetProperty("project").GetProperty("frameworks").EnumerateObject()
+            .SelectMany(static framework => framework.Value.TryGetProperty("frameworkReferences", out var references)
+                ? references.EnumerateObject().Select(static reference => reference.Name)
+                : Enumerable.Empty<string>())
+            .ToArray();
+        frameworks.Where(static name => StartsWithAny(name, ForbiddenInCore)).Should().BeEmpty(
+            "the engine restores no ASP.NET Core framework reference, whatever imported it");
     }
 
     [Theory]

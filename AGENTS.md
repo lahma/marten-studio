@@ -282,8 +282,8 @@ that a human edits and no tool rewrites, and that the only credential anywhere i
 
 **D16 — xunit.v3 3.2.2 and Verify.XunitV3 32.0.0, six test projects all matching `*.Tests`.**
 `tests/MartenStudio.Tests`, `tests/PostgresStudio.Tests` and `tests/KStudio.Tests` are fast and need no Docker; the three
-`*.Integration.Tests` need Testcontainers, and the first two Playwright. All six match the glob in `ITest.TestProjects`. The pins are load-bearing — see
-*Package budget*. Full text: [testing.md](docs/maintainers/testing.md#d16).
+`*.Integration.Tests` need Testcontainers, and MartenStudio's and PostgresStudio's also need Playwright. All six match the
+glob in `ITest.TestProjects`. The pins are load-bearing — see *Package budget*. Full text: [testing.md](docs/maintainers/testing.md#d16).
 
 **D17 — The demo domain lives in `samples/MartenStudio.SampleDomain` and does not reference `MartenStudio`.** The
 missing reference is deliberate and structural: the studio must work against a store that knows nothing about it. The
@@ -488,7 +488,7 @@ Complete, as of the bootstrap commit. Versions are centrally pinned in `Director
 | `src/KStudio.Core` | `Confluent.Kafka` | `2.14.0` (latest tested `2.16.0`) | KStudio's only Kafka client (plan K2), behind the engine's internal wire seam (D36). Floor, not exact pin: 2.14.0 is what WolverineFx.Kafka 6.61 pins, so a Wolverine host is never raised. It brings `librdkafka.redist` (native librdkafka for Windows, Linux and macOS) at its own version, unpinned. Unconditional row: only the KStudio projects reference it. Not packed before M4 (K8). *Package budget changes* 2026-11-09. |
 | `src/KStudio.Core` | `Microsoft.Extensions.DependencyInjection.Abstractions`, `Microsoft.Extensions.Logging.Abstractions`, `Microsoft.Extensions.Options` | `10.0.0` each | The diagnostics engine's conditional rows, seen by KStudio.Core through `KStudioCorePinsExtensions`: the engine has no ASP.NET Core either (D36). |
 | `tests/KStudio.Integration.Tests` | `Testcontainers.Kafka` | `4.15.0` | The live suite's brokers, `apache/kafka:3.9.2` and `4.4.0` in KRaft mode, one per image with SASL/PLAIN and ACLs. |
-| the three sample hosts, both `tests/…Integration.Tests` | `Testcontainers.PostgreSql` | `4.15.0` | D18's throwaway Postgres (the Marten and Postgres Studio sample hosts and the diagnostics worker), and the container each integration suite runs against. |
+| the three sample hosts, `tests/MartenStudio.Integration.Tests`, `tests/PostgresStudio.Integration.Tests` | `Testcontainers.PostgreSql` | `4.15.0` | D18's throwaway Postgres (the Marten and Postgres Studio sample hosts and the diagnostics worker), and the container each integration suite runs against. |
 | `samples/PostgresStudio.Worker` | `Microsoft.Extensions.Hosting` | `10.0.0` | The generic host the diagnostics worker sample runs in (*Package budget changes* 2026-11-01). A fifth row of the conditional `PostgresStudioDiagnosticsPinsExtensions` group: no shipped package references it. |
 | all six test projects | `Microsoft.NET.Test.Sdk` | `18.10.0` | The VSTest host Fallout's `ITest` drives. |
 | all six test projects | `xunit.v3` | `3.2.2` | Held — see below. |
@@ -496,11 +496,11 @@ Complete, as of the bootstrap commit. Versions are centrally pinned in `Director
 | all six test projects | `GitHubActionsTestLogger` | `2.4.1` | Held — see below. |
 | all six test projects | `AwesomeAssertions` | `9.6.0` | The MIT fork of FluentAssertions. One assertion library, and **no mocking library**: the data seam is our own set of interfaces, and hand-written fakes are smaller and more auditable than a mocking framework's call-matching DSL. Its namespace is `AwesomeAssertions`, not `FluentAssertions` (verified 2026-09-14); every test project declares it as a global using. |
 | both fast suites (`tests/MartenStudio.Tests`, `tests/PostgresStudio.Tests`) | `bunit` | `2.13.3` | Component tests. |
-| the three fast suites | `Verify.XunitV3` | `32.0.0` | Held — see below. Also the source of each fast suite's `global using Xunit;`, which is why neither csproj declares one. |
+| the three fast suites | `Verify.XunitV3` | `32.0.0` | Held — see below. Also the source of each fast suite's `global using Xunit;`, which is why none of them declares one. |
 | the three fast suites | `PublicApiGenerator` | `11.5.4` | The public API snapshots (D20), one per package. |
-| both fast suites | `Microsoft.AspNetCore.TestHost` | `10.0.12` | `UseTestServer()` for the endpoint-metadata and startup-guard tests. TestHost rather than Mvc.Testing: those tests never need a `WebApplicationFactory`. |
+| `tests/MartenStudio.Tests`, `tests/PostgresStudio.Tests` | `Microsoft.AspNetCore.TestHost` | `10.0.12` | `UseTestServer()` for the endpoint-metadata and startup-guard tests. TestHost rather than Mvc.Testing: those tests never need a `WebApplicationFactory`. |
 | `tests/MartenStudio.Integration.Tests` | `Microsoft.AspNetCore.Mvc.Testing` | `10.0.12` | `WebApplicationFactory` over the real sample host. |
-| both `tests/…Integration.Tests` | `Microsoft.Playwright` | `1.62.0` | The browser suites (D19). |
+| `tests/MartenStudio.Integration.Tests`, `tests/PostgresStudio.Integration.Tests` | `Microsoft.Playwright` | `1.62.0` | The browser suites (D19). |
 | `build/` | `Fallout.Common`, `Fallout.Components` | `10.4.0` | The orchestrator; the build project opts out of CPM. |
 | `build/` | `NuGet.Frameworks` | `7.9.0` | Held — see below. |
 

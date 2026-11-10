@@ -10,8 +10,9 @@ full text and wins where they differ. D34 and D35, the shell seams and KStudio's
 
 KStudio.Core holds everything KStudio knows about Kafka: the catalog of clusters and topics, the topic overview, window
 resolution, the scan engine, the search predicates, the decoders, the governor and redaction. It has no ASP.NET Core
-(no `FrameworkReference`), references no studio, no Npgsql, no Marten family and no Wolverine (`KStudioCoreFenceTests`),
-and is not packed before M4 (plan K8). Its public types are in namespace `KStudio`: `KafkaEngineOptions` (the base of
+(no `FrameworkReference`), references no studio, no Npgsql, no Marten family and no Wolverine (`KStudioCoreFenceTests`,
+which also holds the reverse: PostgresStudio, PostgresStudio.Diagnostics and MartenStudio reference no Confluent,
+librdkafka, Wolverine or KStudio package or project), and is not packed before M4 (plan K8). Its public types are in namespace `KStudio`: `KafkaEngineOptions` (the base of
 KStudio's options), `KafkaClusterBuilder`, `KafkaTopicBuilder`, `KafkaKeyFormat`, `KafkaScanLimits`, and the decoder
 extension point (`IKafkaRecordDecoder`, `KafkaDecodeContext`, `KafkaDecodeResult`, `KafkaHeader`, `KafkaDecoders`). Later
 milestones add `KafkaRedactionBuilder` (M2, M3), `KafkaPartitioner` (M3) and the correlation and index seams (M4, M5),
