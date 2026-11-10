@@ -27,6 +27,7 @@ on:
 env:
   MARTEN_VERSION: latest
   NPGSQL_VERSION: latest
+  CONFLUENT_VERSION: latest
 
 permissions:
   contents: read

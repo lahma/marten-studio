@@ -127,6 +127,19 @@ pass's. `marten-latest.yml` sets `MARTEN_VERSION: latest` and `NPGSQL_VERSION: l
 latest legs. Without Fallout: `dotnet test postgres-studio.slnf -p:PostgresStudioNpgsqlVersion=10.0.3` - never the
 `.slnx`. A project that sets `PostgresStudioPinsNpgsql` goes into `postgres-studio.slnf` in the same pull request.
 
+**KStudio's Confluent.Kafka is `Directory.Packages.props`'s too, and needs no pass of its own.**
+`KStudioConfluentFloor` (2.14.0, what `KStudio.Core` depends on: the version WolverineFx.Kafka 6.61 pins, so a Wolverine
+host is never raised) and `KStudioConfluentLatest` (2.16.0) are defined there once, and the unconditional
+`Confluent.Kafka` row reads `$(KStudioConfluentVersion)`. `build/Build.Confluent.cs` resolves `--confluent-version` (env
+`CONFLUENT_VERSION`) - `floor`, the default; `latest`; or an exact version, never a range - and passes
+`-p:KStudioConfluentVersion=<resolved>` to Restore, Compile and Test, the floor included, so an environment variable of
+that name cannot change what a run tests. Unlike Npgsql's, the property may go to the whole solution: only the KStudio
+projects reference the package, so MartenStudio and PostgresStudio never read it, and there is no second pass. `Pack`
+refuses anything but the floor (nothing KStudio ships is packed before plan K8, but the guard is there for the first
+package that is). `marten-latest.yml` sets `CONFLUENT_VERSION: latest` beside `MARTEN_VERSION` and `NPGSQL_VERSION`, so
+one workflow runs all three latest legs; `build.yml` and `publish.yml` set none of them. Without Fallout: `dotnet test
+tests/KStudio.Tests -p:KStudioConfluentVersion=2.16.0`.
+
 **Three packages, one version.** `Pack` packs `src/PostgresStudio.Diagnostics`, then `src/PostgresStudio`, then
 `src/MartenStudio`, one after the other, all at the CHANGELOG version and all at the floors - it refuses a
 `--marten-version` or `--npgsql-version` that is not the floor, and each csproj refuses a bare `dotnet pack` off its

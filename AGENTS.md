@@ -550,6 +550,7 @@ by folder-name convention.
 .\build.ps1 Test --playwright              # ... and install Chromium first (D19)
 .\build.ps1 Test --marten-version latest   # ... at the latest-tested Marten instead of the floor
 .\build.ps1 Test --npgsql-version latest   # ... and then PostgresStudio's projects at the latest-tested Npgsql
+.\build.ps1 Test --confluent-version latest   # ... and KStudio at the latest-tested Confluent.Kafka
 .\build.ps1 Pack                           # the three NuGet packages into artifacts/packages (always at the floors)
 .\build.ps1 Browsers                       # just the Chromium install
 ```
