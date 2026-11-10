@@ -43,6 +43,7 @@
     <InternalsVisibleTo Include="MartenStudio.Integration.Tests" />
     <InternalsVisibleTo Include="PostgresStudio.Tests" />
     <InternalsVisibleTo Include="PostgresStudio.Integration.Tests" />
+    <InternalsVisibleTo Include="KStudio.Tests" />
   </ItemGroup>
 
   <!--

@@ -24,10 +24,15 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/KStudio.Core/KStudio.Core.csproj" />
+    <!-- Only for KafkaLogValueParityTests: StudioLogValue is internal there, and this suite is granted InternalsVisibleTo. -->
+    <ProjectReference Include="../../src/PostgresStudio.Diagnostics/PostgresStudio.Diagnostics.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <Compile Include="../MartenStudio.Tests/Conventions/RepositoryRoot.cs" Link="Support/Linked/RepositoryRoot.cs" />
+    <Compile Include="../MartenStudio.Tests/Conventions/SourceScanner.cs" Link="Support/Linked/SourceScanner.cs" />
+    <Compile Include="../PostgresStudio.Tests/Support/ManualTimeProvider.cs" Link="Support/Linked/ManualTimeProvider.cs" />
+    <Compile Include="../MartenStudio.Tests/Support/CapturingLoggerProvider.cs" Link="Support/Linked/CapturingLoggerProvider.cs" />
   </ItemGroup>
 
 </Project>
