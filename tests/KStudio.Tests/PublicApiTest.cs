@@ -46,12 +46,17 @@ public class PublicApiTest
     }
 
     /// <summary>
-    /// The engine's public types by name, so an extra one fails with its name rather than a diff. None until ENG-A adds the
-    /// registration types.
+    /// The engine's public types by name, so an extra one fails with its name rather than a diff. ENG-A's (decision 1.5): the options, the
+    /// two builders and the key formats; ENG-B adds the decoder extension point.
     /// </summary>
     [Fact]
     public void The_public_types_are_the_registration_types_and_the_extension_points()
     {
-        Core.GetExportedTypes().Select(static type => type.FullName!).Order(StringComparer.Ordinal).Should().BeEmpty();
+        Core.GetExportedTypes().Select(static type => type.FullName!).Order(StringComparer.Ordinal).Should().Equal(
+            "KStudio.KafkaClusterBuilder",
+            "KStudio.KafkaEngineOptions",
+            "KStudio.KafkaKeyFormat",
+            "KStudio.KafkaScanLimits",
+            "KStudio.KafkaTopicBuilder");
     }
 }

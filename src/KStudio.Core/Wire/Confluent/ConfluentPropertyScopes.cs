@@ -56,6 +56,7 @@ internal static class ConfluentPropertyScopes
         "dotnet.producer.enable.delivery.reports",
         "enable.gapless.guarantee",
         "enable.idempotence",
+        "linger.ms",
         "message.send.max.retries",
         "message.timeout.ms",
         "partitioner",

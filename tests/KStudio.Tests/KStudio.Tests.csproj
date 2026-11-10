@@ -5,6 +5,8 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <IsTestProject>true</IsTestProject>
+    <!-- The linked SourceScanner.cs documents itself with crefs to the other suite's tests (CS1574), which this project does not compile. -->
+    <NoWarn>$(NoWarn);CS1574</NoWarn>
   </PropertyGroup>
 
   <!-- Global usings: `Xunit` comes from Verify.XunitV3's build props. -->
@@ -20,6 +22,12 @@
     <PackageReference Include="AwesomeAssertions" />
     <PackageReference Include="Verify.XunitV3" />
     <PackageReference Include="PublicApiGenerator" />
+  </ItemGroup>
+
+  <!-- Not a package: the shared framework brings the container and logging implementations the engine's real registration is tested
+       with (KStudio.Core itself has no framework reference, which KStudioCoreFenceTests holds). -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 
   <ItemGroup>
