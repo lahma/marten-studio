@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- KStudio's live suite (AGENTS.md D36): real brokers in containers - apache/kafka 3.9 and 4.x, with SASL and ACLs -
+       through Testcontainers.Kafka. It needs Docker: without it every live test skips with a reason locally and fails on CI. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <!-- Global usings: no Verify here, so `Xunit` is declared rather than inherited. -->
+  <ItemGroup>
+    <Using Include="AwesomeAssertions" />
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="GitHubActionsTestLogger" />
+    <PackageReference Include="AwesomeAssertions" />
+    <PackageReference Include="Testcontainers.Kafka" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/KStudio.Core/KStudio.Core.csproj" />
+  </ItemGroup>
+
+</Project>

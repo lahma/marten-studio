@@ -4,10 +4,12 @@ This is the full text of D16, D19 and the description of the seven kinds of test
 
 ## D16
 
-**D16 — xunit.v3 3.2.2 and Verify.XunitV3 32.0.0, four test projects all matching `*.Tests`.**
+**D16 — xunit.v3 3.2.2 and Verify.XunitV3 32.0.0, six test projects all matching `*.Tests`.**
 `tests/MartenStudio.Tests` and `tests/PostgresStudio.Tests` are fast and need no Docker;
 `tests/MartenStudio.Integration.Tests` and `tests/PostgresStudio.Integration.Tests` need Testcontainers and
-Playwright. PostgresStudio's two have no Marten anywhere in their graph. All four match the glob in
+Playwright. PostgresStudio's two have no Marten anywhere in their graph. `tests/KStudio.Tests` (fast) and
+`tests/KStudio.Integration.Tests` (Testcontainers, Kafka) are KStudio's, with no Marten in their graph either. All six
+match the glob in
 `ITest.TestProjects`, so one `dotnet fallout Test` runs everything. The pins are load-bearing — see *Package budget
 changes*.
 
@@ -20,7 +22,7 @@ skip message names the exact command that would install them.
 
 ## The seven kinds of test
 
-There are seven kinds of test, in four projects. Each kind below names MartenStudio's folder; PostgresStudio's two
+There are seven kinds of test, in six projects. Each kind below names MartenStudio's folder; PostgresStudio's two
 projects mirror it for the shared studio - its fast suite (public API baseline, the assembly fence, the shared pages,
 the 0.5 pages' services and evaluators, the diagnostics API) and its live suite - with no Marten anywhere in their
 graph:

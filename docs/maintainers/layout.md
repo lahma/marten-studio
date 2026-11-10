@@ -63,7 +63,7 @@ samples/PostgresStudio.Sample/Properties/  launchSettings.json, fixed at http://
 samples/PostgresStudio.Worker/           The diagnostics worker (0.11-D, issue #29): a generic host that references
                                          src/PostgresStudio.Diagnostics alone - no ASP.NET Core, no studio - and logs a
                                          summary of every database's findings at start and every Summary:Interval (D18)
-tests/                                   All four test projects match *.Tests, so one Test run covers them all
+tests/                                   All six test projects match *.Tests, so one Test run covers them all
 tests/MartenStudio.Tests/                Fast suite: unit, bUnit, endpoint metadata, API snapshot,
                                          conventions. No Docker
 tests/MartenStudio.Tests/Conventions/    Rules too easy to break silently to leave to review
@@ -339,4 +339,13 @@ src/PostgresStudio.Diagnostics/Services/Connection/  The connection-insights eng
                                          platform, the pools that share the data source)
 tests/PostgresStudio.Tests/Connection/  The catalogue against the loaded Npgsql, the reader's provenance and redaction, every hint
                                          each way, the pooler signs and the sentinel test - no database
+src/KStudio.Core/                        KStudio's engine (D36): catalog, window resolution, scan engine, predicates,
+                                         decoders, governor and redaction, over Confluent.Kafka behind the internal wire
+                                         seam. No ASP.NET Core, no studio, no Npgsql (KStudioCoreFenceTests); not packed (K8)
+tests/KStudio.Tests/                     KStudio's fast suite: the engine against the hand-written fake broker, the fences
+                                         and the public API baseline. No Docker
+tests/KStudio.Tests/Conventions/         KStudio's fences and convention scans
+tests/KStudio.Tests/Verify/              KStudio.Core's public API baseline
+tests/KStudio.Integration.Tests/         KStudio's live suite: apache/kafka 3.9 and 4.x with SASL and ACLs, through
+                                         Testcontainers.Kafka; needs Docker
 ```

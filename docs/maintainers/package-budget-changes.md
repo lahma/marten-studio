@@ -660,3 +660,29 @@ one level down.
 
 **Exit condition:** as the policy: at a minor release the floors may move to the latest tested versions; a floor still rises when
 a member the studio needs is absent below it or an advisory makes restore fail.
+
+**2026-11-09 — `Confluent.Kafka` `2.14.0` (latest tested `2.16.0`) is added to a new project, `src/KStudio.Core`, and
+`Testcontainers.Kafka` `4.15.0` to `tests/KStudio.Integration.Tests`; KStudio.Core takes three of the diagnostics
+engine's `Microsoft.Extensions.*` rows.** KStudio (working name, plan K1) is the Kafka module of the studio family,
+and `KStudio.Core` is its engine, with no ASP.NET Core (D36). Confluent.Kafka is its only Kafka client (plan K2,
+2026-11-09): nothing in the budget speaks the Kafka protocol, and the managed alternative, Dekaf, needs Kafka 4.0
+brokers and is ten months old. The floor is 2.14.0 because WolverineFx.Kafka 6.61.0 pins exactly that version
+(`Directory.Packages.props` in the sibling checkout at `V6.61.0`), so a Wolverine host, the module's first natural
+host, is never raised by KStudio; 2.16.0 is the newest release and the version the suites are also run at
+(`KStudioConfluentLatest`). Every member the engine calls was read at both tags: `IAdminClient.GetMetadata`,
+`ListOffsetsAsync`, `DescribeTopicsAsync`, `DescribeClusterAsync`, `DescribeConfigsAsync`,
+`ListConsumerGroupOffsetsAsync` and `DescribeConsumerGroupsAsync`, `OffsetSpec`'s four kinds,
+`ConsumeResult.LeaderEpoch` and `IsPartitionEOF`, both builders' `SetOAuthBearerTokenRefreshHandler`, and the
+`ConsumerConfig` properties of D37. **The native payload:** Confluent.Kafka depends on `librdkafka.redist` at its own
+version, native librdkafka binaries for Windows, Linux and macOS under `runtimes/`. It arrives transitively and has no
+row, so it always matches the Confluent.Kafka a host resolves; a host that installs KStudio gets librdkafka in its
+output, and a host already on Confluent.Kafka has it already. On net8.0 and later Confluent.Kafka has no other
+dependency (`System.Memory` and `System.Buffers` are for netstandard2.0 and net462). Its row is unconditional: only
+the KStudio projects have it in their graph, so `CentralPackageTransitivePinningEnabled` pins it nowhere else, and
+`-p:KStudioConfluentVersion=` may be passed to the whole solution, unlike Npgsql's. `Testcontainers.Kafka` 4.15.0 is the
+Kafka module of the Testcontainers release already budgeted (`Testcontainers.PostgreSql` 4.15.0): its
+`KafkaBuilder(string image)` runs `apache/kafka` images in KRaft mode, which is what the live suite runs, at
+`apache/kafka:3.9.2` and `apache/kafka:4.4.0`. The three `Microsoft.Extensions.*` abstractions
+(`DependencyInjection.Abstractions`, `Logging.Abstractions`, `Options`, 10.0.0) are no new package: the conditional rows
+of 2026-11-01 are widened to a project that sets `KStudioCorePinsExtensions`, for the reason they were made
+conditional. None of the KStudio projects is packed (plan K8).

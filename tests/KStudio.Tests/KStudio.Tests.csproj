@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- KStudio's fast suite (AGENTS.md D36): no Docker. The engine against the hand-written fake broker, the conventions
+       and the public API baseline. M2 adds bUnit and the KStudio project. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <!-- Global usings: `Xunit` comes from Verify.XunitV3's build props. -->
+  <ItemGroup>
+    <Using Include="AwesomeAssertions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="GitHubActionsTestLogger" />
+    <PackageReference Include="AwesomeAssertions" />
+    <PackageReference Include="Verify.XunitV3" />
+    <PackageReference Include="PublicApiGenerator" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/KStudio.Core/KStudio.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="../MartenStudio.Tests/Conventions/RepositoryRoot.cs" Link="Support/Linked/RepositoryRoot.cs" />
+  </ItemGroup>
+
+</Project>

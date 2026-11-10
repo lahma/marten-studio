@@ -1,8 +1,8 @@
 # Hard rules
 
-This is the full text of hard rules 1 to 16, moved word for word from AGENTS.md on 2026-10-31. AGENTS.md states each rule in brief; this document holds the detail and wins where they differ. In rule 1, 'this file' and 'below' mean AGENTS.md.
+This is the full text of hard rules 1 to 16, moved word for word from AGENTS.md on 2026-10-31, and of rule 17, added on 2026-11-10 for KStudio. AGENTS.md states each rule in brief; this document holds the detail and wins where they differ. In rule 1, 'this file' and 'below' mean AGENTS.md.
 
-## Hard rules 1-16
+## Hard rules 1-17
 
 1. **No new NuGet package without a decision recorded in this file.** The package budget below is
    complete. If a package looks necessary, add a dated entry to *Package budget changes*
@@ -202,3 +202,7 @@ This is the full text of hard rules 1 to 16, moved word for word from AGENTS.md 
     `PostgresStudio.Diagnostics [x.y.z]`, asserted by `Pack` and checked by `AddPostgresStudio()`, and again by
     `AddMartenStudio()`'s guard). A page route belongs to one assembly of a studio, below that assembly's own compile-time root
     (`/postgres`, `/marten`), and the route table refuses a route two pages claim (`StudioRouteTableTests`).
+17. **In KStudio, a read never writes.** No client the engine builds may create a topic, commit or store an offset,
+    join or subscribe a group, or run a host's builder delegate; every assign carries explicit offsets, and the wire
+    seam has no produce, commit, delete or alter method. D37 has the overrides; `ConfluentOverridesTests`,
+    `ReadNeverWritesMetadataLiveTests` and `ReadNeverWritesScanLiveTests` hold them. It is the Kafka analogue of hard rule 14.
