@@ -13,7 +13,7 @@ namespace KStudio.Core.Wire.Confluent;
 internal sealed class ConfluentWire(
     KafkaClusterDefinition cluster,
     KafkaAdminPool<IAdminClient> pool,
-    KafkaEngineOptions options,
+    KafkaEngineSnapshot options,
     ConfluentClientEvents events,
     KStudioLoggers loggers) : IKafkaWire
 {
@@ -145,6 +145,12 @@ internal sealed class ConfluentWire(
                 {
                     // Per-partition failures arrive with the infos; each becomes that partition's error.
                     infos = exception.Result.ResultInfos;
+                }
+                catch (KafkaException exception) when (exception.Error.Code == ErrorCode.Local_NoEnt && partitions.Select(static x => x.Topic).Distinct().Count() == 1)
+                {
+                    // Measured on 3.9.2 and 4.4.0 (REVIEW-ENG-A 2): a topic the broker does not know fails the whole call with
+                    // Local_NoEnt, which for a single topic is "not found". With several topics the call names none, so it stays a failure.
+                    return WireResult<IReadOnlyList<WireOffset>>.Fail(new WireError.NotFound(KafkaResourceType.Topic, partitions[0].Topic));
                 }
 
                 return WireResult<IReadOnlyList<WireOffset>>.Ok([.. infos.Select(ToOffset)]);

@@ -330,5 +330,63 @@ public class ClusterRegistrationTests
         logs.Entries.Where(static x => x.Level == LogLevel.Warning && x.EventId.Id == 9657).Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task The_hosts_token_hook_is_run_by_the_scan_consumer_too_and_a_hook_that_throws_is_a_failed_refresh_not_a_crash()
+    {
+        TaskCompletionSource called = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        ClientConfig oauth = new()
+        {
+            BootstrapServers = "localhost:1",
+            SecurityProtocol = SecurityProtocol.SaslPlaintext,
+            SaslMechanism = SaslMechanism.OAuthBearer,
+        };
+
+        KafkaEngineOptions options = new();
+        options.AddCluster("prod", oauth, c => c.OAuthBearerTokenRefresh((_, _) =>
+        {
+            called.TrySetResult();
+            throw new InvalidOperationException("the token service is down");
+        }));
+        KafkaClusterDefinition definition = new KafkaClusterRegistry(options).Get("prod");
+
+        CapturingLoggerProvider logs = new();
+        ConfluentClientEvents events = new(new KStudioLoggers(logs.CreateFactory()), new KafkaLogOnce(TimeProvider.System), TimeProvider.System);
+
+        // A consumer serves its callbacks from Consume, so the reader is polled on a thread of its own, as a scan does.
+        using CancellationTokenSource stop = new();
+        Task poller = Task.Factory.StartNew(
+            () =>
+            {
+                using ConfluentScanReader reader = new(
+                    definition,
+                    KafkaEngineSnapshot.Take(options),
+                    new WireReaderOptions(Guid.NewGuid(), WireIsolation.ReadCommitted, new KafkaScanLimits()),
+                    events);
+                reader.Assign([new WirePartitionOffset("orders", 0, 0)]);
+
+                while (!stop.IsCancellationRequested)
+                {
+                    reader.Read(TimeSpan.FromMilliseconds(50));
+                }
+            },
+            CancellationToken.None,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default);
+
+        try
+        {
+            await called.Task.Bounded();
+            SpinWait.SpinUntil(() => logs.Entries.Any(static x => x.EventId.Id == 9657 && x.Message.Contains("InvalidOperationException", StringComparison.Ordinal)), TimeSpan.FromSeconds(10))
+                .Should().BeTrue();
+        }
+        finally
+        {
+            await stop.CancelAsync();
+            await poller.Bounded();
+        }
+
+        logs.Entries.Should().NotContain(static x => x.Message.Contains("token service", StringComparison.Ordinal));
+    }
+
     private sealed class DerivedOptions : KafkaEngineOptions;
 }

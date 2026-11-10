@@ -37,6 +37,9 @@ internal static class KStudioEngineRegistration
         services.TryAddSingleton<KStudioLoggers>();
         services.TryAddSingleton<KafkaClusterRegistry>();
 
+        // The options are validated once, by the registry, and read from this snapshot only (REVIEW-ENG-A 8).
+        services.TryAddSingleton(static provider => provider.GetRequiredService<KafkaClusterRegistry>().Settings);
+
         services.TryAddSingleton(static provider => new KafkaLogOnce(provider.GetRequiredService<TimeProvider>()));
         services.TryAddSingleton<ConfluentClientEvents>();
 
@@ -46,7 +49,7 @@ internal static class KStudioEngineRegistration
             return new KafkaAdminPool<IAdminClient>(
                 cluster => ConfluentWireFactory.BuildAdminClient(cluster, events),
                 provider.GetRequiredService<TimeProvider>(),
-                provider.GetRequiredService<KafkaEngineOptions>().AdminIdleTimeout,
+                provider.GetRequiredService<KafkaEngineSnapshot>().AdminIdleTimeout,
                 provider.GetRequiredService<KStudioLoggers>().Clients);
         });
 

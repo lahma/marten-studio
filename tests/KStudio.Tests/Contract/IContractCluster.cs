@@ -41,6 +41,9 @@ internal interface IContractCluster : IAsyncDisposable
 
     Task CreateTopicAsync(string topic, int partitions, IReadOnlyDictionary<string, string>? config = null);
 
+    /// <summary>Whether the topic exists, asked in a way that cannot create it (the live cluster asks as the seeding principal with auto-creation off).</summary>
+    Task<bool> TopicExistsAsync(string topic);
+
     /// <summary>Appends records to one partition, in order.</summary>
     Task ProduceAsync(string topic, int partition, IReadOnlyList<ContractRecord> records);
 

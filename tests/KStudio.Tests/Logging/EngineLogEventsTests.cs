@@ -32,6 +32,7 @@ public class EngineLogEventsTests
         [9661] = LogLevel.Debug,
         [9662] = LogLevel.Debug,
         [9663] = LogLevel.Warning,
+        [9664] = LogLevel.Debug,
     };
 
     private static readonly string[] AllowedParameters =
@@ -61,7 +62,7 @@ public class EngineLogEventsTests
     }
 
     [Fact]
-    public void ENG_A_defines_exactly_its_events_9650_to_9663_and_9664_is_reserved()
+    public void ENG_A_defines_exactly_its_events_9650_to_9664()
     {
         Events().Select(static x => x.Attribute.EventId).Order().Should().Equal(EngineAEvents.Keys.Order());
     }
@@ -111,12 +112,30 @@ public class EngineLogEventsTests
     [Fact]
     public void The_loggers_use_the_engines_categories_so_one_filter_covers_the_engine()
     {
-        Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory factory = new();
+        CategoryProvider provider = new();
+        using ILoggerFactory factory = LoggerFactory.Create(builder => builder.AddProvider(provider));
+
         KStudioLoggers loggers = new(factory);
 
+        provider.Categories.Should().BeEquivalentTo("KStudio.Core.Clients", "KStudio.Core.Catalog", "KStudio.Core.Scans");
         loggers.Clients.Should().NotBeNull();
         loggers.Catalog.Should().NotBeNull();
         loggers.Scans.Should().NotBeNull();
+    }
+
+    private sealed class CategoryProvider : ILoggerProvider
+    {
+        public List<string> Categories { get; } = [];
+
+        public ILogger CreateLogger(string categoryName)
+        {
+            Categories.Add(categoryName);
+            return Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance;
+        }
+
+        public void Dispose()
+        {
+        }
     }
 
     [Fact]

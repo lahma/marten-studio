@@ -18,7 +18,7 @@ namespace KStudio.Core.Windows;
 internal sealed class WindowResolver(
     KafkaWires wires,
     KafkaWireReads reads,
-    KafkaEngineOptions options,
+    KafkaEngineSnapshot options,
     KStudioLoggers loggers,
     TimeProvider timeProvider)
 {
@@ -52,7 +52,7 @@ internal sealed class WindowResolver(
         long toWithMarginMs = toMs + (long) effectiveMargin.TotalMilliseconds;
 
         // Step 1 (partly): the topics' partitions and configs.
-        WireResult<WireMetadata> metadata = await reads.MetadataAsync(cluster, cancellationToken).ConfigureAwait(false);
+        WireResult<WireMetadata> metadata = await reads.FreshMetadataAsync(cluster, cancellationToken).ConfigureAwait(false);
         Task<WireResult<WireTopicConfig>>[] configTasks = [.. topics.Select(topic => reads.ConfigAsync(cluster, topic, cancellationToken))];
         WireResult<WireTopicConfig>[] configs = await Task.WhenAll(configTasks).ConfigureAwait(false);
 
@@ -121,7 +121,7 @@ internal sealed class WindowResolver(
             }
 
             // A refusal of the look-ups themselves (the principal may not describe the topic) refuses the topic.
-            WireError? lookupRefusal = FirstTopicError(state, earliest, latest, start, end);
+            WireError? lookupRefusal = FirstTopicError(state, earliest, latest, stable, start, end);
 
             if (lookupRefusal is not null)
             {
@@ -149,7 +149,7 @@ internal sealed class WindowResolver(
             topicWindows.Add(new TopicWindow(state.Topic, state.Kind, null, topicNotes));
         }
 
-        List<WindowNote> windowNotes = [];
+        List<WindowNote> windowNotes = [new WindowNote.PartitionsFixed(now)];
 
         if (!committed)
         {
@@ -196,14 +196,20 @@ internal sealed class WindowResolver(
             notes.Add(new WindowNote.StoppedAtLso(key.Topic, key.Partition, l, highWatermark));
         }
 
-        // The first retained record is later than the window's start: what came before it may have been matches.
-        if (logStart > 0 && startOffset is { Found: true } found && found.Offset == logStart && found.TimestampMs is { } firstAt && firstAt > fromMs)
+        // The first retained record is later than the window's start: what came before it may have been matches. A broker that returned
+        // no timestamp cannot say it is not, so the gap is reported without one (the note's wording accepts that).
+        if (logStart > 0 && startOffset is { Found: true } found && found.Offset == logStart && (found.TimestampMs is null || found.TimestampMs > fromMs))
         {
-            notes.Add(new WindowNote.RetentionGap(key.Topic, key.Partition, logStart, DateTimeOffset.FromUnixTimeMilliseconds(firstAt)));
-            KStudioLog.RetentionGap(loggers.Catalog, key.Partition, key.Topic, cluster, logStart);
+            DateTimeOffset? firstAt = found.TimestampMs is { } stamp ? DateTimeOffset.FromUnixTimeMilliseconds(stamp) : null;
+            notes.Add(new WindowNote.RetentionGap(key.Topic, key.Partition, logStart, firstAt));
+            string topicText = KafkaLogValue.Cap(key.Topic);
+            string clusterText = KafkaLogValue.Cap(cluster);
+            KStudioLog.RetentionGap(loggers.Catalog, key.Partition, topicText, clusterText, logStart);
         }
 
-        if (topic.Kind != KafkaTimestampKind.LogAppendTime && margin > TimeSpan.Zero && endOffset is { Found: true })
+        // With no margin the end is exact, and a record stamped earlier than one before the end but appended after it is missed: the case
+        // the note is for, so it is given at margin zero too.
+        if (topic.Kind != KafkaTimestampKind.LogAppendTime && endOffset is { Found: true })
         {
             notes.Add(new WindowNote.CreateTimeMargin(key.Topic, key.Partition, margin, endAt));
         }

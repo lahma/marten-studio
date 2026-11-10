@@ -8,12 +8,12 @@ namespace KStudio.Core.Wire.Confluent;
 /// <summary>The production factory: one <see cref="ConfluentWire" /> per cluster, over the shared admin pool.</summary>
 internal sealed class ConfluentWireFactory(
     KafkaAdminPool<IAdminClient> pool,
-    KafkaEngineOptions options,
+    KafkaEngineSnapshot settings,
     ConfluentClientEvents events,
     KStudioLoggers loggers) : IKafkaWireFactory
 {
     /// <inheritdoc />
-    public IKafkaWire Create(KafkaClusterDefinition cluster) => new ConfluentWire(cluster, pool, options, events, loggers);
+    public IKafkaWire Create(KafkaClusterDefinition cluster) => new ConfluentWire(cluster, pool, settings, events, loggers);
 
     /// <summary>
     /// Builds the admin client of a cluster: the host's configuration with the engine's overrides, the engine's own log and error

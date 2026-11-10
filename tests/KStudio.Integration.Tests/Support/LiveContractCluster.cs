@@ -77,6 +77,17 @@ internal sealed class LiveContractCluster : IContractCluster
         }
     }
 
+    public Task<bool> TopicExistsAsync(string topic) => Task.FromResult(TopicExists(fixture, topic));
+
+    /// <summary>Whether the broker lists the topic, asked by an admin client that does not auto-create (all topics, never a single one).</summary>
+    /// <param name="fixture">The broker.</param>
+    /// <param name="topic">The topic.</param>
+    public static bool TopicExists(KafkaFixture fixture, string topic)
+    {
+        using IAdminClient check = new AdminClientBuilder(new AdminClientConfig(fixture.Client("admin")) { AllowAutoCreateTopics = false }).Build();
+        return check.GetMetadata(TimeSpan.FromSeconds(10)).Topics.Any(x => x.Topic == topic && x.Error.Code == ErrorCode.NoError);
+    }
+
     public Task ProduceAsync(string topic, int partition, IReadOnlyList<ContractRecord> records)
     {
         foreach (ContractRecord record in records)

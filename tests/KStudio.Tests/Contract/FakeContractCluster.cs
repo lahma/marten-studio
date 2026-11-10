@@ -12,10 +12,13 @@ internal sealed class FakeContractCluster : IContractCluster
 {
     private static int topics;
 
-    public FakeContractCluster()
+    private readonly ContractPrincipal? principal;
+
+    public FakeContractCluster(ContractPrincipal? principal = null)
     {
+        this.principal = principal;
         Clock = new ManualTimeProvider(new DateTimeOffset(2026, 11, 8, 6, 0, 0, TimeSpan.Zero));
-        Cluster = new FakeKafkaCluster(Clock);
+        Cluster = new FakeKafkaCluster(Clock) { RefuseGroupOnFetch = principal == ContractPrincipal.NoGroup };
         FakeWire = new FakeKafkaWire(Cluster, EngineHarness.ClusterKey);
         Engine = EngineHarness.ForWire(FakeWire, Clock);
     }
@@ -35,8 +38,17 @@ internal sealed class FakeContractCluster : IContractCluster
     public Task CreateTopicAsync(string topic, int partitions, IReadOnlyDictionary<string, string>? config = null)
     {
         Cluster.CreateTopic(topic, partitions, config);
+
+        // The broker's describeonly principal has DESCRIBE on the topics and no READ.
+        if (principal == ContractPrincipal.DescribeOnly)
+        {
+            Cluster.Deny(KafkaAclOperation.Read, KafkaResourceType.Topic, topic);
+        }
+
         return Task.CompletedTask;
     }
+
+    public Task<bool> TopicExistsAsync(string topic) => Task.FromResult(Cluster.Topic(topic) is not null);
 
     public Task ProduceAsync(string topic, int partition, IReadOnlyList<ContractRecord> records)
     {
@@ -137,4 +149,11 @@ public sealed class FakeWireContractTests : WireContract
 public sealed class FakeWindowContractTests : WindowContract
 {
     internal override Task<IContractCluster> OpenAsync() => Task.FromResult<IContractCluster>(new FakeContractCluster());
+}
+
+/// <summary><see cref="ReaderAclContract" /> on the fake.</summary>
+public sealed class FakeReaderAclContractTests : ReaderAclContract
+{
+    internal override Task<IContractCluster> OpenAsync(ContractPrincipal principal) =>
+        Task.FromResult<IContractCluster>(new FakeContractCluster(principal));
 }

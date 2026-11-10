@@ -81,6 +81,10 @@ internal sealed class ConfluentClientEvents(KStudioLoggers loggers, KafkaLogOnce
     {
         ILogger logger = loggers.Clients;
         string key = cluster.Key;
-        return setting => KStudioLog.HostSettingOverridden(logger, setting, key, client);
+        return setting =>
+        {
+            string name = KafkaLogValue.Cap(setting);
+            KStudioLog.HostSettingOverridden(logger, name, key, client);
+        };
     }
 }

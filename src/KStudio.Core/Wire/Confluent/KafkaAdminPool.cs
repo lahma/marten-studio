@@ -11,7 +11,7 @@ namespace KStudio.Core.Wire.Confluent;
 /// that stops itself when none is left.
 /// </summary>
 /// <typeparam name="TClient">The client; <c>IAdminClient</c> in production, anything disposable in a test.</typeparam>
-internal sealed class KafkaAdminPool<TClient> : IAsyncDisposable
+internal sealed class KafkaAdminPool<TClient> : IDisposable, IAsyncDisposable
     where TClient : class, IDisposable
 {
     private readonly Func<KafkaClusterDefinition, TClient> create;
@@ -71,38 +71,13 @@ internal sealed class KafkaAdminPool<TClient> : IAsyncDisposable
         }
     }
 
-    /// <inheritdoc />
-    public ValueTask DisposeAsync()
+    /// <summary>
+    /// Disposes every client and refuses new leases. A failing client does not stop the others and is logged at Debug (9664). Both
+    /// interfaces are implemented, so that a synchronous <c>ServiceProvider.Dispose()</c> can dispose the pool as well as an asynchronous one.
+    /// </summary>
+    public void Dispose()
     {
-        List<Slot> toDispose;
-
-        lock (gate)
-        {
-            if (disposed)
-            {
-                return ValueTask.CompletedTask;
-            }
-
-            disposed = true;
-            toDispose = [.. slots.Values];
-            slots.Clear();
-            reaper?.Dispose();
-            reaper = null;
-        }
-
-        // Disposing an admin client blocks while librdkafka tears down, so it is never done under the lock.
-        foreach (Slot slot in toDispose)
-        {
-            slot.Client.Dispose();
-        }
-
-        return ValueTask.CompletedTask;
-    }
-
-    private void Reap(object? state)
-    {
-        List<KeyValuePair<string, Slot>> expired = [];
-        DateTimeOffset now = timeProvider.GetUtcNow();
+        List<KeyValuePair<string, Slot>> toDispose;
 
         lock (gate)
         {
@@ -111,31 +86,89 @@ internal sealed class KafkaAdminPool<TClient> : IAsyncDisposable
                 return;
             }
 
-            foreach (KeyValuePair<string, Slot> pair in slots)
+            disposed = true;
+            toDispose = [.. slots];
+            slots.Clear();
+            reaper?.Dispose();
+            reaper = null;
+        }
+
+        // Disposing an admin client blocks while librdkafka tears down, so it is never done under the lock.
+        foreach (KeyValuePair<string, Slot> pair in toDispose)
+        {
+            DisposeClient(pair.Key, pair.Value);
+        }
+    }
+
+    /// <inheritdoc />
+    public ValueTask DisposeAsync()
+    {
+        Dispose();
+        return ValueTask.CompletedTask;
+    }
+
+    private void Reap(object? state)
+    {
+        // A timer callback that throws ends the process, so nothing escapes this method.
+        try
+        {
+            List<KeyValuePair<string, Slot>> expired = [];
+            DateTimeOffset now = timeProvider.GetUtcNow();
+
+            lock (gate)
             {
-                if (pair.Value.Leases == 0 && now - pair.Value.LastUsed >= idleTimeout)
+                if (disposed)
                 {
-                    expired.Add(pair);
+                    return;
+                }
+
+                foreach (KeyValuePair<string, Slot> pair in slots)
+                {
+                    if (pair.Value.Leases == 0 && now - pair.Value.LastUsed >= idleTimeout)
+                    {
+                        expired.Add(pair);
+                    }
+                }
+
+                foreach (KeyValuePair<string, Slot> pair in expired)
+                {
+                    slots.Remove(pair.Key);
+                }
+
+                if (slots.Count == 0)
+                {
+                    reaper?.Dispose();
+                    reaper = null;
                 }
             }
 
             foreach (KeyValuePair<string, Slot> pair in expired)
             {
-                slots.Remove(pair.Key);
-            }
-
-            if (slots.Count == 0)
-            {
-                reaper?.Dispose();
-                reaper = null;
+                if (DisposeClient(pair.Key, pair.Value))
+                {
+                    string key = KafkaLogValue.Cap(pair.Key);
+                    KStudioLog.AdminClientDisposed(logger, key, (int) (now - pair.Value.LastUsed).TotalSeconds);
+                }
             }
         }
-
-        foreach (KeyValuePair<string, Slot> pair in expired)
+        catch (Exception exception)
         {
-            pair.Value.Client.Dispose();
-            string key = KafkaLogValue.Cap(pair.Key);
-            KStudioLog.AdminClientDisposed(logger, key, (int) (now - pair.Value.LastUsed).TotalSeconds);
+            KStudioLog.AdminClientDisposeFailed(logger, exception, "pool");
+        }
+    }
+
+    private bool DisposeClient(string cluster, Slot slot)
+    {
+        try
+        {
+            slot.Client.Dispose();
+            return true;
+        }
+        catch (Exception exception)
+        {
+            string key = KafkaLogValue.Cap(cluster);
+            KStudioLog.AdminClientDisposeFailed(logger, exception, key);
+            return false;
         }
     }
 

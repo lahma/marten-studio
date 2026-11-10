@@ -116,6 +116,18 @@ internal abstract record WireError
     }
 }
 
+/// <summary>
+/// What a scan reader's non-reading calls (<c>Assign</c>, <c>Pause</c>, <c>Resume</c>, <c>Reposition</c>) and the construction of a
+/// reader throw instead of a Confluent exception, so that the scan's thread catches an engine type and never a Confluent one. The
+/// admin calls return their errors as values; a reader's calls are void, so the value travels in this exception.
+/// </summary>
+/// <param name="error">The mapped error.</param>
+internal sealed class WireException(WireError error) : Exception("The wire call failed: " + error?.Code + ".")
+{
+    /// <summary>The error, mapped from the client's.</summary>
+    public WireError Error { get; } = error ?? throw new ArgumentNullException(nameof(error));
+}
+
 /// <summary>A wire call's outcome: a value, or the error that withheld it. Exactly one is set.</summary>
 /// <typeparam name="T">What the call returns.</typeparam>
 internal readonly struct WireResult<T>

@@ -16,8 +16,6 @@ internal sealed class FakeKafkaWire(FakeKafkaCluster cluster, string clusterKey)
 {
     private static readonly string[] AllOperations = ["Describe", "Read", "DescribeConfigs"];
 
-    private int readersOpened;
-
     public string ClusterKey { get; } = clusterKey;
 
     public FakeKafkaCluster Cluster { get; } = cluster;
@@ -122,6 +120,15 @@ internal sealed class FakeKafkaWire(FakeKafkaCluster cluster, string clusterKey)
             return Task.FromResult(WireResult<IReadOnlyList<WireOffset>>.Fail(new WireError.Failed("Local_InvalidArg", IsFatal: false)));
         }
 
+        // A broker fails the whole call with Local_NoEnt for a topic it does not know; for one topic that is "not found" (measured on 3.9.2
+        // and 4.4.0, REVIEW-ENG-A 2). The same call about several topics is not modelled: the contract does not prove it.
+        string[] distinctTopics = [.. partitions.Select(static x => x.Topic).Distinct()];
+
+        if (distinctTopics.Length == 1 && Cluster.Topic(distinctTopics[0]) is null)
+        {
+            return Task.FromResult(WireResult<IReadOnlyList<WireOffset>>.Fail(new WireError.NotFound(KafkaResourceType.Topic, distinctTopics[0])));
+        }
+
         List<WireOffset> result = [];
 
         lock (Cluster.Gate)
@@ -217,7 +224,7 @@ internal sealed class FakeKafkaWire(FakeKafkaCluster cluster, string clusterKey)
 
     public IWireScanReader OpenReader(WireReaderOptions options)
     {
-        FakeScanReader reader = new(Cluster, options, "fake-group-" + Interlocked.Increment(ref readersOpened));
+        FakeScanReader reader = new(Cluster, options, "kstudio-" + options.ScanId.ToString("N", System.Globalization.CultureInfo.InvariantCulture));
         lock (Readers)
         {
             Readers.Add(reader);
@@ -253,8 +260,14 @@ internal sealed class FakeKafkaWire(FakeKafkaCluster cluster, string clusterKey)
                 new WireError.NotAuthorized(KafkaAclOperation.Describe, KafkaResourceType.Topic, partition.Topic));
         }
 
+        if (Cluster.OffsetFault?.Invoke(partition, spec, isolation) is { } fault)
+        {
+            return new WireOffset(partition, -1, null, null, fault);
+        }
+
         FakePartition log = topic.Partitions[partition.Partition];
         long limit = isolation == WireIsolation.ReadCommitted ? log.LastStableOffset : log.End;
+        long? Stamp(FakeEntry entry) => Cluster.OmitLookupTimestamps ? null : entry.Record!.TimestampMs;
 
         switch (spec.Kind)
         {
@@ -278,7 +291,7 @@ internal sealed class FakeKafkaWire(FakeKafkaCluster cluster, string clusterKey)
 
                     return best is null
                         ? new WireOffset(partition, -1, null, null, null)
-                        : new WireOffset(partition, best.Offset, best.Record!.TimestampMs, 0, null);
+                        : new WireOffset(partition, best.Offset, Stamp(best), 0, null);
                 }
 
             default:
@@ -287,7 +300,7 @@ internal sealed class FakeKafkaWire(FakeKafkaCluster cluster, string clusterKey)
 
                     return first is null
                         ? new WireOffset(partition, -1, null, null, null)
-                        : new WireOffset(partition, first.Offset, first.Record!.TimestampMs, 0, null);
+                        : new WireOffset(partition, first.Offset, Stamp(first), 0, null);
                 }
         }
     }

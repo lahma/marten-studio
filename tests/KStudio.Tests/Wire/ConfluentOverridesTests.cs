@@ -201,6 +201,66 @@ public class ConfluentOverridesTests
     }
 
     [Fact]
+    public void A_hosts_plugins_and_monitoring_interceptor_are_dropped_from_both_configs_and_reported_by_name_only()
+    {
+        ConsumerConfig host = HostConsumerConfig();
+        host.Set("plugin.library.paths", "monitoring-interceptor");
+        host.Set("confluent.monitoring.interceptor.bootstrap.servers", "monitor:9092");
+        host.Set("confluent.monitoring.interceptor.sasl.password", "very-secret");
+        List<string> reported = [];
+
+        ConsumerConfig consumer = ConfluentClientSettings.BuildConsumerConfig(
+            Definition(host), ScanId, WireIsolation.ReadCommitted, new KafkaScanLimits(), "kstudio-", reported.Add);
+        AdminClientConfig admin = ConfluentClientSettings.BuildAdminConfig(Definition(host), reported.Add);
+
+        foreach (string key in new[] { "plugin.library.paths", "confluent.monitoring.interceptor.bootstrap.servers", "confluent.monitoring.interceptor.sasl.password" })
+        {
+            consumer.Get(key).Should().BeNull(key);
+            admin.Get(key).Should().BeNull(key);
+            reported.Should().Contain(key);
+        }
+
+        reported.Should().NotContain(static x => x.Contains("very-secret", StringComparison.Ordinal) || x.Contains("monitor:9092", StringComparison.Ordinal));
+        consumer.Get("bootstrap.servers").Should().Be("broker:9092");
+    }
+
+    [Fact]
+    public void A_hosts_alias_of_an_overridden_key_is_dropped_so_that_the_engines_value_is_the_only_one()
+    {
+        ConsumerConfig host = HostConsumerConfig();
+        host.Set("fetch.message.max.bytes", "1");
+        host.Set("auto.commit.enable", "true");
+        List<string> reported = [];
+
+        ConsumerConfig config = ConfluentClientSettings.BuildConsumerConfig(
+            Definition(host), ScanId, WireIsolation.ReadCommitted, new KafkaScanLimits(), "kstudio-", reported.Add);
+
+        config.Get("fetch.message.max.bytes").Should().BeNull();
+        config.Get("auto.commit.enable").Should().BeNull();
+        config.Get("max.partition.fetch.bytes").Should().Be("1048576");
+        config.Get("enable.auto.commit").Should().Be("false");
+        reported.Should().Contain(["fetch.message.max.bytes", "auto.commit.enable"]);
+    }
+
+    [Fact]
+    public void The_engines_keys_come_last_in_the_configuration_whatever_order_the_host_set_its_own()
+    {
+        // librdkafka applies the properties in the order given: a freed dictionary slot reused by a later key would let the host win.
+        ConsumerConfig host = HostConsumerConfig();
+        host.Set("fetch.message.max.bytes", "1");
+
+        ConsumerConfig config = ConfluentClientSettings.BuildConsumerConfig(
+            Definition(host), ScanId, WireIsolation.ReadCommitted, new KafkaScanLimits(), "kstudio-");
+
+        string[] keys = [.. config.Select(static x => x.Key)];
+        string[] engineKeys = ["group.id", "enable.auto.commit", "isolation.level", "fetch.max.bytes", "max.partition.fetch.bytes", "auto.offset.reset"];
+
+        int lastHostKey = keys.Select((key, index) => (key, index)).Where(x => !engineKeys.Contains(x.key) && x.key is "bootstrap.servers" or "sasl.username" or "sasl.password").Max(static x => x.index);
+
+        engineKeys.Select(x => Array.IndexOf(keys, x)).Should().OnlyContain(index => index > lastHostKey);
+    }
+
+    [Fact]
     public void The_hosts_instance_is_byte_for_byte_unchanged_and_a_later_change_to_it_is_not_seen()
     {
         ConsumerConfig host = HostConsumerConfig();

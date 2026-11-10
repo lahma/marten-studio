@@ -381,10 +381,73 @@ public abstract class WireContract
         });
 
         WireReadOutcome.Failure failure = outcomes.OfType<WireReadOutcome.Failure>().First();
-        failure.Error.Should().BeOfType<WireError.OffsetOutOfRange>();
+        failure.Error.Should().BeOfType<WireError.OffsetOutOfRange>().Which.Position.Should().BeNull("librdkafka's error does not carry the position; the fake must not invent one");
         failure.Partition.Should().Be(new WirePartition(topic, 0));
         outcomes.OfType<WireReadOutcome.Record>().Select(static x => x.Value.Offset).Should().Equal(5, 6, 7, 8, 9);
         outcomes.OfType<WireReadOutcome.PartitionEnd>().Last().Offset.Should().Be(10);
+    }
+
+    [Fact]
+    public async Task Repositioning_a_partition_that_is_not_assigned_throws_the_engines_exception_with_a_mapped_error()
+    {
+        await using IContractCluster cluster = await OpenAsync();
+        string topic = cluster.NewTopic("unassigned");
+        await cluster.CreateTopicAsync(topic, 2);
+        await cluster.ProduceAsync(topic, 0, Sequence(3));
+
+        WireException? thrown = null;
+
+        await OnReaderThread(cluster, WireIsolation.ReadCommitted, reader =>
+        {
+            reader.Assign([new WirePartitionOffset(topic, 0, 0)]);
+
+            try
+            {
+                reader.Reposition(new WirePartitionOffset(topic, 1, 0));
+            }
+            catch (WireException exception)
+            {
+                thrown = exception;
+            }
+
+            return [];
+        });
+
+        thrown.Should().NotBeNull("a Confluent exception must not cross the seam, and the call must not pass silently");
+        WireError.Failed failed = thrown!.Error.Should().BeOfType<WireError.Failed>().Subject;
+        failed.IsFatal.Should().BeFalse();
+        failed.FailedCode.Should().Be("Local_InvalidArg", "measured on Kafka 3.9.2 and 4.4.0: librdkafka's incremental unassign refuses a partition that is not assigned");
+    }
+
+    [Fact]
+    public async Task Every_wire_call_about_a_missing_topic_answers_not_found_and_creates_nothing()
+    {
+        // Run as a principal that may create topics, on a broker that auto-creates them (REVIEW-ENG-A 2): nothing the engine asks may create one.
+        await using IContractCluster cluster = await OpenAsync();
+        string topic = cluster.NewTopic("absent");
+        WireError notFound = new WireError.NotFound(KafkaResourceType.Topic, topic);
+
+        WireResult<IReadOnlyList<WireTopicDescription>> described = await cluster.Wire.DescribeTopicsAsync([new KafkaTopicName(topic)], Token);
+        described.Error.Should().BeNull();
+        described.Value.Should().ContainSingle().Which.Error.Should().Be(notFound);
+
+        (await cluster.Wire.DescribeTopicConfigAsync(new KafkaTopicName(topic), Token)).Error.Should().Be(notFound);
+
+        foreach (WireIsolation isolation in new[] { WireIsolation.ReadUncommitted, WireIsolation.ReadCommitted })
+        {
+            foreach (WireOffsetSpec spec in new[] { WireOffsetSpec.Earliest, WireOffsetSpec.Latest, WireOffsetSpec.MaxTimestamp, WireOffsetSpec.ForTimestamp(T0) })
+            {
+                WireResult<IReadOnlyList<WireOffset>> offsets = await cluster.Wire.ListOffsetsAsync([new WirePartition(topic, 0)], spec, isolation, Token);
+                offsets.Error.Should().Be(notFound, $"ListOffsets {spec.Kind} at {isolation}");
+            }
+        }
+
+        // A group's offsets for a partition that does not exist are simply not committed: no error, no offset.
+        WireResult<IReadOnlyList<WireGroupOffset>> committed = await cluster.Wire.ListGroupOffsetsAsync("kstudio-absent-group", [new WirePartition(topic, 0)], Token);
+        committed.Error.Should().BeNull();
+        committed.Value.Should().ContainSingle().Which.Committed.Should().BeNull();
+
+        (await cluster.TopicExistsAsync(topic)).Should().BeFalse("no read the engine makes creates a topic");
     }
 
     // ---- helpers ----

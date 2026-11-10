@@ -29,7 +29,7 @@ public class ConfluentScanReaderTests
         CapturingLoggerProvider logs = new();
         ConfluentClientEvents events = new(new KStudioLoggers(logs.CreateFactory()), new KafkaLogOnce(TimeProvider.System), TimeProvider.System);
 
-        return new ConfluentScanReader(cluster, options, new WireReaderOptions(Guid.NewGuid(), WireIsolation.ReadCommitted, new KafkaScanLimits()), events);
+        return new ConfluentScanReader(cluster, KafkaEngineSnapshot.Take(options), new WireReaderOptions(Guid.NewGuid(), WireIsolation.ReadCommitted, new KafkaScanLimits()), events);
     }
 
     [Fact]
@@ -110,12 +110,37 @@ public class ConfluentScanReaderTests
         using IWireScanReader reader = new FakeKafkaWire(cluster, "main").OpenReader(new WireReaderOptions(Guid.NewGuid(), WireIsolation.ReadCommitted, new KafkaScanLimits()));
         reader.Assign([new WirePartitionOffset("orders", 0, 0)]);
 
-        List<WireReadOutcome> outcomes = [reader.Read(TimeSpan.Zero), reader.Read(TimeSpan.Zero), reader.Read(TimeSpan.Zero)];
+        List<WireReadOutcome> outcomes = [reader.Read(TimeSpan.Zero), reader.Read(TimeSpan.Zero), reader.Read(TimeSpan.Zero), reader.Read(TimeSpan.Zero)];
 
-        outcomes[0].Should().BeOfType<WireReadOutcome.Failure>().Which.Error.Should().BeOfType<WireError.NotAuthorized>()
+        // On a broker the refusal arrives after the assign, possibly after records (SPIKE S1), so the fake sends it after the first outcome.
+        outcomes[0].Should().BeOfType<WireReadOutcome.Record>();
+        outcomes[1].Should().BeOfType<WireReadOutcome.Failure>().Which.Error.Should().BeOfType<WireError.NotAuthorized>()
             .Which.ResourceType.Should().Be(KafkaResourceType.Group);
-        outcomes[1].Should().BeOfType<WireReadOutcome.Record>();
         outcomes[2].Should().BeOfType<WireReadOutcome.PartitionEnd>();
+        outcomes[3].Should().BeSameAs(WireReadOutcome.Idle, "exactly one refusal");
+    }
+
+    [Fact]
+    public void Repositioning_a_partition_that_is_not_assigned_throws_the_engines_exception_with_the_mapped_error_on_the_real_reader_too()
+    {
+        using ConfluentScanReader reader = NewReader();
+        reader.Assign([new WirePartitionOffset("orders", 0, 0)]);
+
+        Action reposition = () => reader.Reposition(new WirePartitionOffset("orders", 5, 0));
+
+        reposition.Should().Throw<WireException>().Which.Error.Should().NotBeNull();
+    }
+
+    [Fact]
+    public void The_fake_throws_the_same_exception_for_a_partition_that_is_not_assigned()
+    {
+        FakeKafkaCluster cluster = new(TimeProvider.System);
+        using IWireScanReader reader = new FakeKafkaWire(cluster, "main").OpenReader(new WireReaderOptions(Guid.NewGuid(), WireIsolation.ReadCommitted, new KafkaScanLimits()));
+        reader.Assign([new WirePartitionOffset("orders", 0, 0)]);
+
+        Action reposition = () => reader.Reposition(new WirePartitionOffset("orders", 5, 0));
+
+        reposition.Should().Throw<WireException>();
     }
 
     [Fact]

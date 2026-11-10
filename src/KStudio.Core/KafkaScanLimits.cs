@@ -65,6 +65,9 @@ public sealed class KafkaScanLimits
     /// <summary>How long a partition may make no progress before it is reported stalled (1 second to 5 minutes). Default 15 seconds.</summary>
     public TimeSpan PartitionStallTimeout { get; set; } = TimeSpan.FromSeconds(15);
 
+    /// <summary>A copy of every value, for the engine's snapshot of the options.</summary>
+    internal KafkaScanLimits Copy() => (KafkaScanLimits) MemberwiseClone();
+
     /// <summary>The problems with these limits, each naming its property; empty when they are all inside their bounds.</summary>
     /// <param name="prefix">What precedes a property name in a message, for example <c>Limits.</c>.</param>
     internal IReadOnlyList<string> Validate(string prefix = "Limits.")

@@ -2,9 +2,12 @@ using Confluent.Kafka;
 
 using KStudio.Core.Clusters;
 using KStudio.Core.Wire.Confluent;
+using KStudio.Tests.Contract;
+using KStudio.Tests.Support.FakeKafka;
 
 using MartenStudio.Tests.Support;
 
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 using PostgresStudio.Tests.Support;
@@ -55,7 +58,76 @@ public class AdminPoolTests
 
         public bool Disposed { get; private set; }
 
-        public void Dispose() => Disposed = true;
+        public bool ThrowOnDispose { get; set; }
+
+        public void Dispose()
+        {
+            Disposed = true;
+
+            if (ThrowOnDispose)
+            {
+                throw new InvalidOperationException("librdkafka refused to tear down");
+            }
+        }
+    }
+
+    [Fact]
+    public void A_synchronous_dispose_of_the_pool_disposes_every_client_and_refuses_new_leases()
+    {
+        Rig rig = new();
+        rig.Pool.Rent(Cluster("a")).Dispose();
+
+        rig.Pool.Dispose();
+
+        rig.Created.Should().OnlyContain(static x => x.Disposed);
+        Action rent = () => rig.Pool.Rent(Cluster("a"));
+        rent.Should().Throw<ObjectDisposedException>();
+        rig.Pool.Dispose();
+    }
+
+    [Fact]
+    public void A_client_that_throws_on_dispose_does_not_stop_the_others_and_is_logged_at_debug()
+    {
+        Rig rig = new();
+        rig.Pool.Rent(Cluster("a")).Dispose();
+        rig.Pool.Rent(Cluster("b")).Dispose();
+        rig.Created.Single(static x => x.Cluster == "a").ThrowOnDispose = true;
+
+        Action dispose = rig.Pool.Dispose;
+
+        dispose.Should().NotThrow();
+        rig.Created.Should().OnlyContain(static x => x.Disposed, "the failing client did not stop the other");
+        CapturedLogEntry entry = rig.Logs.Entries.Single(static x => x.EventId.Id == 9664);
+        entry.Level.Should().Be(LogLevel.Debug);
+        entry.Message.Should().Contain("cluster a");
+    }
+
+    [Fact]
+    public void The_reaper_survives_a_client_that_throws_on_dispose_and_goes_on_reaping()
+    {
+        Rig rig = new();
+        rig.Pool.Rent(Cluster("a")).Dispose();
+        rig.Pool.Rent(Cluster("b")).Dispose();
+        rig.Created.Single(static x => x.Cluster == "a").ThrowOnDispose = true;
+
+        Action advance = () => rig.Clock.Advance(Idle);
+
+        advance.Should().NotThrow("a timer callback that throws ends the process");
+        rig.Created.Should().OnlyContain(static x => x.Disposed);
+        rig.Pool.ClientCount.Should().Be(0);
+        rig.Logs.Entries.Where(static x => x.EventId.Id == 9664).Should().ContainSingle();
+        rig.Logs.Entries.Where(static x => x.EventId.Id == 9651).Should().ContainSingle("only the client that disposed cleanly is reported as disposed");
+    }
+
+    [Fact]
+    public void The_registered_pool_is_disposed_by_a_synchronous_service_provider_dispose()
+    {
+        EngineHarness harness = EngineHarness.ForWire(new FakeKafkaWire(new FakeKafkaCluster(TimeProvider.System), EngineHarness.ClusterKey));
+        _ = harness.Provider.GetRequiredService<KafkaAdminPool<IAdminClient>>();
+
+        Action dispose = harness.Provider.Dispose;
+
+        dispose.Should().NotThrow("a singleton that is only IAsyncDisposable makes ServiceProvider.Dispose() throw");
     }
 
     [Fact]

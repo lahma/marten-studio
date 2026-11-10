@@ -23,12 +23,12 @@ internal sealed class ConfluentScanReader : IWireScanReader
 
     /// <summary>Builds the consumer; nothing is fetched until <see cref="Assign" />.</summary>
     /// <param name="cluster">The cluster.</param>
-    /// <param name="options">The engine options (the group id prefix).</param>
+    /// <param name="options">The engine options as validated (the group id prefix).</param>
     /// <param name="readerOptions">The scan's id, isolation and limits.</param>
     /// <param name="events">The engine's log and error handlers.</param>
     public ConfluentScanReader(
         KafkaClusterDefinition cluster,
-        KafkaEngineOptions options,
+        KafkaEngineSnapshot options,
         WireReaderOptions readerOptions,
         ConfluentClientEvents events)
     {
@@ -53,8 +53,18 @@ internal sealed class ConfluentScanReader : IWireScanReader
             builder.SetOAuthBearerTokenRefreshHandler((client, text) => ConfluentWireFactory.RefreshToken(refresh, client, text, key, "scan", events));
         }
 
-        consumer = builder.Build();
+        try
+        {
+            consumer = builder.Build();
+        }
+        catch (KafkaException exception)
+        {
+            throw new WireException(ConfluentErrors.Map(exception.Error, WireCall.Fetch));
+        }
     }
+
+    /// <summary>The scan's consumer group id, which only the refusal of a group ACL names.</summary>
+    internal string GroupId => groupId;
 
     /// <inheritdoc />
     public void Assign(IReadOnlyList<WirePartitionOffset> start)
@@ -65,24 +75,40 @@ internal sealed class ConfluentScanReader : IWireScanReader
             ArgumentOutOfRangeException.ThrowIfNegative(position.Offset, nameof(start));
         }
 
-        consumer.Assign(start.Select(static x => new TopicPartitionOffset(x.Topic, x.Partition, x.Offset)).ToList());
+        Mapped(() => consumer.Assign(start.Select(static x => new TopicPartitionOffset(x.Topic, x.Partition, x.Offset)).ToList()));
     }
 
     /// <inheritdoc />
     public void Pause(IReadOnlyList<WirePartition> partitions) =>
-        consumer.Pause(partitions.Select(static x => new TopicPartition(x.Topic, x.Partition)).ToList());
+        Mapped(() => consumer.Pause(partitions.Select(static x => new TopicPartition(x.Topic, x.Partition)).ToList()));
 
     /// <inheritdoc />
     public void Resume(IReadOnlyList<WirePartition> partitions) =>
-        consumer.Resume(partitions.Select(static x => new TopicPartition(x.Topic, x.Partition)).ToList());
+        Mapped(() => consumer.Resume(partitions.Select(static x => new TopicPartition(x.Topic, x.Partition)).ToList()));
 
     /// <inheritdoc />
     public void Reposition(WirePartitionOffset position)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(position.Offset, nameof(position));
 
-        consumer.IncrementalUnassign([new TopicPartition(position.Topic, position.Partition)]);
-        consumer.IncrementalAssign([new TopicPartitionOffset(position.Topic, position.Partition, position.Offset)]);
+        Mapped(() =>
+        {
+            consumer.IncrementalUnassign([new TopicPartition(position.Topic, position.Partition)]);
+            consumer.IncrementalAssign([new TopicPartitionOffset(position.Topic, position.Partition, position.Offset)]);
+        });
+    }
+
+    /// <summary>Runs a consumer call and turns a Confluent exception into the engine's <see cref="WireException" />.</summary>
+    private static void Mapped(Action call)
+    {
+        try
+        {
+            call();
+        }
+        catch (KafkaException exception)
+        {
+            throw new WireException(ConfluentErrors.Map(exception.Error, WireCall.Fetch));
+        }
     }
 
     /// <inheritdoc />

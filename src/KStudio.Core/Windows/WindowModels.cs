@@ -93,9 +93,17 @@ internal abstract record WindowNote
     public sealed record CreateTimeMargin(string Topic, int Partition, TimeSpan Margin, long EndOffset) : WindowNote
     {
         /// <inheritdoc />
-        public override string Text => string.Create(
-            CultureInfo.InvariantCulture,
-            $"A record stamped more than {Span(Margin)} before a later one is not found after offset {EndOffset}");
+        public override string Text => Margin > TimeSpan.Zero
+            ? string.Create(CultureInfo.InvariantCulture, $"A record stamped more than {Span(Margin)} before a later one is not found after offset {EndOffset}")
+            : string.Create(CultureInfo.InvariantCulture, $"No margin is read past the window's end: a record stamped earlier than one before offset {EndOffset} but appended after it is not found");
+    }
+
+    /// <summary>The partitions a window reads are the ones its topics had when it was resolved.</summary>
+    /// <param name="ResolvedAt">When the window was resolved.</param>
+    public sealed record PartitionsFixed(DateTimeOffset ResolvedAt) : WindowNote
+    {
+        /// <inheritdoc />
+        public override string Text => "A partition added after " + Time(ResolvedAt) + " is not read: a window reads the partitions its topics had when it was resolved";
     }
 
     /// <summary>The topic is compacted.</summary>

@@ -38,6 +38,18 @@ internal sealed class KafkaWireReads(
             async ct => Observe(cluster, WireCall.Metadata, await wires.For(cluster).GetMetadataAsync(ct).ConfigureAwait(false)),
             cancellationToken);
 
+    /// <summary>
+    /// Metadata for all topics, read now: the cached answer is dropped first. A scan's partitions are fixed when its window is resolved,
+    /// so the window must not be built on an answer up to a refresh interval old (a partition added in between would never be read).
+    /// </summary>
+    /// <param name="cluster">The cluster's key.</param>
+    /// <param name="cancellationToken">Abandons this caller's wait.</param>
+    public Task<WireResult<WireMetadata>> FreshMetadataAsync(string cluster, CancellationToken cancellationToken)
+    {
+        cache.Invalidate(cluster + "|metadata");
+        return MetadataAsync(cluster, cancellationToken);
+    }
+
     /// <summary>One kind of offset for some partitions of a topic.</summary>
     /// <param name="cluster">The cluster's key.</param>
     /// <param name="topic">The topic.</param>

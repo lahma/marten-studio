@@ -157,6 +157,15 @@ internal sealed class FakeKafkaCluster(TimeProvider clock)
     /// <summary>When set, a reader's first fetch returns a group refusal and then carries on, as a principal with no group ACL does (SPIKE S1).</summary>
     public bool RefuseGroupOnFetch { get; set; }
 
+    /// <summary>When set, a time look-up (<c>ForTimestamp</c>, <c>MaxTimestamp</c>) answers its offset without the record's timestamp, as a broker may.</summary>
+    public bool OmitLookupTimestamps { get; set; }
+
+    /// <summary>
+    /// When set and it returns an error, that list-offsets answer carries the error for that partition only, the way a broker fails one
+    /// partition (or one isolation level) of a call that otherwise succeeds.
+    /// </summary>
+    public Func<WirePartition, WireOffsetSpec, WireIsolation, WireError?>? OffsetFault { get; set; }
+
     public IReadOnlyList<FakeCall> Calls
     {
         get

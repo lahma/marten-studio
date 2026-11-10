@@ -45,7 +45,7 @@ public abstract class KafkaFixture : IAsyncLifetime
     /// <summary>The newest 4.x release.</summary>
     public const string Image4 = "apache/kafka:4.4.0";
 
-    private static readonly string[] UserNames = ["admin", "reader", "configreader", "nogroup"];
+    private static readonly string[] UserNames = ["admin", "reader", "configreader", "nogroup", "describeonly"];
 
     private KafkaContainer? container;
     private string[] volumes = [];
@@ -133,7 +133,7 @@ public abstract class KafkaFixture : IAsyncLifetime
     }
 
     /// <summary>A client configuration for a principal, pointing at this broker.</summary>
-    /// <param name="user">The principal: <c>admin</c>, <c>reader</c>, <c>configreader</c> or <c>nogroup</c>.</param>
+    /// <param name="user">The principal: <c>admin</c>, <c>reader</c>, <c>configreader</c>, <c>nogroup</c> or <c>describeonly</c>.</param>
     public ClientConfig Client(string user) => ClientFor(Bootstrap, user, Password(user));
 
     /// <summary>A client configuration with a given user and password, for a wrong-password test.</summary>
@@ -210,7 +210,7 @@ public abstract class KafkaFixture : IAsyncLifetime
         }
     }
 
-    /// <summary>ACLs, all ALLOW and PREFIXED: <c>reader</c> READ; <c>configreader</c> READ plus DESCRIBE_CONFIGS; <c>nogroup</c> READ with no group ACL (SPIKE S1).</summary>
+    /// <summary>ACLs, all ALLOW and PREFIXED: <c>reader</c> READ; <c>configreader</c> READ plus DESCRIBE_CONFIGS; <c>nogroup</c> READ with no group ACL (SPIKE S1); <c>describeonly</c> DESCRIBE on the topics and READ on the groups, but no READ on a topic.</summary>
     private async Task CreateAclsAsync()
     {
         using IAdminClient admin = new AdminClientBuilder(Client("admin")).Build();
@@ -222,6 +222,8 @@ public abstract class KafkaFixture : IAsyncLifetime
         Allow(bindings, "configreader", ResourceType.Topic, "ks.", AclOperation.DescribeConfigs);
         Allow(bindings, "configreader", ResourceType.Group, "kstudio-", AclOperation.Read);
         Allow(bindings, "nogroup", ResourceType.Topic, "ks.", AclOperation.Read);
+        Allow(bindings, "describeonly", ResourceType.Topic, "ks.", AclOperation.Describe);
+        Allow(bindings, "describeonly", ResourceType.Group, "kstudio-", AclOperation.Read);
 
         // Creating an ACL that exists is not an error, so a reused container is fine.
         await admin.CreateAclsAsync(bindings);

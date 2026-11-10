@@ -37,6 +37,7 @@
   <ItemGroup>
     <Compile Include="../KStudio.Tests/Contract/WireContract.cs" Link="Contract/WireContract.cs" />
     <Compile Include="../KStudio.Tests/Contract/WindowContract.cs" Link="Contract/WindowContract.cs" />
+    <Compile Include="../KStudio.Tests/Contract/ReaderAclContract.cs" Link="Contract/ReaderAclContract.cs" />
     <Compile Include="../KStudio.Tests/Contract/IContractCluster.cs" Link="Contract/IContractCluster.cs" />
     <Compile Include="../KStudio.Tests/Contract/EngineHarness.cs" Link="Contract/EngineHarness.cs" />
     <Compile Include="../MartenStudio.Tests/Support/CapturingLoggerProvider.cs" Link="Support/Linked/CapturingLoggerProvider.cs" />

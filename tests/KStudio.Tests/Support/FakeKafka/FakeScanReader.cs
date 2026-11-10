@@ -17,6 +17,7 @@ internal sealed class FakeScanReader(FakeKafkaCluster cluster, WireReaderOptions
     private readonly HashSet<WirePartition> refused = [];
     private readonly List<int> threads = [];
     private bool groupRefusalSent;
+    private bool anyOutcome;
     private int cursor;
 
     public WireReaderOptions Options { get; } = options;
@@ -68,6 +69,13 @@ internal sealed class FakeScanReader(FakeKafkaCluster cluster, WireReaderOptions
     {
         Touch();
         ArgumentOutOfRangeException.ThrowIfNegative(position.Offset, nameof(position));
+
+        // The real consumer cannot unassign what it was not assigned: the engine's WireException carries the mapped error.
+        if (!positions.ContainsKey(position.Key))
+        {
+            throw new WireException(new WireError.Failed("Local_InvalidArg", IsFatal: false));
+        }
+
         positions[position.Key] = position.Offset;
         stalled.Remove(position.Key);
         endReported.Remove(position.Key);
@@ -77,13 +85,22 @@ internal sealed class FakeScanReader(FakeKafkaCluster cluster, WireReaderOptions
     {
         Touch();
 
-        if (Cluster.RefuseGroupOnFetch && !groupRefusalSent)
+        // On a broker the one group refusal arrives about half a second after the assign, so after the first records (SPIKE S1): the fake
+        // sends it on the first read after an outcome, never before one.
+        if (Cluster.RefuseGroupOnFetch && !groupRefusalSent && anyOutcome)
         {
             groupRefusalSent = true;
             return new WireReadOutcome.Failure(
                 new WireError.NotAuthorized(KafkaAclOperation.Describe, KafkaResourceType.Group, GroupId), null);
         }
 
+        WireReadOutcome result = ReadNext();
+        anyOutcome |= result != WireReadOutcome.Idle;
+        return result;
+    }
+
+    private WireReadOutcome ReadNext()
+    {
         List<WirePartition> keys = [.. positions.Keys.OrderBy(static x => x.Topic, StringComparer.Ordinal).ThenBy(static x => x.Partition)];
 
         for (int attempt = 0; attempt < keys.Count; attempt++)
@@ -151,7 +168,8 @@ internal sealed class FakeScanReader(FakeKafkaCluster cluster, WireReaderOptions
             if (position < log.LogStart)
             {
                 stalled.Add(key);
-                return new WireReadOutcome.Failure(new WireError.OffsetOutOfRange(key, position), key);
+                // The real reader leaves the position null: librdkafka's error does not carry it (REVIEW-ENG-A 5a).
+                return new WireReadOutcome.Failure(new WireError.OffsetOutOfRange(key, null), key);
             }
 
             long limit = Options.Isolation == WireIsolation.ReadCommitted ? log.LastStableOffset : log.End;

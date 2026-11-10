@@ -28,11 +28,11 @@ public class WindowResolverTests
 
     private sealed class Rig : IAsyncDisposable
     {
-        public Rig()
+        public Rig(TimeSpan? catalogTimeToLive = null)
         {
             Clock = new ManualTimeProvider(new DateTimeOffset(2026, 11, 9, 12, 0, 0, TimeSpan.Zero));
             Cluster = new FakeKafkaCluster(Clock);
-            Engine = EngineHarness.ForWire(new FakeKafkaWire(Cluster, EngineHarness.ClusterKey), Clock);
+            Engine = EngineHarness.ForWire(new FakeKafkaWire(Cluster, EngineHarness.ClusterKey), Clock, catalogTimeToLive);
         }
 
         public ManualTimeProvider Clock { get; }
@@ -262,6 +262,97 @@ public class WindowResolverTests
     public void A_margin_is_written_as_seconds_minutes_or_hours(double seconds, string expected)
     {
         WindowNote.Span(TimeSpan.FromSeconds(seconds)).Should().Be(expected);
+    }
+
+    [Fact]
+    public async Task A_create_time_window_with_no_margin_still_says_that_a_record_appended_after_the_end_may_be_missed()
+    {
+        await using Rig rig = new();
+        rig.Cluster.CreateTopic("a", 1);
+        rig.Seed("a", 0, 0, 10, 20, 30);
+
+        ResolvedWindow resolved = await rig.Resolve(0, 15, TimeSpan.Zero, KafkaIsolation.Committed, "a");
+
+        WindowNote.CreateTimeMargin note = resolved.Ranges.Single().Notes.OfType<WindowNote.CreateTimeMargin>().Should().ContainSingle().Subject;
+        note.Margin.Should().Be(TimeSpan.Zero);
+        note.Text.Should().Be("No margin is read past the window's end: a record stamped earlier than one before offset 2 but appended after it is not found");
+    }
+
+    [Fact]
+    public async Task A_log_append_time_window_has_no_margin_note_at_margin_zero()
+    {
+        await using Rig rig = new();
+        rig.Cluster.CreateTopic("a", 1, new Dictionary<string, string> { ["message.timestamp.type"] = "LogAppendTime" });
+        rig.Seed("a", 0, 0, 10, 20, 30);
+
+        ResolvedWindow resolved = await rig.Resolve(0, 15, TimeSpan.Zero, KafkaIsolation.Committed, "a");
+
+        resolved.AllNotes.Should().NotContain(static x => x is WindowNote.CreateTimeMargin);
+    }
+
+    [Fact]
+    public async Task A_retention_gap_is_reported_even_when_the_broker_returns_no_timestamp_for_the_first_record()
+    {
+        await using Rig rig = new();
+        rig.Cluster.CreateTopic("a", 1);
+        rig.Seed("a", 0, 0, 10, 20, 30);
+        rig.Cluster.DeleteRecords("a", 0, 2);
+        rig.Cluster.OmitLookupTimestamps = true;
+
+        ResolvedWindow resolved = await rig.Resolve(0, 100, TimeSpan.Zero, KafkaIsolation.Committed, "a");
+
+        WindowNote.RetentionGap gap = resolved.AllNotes.OfType<WindowNote.RetentionGap>().Should().ContainSingle().Subject;
+        gap.EarliestTimestamp.Should().BeNull();
+        gap.Text.Should().Be("Records before offset 2 are gone (retention): the earliest retained record is offset 2");
+    }
+
+    [Fact]
+    public async Task A_retention_gap_is_not_reported_when_the_first_retained_record_is_inside_the_window()
+    {
+        await using Rig rig = new();
+        rig.Cluster.CreateTopic("a", 1);
+        rig.Seed("a", 0, 0, 10, 20, 30);
+        rig.Cluster.DeleteRecords("a", 0, 2);
+
+        ResolvedWindow resolved = await rig.Resolve(20, 100, TimeSpan.Zero, KafkaIsolation.Committed, "a");
+
+        resolved.AllNotes.Should().NotContain(static x => x is WindowNote.RetentionGap, "the first retained record (20 s) is at the window's start");
+    }
+
+    [Fact]
+    public async Task A_last_stable_offset_a_broker_refuses_for_one_partition_refuses_the_topic_instead_of_reading_to_the_high_watermark()
+    {
+        await using Rig rig = new();
+        rig.Cluster.CreateTopic("a", 1);
+        rig.Seed("a", 0, 0, 10);
+        WireError error = new WireError.Unavailable("OffsetNotAvailable", Retriable: true);
+        rig.Cluster.OffsetFault = (_, spec, isolation) => spec.Kind == WireOffsetSpecKind.Latest && isolation == WireIsolation.ReadCommitted ? error : null;
+
+        ResolvedWindow committed = await rig.Resolve(0, 100, TimeSpan.Zero, KafkaIsolation.Committed, "a");
+        ResolvedWindow uncommitted = await rig.Resolve(0, 100, TimeSpan.Zero, KafkaIsolation.IncludeUncommitted, "a");
+
+        committed.Topics.Single().Refusal.Should().Be(error);
+        committed.Ranges.Should().BeEmpty();
+        uncommitted.Topics.Single().Refusal.Should().BeNull("without read_committed the last stable offset is not asked for");
+        uncommitted.Ranges.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task A_window_reads_fresh_metadata_so_a_partition_added_since_the_catalog_last_read_is_included_and_it_says_when_the_partitions_were_fixed()
+    {
+        Rig rig = new(catalogTimeToLive: TimeSpan.FromMinutes(5));
+        await using (rig)
+        {
+            rig.Cluster.CreateTopic("a", 1);
+            (await rig.Engine.Catalog.ListTopicsAsync(EngineHarness.ClusterKey, Token)).Should().NotBeNull();
+            rig.Cluster.CreateTopic("a", 3);
+
+            ResolvedWindow resolved = await rig.Resolve(0, 100, TimeSpan.Zero, KafkaIsolation.Committed, "a");
+
+            resolved.Ranges.Select(static x => x.Partition).Order().Should().Equal(0, 1, 2);
+            resolved.Notes.OfType<WindowNote.PartitionsFixed>().Should().ContainSingle().Which.Text.Should().Be(
+                "A partition added after 2026-11-09 12:00:00Z is not read: a window reads the partitions its topics had when it was resolved");
+        }
     }
 
     [Fact]

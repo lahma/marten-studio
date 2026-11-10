@@ -34,7 +34,14 @@ internal sealed class KafkaClusterRegistry
         }
 
         Clusters = clusters;
+        Settings = KafkaEngineSnapshot.Take(options);
     }
+
+    /// <summary>
+    /// The options' values at validation. The engine reads its timings, group id prefix and limits from here only, so that a write to the
+    /// options after validation changes nothing.
+    /// </summary>
+    public KafkaEngineSnapshot Settings { get; }
 
     /// <summary>Every cluster, in the order the host added them.</summary>
     public IReadOnlyList<KafkaClusterDefinition> Clusters { get; }
