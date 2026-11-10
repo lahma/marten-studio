@@ -25,7 +25,7 @@ internal static partial class KafkaEngineOptionsValidation
             problems.Add("At least one Kafka cluster is required: call AddCluster.");
         }
 
-        if (!GroupIdPrefixPattern().IsMatch(options.GroupIdPrefix ?? string.Empty) || options.GroupIdPrefix is null)
+        if (options.GroupIdPrefix is null || !GroupIdPrefixPattern().IsMatch(options.GroupIdPrefix))
         {
             problems.Add("GroupIdPrefix must be at most 100 characters of letters, digits, '.', '_' and '-'.");
         }

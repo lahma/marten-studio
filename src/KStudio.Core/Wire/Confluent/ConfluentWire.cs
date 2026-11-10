@@ -262,7 +262,7 @@ internal sealed class ConfluentWire(
 
     /// <inheritdoc />
     public IWireScanReader OpenReader(WireReaderOptions readerOptions) =>
-        new ConfluentScanReader(cluster, options, readerOptions, events, loggers);
+        new ConfluentScanReader(cluster, options, readerOptions, events);
 
     private static WireTopicDescription Describe(TopicDescription description) => new(
         description.Name,

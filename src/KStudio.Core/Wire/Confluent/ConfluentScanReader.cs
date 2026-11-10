@@ -1,7 +1,6 @@
 using Confluent.Kafka;
 
 using KStudio.Core.Clusters;
-using KStudio.Core.Logging;
 
 namespace KStudio.Core.Wire.Confluent;
 
@@ -27,16 +26,12 @@ internal sealed class ConfluentScanReader : IWireScanReader
     /// <param name="options">The engine options (the group id prefix).</param>
     /// <param name="readerOptions">The scan's id, isolation and limits.</param>
     /// <param name="events">The engine's log and error handlers.</param>
-    /// <param name="loggers">Unused by the reader itself; kept for the scan engine's seam.</param>
     public ConfluentScanReader(
         KafkaClusterDefinition cluster,
         KafkaEngineOptions options,
         WireReaderOptions readerOptions,
-        ConfluentClientEvents events,
-        KStudioLoggers loggers)
+        ConfluentClientEvents events)
     {
-        _ = loggers;
-
         ConsumerConfig config = ConfluentClientSettings.BuildConsumerConfig(
             cluster,
             readerOptions.ScanId,
