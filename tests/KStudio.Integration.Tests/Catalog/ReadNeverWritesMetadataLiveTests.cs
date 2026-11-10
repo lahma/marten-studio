@@ -3,10 +3,14 @@ using Confluent.Kafka.Admin;
 
 using KStudio.Core.Catalog;
 using KStudio.Core.Clusters;
+using KStudio.Core.Logging;
 using KStudio.Core.Wire;
+using KStudio.Core.Wire.Confluent;
 using KStudio.Core.Windows;
 using KStudio.Integration.Tests.Support;
 using KStudio.Tests.Contract;
+
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace KStudio.Integration.Tests.Catalog;
 
@@ -66,40 +70,24 @@ public abstract class ReadNeverWritesMetadataLiveTests(KafkaFixture fixture)
     }
 
     [Fact]
-    public async Task The_control_proves_a_default_consumer_that_subscribes_would_create_the_topic_which_is_why_the_engine_never_subscribes()
+    public async Task The_engines_admin_client_does_not_create_a_topic_even_when_asked_about_it_by_name()
     {
+        // The engine never makes this request (ForbiddenConfluentCallsTests), so this is the admin override's own test: with
+        // allow.auto.create.topics deleted from ConfluentClientSettings.BuildAdminConfig, the topic exists afterwards, as the control above shows.
         await using LiveContractCluster cluster = LiveContractCluster.Open(fixture);
-        string topic = cluster.NewTopic("ctl-subscribe");
+        string topic = cluster.NewTopic("override");
 
-        ConsumerConfig config = new(fixture.Client("admin")) { GroupId = "kstudio-ctl-" + fixture.RunId, AllowAutoCreateTopics = true, AutoOffsetReset = AutoOffsetReset.Earliest };
+        KafkaEngineOptions options = new();
+        options.AddCluster("live", fixture.Client("admin"));
+        KafkaClusterDefinition definition = new KafkaClusterRegistry(options).Get("live");
+        ConfluentClientEvents events = new(new KStudioLoggers(NullLoggerFactory.Instance), new KafkaLogOnce(TimeProvider.System), TimeProvider.System);
 
-        await Task.Factory.StartNew(
-            () =>
-            {
-                using IConsumer<byte[], byte[]> consumer = new ConsumerBuilder<byte[], byte[]>(config).Build();
-                consumer.Subscribe(topic);
-                DateTime deadline = DateTime.UtcNow.AddSeconds(30);
+        using (IAdminClient admin = ConfluentWireFactory.BuildAdminClient(definition, events))
+        {
+            admin.GetMetadata(topic, TimeSpan.FromSeconds(10));
+        }
 
-                while (DateTime.UtcNow < deadline && !TopicsExist(fixture, topic))
-                {
-                    try
-                    {
-                        consumer.Consume(TimeSpan.FromMilliseconds(250));
-                    }
-                    catch (ConsumeException)
-                    {
-                        // "Subscribed topic not available" until the broker has created it; the poll is the wait.
-                    }
-                }
-
-                consumer.Close();
-            },
-            CancellationToken.None,
-            TaskCreationOptions.LongRunning,
-            TaskScheduler.Default);
-
-        TopicsExist(fixture, topic).Should().BeTrue("a subscribing consumer's metadata request auto-creates the topic here");
-        await DeleteAsync(topic);
+        TopicsExist(fixture, topic).Should().BeFalse("the engine's admin client is built with allow.auto.create.topics=false");
     }
 
     [Fact]

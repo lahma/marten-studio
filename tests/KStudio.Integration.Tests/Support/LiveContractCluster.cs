@@ -75,6 +75,10 @@ internal sealed class LiveContractCluster : IContractCluster
         {
             topics.Add(topic);
         }
+
+        // CreateTopics returns before every broker serves the topic's metadata: a DescribeConfigs straight after can answer "unknown topic"
+        // (seen once on 3.9.2). Wait, bounded, until the topic is listed (a condition, not a delay).
+        SpinWait.SpinUntil(() => TopicExists(fixture, topic), TimeSpan.FromSeconds(30)).Should().BeTrue("the broker lists the topic that was just created");
     }
 
     public Task<bool> TopicExistsAsync(string topic) => Task.FromResult(TopicExists(fixture, topic));
