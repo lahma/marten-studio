@@ -22,8 +22,24 @@
     <PackageReference Include="Testcontainers.Kafka" />
   </ItemGroup>
 
+  <!-- Not a package: the shared framework brings the container and logging implementations the engine's real registration is run with
+       (KStudio.Core itself has no framework reference, which KStudioCoreFenceTests holds). -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="../../src/KStudio.Core/KStudio.Core.csproj" />
+  </ItemGroup>
+
+  <!-- The contract suites run here on real brokers: WireContract and WindowContract are compiled into this assembly from the fast suite's
+       sources, with the harness they run over. The fake is not linked, so the live suite can only run them on a broker. -->
+  <ItemGroup>
+    <Compile Include="../KStudio.Tests/Contract/WireContract.cs" Link="Contract/WireContract.cs" />
+    <Compile Include="../KStudio.Tests/Contract/WindowContract.cs" Link="Contract/WindowContract.cs" />
+    <Compile Include="../KStudio.Tests/Contract/IContractCluster.cs" Link="Contract/IContractCluster.cs" />
+    <Compile Include="../KStudio.Tests/Contract/EngineHarness.cs" Link="Contract/EngineHarness.cs" />
+    <Compile Include="../MartenStudio.Tests/Support/CapturingLoggerProvider.cs" Link="Support/Linked/CapturingLoggerProvider.cs" />
   </ItemGroup>
 
 </Project>

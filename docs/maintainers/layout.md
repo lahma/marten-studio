@@ -345,8 +345,34 @@ src/KStudio.Core/                        KStudio's engine (D36): catalog, window
                                          seam. No ASP.NET Core, no studio, no Npgsql (KStudioCoreFenceTests); not packed (K8)
 tests/KStudio.Tests/                     KStudio's fast suite: the engine against the hand-written fake broker, the fences
                                          and the public API baseline. No Docker
+src/KStudio.Core/Wire/                   The wire seam (D36): IKafkaWire, the reader, the error values and the neutral records; no
+                                         Confluent type crosses it
+src/KStudio.Core/Wire/Confluent/         The one implementation over Confluent.Kafka: the overrides (D37), the role filter for host
+                                         configuration, the error table, the admin pool, the wire and the scan reader
+src/KStudio.Core/Clusters/               The registered clusters: keys and names, the cloned host configuration split by role, the
+                                         option bounds and the container registration
+src/KStudio.Core/Catalog/                The catalog and overview reads: the cached reads, the ACL table and its sentences, the
+                                         overview records and the throughput samples
+src/KStudio.Core/Windows/                Window resolution (D38): a time window to offsets per partition, and the notes that say what a
+                                         "no match" could be missing
+src/KStudio.Core/Logging/                The engine's log events 9650 to 9699, the bounded log values and the log-once helper
 tests/KStudio.Tests/Conventions/         KStudio's fences and convention scans
 tests/KStudio.Tests/Verify/              KStudio.Core's public API baseline
+tests/KStudio.Tests/Support/             Test helpers the fast suite shares
+tests/KStudio.Tests/Support/FakeKafka/   The hand-written fake broker (D36): topics as logs, transactions, configs, groups and an ACL
+                                         table, with a wire and a scan reader over it
+tests/KStudio.Tests/Contract/            WireContract and WindowContract, run on the fake here and on real brokers by the live suite, and
+                                         the harness they run over
+tests/KStudio.Tests/Wire/                The overrides, the role filter, the error table, the forbidden-call IL scan and the reader
+tests/KStudio.Tests/Clusters/            Registration, key formats and the admin pool
+tests/KStudio.Tests/Catalog/             The overview reads, the ACL table, the snapshot cache and the throughput samples
+tests/KStudio.Tests/Windows/             Window resolution on the fake
+tests/KStudio.Tests/Logging/             The engine's log events and the parity of its log values with the studios'
 tests/KStudio.Integration.Tests/         KStudio's live suite: apache/kafka 3.9 and 4.x with SASL and ACLs, through
                                          Testcontainers.Kafka; needs Docker
+tests/KStudio.Integration.Tests/Support/  The broker fixtures, one per image, the live contract cluster and the harness tests
+tests/KStudio.Integration.Tests/Wire/    WireContract on real brokers
+tests/KStudio.Integration.Tests/Windows/  WindowContract on real brokers
+tests/KStudio.Integration.Tests/Catalog/  The catalog as principals with different ACLs, and metadata that creates nothing
+tests/KStudio.Integration.Tests/Scanning/  Retention before a scan (the scan engine's live tests come with it)
 ```
