@@ -18,6 +18,7 @@ build/                                   The Fallout orchestrator. `build/` is a
   Build.Publish.cs                       Pack (the three packages) + the in-build nuget.org OIDC token exchange (D15)
   Build.Marten.cs                        --marten-version: the floor, the latest-tested Marten or an exact one (D3)
   Build.Npgsql.cs                        --npgsql-version and NpgsqlPass, PostgresStudio's latest-Npgsql pass (D30)
+  Build.Confluent.cs                     --confluent-version: KStudio's floor, latest-tested Confluent.Kafka or an exact one (D36)
 build/Extensions/                        Vendored Cake helpers (StringExtensions) - do not edit
 src/                                     The shipped libraries, and nothing else: the shared studio and MartenStudio
 src/PostgresStudio.Diagnostics/          The diagnostics engine, with no ASP.NET Core (0.11-C, issue #29): the health sweep and its
