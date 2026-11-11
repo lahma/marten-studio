@@ -38,6 +38,16 @@ public class ScanBatchingTests
         }
     }
 
+    // The collector adds under the lock, so whoever enumerates takes a copy under it: enumerating the list itself throws "Collection was modified"
+    // whenever a batch lands in the middle (KS-CI-FIX-2).
+    private static List<KafkaScanBatch> Snapshot(List<KafkaScanBatch> batches)
+    {
+        lock (batches)
+        {
+            return [.. batches];
+        }
+    }
+
     [Fact]
     public async Task A_batch_is_handed_over_at_most_once_per_quarter_second_however_often_the_scan_changes()
     {
@@ -56,8 +66,9 @@ public class ScanBatchingTests
         }
 
         ScanFixture.Until(() => Count(batches) >= 1, "at least one batch");
-        Count(batches).Should().BeLessThanOrEqualTo(4, "four ticks passed in that second, and a tick hands over at most one batch");
-        batches.SelectMany(static x => x.NewMatches).Select(static x => x.Offset).Should().BeInAscendingOrder();
+        List<KafkaScanBatch> seen = Snapshot(batches);
+        seen.Should().HaveCountLessThanOrEqualTo(4, "four ticks passed in that second, and a tick hands over at most one batch");
+        seen.SelectMany(static x => x.NewMatches).Select(static x => x.Offset).Should().BeInAscendingOrder();
     }
 
     [Fact]
@@ -177,8 +188,12 @@ public class ScanBatchingTests
         ScanEngineTests.ScriptedScan scan = await ScanEngineTests.ScriptedScan.StartAsync();
         await using ScanEngineTests.ScriptedScan guard = scan;
 
-        _ = Collect(scan.Handle, []);
-        ScanFixture.Until(() => scan.Reader.Reads > 0, "the scan starts");
+        // The first reader claims the batches when its first MoveNextAsync runs the iterator, which is synchronous up to its first await. It is
+        // started here, not on a task: through Collect the claim happened whenever the thread pool got to it, and on a two-core runner the
+        // "second" reader below could be the first, wait for a batch the manual clock never ticks, and hang the run (KS-CI-FIX-2).
+        using CancellationTokenSource stop = new();
+        await using IAsyncEnumerator<KafkaScanBatch> first = scan.Handle.ReadBatchesAsync(stop.Token).GetAsyncEnumerator(stop.Token);
+        ValueTask<bool> pending = first.MoveNextAsync();
 
         Func<Task> second = async () =>
         {
@@ -188,5 +203,10 @@ public class ScanBatchingTests
         };
 
         await second.Should().ThrowAsync<InvalidOperationException>();
+
+        // Let the first reader go: it ends with the token, not with a batch.
+        await stop.CancelAsync();
+        Func<Task> ended = async () => await pending;
+        await ended.Should().ThrowAsync<OperationCanceledException>();
     }
 }
