@@ -80,6 +80,8 @@ public class LogLevelsTests
     {
         ["StudioLogThrottle.LevelOrWarning"] =
             "The throttle's own answer, or Warning for an owner a test built without one (StudioScopeCatalog, MartenStoreRegistry, StudioLiveUpdates); the container always supplies a throttle.",
+        ["KafkaLogOnce.WarningOrDebug"] =
+            "KStudio.Core cannot use StudioLogThrottle across the fence (hard rule 16), and this helper is KStudio's own ten-minute throttle: Warning once per key per window, Debug in between.",
     };
 
     /// <summary>Why a site is allowed to be above Debug.</summary>
@@ -329,6 +331,18 @@ public class LogLevelsTests
             "One of Aurora's own reads failed by connection or an unexpected SQLSTATE; a privilege or a timeout is Debug, and the sweep and the Server page re-read every HealthInterval."),
         ["src/PostgresStudio.Diagnostics/Services/PostgresStudioLog.Aurora.cs : 9501 PostgresStudioAuroraReadFailed"] = (Verdict.Throttled,
             "9501 in Postgres Studio's words: one of Aurora's own reads failed, re-read every HealthInterval."),
+
+        // ---- KStudio.Core: the engine's events above Debug (9650 to 9699) ----------------------------
+        ["src/KStudio.Core/Logging/KStudioLog.Catalog.cs : 9654 ClusterUnavailable"] = (Verdict.Throttled,
+            "A Kafka cluster the catalog cannot reach; every polling page asks it, so Warning once per cluster per ten minutes, Debug in between."),
+        ["src/KStudio.Core/Logging/KStudioLog.Clients.cs : 9655 AuthenticationFailed"] = (Verdict.Throttled,
+            "The cluster refused KStudio's credentials; every client meets it, so Warning once per cluster per ten minutes, Debug in between."),
+        ["src/KStudio.Core/Logging/KStudioLog.Clients.cs : 9658 ClientFatalError"] = (Verdict.Fault,
+            "librdkafka declared a client fatally failed; the client is unusable until it is rebuilt."),
+        ["src/KStudio.Core/Logging/KStudioLog.Clients.cs : 9663 ShutdownTimedOut"] = (Verdict.Fault,
+            "Scans did not stop within 10 s of shutdown; an operation ended half-done, once per host stop."),
+        ["src/KStudio.Core/Logging/KStudioLog.Scans.cs : 9668 ScanFailed"] = (Verdict.VisitorAction,
+            "A scan a visitor started ended with an unexpected exception; one line per scan, exception kind only, and the page says the same."),
 
         // ---- W5-API ---------------------------------------------------------------------------------
         ["src/PostgresStudio.Diagnostics/Services/StudioLog.Diagnostics.cs : 9251 DiagnosticsSectionFailed"] = (Verdict.Throttled,

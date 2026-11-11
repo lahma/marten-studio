@@ -10,7 +10,7 @@ internal static partial class KStudioLog
     [LoggerMessage(EventId = 9653, Level = LogLevel.Debug, Message = "Kafka cluster {Cluster} does not support {Api}")]
     public static partial void ApiUnsupported(ILogger logger, string cluster, string api);
 
-    /// <summary>9654: logged at Warning the first time within ten minutes and at Debug afterwards (<c>KafkaLogOnce.WarningThenDebug</c>).</summary>
+    /// <summary>9654: logged at Warning the first time within ten minutes and at Debug afterwards (<c>KafkaLogOnce.WarningOrDebug</c>).</summary>
     [LoggerMessage(EventId = 9654, Message = "KStudio could not reach Kafka cluster {Cluster} for {Call}: {Code}")]
     public static partial void ClusterUnavailable(ILogger logger, LogLevel level, string cluster, string call, string code);
 

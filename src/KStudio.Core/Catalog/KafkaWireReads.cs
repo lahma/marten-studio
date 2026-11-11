@@ -187,7 +187,7 @@ internal sealed class KafkaWireReads(
             case WireError.Unavailable:
                 {
                     // An authentication failure is logged once by the client's own error handler (9655).
-                    LogLevel level = once.WarningThenDebug($"{cluster}|unavailable");
+                    LogLevel level = KafkaLogOnce.WarningOrDebug(once, $"{cluster}|unavailable");
                     string callName = call.ToString();
                     string code = error.Code;
                     KStudioLog.ClusterUnavailable(logger, level, cluster, callName, code);

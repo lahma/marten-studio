@@ -25,8 +25,13 @@ internal sealed class KafkaLogOnce(TimeProvider timeProvider)
     /// <see cref="LogLevel.Warning" /> the first time <paramref name="key" /> is seen within the window and <see cref="LogLevel.Debug" />
     /// afterwards: a cluster that cannot be reached is worth one warning, not one per poll.
     /// </summary>
+    /// <param name="once">The window's owner.</param>
     /// <param name="key">What is being logged.</param>
-    public LogLevel WarningThenDebug(string key) => Acquire(key) ? LogLevel.Warning : LogLevel.Debug;
+    /// <remarks>
+    /// Static, and named as the studios' <c>StudioLogThrottle.WarningOrDebug</c> is, because KStudio.Core cannot reference the
+    /// Diagnostics assembly (the fence) and the log-level roster test recognises a throttle by that name.
+    /// </remarks>
+    public static LogLevel WarningOrDebug(KafkaLogOnce once, string key) => once.Acquire(key) ? LogLevel.Warning : LogLevel.Debug;
 
     private bool Acquire(string key)
     {

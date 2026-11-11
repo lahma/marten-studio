@@ -15,7 +15,7 @@ internal static partial class KStudioLog
     [LoggerMessage(EventId = 9651, Level = LogLevel.Debug, Message = "KStudio disposed the admin client of cluster {Cluster} after {IdleSeconds} s idle")]
     public static partial void AdminClientDisposed(ILogger logger, string cluster, int idleSeconds);
 
-    /// <summary>9655: logged at Warning the first time within ten minutes and at Debug afterwards (<c>KafkaLogOnce.WarningThenDebug</c>).</summary>
+    /// <summary>9655: logged at Warning the first time within ten minutes and at Debug afterwards (<c>KafkaLogOnce.WarningOrDebug</c>).</summary>
     [LoggerMessage(EventId = 9655, Message = "Kafka cluster {Cluster} refused KStudio's authentication: {Code}")]
     public static partial void AuthenticationFailed(ILogger logger, LogLevel level, string cluster, string code);
 
@@ -25,7 +25,7 @@ internal static partial class KStudioLog
     [LoggerMessage(EventId = 9657, Level = LogLevel.Debug, Message = "Kafka client {Client} of cluster {Cluster} reported {Code}")]
     public static partial void ClientError(ILogger logger, string client, string cluster, string code);
 
-    [LoggerMessage(EventId = 9658, Level = LogLevel.Warning, Message = "Kafka client {Client} of cluster {Cluster} failed fatally: {Code}")]
+    [LoggerMessage(EventId = 9658, Level = LogLevel.Error, Message = "Kafka client {Client} of cluster {Cluster} failed fatally: {Code}")]
     public static partial void ClientFatalError(ILogger logger, string client, string cluster, string code);
 
     [LoggerMessage(EventId = 9661, Level = LogLevel.Debug, Message = "KStudio overrides {Setting} of cluster {Cluster} for its {Client} client")]
@@ -37,6 +37,6 @@ internal static partial class KStudioLog
     [LoggerMessage(EventId = 9662, Level = LogLevel.Debug, Message = "KStudio is stopping {Count} scans")]
     public static partial void ShutdownStarted(ILogger logger, int count);
 
-    [LoggerMessage(EventId = 9663, Level = LogLevel.Warning, Message = "{Count} KStudio scans did not stop within 10 s of shutdown")]
+    [LoggerMessage(EventId = 9663, Level = LogLevel.Error, Message = "{Count} KStudio scans did not stop within 10 s of shutdown")]
     public static partial void ShutdownTimedOut(ILogger logger, int count);
 }

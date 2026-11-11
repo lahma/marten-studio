@@ -26,12 +26,12 @@ public class EngineLogEventsTests
         [9655] = null,
         [9656] = LogLevel.Debug,
         [9657] = LogLevel.Debug,
-        [9658] = LogLevel.Warning,
+        [9658] = LogLevel.Error,
         [9659] = LogLevel.Debug,
         [9660] = LogLevel.Debug,
         [9661] = LogLevel.Debug,
         [9662] = LogLevel.Debug,
-        [9663] = LogLevel.Warning,
+        [9663] = LogLevel.Error,
         [9664] = LogLevel.Debug,
 
         // ENG-B: the scan engine's (9665 to 9674).
@@ -162,12 +162,12 @@ public class EngineLogEventsTests
         PostgresStudio.Tests.Support.ManualTimeProvider clock = new();
         KafkaLogOnce once = new(clock);
 
-        once.WarningThenDebug("k").Should().Be(LogLevel.Warning);
-        once.WarningThenDebug("k").Should().Be(LogLevel.Debug);
-        once.WarningThenDebug("other").Should().Be(LogLevel.Warning);
+        KafkaLogOnce.WarningOrDebug(once, "k").Should().Be(LogLevel.Warning);
+        KafkaLogOnce.WarningOrDebug(once, "k").Should().Be(LogLevel.Debug);
+        KafkaLogOnce.WarningOrDebug(once, "other").Should().Be(LogLevel.Warning);
 
         clock.Advance(TimeSpan.FromMinutes(10));
-        once.WarningThenDebug("k").Should().Be(LogLevel.Warning);
+        KafkaLogOnce.WarningOrDebug(once, "k").Should().Be(LogLevel.Warning);
         once.ShouldLog("x").Should().BeTrue();
         once.ShouldLog("x").Should().BeFalse();
     }

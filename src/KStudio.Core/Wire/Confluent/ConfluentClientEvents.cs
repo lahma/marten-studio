@@ -48,7 +48,7 @@ internal sealed class ConfluentClientEvents(KStudioLoggers loggers, KafkaLogOnce
         if (ConfluentErrors.Map(error, WireCall.Metadata) is WireError.AuthenticationFailed)
         {
             authentication[cluster] = (timeProvider.GetUtcNow(), code);
-            LogLevel level = once.WarningThenDebug("auth|" + cluster);
+            LogLevel level = KafkaLogOnce.WarningOrDebug(once, "auth|" + cluster);
             KStudioLog.AuthenticationFailed(loggers.Clients, level, cluster, code);
             return;
         }

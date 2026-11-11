@@ -129,7 +129,7 @@ public class ScanLifecycleTests
         await shutdown.Bounded();
 
         CapturedLogEntry warning = scan.Fixture.Logs.Entries.Where(static x => x.EventId.Id == 9663).Should().ContainSingle().Subject;
-        warning.Level.Should().Be(LogLevel.Warning);
+        warning.Level.Should().Be(LogLevel.Error);
         warning.Message.Should().Be("1 KStudio scans did not stop within 10 s of shutdown");
 
         scan.Reader.Unblock();
