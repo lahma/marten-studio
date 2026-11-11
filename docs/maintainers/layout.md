@@ -356,6 +356,14 @@ src/KStudio.Core/Catalog/                The catalog and overview reads: the cac
 src/KStudio.Core/Windows/                Window resolution (D38): a time window to offsets per partition, and the notes that say what a
                                          "no match" could be missing
 src/KStudio.Core/Logging/                The engine's log events 9650 to 9699, the bounded log values and the log-once helper
+src/KStudio.Core/Predicates/             The search grammar (D39): lexer, parser, canonical text, the compiler per topic and the
+                                         three-valued evaluator, with the verdict of every clause
+src/KStudio.Core/Decoding/               Value and header decoding (D39): the detection order, CloudEvents, the Confluent wire format,
+                                         trace contexts, the decode counters and the per-record evaluation context
+src/KStudio.Core/Scanning/               The scan engine (D38, D41): plan and estimate, the scan's thread, the governor, the limiter and
+                                         the owner budget, batches, the match store and the one factory that makes a match
+src/KStudio.Core/Redaction/              Redaction inside the engine (D40): the built-in header deny-list, the topic's rules and the
+                                         redactor every match is made through
 tests/KStudio.Tests/Conventions/         KStudio's fences and convention scans
 tests/KStudio.Tests/Verify/              KStudio.Core's public API baseline
 tests/KStudio.Tests/Support/             Test helpers the fast suite shares
@@ -368,11 +376,18 @@ tests/KStudio.Tests/Clusters/            Registration, key formats and the admin
 tests/KStudio.Tests/Catalog/             The overview reads, the ACL table, the snapshot cache and the throughput samples
 tests/KStudio.Tests/Windows/             Window resolution on the fake
 tests/KStudio.Tests/Logging/             The engine's log events and the parity of its log values with the studios'
+tests/KStudio.Tests/Predicates/          The grammar, its messages and limits, the canonical text and the evaluation tables
+tests/KStudio.Tests/Decoding/            The detection order, the caps, headers, trace contexts and CloudEvents
+tests/KStudio.Tests/Redaction/           The deny-list, the topic's rules, the match caps and the one place a match is made
+tests/KStudio.Tests/Scanning/            The scan engine on the fake: every stop reason and end state, the cursor, the governor, the
+                                         limits, the estimate, batching and the lifecycle
 tests/KStudio.Integration.Tests/         KStudio's live suite: apache/kafka 3.9 and 4.x with SASL and ACLs, through
                                          Testcontainers.Kafka; needs Docker
 tests/KStudio.Integration.Tests/Support/  The broker fixtures, one per image, the live contract cluster and the harness tests
 tests/KStudio.Integration.Tests/Wire/    WireContract on real brokers
 tests/KStudio.Integration.Tests/Windows/  WindowContract on real brokers
 tests/KStudio.Integration.Tests/Catalog/  The catalog as principals with different ACLs, and metadata that creates nothing
-tests/KStudio.Integration.Tests/Scanning/  Retention before a scan (the scan engine's live tests come with it)
+tests/KStudio.Integration.Tests/Scanning/  The scan engine on real records: stop reasons, transactions, retention before and during a scan, the
+                                         governor, the memory ceiling and that a scan writes nothing
+tests/KStudio.Integration.Tests/Search/  Find the message with this id (the M1 exit), as restricted principals
 ```

@@ -232,9 +232,13 @@ librdkafka's bounded queue stops fetching, so the broker sends little more than 
 principal, and the studio shares the host's: keep the ceiling well below the principal's quota, or a scan throttles the
 host's own consumers. On managed clusters bytes fetched are billed, so the per-scan budget is a cost control first.
 
-Memory is stated: with $S$ concurrent scans, a prefetch queue $Q$, a fetch size $F$, $m$ kept matches and $c$ bytes kept
-per match, $M \approx S \cdot (Q + F + m \cdot c)$. The defaults ($S = 2$, $Q = F = 8$ MiB, $m = 500$, $c = 64$ KiB) give
-about 95 MiB; the clients' own defaults would hold 228 MiB before a single match. The live suite measures it.
+Memory is stated: with $S$ concurrent scans, a constant $C$ for each consumer's own overhead, $m$ kept matches and $c$ bytes
+kept per match, $M \approx S \cdot (C + m \cdot c)$. A consumer's prefetch queue $Q$ and fetch size $F$ (8 MiB each at the
+defaults) sit inside $C$, which was measured at about 64 MiB for a consumer over six partitions (about 51 MiB of private
+bytes and 59 MiB of working set, three times $Q + F$, because librdkafka has overhead per consumer); with the clients' own
+defaults the same consumer grew by 154 MiB. The defaults ($S = 2$, $C = 64$ MiB, $m = 500$, $c = 64$ KiB) give about
+191 MiB as a ceiling, and the live suite allows that plus 25 %. It also prints what two scans actually held. Broker
+egress is bounded separately: with these limits the broker sent at most $Q + F$ more than the engine had read.
 
 Before reading, the engine estimates a scan: the offsets in its ranges ("about", since offsets are not records) and the
 bytes, from a small sample of record sizes. Above the confirmation threshold, `Start` refuses unless the visitor's

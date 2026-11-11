@@ -53,8 +53,13 @@ public class PublicApiTest
     public void The_public_types_are_the_registration_types_and_the_extension_points()
     {
         Core.GetExportedTypes().Select(static type => type.FullName!).Order(StringComparer.Ordinal).Should().Equal(
+            "KStudio.IKafkaRecordDecoder",
             "KStudio.KafkaClusterBuilder",
+            "KStudio.KafkaDecodeContext",
+            "KStudio.KafkaDecodeResult",
+            "KStudio.KafkaDecoders",
             "KStudio.KafkaEngineOptions",
+            "KStudio.KafkaHeader",
             "KStudio.KafkaKeyFormat",
             "KStudio.KafkaScanLimits",
             "KStudio.KafkaTopicBuilder");

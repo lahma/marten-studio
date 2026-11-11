@@ -7,7 +7,7 @@ using Microsoft.Extensions.Logging;
 namespace KStudio.Tests.Logging;
 
 /// <summary>
-/// The engine's log events (decision 11): ids unique and inside 9650 to 9699 (ENG-A's are 9650 to 9664), each level as designed, and no
+/// The engine's log events (decision 11): ids unique and inside 9650 to 9699 (ENG-A's are 9650 to 9664, ENG-B's 9665 to 9674), each level as designed, and no
 /// parameter that could carry content. Engine events carry cluster keys, topics, partitions, offsets, counts, code names and librdkafka's own
 /// text, and never a predicate, a literal, a key, a header, a value, an owner or a user.
 /// </summary>
@@ -16,7 +16,7 @@ public class EngineLogEventsTests
     private const BindingFlags Methods = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly;
 
     /// <summary>Id → level; <see langword="null" /> is "chosen by the caller" (Warning the first time within ten minutes, Debug after).</summary>
-    private static readonly Dictionary<int, LogLevel?> EngineAEvents = new()
+    private static readonly Dictionary<int, LogLevel?> EngineEvents = new()
     {
         [9650] = LogLevel.Debug,
         [9651] = LogLevel.Debug,
@@ -33,6 +33,18 @@ public class EngineLogEventsTests
         [9662] = LogLevel.Debug,
         [9663] = LogLevel.Warning,
         [9664] = LogLevel.Debug,
+
+        // ENG-B: the scan engine's (9665 to 9674).
+        [9665] = LogLevel.Debug,
+        [9666] = LogLevel.Debug,
+        [9667] = LogLevel.Debug,
+        [9668] = LogLevel.Warning,
+        [9669] = LogLevel.Debug,
+        [9670] = LogLevel.Debug,
+        [9671] = LogLevel.Debug,
+        [9672] = LogLevel.Debug,
+        [9673] = LogLevel.Debug,
+        [9674] = LogLevel.Debug,
     };
 
     private static readonly string[] AllowedParameters =
@@ -62,9 +74,15 @@ public class EngineLogEventsTests
     }
 
     [Fact]
-    public void ENG_A_defines_exactly_its_events_9650_to_9664()
+    public void The_engine_defines_exactly_ENG_As_events_9650_to_9664_and_ENG_Bs_9665_to_9674()
     {
-        Events().Select(static x => x.Attribute.EventId).Order().Should().Equal(EngineAEvents.Keys.Order());
+        Events().Select(static x => x.Attribute.EventId).Order().Should().Equal(EngineEvents.Keys.Order());
+    }
+
+    [Fact]
+    public void ENG_B_leaves_9675_to_9699_for_the_later_milestones()
+    {
+        Events().Select(static x => x.Attribute.EventId).Should().NotContain(static x => x >= 9675, "9675 to 9679 are reserved for ENG-B's later fixes and 9680 to 9699 for M2 to M5");
     }
 
     [Fact]
@@ -72,7 +90,7 @@ public class EngineLogEventsTests
     {
         foreach ((MethodInfo method, LoggerMessageAttribute attribute) in Events())
         {
-            LogLevel? expected = EngineAEvents[attribute.EventId];
+            LogLevel? expected = EngineEvents[attribute.EventId];
 
             if (expected is null)
             {

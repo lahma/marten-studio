@@ -61,7 +61,7 @@ internal static class KStudioEngineRegistration
         services.TryAddSingleton<IKafkaCatalog, KafkaCatalog>();
         services.TryAddSingleton<WindowResolver>();
 
-        // ENG-B adds, on this line: ScanningRegistration.Add(services);
+        KStudio.Core.Scanning.ScanningRegistration.Add(services);
         return services;
     }
 }
