@@ -1,4 +1,4 @@
-using System.Diagnostics;
+using System.Runtime.InteropServices;
 
 using KStudio.Core.Decoding;
 using KStudio.Core.Scanning;
@@ -16,6 +16,14 @@ namespace KStudio.Integration.Tests.Scanning;
 /// parallelization: nothing else of the run executes while it measures (on CI the same test, beside the other live classes, measured 465 MB
 /// against an allowance of 332 MB).
 /// </summary>
+/// <remarks>
+/// <b>The metric is the private memory the process holds, read per OS</b> (<see cref="ProcessMemory" />): on Windows
+/// <c>PrivateMemorySize64</c>, on Linux <c>RssAnon</c> of <c>/proc/self/status</c>. .NET's own <c>PrivateMemorySize64</c> on Linux is the
+/// <c>VmData</c> line of that file, the size of the data mappings whether or not a page was ever touched, so it counts what the allocators
+/// reserve and the process never holds; CI measured 403 MB and 447 MB of it. Measured with the honest figure (KS-CI-FIX-2): Windows 204 to
+/// 239 MiB; Linux (Ubuntu 24.04 container, 4 cores) 239 to 267 MiB, 267 MiB being the run beside all the other live classes. The ceiling
+/// (253 MiB) and the allowance (316 MiB) are D41's and did not move.
+/// </remarks>
 [Collection(KafkaCollections.V4Alone)]
 public sealed class ScanMemoryCeilingLiveTests4(Kafka4Fixture fixture)
 {
@@ -64,8 +72,9 @@ public sealed class ScanMemoryCeilingLiveTests4(Kafka4Fixture fixture)
         GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
         GC.WaitForPendingFinalizers();
         GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
-        using Process current = Process.GetCurrentProcess();
-        long baseline = current.PrivateMemorySize64;
+        ProcessMemory.Reading start = ProcessMemory.Read();
+        long baseline = start.Private;
+        ProcessMemory.Reading highest = start;
 
         await using KafkaScanHandle one = engine.Scanner.Start(planOne, first, confirmed: true).Handle!;
         await using KafkaScanHandle two = engine.Scanner.Start(planTwo, second, confirmed: true).Handle!;
@@ -77,8 +86,9 @@ public sealed class ScanMemoryCeilingLiveTests4(Kafka4Fixture fixture)
 
         while (!done.IsCompleted && await timer.WaitForNextTickAsync(Token))
         {
-            using Process self = Process.GetCurrentProcess();
-            peak = Math.Max(peak, self.PrivateMemorySize64);
+            ProcessMemory.Reading now = ProcessMemory.Read();
+            peak = Math.Max(peak, now.Private);
+            highest = highest.Max(now);
         }
 
         KafkaScanResult[] results = await done.WaitAsync(TimeSpan.FromMinutes(3), Token);
@@ -105,7 +115,7 @@ public sealed class ScanMemoryCeilingLiveTests4(Kafka4Fixture fixture)
         double allowed = ceiling * 1.25;
 
         // Printed either way, so the number is on record next to the formula.
-        TestContext.Current.SendDiagnosticMessage($"KStudio memory ceiling ({fixture.Image}): peak growth {grown / (double) MiB:F1} MiB, ceiling {ceiling / MiB:F1} MiB, allowed {allowed / MiB:F1} MiB (S=2, C=64 MiB, 2*m*c={2.0 * limits.MaxMatches * limits.MaxMatchBytes / MiB:F1} MiB, +25 %).");
+        TestContext.Current.SendDiagnosticMessage($"KStudio memory ceiling ({fixture.Image}, {RuntimeInformation.OSDescription}): peak growth {grown / (double) MiB:F1} MiB of {ProcessMemory.PrivateName}, ceiling {ceiling / MiB:F1} MiB, allowed {allowed / MiB:F1} MiB (S=2, C=64 MiB, 2*m*c={2.0 * limits.MaxMatches * limits.MaxMatchBytes / MiB:F1} MiB, +25 %). Highest of each over the scans, baseline to peak: {highest.Describe(start)}.");
 
         grown.Should().BeLessThan((long) allowed);
     }
