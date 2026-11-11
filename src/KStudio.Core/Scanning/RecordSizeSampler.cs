@@ -32,6 +32,8 @@ internal sealed class RecordSizeSampler(
     /// <summary>How long an answer is reused.</summary>
     public static readonly TimeSpan TimeToLive = TimeSpan.FromMinutes(10);
 
+    private const int SampleQueueKilobytes = 1_024;
+    private const int SampleFetchBytes = 1024 * 1024;
     private const int MaxIdleReads = 30;
     private const int MaxRanges = 3;
 
@@ -99,7 +101,11 @@ internal sealed class RecordSizeSampler(
 
         try
         {
-            reader = wires.For(cluster).OpenReader(new WireReaderOptions(Guid.NewGuid(), isolation, settings.Limits));
+            // The sampling consumer is outside S and the governor, so it is small: 1 MiB of queue and of fetch, the lowest the limits allow.
+            KafkaScanLimits small = settings.Limits.Copy();
+            small.QueueKilobytes = SampleQueueKilobytes;
+            small.FetchBytes = SampleFetchBytes;
+            reader = wires.For(cluster).OpenReader(new WireReaderOptions(Guid.NewGuid(), isolation, small));
             reader.Assign([.. ranges.Select(static x => new WirePartitionOffset(x.Topic, x.Partition, x.Start))]);
 
             Dictionary<WirePartition, long> ends = ranges.ToDictionary(static x => x.Key, static x => x.End);

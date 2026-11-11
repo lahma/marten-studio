@@ -498,7 +498,7 @@ public class PredicateEvaluationTests
         verdicts[4].Kind.Should().Be(ClauseVerdictKind.Scan);
         verdicts[5].Kind.Should().Be(ClauseVerdictKind.SlowScan);
 
-        Compile("key = 'a'", KafkaKeyFormat.JsonString, declared: true).Predicate!.Verdicts[0].Description.Should().Be("compared as bytes (JsonString)");
+        Compile("key = 'a'", KafkaKeyFormat.JsonString, declared: true).Predicate!.Verdicts[0].Description.Should().Be("compared as bytes; a key with escapes is decoded (JsonString)");
         Compile("ce.type = 'a'", declaresCloudEvents: true).Predicate!.Verdicts[0].Kind.Should().Be(ClauseVerdictKind.SlowScan);
     }
 }

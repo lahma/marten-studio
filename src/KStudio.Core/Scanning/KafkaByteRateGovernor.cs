@@ -194,7 +194,9 @@ internal sealed class KafkaScanLimiter(KafkaEngineSnapshot settings)
 internal sealed class OwnerByteBudget(KafkaEngineSnapshot settings, TimeProvider time)
 {
     private const long HourSeconds = 3_600;
+    private const long SweepEverySeconds = 60;
 
+    private long lastSweepSecond;
     private readonly Lock gate = new();
     private readonly Dictionary<string, List<(long Second, long Bytes)>> reads = new(StringComparer.Ordinal);
     private readonly long budget = settings.Limits.OwnerBytesPerHour;
@@ -224,12 +226,14 @@ internal sealed class OwnerByteBudget(KafkaEngineSnapshot settings, TimeProvider
 
         lock (gate)
         {
+            long second = time.GetUtcNow().ToUnixTimeSeconds();
+            ForgetIdleOwners(second);
+
             if (!reads.TryGetValue(owner, out List<(long Second, long Bytes)>? entries))
             {
                 reads[owner] = entries = [];
             }
 
-            long second = time.GetUtcNow().ToUnixTimeSeconds();
             Prune(entries);
 
             // One entry per second, so a long-running owner holds at most 3,600 of them.
@@ -240,6 +244,38 @@ internal sealed class OwnerByteBudget(KafkaEngineSnapshot settings, TimeProvider
             else
             {
                 entries.Add((second, bytes));
+            }
+        }
+    }
+
+    /// <summary>
+    /// An owner who read once and never came back would otherwise stay in the table for the life of the host: once a minute, owners whose
+    /// last read is more than an hour old are forgotten (the caller holds the lock).
+    /// </summary>
+    private void ForgetIdleOwners(long second)
+    {
+        if (second - lastSweepSecond < SweepEverySeconds)
+        {
+            return;
+        }
+
+        lastSweepSecond = second;
+        long oldest = second - HourSeconds;
+
+        foreach (string owner in reads.Where(x => x.Value.Count == 0 || x.Value[^1].Second <= oldest).Select(static x => x.Key).ToList())
+        {
+            reads.Remove(owner);
+        }
+    }
+
+    /// <summary>How many owners the table holds: for tests.</summary>
+    public int TrackedOwners
+    {
+        get
+        {
+            lock (gate)
+            {
+                return reads.Count;
             }
         }
     }

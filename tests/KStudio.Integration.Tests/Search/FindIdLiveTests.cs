@@ -147,6 +147,9 @@ public abstract class FindIdLiveTests(KafkaFixture fixture)
         result.StopReason.Should().Be(KafkaScanStopReason.Completed);
 
         // SPIKE S1: one GroupAuthorizationFailed per consumer, about half a second after the assign; a scan that finishes first may not see it.
+        // That the refusal arrives, exactly once and naming the scan's group, is proved by ReaderAclContract's
+        // Without_a_group_acl_every_record_arrives_and_exactly_one_refusal_names_the_scan_group (run live as ReaderAclLiveTests); this
+        // test proves only that the scan neither stops on it nor logs it above Debug.
         result.GroupRefusals.Should().BeInRange(0, 1);
         engine.Logs.Entries.Count(static x => x.EventId.Id == 9671).Should().Be(result.GroupRefusals);
         engine.Logs.Entries.Should().NotContain(static x => x.Level >= LogLevel.Warning);

@@ -19,7 +19,7 @@ internal static partial class KStudioLog
     public static partial void ScanRefused(ILogger logger, string cluster, string refusal);
 
     [LoggerMessage(EventId = 9668, Level = LogLevel.Warning, Message = "Scan {ScanId} on {Cluster} failed: {ExceptionKind}")]
-    public static partial void ScanFailed(ILogger logger, Exception exception, Guid scanId, string cluster, string exceptionKind);
+    public static partial void ScanFailed(ILogger logger, Guid scanId, string cluster, string exceptionKind);
 
     [LoggerMessage(EventId = 9669, Level = LogLevel.Debug, Message = "Scan {ScanId}: {Lost} offsets of {Topic} partition {Partition} were deleted while it read")]
     public static partial void OffsetsDeletedDuringScan(ILogger logger, Guid scanId, long lost, string topic, int partition);

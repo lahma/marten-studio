@@ -39,12 +39,23 @@ internal sealed class RecordEvaluationContext
     /// <summary>The record.</summary>
     public WireRecord Record { get; }
 
-    /// <summary>The first reason a clause could not decide on this record, when one could not.</summary>
+    /// <summary>
+    /// Why the node last evaluated returned <c>Unknown</c>: set only by a node that returned it, and cleared by every
+    /// composite before each child, so that after the root it holds the first reason among the clauses that actually decided the result
+    /// (a clause that was unknown inside an <c>and</c> another child made false says nothing).
+    /// </summary>
     public KafkaUnknownReason? UnknownReason { get; private set; }
 
     /// <summary>Says a clause could not decide, and why; the first reason is kept.</summary>
     /// <param name="reason">Why.</param>
     public void MarkUnknown(KafkaUnknownReason reason) => UnknownReason ??= reason;
+
+    /// <summary>Forgets the reason of a node that is not the result (a composite calls it before each child).</summary>
+    public void ClearUnknown() => UnknownReason = null;
+
+    /// <summary>Sets the reason of the composite's own result: the first of its unknown children's, or none.</summary>
+    /// <param name="reason">The reason.</param>
+    public void SetUnknown(KafkaUnknownReason? reason) => UnknownReason = reason;
 
     /// <summary>The key as text in its format; <see langword="false" /> for a null key or one the format cannot write as text.</summary>
     /// <param name="text">The text.</param>
@@ -102,7 +113,18 @@ internal sealed class RecordEvaluationContext
 
     private sealed class KafkaKeyFormatReader(KafkaKeyFormat format)
     {
-        public string? TryFormat(byte[] key) => format.TryFormat(key, out string? text) ? text : null;
+        public string? TryFormat(byte[] key)
+        {
+            try
+            {
+                return format.TryFormat(key, out string? text) ? text : null;
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                // A host's formatter threw: the key cannot be read as text, which is a fact about this record and not the end of the scan.
+                return null;
+            }
+        }
     }
 }
 

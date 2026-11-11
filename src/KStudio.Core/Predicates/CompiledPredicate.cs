@@ -92,19 +92,26 @@ internal sealed class CompiledAnd(IReadOnlyList<CompiledNode> children) : Compil
     public override TriState Evaluate(RecordEvaluationContext context)
     {
         TriState result = TriState.True;
+        KafkaUnknownReason? reason = null;
 
         foreach (CompiledNode child in ordered)
         {
+            context.ClearUnknown();
+
             switch (child.Evaluate(context))
             {
                 case TriState.False:
+                    context.ClearUnknown();
                     return TriState.False;
                 case TriState.Unknown:
                     result = TriState.Unknown;
+                    reason ??= context.UnknownReason;
                     break;
             }
         }
 
+        // Only the clauses that left the result unknown say why; an unknown child that another child made false does not.
+        context.SetUnknown(reason);
         return result;
     }
 }
@@ -118,19 +125,25 @@ internal sealed class CompiledOr(IReadOnlyList<CompiledNode> children) : Compile
     public override TriState Evaluate(RecordEvaluationContext context)
     {
         TriState result = TriState.False;
+        KafkaUnknownReason? reason = null;
 
         foreach (CompiledNode child in ordered)
         {
+            context.ClearUnknown();
+
             switch (child.Evaluate(context))
             {
                 case TriState.True:
+                    context.ClearUnknown();
                     return TriState.True;
                 case TriState.Unknown:
                     result = TriState.Unknown;
+                    reason ??= context.UnknownReason;
                     break;
             }
         }
 
+        context.SetUnknown(reason);
         return result;
     }
 }
@@ -149,8 +162,10 @@ internal sealed class CompiledNot(CompiledNode operand) : CompiledNode
 }
 
 /// <summary>A clause on the key (cost 0 for bytes, 3 for <c>~</c>).</summary>
-internal sealed class CompiledKeyClause(PredicateOperator op, byte[][] forms, string[] texts) : CompiledNode
+internal sealed class CompiledKeyClause(PredicateOperator op, byte[][] forms, string[] texts, bool decodeEscapes = false) : CompiledNode
 {
+    private const byte Backslash = (byte) '\\';
+
     public override int Cost { get; } = op == PredicateOperator.Contains ? 3 : 0;
 
     public override TriState Evaluate(RecordEvaluationContext context)
@@ -181,7 +196,7 @@ internal sealed class CompiledKeyClause(PredicateOperator op, byte[][] forms, st
                     }
                 }
 
-                return TriState.False;
+                return EscapedKeyMatches(context, key) ? TriState.True : TriState.False;
 
             case PredicateOperator.Prefix:
                 foreach (byte[] form in forms)
@@ -192,7 +207,7 @@ internal sealed class CompiledKeyClause(PredicateOperator op, byte[][] forms, st
                     }
                 }
 
-                return TriState.False;
+                return EscapedKeyMatches(context, key) ? TriState.True : TriState.False;
 
             default:
                 if (!context.TryKeyText(out string text))
@@ -203,6 +218,21 @@ internal sealed class CompiledKeyClause(PredicateOperator op, byte[][] forms, st
 
                 return TextMatch.Any(op, text, texts) ? TriState.True : TriState.False;
         }
+    }
+
+    /// <summary>
+    /// The byte forms are the fast path and cover the two escapings the studio knows. A JSON serializer may escape differently (Python's
+    /// <c>json.dumps</c> writes <c>é</c> for é, Go escapes <c>&lt;</c>), so when no form matched and the key contains a backslash, it is
+    /// decoded once as JSON (counted as a key decode) and its text is compared.
+    /// </summary>
+    private bool EscapedKeyMatches(RecordEvaluationContext context, byte[] key)
+    {
+        if (!decodeEscapes || !key.AsSpan().Contains(Backslash) || !context.TryKeyText(out string text))
+        {
+            return false;
+        }
+
+        return TextMatch.Any(op == PredicateOperator.Prefix ? PredicateOperator.Prefix : PredicateOperator.Equals, text, texts);
     }
 }
 
@@ -336,9 +366,25 @@ internal sealed class CompiledAnyClause(PredicateOperator op, string[] texts, IK
 
     public override TriState Evaluate(RecordEvaluationContext context)
     {
-        if (context.Record.Key is not null && redactor.ForKey() is null && context.TryKeyText(out string key) && TextMatch.Any(op, key, texts, ordinalEquality: true))
+        // "Some field is true" decides the clause; otherwise a field that could not be judged leaves it unknown, never false (decision 7.5).
+        // A field that is not text can only fail to be judged for `~` (an equality or a prefix of a text literal is simply not met by bytes
+        // that are not that text), and a masked field is never looked at, so it cannot make the clause unknown either.
+        KafkaUnknownReason? unknown = null;
+        bool contains = op == PredicateOperator.Contains;
+
+        if (context.Record.Key is not null && redactor.ForKey() is null)
         {
-            return TriState.True;
+            if (context.TryKeyText(out string key))
+            {
+                if (TextMatch.Any(op, key, texts, ordinalEquality: true))
+                {
+                    return TriState.True;
+                }
+            }
+            else if (contains)
+            {
+                unknown ??= KafkaUnknownReason.KeyNotText;
+            }
         }
 
         WireHeader[] headers = context.Record.Headers;
@@ -351,9 +397,16 @@ internal sealed class CompiledAnyClause(PredicateOperator op, string[] texts, IK
                 continue;
             }
 
-            if (context.TryHeaderText(i, out string text) && TextMatch.Any(op, text, texts, ordinalEquality: true))
+            if (context.TryHeaderText(i, out string text))
             {
-                return TriState.True;
+                if (TextMatch.Any(op, text, texts, ordinalEquality: true))
+                {
+                    return TriState.True;
+                }
+            }
+            else if (contains)
+            {
+                unknown ??= KafkaUnknownReason.HeaderNotText;
             }
         }
 
@@ -361,24 +414,31 @@ internal sealed class CompiledAnyClause(PredicateOperator op, string[] texts, IK
 
         if (view.Unreadable is { } reason)
         {
-            context.MarkUnknown(reason switch
+            unknown ??= reason switch
             {
                 KafkaUndecodableReason.TooLarge => KafkaUnknownReason.TooLarge,
                 KafkaUndecodableReason.NotACloudEvent => KafkaUnknownReason.NotACloudEvent,
                 _ => KafkaUnknownReason.InvalidJson,
-            });
-            return TriState.Unknown;
+            };
         }
-
-        foreach (KafkaCloudEvent cloudEvent in view.Events)
+        else
         {
-            foreach (KeyValuePair<string, string> attribute in cloudEvent.Attributes)
+            foreach (KafkaCloudEvent cloudEvent in view.Events)
             {
-                if (redactor.ForCloudEvent(attribute.Key) is null && TextMatch.Any(op, attribute.Value, texts, ordinalEquality: true))
+                foreach (KeyValuePair<string, string> attribute in cloudEvent.Attributes)
                 {
-                    return TriState.True;
+                    if (redactor.ForCloudEvent(attribute.Key) is null && TextMatch.Any(op, attribute.Value, texts, ordinalEquality: true))
+                    {
+                        return TriState.True;
+                    }
                 }
             }
+        }
+
+        if (unknown is { } why)
+        {
+            context.MarkUnknown(why);
+            return TriState.Unknown;
         }
 
         return TriState.False;

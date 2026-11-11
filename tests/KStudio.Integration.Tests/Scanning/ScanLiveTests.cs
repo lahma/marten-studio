@@ -45,6 +45,30 @@ public abstract class ScanLiveTests(KafkaFixture fixture)
     }
 
     [Fact]
+    public async Task The_cheap_clause_decides_first_on_a_real_broker_so_a_record_it_rejects_is_never_decoded()
+    {
+        // Decision 12.4: the short circuit, counted by DecodeCounters on real records. The clause on the key is bytes; the clause on the
+        // header's text (`~`) is a decode, and runs only on the records the key clause let through.
+        (LiveContractCluster admin, string topic) = await SeedAsync(fixture, "short-circuit", 2, 50, static (p, i) => LiveRecords.At(i, $"k{i % 10}", "v", ("x", "value")));
+        await using LiveContractCluster adminGuard = admin;
+        await using LiveScanEngine engine = LiveScanEngine.Create(fixture, "reader");
+
+        (_, KafkaScanResult none, IReadOnlyList<KafkaMatch> noMatches) = await engine.RunAsync(
+            LiveScanEngine.Request([topic], "header.x ~ 'val' and key = 'absent'"), Token);
+
+        noMatches.Should().BeEmpty();
+        none.Records.Should().Be(100);
+        none.Decodes.Total.Should().Be(0, "the key clause is false for every record, so the header is never decoded, whatever order the text was typed in");
+
+        (_, KafkaScanResult some, IReadOnlyList<KafkaMatch> matches) = await engine.RunAsync(
+            LiveScanEngine.Request([topic], "header.x ~ 'val' and key = 'k3'"), Token);
+
+        matches.Should().HaveCount(10);
+        some.Decodes.HeaderText.Should().Be(10, "the header was decoded for the records whose key matched, and for no other");
+        some.Decodes.KeyText.Should().Be(0);
+    }
+
+    [Fact]
     public async Task A_scan_stops_at_its_match_limit_with_a_cursor_that_continues_to_exactly_the_rest()
     {
         (LiveContractCluster admin, string topic) = await SeedAsync(fixture, "cursor", 2, 100, static (p, i) => LiveRecords.At(i, $"k{i % 5}", "v"));
@@ -78,15 +102,16 @@ public abstract class ScanLiveTests(KafkaFixture fixture)
     [Fact]
     public async Task A_scan_stops_at_its_byte_budget()
     {
-        (LiveContractCluster admin, string topic) = await SeedAsync(fixture, "bytes", 1, 400, static (p, i) => LiveRecords.At(i, "k", new string('x', 2_000)));
+        // The lowest byte budget the engine accepts is 1 MiB: 1,000 records of 2 KB are about 2 MB, so the scan stops about halfway; no record matches, so the match limit does not come first.
+        (LiveContractCluster admin, string topic) = await SeedAsync(fixture, "bytes", 1, 1_000, static (p, i) => LiveRecords.At(i, "k", new string('x', 2_000)));
         await using LiveContractCluster adminGuard = admin;
         await using LiveScanEngine engine = LiveScanEngine.Create(fixture, "reader");
 
-        (_, KafkaScanResult result, _) = await engine.RunAsync(LiveScanEngine.Request([topic], lower: new KafkaScanLowering { MaxBytesPerScan = 100_000 }), Token);
+        (_, KafkaScanResult result, _) = await engine.RunAsync(LiveScanEngine.Request([topic], "key = 'absent'", lower: new KafkaScanLowering { MaxBytesPerScan = 1024 * 1024 }), Token);
 
         result.StopReason.Should().Be(KafkaScanStopReason.ByteBudget);
-        result.Bytes.Should().BeInRange(100_000, 100_000 + 2_100);
-        result.Records.Should().BeInRange(49, 51);
+        result.Bytes.Should().BeInRange(1024 * 1024, (1024 * 1024) + 2_100);
+        result.Records.Should().BeInRange(450, 550);
         result.Partitions.Single().State.Should().Be(PartitionEndState.NotReached);
     }
 
@@ -143,12 +168,13 @@ public abstract class ScanLiveTests(KafkaFixture fixture)
         await using LiveScanEngine engine = LiveScanEngine.Create(fixture, "reader");
         KafkaScanPlan plan = await engine.PlanAsync(LiveScanEngine.Request([topic]), Token);
 
-        // `reader` cannot even describe `other.*`: the window has no ranges, so nothing is read, and nothing says it was.
+        // `reader` cannot even describe `other.*`: the window has no ranges, so nothing is read, and the scan says why: every topic was
+        // refused, which is NotAuthorized and not "completed" (a completed scan with no match reads as "nothing found").
         plan.Ranges.Should().BeEmpty();
         plan.Window!.Topics.Single().Refusal.Should().NotBeNull();
         await using KafkaScanHandle handle = engine.Scanner.Start(plan, engine.Owner, confirmed: true).Handle!;
         KafkaScanResult result = await handle.Result.WaitAsync(TimeSpan.FromSeconds(30), Token);
-        result.StopReason.Should().Be(KafkaScanStopReason.Completed);
+        result.StopReason.Should().Be(KafkaScanStopReason.NotAuthorized);
         result.TopicRefusals.Should().ContainSingle();
     }
 }

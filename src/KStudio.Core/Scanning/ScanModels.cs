@@ -39,21 +39,27 @@ internal sealed record KafkaScanLowering
     /// <summary>A lower <c>ConfirmAboveRecords</c>.</summary>
     public long? ConfirmAboveRecords { get; init; }
 
-    /// <summary>The host's limits lowered by this; a value above the host's throws, because nothing raises a limit.</summary>
+    /// <summary>
+    /// The host's limits lowered by this. A value above the host's throws, because nothing raises a limit, and so does a value below the
+    /// lowest decision 9.4 allows (a negative duration would otherwise fail later, with a scan slot already taken).
+    /// </summary>
     /// <param name="host">The host's limits (a copy the caller owns).</param>
     public KafkaScanLimits Apply(KafkaScanLimits host)
     {
-        host.MaxBytesPerScan = Lowered(MaxBytesPerScan, host.MaxBytesPerScan, nameof(MaxBytesPerScan));
-        host.MaxRecordsPerScan = Lowered(MaxRecordsPerScan, host.MaxRecordsPerScan, nameof(MaxRecordsPerScan));
-        host.MaxScanDuration = Lowered(MaxScanDuration, host.MaxScanDuration, nameof(MaxScanDuration));
-        host.MaxMatches = Lowered(MaxMatches, host.MaxMatches, nameof(MaxMatches));
-        host.MaxMatchBytes = Lowered(MaxMatchBytes, host.MaxMatchBytes, nameof(MaxMatchBytes));
-        host.ConfirmAboveBytes = Lowered(ConfirmAboveBytes, host.ConfirmAboveBytes, nameof(ConfirmAboveBytes));
-        host.ConfirmAboveRecords = Lowered(ConfirmAboveRecords, host.ConfirmAboveRecords, nameof(ConfirmAboveRecords));
+        const long kib = 1024;
+        const long mib = 1024 * kib;
+
+        host.MaxBytesPerScan = Lowered(MaxBytesPerScan, host.MaxBytesPerScan, mib, nameof(MaxBytesPerScan));
+        host.MaxRecordsPerScan = Lowered(MaxRecordsPerScan, host.MaxRecordsPerScan, 1_000L, nameof(MaxRecordsPerScan));
+        host.MaxScanDuration = Lowered(MaxScanDuration, host.MaxScanDuration, TimeSpan.FromSeconds(5), nameof(MaxScanDuration));
+        host.MaxMatches = Lowered(MaxMatches, host.MaxMatches, 1, nameof(MaxMatches));
+        host.MaxMatchBytes = Lowered(MaxMatchBytes, host.MaxMatchBytes, (int) kib, nameof(MaxMatchBytes));
+        host.ConfirmAboveBytes = Lowered(ConfirmAboveBytes, host.ConfirmAboveBytes, 0L, nameof(ConfirmAboveBytes));
+        host.ConfirmAboveRecords = Lowered(ConfirmAboveRecords, host.ConfirmAboveRecords, 0L, nameof(ConfirmAboveRecords));
         return host;
     }
 
-    private static T Lowered<T>(T? wanted, T host, string name)
+    private static T Lowered<T>(T? wanted, T host, T minimum, string name)
         where T : struct, IComparable<T>
     {
         if (wanted is not { } value)
@@ -64,6 +70,11 @@ internal sealed record KafkaScanLowering
         if (value.CompareTo(host) > 0)
         {
             throw new ArgumentException($"{name} cannot be raised above the host's limit; a profile or a visitor can only lower a limit.", nameof(wanted));
+        }
+
+        if (value.CompareTo(minimum) < 0)
+        {
+            throw new ArgumentException($"{name} is below the lowest value the engine accepts ({minimum}).", nameof(wanted));
         }
 
         return value;

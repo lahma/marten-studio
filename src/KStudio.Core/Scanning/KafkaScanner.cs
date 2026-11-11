@@ -49,7 +49,11 @@ internal sealed class KafkaDecoderResolver(IServiceProvider services)
             return null;
         }
 
-        return resolved.GetOrAdd(descriptor, _ => new Lazy<IKafkaRecordDecoder?>(() => source(services))).Value;
+        // PublicationOnly: a factory that throws is tried again on the next scan and is never cached as the answer (the default mode caches
+        // the exception for the life of the host).
+        return resolved
+            .GetOrAdd(descriptor, _ => new Lazy<IKafkaRecordDecoder?>(() => source(services), LazyThreadSafetyMode.PublicationOnly))
+            .Value;
     }
 }
 
@@ -105,11 +109,21 @@ internal sealed class KafkaScanner(
         List<PredicateError> errors = [];
         List<ClauseVerdict> verdicts = [];
 
-        foreach (KafkaTopicName topic in topics)
+        // Every topic's redactor is built before anything is compiled, and the audit text asks all of them: a topic whose compilation was
+        // refused (a deny-listed header, a rule that cannot be searched) has no context, and its refused literal must still not reach a sink.
+        IKafkaRedactor[] redactors = [.. topics.Select(topic => (IKafkaRedactor)new KafkaRedactor(definition.Descriptor(topic.Value).Settings.Rules))];
+
+        for (int index = 0; index < topics.Length; index++)
         {
+            KafkaTopicName topic = topics[index];
             KafkaTopicDescriptor descriptor = definition.Descriptor(topic.Value);
-            IKafkaRedactor redactor = new KafkaRedactor(descriptor.Settings.Rules);
-            IKafkaRecordDecoder? decoder = decoders.For(descriptor);
+            IKafkaRedactor redactor = redactors[index];
+
+            // A host decoder runs only for a visitor who may read payloads (decision 8.6): under Envelope it is not even created. The
+            // built-in kinds (CloudEvents among them) are instances the host handed over, never made by its factory, so they still count.
+            IKafkaRecordDecoder? decoder = request.Grant.HasFlag(KafkaReadGrant.Payload) || KafkaDecoders.BuiltInKind(descriptor.Settings.DecoderInstance) is not null
+                ? decoders.For(descriptor)
+                : null;
             bool structured = KafkaDecoders.BuiltInKind(decoder) == KafkaBuiltInDecoder.CloudEvents;
 
             PredicateCompilation compiled = PredicateCompiler.Compile(
@@ -133,7 +147,7 @@ internal sealed class KafkaScanner(
 
         string audit = PredicateFormatter.Format(
             parsed.Tree,
-            clause => contexts.Values.Any(x => PredicateCompiler.IsRedacted(clause.Field, x.Redactor)));
+            clause => redactors.Any(x => PredicateCompiler.IsRedacted(clause.Field, x)));
 
         IReadOnlyList<PartitionRange> ranges = Continue(window.Ranges, request.ContinueFrom);
 
@@ -191,33 +205,47 @@ internal sealed class KafkaScanner(
             return Refuse(plan, refusal);
         }
 
-        ScanRun run = new(inputs);
-        string cluster = KafkaLogValue.Cap(plan.Request.Cluster)!;
-        int topicCount = plan.Request.Topics.Count;
-        int partitionCount = plan.Ranges.Count(static x => !x.IsEmpty);
-        KStudioLog.ScanStarted(loggers.Scans, scanId, cluster, topicCount, partitionCount, offsets, isolation);
+        // From here the scan holds both slots. Until the thread that releases them has started, a failure must release them here, or the
+        // slots are gone for the life of the process.
+        ScanRun? run = null;
 
-        // One dedicated thread per scan; nothing in it awaits and the consumer lives and dies on it (decision 4.2).
-        Task<KafkaScanResult> task = Task.Factory.StartNew(
-            () =>
-            {
-                try
-                {
-                    return run.Execute();
-                }
-                finally
-                {
-                    run.Dispose();
-                    lease?.Dispose();
-                }
-            },
-            CancellationToken.None,
-            TaskCreationOptions.LongRunning | TaskCreationOptions.DenyChildAttach,
-            TaskScheduler.Default);
+        try
+        {
+            run = new ScanRun(inputs);
+            ScanRun started = run;
+            string cluster = KafkaLogValue.Cap(plan.Request.Cluster)!;
+            int topicCount = plan.Request.Topics.Count;
+            int partitionCount = plan.Ranges.Count(static x => !x.IsEmpty);
+            KStudioLog.ScanStarted(loggers.Scans, scanId, cluster, topicCount, partitionCount, offsets, isolation);
 
-        KafkaScanHandle handle = new(run, task, time);
-        coordinator.Register(handle);
-        return KafkaScanStart.Of(handle);
+            // One dedicated thread per scan; nothing in it awaits and the consumer lives and dies on it (decision 4.2).
+            Task<KafkaScanResult> task = Task.Factory.StartNew(
+                () =>
+                {
+                    try
+                    {
+                        return started.Execute();
+                    }
+                    finally
+                    {
+                        started.Dispose();
+                        lease?.Dispose();
+                    }
+                },
+                CancellationToken.None,
+                TaskCreationOptions.LongRunning | TaskCreationOptions.DenyChildAttach,
+                TaskScheduler.Default);
+
+            KafkaScanHandle handle = new(run, task, time);
+            coordinator.Register(handle);
+            return KafkaScanStart.Of(handle);
+        }
+        catch
+        {
+            run?.Dispose();
+            lease?.Dispose();
+            throw;
+        }
     }
 
     private KafkaScanStart Refuse(KafkaScanPlan plan, KafkaScanRefusal refusal)
@@ -306,7 +334,7 @@ internal sealed class KafkaScanner(
 }
 
 /// <summary>Holds every running scan, and stops them when the host stops (decision 4.3). No hosted service: disposing the container is the trigger.</summary>
-internal sealed class KafkaScanCoordinator(TimeProvider time, KStudioLoggers loggers) : IAsyncDisposable
+internal sealed class KafkaScanCoordinator(TimeProvider time, KStudioLoggers loggers) : IAsyncDisposable, IDisposable
 {
     /// <summary>How long shutdown waits for running scans.</summary>
     public static readonly TimeSpan ShutdownTimeout = TimeSpan.FromSeconds(10);
@@ -337,6 +365,12 @@ internal sealed class KafkaScanCoordinator(TimeProvider time, KStudioLoggers log
             handle.Stop(KafkaScanStopReason.Shutdown);
         }
     }
+
+    /// <summary>
+    /// The synchronous form, for a container that is disposed with <c>Dispose()</c> (a host that never awaits its provider): the same stop,
+    /// the same wait. A scan runs on a thread of its own and nothing here captures a context, so blocking cannot deadlock.
+    /// </summary>
+    public void Dispose() => DisposeAsync().AsTask().GetAwaiter().GetResult();
 
     /// <summary>Stops every scan with <see cref="KafkaScanStopReason.Shutdown" /> and waits for them for at most ten seconds.</summary>
     public async ValueTask DisposeAsync()

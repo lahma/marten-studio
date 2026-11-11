@@ -185,7 +185,11 @@ internal sealed class ScanRun : IDisposable
             }
             else
             {
-                stopReason = KafkaScanStopReason.Completed;
+                // Nothing to read. When that is because every topic was refused (a topic the principal may not describe is reported as
+                // not found, and one it may not read as refused), saying "completed" would read as "nothing found".
+                IReadOnlyList<TopicWindow> windowTopics = plan.Window?.Topics ?? [];
+                bool everyTopicRefused = windowTopics.Count > 0 && windowTopics.All(static x => x.Refusal is not null);
+                stopReason = everyTopicRefused ? KafkaScanStopReason.NotAuthorized : KafkaScanStopReason.Completed;
             }
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
@@ -193,7 +197,7 @@ internal sealed class ScanRun : IDisposable
             stopReason = KafkaScanStopReason.Failed;
             string clusterText = KafkaLogValue.Cap(cluster)!;
             string kind = exception.GetType().Name;
-            KStudioLog.ScanFailed(inputs.Loggers.Scans, exception, ScanId, clusterText, kind);
+            KStudioLog.ScanFailed(inputs.Loggers.Scans, ScanId, clusterText, kind);
         }
         finally
         {
@@ -416,8 +420,17 @@ internal sealed class ScanRun : IDisposable
 
         if (end.Offset >= p.Range.End)
         {
-            // Everything the range asked for was read, or lies under control records and aborted batches.
+            // Everything the range asked for was read, or lies under control records and aborted batches: nothing is left, so the
+            // cursor does not offer this partition again.
             state = p.StopsAtLso ? PartitionEndState.StoppedAtLso : PartitionEndState.EndOfWindow;
+
+            lock (gate)
+            {
+                if (p.State is null)
+                {
+                    p.Next = p.Range.End;
+                }
+            }
         }
         else if (p.Range.Lso is { } lso && lso == end.Offset && lso < p.Range.HighWatermark)
         {
@@ -428,7 +441,7 @@ internal sealed class ScanRun : IDisposable
             state = PartitionEndState.EndOfLog;
         }
 
-        Finish(p, state);
+        Finish(p, state, end.Offset);
         return false;
     }
 
@@ -645,7 +658,12 @@ internal sealed class ScanRun : IDisposable
         }
     }
 
-    private void Finish(PartitionState p, PartitionEndState state)
+    /// <summary>
+    /// Ends a partition. A partition that ended at the end of its range has nothing left to read, so its cursor position is the range's end
+    /// (the offsets between its last record and the end are control records and aborted batches); one that ended at an offset below the end
+    /// (the end of the log, an LSO inside the range) keeps at least that offset.
+    /// </summary>
+    private void Finish(PartitionState p, PartitionEndState state, long? reached = null)
     {
         lock (gate)
         {
@@ -655,6 +673,16 @@ internal sealed class ScanRun : IDisposable
             }
 
             p.State = state;
+
+            if (state == PartitionEndState.EndOfWindow)
+            {
+                p.Next = p.Range.End;
+            }
+            else if (reached is { } offset)
+            {
+                p.Next = Math.Min(p.Range.End, Math.Max(p.Next, offset));
+            }
+
             version++;
         }
     }

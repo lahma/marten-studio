@@ -7,9 +7,11 @@ namespace KStudio;
 /// lower a limit; nothing raises one above the value the host set here.
 /// </summary>
 /// <remarks>
-/// The memory a process holds for scans is about $S \cdot (Q + F + m \cdot c)$ with the concurrent scans
-/// <see cref="MaxConcurrentScans" />, the prefetch queue <see cref="QueueKilobytes" />, the fetch size <see cref="FetchBytes" />,
-/// the kept matches <see cref="MaxMatches" /> and the bytes kept per match <see cref="MaxMatchBytes" />.
+/// The memory a process holds for scans is about $S \cdot (C + 2 m c)$ with the concurrent scans
+/// <see cref="MaxConcurrentScans" />, a constant <c>C</c> of about 64 MiB for each consumer (its prefetch queue
+/// <see cref="QueueKilobytes" /> and fetch size <see cref="FetchBytes" /> sit inside it), the kept matches <see cref="MaxMatches" />
+/// and <see cref="MaxMatchBytes" /> as <c>c</c>, which bounds everything a kept match holds (key, headers, CloudEvents attributes and
+/// value together); the 2 is .NET's UTF-16.
 /// </remarks>
 public sealed class KafkaScanLimits
 {
@@ -41,7 +43,7 @@ public sealed class KafkaScanLimits
     /// <summary>The most matches one scan keeps (1 to 10,000). Default 500.</summary>
     public int MaxMatches { get; set; } = 500;
 
-    /// <summary>The most bytes a kept match holds of a record's value (1 KiB to 1 MiB). Default 64 KiB.</summary>
+    /// <summary>The most bytes (UTF-8) a kept match holds of a record in all: key, headers, CloudEvents attributes and value (1 KiB to 1 MiB). Default 64 KiB.</summary>
     public int MaxMatchBytes { get; set; } = 64 * 1024;
 
     /// <summary>The largest value parsed for evaluation (64 KiB to 16 MiB). Default 1 MiB.</summary>

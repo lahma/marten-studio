@@ -51,15 +51,25 @@ public class ScanEngineTests
             },
             [KafkaScanStopReason.ByteBudget] = async () =>
             {
-                (ScanFixture fixture, string topic) = await Seeded(10);
+                // The lowest byte budget the engine accepts is 1 MiB: ten records of 400 KiB, of which the third passes it.
+                ScanFixture fixture = ScanFixture.Create();
                 await using ScanFixture guard = fixture;
-                return (await fixture.RunAsync(ScanFixture.Request([topic], lower: new KafkaScanLowering { MaxBytesPerScan = 350 }))).Result;
+                string topic = fixture.Topic("bytes");
+                string big = new('x', 400 * 1024);
+
+                for (int i = 0; i < 10; i++)
+                {
+                    fixture.Produce(topic, 0, i, "k", big);
+                }
+
+                return (await fixture.RunAsync(ScanFixture.Request([topic], lower: new KafkaScanLowering { MaxBytesPerScan = 1024 * 1024 }))).Result;
             },
             [KafkaScanStopReason.RecordBudget] = async () =>
             {
-                (ScanFixture fixture, string topic) = await Seeded(10);
+                // The lowest record budget the engine accepts is 1,000; no record matches, so the match limit does not come first.
+                (ScanFixture fixture, string topic) = await Seeded(1_200);
                 await using ScanFixture guard = fixture;
-                return (await fixture.RunAsync(ScanFixture.Request([topic], lower: new KafkaScanLowering { MaxRecordsPerScan = 5 }))).Result;
+                return (await fixture.RunAsync(ScanFixture.Request([topic], "key = 'absent'", lower: new KafkaScanLowering { MaxRecordsPerScan = 1_000 }))).Result;
             },
             [KafkaScanStopReason.OwnerBudget] = async () =>
             {
@@ -546,9 +556,9 @@ public class ScanEngineTests
     {
         KafkaScanLimits host = new();
 
-        KafkaScanLowering lower = new() { MaxMatches = 10, MaxBytesPerScan = 1_000 };
+        KafkaScanLowering lower = new() { MaxMatches = 10, MaxBytesPerScan = 2L * 1024 * 1024 };
         KafkaScanLimits applied = lower.Apply(host.Copy());
-        (applied.MaxMatches, applied.MaxBytesPerScan, applied.MaxRecordsPerScan).Should().Be((10, 1_000L, host.MaxRecordsPerScan));
+        (applied.MaxMatches, applied.MaxBytesPerScan, applied.MaxRecordsPerScan).Should().Be((10, 2L * 1024 * 1024, host.MaxRecordsPerScan));
 
         Action raise = () => new KafkaScanLowering { MaxMatches = host.MaxMatches + 1 }.Apply(host.Copy());
         raise.Should().Throw<ArgumentException>().WithMessage("MaxMatches cannot be raised*");

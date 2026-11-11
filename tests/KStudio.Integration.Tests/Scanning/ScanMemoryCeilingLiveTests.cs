@@ -7,17 +7,22 @@ using KStudio.Integration.Tests.Support;
 namespace KStudio.Integration.Tests.Scanning;
 
 /// <summary>
-/// The memory a scan holds (AGENTS.md D41, OPEN-6): two concurrent scans over two topics of 128 MiB each, every record kept up to the match cap,
-/// with the process's private memory sampled on a timer. The ceiling is $M \approx S \cdot (C + m \cdot c)$ with a per-consumer constant of
-/// 64 MiB (SPIKE S4: a consumer over six partitions grew by about 51 MiB private and 59 MiB working set, three times $Q + F$, because
-/// librdkafka has overhead per consumer), and the test allows that plus 25 %. It prints the measured peak either way. Kafka 4.x only.
+/// The memory a scan holds (AGENTS.md D41, OPEN-6): two concurrent scans over two topics, every record the heaviest the match cap has to bound
+/// (a 96 KiB value and 64 headers of 4 KiB, 352 KiB in all) and every record a match, with the process's private memory sampled on a timer.
+/// The ceiling is $M \approx S \cdot (C + 2 m c)$: a per-consumer constant of 64 MiB (SPIKE S4: a consumer over six partitions grew by about
+/// 51 MiB private and 59 MiB working set, three times $Q + F$, because librdkafka has overhead per consumer) and, per kept match, at most
+/// $c$ bytes of key, headers, attributes and value together, which .NET holds as UTF-16. The test allows that plus 25 %, and prints the
+/// measured peak either way. Kafka 4.x only.
 /// </summary>
 [Collection(KafkaCollections.V4)]
 public sealed class ScanMemoryCeilingLiveTests4(Kafka4Fixture fixture)
 {
     private const long MiB = 1024 * 1024;
-    private const int Records = 8_192;
-    private const int ValueBytes = (16 * 1024) - 2;
+    private const int Partitions = 6;
+    private const int PerPartition = 90;
+    private const int ValueBytes = 96 * 1024;
+    private const int HeaderCount = 64;
+    private const int HeaderBytes = 4 * 1024;
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
@@ -27,17 +32,18 @@ public sealed class ScanMemoryCeilingLiveTests4(Kafka4Fixture fixture)
         await using LiveContractCluster admin = LiveContractCluster.Open(fixture);
         string[] topics = [admin.NewTopic("memory-a"), admin.NewTopic("memory-b")];
         string payload = new('x', ValueBytes);
+        (string Name, string Value)[] headers = [.. Enumerable.Range(0, HeaderCount).Select(static i => ("h" + i, new string('h', HeaderBytes)))];
 
         foreach (string topic in topics)
         {
-            await admin.CreateTopicAsync(topic, 6);
+            await admin.CreateTopicAsync(topic, Partitions);
 
-            for (int partition = 0; partition < 6; partition++)
+            for (int partition = 0; partition < Partitions; partition++)
             {
-                for (int block = 0; block < Records / 6; block += 500)
+                for (int block = 0; block < PerPartition; block += 30)
                 {
-                    int count = Math.Min(500, (Records / 6) - block);
-                    await admin.ProduceAsync(topic, partition, [.. Enumerable.Range(block, count).Select(i => LiveRecords.At(i, "k" + (i % 10), payload))]);
+                    int count = Math.Min(30, PerPartition - block);
+                    await admin.ProduceAsync(topic, partition, [.. Enumerable.Range(block, count).Select(i => LiveRecords.At(i, "k1", payload, headers))]);
                 }
             }
         }
@@ -46,8 +52,8 @@ public sealed class ScanMemoryCeilingLiveTests4(Kafka4Fixture fixture)
         KafkaScanOwner first = new("one");
         KafkaScanOwner second = new("two");
 
-        // A tenth of the records match, more than the 500 a scan keeps, and with the payload grant each match keeps its value up to the cap:
-        // the queue and the match store are both full for most of the scan.
+        // Every record matches and each scan keeps 500 of them, so the queue and the match store are both full for most of the scan; with the
+        // payload grant each match keeps whatever its budget leaves of its value.
         KafkaScanPlan planOne = await engine.Scanner.PlanAsync(LiveScanEngine.Request([topics[0]], "key = 'k1'", grant: KafkaReadGrant.Envelope | KafkaReadGrant.Payload), first, Token);
         KafkaScanPlan planTwo = await engine.Scanner.PlanAsync(LiveScanEngine.Request([topics[1]], "key = 'k1'", grant: KafkaReadGrant.Envelope | KafkaReadGrant.Payload), second, Token);
 
@@ -73,16 +79,29 @@ public sealed class ScanMemoryCeilingLiveTests4(Kafka4Fixture fixture)
 
         KafkaScanResult[] results = await done.WaitAsync(TimeSpan.FromMinutes(3), Token);
 
-        results.Should().OnlyContain(static x => x.StopReason == KafkaScanStopReason.Completed || x.StopReason == KafkaScanStopReason.MatchLimit);
-        results.Sum(static x => x.Bytes).Should().BeGreaterThan(8 * MiB, "the scans read enough for the queues to fill");
+        results.Should().OnlyContain(static x => x.StopReason == KafkaScanStopReason.MatchLimit, "every record matches, so each scan keeps its 500 and stops");
+        results.Sum(static x => x.Bytes).Should().BeGreaterThan(64 * MiB, "the scans read enough for the queues to fill");
+
+        // What a kept match holds is bounded by c, whatever the record carried.
+        KafkaScanLimits limits = new();
+
+        foreach (KafkaMatch match in one.Matches.Concat(two.Matches))
+        {
+            long held = (match.Key.Text?.Length ?? 0)
+                + match.Headers.Sum(static x => x.Name.Length + (x.Value.Text?.Length ?? 0))
+                + match.CloudEventAttributes.Sum(static x => x.Name.Length + (x.Value.Text?.Length ?? 0))
+                + (match.ValueText?.Length ?? 0)
+                + (match.ValuePreview?.Length ?? 0);
+            held.Should().BeLessThanOrEqualTo(limits.MaxMatchBytes);
+        }
 
         long grown = peak - baseline;
-        KafkaScanLimits limits = new();
-        double perScanMiB = 64 + ((double) limits.MaxMatches * limits.MaxMatchBytes / MiB);
-        double allowed = 2 * perScanMiB * 1.25 * MiB;
+        double perScanMiB = 64 + (2.0 * limits.MaxMatches * limits.MaxMatchBytes / MiB);
+        double ceiling = 2 * perScanMiB * MiB;
+        double allowed = ceiling * 1.25;
 
         // Printed either way, so the number is on record next to the formula.
-        TestContext.Current.SendDiagnosticMessage($"KStudio memory ceiling ({fixture.Image}): peak growth {grown / (double) MiB:F1} MiB, allowed {allowed / MiB:F1} MiB (S=2, C=64 MiB, m*c={(double) limits.MaxMatches * limits.MaxMatchBytes / MiB:F1} MiB, +25 %); the formula without C would be 95 MiB.");
+        TestContext.Current.SendDiagnosticMessage($"KStudio memory ceiling ({fixture.Image}): peak growth {grown / (double) MiB:F1} MiB, ceiling {ceiling / MiB:F1} MiB, allowed {allowed / MiB:F1} MiB (S=2, C=64 MiB, 2*m*c={2.0 * limits.MaxMatches * limits.MaxMatchBytes / MiB:F1} MiB, +25 %).");
 
         grown.Should().BeLessThan((long) allowed);
     }

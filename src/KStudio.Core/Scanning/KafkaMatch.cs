@@ -72,10 +72,10 @@ internal sealed class KafkaMatch
     /// <summary>How the topic's keys are written; "(assumed)" when the host declared nothing.</summary>
     public required string KeyFormat { get; init; }
 
-    /// <summary>The headers, at most 64.</summary>
+    /// <summary>The headers, at most 64 and within the match's budget.</summary>
     public required IReadOnlyList<KafkaMatchHeader> Headers { get; init; }
 
-    /// <summary>How many headers beyond the first 64 were left out.</summary>
+    /// <summary>How many headers beyond the first 64, or beyond the match's budget, were left out.</summary>
     public int HeadersOmitted { get; init; }
 
     /// <summary>What kind of thing the value is.</summary>
@@ -95,6 +95,9 @@ internal sealed class KafkaMatch
 
     /// <summary>The CloudEvents attributes, when the record is one.</summary>
     public IReadOnlyList<KafkaMatchHeader> CloudEventAttributes { get; init; } = [];
+
+    /// <summary>How many attributes beyond the first 64, or beyond the match's budget, were left out.</summary>
+    public int CloudEventAttributesOmitted { get; init; }
 
     /// <summary>How the record carries its CloudEvent.</summary>
     public CloudEventMode CloudEventMode { get; init; }
@@ -171,6 +174,12 @@ internal static class KafkaMatchFactory
     /// <summary>The most bytes of a CloudEvents attribute kept.</summary>
     public const int MaxAttributeBytes = 1_024;
 
+    /// <summary>The most CloudEvents attributes kept; the count of the rest is kept.</summary>
+    public const int MaxAttributes = 64;
+
+    /// <summary>The most characters of a header's or an attribute's name kept.</summary>
+    public const int MaxNameChars = 256;
+
     /// <summary>Makes the match of a record that satisfied the predicate.</summary>
     /// <param name="record">The record; it is not kept.</param>
     /// <param name="topic">The topic's context: its redactor, key format and decoder.</param>
@@ -190,6 +199,10 @@ internal static class KafkaMatchFactory
         IKafkaRedactor redactor = topic.Redactor;
         KafkaKeyFormat keyFormat = topic.Descriptor.KeyFormat;
 
+        // One budget for everything the match keeps, in UTF-8 bytes (decision 9.8): the key, the headers, the attributes and then the value,
+        // each cut with its count of what was left out. What a match holds is therefore at most c, whatever the record carries.
+        int budget = limits.MaxMatchBytes;
+
         // The key.
         KafkaMatchField key;
 
@@ -203,7 +216,8 @@ internal static class KafkaMatchFactory
         }
         else
         {
-            key = Capture(keyFormat.TryFormat(record.Key, out string? formatted) && formatted is not null ? Encoding.UTF8.GetBytes(formatted) : null, record.Key, MaxKeyBytes);
+            key = Capture(keyFormat.TryFormat(record.Key, out string? formatted) && formatted is not null ? Encoding.UTF8.GetBytes(formatted) : null, record.Key, Math.Min(MaxKeyBytes, budget));
+            budget -= Spent(key);
         }
 
         // The headers.
@@ -212,7 +226,10 @@ internal static class KafkaMatchFactory
 
         foreach (WireHeader header in record.Headers)
         {
-            if (headers.Count >= MaxHeaders)
+            string name = CutName(header.Name, MaxNameChars);
+            int nameCost = Encoding.UTF8.GetByteCount(name);
+
+            if (headers.Count >= MaxHeaders || nameCost > budget)
             {
                 omitted++;
                 continue;
@@ -220,17 +237,19 @@ internal static class KafkaMatchFactory
 
             KafkaMatchField value = header.Value is null ? KafkaMatchField.Null
                 : redactor.ForHeader(header.Name) is { } rule ? KafkaMatchField.Masked(rule.Name)
-                : Capture(null, header.Value, MaxHeaderBytes);
+                : Capture(null, header.Value, Math.Min(MaxHeaderBytes, budget - nameCost));
 
-            headers.Add(new KafkaMatchHeader(header.Name.Length > 256 ? header.Name[..256] : header.Name, value));
+            headers.Add(new KafkaMatchHeader(name, value));
+            budget -= nameCost + Spent(value);
         }
 
         // The value: its kind and length always, its CloudEvents attributes, and its text only under the payload grant.
         KafkaDecodedValue decoded = ValueDetector.Detect(
             record,
-            new ValueDetection(grant, topic.Decoder, limits.MaxDecodeBytes, limits.MaxMatchBytes, counters, onDecoderFailed));
+            new ValueDetection(grant, topic.Decoder, limits.MaxDecodeBytes, Math.Max(0, budget), counters, onDecoderFailed));
 
         List<KafkaMatchHeader> attributes = [];
+        int attributesOmitted = 0;
 
         if (decoded.CloudEvent is { } view)
         {
@@ -238,18 +257,42 @@ internal static class KafkaMatchFactory
             {
                 foreach (KeyValuePair<string, string> attribute in cloudEvent.Attributes.OrderBy(static x => x.Key, StringComparer.Ordinal))
                 {
+                    string name = CutName(attribute.Key, MaxNameChars);
+                    int nameCost = Encoding.UTF8.GetByteCount(name);
+
+                    if (attributes.Count >= MaxAttributes || nameCost > budget)
+                    {
+                        attributesOmitted++;
+                        continue;
+                    }
+
                     KafkaMatchField value = redactor.ForCloudEvent(attribute.Key) is { } rule
                         ? KafkaMatchField.Masked(rule.Name)
-                        : Capture(Encoding.UTF8.GetBytes(attribute.Value), null, MaxAttributeBytes);
-                    attributes.Add(new KafkaMatchHeader(attribute.Key, value));
+                        : Capture(Encoding.UTF8.GetBytes(attribute.Value), null, Math.Min(MaxAttributeBytes, budget - nameCost));
+                    attributes.Add(new KafkaMatchHeader(name, value));
+                    budget -= nameCost + Spent(value);
                 }
             }
         }
 
+        // The value gets what is left.
         string? text = decoded.Text;
         string? preview = decoded.Preview;
         bool truncated = decoded.Truncated;
         string? withheld = null;
+        int valueBudget = Math.Max(0, budget);
+
+        if (text is not null && Encoding.UTF8.GetByteCount(text) > valueBudget)
+        {
+            text = Cut(text, valueBudget);
+            truncated = true;
+        }
+
+        if (preview is not null && Encoding.UTF8.GetByteCount(preview) > valueBudget)
+        {
+            preview = Cut(preview, valueBudget);
+            truncated = true;
+        }
 
         // A structured envelope holds the attributes a rule masks: the value cannot be kept whole, so it is not kept (fail closed).
         if ((text is not null || preview is not null)
@@ -280,6 +323,7 @@ internal static class KafkaMatchFactory
             SchemaId = decoded.SchemaId,
             UndecodableReason = decoded.Reason,
             CloudEventAttributes = attributes,
+            CloudEventAttributesOmitted = attributesOmitted,
             CloudEventMode = decoded.CloudEvent?.Mode ?? CloudEventMode.None,
             Trace = HeaderDecoder.FindTrace(record.Headers.Select(static x => KeyValuePair.Create(x.Name, x.Value))),
             ValueText = text,
@@ -289,9 +333,54 @@ internal static class KafkaMatchFactory
         };
     }
 
-    /// <summary>A capped copy: <paramref name="textBytes" /> when the field is text, else hex of <paramref name="raw" />.</summary>
+    /// <summary>A name cut at <paramref name="maxChars" /> characters, not in the middle of a surrogate pair.</summary>
+    private static string CutName(string name, int maxChars)
+    {
+        if (name.Length <= maxChars)
+        {
+            return name;
+        }
+
+        int length = char.IsHighSurrogate(name[maxChars - 1]) ? maxChars - 1 : maxChars;
+        return name[..length];
+    }
+
+    /// <summary>The bytes a kept field spends of the match's budget: its text in UTF-8 (a masked or null field keeps none).</summary>
+    private static int Spent(KafkaMatchField field) => field.Text is { } text ? Encoding.UTF8.GetByteCount(text) : 0;
+
+    /// <summary>At most <paramref name="maxBytes" /> bytes of UTF-8 of <paramref name="text" />, cut between characters.</summary>
+    private static string Cut(string text, int maxBytes)
+    {
+        if (text.Length <= maxBytes / 3 || Encoding.UTF8.GetByteCount(text) <= maxBytes)
+        {
+            return text;
+        }
+
+        int used = 0;
+        int index = 0;
+
+        while (index < text.Length)
+        {
+            int length = char.IsHighSurrogate(text[index]) && index + 1 < text.Length && char.IsLowSurrogate(text[index + 1]) ? 2 : 1;
+            int bytes = Encoding.UTF8.GetByteCount(text.AsSpan(index, length));
+
+            if (used + bytes > maxBytes)
+            {
+                break;
+            }
+
+            used += bytes;
+            index += length;
+        }
+
+        return text[..index];
+    }
+
+    /// <summary>A capped copy: <paramref name="textBytes" /> when the field is text, else hex of <paramref name="raw" />; at most <paramref name="max" /> bytes of text.</summary>
     private static KafkaMatchField Capture(byte[]? textBytes, byte[]? raw, int max)
     {
+        max = Math.Max(0, max);
+
         if (textBytes is not null)
         {
             (string text, bool cut) = ValueDetector.KeepText(textBytes, max);
@@ -306,7 +395,16 @@ internal static class KafkaMatchFactory
             return new KafkaMatchField(text, null, cut, bytes.Length, false);
         }
 
-        return new KafkaMatchField(HeaderDecoder.Hex(bytes), null, bytes.Length > HeaderDecoder.MaxHexBytes, bytes.Length, false);
+        string hex = HeaderDecoder.Hex(bytes);
+        bool hexCut = bytes.Length > HeaderDecoder.MaxHexBytes;
+
+        if (hex.Length > max)
+        {
+            hex = hex[..max];
+            hexCut = true;
+        }
+
+        return new KafkaMatchField(hex, null, hexCut, bytes.Length, false);
     }
 }
 

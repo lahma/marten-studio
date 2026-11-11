@@ -234,7 +234,7 @@ internal static class PredicateCompiler
             forms.AddRange(encoded);
         }
 
-        return new CompiledKeyClause(clause.Operator, [.. forms], texts);
+        return new CompiledKeyClause(clause.Operator, [.. forms], texts, ReferenceEquals(format, KafkaKeyFormat.JsonString));
     }
 
     private static PredicateError Refuse(ClauseNode clause, string field, int position, string reason) =>
@@ -253,6 +253,8 @@ internal static class PredicateCompiler
         {
             KeyField when clause.Operator == PredicateOperator.Contains =>
                 (ClauseVerdictKind.SlowScan, $"slow: each key is formatted as text ({context.KeyFormat.Name}{assumed})"),
+            KeyField when ReferenceEquals(context.KeyFormat, KafkaKeyFormat.JsonString) && clause.Operator is not (PredicateOperator.IsNull or PredicateOperator.IsNotNull) =>
+                (ClauseVerdictKind.Scan, $"compared as bytes; a key with escapes is decoded ({context.KeyFormat.Name}{assumed})"),
             KeyField => (ClauseVerdictKind.Scan, $"compared as bytes ({context.KeyFormat.Name}{assumed})"),
             HeaderField when clause.Operator == PredicateOperator.Contains =>
                 (ClauseVerdictKind.SlowScan, "slow: each header value is decoded as text"),

@@ -177,12 +177,17 @@ and round-trips, and KStudio carries it in the URL's fragment.
 
 **Keys are bytes.** A key literal is compiled through the topic's key format (`Utf8String`, the default, said "assumed"
 when undeclared; `JsonString`, which tries both common escapings; `Int64BigEndian`; `Int32BigEndian`; `GuidRfc4122`;
-`GuidDotNet`; `Bytes`) into every byte form a producer could have written, and compared without decoding. Headers compare
-as the UTF-8 bytes of the literal.
+`GuidDotNet`; `Bytes`) into every byte form a producer could have written, and compared without decoding. A
+`JsonString` key that no form matched and that contains a backslash is decoded once as JSON (counted as a key decode) and
+its text compared for `=`, `in` and `^=`, because serializers escape differently (Python's `json.dumps` writes `é`
+for é); the clause's verdict says "compared as bytes; a key with escapes is decoded". Headers compare as the UTF-8 bytes
+of the literal.
 
 **Three values.** A condition that needs a decode it cannot make - `~` on a key or header that is not valid text, a
 CloudEvents attribute of a value that is not JSON, M3's value conditions on an undecodable value - is *undecidable*, never
-false. Only a predicate that is true matches; undecidable records are counted by reason and shown beside the result.
+false. `any ~ …` is undecidable when no field was true and a key or header that is not masked was not text. Only a
+predicate that is true matches; undecidable records are counted by reason (the first reason among the clauses that left the
+result unknown) and shown beside the result.
 
 **Cheapest first.** Conditions run in cost order (key bytes, header bytes, binary CloudEvents attributes, text matches,
 structured CloudEvents attributes, `any`, then M3's value and JSON paths) and short-circuit; each record decodes each
@@ -232,13 +237,20 @@ librdkafka's bounded queue stops fetching, so the broker sends little more than 
 principal, and the studio shares the host's: keep the ceiling well below the principal's quota, or a scan throttles the
 host's own consumers. On managed clusters bytes fetched are billed, so the per-scan budget is a cost control first.
 
-Memory is stated: with $S$ concurrent scans, a constant $C$ for each consumer's own overhead, $m$ kept matches and $c$ bytes
-kept per match, $M \approx S \cdot (C + m \cdot c)$. A consumer's prefetch queue $Q$ and fetch size $F$ (8 MiB each at the
-defaults) sit inside $C$, which was measured at about 64 MiB for a consumer over six partitions (about 51 MiB of private
-bytes and 59 MiB of working set, three times $Q + F$, because librdkafka has overhead per consumer); with the clients' own
-defaults the same consumer grew by 154 MiB. The defaults ($S = 2$, $C = 64$ MiB, $m = 500$, $c = 64$ KiB) give about
-191 MiB as a ceiling, and the live suite allows that plus 25 %. It also prints what two scans actually held. Broker
-egress is bounded separately: with these limits the broker sent at most $Q + F$ more than the engine had read.
+Memory is stated: $M \approx S \cdot (C + 2mc)$, where $c$ bounds everything a kept match holds (key, headers, CloudEvents
+attributes and value, cut in that order) and the 2 is .NET's UTF-16; the defaults ($S = 2$, $C = 64$ MiB, $m = 500$, $c = 64$ KiB)
+give about 253 MiB. Here $S$ is the concurrent scans, $C$ a constant for each consumer's own overhead and $m$ the kept
+matches. A consumer's prefetch queue $Q$ and fetch size $F$ (8 MiB each at the defaults) sit inside $C$, which was
+measured at about 64 MiB for a consumer over six partitions (about 51 MiB of private bytes and 59 MiB of working set,
+three times $Q + F$, because librdkafka has overhead per consumer); with the clients' own defaults the same consumer grew
+by 154 MiB. A match spends one budget of $c$ bytes of UTF-8, in order: its key (at most 1 KiB), its headers (at most 64,
+4 KiB each, names cut at 256 characters), its CloudEvents attributes (at most 64, 1 KiB each, names cut at 256
+characters) and then its value, each cut with a count of what was left out; so a record of 64 headers of 4 KiB keeps the
+first of them and none of its value. The formula is a ceiling only because of that budget. The record-size sampler's
+consumer is outside $S$ and the governor, so it is small: 1 MiB of queue and 1 MiB of fetch, for at most three seconds
+at a time per cluster. The live suite allows $1.25 \cdot S(C + 2mc)$ for two scans over records of a 96 KiB value and 64
+headers of 4 KiB, and prints what they actually held. Broker egress is bounded separately: with these limits the broker
+sent at most $Q + F$ more than the engine had read.
 
 Before reading, the engine estimates a scan: the offsets in its ranges ("about", since offsets are not records) and the
 bytes, from a small sample of record sizes. Above the confirmation threshold, `Start` refuses unless the visitor's
