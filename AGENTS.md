@@ -470,7 +470,8 @@ text: [kstudio.md](docs/maintainers/kstudio.md#d40).
 
 **D41 — KStudio bounds the cost of a scan in the engine.** Concurrency (two scans per process, one per owner), a byte rate
 (10 MiB/s per process, paced by consumption), per-scan bytes, records, duration and matches, and an owner's rolling
-hourly byte budget. Memory is stated, about $S(C + 2mc)$: $C \approx 64$ MiB per consumer (measured), and a kept match holds at most $c$ bytes of key, headers, attributes and value together, kept as UTF-16 text; about 253 MiB at the defaults. A scan above the confirmation
+hourly byte budget. Memory is stated, about $S(C + 2mc)$: $C \approx 64$ MiB per consumer (measured), and a kept match holds at most $c$ bytes of key, headers, attributes and value together, kept as UTF-16 text; about 253 MiB at the defaults, as private memory (`RssAnon` on Linux, where .NET's
+`PrivateMemorySize64` counts untouched mappings). A scan above the confirmation
 threshold starts only with a confirmation the engine checks. A profile or a visitor can only lower a limit. Full text:
 [kstudio.md](docs/maintainers/kstudio.md#d41).
 

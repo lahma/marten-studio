@@ -64,7 +64,11 @@ public abstract class ReadNeverWritesScanLiveTests(KafkaFixture fixture)
     private string[] TopicNames()
     {
         using IAdminClient client = new AdminClientBuilder(new AdminClientConfig(fixture.Client("admin")) { AllowAutoCreateTopics = false }).Build();
-        return [.. client.GetMetadata(TimeSpan.FromSeconds(10)).Topics.Select(static x => x.Topic).Order(StringComparer.Ordinal)];
+        // A broker that never hosted a consumer group creates its internal __consumer_offsets when the scan consumer looks up
+        // its group coordinator (kstudio.md D37, "The group coordinator on a pristine cluster"); internal topics are the
+        // broker's own, so only topics a host could see are compared.
+        return [.. client.GetMetadata(TimeSpan.FromSeconds(10)).Topics.Select(static x => x.Topic)
+            .Where(static x => !x.StartsWith("__", StringComparison.Ordinal)).Order(StringComparer.Ordinal)];
     }
 }
 

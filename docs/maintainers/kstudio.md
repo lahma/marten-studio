@@ -102,6 +102,12 @@ request through the engine's own admin client. librdkafka creates a topic a cons
 consumer's `false` is the only line there, and the same class builds a reader from a host configuration that says `true`
 and finds the topic still absent.
 
+**The group coordinator on a pristine cluster.** The scan consumer's group-coordinator lookup makes a broker that has
+never hosted a consumer group create its internal `__consumer_offsets` topic (seen on a fresh test broker, CI-FIX-2,
+2026-11-11). It is the broker's own internal topic and holds nothing of the studio's, and every cluster with a consumer
+group already has it; `ReadNeverWrites*` assert on the topics a host could see, so a test that runs first on a fresh
+broker must ignore `__`-prefixed internal topics.
+
 **A key without a group ACL.** Confluent requires a `group.id`, so every scan consumer has one, `{GroupIdPrefix}{scan
 id}`, and librdkafka looks up that group's coordinator although the consumer only assigns. Measured (spike S1,
 2026-11-10, the same on `apache/kafka` 3.9.2 and 4.4.0 and on Confluent.Kafka 2.14.0 and 2.16.0): a principal with
@@ -243,7 +249,10 @@ give about 253 MiB. Here $S$ is the concurrent scans, $C$ a constant for each co
 matches. A consumer's prefetch queue $Q$ and fetch size $F$ (8 MiB each at the defaults) sit inside $C$, which was
 measured at about 64 MiB for a consumer over six partitions (about 51 MiB of private bytes and 59 MiB of working set,
 three times $Q + F$, because librdkafka has overhead per consumer); with the clients' own defaults the same consumer grew
-by 154 MiB. A match spends one budget of $c$ bytes of UTF-8, in order: its key (at most 1 KiB), its headers (at most 64,
+by 154 MiB. The memory is the private memory the process holds: `PrivateMemorySize64` on Windows and `RssAnon`
+(anonymous resident pages) on Linux, because .NET's Linux `PrivateMemorySize64` is `VmData`, the size of the mappings,
+which counts arenas librdkafka's threads reserve and never touch. $C \approx 64$ MiB holds on both: two scans grew by 204
+to 267 MiB against the ceiling of 253 MiB and the live test's allowance of 316 MiB (CI-FIX-2, 2026-11-11). A match spends one budget of $c$ bytes of UTF-8, in order: its key (at most 1 KiB), its headers (at most 64,
 4 KiB each, names cut at 256 characters), its CloudEvents attributes (at most 64, 1 KiB each, names cut at 256
 characters) and then its value, each cut with a count of what was left out; so a record of 64 headers of 4 KiB keeps the
 first of them and none of its value. The formula is a ceiling only because of that budget. The record-size sampler's
