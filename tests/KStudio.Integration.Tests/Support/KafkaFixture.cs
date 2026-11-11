@@ -251,6 +251,13 @@ public static class KafkaCollections
 
     /// <summary>The Kafka 4.x collection.</summary>
     public const string V4 = "kafka-4";
+
+    /// <summary>
+    /// A Kafka 4.x collection that runs alone: xunit runs a collection that disables parallelization after every parallel one has finished, and
+    /// one at a time, so a test that measures process-wide memory sees nothing else of the run (<c>ScanMemoryCeilingLiveTests4</c>). It has a
+    /// broker of its own, which a reusing run attaches to the same container as <see cref="V4" />'s.
+    /// </summary>
+    public const string V4Alone = "kafka-4-alone";
 }
 
 /// <summary>Kafka 3.9: one broker for every class in the collection.</summary>
@@ -260,6 +267,10 @@ public sealed class Kafka39Group : ICollectionFixture<Kafka39Fixture>;
 /// <summary>Kafka 4.x: one broker for every class in the collection.</summary>
 [CollectionDefinition(KafkaCollections.V4)]
 public sealed class Kafka4Group : ICollectionFixture<Kafka4Fixture>;
+
+/// <summary>Kafka 4.x, with nothing else of the run executing beside it: for the tests that measure the process's own memory.</summary>
+[CollectionDefinition(KafkaCollections.V4Alone, DisableParallelization = true)]
+public sealed class Kafka4AloneGroup : ICollectionFixture<Kafka4Fixture>;
 
 /// <summary>A built container's reuse identity, as Testcontainers computes it.</summary>
 internal static class ContainerReuse

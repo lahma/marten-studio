@@ -12,9 +12,11 @@ namespace KStudio.Integration.Tests.Scanning;
 /// The ceiling is $M \approx S \cdot (C + 2 m c)$: a per-consumer constant of 64 MiB (SPIKE S4: a consumer over six partitions grew by about
 /// 51 MiB private and 59 MiB working set, three times $Q + F$, because librdkafka has overhead per consumer) and, per kept match, at most
 /// $c$ bytes of key, headers, attributes and value together, which .NET holds as UTF-16. The test allows that plus 25 %, and prints the
-/// measured peak either way. Kafka 4.x only.
+/// measured peak either way. Kafka 4.x only. The peak is the whole process's private memory, so the class is in a collection that disables
+/// parallelization: nothing else of the run executes while it measures (on CI the same test, beside the other live classes, measured 465 MB
+/// against an allowance of 332 MB).
 /// </summary>
-[Collection(KafkaCollections.V4)]
+[Collection(KafkaCollections.V4Alone)]
 public sealed class ScanMemoryCeilingLiveTests4(Kafka4Fixture fixture)
 {
     private const long MiB = 1024 * 1024;
@@ -57,9 +59,11 @@ public sealed class ScanMemoryCeilingLiveTests4(Kafka4Fixture fixture)
         KafkaScanPlan planOne = await engine.Scanner.PlanAsync(LiveScanEngine.Request([topics[0]], "key = 'k1'", grant: KafkaReadGrant.Envelope | KafkaReadGrant.Payload), first, Token);
         KafkaScanPlan planTwo = await engine.Scanner.PlanAsync(LiveScanEngine.Request([topics[1]], "key = 'k1'", grant: KafkaReadGrant.Envelope | KafkaReadGrant.Payload), second, Token);
 
-        GC.Collect();
+        // The baseline is taken with the broker running, the topics produced and the engine built (the fixture is warm), after a full, compacting
+        // collection: what the setup left on the managed heap is not the scans' growth.
+        GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
         GC.WaitForPendingFinalizers();
-        GC.Collect();
+        GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
         using Process current = Process.GetCurrentProcess();
         long baseline = current.PrivateMemorySize64;
 
