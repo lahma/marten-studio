@@ -38,7 +38,12 @@ internal sealed class KafkaScanHandle : IAsyncDisposable
         this.run = run;
         this.scanTask = scanTask;
         this.time = time;
-        batcher = Task.Run(BatchLoopAsync);
+
+        // The timer exists before the constructor returns, so before the caller can do anything the clock could answer. Created inside the task
+        // (as it was until KS-CI-FIX-2) it was armed whenever the thread pool got to it, and a clock that moved in between had already gone past
+        // its first tick: a manual clock lost the tick for good, and a loaded host delayed the first batch by however long the pool took.
+        PeriodicTimer timer = new(BatchInterval, time);
+        batcher = Task.Run(() => BatchLoopAsync(timer));
     }
 
     /// <summary>The scan's id.</summary>
@@ -112,15 +117,13 @@ internal sealed class KafkaScanHandle : IAsyncDisposable
         batcherStop.Dispose();
     }
 
-    private async Task BatchLoopAsync()
+    private async Task BatchLoopAsync(PeriodicTimer timer)
     {
         long sentVersion = -1;
         int sentMatches = 0;
 
         try
         {
-            using PeriodicTimer timer = new(BatchInterval, time);
-
             while (await timer.WaitForNextTickAsync(batcherStop.Token).ConfigureAwait(false))
             {
                 bool finished = scanTask.IsCompleted;
@@ -150,6 +153,7 @@ internal sealed class KafkaScanHandle : IAsyncDisposable
         }
         finally
         {
+            timer.Dispose();
             channel.Writer.TryComplete();
         }
     }

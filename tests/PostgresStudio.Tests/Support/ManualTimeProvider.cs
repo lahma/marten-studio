@@ -12,6 +12,7 @@ internal sealed class ManualTimeProvider(DateTimeOffset start) : TimeProvider
 {
     private readonly Lock gate = new();
     private readonly List<ManualTimer> timers = [];
+    private readonly List<TimeSpan> periods = [];
     private DateTimeOffset now = start;
 
     public ManualTimeProvider() : this(new DateTimeOffset(2026, 10, 26, 12, 0, 0, TimeSpan.Zero))
@@ -32,10 +33,20 @@ internal sealed class ManualTimeProvider(DateTimeOffset start) : TimeProvider
         lock (gate)
         {
             timers.Add(timer);
+            periods.Add(period);
         }
 
         timer.Change(dueTime, period);
         return timer;
+    }
+
+    /// <summary>How many timers have been created with this period, disposed or not: a test that needs to know a timer was armed by a given moment.</summary>
+    public int TimersCreatedWithPeriod(TimeSpan period)
+    {
+        lock (gate)
+        {
+            return periods.Count(x => x == period);
+        }
     }
 
     /// <summary>Moves the clock forward and fires every timer that came due.</summary>

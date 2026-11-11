@@ -61,6 +61,29 @@ public class ScanBatchingTests
     }
 
     [Fact]
+    public async Task The_batch_timer_is_armed_before_the_scan_is_handed_back_so_a_clock_that_moves_at_once_cannot_pass_its_first_tick()
+    {
+        // KS-CI-FIX-2: the timer used to be created on a thread-pool task started by the constructor, so a clock that moved before the pool got to
+        // it was already past the first tick (the timer's first due time is "now + 250 ms" at creation), and on a loaded runner the batch never came.
+        await using ScanFixture fixture = ScanFixture.Create();
+        string topic = fixture.Topic("armed");
+        fixture.Produce(topic, 0, 0, "k", "v");
+        KafkaScanPlan plan = await fixture.PlanAsync(ScanFixture.Request([topic]));
+        int before = fixture.Clock.TimersCreatedWithPeriod(KafkaScanHandle.BatchInterval);
+
+        KafkaScanStart started = fixture.Start(plan, confirmed: true);
+        await using KafkaScanHandle handle = started.Handle!;
+
+        // Nothing is awaited between Start and this line: the timer is there because the handle's constructor made it, not because a task got to it.
+        fixture.Clock.TimersCreatedWithPeriod(KafkaScanHandle.BatchInterval).Should().Be(before + 1);
+
+        List<KafkaScanBatch> batches = [];
+        _ = Collect(handle, batches);
+        fixture.Clock.Advance(KafkaScanHandle.BatchInterval);
+        ScanFixture.Until(() => Count(batches) >= 1, "the first tick, which the clock reached the moment the scan started, hands over a batch");
+    }
+
+    [Fact]
     public async Task Each_tick_hands_over_the_matches_added_since_the_last_batch_and_a_tick_with_no_change_hands_over_nothing()
     {
         ScanEngineTests.ScriptedScan scan = await ScanEngineTests.ScriptedScan.StartAsync();
