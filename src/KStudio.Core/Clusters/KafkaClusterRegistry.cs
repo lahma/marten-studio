@@ -17,7 +17,9 @@ internal sealed class KafkaClusterRegistry
     /// <param name="options">The options.</param>
     public KafkaClusterRegistry(KafkaEngineOptions options)
     {
-        IReadOnlyList<string> problems = KafkaEngineOptionsValidation.Validate(options);
+        // The snapshot first, and the snapshot is what is validated: nothing written to the options after this line reaches the engine.
+        KafkaEngineSnapshot settings = KafkaEngineSnapshot.Take(options);
+        IReadOnlyList<string> problems = KafkaEngineOptionsValidation.Validate(options, settings);
 
         if (problems.Count > 0)
         {
@@ -34,7 +36,7 @@ internal sealed class KafkaClusterRegistry
         }
 
         Clusters = clusters;
-        Settings = KafkaEngineSnapshot.Take(options);
+        Settings = settings;
     }
 
     /// <summary>

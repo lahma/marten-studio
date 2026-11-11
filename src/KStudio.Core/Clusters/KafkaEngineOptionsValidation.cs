@@ -18,6 +18,21 @@ internal static partial class KafkaEngineOptionsValidation
     {
         ArgumentNullException.ThrowIfNull(options);
 
+        return Validate(options, KafkaEngineSnapshot.Take(options));
+    }
+
+    /// <summary>
+    /// The problems with <paramref name="options" />' clusters and topics and with <paramref name="settings" />' values. The registry takes
+    /// the snapshot first and validates that same snapshot, so a write to the options between the two cannot skip a bound
+    /// (REVIEW-ENG-A-FIX 5).
+    /// </summary>
+    /// <param name="options">The options, for their clusters and topics.</param>
+    /// <param name="settings">The snapshot of the options' other values.</param>
+    public static IReadOnlyList<string> Validate(KafkaEngineOptions options, KafkaEngineSnapshot settings)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(settings);
+
         List<string> problems = [];
 
         if (options.Clusters.Count == 0)
@@ -25,14 +40,14 @@ internal static partial class KafkaEngineOptionsValidation
             problems.Add("At least one Kafka cluster is required: call AddCluster.");
         }
 
-        if (options.GroupIdPrefix is null || !GroupIdPrefixPattern().IsMatch(options.GroupIdPrefix))
+        if (settings.GroupIdPrefix is null || !GroupIdPrefixPattern().IsMatch(settings.GroupIdPrefix))
         {
             problems.Add("GroupIdPrefix must be at most 100 characters of letters, digits, '.', '_' and '-'.");
         }
 
-        Range(problems, nameof(options.RequestTimeout), options.RequestTimeout, TimeSpan.FromSeconds(1), TimeSpan.FromMinutes(2));
-        Range(problems, nameof(options.AdminIdleTimeout), options.AdminIdleTimeout, TimeSpan.FromSeconds(30), TimeSpan.FromHours(1));
-        problems.AddRange(options.Limits.Validate());
+        Range(problems, nameof(options.RequestTimeout), settings.RequestTimeout, TimeSpan.FromSeconds(1), TimeSpan.FromMinutes(2));
+        Range(problems, nameof(options.AdminIdleTimeout), settings.AdminIdleTimeout, TimeSpan.FromSeconds(30), TimeSpan.FromHours(1));
+        problems.AddRange(settings.Limits.Validate());
 
         HashSet<string> keys = new(StringComparer.Ordinal);
 

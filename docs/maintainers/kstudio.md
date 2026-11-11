@@ -79,6 +79,8 @@ never by value.
 | `enable.metrics.push` | `false` | `false` | the studio's clients never appear in the cluster's client metrics |
 | `queued.max.messages.kbytes`, `fetch.max.bytes`, `max.partition.fetch.bytes` | the engine's limits (D41) | - | the clients' defaults prefetch 64 MiB per consumer |
 | `debug` | removed | removed | the host's debug contexts are not the studio's |
+| `plugin.library.paths`, `confluent.monitoring.interceptor.*` | removed | removed | a host's interceptor would make the studio's clients produce to the host's monitoring topic |
+| `fetch.message.max.bytes` (librdkafka's own name for `max.partition.fetch.bytes`), `auto.commit.enable` (the legacy topic property that `enable.auto.commit` also names) | removed | - | one setting under two names never reaches the client twice |
 
 Every assign carries explicit offsets, so the consumer never fetches committed offsets, which would need a group ACL.
 The engine sets its own log and error handlers on both builders, so librdkafka never writes to the host's stderr, and
@@ -92,7 +94,29 @@ key against a host configuration that sets the opposite of every value; `ReadNev
 topic that does not exist on a broker that auto-creates topics, as a principal allowed to create them, and finds it still
 absent; `ReadNeverWritesScanLiveTests` finds no committed offset and no `kstudio-` group after scans.
 
-**A key without a group ACL.** Confluent requires a `group.id`, so every scan consumer has one, `{GroupIdPrefix}{scan id}`, and librdkafka looks up that group's coordinator although the consumer only assigns. Measured (spike S1, 2026-11-10, the same on `apache/kafka` 3.9.2 and 4.4.0 and on Confluent.Kafka 2.14.0 and 2.16.0): a principal with `READ` on the topics and no group ACL reads every record, from explicit, `Beginning` and `End` offsets alike. Its consumer sees exactly one non-fatal `GroupAuthorizationFailed` (30), thrown from `Consume` as a `ConsumeException` within about half a second of the assign, possibly after the first records; the error and log handlers never see it. The reader returns it as a failure naming the scan's group, and the scan counts it, logs 9671 once at Debug and goes on: it is never a stop and never a warning. Without a group ACL `Offset.Stored` stalls with no record, no end and no error, so the reader refuses every negative offset and the engine always assigns a concrete one. A `PREFIXED` `READ` ACL on group `kstudio-` (or on the host's own `GroupIdPrefix`) silences the one refusal and changes nothing else; reading never needs it. The consumer groups a host declares for the lag panel are another matter: without `DESCRIBE` on the group, `DescribeConsumerGroups` and `ListConsumerGroupOffsets` fail with `GroupAuthorizationFailed`, which the overview shows as "Not available: needs `DESCRIBE` on group `orders-service`" while the topic's own fields still load. `ListConsumerGroups`, which the engine never calls, answers such a principal with an empty list and no error, one more reason a group the engine cannot see is never shown as "no groups".
+Of the admin client's requests, only the single-topic metadata request creates a topic (measured on 3.9.2 and 4.4.0,
+even for a default client); the engine never sends it (`ForbiddenConfluentCallsTests`), and
+`allow.auto.create.topics=false` is the second line, which `ReadNeverWritesMetadataLiveTests` proves by sending that
+request through the engine's own admin client. librdkafka creates a topic a consumer with
+`allow.auto.create.topics=true` is assigned (measured on both images by the same class's control), so the scan
+consumer's `false` is the only line there, and the same class builds a reader from a host configuration that says `true`
+and finds the topic still absent.
+
+**A key without a group ACL.** Confluent requires a `group.id`, so every scan consumer has one, `{GroupIdPrefix}{scan
+id}`, and librdkafka looks up that group's coordinator although the consumer only assigns. Measured (spike S1,
+2026-11-10, the same on `apache/kafka` 3.9.2 and 4.4.0 and on Confluent.Kafka 2.14.0 and 2.16.0): a principal with
+`READ` on the topics and no group ACL reads every record, from explicit, `Beginning` and `End` offsets alike. Its
+consumer sees exactly one non-fatal `GroupAuthorizationFailed` (30), thrown from `Consume` as a `ConsumeException`
+within about half a second of the assign, possibly after the first records; the error and log handlers never see it. The
+reader returns it as a failure naming the scan's group, and the scan counts it, logs 9671 once at Debug and goes on: it
+is never a stop and never a warning. Without a group ACL `Offset.Stored` stalls with no record, no end and no error, so
+the reader refuses every negative offset and the engine always assigns a concrete one. A `PREFIXED` `READ` ACL on group
+`kstudio-` (or on the host's own `GroupIdPrefix`) silences the one refusal and changes nothing else; reading never needs
+it. The consumer groups a host declares for the lag panel are another matter: without `DESCRIBE` on the group,
+`DescribeConsumerGroups` and `ListConsumerGroupOffsets` fail with `GroupAuthorizationFailed`, which the overview shows
+as "Not available: needs `DESCRIBE` on group `orders-service`" while the topic's own fields still load.
+`ListConsumerGroups`, which the engine never calls, answers such a principal with an empty list and no error, one more
+reason a group the engine cannot see is never shown as "no groups".
 
 ## D38
 

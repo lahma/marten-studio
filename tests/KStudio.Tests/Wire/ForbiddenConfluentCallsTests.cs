@@ -9,12 +9,15 @@ namespace KStudio.Tests.Wire;
 /// AGENTS.md hard rule 17 at the IL, the Kafka analogue of <c>StorageEnsuringCallTests</c>: KStudio.Core never calls an API that creates,
 /// alters, deletes, commits, subscribes, stores an offset, seeks, produces, lists every group, sends a single-topic metadata request, or
 /// assigns without explicit offsets (decision 2.4). The compiled methods are read (<c>GetMethodBody()</c>, then
-/// <c>Module.ResolveMethod</c> on each <c>call</c>, <c>callvirt</c>, <c>newobj</c>, <c>ldftn</c> and <c>ldvirtftn</c> token), so a call in a
-/// lambda, a closure or an async state machine is found, and so is a method group converted to a delegate; a comment that mentions a call
-/// is not. A producer is recognised by the declaring type of the call (the type, its bases or its interfaces being a producer type), not
-/// by a substring of a formatted name. <b>Reflection is out of this fence's reach</b>: <c>MethodInfo.Invoke</c>,
-/// <c>Delegate.DynamicInvoke</c> and a string-built method name are not seen, and <c>KStudioCoreFenceTests</c> is what keeps them out of
-/// the sources.
+/// <c>Module.ResolveMethod</c> on each <c>call</c>, <c>callvirt</c>, <c>newobj</c>, <c>ldftn</c> and <c>ldvirtftn</c> token, and
+/// <c>Module.ResolveMember</c> on each <c>ldtoken</c>, which is how an expression tree such as <c>c =&gt; c.Subscribe("x")</c> names its
+/// method), so a call in a lambda, a closure or an async state machine is found, and so is a method group converted to a delegate; a
+/// comment that mentions a call is not. A token that cannot be resolved is counted and the test fails on one, never skips it. A producer
+/// is recognised by the declaring type of the call (the type, its bases or its interfaces being a producer type), not by a substring of
+/// a formatted name. <b>Reflection is closed by <c>KStudio_Core_calls_no_reflection_entry_point</c></b>: the engine calls none of
+/// <c>MethodBase.Invoke</c>, <c>Delegate.DynamicInvoke</c>, <c>CreateDelegate</c>, <c>Type.InvokeMember</c>, <c>Type.GetMethod(s)</c>,
+/// <c>LambdaExpression.Compile</c> or <c>Activator.CreateInstance</c>, so a forbidden method cannot be reached by a name this scan never
+/// sees. <c>KStudioCoreFenceTests</c> checks assembly references, not reflection.
 /// </summary>
 public class ForbiddenConfluentCallsTests
 {
@@ -51,6 +54,39 @@ public class ForbiddenConfluentCallsTests
     }
 
     [Fact]
+    public void No_method_token_of_KStudio_Core_goes_unresolved()
+    {
+        List<string> unresolved = [];
+
+        _ = CalledMethodsOf(typeof(KafkaEngineOptions).Assembly.GetTypes(), unresolved).ToList();
+
+        unresolved.Should().BeEmpty("a token the scan could not resolve is a call it did not see");
+    }
+
+    [Fact]
+    public void KStudio_Core_calls_no_reflection_entry_point()
+    {
+        List<string> found = [.. ReflectionOffenders(typeof(KafkaEngineOptions).Assembly.GetTypes())];
+
+        found.Should().BeEmpty("a forbidden Confluent method could be reached through reflection, which the scan above cannot see. Found: " + string.Join("; ", found));
+    }
+
+    [Fact]
+    public void The_reflection_scan_finds_each_entry_point_in_a_fixture()
+    {
+        List<string> found = [.. ReflectionOffenders([typeof(ReflectionFixture)])];
+
+        foreach (string expected in new[]
+        {
+            "MethodBase.Invoke", "ConstructorInfo.Invoke", "Delegate.DynamicInvoke", "Delegate.CreateDelegate", "MethodInfo.CreateDelegate",
+            "Type.InvokeMember", "Type.GetMethod ", "Type.GetMethods", "Expression`1.Compile", "Activator.CreateInstance",
+        })
+        {
+            found.Should().Contain(x => x.StartsWith(expected, StringComparison.Ordinal), "the fixture calls " + expected);
+        }
+    }
+
+    [Fact]
     public void The_scan_reads_the_methods_it_is_meant_to_read()
     {
         // Anti-vacuity: the scan sees at least the Confluent calls the engine really makes.
@@ -83,6 +119,15 @@ public class ForbiddenConfluentCallsTests
     {
         // Only the delegate conversion reaches Subscribe here: the fixture never calls it.
         List<string> found = [.. Offenders([typeof(MethodGroupFixture)])];
+
+        found.Should().Contain(static x => x.Contains("Subscribe(String)", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void A_method_named_only_by_an_expression_tree_is_found()
+    {
+        // c => c.Subscribe("x") never calls Subscribe: it loads the method's handle with ldtoken (REVIEW-ENG-A-FIX 3).
+        List<string> found = [.. Offenders([typeof(ExpressionFixture)])];
 
         found.Should().Contain(static x => x.Contains("Subscribe(String)", StringComparison.Ordinal));
     }
@@ -159,8 +204,12 @@ public class ForbiddenConfluentCallsTests
         }
     }
 
-    /// <summary>Every method or constructor of Confluent.Kafka a type's methods call or take a delegate to.</summary>
-    private static IEnumerable<MethodBase> CalledConfluentMethods(IEnumerable<Type> types)
+    /// <summary>Every method or constructor of Confluent.Kafka a type's methods call, take a delegate to, or name with <c>ldtoken</c>.</summary>
+    private static IEnumerable<MethodBase> CalledConfluentMethods(IEnumerable<Type> types) =>
+        CalledMethodsOf(types, []).Where(static x => x.DeclaringType?.Assembly.GetName().Name == "Confluent.Kafka");
+
+    /// <summary>Every method or constructor any type's methods reference; a token that cannot be resolved is added to <paramref name="unresolved" />.</summary>
+    private static IEnumerable<MethodBase> CalledMethodsOf(IEnumerable<Type> types, List<string> unresolved)
     {
         const BindingFlags all = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly;
 
@@ -168,15 +217,48 @@ public class ForbiddenConfluentCallsTests
         {
             foreach (MethodBase method in type.GetMethods(all).Cast<MethodBase>().Concat(type.GetConstructors(all)))
             {
-                foreach (MethodBase called in CalledMethods(method))
+                foreach (MethodBase called in CalledMethods(method, unresolved))
                 {
-                    if (called.DeclaringType?.Assembly.GetName().Name == "Confluent.Kafka")
-                    {
-                        yield return called;
-                    }
+                    yield return called;
                 }
             }
         }
+    }
+
+    /// <summary>The reflection entry points that could reach a method by a name the IL scan never sees.</summary>
+    private static IEnumerable<string> ReflectionOffenders(IEnumerable<Type> types)
+    {
+        foreach (MethodBase call in CalledMethodsOf(types, []))
+        {
+            Type declaring = call.DeclaringType!;
+            string name = call.Name;
+            bool isReflection =
+                (name == "Invoke" && typeof(MethodBase).IsAssignableFrom(declaring))
+                || (name == "DynamicInvoke" && typeof(Delegate).IsAssignableFrom(declaring))
+                || (name == "CreateDelegate" && (typeof(Delegate).IsAssignableFrom(declaring) || typeof(MethodInfo).IsAssignableFrom(declaring)))
+                || (name == "InvokeMember" && typeof(Type).IsAssignableFrom(declaring))
+                || (name is "GetMethod" or "GetMethods" && typeof(Type).IsAssignableFrom(declaring))
+                || (name == "Compile" && IsLambdaExpression(declaring))
+                || (name == "CreateInstance" && declaring == typeof(Activator));
+
+            if (isReflection)
+            {
+                yield return declaring.Name + "." + name + " (" + Format(call) + ")";
+            }
+        }
+    }
+
+    private static bool IsLambdaExpression(Type type)
+    {
+        for (Type? current = type; current is not null; current = current.BaseType)
+        {
+            if (current == typeof(System.Linq.Expressions.LambdaExpression))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static string Format(MethodBase method) =>
@@ -185,7 +267,7 @@ public class ForbiddenConfluentCallsTests
     private static string Name(Type type) =>
         type.IsGenericType ? type.Name + "<" + string.Join(", ", type.GetGenericArguments().Select(Name)) + ">" : type.Name;
 
-    private static IEnumerable<MethodBase> CalledMethods(MethodBase method)
+    private static IEnumerable<MethodBase> CalledMethods(MethodBase method, List<string> unresolved)
     {
         byte[]? il = method.GetMethodBody()?.GetILAsByteArray();
 
@@ -215,17 +297,23 @@ public class ForbiddenConfluentCallsTests
                 _ => 4,
             };
 
-            if (opCode == OpCodes.Call || opCode == OpCodes.Callvirt || opCode == OpCodes.Newobj || opCode == OpCodes.Ldftn || opCode == OpCodes.Ldvirtftn)
+            bool isCall = opCode == OpCodes.Call || opCode == OpCodes.Callvirt || opCode == OpCodes.Newobj || opCode == OpCodes.Ldftn || opCode == OpCodes.Ldvirtftn;
+
+            if (isCall || opCode == OpCodes.Ldtoken)
             {
                 MethodBase? resolved = null;
+                int token = BitConverter.ToInt32(il, position);
 
                 try
                 {
-                    resolved = method.Module.ResolveMethod(BitConverter.ToInt32(il, position), typeArguments, methodArguments);
+                    // An ldtoken names a type, a field or a method; only a method is a call this fence cares about.
+                    resolved = isCall
+                        ? method.Module.ResolveMethod(token, typeArguments, methodArguments)
+                        : method.Module.ResolveMember(token, typeArguments, methodArguments) as MethodBase;
                 }
                 catch (ArgumentException)
                 {
-                    // A token that cannot be resolved with these generic arguments is skipped; the non-generic ones are what matters.
+                    unresolved.Add(method.DeclaringType?.FullName + "." + method.Name + " token 0x" + token.ToString("X8", System.Globalization.CultureInfo.InvariantCulture));
                 }
 
                 if (resolved is not null)
@@ -278,6 +366,30 @@ public class ForbiddenConfluentCallsTests
             producer.Produce("topic", new Message<Null, Null>());
             producer.InitTransactions(TimeSpan.Zero);
         }
+    }
+
+    /// <summary>Every reflection entry point the fence closes. Never called.</summary>
+    private static class ReflectionFixture
+    {
+        public static void Calls(MethodInfo method, ConstructorInfo constructor, Delegate handler, Type type, System.Linq.Expressions.Expression<Action> expression)
+        {
+            _ = method.Invoke(null, null);
+            _ = constructor.Invoke(null);
+            _ = handler.DynamicInvoke();
+            _ = Delegate.CreateDelegate(typeof(Action), method);
+            _ = method.CreateDelegate<Action>();
+            _ = type.InvokeMember("m", BindingFlags.InvokeMethod, null, null, null, System.Globalization.CultureInfo.InvariantCulture);
+            _ = type.GetMethod("m");
+            _ = type.GetMethods();
+            _ = expression.Compile();
+            _ = Activator.CreateInstance(type);
+        }
+    }
+
+    /// <summary>A method named only by an expression tree, which loads its handle with ldtoken and never calls it. Never called.</summary>
+    private static class ExpressionFixture
+    {
+        public static System.Linq.Expressions.Expression<Action<IConsumer<byte[], byte[]>>> Tree() => c => c.Subscribe("x");
     }
 
     /// <summary>A delegate to a forbidden method with no direct call to it. Never called.</summary>

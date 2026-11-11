@@ -142,21 +142,72 @@ public abstract class ReadNeverWritesMetadataLiveTests(KafkaFixture fixture)
     }
 
     [Fact]
-    public async Task A_reader_assigned_a_missing_topic_creates_nothing_because_an_assign_never_does()
+    public async Task The_control_shows_that_a_consumer_with_auto_create_true_creates_the_missing_topic_it_is_assigned()
     {
+        // Measured on 3.9.2 and 4.4.0 (REVIEW-ENG-A-FIX 4): librdkafka's CONFIGURATION.md says allow.auto.create.topics applies "when
+        // subscribing to or assigning non-existent topics", and it does: a plain consumer with true that is only assigned the topic creates it.
+        // So the scan consumer's false is the only line there, and the next test fails if the engine's override is deleted.
+        await using LiveContractCluster cluster = LiveContractCluster.Open(fixture);
+        string topic = cluster.NewTopic("ctl-consumer");
+
+        ConsumerConfig config = new(fixture.Client("admin"))
+        {
+            GroupId = "kstudio-ctl-" + fixture.RunId,
+            AllowAutoCreateTopics = true,
+            EnableAutoCommit = false,
+            EnablePartitionEof = true,
+        };
+
+        await Task.Run(
+            () =>
+            {
+                using IConsumer<byte[], byte[]> plain = new ConsumerBuilder<byte[], byte[]>(config).Build();
+                plain.Assign([new TopicPartitionOffset(topic, 0, 0)]);
+
+                SpinWait.SpinUntil(
+                    () =>
+                    {
+                        try
+                        {
+                            plain.Consume(TimeSpan.FromMilliseconds(200));
+                        }
+                        catch (ConsumeException)
+                        {
+                            // An unknown-partition or group error is not what is measured; the topic's existence is.
+                        }
+
+                        return TopicsExist(fixture, topic);
+                    },
+                    TimeSpan.FromSeconds(30));
+            },
+            Token);
+
+        TopicsExist(fixture, topic).Should().BeTrue("measured: a consumer with allow.auto.create.topics=true that is assigned a missing topic creates it on this broker");
+        await DeleteAsync(topic);
+    }
+
+    [Fact]
+    public async Task A_scan_reader_built_from_a_host_config_that_allows_auto_create_still_creates_nothing_because_the_engine_sets_it_false()
+    {
+        // The host's own consumer settings ask for auto-creation; the engine's override (ConfluentClientSettings.BuildConsumerConfig) turns it
+        // off. With the override deleted, the control above shows the topic would exist afterwards.
         await using LiveContractCluster cluster = LiveContractCluster.Open(fixture);
         string topic = cluster.NewTopic("reader");
+
+        Dictionary<string, string> hostSettings = new(fixture.Client("admin")) { ["allow.auto.create.topics"] = "true" };
+        ClientConfig host = new(hostSettings);
+        await using EngineHarness engine = EngineHarness.ForClient(host);
 
         await Task.Factory.StartNew(
             () =>
             {
-                using IWireScanReader reader = cluster.Wire.OpenReader(new WireReaderOptions(Guid.NewGuid(), WireIsolation.ReadCommitted, new KafkaScanLimits()));
+                using IWireScanReader reader = engine.Wire.OpenReader(new WireReaderOptions(Guid.NewGuid(), WireIsolation.ReadCommitted, new KafkaScanLimits()));
                 reader.Assign([new WirePartitionOffset(topic, 0, 0)]);
 
-                // A consumer assigned a missing topic reports nothing at all (SPIKE S1.6): a few reads, then the proof it created nothing.
-                for (int i = 0; i < 20; i++)
+                // A consumer assigned a missing topic reports nothing at all (SPIKE S1.6): reads for as long as the control needed, then the proof.
+                for (int i = 0; i < 40; i++)
                 {
-                    reader.Read(TimeSpan.FromMilliseconds(100)).Should().BeSameAs(WireReadOutcome.Idle);
+                    reader.Read(TimeSpan.FromMilliseconds(200)).Should().BeSameAs(WireReadOutcome.Idle);
                 }
 
                 reader.Close();
@@ -165,7 +216,7 @@ public abstract class ReadNeverWritesMetadataLiveTests(KafkaFixture fixture)
             TaskCreationOptions.LongRunning,
             TaskScheduler.Default);
 
-        TopicsExist(fixture, topic).Should().BeFalse("the scan consumer is built with allow.auto.create.topics=false");
+        TopicsExist(fixture, topic).Should().BeFalse("the scan consumer is built with allow.auto.create.topics=false whatever the host's config says");
     }
 
     private static bool TopicsExist(KafkaFixture fixture, string topic)

@@ -61,6 +61,13 @@ internal sealed class ConfluentScanReader : IWireScanReader
         {
             throw new WireException(ConfluentErrors.Map(exception.Error, WireCall.Fetch));
         }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
+        {
+            // Confluent's constructor rejects a configuration librdkafka does not accept (an unknown host key, a key of a plugin it
+            // does not load) with these two, not with a KafkaException (REVIEW-ENG-A-FIX 2). On the scan's thread an escape would end
+            // the process, so it leaves the seam as the engine's own error; the exception's message may quote a host value and is dropped.
+            throw new WireException(new WireError.Failed("Local_InvalidArg", IsFatal: false));
+        }
     }
 
     /// <summary>The scan's consumer group id, which only the refusal of a group ACL names.</summary>

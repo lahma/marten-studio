@@ -31,8 +31,8 @@ internal static partial class KStudioLog
     [LoggerMessage(EventId = 9661, Level = LogLevel.Debug, Message = "KStudio overrides {Setting} of cluster {Cluster} for its {Client} client")]
     public static partial void HostSettingOverridden(ILogger logger, string setting, string cluster, string client);
 
-    [LoggerMessage(EventId = 9664, Level = LogLevel.Debug, Message = "KStudio could not dispose the admin client of cluster {Cluster}")]
-    public static partial void AdminClientDisposeFailed(ILogger logger, Exception exception, string cluster);
+    [LoggerMessage(EventId = 9664, Level = LogLevel.Debug, Message = "KStudio could not dispose the admin client of cluster {Cluster}: {ExceptionKind}")]
+    public static partial void AdminClientDisposeFailed(ILogger logger, string cluster, string exceptionKind);
 
     [LoggerMessage(EventId = 9662, Level = LogLevel.Debug, Message = "KStudio is stopping {Count} scans")]
     public static partial void ShutdownStarted(ILogger logger, int count);

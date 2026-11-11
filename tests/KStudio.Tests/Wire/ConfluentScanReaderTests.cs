@@ -128,7 +128,29 @@ public class ConfluentScanReaderTests
 
         Action reposition = () => reader.Reposition(new WirePartitionOffset("orders", 5, 0));
 
-        reposition.Should().Throw<WireException>().Which.Error.Should().NotBeNull();
+        reposition.Should().Throw<WireException>().Which.Error.Should().Be(new WireError.Failed("Local_InvalidArg", IsFatal: false));
+    }
+
+    [Fact]
+    public void A_host_key_librdkafka_does_not_know_leaves_the_seam_as_the_engines_exception_and_never_quotes_the_value()
+    {
+        // Confluent's constructor throws ArgumentException ("No such configuration property") for a key like this, not a KafkaException
+        // (REVIEW-ENG-A-FIX 2); on the scan's thread an escape would end the process.
+        KafkaEngineOptions options = new();
+        options.AddCluster("main", new ClientConfig(new Dictionary<string, string> { ["bootstrap.servers"] = "localhost:1", ["not.a.real.key"] = "secret-sentinel" }));
+        KafkaClusterDefinition cluster = new KafkaClusterRegistry(options).Get("main");
+        CapturingLoggerProvider logs = new();
+        ConfluentClientEvents events = new(new KStudioLoggers(logs.CreateFactory()), new KafkaLogOnce(TimeProvider.System), TimeProvider.System);
+
+        Func<ConfluentScanReader> build = () => new ConfluentScanReader(
+            cluster,
+            KafkaEngineSnapshot.Take(options),
+            new WireReaderOptions(Guid.NewGuid(), WireIsolation.ReadCommitted, new KafkaScanLimits()),
+            events);
+
+        WireException thrown = build.Should().Throw<WireException>().Which;
+        thrown.Error.Should().Be(new WireError.Failed("Local_InvalidArg", IsFatal: false));
+        thrown.Message.Should().NotContain("secret-sentinel");
     }
 
     [Fact]

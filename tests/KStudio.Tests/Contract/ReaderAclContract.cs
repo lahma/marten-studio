@@ -7,7 +7,7 @@ namespace KStudio.Tests.Contract;
 /// <summary>The principals the reader contract runs as.</summary>
 public enum ContractPrincipal
 {
-    /// <summary><c>READ</c> on the topics and on the scan groups.</summary>
+    /// <summary><c>READ</c> and <c>DESCRIBE</c> on the topics and <b>no</b> ACL on any group.</summary>
     NoGroup,
 
     /// <summary><c>DESCRIBE</c> on the topics, no <c>READ</c>.</summary>

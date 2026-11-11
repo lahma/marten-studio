@@ -450,6 +450,22 @@ public abstract class WireContract
         (await cluster.TopicExistsAsync(topic)).Should().BeFalse("no read the engine makes creates a topic");
     }
 
+    [Fact]
+    public async Task List_offsets_of_a_partition_an_existing_topic_does_not_have_is_not_reported_as_a_missing_topic()
+    {
+        // librdkafka answers Local_NoEnt whenever no requested partition has a leader, which a missing topic is only one cause of
+        // (REVIEW-ENG-A-FIX 1): the topic is listed, so the answer must not say it is not found.
+        await using IContractCluster cluster = await OpenAsync();
+        string topic = cluster.NewTopic("narrow");
+        await cluster.CreateTopicAsync(topic, 1);
+
+        WireResult<IReadOnlyList<WireOffset>> offsets = await cluster.Wire.ListOffsetsAsync(
+            [new WirePartition(topic, 5)], WireOffsetSpec.Latest, WireIsolation.ReadUncommitted, Token);
+
+        offsets.Error.Should().Be(new WireError.Unavailable("LeaderNotAvailable", Retriable: true));
+        (await cluster.TopicExistsAsync(topic)).Should().BeTrue();
+    }
+
     // ---- helpers ----
 
     protected static byte[] Bytes(string text) => Encoding.UTF8.GetBytes(text);

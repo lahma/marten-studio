@@ -54,6 +54,24 @@ public class EngineOptionsSnapshotTests
     }
 
     [Fact]
+    public void Limits_is_a_fresh_copy_on_every_read_so_a_write_to_it_reaches_no_other_reader()
+    {
+        KafkaClusterRegistry registry = new(Options());
+        KafkaEngineSnapshot settings = registry.Settings;
+
+        // What a per-profile governor might do (ENG-B): narrow one scan's bound. It must not change the bound of any other scan,
+        // nor the value the registry validated.
+        KafkaScanLimits mine = settings.Limits;
+        mine.MaxMatches = 1;
+        mine.QueueKilobytes = -5;
+
+        settings.Limits.Should().NotBeSameAs(mine).And.NotBeSameAs(settings.Limits);
+        settings.Limits.MaxMatches.Should().Be(new KafkaScanLimits().MaxMatches);
+        settings.Limits.QueueKilobytes.Should().Be(8192);
+        settings.Limits.Validate().Should().BeEmpty();
+    }
+
+    [Fact]
     public void The_scan_group_id_prefix_comes_from_the_snapshot()
     {
         KafkaEngineOptions options = Options();

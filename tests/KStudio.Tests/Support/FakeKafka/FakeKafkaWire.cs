@@ -129,6 +129,14 @@ internal sealed class FakeKafkaWire(FakeKafkaCluster cluster, string clusterKey)
             return Task.FromResult(WireResult<IReadOnlyList<WireOffset>>.Fail(new WireError.NotFound(KafkaResourceType.Topic, distinctTopics[0])));
         }
 
+        // librdkafka answers Local_NoEnt for the whole call when no requested partition has a leader; the topic is listed, so it is not
+        // "not found" (REVIEW-ENG-A-FIX 1, measured by WireContract on both images).
+        if (distinctTopics.Length == 1 && partitions.All(x => x.Partition < 0 || x.Partition >= Cluster.Topic(x.Topic)!.Partitions.Count)
+            && !Cluster.IsDenied(KafkaAclOperation.Describe, KafkaResourceType.Topic, distinctTopics[0]))
+        {
+            return Task.FromResult(WireResult<IReadOnlyList<WireOffset>>.Fail(new WireError.Unavailable("LeaderNotAvailable", Retriable: true)));
+        }
+
         List<WireOffset> result = [];
 
         lock (Cluster.Gate)

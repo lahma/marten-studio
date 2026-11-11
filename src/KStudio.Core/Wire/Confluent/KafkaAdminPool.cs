@@ -110,9 +110,10 @@ internal sealed class KafkaAdminPool<TClient> : IDisposable, IAsyncDisposable
     private void Reap(object? state)
     {
         // A timer callback that throws ends the process, so nothing escapes this method.
+        List<KeyValuePair<string, Slot>> expired = [];
+
         try
         {
-            List<KeyValuePair<string, Slot>> expired = [];
             DateTimeOffset now = timeProvider.GetUtcNow();
 
             lock (gate)
@@ -153,7 +154,10 @@ internal sealed class KafkaAdminPool<TClient> : IDisposable, IAsyncDisposable
         }
         catch (Exception exception)
         {
-            KStudioLog.AdminClientDisposeFailed(logger, exception, "pool");
+            // The clients this pass had picked to dispose (the dispose of each is guarded in DisposeClient, so this is the pass itself failing).
+            string clusters = expired.Count == 0 ? "(none picked)" : KafkaLogValue.Cap(string.Join(", ", expired.Select(static x => x.Key)));
+            string kind = exception.GetType().Name;
+            KStudioLog.AdminClientDisposeFailed(logger, clusters, kind);
         }
     }
 
@@ -167,7 +171,8 @@ internal sealed class KafkaAdminPool<TClient> : IDisposable, IAsyncDisposable
         catch (Exception exception)
         {
             string key = KafkaLogValue.Cap(cluster);
-            KStudioLog.AdminClientDisposeFailed(logger, exception, key);
+            string kind = exception.GetType().Name;
+            KStudioLog.AdminClientDisposeFailed(logger, key, kind);
             return false;
         }
     }

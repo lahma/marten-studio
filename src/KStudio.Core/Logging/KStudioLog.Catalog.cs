@@ -14,8 +14,8 @@ internal static partial class KStudioLog
     [LoggerMessage(EventId = 9654, Message = "KStudio could not reach Kafka cluster {Cluster} for {Call}: {Code}")]
     public static partial void ClusterUnavailable(ILogger logger, LogLevel level, string cluster, string call, string code);
 
-    [LoggerMessage(EventId = 9659, Level = LogLevel.Debug, Message = "KStudio could not read {Call} of cluster {Cluster}")]
-    public static partial void CatalogReadFailed(ILogger logger, Exception exception, string call, string cluster);
+    [LoggerMessage(EventId = 9659, Level = LogLevel.Debug, Message = "KStudio could not read {Call} of cluster {Cluster}: {ExceptionKind}")]
+    public static partial void CatalogReadFailed(ILogger logger, string call, string cluster, string exceptionKind);
 
     [LoggerMessage(EventId = 9660, Level = LogLevel.Debug, Message = "Partition {Partition} of {Topic} on {Cluster} starts at offset {LogStart}: earlier records are gone")]
     public static partial void RetentionGap(ILogger logger, int partition, string topic, string cluster, long logStart);

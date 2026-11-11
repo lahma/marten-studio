@@ -149,8 +149,16 @@ internal sealed class ConfluentWire(
                 catch (KafkaException exception) when (exception.Error.Code == ErrorCode.Local_NoEnt && partitions.Select(static x => x.Topic).Distinct().Count() == 1)
                 {
                     // Measured on 3.9.2 and 4.4.0 (REVIEW-ENG-A 2): a topic the broker does not know fails the whole call with
-                    // Local_NoEnt, which for a single topic is "not found". With several topics the call names none, so it stays a failure.
-                    return WireResult<IReadOnlyList<WireOffset>>.Fail(new WireError.NotFound(KafkaResourceType.Topic, partitions[0].Topic));
+                    // Local_NoEnt. librdkafka raises the same code whenever no requested partition has a leader ("No leaders found"),
+                    // so a topic whose partitions are all offline, a partition the topic does not have and a topic the principal may
+                    // not describe give it too (REVIEW-ENG-A-FIX 1). It is "not found" only when the all-topics metadata does not list
+                    // the topic; otherwise it is a leader that is not there yet. With several topics the call names none, so it stays a failure.
+                    string topic = partitions[0].Topic;
+                    Metadata metadata = await Task.Run(() => client.GetMetadata(options.RequestTimeout), CancellationToken.None).ConfigureAwait(false);
+
+                    return metadata.Topics.Any(x => string.Equals(x.Topic, topic, StringComparison.Ordinal))
+                        ? WireResult<IReadOnlyList<WireOffset>>.Fail(new WireError.Unavailable("LeaderNotAvailable", Retriable: true))
+                        : WireResult<IReadOnlyList<WireOffset>>.Fail(new WireError.NotFound(KafkaResourceType.Topic, topic));
                 }
 
                 return WireResult<IReadOnlyList<WireOffset>>.Ok([.. infos.Select(ToOffset)]);
@@ -363,8 +371,9 @@ internal sealed class ConfluentWire(
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             string callName = call.ToString();
-            KStudioLog.CatalogReadFailed(loggers.Catalog, exception, callName, ClusterKey);
-            return WireResult<T>.Fail(new WireError.Failed(exception.GetType().Name, IsFatal: false));
+            string kind = exception.GetType().Name;
+            KStudioLog.CatalogReadFailed(loggers.Catalog, callName, ClusterKey, kind);
+            return WireResult<T>.Fail(new WireError.Failed(kind, IsFatal: false));
         }
     }
 

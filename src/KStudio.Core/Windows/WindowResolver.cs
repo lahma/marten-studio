@@ -51,6 +51,10 @@ internal sealed class WindowResolver(
         long toMs = window.To.ToUnixTimeMilliseconds();
         long toWithMarginMs = toMs + (long) effectiveMargin.TotalMilliseconds;
 
+        // The window's partitions are the ones this metadata names, so the time the note gives is read before it: a partition added after it
+        // is not read, and a later time would say it was (REVIEW-ENG-A-FIX 6).
+        DateTimeOffset now = timeProvider.GetUtcNow();
+
         // Step 1 (partly): the topics' partitions and configs.
         WireResult<WireMetadata> metadata = await reads.FreshMetadataAsync(cluster, cancellationToken).ConfigureAwait(false);
         Task<WireResult<WireTopicConfig>>[] configTasks = [.. topics.Select(topic => reads.ConfigAsync(cluster, topic, cancellationToken))];
@@ -102,7 +106,6 @@ internal sealed class WindowResolver(
 
         List<PartitionRange> ranges = [];
         List<TopicWindow> topicWindows = [];
-        DateTimeOffset now = timeProvider.GetUtcNow();
 
         foreach (KafkaTopicName topic in topics)
         {

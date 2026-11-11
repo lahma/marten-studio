@@ -6,17 +6,21 @@ namespace KStudio.Core.Clusters;
 /// and never from the options: a write after validation reaches nothing, so no bound can be skipped by it.
 /// </summary>
 /// <remarks>
-/// <see cref="Limits" /> is a private copy that only the registry has made and nothing writes; the limits type is the public options class,
-/// so the copy is read-only by convention and by <c>EngineOptionsSnapshotTests</c>, not by its type.
+/// The limits type is the public options class and so writable: the snapshot keeps its own copy, private, and <see cref="Limits" /> hands
+/// out a fresh copy on every read. A caller that writes to what it got (a governor narrowing one profile's bound, say) changes its own
+/// copy and nothing else, and no write reaches a scan that is running or skips the validation (REVIEW-ENG-A-FIX 5,
+/// <c>EngineOptionsSnapshotTests</c>).
 /// </remarks>
 internal sealed class KafkaEngineSnapshot
 {
+    private readonly KafkaScanLimits limits;
+
     private KafkaEngineSnapshot(KafkaEngineOptions options)
     {
         GroupIdPrefix = options.GroupIdPrefix;
         RequestTimeout = options.RequestTimeout;
         AdminIdleTimeout = options.AdminIdleTimeout;
-        Limits = options.Limits.Copy();
+        limits = options.Limits.Copy();
     }
 
     /// <summary>The prefix of every scan consumer's group id.</summary>
@@ -28,8 +32,8 @@ internal sealed class KafkaEngineSnapshot
     /// <summary>How long an admin client may sit unused.</summary>
     public TimeSpan AdminIdleTimeout { get; }
 
-    /// <summary>What a scan may cost; a copy no one writes.</summary>
-    public KafkaScanLimits Limits { get; }
+    /// <summary>What a scan may cost: a new copy on every read, so a write to it reaches no one else.</summary>
+    public KafkaScanLimits Limits => limits.Copy();
 
     /// <summary>Copies the options' values. The caller has validated them; the registry is the only caller outside tests.</summary>
     /// <param name="options">The validated options.</param>

@@ -356,6 +356,27 @@ public class WindowResolverTests
     }
 
     [Fact]
+    public async Task The_time_the_partitions_were_fixed_is_read_before_the_look_ups_not_after_them()
+    {
+        await using Rig rig = new();
+        rig.Cluster.CreateTopic("a", 1);
+        rig.Seed("a", 0, 0, 10);
+        DateTimeOffset before = rig.Clock.GetUtcNow();
+
+        // The look-ups take a minute: a partition added in that minute is not read, so the note must not say it was fixed after it.
+        rig.Cluster.OffsetFault = (_, _, _) =>
+        {
+            rig.Clock.Advance(TimeSpan.FromMinutes(1));
+            return null;
+        };
+
+        ResolvedWindow resolved = await rig.Resolve(0, 100, TimeSpan.Zero, KafkaIsolation.Committed, "a");
+
+        resolved.Notes.OfType<WindowNote.PartitionsFixed>().Should().ContainSingle().Which.ResolvedAt.Should().Be(before);
+        rig.Clock.GetUtcNow().Should().BeAfter(before, "the look-ups did advance the clock");
+    }
+
+    [Fact]
     public async Task A_margin_reaching_past_the_last_record_has_no_end_offset_to_warn_about()
     {
         await using Rig rig = new();
