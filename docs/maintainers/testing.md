@@ -4,10 +4,12 @@ This is the full text of D16, D19 and the description of the seven kinds of test
 
 ## D16
 
-**D16 — xunit.v3 3.2.2 and Verify.XunitV3 32.0.0, four test projects all matching `*.Tests`.**
+**D16 — xunit.v3 3.2.2 and Verify.XunitV3 32.0.0, six test projects all matching `*.Tests`.**
 `tests/MartenStudio.Tests` and `tests/PostgresStudio.Tests` are fast and need no Docker;
 `tests/MartenStudio.Integration.Tests` and `tests/PostgresStudio.Integration.Tests` need Testcontainers and
-Playwright. PostgresStudio's two have no Marten anywhere in their graph. All four match the glob in
+Playwright. PostgresStudio's two have no Marten anywhere in their graph. `tests/KStudio.Tests` (fast) and
+`tests/KStudio.Integration.Tests` (Testcontainers, Kafka) are KStudio's, with no Marten in their graph either. All six
+match the glob in
 `ITest.TestProjects`, so one `dotnet fallout Test` runs everything. The pins are load-bearing — see *Package budget
 changes*.
 
@@ -20,7 +22,7 @@ skip message names the exact command that would install them.
 
 ## The seven kinds of test
 
-There are seven kinds of test, in four projects. Each kind below names MartenStudio's folder; PostgresStudio's two
+There are seven kinds of test, in six projects. Each kind below names MartenStudio's folder; PostgresStudio's two
 projects mirror it for the shared studio - its fast suite (public API baseline, the assembly fence, the shared pages,
 the 0.5 pages' services and evaluators, the diagnostics API) and its live suite - with no Marten anywhere in their
 graph:
@@ -122,3 +124,15 @@ graph:
    navigations (`StudioPage.EnhancedNavigations`) and assert none (`AssertNoPageFetch`, 1.2);
    `MARTENSTUDIO_TEST_NAV_INTERCEPTION_OFF=true` runs a suite with the `PostgresStudio.DisableNavigationInterception`
    switch on.
+
+## KStudio
+
+`tests/KStudio.Tests` runs the engine on `FakeKafkaCluster`, a hand-written in-memory broker (D36), with no Docker; `tests/KStudio.Integration.Tests` runs it on `apache/kafka:3.9.2` and `apache/kafka:4.4.0`, one broker per image for the whole run (the collections `kafka-3.9` and `kafka-4`). Each broker is KRaft with SASL/PLAIN on the mapped listener, the `StandardAuthorizer`, `allow.everyone.if.no.acl.found=false` and topic auto-creation on, so "no topic created" is proved against a principal that could have created one. The fixture creates its ACLs from the host with `CreateAclsAsync` as `admin` (`kafka-acls.sh` inside the container cannot reach the advertised listener): `reader` has `READ` on topics `ks.` and groups `kstudio-`, `configreader` adds `DESCRIBE_CONFIGS`, `nogroup` has `READ` on `ks.` and no group ACL, and `describeonly` has `DESCRIBE` on `ks.` and `READ` on the groups but no `READ` on a topic. `[KafkaFact]` and `DockerAvailability` skip with a reason locally and fail on CI, as the Postgres suites do. `DescribeCluster` is allowed for every principal on these brokers, so a cluster refusal is proved on the fake only.
+
+**The contract suites.** `WireContract`, `WindowContract` and `ReaderAclContract` (`tests/KStudio.Tests/Contract/`) are abstract classes over `IContractCluster`, a wire plus a seeder; `ReaderAclContract` runs the reader as `nogroup` and as `describeonly`. The fast suite runs them on the fake; the live suite compiles the same files by link (`<Compile Include="../KStudio.Tests/Contract/…" Link="Contract/…" />`), links no fake, and runs them on both images (`WireContractLiveTests`, `WindowResolutionLiveTests`, `ReaderAclLiveTests`). The fake is trusted only where a contract test holds on both images: a fast test that relies on a Kafka behaviour relies on the contract test that proves it, and a fake behaviour the contract does not prove is not one a fast test may lean on. A new fake behaviour comes with its contract test in the same pull request. Seeding is test code, as `admin`; every timestamp is in the past, because Kafka 4 refuses a record stamped more than an hour ahead; topics are named `ks.{label}.{runId}.{n}` and deleted when the cluster is disposed. A transaction's markers reach the partition a moment after `CommitTransaction` or `AbortTransaction` returns, so `LiveContractCluster` waits, bounded at 30 s, until the last stable offset equals the high watermark before the test reads on.
+
+**`KSTUDIO_PACKET` and reuse.** Reuse follows `MARTENSTUDIO_PG_REUSE`, as in the Postgres suites: on locally, off on CI and when the variable is `false` or `0`. The label `marten-studio.tests=KStudio.Integration.Tests.{image tag}` gives each image a reuse identity of its own. An agent run also sets `KSTUDIO_PACKET` to its packet id; the fixture then labels the broker `kstudio.packet={id}`, and labels are part of Testcontainers' reuse hash, so two packets never attach to each other's broker (`KafkaFixtureTests` proves the hashes differ). With the variable unset, on CI or for a developer, nothing changes. Agent runs set `MARTENSTUDIO_PG_REUSE=false` as well, so the broker and its volumes go when the run ends.
+
+**The loopback listener.** Testcontainers.Kafka 4.15.0's startup script ends `KAFKA_ADVERTISED_LISTENERS` with a comma when the container has no additional listener. Kafka 3.9 ignores the empty entry; 4.4 refuses to start ("advertised.listeners values must not be empty"). The fixture therefore adds `.WithListener("localhost:9095")`, a `PLAINTEXT` listener bound to the container's own loopback and mapped to no host port, which fills the empty slot. No test connects to it. Testcontainers 4.16.0 fixes the script ([testcontainers-dotnet#1772](https://github.com/testcontainers/testcontainers-dotnet/pull/1772)): drop the listener in the same pull request that moves the repository's Testcontainers rows to 4.16.0 or later.
+
+**Volumes.** The `apache/kafka` image declares six anonymous volumes, and removing the container with `docker rm -f` leaves them behind. The fixture records the container's volumes when it starts and removes them with the container when it does not reuse it. `KafkaFixtureTests.A_disposed_broker_leaves_no_volume_of_ours` starts and disposes a throwaway 4.4 broker and asserts that none of its volumes is left; it skips, saying why, while reuse is on, because a reused broker keeps its volumes by design. Remove a reused broker by hand with `docker rm -f -v <container>`, which takes its volumes too. Never prune volumes by filter on a shared machine: the other sessions' volumes match the same filter.

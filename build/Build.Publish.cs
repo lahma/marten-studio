@@ -89,6 +89,7 @@ partial class Build
             // Marten or Npgsql would depend on it and raise every host's floor.
             AssertPackingAtTheMartenFloor();
             AssertPackingAtTheNpgsqlFloor();
+            AssertPackingAtTheConfluentFloor();
 
             // Independent of Compile for the same reason PublishAot is: this is a Release build of
             // three projects, and `dotnet pack` runs its own build anyway.
@@ -107,7 +108,8 @@ partial class Build
                     // Both said explicitly, so that MSBuild's environment-as-properties rule cannot pack at
                     // anything else either.
                     .SetProperty(MartenVersionProperty, MartenFloor)
-                    .SetProperty(NpgsqlVersionProperty, NpgsqlFloor));
+                    .SetProperty(NpgsqlVersionProperty, NpgsqlFloor)
+                    .SetProperty(ConfluentVersionProperty, ConfluentFloor));
             }
 
             AssertTheReleasePackagesAndNothingElse();

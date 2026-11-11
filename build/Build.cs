@@ -21,12 +21,13 @@ using Project = Fallout.Solutions.Project;
 /// The Fallout orchestrator for marten-studio.
 /// </summary>
 /// <remarks>
-/// Restore / Compile / Test come from the Fallout.Components interfaces. Only five things are
+/// Restore / Compile / Test come from the Fallout.Components interfaces. Only six things are
 /// hand-written: the CHANGELOG-driven version (<see cref="OnBuildInitialized"/>), the NuGet leg in
 /// <c>Build.Publish.cs</c>, the Playwright browser install in <c>Build.Browsers.cs</c>, the choice of
 /// Marten - the floor, or the latest-tested 9.x - in <c>Build.Marten.cs</c>, and the choice of Npgsql for
 /// the PostgresStudio-only projects, with its second pass over <c>postgres-studio.slnf</c>, in
-/// <c>Build.Npgsql.cs</c>. There is no publish or archive target: the studio ships as three NuGet packages,
+/// <c>Build.Npgsql.cs</c>, and the choice of Confluent.Kafka for the KStudio projects in <c>Build.Confluent.cs</c>.
+/// There is no publish or archive target: the studio ships as three NuGet packages,
 /// PostgresStudio.Diagnostics, PostgresStudio and MartenStudio, released together, and nothing else.
 /// </remarks>
 [ShutdownDotNetAfterServerBuild]
@@ -121,6 +122,9 @@ partial class Build : FalloutBuild,
         // Build.Npgsql.cs: the same for the PostgresStudio-only projects' Npgsql, whose non-floor values get a
         // pass of their own after Test.
         ResolveNpgsqlVersion();
+
+        // Build.Confluent.cs: the floor, or the latest-tested Confluent.Kafka for the KStudio projects.
+        ResolveConfluentVersion();
     }
 
     Target Clean => _ => _
@@ -141,28 +145,32 @@ partial class Build : FalloutBuild,
 
     // The Marten version goes to all three, the floor included (Build.Marten.cs says why). The Npgsql version of
     // this whole-solution pass is always the floor - never the requested one, which would reach MartenStudio through
-    // its PostgresStudio reference - and is said explicitly for the same reason (Build.Npgsql.cs).
+    // its PostgresStudio reference - and is said explicitly for the same reason (Build.Npgsql.cs). The Confluent.Kafka
+    // version goes to all three too: only the KStudio projects reference the package (Build.Confluent.cs).
     Configure<DotNetRestoreSettings> IRestore.RestoreSettings => _ => _
         .SetProperty(MartenVersionProperty, ResolvedMartenVersion)
-        .SetProperty(NpgsqlVersionProperty, NpgsqlFloor);
+        .SetProperty(NpgsqlVersionProperty, NpgsqlFloor)
+        .SetProperty(ConfluentVersionProperty, ResolvedConfluentVersion);
 
     Configure<DotNetBuildSettings> ICompile.CompileSettings => _ => _
         .SetProperty("Version", Version)
         .SetProperty(MartenVersionProperty, ResolvedMartenVersion)
-        .SetProperty(NpgsqlVersionProperty, NpgsqlFloor);
+        .SetProperty(NpgsqlVersionProperty, NpgsqlFloor)
+        .SetProperty(ConfluentVersionProperty, ResolvedConfluentVersion);
 
     Configure<DotNetTestSettings> ITest.TestSettings => _ => _
         .SetProperty("Version", Version)
         .SetProperty(MartenVersionProperty, ResolvedMartenVersion)
-        .SetProperty(NpgsqlVersionProperty, NpgsqlFloor);
+        .SetProperty(NpgsqlVersionProperty, NpgsqlFloor)
+        .SetProperty(ConfluentVersionProperty, ResolvedConfluentVersion);
 
-    // 1.2-HANG-2: the two fast suites run with a ten-minute blame-hang timeout, so a test that waits for ever fails the run within ten
+    // 1.2-HANG-2: the three fast suites run with a ten-minute blame-hang timeout, so a test that waits for ever fails the run within ten
     // minutes with a dump and a sequence file naming it (in artifacts/test-results, which the workflows upload), instead of running to the
-    // job's own timeout with nothing said. Not the two integration suites: their Playwright and live tests may legitimately run long.
+    // job's own timeout with nothing said. Not the three integration suites: their Playwright and live tests may legitimately run long.
     Configure<DotNetTestSettings, Project> ITest.TestProjectSettings => (_, project) => WithBlameHang(_, project);
 
     /// <summary>The test projects that run without Docker or a browser: nothing in them takes ten minutes, so a test that does is hung.</summary>
-    static readonly string[] BlameHangTestProjects = ["MartenStudio.Tests", "PostgresStudio.Tests"];
+    static readonly string[] BlameHangTestProjects = ["MartenStudio.Tests", "PostgresStudio.Tests", "KStudio.Tests"];
 
     /// <summary>How long a single fast-suite test may run before the run is stopped and a mini dump taken (<c>--blame-hang-timeout</c>).</summary>
     const string BlameHangTimeout = "10m";

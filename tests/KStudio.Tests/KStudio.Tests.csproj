@@ -1,0 +1,46 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- KStudio's fast suite (AGENTS.md D36): no Docker. The engine against the hand-written fake broker, the conventions
+       and the public API baseline. M2 adds bUnit and the KStudio project. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsTestProject>true</IsTestProject>
+    <!-- The linked SourceScanner.cs documents itself with crefs to the other suite's tests (CS1574), which this project does not compile. -->
+    <NoWarn>$(NoWarn);CS1574</NoWarn>
+  </PropertyGroup>
+
+  <!-- Global usings: `Xunit` comes from Verify.XunitV3's build props. -->
+  <ItemGroup>
+    <Using Include="AwesomeAssertions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="GitHubActionsTestLogger" />
+    <PackageReference Include="AwesomeAssertions" />
+    <PackageReference Include="Verify.XunitV3" />
+    <PackageReference Include="PublicApiGenerator" />
+  </ItemGroup>
+
+  <!-- Not a package: the shared framework brings the container and logging implementations the engine's real registration is tested
+       with (KStudio.Core itself has no framework reference, which KStudioCoreFenceTests holds). -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/KStudio.Core/KStudio.Core.csproj" />
+    <!-- Only for KafkaLogValueParityTests: StudioLogValue is internal there, and this suite is granted InternalsVisibleTo. -->
+    <ProjectReference Include="../../src/PostgresStudio.Diagnostics/PostgresStudio.Diagnostics.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="../MartenStudio.Tests/Conventions/RepositoryRoot.cs" Link="Support/Linked/RepositoryRoot.cs" />
+    <Compile Include="../MartenStudio.Tests/Conventions/SourceScanner.cs" Link="Support/Linked/SourceScanner.cs" />
+    <Compile Include="../PostgresStudio.Tests/Support/ManualTimeProvider.cs" Link="Support/Linked/ManualTimeProvider.cs" />
+    <Compile Include="../MartenStudio.Tests/Support/CapturingLoggerProvider.cs" Link="Support/Linked/CapturingLoggerProvider.cs" />
+  </ItemGroup>
+
+</Project>

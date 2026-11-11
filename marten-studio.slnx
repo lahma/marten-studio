@@ -22,6 +22,7 @@
     <Project Path="src/MartenStudio/MartenStudio.csproj" />
     <Project Path="src/PostgresStudio.Diagnostics/PostgresStudio.Diagnostics.csproj" />
     <Project Path="src/PostgresStudio/PostgresStudio.csproj" />
+    <Project Path="src/KStudio.Core/KStudio.Core.csproj" />
   </Folder>
   <Folder Name="/samples/">
     <Project Path="samples/MartenStudio.SampleDomain/MartenStudio.SampleDomain.csproj" />
@@ -35,5 +36,7 @@
     <Project Path="tests/MartenStudio.Integration.Tests/MartenStudio.Integration.Tests.csproj" />
     <Project Path="tests/PostgresStudio.Tests/PostgresStudio.Tests.csproj" />
     <Project Path="tests/PostgresStudio.Integration.Tests/PostgresStudio.Integration.Tests.csproj" />
+    <Project Path="tests/KStudio.Tests/KStudio.Tests.csproj" />
+    <Project Path="tests/KStudio.Integration.Tests/KStudio.Integration.Tests.csproj" />
   </Folder>
 </Solution>

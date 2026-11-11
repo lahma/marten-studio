@@ -292,19 +292,34 @@ public class WorkflowGenerationTests
     }
 
     /// <summary>
-    /// The floor workflows ask for no other version. <c>build.yml</c> is the floor leg - a <c>MARTEN_VERSION</c> or
-    /// <c>NPGSQL_VERSION</c> there would leave the floors the packages ship with untested - and <c>publish.yml</c>
-    /// packs, which refuses anything but the floors.
+    /// The latest leg also runs KStudio at the latest-tested Confluent.Kafka. Without the env line KStudio would be
+    /// tested only at its floor, the version a Wolverine host pins, while a host free to move is on 2.16.
+    /// </summary>
+    [Fact]
+    public void The_marten_latest_workflow_also_runs_KStudio_at_the_latest_tested_confluent_kafka()
+    {
+        var latest = ReadWorkflow("marten-latest.yml");
+
+        latest.Should().Contain("CONFLUENT_VERSION: latest",
+            "Fallout binds CONFLUENT_VERSION to the ConfluentVersion parameter, and 'latest' resolves to " +
+            "KStudioConfluentLatest in Directory.Packages.props (build/Build.Confluent.cs)");
+    }
+
+    /// <summary>
+    /// The floor workflows ask for no other version. <c>build.yml</c> is the floor leg - a <c>MARTEN_VERSION</c>,
+    /// <c>NPGSQL_VERSION</c> or <c>CONFLUENT_VERSION</c> there would leave the floors the packages ship with
+    /// untested - and <c>publish.yml</c> packs, which refuses anything but the floors.
     /// </summary>
     [Theory]
     [InlineData("build.yml")]
     [InlineData("publish.yml")]
-    public void The_floor_workflows_ask_for_neither_the_latest_marten_nor_the_latest_npgsql(string fileName)
+    public void The_floor_workflows_ask_for_neither_the_latest_marten_nor_the_latest_npgsql_nor_the_latest_confluent(string fileName)
     {
         var workflow = ReadWorkflow(fileName);
 
         workflow.Should().NotContain("MARTEN_VERSION", "this workflow runs at the Marten floor");
         workflow.Should().NotContain("NPGSQL_VERSION", "this workflow runs at the Npgsql floor");
+        workflow.Should().NotContain("CONFLUENT_VERSION", "this workflow runs at the Confluent.Kafka floor");
     }
 
     /// <summary>

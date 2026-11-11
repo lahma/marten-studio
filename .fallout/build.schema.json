@@ -120,6 +120,10 @@
             "Release"
           ]
         },
+        "ConfluentVersion": {
+          "type": "string",
+          "description": "The Confluent.Kafka version the KStudio projects are restored, compiled and tested against: 'floor' (the default - the version KStudio.Core depends on, and the only one Pack packs at), 'latest' (the newest release CI tests, pinned in Directory.Packages.props), or an exact version such as 2.16.0. (env: CONFLUENT_VERSION)"
+        },
         "GitHubReleaseGitHubToken": {
           "type": "string",
           "default": "Secrets must be entered via 'fallout :secrets [profile]'"

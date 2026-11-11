@@ -18,6 +18,7 @@ build/                                   The Fallout orchestrator. `build/` is a
   Build.Publish.cs                       Pack (the three packages) + the in-build nuget.org OIDC token exchange (D15)
   Build.Marten.cs                        --marten-version: the floor, the latest-tested Marten or an exact one (D3)
   Build.Npgsql.cs                        --npgsql-version and NpgsqlPass, PostgresStudio's latest-Npgsql pass (D30)
+  Build.Confluent.cs                     --confluent-version: KStudio's floor, latest-tested Confluent.Kafka or an exact one (D36)
 build/Extensions/                        Vendored Cake helpers (StringExtensions) - do not edit
 src/                                     The shipped libraries, and nothing else: the shared studio and MartenStudio
 src/PostgresStudio.Diagnostics/          The diagnostics engine, with no ASP.NET Core (0.11-C, issue #29): the health sweep and its
@@ -63,7 +64,7 @@ samples/PostgresStudio.Sample/Properties/  launchSettings.json, fixed at http://
 samples/PostgresStudio.Worker/           The diagnostics worker (0.11-D, issue #29): a generic host that references
                                          src/PostgresStudio.Diagnostics alone - no ASP.NET Core, no studio - and logs a
                                          summary of every database's findings at start and every Summary:Interval (D18)
-tests/                                   All four test projects match *.Tests, so one Test run covers them all
+tests/                                   All six test projects match *.Tests, so one Test run covers them all
 tests/MartenStudio.Tests/                Fast suite: unit, bUnit, endpoint metadata, API snapshot,
                                          conventions. No Docker
 tests/MartenStudio.Tests/Conventions/    Rules too easy to break silently to leave to review
@@ -339,4 +340,54 @@ src/PostgresStudio.Diagnostics/Services/Connection/  The connection-insights eng
                                          platform, the pools that share the data source)
 tests/PostgresStudio.Tests/Connection/  The catalogue against the loaded Npgsql, the reader's provenance and redaction, every hint
                                          each way, the pooler signs and the sentinel test - no database
+src/KStudio.Core/                        KStudio's engine (D36): catalog, window resolution, scan engine, predicates,
+                                         decoders, governor and redaction, over Confluent.Kafka behind the internal wire
+                                         seam. No ASP.NET Core, no studio, no Npgsql (KStudioCoreFenceTests); not packed (K8)
+tests/KStudio.Tests/                     KStudio's fast suite: the engine against the hand-written fake broker, the fences
+                                         and the public API baseline. No Docker
+src/KStudio.Core/Wire/                   The wire seam (D36): IKafkaWire, the reader, the error values and the neutral records; no
+                                         Confluent type crosses it
+src/KStudio.Core/Wire/Confluent/         The one implementation over Confluent.Kafka: the overrides (D37), the role filter for host
+                                         configuration, the error table, the admin pool, the wire and the scan reader
+src/KStudio.Core/Clusters/               The registered clusters: keys and names, the cloned host configuration split by role, the
+                                         option bounds and the container registration
+src/KStudio.Core/Catalog/                The catalog and overview reads: the cached reads, the ACL table and its sentences, the
+                                         overview records and the throughput samples
+src/KStudio.Core/Windows/                Window resolution (D38): a time window to offsets per partition, and the notes that say what a
+                                         "no match" could be missing
+src/KStudio.Core/Logging/                The engine's log events 9650 to 9699, the bounded log values and the log-once helper
+src/KStudio.Core/Predicates/             The search grammar (D39): lexer, parser, canonical text, the compiler per topic and the
+                                         three-valued evaluator, with the verdict of every clause
+src/KStudio.Core/Decoding/               Value and header decoding (D39): the detection order, CloudEvents, the Confluent wire format,
+                                         trace contexts, the decode counters and the per-record evaluation context
+src/KStudio.Core/Scanning/               The scan engine (D38, D41): plan and estimate, the scan's thread, the governor, the limiter and
+                                         the owner budget, batches, the match store and the one factory that makes a match
+src/KStudio.Core/Redaction/              Redaction inside the engine (D40): the built-in header deny-list, the topic's rules and the
+                                         redactor every match is made through
+tests/KStudio.Tests/Conventions/         KStudio's fences and convention scans
+tests/KStudio.Tests/Verify/              KStudio.Core's public API baseline
+tests/KStudio.Tests/Support/             Test helpers the fast suite shares
+tests/KStudio.Tests/Support/FakeKafka/   The hand-written fake broker (D36): topics as logs, transactions, configs, groups and an ACL
+                                         table, with a wire and a scan reader over it
+tests/KStudio.Tests/Contract/            WireContract and WindowContract, run on the fake here and on real brokers by the live suite, and
+                                         the harness they run over
+tests/KStudio.Tests/Wire/                The overrides, the role filter, the error table, the forbidden-call IL scan and the reader
+tests/KStudio.Tests/Clusters/            Registration, key formats and the admin pool
+tests/KStudio.Tests/Catalog/             The overview reads, the ACL table, the snapshot cache and the throughput samples
+tests/KStudio.Tests/Windows/             Window resolution on the fake
+tests/KStudio.Tests/Logging/             The engine's log events and the parity of its log values with the studios'
+tests/KStudio.Tests/Predicates/          The grammar, its messages and limits, the canonical text and the evaluation tables
+tests/KStudio.Tests/Decoding/            The detection order, the caps, headers, trace contexts and CloudEvents
+tests/KStudio.Tests/Redaction/           The deny-list, the topic's rules, the match caps and the one place a match is made
+tests/KStudio.Tests/Scanning/            The scan engine on the fake: every stop reason and end state, the cursor, the governor, the
+                                         limits, the estimate, batching and the lifecycle
+tests/KStudio.Integration.Tests/         KStudio's live suite: apache/kafka 3.9 and 4.x with SASL and ACLs, through
+                                         Testcontainers.Kafka; needs Docker
+tests/KStudio.Integration.Tests/Support/  The broker fixtures, one per image, the live contract cluster and the harness tests
+tests/KStudio.Integration.Tests/Wire/    WireContract on real brokers
+tests/KStudio.Integration.Tests/Windows/  WindowContract on real brokers
+tests/KStudio.Integration.Tests/Catalog/  The catalog as principals with different ACLs, and metadata that creates nothing
+tests/KStudio.Integration.Tests/Scanning/  The scan engine on real records: stop reasons, transactions, retention before and during a scan, the
+                                         governor, the memory ceiling and that a scan writes nothing
+tests/KStudio.Integration.Tests/Search/  Find the message with this id (the M1 exit), as restricted principals
 ```

@@ -71,6 +71,7 @@
          throwaway Postgres. Also the container the integration tests use. Recorded in AGENTS.md;
          the sample is never packed. -->
     <PackageVersion Include="Testcontainers.PostgreSql" Version="4.15.0" />
+    <PackageVersion Include="Testcontainers.Kafka" Version="4.15.0" />
   </ItemGroup>
 
   <ItemGroup Label="Test - both projects">
@@ -156,6 +157,23 @@
   </ItemGroup>
 
   <!--
+    The Confluent.Kafka version of the KStudio projects, defined once and tested at both ends, like Marten's above.
+    KStudioConfluentFloor is what KStudio.Core depends on: 2.14.0, the version WolverineFx.Kafka 6.61 pins, so a
+    Wolverine host is never raised (AGENTS.md, Package budget changes, 2026-11-09). KStudioConfluentLatest is the newest
+    release the suites are also run at. KStudioConfluentVersion is what is restored; empty means the floor. Only the
+    KStudio projects reference Confluent.Kafka, so the property may be passed to the whole solution.
+  -->
+  <PropertyGroup Label="KStudio Confluent.Kafka version">
+    <KStudioConfluentFloor>2.14.0</KStudioConfluentFloor>
+    <KStudioConfluentLatest>2.16.0</KStudioConfluentLatest>
+    <KStudioConfluentVersion Condition="'$(KStudioConfluentVersion)' == ''">$(KStudioConfluentFloor)</KStudioConfluentVersion>
+  </PropertyGroup>
+
+  <ItemGroup Label="KStudio (src/KStudio.Core)">
+    <PackageVersion Include="Confluent.Kafka" Version="$(KStudioConfluentVersion)" />
+  </ItemGroup>
+
+  <!--
     The Microsoft.Extensions.* packages of src/PostgresStudio.Diagnostics, which has no FrameworkReference to
     Microsoft.AspNetCore.App and so needs the abstractions it uses as packages (AGENTS.md, Package budget
     changes, 2026-11-01). They are floors, not exact pins.
@@ -174,7 +192,7 @@
     Microsoft.Extensions.Hosting is the worker sample's only addition (0.11-D, Package budget changes 2026-11-01): the
     generic host a worker runs in, which no shipped package references.
   -->
-  <ItemGroup Label="PostgresStudio.Diagnostics (it sets PostgresStudioDiagnosticsPinsExtensions)" Condition="'$(PostgresStudioDiagnosticsPinsExtensions)' == 'true'">
+  <ItemGroup Label="PostgresStudio.Diagnostics and KStudio.Core (they set PostgresStudioDiagnosticsPinsExtensions or KStudioCorePinsExtensions)" Condition="'$(PostgresStudioDiagnosticsPinsExtensions)' == 'true' or '$(KStudioCorePinsExtensions)' == 'true'">
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.0" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" />
     <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.0" />
