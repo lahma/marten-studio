@@ -28,7 +28,7 @@ internal sealed class KafkaSearchRig : IAsyncDisposable
     /// <summary>The cluster entry the studio lists.</summary>
     public KafkaClusterEntry Entry { get; }
 
-    public KafkaSearchRig(Action<KafkaEngineOptions>? engine = null, Action<KafkaStudioOptions>? studio = null, bool searchOn = true, bool policies = true, Func<FakeKafkaWire, KStudio.Core.Wire.IKafkaWire>? wrap = null, bool payloads = false, bool traceCircuit = false)
+    public KafkaSearchRig(Action<KafkaEngineOptions>? engine = null, Action<KafkaStudioOptions>? studio = null, bool searchOn = true, bool policies = true, Func<FakeKafkaWire, KStudio.Core.Wire.IKafkaWire>? wrap = null, bool payloads = false, bool traceCircuit = false, Action<IServiceCollection>? services = null)
     {
         Entry = new KafkaClusterEntry(EngineHarness.ClusterKey, null, "Test cluster", "production");
         Cluster = new FakeKafkaCluster(TimeProvider.System);
@@ -47,7 +47,13 @@ internal sealed class KafkaSearchRig : IAsyncDisposable
 
                 studio?.Invoke(options);
             },
-            traceCircuit ? services => services.AddLogging(builder => builder.SetMinimumLevel(LogLevel.Trace).AddProvider(CircuitLogs)) : null,
+            traceCircuit
+                ? container =>
+                {
+                    container.AddLogging(builder => builder.SetMinimumLevel(LogLevel.Trace).AddProvider(CircuitLogs));
+                    services?.Invoke(container);
+                }
+                : services,
             [Entry],
             Engine);
     }

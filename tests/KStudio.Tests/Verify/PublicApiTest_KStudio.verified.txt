@@ -15,6 +15,7 @@ namespace KStudio
         public KStudio.KafkaStudioCapabilities Capabilities { get; set; }
         public string? CapabilityAuthorizationPolicy { get; set; }
         public string? ClusterAuthorizationPolicy { get; set; }
+        public KStudio.KafkaStudioOptions ExternalLink(string label, string urlTemplate) { }
     }
     public static class KafkaStudioServiceCollectionExtensions
     {
