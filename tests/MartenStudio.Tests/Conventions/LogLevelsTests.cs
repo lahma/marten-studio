@@ -282,6 +282,14 @@ public class LogLevelsTests
         ["src/KStudio/Services/KafkaStudioLog.cs : 9611 LiveUpdateHandlerFailedCore"] = (Verdict.Throttled,
             "9220's twin: a Kafka page's own refresh-failure handler threw, on a loop that runs every RefreshInterval; the level comes from the throttle."),
 
+        // ---- KS-UI-A: the catalog pages (D-UI decisions 7 to 9) --------------------------------------
+        ["src/KStudio/Components/Pages/KafkaTopicsBody.razor : The Kafka topics page failed to read the catalog"] = (Verdict.VisitorAction,
+            "The engine returns broker errors as values, so an exception here is a fault in a page the visitor opened or filtered; one line per load, the page says the same, and a poll's failure goes to the Failed handler, not here."),
+        ["src/KStudio/Components/Pages/KafkaTopicBody.razor : The Kafka topic page failed to read the catalog"] = (Verdict.VisitorAction,
+            "The topic overview threw rather than returning a value: a fault in a page the visitor opened; one line per load, the page says the same."),
+        ["src/KStudio/Components/Pages/KafkaSettingsBody.razor : The Kafka settings page failed to read the cluster's settings"] = (Verdict.VisitorAction,
+            "The settings reader threw on a page the visitor opened (it reads memory, so this is a bug); one line per load, the page says the same."),
+
         // ---- W5-V1 ------------------------------------------------------------------------------------
         ["src/PostgresStudio.Diagnostics/Services/StudioLog.Maintenance.cs : 9420 BloatMeasureFailed"] = (Verdict.VisitorAction,
             "A bloat measure the visitor pressed failed after its gates and preconditions passed; one line per press, never polled, and the page shows it."),

@@ -202,21 +202,7 @@
 
         started = true;
 
-        try
-        {
-            await LoadAsync(poll: default, first: true);
-        }
-        catch (OperationCanceledException)
-        {
-            return;
-        }
-        catch (Exception e) when (!disposed)
-        {
-            Logger.LogWarning(e, "The Kafka topics page failed to read the catalog");
-            error = KafkaStudioText.ReadFailed;
-            loading = false;
-            await InvokeAsync(StateHasChanged);
-        }
+        await ReloadAsync();
 
         if (disposed)
         {

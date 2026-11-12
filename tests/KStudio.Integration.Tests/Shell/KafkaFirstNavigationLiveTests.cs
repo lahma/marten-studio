@@ -44,9 +44,10 @@ namespace KStudio.Integration.Tests.Shell;
 /// on, so a call to it would also have been slow and logged.
 /// </para>
 /// <para>
-/// <b>The stub page reads nothing from a broker</b> (it lists the registered clusters), so the interactive half of the walk is the component suite's;
-/// what this class holds is the part only a real broker and a real database can: that nothing the shell does on a first navigation writes. UI-A and
-/// UI-B add their pages to <see cref="Pages" />.
+/// <b>A prerendering request reads nothing from a broker</b> (the page frame releases reads only to a live circuit), so the interactive half of the
+/// walk is the component suite's, against the fake broker; what this class holds is the part only a real broker and a real database can: that nothing
+/// the shell and the catalog pages do on a first navigation writes, and that no GET calls a broker. UI-A added Topics, the topic overview and Cluster
+/// settings to <see cref="Pages" />; UI-B adds its pages.
 /// </para>
 /// </remarks>
 public abstract class KafkaFirstNavigationLiveTests(KafkaFixture kafka)
@@ -61,6 +62,10 @@ public abstract class KafkaFirstNavigationLiveTests(KafkaFixture kafka)
         "/kafka?cluster=dark",
         "/kafka?cluster=nope",
         "/kafka?cluster=live&topic=does-not-exist",
+        "/kafka/topic?cluster=live&topic=orders.v1",
+        "/kafka/topic?cluster=live&topic=does-not-exist",
+        "/kafka/settings",
+        "/kafka/settings?cluster=live",
     ];
 
     /// <summary>Counts the wires the engine creates, which is the engine's first contact with a cluster.</summary>
