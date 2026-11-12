@@ -170,6 +170,17 @@ public class CorrelationValidationTests
         }).Should().BeEmpty();
     }
 
+    [Theory]
+    [InlineData("authorization")]
+    [InlineData("Cookie")]
+    [InlineData("X-API-KEY")]
+    [InlineData("set-cookie")]
+    [InlineData("Proxy-Authorization")]
+    public void A_deny_listed_header_is_never_a_correlation_field(string header)
+    {
+        Validate(c => c.Header(header)).Should().ContainSingle().Which.Should().EndWith($"header '{header}' is on the header deny-list and is never a correlation field.");
+    }
+
     [Fact]
     public void Document_and_stream_on_one_field_are_refused()
     {

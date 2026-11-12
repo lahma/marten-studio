@@ -188,9 +188,11 @@ public class CorrelationQueryBuilderTests
         query.PredicateText.Should().Be("key = '17'", "the value the format can hold is searched");
         ShouldCompile(query, number, KafkaReadGrant.Envelope);
 
-        CorrelationTopicQuery none = Build(Keys(("order", "ord-1")), number);
+        query.Notes.Should().Equal("key: 1 value cannot be held in this topic's key format and was not searched.");
+
+        CorrelationTopicQuery none = Build(Keys(("order", "ord-1"), ("order", "ord-2")), number);
         none.HasQuery.Should().BeFalse();
-        none.Notes.Should().ContainSingle().Which.Should().Contain("key format");
+        none.Notes.Should().Equal("key: 2 values cannot be held in this topic's key format and were not searched.");
     }
 
     [Fact]

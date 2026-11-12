@@ -185,11 +185,7 @@ internal sealed partial class KafkaScanner(
 
         // A literal is shown only where no topic of the scan redacts the field it is on: one that is plain here and masked there is
         // <redacted> everywhere in the entry.
-        string audit = perTopic
-            ? string.Join(
-                "; ",
-                topics.Select(topic => topic.Value + ": " + PredicateFormatter.Format(searches[topic.Value].Parsed.Tree, clause => redactors.Any(x => PredicateCompiler.IsRedacted(clause.Field, x)))))
-            : PredicateFormatter.Format(shared.Tree, clause => redactors.Any(x => PredicateCompiler.IsRedacted(clause.Field, x)));
+        string audit = perTopic ? PerTopicAudit(topics, searches, redactors) : PredicateFormatter.Format(shared.Tree, clause => redactors.Any(x => PredicateCompiler.IsRedacted(clause.Field, x)));
 
         IReadOnlyList<PartitionRange> ranges = Continue(window.Ranges, request.ContinueFrom);
 
@@ -233,9 +229,9 @@ internal sealed partial class KafkaScanner(
 
         foreach (KafkaTopicQuery query in queries)
         {
-            if (query.PredicateText is null)
+            if (string.IsNullOrWhiteSpace(query.PredicateText))
             {
-                throw new ArgumentException("A topic's search is a text; an empty text matches every record.", nameof(request));
+                throw new ArgumentException("A topic's search is a text that is not empty: a topic with no search is left out of the request.", nameof(request));
             }
 
             if (!query.Grant.HasFlag(KafkaReadGrant.Envelope))
@@ -248,6 +244,20 @@ internal sealed partial class KafkaScanner(
                 throw new ArgumentException("A topic cannot be read under more than the request's grant.", nameof(request));
             }
         }
+    }
+
+    /// <summary>
+    /// The audit text of a scan with a search for each topic: the topics whose formatted text is equal are named together, so that a scan of
+    /// 20 topics with one search is not 20 copies of it (the log cuts a long text). A literal is shown only where no topic redacts its field.
+    /// </summary>
+    private static string PerTopicAudit(KafkaTopicName[] topics, Dictionary<string, (PredicateParseResult Parsed, KafkaReadGrant Grant)> searches, IKafkaRedactor[] redactors)
+    {
+        Dictionary<string, string> formatted = topics.ToDictionary(
+            static x => x.Value,
+            x => PredicateFormatter.Format(searches[x.Value].Parsed.Tree, clause => redactors.Any(r => PredicateCompiler.IsRedacted(clause.Field, r))),
+            StringComparer.Ordinal);
+
+        return string.Join("; ", topics.GroupBy(x => formatted[x.Value], StringComparer.Ordinal).Select(g => string.Join(", ", g.Select(static x => x.Value)) + ": " + g.Key));
     }
 
     private static PredicateError OnTopic(string topic, PredicateError error) => error with { Message = "On " + topic + ": " + error.Message };

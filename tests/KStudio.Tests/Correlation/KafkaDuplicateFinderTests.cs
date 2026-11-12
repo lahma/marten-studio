@@ -183,6 +183,27 @@ public class KafkaDuplicateFinderTests
     }
 
     [Fact]
+    public void Five_hundred_matches_with_the_largest_values_are_grouped_in_under_twenty_milliseconds_and_copy_no_value()
+    {
+        KafkaTopicBuilder builder = CorrelationRig.Declare();
+        string Value(int i) => i.ToString("D6", System.Globalization.CultureInfo.InvariantCulture) + new string('x', 40_000);
+        KafkaMatch[] matches = [.. Enumerable.Range(0, 500).Select(i => Made(builder, Payload, "k" + (i % 250), Value(i % 250), offset: i, seconds: i))];
+
+        matches.Should().OnlyContain(static x => !x.ValueTruncated && x.ValueText != null && x.ValueText.Length > 40_000);
+
+        KafkaDuplicateFinder.Find(matches);
+        long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+        Stopwatch watch = Stopwatch.StartNew();
+        IReadOnlyList<KafkaDuplicateGroup> groups = KafkaDuplicateFinder.Find(matches);
+        watch.Stop();
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+
+        groups.Should().HaveCount(250).And.OnlyContain(static x => x.Basis == KafkaDuplicateBasis.KeyAndValue);
+        watch.ElapsedMilliseconds.Should().BeLessThan(20);
+        allocated.Should().BeLessThan(2_000_000, "a value of 80 KB copied 500 times would be 40 MB");
+    }
+
+    [Fact]
     public void The_finder_reads_only_the_matches_it_is_given()
     {
         typeof(KafkaDuplicateFinder).GetMethods().Where(static x => x.DeclaringType == typeof(KafkaDuplicateFinder) && x.IsPublic).Select(static x => x.Name).Should().Equal("Find");

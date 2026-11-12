@@ -96,6 +96,12 @@ internal static class CorrelationExtractor
 
     private static void ReadHeader(KafkaMatch anchor, CorrelationField field, List<CorrelationValue> found)
     {
+        // Validation refuses a deny-listed header as a field; a header the built-in list masks is never a key, whatever declared it.
+        if (HeaderDenyList.Contains(field.Name))
+        {
+            return;
+        }
+
         int read = 0;
 
         foreach (KafkaMatchHeader header in anchor.Headers)

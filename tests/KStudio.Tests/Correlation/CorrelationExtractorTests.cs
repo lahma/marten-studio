@@ -94,6 +94,23 @@ public class CorrelationExtractorTests
     }
 
     [Fact]
+    public void A_deny_listed_header_is_never_read_even_when_a_field_names_it()
+    {
+        KafkaTopicBuilder builder = CorrelationRig.Declare(t => t.Redact(r => r.Header("authorization")));
+        KafkaMatch match = CorrelationRig.Match(builder, KafkaReadGrant.Envelope, headers: [("authorization", "Bearer abc"), ("cookie", "s=1")]);
+        CorrelationField[] fields =
+        [
+            new(CorrelationSource.Header, "authorization", "auth"),
+            new(CorrelationSource.Header, "Cookie", "auth"),
+        ];
+
+        CorrelationExtractor.Extract(match, fields).IsEmpty.Should().BeTrue();
+
+        // Not a deny-list effect: the same field on a header that is not listed is read.
+        CorrelationExtractor.Extract(CorrelationRig.Match(builder, KafkaReadGrant.Envelope, headers: [("x-a", "v")]), [new(CorrelationSource.Header, "x-a", "auth")]).Values.Should().ContainSingle();
+    }
+
+    [Fact]
     public void A_header_is_read_at_most_four_times()
     {
         KafkaTopicBuilder builder = CorrelationRig.Declare();

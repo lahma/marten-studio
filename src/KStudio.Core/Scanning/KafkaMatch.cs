@@ -37,7 +37,7 @@ internal readonly record struct KafkaMatchField(string? Text, string? RedactedBy
     public static KafkaMatchField Masked(string rule) => new(null, rule, false, 0, false);
 
     /// <summary>How the field reads on a screen.</summary>
-    public string Display => RedactedBy is not null ? "••• (redacted by " + RedactedBy + ")" : IsNull ? "null" : Text ?? string.Empty;
+    public string Display => RedactedBy is not null ? KafkaMatchMasks.MaskPrefix + " " + RedactedBy + ")" : IsNull ? "null" : Text ?? string.Empty;
 }
 
 /// <summary>A header of a match.</summary>

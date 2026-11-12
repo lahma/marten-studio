@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.RegularExpressions;
 
 using KStudio.Core.Predicates;
+using KStudio.Core.Redaction;
 
 namespace KStudio.Core.Correlation;
 
@@ -72,6 +73,11 @@ internal static partial class CorrelationValidation
                 if (!HeaderName().IsMatch(field.Name))
                 {
                     problems.Add(where + " " + name + ": a header name is 1 to 256 letters, digits, '.', '_' and '-'.");
+                }
+                else if (HeaderDenyList.Contains(field.Name))
+                {
+                    // Its value is masked in every match and never searched: it can be no key, and a field on it would only look as if it were.
+                    problems.Add(where + " " + name + " is on the header deny-list and is never a correlation field.");
                 }
 
                 break;

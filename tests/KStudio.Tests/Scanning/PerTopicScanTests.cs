@@ -193,6 +193,33 @@ public class PerTopicScanTests
     }
 
     [Fact]
+    public async Task The_audit_text_names_topics_with_one_text_together()
+    {
+        await using ScanFixture fixture = ScanFixture.Create();
+        string a = fixture.Topic("a");
+        string b = fixture.Topic("b");
+        string c = fixture.Topic("c");
+        string d = fixture.Topic("d");
+
+        KafkaScanPlan plan = await fixture.PlanAsync(Request(Envelope, (a, "key = 'x'", Envelope), (b, "key = 'y'", Envelope), (c, "key = 'x'", Envelope), (d, "key = 'x'", Envelope)));
+
+        plan.AuditText.Should().Be($"{a}, {c}, {d}: key = 'x'; {b}: key = 'y'");
+    }
+
+    [Fact]
+    public async Task Twenty_topics_with_one_text_are_one_entry_that_fits_the_log()
+    {
+        await using ScanFixture fixture = ScanFixture.Create();
+        string[] topics = [.. Enumerable.Range(0, 20).Select(i => fixture.Topic("t" + i))];
+        string text = "header.correlation-id = 'c-1' or header.id in ('m-1', 'm-2') or header.conversation-id in ('m-1', 'm-2')";
+
+        KafkaScanPlan plan = await fixture.PlanAsync(Request(Envelope, [.. topics.Select(x => (x, text, Envelope))]));
+
+        plan.AuditText.Should().Be(string.Join(", ", topics) + ": " + text);
+        plan.AuditText.Length.Should().BeLessThan(4_000);
+    }
+
+    [Fact]
     public async Task Pruning_on_one_topics_key_clause_leaves_the_other_topic_whole()
     {
         await using ScanFixture fixture = ScanFixture.Create();
@@ -288,7 +315,9 @@ public class PerTopicScanTests
 
         // No topic at all, and no text.
         (await RefusalAsync(fixture, Request(Envelope) with { Topics = [] })).Should().Contain("at least one topic");
-        (await RefusalAsync(fixture, Request(Envelope, (a, null!, Envelope)))).Should().Contain("a text");
+        (await RefusalAsync(fixture, Request(Envelope, (a, null!, Envelope)))).Should().Contain("not empty");
+        (await RefusalAsync(fixture, Request(Envelope, (a, string.Empty, Envelope)))).Should().Contain("not empty");
+        (await RefusalAsync(fixture, Request(Envelope, (a, "  	", Envelope)))).Should().Contain("not empty");
     }
 
     [Fact]

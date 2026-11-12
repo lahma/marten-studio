@@ -558,19 +558,31 @@ grant). `PredicateText` is then `null`, the topics are exactly the queries' topi
 and is included in the request's. Each text is parsed and compiled for its own topic under its own grant, and every read of a
 record asks the topic's grant (`TopicScanContext.Grant`), so a topic searched under `Envelope` never reads a value although
 another topic of the scan does. An error is prefixed `On {topic}: `. Pruning uses each topic's own key clauses. The audit text
-is `{topic}: {text}` for each topic, joined by `; `, and a literal is shown only where **no** topic redacts the field it is
-on. It is still one scan: one consumer, one slot, one estimate and confirmation, one stop reason, one budget, and
+is `{topics}: {text}` for each distinct text, the topics that share one named together and the groups joined by `; ` (so 20
+topics with one search are one entry that fits the log), and a literal is shown only where **no** topic redacts the field it is
+on. A topic's text is never empty or blank: a topic with nothing to search is left out of the request. It is still one scan: one consumer, one slot, one estimate and confirmation, one stop reason, one budget, and
 `ReadsValues` is true when a topic whose search reads values has the payload grant. Without `PerTopic` nothing changed.
 
 **Related records, the rules the timeline follows.** The default topic set is the anchor's topic first, then the cluster's
 declared topics in name order, each filtered through the cluster and capability policies, at most 20; a refused topic is absent
-from a default set, and a visitor-chosen set with a refused topic is refused whole, never narrowed (D35). A topic whose query
-is `null` is a lane that says why and is left out of `PerTopic`; a JSON path without `ReadPayloads` is noted on its lane. The
-service asks `SearchRecords`, the cluster policy for every topic, then the `ReadPayloads` question once for each topic that has
-a path, and audits once for the scan, on failure as well as success, with the per-topic audit text.
+from a default set, and a visitor-chosen set with a refused topic is refused whole, never narrowed (D35). A topic with no query (`HasQuery` false)
+is a lane that says why and is left out of `PerTopic`; a JSON path without `ReadPayloads` is noted on its lane. The
+service asks `SearchRecords`, the cluster question, then both policies for every topic in `PerTopic` (after the cluster
+question), then the `ReadPayloads` question once for each topic that has a path, and audits once for the scan, on failure as well as success, with the per-topic audit text.
 
 **Duplicates.** `KafkaDuplicateFinder` groups the matches the visitor already holds; it reads nothing, asks no gate and records
 no audit. Two records are copies when they are on the same topic and share an identity, which is the first of these a record
 has: its `id` header, CloudEvents `source` and `id`, or its key and whole value (read with the payload, neither cut nor
 withheld; a masked value is compared as shown, and the group says so). A masked or cut field is no identity. A group has at
-least two copies.
+least two copies. The pass keys its buckets on the strings the matches already hold, in parts, and copies no value. A header on
+the deny-list is never a correlation field: validation refuses it, and the extractor skips it besides.
+
+**Why.** One scan, because the owner may run one at a time (D41) and a timeline is one read with one estimate, one stop reason and
+one audit entry; a query a topic, because a field one topic redacts must not fail the others. Kinds are the smallest vocabulary
+that says which fields mean the same thing on topics that spell them differently, and keys come only from what the anchor
+shows, so a link can reveal nothing the visitor could not already see (D40). Duplicates are same-topic, because a retry tier
+re-publishes to another topic and the timeline already shows that as related, not as a copy.
+
+**Tests.** `tests/KStudio.Tests/Correlation/` (validation, extractor, query builder, duplicate finder, with its 20 ms bound at
+the largest values), `Scanning/PerTopicScanTests` on the fake and `PerTopicScanLiveTests` on Kafka 3.9 and 4.x (one consumer, a
+group never joined), and `Redaction/MaskTextTests`.

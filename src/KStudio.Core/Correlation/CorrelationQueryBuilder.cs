@@ -127,20 +127,26 @@ internal static partial class CorrelationQueryBuilder
         }
 
         List<string> literals = [];
+        int unsearchable = 0;
 
         foreach (CorrelationValue value in values)
         {
             if (field.Source == CorrelationSource.Key && !topic.KeyFormat.TryEncode(value.Value, out _, out _))
             {
+                unsearchable++;
                 continue;
             }
 
             Literals(field, value, literals);
         }
 
+        if (unsearchable > 0)
+        {
+            notes.Add(string.Create(CultureInfo.InvariantCulture, $"{field.Grammar}: {unsearchable} {(unsearchable == 1 ? "value cannot" : "values cannot")} be held in this topic's key format and {(unsearchable == 1 ? "was" : "were")} not searched."));
+        }
+
         if (literals.Count == 0)
         {
-            notes.Add("`" + field.Grammar + "` cannot hold these values in this topic's key format and is not searched.");
             return;
         }
 

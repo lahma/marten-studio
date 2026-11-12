@@ -1,3 +1,5 @@
+using System.Runtime.InteropServices;
+
 using KStudio.Core.Scanning;
 
 namespace KStudio.Core.Correlation;
@@ -48,7 +50,8 @@ internal static class KafkaDuplicateFinder
     {
         ArgumentNullException.ThrowIfNull(matches);
 
-        Dictionary<(string Topic, KafkaDuplicateBasis Basis, string Identity), List<KafkaMatch>> buckets = [];
+        // The key holds the strings the matches already hold, in parts: nothing is concatenated, so the pass copies no value.
+        Dictionary<BucketKey, List<KafkaMatch>> buckets = new(IdentityComparer.Instance);
 
         foreach (KafkaMatch match in matches)
         {
@@ -58,26 +61,20 @@ internal static class KafkaDuplicateFinder
                 continue;
             }
 
-            (string, KafkaDuplicateBasis, string) bucket = (match.Topic, identity.Basis, identity.Value);
-
-            if (!buckets.TryGetValue(bucket, out List<KafkaMatch>? copies))
-            {
-                copies = [];
-                buckets[bucket] = copies;
-            }
-
-            copies.Add(match);
+            ref List<KafkaMatch>? copies = ref CollectionsMarshal.GetValueRefOrAddDefault(buckets, new BucketKey(match.Topic, identity.Basis, identity.First, identity.Second), out _);
+            (copies ??= []).Add(match);
         }
 
         List<KafkaDuplicateGroup> groups = [];
 
-        foreach (((string topic, KafkaDuplicateBasis basis, string _), List<KafkaMatch> copies) in buckets)
+        foreach ((BucketKey bucket, List<KafkaMatch> copies) in buckets)
         {
             if (copies.Count < 2)
             {
                 continue;
             }
 
+            (string topic, KafkaDuplicateBasis basis) = (bucket.Topic, bucket.Basis);
             KafkaMatch[] ordered = [.. copies.OrderBy(static x => x.Timestamp).ThenBy(static x => x.Partition).ThenBy(static x => x.Offset)];
             bool asShown = basis == KafkaDuplicateBasis.KeyAndValue && ordered.Any(static x => x.ValueMaskedBy.Count > 0);
             groups.Add(new KafkaDuplicateGroup(basis, topic, ordered, asShown));
@@ -86,11 +83,11 @@ internal static class KafkaDuplicateFinder
         return [.. groups.OrderByDescending(static x => x.Count).ThenBy(static x => x.First).ThenBy(static x => x.Topic, StringComparer.Ordinal)];
     }
 
-    private static (KafkaDuplicateBasis Basis, string Value)? Identity(KafkaMatch match)
+    private static (KafkaDuplicateBasis Basis, string First, string? Second)? Identity(KafkaMatch match)
     {
         if (Literal(match.Headers.FirstOrDefault(static x => string.Equals(x.Name, IdHeader, StringComparison.OrdinalIgnoreCase))?.Value) is { } envelope)
         {
-            return (KafkaDuplicateBasis.EnvelopeId, envelope);
+            return (KafkaDuplicateBasis.EnvelopeId, envelope, null);
         }
 
         string? source = Literal(Attribute(match, "source"));
@@ -98,8 +95,7 @@ internal static class KafkaDuplicateFinder
 
         if (source is not null && id is not null)
         {
-            // The length keeps ("ab", "c") from meeting ("a", "bc").
-            return (KafkaDuplicateBasis.CloudEvent, source.Length + ":" + source + id);
+            return (KafkaDuplicateBasis.CloudEvent, source, id);
         }
 
         // The value counts only if it is whole and was read: a cut or withheld value, or one never read, says nothing about equality.
@@ -110,7 +106,7 @@ internal static class KafkaDuplicateFinder
             && match.Key.IsLiteral
             && match.Key.Text is { } key)
         {
-            return (KafkaDuplicateBasis.KeyAndValue, key.Length + ":" + key + value);
+            return (KafkaDuplicateBasis.KeyAndValue, key, value);
         }
 
         return null;
@@ -120,4 +116,57 @@ internal static class KafkaDuplicateFinder
         match.CloudEventAttributes.FirstOrDefault(x => string.Equals(x.Name, name, StringComparison.OrdinalIgnoreCase))?.Value;
 
     private static string? Literal(KafkaMatchField? field) => field is { IsLiteral: true, Text.Length: > 0 } ? field.Value.Text : null;
+
+    /// <summary>What a bucket is keyed on: strings the matches already hold, in parts.</summary>
+    private readonly record struct BucketKey(string Topic, KafkaDuplicateBasis Basis, string First, string? Second);
+
+    /// <summary>
+    /// Equal when every part is equal ordinally. The hash reads a value's length and a bounded sample of it (its start, its end and 64 places
+    /// between), not all of it: hashing every value of 500 matches of 64 KiB would read 30 MB to find what a length and a sample already
+    /// separate, and equal values are then confirmed by one vectorized comparison.
+    /// </summary>
+    private sealed class IdentityComparer : IEqualityComparer<BucketKey>
+    {
+        private const int Edge = 128;
+        private const int Strides = 64;
+
+        public static IdentityComparer Instance { get; } = new();
+
+        public bool Equals(BucketKey x, BucketKey y) =>
+            x.Basis == y.Basis
+            && string.Equals(x.Topic, y.Topic, StringComparison.Ordinal)
+            && string.Equals(x.First, y.First, StringComparison.Ordinal)
+            && string.Equals(x.Second, y.Second, StringComparison.Ordinal);
+
+        public int GetHashCode(BucketKey identity)
+        {
+            HashCode hash = new();
+            hash.Add(identity.Topic, StringComparer.Ordinal);
+            hash.Add(identity.Basis);
+            hash.Add(Sample(identity.First));
+            hash.Add(identity.Second is null ? 0 : Sample(identity.Second));
+            return hash.ToHashCode();
+        }
+
+        private static int Sample(string text)
+        {
+            if (text.Length <= (2 * Edge) + Strides)
+            {
+                return string.GetHashCode(text, StringComparison.Ordinal);
+            }
+
+            HashCode hash = new();
+            hash.Add(text.Length);
+            hash.AddBytes(System.Runtime.InteropServices.MemoryMarshal.AsBytes(text.AsSpan(0, Edge)));
+            hash.AddBytes(System.Runtime.InteropServices.MemoryMarshal.AsBytes(text.AsSpan(text.Length - Edge, Edge)));
+            int step = (text.Length - (2 * Edge)) / Strides;
+
+            for (int i = 0; i < Strides; i++)
+            {
+                hash.Add(text[Edge + (i * step)]);
+            }
+
+            return hash.ToHashCode();
+        }
+    }
 }
