@@ -1,5 +1,6 @@
 using System.Globalization;
 
+using KStudio.Core.Scanning;
 using KStudio.Core.Wire;
 
 namespace KStudio.Core.Windows;
@@ -63,6 +64,19 @@ internal abstract record WindowNote
         public override string Text => string.Create(
             CultureInfo.InvariantCulture,
             $"Records before {(EarliestTimestamp is { } at ? Time(at) : "offset " + EarliestRetained.ToString(CultureInfo.InvariantCulture))} are gone (retention): the earliest retained record is offset {EarliestRetained}");
+    }
+
+    /// <summary>A key search reads only the partitions its key maps to, after sampling the window proved the topic's partitioner (D-PAYLOAD decision 7.5).</summary>
+    /// <param name="Topic">The topic.</param>
+    /// <param name="Partitions">The partitions read.</param>
+    /// <param name="Partitioner">The partitioner's name.</param>
+    /// <param name="Checked">How many keyed records the sample checked.</param>
+    public sealed record PartitionsPruned(string Topic, IReadOnlyList<int> Partitions, string Partitioner, int Checked) : WindowNote
+    {
+        /// <inheritdoc />
+        public override string Text => string.Create(
+            CultureInfo.InvariantCulture,
+            $"{(Partitions.Count == 1 ? "Only partition" : "Only partitions")} {KafkaTopicPruning.List(Partitions)} of {Topic} {(Partitions.Count == 1 ? "is" : "are")} read: {Partitioner} maps the key to {(Partitions.Count == 1 ? "it" : "them")}, verified on {Checked:N0} records of this window.");
     }
 
     /// <summary>A partition stops at its last stable offset because an open transaction holds later offsets.</summary>

@@ -27,6 +27,9 @@ internal sealed class FakeScanReader(FakeKafkaCluster cluster, WireReaderOptions
     /// <summary>Every assign this reader received, in order.</summary>
     public List<IReadOnlyList<WirePartitionOffset>> Assigns { get; } = [];
 
+    /// <summary>Every partition this reader was asked to pause, in order.</summary>
+    public List<WirePartition> PausedLog { get; } = [];
+
     public int CloseCount { get; private set; }
 
     public int DisposeCount { get; private set; }
@@ -57,6 +60,7 @@ internal sealed class FakeScanReader(FakeKafkaCluster cluster, WireReaderOptions
     {
         Touch();
         paused.UnionWith(partitions);
+        PausedLog.AddRange(partitions);
     }
 
     public void Resume(IReadOnlyList<WirePartition> partitions)

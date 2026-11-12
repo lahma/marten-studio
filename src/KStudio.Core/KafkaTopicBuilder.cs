@@ -23,6 +23,7 @@ public sealed partial class KafkaTopicBuilder
             DecoderSource = DecoderSource,
             DecoderInstance = DecoderInstance,
             Rules = Rules?.Copy(),
+            PartitionerValue = PartitionerValue,
         };
 
         return copy;

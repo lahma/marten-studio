@@ -28,6 +28,12 @@ internal enum ClauseVerdictKind
 
     /// <summary>Needs a decode of every record it reaches: slow.</summary>
     SlowScan,
+
+    /// <summary>A key search that reads several, but not all, of a topic's partitions, after sampling proved the topic's partitioner (decision 7.5).</summary>
+    PartitionPruned,
+
+    /// <summary>A key search that reads exactly one partition, after sampling proved the topic's partitioner.</summary>
+    PointLookup,
 }
 
 /// <summary>What the engine says about one clause on one topic before it reads anything.</summary>
@@ -35,7 +41,8 @@ internal enum ClauseVerdictKind
 /// <param name="Field">The clause's field, without its literals.</param>
 /// <param name="Kind">How it runs.</param>
 /// <param name="Description">The sentence.</param>
-internal sealed record ClauseVerdict(string Topic, string Field, ClauseVerdictKind Kind, string Description);
+/// <param name="Operator">The clause's operator, so that a verdict about a key's <c>=</c> or <c>in</c> can be told from one about <c>~</c>; <see langword="null" /> when not recorded.</param>
+internal sealed record ClauseVerdict(string Topic, string Field, ClauseVerdictKind Kind, string Description, PredicateOperator? Operator = null);
 
 /// <summary>A node of the compiled tree.</summary>
 internal abstract class CompiledNode

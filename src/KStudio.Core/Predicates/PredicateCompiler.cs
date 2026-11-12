@@ -340,6 +340,6 @@ internal static class PredicateCompiler
             _ => (ClauseVerdictKind.SlowScan, "slow: it reads the key, every header and every CloudEvents attribute as text"),
         };
 
-        verdicts.Add(new ClauseVerdict(context.Topic, field, kind, text));
+        verdicts.Add(new ClauseVerdict(context.Topic, field, kind, text, clause.Operator));
     }
 }

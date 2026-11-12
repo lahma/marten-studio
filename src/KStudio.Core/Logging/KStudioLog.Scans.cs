@@ -3,7 +3,7 @@ using Microsoft.Extensions.Logging;
 namespace KStudio.Core.Logging;
 
 /// <summary>
-/// The scan engine's log events, 9665 to 9675 (decision 11; 9675 is the payload rules' in M3). They carry cluster keys, topics, partitions, offsets, counts, enum names and
+/// The scan engine's log events, 9665 to 9676 (decision 11; 9675 is the payload rules' and 9676 the partitioner verification's in M3). They carry cluster keys, topics, partitions, offsets, counts, enum names and
 /// exception type names, and never a predicate, a literal, a key, a header, a value, an owner or a user: the audit of a scan is KStudio's.
 /// </summary>
 internal static partial class KStudioLog
@@ -41,4 +41,7 @@ internal static partial class KStudioLog
 
     [LoggerMessage(EventId = 9675, Level = LogLevel.Debug, Message = "KStudio could not apply a {Kind} redaction rule to a value of {Topic} on {Cluster}: {Reason}, {ExceptionKind}")]
     public static partial void PayloadRuleNotApplied(ILogger logger, string kind, string topic, string cluster, string reason, string exceptionKind);
+
+    [LoggerMessage(EventId = 9676, Level = LogLevel.Debug, Message = "KStudio could not read a partitioner verification sample of {Topic} on {Cluster}: {Kind}")]
+    public static partial void PartitionerSampleFailed(ILogger logger, string topic, string cluster, string kind);
 }

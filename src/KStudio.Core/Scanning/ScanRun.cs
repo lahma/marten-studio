@@ -830,7 +830,10 @@ internal sealed class ScanRun : IDisposable
                 refusals,
                 cursor,
                 counters.Copy(),
-                matchCounters.Copy());
+                matchCounters.Copy())
+            {
+                Pruning = plan.Pruning,
+            };
         }
 
         string clusterText = KafkaLogValue.Cap(cluster)!;

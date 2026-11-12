@@ -68,6 +68,16 @@ namespace KStudio
         public virtual bool TryEncodePrefix(string literal, out System.Collections.Generic.IReadOnlyList<byte[]> forms, out string? problem) { }
         public abstract bool TryFormat(System.ReadOnlySpan<byte> key, out string? text);
     }
+    public abstract class KafkaPartitioner
+    {
+        protected KafkaPartitioner(string name) { }
+        public string Name { get; }
+        public static KStudio.KafkaPartitioner Crc32 { get; }
+        public static KStudio.KafkaPartitioner Fnv1a { get; }
+        public static KStudio.KafkaPartitioner Murmur2 { get; }
+        public virtual bool IsDeterministic(System.ReadOnlySpan<byte> key) { }
+        public abstract int Partition(System.ReadOnlySpan<byte> key, int partitionCount);
+    }
     public sealed class KafkaRedactionBuilder
     {
         public KStudio.KafkaRedactionBuilder AllowHeader(string name) { }
@@ -105,6 +115,7 @@ namespace KStudio
     {
         public KStudio.KafkaTopicBuilder Description(string description) { }
         public KStudio.KafkaTopicBuilder Key(KStudio.KafkaKeyFormat format) { }
+        public KStudio.KafkaTopicBuilder Partitioner(KStudio.KafkaPartitioner partitioner) { }
         public KStudio.KafkaTopicBuilder Redact(System.Action<KStudio.KafkaRedactionBuilder> configure) { }
         public KStudio.KafkaTopicBuilder Value(KStudio.IKafkaRecordDecoder decoder) { }
         public KStudio.KafkaTopicBuilder Value<TDecoder>()
