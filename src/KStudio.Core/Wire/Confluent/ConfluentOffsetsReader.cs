@@ -5,8 +5,8 @@ using KStudio.Core.Clusters;
 namespace KStudio.Core.Wire.Confluent;
 
 /// <summary>
-/// The handle the group-offsets read runs on: a consumer that is never subscribed, assigned or read, and an admin client dependent on its
-/// handle (D36). An admin client has no consumer group, and librdkafka 2.16.0 and earlier dereference it when an OffsetFetch answers
+/// The handle the group-offsets read runs on: a consumer that is never subscribed or assigned (so it never fetches, and is polled only to
+/// serve its events), and an admin client dependent on its handle (D36). An admin client has no consumer group, and librdkafka 2.16.0 and earlier dereference it when an OffsetFetch answers
 /// <c>NOT_COORDINATOR</c> or <c>COORDINATOR_NOT_AVAILABLE</c> (issue #5040, fixed by PR #5611): the process dies with SIGSEGV. A
 /// consumer's handle has one, so the same request takes the path that handles the answer. Hard rule 17 holds as it does for a scan
 /// consumer: the reader commits nothing, joins no group, creates no topic and runs no host delegate.
@@ -64,8 +64,10 @@ internal sealed class ConfluentOffsetsReader : IDisposable
     internal IAdminClient Admin => admin;
 
     /// <summary>
-    /// Serves the events the consumer's queue holds (librdkafka's log and error events are delivered by a poll, and this consumer is never
-    /// consumed from), so that none accumulates between reads. The consumer has no assignment, so each call returns at once.
+    /// Serves the events the consumer's queue holds, so that none accumulates between reads and so that the host's OAuth token-refresh hook
+    /// runs: librdkafka queues that op on the main queue inside <c>rd_kafka_new</c>, a consumer redirects the main queue to its poll queue,
+    /// and the dependent admin client polls only its own result queue, so nothing else would ever serve it. Called before and after each
+    /// read. The consumer has no assignment, so each call returns at once.
     /// </summary>
     internal void Drain()
     {

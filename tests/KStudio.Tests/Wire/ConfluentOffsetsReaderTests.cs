@@ -4,6 +4,7 @@ using KStudio.Core.Clusters;
 using KStudio.Core.Logging;
 using KStudio.Core.Wire.Confluent;
 using KStudio.Tests.Contract;
+using KStudio.Tests.Support;
 
 using MartenStudio.Tests.Support;
 
@@ -59,6 +60,39 @@ public class ConfluentOffsetsReaderTests
     }
 
     [Fact]
+    public async Task One_drain_straight_after_construction_runs_the_hosts_token_hook_which_nothing_else_serves()
+    {
+        // librdkafka queues the token-refresh op on the main queue inside rd_kafka_new; the consumer redirects that queue to its poll queue and
+        // the dependent admin client polls only its own result queue. The lag read drains before it asks, so the first read on an OAUTHBEARER
+        // cluster does not wait out its timeout (REVIEW-CRASH-FIX).
+        TaskCompletionSource called = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        ClientConfig oauth = new()
+        {
+            BootstrapServers = "localhost:1",
+            SecurityProtocol = SecurityProtocol.SaslPlaintext,
+            SaslMechanism = SaslMechanism.OAuthBearer,
+        };
+
+        KafkaEngineOptions options = new();
+        options.AddCluster("prod", oauth, c => c.OAuthBearerTokenRefresh((_, _) =>
+        {
+            called.TrySetResult();
+            throw new InvalidOperationException("the token service is down");
+        }));
+        KafkaClusterDefinition cluster = new KafkaClusterRegistry(options).Get("prod");
+        CapturingLoggerProvider logs = new();
+        ConfluentClientEvents events = new(new KStudioLoggers(logs.CreateFactory()), new KafkaLogOnce(TimeProvider.System), TimeProvider.System);
+
+        using ConfluentOffsetsReader reader = new(cluster, KafkaEngineSnapshot.Take(options).GroupIdPrefix, events);
+        called.Task.IsCompleted.Should().BeFalse("the hook runs when the queue is served, on no thread of its own");
+
+        reader.Drain();
+
+        await called.Task.Bounded();
+        logs.Entries.Should().NotContain(static x => x.Message.Contains("token service", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task The_engine_registers_the_readers_pool_and_creates_no_reader_until_a_lag_read_needs_one()
     {
         ServiceCollection services = new();
@@ -70,6 +104,5 @@ public class ConfluentOffsetsReaderTests
         await using ServiceProvider provider = services.BuildServiceProvider(validateScopes: true);
 
         provider.GetRequiredService<KafkaAdminPool<ConfluentOffsetsReader>>().ClientCount.Should().Be(0, "no consumer is built until the lag is read");
-        provider.GetRequiredService<KafkaAdminPool<ConfluentOffsetsReader>>().Should().NotBeSameAs(provider.GetRequiredService<KafkaAdminPool<IAdminClient>>());
     }
 }

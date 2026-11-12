@@ -138,11 +138,16 @@ shown as "Not available: needs `DESCRIBE_CONFIGS` on topic `orders.v1`" and logg
 One admin client per cluster is created by the first read that needs it and disposed when it has been idle for
 `AdminIdleTimeout` (5 minutes). A client a call still holds is never destroyed: the pool retires it and disposes it when the last
 lease is released. The group-offsets (lag) read is the one admin call that does not run on that client: it runs on a per-cluster
-**offsets reader**, a consumer that is never subscribed, assigned or read, with a dependent admin client built over its handle
-(`DependentAdminClientBuilder`), pooled, leased and idle-disposed exactly as the admin client is, and disposed in the order
-dependent admin client, `Close`, `Dispose`. It is built as a scan consumer is (the clone, the overrides, a group id of its own that is
-never joined, no commit, no offset store, the engine's log and error handlers), and its queue is drained after each read. It commits
-nothing, joins no group and creates no topic (`ReadNeverWritesMetadataLiveTests`). Each scan gets one consumer, built, read and closed on a dedicated thread; the scan's
+**offsets reader**, a consumer that is never subscribed and never assigned, so it never fetches, with a dependent admin client built
+over its handle (`DependentAdminClientBuilder`), pooled, leased and idle-disposed exactly as the admin client is (the pool's log lines
+say `admin` or `offsets`), and disposed in the order dependent admin client, `Close`, `Dispose`. It is built as a scan consumer is
+(the clone, the overrides, a group id of its own that is never joined, no commit, no offset store, the engine's log and error
+handlers). Its queue is drained **before and after** each read, with a poll of zero wait: that is where the host's OAuth
+token-refresh hook runs, because librdkafka queues the refresh on the main queue inside `rd_kafka_new`, a consumer redirects that
+queue to its poll queue, and the dependent admin client polls only its own result queue; without the drain before, the first lag read
+on an OAUTHBEARER cluster would wait out its timeout (and so would the first after every idle disposal). The drain after keeps log
+and error events from piling up. The reader commits nothing, joins no group and creates no topic (`ReadNeverWritesMetadataLiveTests`).
+Each scan gets one consumer, built, read and closed on a dedicated thread; the scan's
 reads wait at most 100 ms, so a cancel, the deadline and the governor are seen within 100 ms. At host shutdown the engine
 cancels every scan, waits up to 10 s, and disposes its clients. Catalog reads are single-flight per cluster and key, for
 the host studio's `RefreshInterval` (configs, authorized operations and the cluster description for a minute).
@@ -160,23 +165,23 @@ The engine clones the host's configuration when a cluster is registered and neve
 client it builds is that clone with these overrides, applied last; each overridden host key is logged at Debug by name,
 never by value.
 
-| Setting | Scan consumer | Admin client | Why |
-|---|---|---|---|
-| `allow.auto.create.topics` | `false` | `false` | a metadata request must never create a topic |
-| `enable.auto.commit`, `enable.auto.offset.store` | `false` | - | nothing is committed or stored |
-| `group.id` | `{GroupIdPrefix}{scan id}`, `kstudio-` by default | - | Confluent's consumer requires one; it is never subscribed and never committed |
-| `group.instance.id` | removed | - | no static membership |
-| `group.protocol` | `classic` | - | one tested path |
-| `client.id` | `{host client.id or rdkafka}.kstudio` | the same | broker metrics and client-id quotas tell the studio apart |
-| `isolation.level` | `read_committed`, or `read_uncommitted` when a scan includes uncommitted records | - | explicit, never inherited |
-| `enable.partition.eof` | `true` | - | the engine must know a partition ran out |
-| `auto.offset.reset` | `error` | - | an offset deleted during a scan is reported, never skipped |
-| `statistics.interval.ms` | `0` | `0` | no statistics |
-| `enable.metrics.push` | `false` | `false` | the studio's clients never appear in the cluster's client metrics |
-| `queued.max.messages.kbytes`, `fetch.max.bytes`, `max.partition.fetch.bytes` | the engine's limits (D41) | - | the clients' defaults prefetch 64 MiB per consumer |
-| `debug` | removed | removed | the host's debug contexts are not the studio's |
-| `plugin.library.paths`, `confluent.monitoring.interceptor.*` | removed | removed | a host's interceptor would make the studio's clients produce to the host's monitoring topic |
-| `fetch.message.max.bytes` (librdkafka's own name for `max.partition.fetch.bytes`), `auto.commit.enable` (the legacy topic property that `enable.auto.commit` also names) | removed | - | one setting under two names never reaches the client twice |
+| Setting | Scan consumer | Offsets reader | Admin client | Why |
+|---|---|---|---|---|
+| `allow.auto.create.topics` | `false` | `false` | `false` | a metadata request must never create a topic |
+| `enable.auto.commit`, `enable.auto.offset.store` | `false` | `false` | - | nothing is committed or stored |
+| `group.id` | `{GroupIdPrefix}{scan id}`, `kstudio-` by default | `{GroupIdPrefix}{reader id}` | - | Confluent's consumer requires one; it is never subscribed and never committed |
+| `group.instance.id` | removed | removed | - | no static membership |
+| `group.protocol` | `classic` | `classic` | - | one tested path |
+| `client.id` | `{host client.id or rdkafka}.kstudio` | the same | the same | broker metrics and client-id quotas tell the studio apart |
+| `isolation.level` | `read_committed`, or `read_uncommitted` when a scan includes uncommitted records | always `read_committed` | - | explicit, never inherited |
+| `enable.partition.eof` | `true` | `true` | - | the engine must know a partition ran out |
+| `auto.offset.reset` | `error` | `error` | - | an offset deleted during a scan is reported, never skipped |
+| `statistics.interval.ms` | `0` | `0` | `0` | no statistics |
+| `enable.metrics.push` | `false` | `false` | `false` | the studio's clients never appear in the cluster's client metrics |
+| `queued.max.messages.kbytes`, `fetch.max.bytes`, `max.partition.fetch.bytes` | the engine's limits (D41) | 1 MiB queue and 1 MiB fetch (it never fetches) | - | the clients' defaults prefetch 64 MiB per consumer |
+| `debug` | removed | removed | removed | the host's debug contexts are not the studio's |
+| `plugin.library.paths`, `confluent.monitoring.interceptor.*` | removed | removed | removed | a host's interceptor would make the studio's clients produce to the host's monitoring topic |
+| `fetch.message.max.bytes` (librdkafka's own name for `max.partition.fetch.bytes`), `auto.commit.enable` (the legacy topic property that `enable.auto.commit` also names) | removed | removed | - | one setting under two names never reaches the client twice |
 
 Every assign carries explicit offsets, so the consumer never fetches committed offsets, which would need a group ACL.
 The engine sets its own log and error handlers on both builders, so librdkafka never writes to the host's stderr, and
@@ -213,8 +218,13 @@ within about half a second of the assign, possibly after the first records; the 
 reader returns it as a failure naming the scan's group, and the scan counts it, logs 9671 once at Debug and goes on: it
 is never a stop and never a warning. Without a group ACL `Offset.Stored` stalls with no record, no end and no error, so
 the reader refuses every negative offset and the engine always assigns a concrete one. A `PREFIXED` `READ` ACL on group
-`kstudio-` (or on the host's own `GroupIdPrefix`) silences the one refusal and changes nothing else; reading never needs
-it. The consumer groups a host declares for the lag panel are another matter: without `DESCRIBE` on the group,
+`kstudio-` (or on the host's own `GroupIdPrefix`) silences the one refusal on a scan, and reading never needs it. It matters more
+for the **offsets reader** (D36), which lives as long as its pool slot, up to `AdminIdleTimeout` after the last lag read: with no
+`DESCRIBE` on its own group, librdkafka keeps looking that group's coordinator up for as long as the reader exists. Measured on
+`apache/kafka` 4.4.0 and Confluent.Kafka 2.16.0 with the `nogroup` principal (`debug=cgrp,protocol` on a reader built from the
+engine's own table, ten lag reads over 30 s): 42 `FindCoordinator` requests, one a second for the reader's own group on top of the
+reads' own (the principal has no ACL on that group, so each is a refused lookup). With a `PREFIXED` ACL on `kstudio-` (`DESCRIBE` is enough, `READ` implies it) the same
+run sent 5, all in the first 100 ms, and none after. Grant it where lookups in the broker's authorizer log matter. The consumer groups a host declares for the lag panel are another matter: without `DESCRIBE` on the group,
 `DescribeConsumerGroups` and `ListConsumerGroupOffsets` fail with `GroupAuthorizationFailed`, which the overview shows
 as "Not available: needs `DESCRIBE` on group `orders-service`" while the topic's own fields still load.
 `ListConsumerGroups`, which the engine never calls, answers such a principal with an empty list and no error, one more
@@ -516,7 +526,11 @@ to 267 MiB against the ceiling of 253 MiB and the live test's allowance of 316 M
 characters) and then its value, each cut with a count of what was left out; so a record of 64 headers of 4 KiB keeps the
 first of them and none of its value. The formula is a ceiling only because of that budget. The record-size sampler's
 consumer is outside $S$ and the governor, so it is small: 1 MiB of queue and 1 MiB of fetch, for at most three seconds
-at a time per cluster. The live suite allows $1.25 \cdot S(C + 2mc)$ for two scans over records of a 96 KiB value and 64
+at a time per cluster. The **offsets reader** (D36) is outside $S$ and the scan count too, and lives for as long as its pool slot, up
+to `AdminIdleTimeout` after the last lag read, one per cluster: measured on Linux (`apache/kafka` 4.4.0, Confluent.Kafka 2.16.0, eight
+readers at once, three runs, `RssAnon` and `/proc/self/status` threads after a GC), it costs about 0.3 MiB of private memory
+(0.1 to 0.4 MiB, at the limit of what `RssAnon` resolves), 5 threads and 2 broker connections each, in addition to what the admin client
+costs. The live suite allows $1.25 \cdot S(C + 2mc)$ for two scans over records of a 96 KiB value and 64
 headers of 4 KiB, and prints what they actually held. Broker egress is bounded separately: with these limits the broker
 sent at most $Q + F$ more than the engine had read.
 

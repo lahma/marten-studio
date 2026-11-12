@@ -9,11 +9,11 @@ namespace KStudio.Core.Logging;
 /// </summary>
 internal static partial class KStudioLog
 {
-    [LoggerMessage(EventId = 9650, Level = LogLevel.Debug, Message = "KStudio created the admin client of cluster {Cluster}")]
-    public static partial void AdminClientCreated(ILogger logger, string cluster);
+    [LoggerMessage(EventId = 9650, Level = LogLevel.Debug, Message = "KStudio created the {Kind} client of cluster {Cluster}")]
+    public static partial void AdminClientCreated(ILogger logger, string kind, string cluster);
 
-    [LoggerMessage(EventId = 9651, Level = LogLevel.Debug, Message = "KStudio disposed the admin client of cluster {Cluster} after {IdleSeconds} s idle")]
-    public static partial void AdminClientDisposed(ILogger logger, string cluster, int idleSeconds);
+    [LoggerMessage(EventId = 9651, Level = LogLevel.Debug, Message = "KStudio disposed the {Kind} client of cluster {Cluster} after {IdleSeconds} s idle")]
+    public static partial void AdminClientDisposed(ILogger logger, string kind, string cluster, int idleSeconds);
 
     /// <summary>9655: logged at Warning the first time within ten minutes and at Debug afterwards (<c>KafkaLogOnce.WarningOrDebug</c>).</summary>
     [LoggerMessage(EventId = 9655, Message = "Kafka cluster {Cluster} refused KStudio's authentication: {Code}")]
@@ -31,8 +31,8 @@ internal static partial class KStudioLog
     [LoggerMessage(EventId = 9661, Level = LogLevel.Debug, Message = "KStudio overrides {Setting} of cluster {Cluster} for its {Client} client")]
     public static partial void HostSettingOverridden(ILogger logger, string setting, string cluster, string client);
 
-    [LoggerMessage(EventId = 9664, Level = LogLevel.Debug, Message = "KStudio could not dispose the admin client of cluster {Cluster}: {ExceptionKind}")]
-    public static partial void AdminClientDisposeFailed(ILogger logger, string cluster, string exceptionKind);
+    [LoggerMessage(EventId = 9664, Level = LogLevel.Debug, Message = "KStudio could not dispose the {Kind} client of cluster {Cluster}: {ExceptionKind}")]
+    public static partial void AdminClientDisposeFailed(ILogger logger, string kind, string cluster, string exceptionKind);
 
     [LoggerMessage(EventId = 9662, Level = LogLevel.Debug, Message = "KStudio is stopping {Count} scans")]
     public static partial void ShutdownStarted(ILogger logger, int count);

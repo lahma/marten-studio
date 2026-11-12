@@ -31,7 +31,7 @@ public abstract class FreshBrokerLagReadLiveTests(string image)
     public async Task The_first_group_request_a_pristine_broker_sees_is_answered_with_a_value_or_a_refusal_and_the_process_survives()
     {
         int loops = int.TryParse(Environment.GetEnvironmentVariable(LoopsEnvironmentVariable), out int parsed) && parsed > 0 ? parsed : DefaultLoops;
-        int answered = 0;
+        List<string> outcomes = [];
 
         for (int i = 0; i < loops; i++)
         {
@@ -46,19 +46,21 @@ public abstract class FreshBrokerLagReadLiveTests(string image)
             WireResult<IReadOnlyList<WireGroupOffset>> read = await cluster.Wire.ListGroupOffsetsAsync(
                 "kstudio-fresh-" + broker.RunId, [new WirePartition(topic, 0)], Token);
 
-            if (read.IsOk)
-            {
-                read.Value.Should().OnlyContain(static x => x.Committed == null, "a group nobody has committed for has no offsets");
-            }
-            else
-            {
-                read.Error.Should().NotBeNull();
-            }
-
-            answered++;
+            // As admin, who may do everything, the broker either answers (a group nobody committed for has no offsets) or says it is not ready:
+            // measured on both images, a pristine broker's coordinator is mostly "unavailable" (not elected yet) and sometimes
+            // GroupLoadInProress (elected, still loading). Any other refusal would be the engine's own fault, and a crash never gets here.
+            outcomes.Add(read.IsOk
+                ? (read.Value.All(static x => x.Committed is null && x.Error is null) ? "value" : "value-with-offsets-or-errors")
+                : read.Error switch
+                {
+                    WireError.Unavailable => "unavailable",
+                    WireError.Failed { FailedCode: "GroupLoadInProress" } => "loading",
+                    _ => "other:" + read.Error,
+                });
         }
 
-        answered.Should().Be(loops);
+        outcomes.Should().HaveCount(loops);
+        outcomes.Should().OnlyContain(static x => x == "value" || x == "unavailable" || x == "loading", "outcomes were: " + string.Join(", ", outcomes));
     }
 }
 

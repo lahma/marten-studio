@@ -54,6 +54,7 @@ internal static class KStudioEngineRegistration
             KafkaEngineSnapshot snapshot = provider.GetRequiredService<KafkaEngineSnapshot>();
             return new KafkaAdminPool<IAdminClient>(
                 cluster => ConfluentWireFactory.BuildAdminClient(cluster, events),
+                "admin",
                 provider.GetRequiredService<TimeProvider>(),
                 snapshot.AdminIdleTimeout,
                 provider.GetRequiredService<KStudioLoggers>().Clients,
@@ -67,6 +68,7 @@ internal static class KStudioEngineRegistration
             KafkaEngineSnapshot snapshot = provider.GetRequiredService<KafkaEngineSnapshot>();
             return new KafkaAdminPool<ConfluentOffsetsReader>(
                 cluster => new ConfluentOffsetsReader(cluster, snapshot.GroupIdPrefix, events),
+                "offsets",
                 provider.GetRequiredService<TimeProvider>(),
                 snapshot.AdminIdleTimeout,
                 provider.GetRequiredService<KStudioLoggers>().Clients,

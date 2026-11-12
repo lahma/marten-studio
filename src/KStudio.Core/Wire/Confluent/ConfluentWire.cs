@@ -213,6 +213,12 @@ internal sealed class ConfluentWire(
             {
                 try
                 {
+                    // librdkafka queues the host's OAuth token-refresh op on the main queue inside rd_kafka_new; a consumer redirects that
+                    // queue to its poll queue, and the dependent admin client polls only its own result queue. Until the consumer is polled
+                    // the hook never runs, and the first read on an OAUTHBEARER cluster would wait out its timeout. One poll first (off the
+                    // caller's thread, and not cancelled with the caller: the lease is held until the call ends).
+                    await Task.Run(reader.Drain, CancellationToken.None).ConfigureAwait(false);
+
                     // On the dependent admin client of a consumer handle, never on the plain admin client (librdkafka #5040, D36).
                     List<ListConsumerGroupOffsetsResult> results = await reader.Admin
                         .ListConsumerGroupOffsetsAsync(

@@ -6,7 +6,7 @@ using Microsoft.Extensions.Logging;
 namespace KStudio.Core.Wire.Confluent;
 
 /// <summary>
-/// One admin client per cluster, created by the first call that needs it and disposed when it has been idle for the idle timeout
+/// One client per cluster (the admin client, or the offsets reader: <c>clientKind</c> says which), created by the first call that needs it and disposed when it has been idle for the idle timeout
 /// (decision 4.1). Nothing is created at startup, and there is no hosted service: the reaper is a timer started with the first client
 /// that stops itself when none is left. A client a call still holds is never destroyed: shutting the pool down retires it, and the last
 /// lease released disposes it.
@@ -16,6 +16,7 @@ internal sealed class KafkaAdminPool<TClient> : IDisposable, IAsyncDisposable
     where TClient : class, IDisposable
 {
     private readonly Func<KafkaClusterDefinition, TClient> create;
+    private readonly string clientKind;
     private readonly TimeProvider timeProvider;
     private readonly TimeSpan idleTimeout;
     private readonly TimeSpan retiredWait;
@@ -29,18 +30,21 @@ internal sealed class KafkaAdminPool<TClient> : IDisposable, IAsyncDisposable
 
     /// <summary>Creates a pool; it connects to nothing.</summary>
     /// <param name="create">Builds the client of a cluster.</param>
+    /// <param name="clientKind">What the pool holds, <c>admin</c> or <c>offsets</c>: the log says which of the two pools a line is about.</param>
     /// <param name="timeProvider">The clock the idle time is read from.</param>
     /// <param name="idleTimeout">How long a client may sit unused.</param>
     /// <param name="logger">Where 9650 and 9651 go.</param>
     /// <param name="retiredWait">How long <see cref="DisposeAsync" /> waits for the clients that were leased at shutdown (the request timeout and a second).</param>
     public KafkaAdminPool(
         Func<KafkaClusterDefinition, TClient> create,
+        string clientKind,
         TimeProvider timeProvider,
         TimeSpan idleTimeout,
         ILogger logger,
         TimeSpan retiredWait = default)
     {
         this.create = create;
+        this.clientKind = clientKind;
         this.timeProvider = timeProvider;
         this.idleTimeout = idleTimeout;
         this.logger = logger;
@@ -72,7 +76,7 @@ internal sealed class KafkaAdminPool<TClient> : IDisposable, IAsyncDisposable
                 slot = new Slot(cluster.Key, create(cluster), timeProvider.GetUtcNow());
                 slots[cluster.Key] = slot;
                 string key = KafkaLogValue.Cap(cluster.Key);
-                KStudioLog.AdminClientCreated(logger, key);
+                KStudioLog.AdminClientCreated(logger, clientKind, key);
                 reaper ??= timeProvider.CreateTimer(Reap, null, idleTimeout / 2, idleTimeout / 2);
             }
 
@@ -202,7 +206,7 @@ internal sealed class KafkaAdminPool<TClient> : IDisposable, IAsyncDisposable
                 if (DisposeClient(pair.Key, pair.Value))
                 {
                     string key = KafkaLogValue.Cap(pair.Key);
-                    KStudioLog.AdminClientDisposed(logger, key, (int) (now - pair.Value.LastUsed).TotalSeconds);
+                    KStudioLog.AdminClientDisposed(logger, clientKind, key, (int) (now - pair.Value.LastUsed).TotalSeconds);
                 }
             }
         }
@@ -211,7 +215,7 @@ internal sealed class KafkaAdminPool<TClient> : IDisposable, IAsyncDisposable
             // The clients this pass had picked to dispose (the dispose of each is guarded in DisposeClient, so this is the pass itself failing).
             string clusters = expired.Count == 0 ? "(none picked)" : KafkaLogValue.Cap(string.Join(", ", expired.Select(static x => x.Key)));
             string kind = exception.GetType().Name;
-            KStudioLog.AdminClientDisposeFailed(logger, clusters, kind);
+            KStudioLog.AdminClientDisposeFailed(logger, clientKind, clusters, kind);
         }
     }
 
@@ -226,7 +230,7 @@ internal sealed class KafkaAdminPool<TClient> : IDisposable, IAsyncDisposable
         {
             string key = KafkaLogValue.Cap(cluster);
             string kind = exception.GetType().Name;
-            KStudioLog.AdminClientDisposeFailed(logger, key, kind);
+            KStudioLog.AdminClientDisposeFailed(logger, clientKind, key, kind);
             return false;
         }
     }
