@@ -31,8 +31,11 @@ internal sealed record KafkaTimelineModel(IReadOnlyList<string> Lanes, IReadOnly
 /// </summary>
 internal static class KafkaRelatedView
 {
-    /// <summary>The words for a lane whose only possible match was on a redacted field that may be searched.</summary>
+    /// <summary>The words for a record whose only possible match was on a masked field of a searched kind.</summary>
     public const string RedactedField = "a redacted field";
+
+    /// <summary>The words for a record whose match is on no field this page can show: neither a literal one nor a masked one of a searched kind.</summary>
+    public const string NotShownField = "a field not shown here";
 
     /// <summary>What a record was found by: <c>{kind} ({field})</c> for each literal field of the record whose value is in the key set, or <see cref="RedactedField" /> when only a masked field can have matched.</summary>
     /// <param name="match">The record found.</param>
@@ -58,8 +61,25 @@ internal static class KafkaRelatedView
             }
         }
 
-        return found.Count > 0 ? found : [RedactedField];
+        if (found.Count > 0)
+        {
+            return found;
+        }
+
+        // Nothing literal matched: a redacted field can be named only if one of a searched kind is masked on this row; otherwise what matched is not shown
+        // here (a field this page does not read, a value cut, or a path), and saying "redacted" would be a claim about the record this page cannot back.
+        return fields.Any(x => HasKey(keys, x) && IsMaskedOn(match, x)) ? [RedactedField] : [NotShownField];
     }
+
+    private static bool HasKey(CorrelationKeySet keys, CorrelationField field) => keys.Of(field.Kind).Any();
+
+    private static bool IsMaskedOn(KafkaMatch match, CorrelationField field) => field.Source switch
+    {
+        CorrelationSource.Header => match.Headers.Any(x => string.Equals(x.Name, field.Name, StringComparison.OrdinalIgnoreCase) && x.Value.IsRedacted),
+        CorrelationSource.CloudEvent => match.CloudEventAttributes.Any(x => string.Equals(x.Name, field.Name, StringComparison.OrdinalIgnoreCase) && x.Value.IsRedacted),
+        CorrelationSource.Key => match.Key.IsRedacted,
+        _ => match.MaskedPaths.Count > 0 || match.MaskedPathsOmitted > 0 || match.ValueMaskedBy.Count > 0,
+    };
 
     /// <summary>The records in the order of the table: by time, then topic, partition and offset.</summary>
     /// <param name="matches">The records found.</param>

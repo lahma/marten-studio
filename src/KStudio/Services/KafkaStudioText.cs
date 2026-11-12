@@ -278,6 +278,13 @@ internal static class KafkaStudioText
     public static string RelatedMoreTopics(int count) =>
         $"{count} more declared {(count == 1 ? "topic was" : "topics were")} not searched; choose the topics to search.";
 
+    /// <summary>The refusal of a search with every topic unticked.</summary>
+    public const string RelatedChooseTopic = "Choose at least one topic to search.";
+
+    /// <summary>The refusal of a seed no readable declared topic has a field for.</summary>
+    /// <param name="label">What the link names: <c>document</c> or <c>stream</c>.</param>
+    public static string RelatedNoSeedTopic(string label) => $"No declared topic you may read on this cluster has a field for this {label}.";
+
     /// <summary>The lane of a topic with no query.</summary>
     /// <param name="reasons">Why, in words that name no value.</param>
     public static string RelatedNothingToCompare(IReadOnlyList<string> reasons) =>

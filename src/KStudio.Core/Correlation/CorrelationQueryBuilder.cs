@@ -36,7 +36,8 @@ internal static partial class CorrelationQueryBuilder
     /// <param name="topic">The topic: its correlation fields and key format.</param>
     /// <param name="redactor">The topic's redaction rules.</param>
     /// <param name="payloadGranted">Whether the visitor may read payloads: a JSON path is searched only then.</param>
-    public static CorrelationTopicQuery Build(CorrelationKeySet keys, KafkaTopicDescriptor topic, IKafkaRedactor redactor, bool payloadGranted)
+    /// <param name="seedStore">For a seed (a value a link names): the store the link names. A field that names another store is not searched; a field that names none is. <see langword="null" /> for an anchor, or a seed whose link names no store.</param>
+    public static CorrelationTopicQuery Build(CorrelationKeySet keys, KafkaTopicDescriptor topic, IKafkaRedactor redactor, bool payloadGranted, string? seedStore = null)
     {
         ArgumentNullException.ThrowIfNull(keys);
         ArgumentNullException.ThrowIfNull(topic);
@@ -50,7 +51,7 @@ internal static partial class CorrelationQueryBuilder
         {
             CorrelationValue[] values = [.. keys.Of(field.Kind)];
 
-            if (values.Length == 0)
+            if (values.Length == 0 || (seedStore is not null && field.Store is not null && !string.Equals(field.Store, seedStore, StringComparison.OrdinalIgnoreCase)))
             {
                 continue;
             }

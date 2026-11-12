@@ -17,7 +17,8 @@ namespace KStudio.Services;
 /// <param name="AnchorPartition">The anchor's partition.</param>
 /// <param name="AnchorOffset">The anchor's offset.</param>
 /// <param name="SeedLabel">For a seed, what the value is (<c>document</c> or <c>stream</c>); <see langword="null" /> for an anchor.</param>
-internal sealed record KafkaRelatedSubject(string? AnchorTopic, int AnchorPartition, long AnchorOffset, string? SeedLabel)
+/// <param name="SeedStore">For a seed, the store the link names, or <see langword="null" /> for any: a field that names another store is not searched.</param>
+internal sealed record KafkaRelatedSubject(string? AnchorTopic, int AnchorPartition, long AnchorOffset, string? SeedLabel, string? SeedStore = null)
 {
     /// <summary>Whether this is a seed: there is no record to anchor to.</summary>
     public bool IsSeed => SeedLabel is not null;
@@ -30,7 +31,8 @@ internal sealed record KafkaRelatedSubject(string? AnchorTopic, int AnchorPartit
 
     /// <summary>The subject of a value a link named.</summary>
     /// <param name="label">What the value is: <c>document</c> or <c>stream</c>.</param>
-    public static KafkaRelatedSubject Seed(string label) => new(null, 0, 0, label);
+    /// <param name="store">The store the link names, or <see langword="null" />.</param>
+    public static KafkaRelatedSubject Seed(string label, string? store = null) => new(null, 0, 0, label, store);
 }
 
 /// <summary>A value a link names (decision 8 of D-CORR): a Marten document or stream id, read from the address's fragment.</summary>
@@ -47,7 +49,7 @@ internal sealed record KafkaRelatedSeed(string Kind, string? Type, string? Store
     public CorrelationKeySet Keys => CorrelationKeySet.Seed(CorrelationKind, Value);
 
     /// <summary>The subject of the audit.</summary>
-    public KafkaRelatedSubject Subject => KafkaRelatedSubject.Seed(Kind);
+    public KafkaRelatedSubject Subject => KafkaRelatedSubject.Seed(Kind, Store);
 }
 
 /// <summary>What the visitor asked to search around: the form's content, before any gate has looked at it.</summary>
@@ -75,9 +77,8 @@ internal sealed record KafkaRelatedInput(
 /// <param name="Topic">The topic.</param>
 /// <param name="Query">The query the topic is searched with; <see cref="CorrelationTopicQuery.HasQuery" /> is false for a topic with nothing to compare.</param>
 /// <param name="Grant">What the scan may read on this topic.</param>
-/// <param name="Access">How a record of this topic's value reads to this visitor.</param>
 /// <param name="ShownText">The query as the page may show it: a literal on a field any topic of the search redacts is <c>&lt;redacted&gt;</c>.</param>
-internal sealed record KafkaRelatedLane(KafkaTopicName Topic, CorrelationTopicQuery Query, KafkaReadGrant Grant, KafkaValueAccess Access, string? ShownText)
+internal sealed record KafkaRelatedLane(KafkaTopicName Topic, CorrelationTopicQuery Query, KafkaReadGrant Grant, string? ShownText)
 {
     /// <summary>Whether the topic is scanned at all.</summary>
     public bool IsScanned => Query.HasQuery;
@@ -227,8 +228,10 @@ internal sealed class KafkaCorrelationService(
 
                 // A JSON-path key is taken from a value the visitor was shown: that is a view, recorded and judged first (9605). A refused view,
                 // or a record read without its value, leaves the path fields out - never the other fields.
+                // Only when the topic has a path field: a view nobody takes a key from is not recorded for this page.
                 bool valueShown = match.ReadWithPayload
                     && read.Grant.HasPayload
+                    && fields.Any(static x => x.Source == CorrelationSource.JsonPath && !x.IsTrace)
                     && await records.RecordValueViewAsync(cluster, match, cancellationToken).ConfigureAwait(false);
 
                 IReadOnlyList<CorrelationField> usable = valueShown ? fields : [.. fields.Where(static x => x.Source != CorrelationSource.JsonPath)];
@@ -472,7 +475,7 @@ internal sealed class KafkaCorrelationService(
                 ? await grants.ForRecordAsync(cluster, name, cancellationToken).ConfigureAwait(false)
                 : KafkaGrantDecision.EnvelopeOnly;
 
-            CorrelationTopicQuery query = CorrelationQueryBuilder.Build(input.Keys, descriptor, redactor, payloadGranted: decision.HasPayload);
+            CorrelationTopicQuery query = CorrelationQueryBuilder.Build(input.Keys, descriptor, redactor, payloadGranted: decision.HasPayload, seedStore: input.Subject.SeedStore);
             built.Add((name, descriptor, redactor, query, decision));
         }
 
@@ -483,9 +486,8 @@ internal sealed class KafkaCorrelationService(
         {
             // Payload only on a topic whose query reads a value: every other topic is read as the envelope, whatever the visitor may do elsewhere.
             KafkaReadGrant laneGrant = query.HasQuery && query.ReadsValues && decision.HasPayload ? KafkaReadGrant.Envelope | KafkaReadGrant.Payload : KafkaReadGrant.Envelope;
-            KafkaValueAccess access = laneGrant.HasFlag(KafkaReadGrant.Payload) ? KafkaValueAccess.Granted : decision.AccessFor(name.Value);
 
-            lanes.Add(new KafkaRelatedLane(name, query, laneGrant, access, query.PredicateText is { } text ? Shown(text, redactors) : null));
+            lanes.Add(new KafkaRelatedLane(name, query, laneGrant, query.PredicateText is { } text ? Shown(text, redactors) : null));
         }
 
         KafkaReadGrant requestGrant = lanes.Any(static x => x.IsScanned && x.Grant.HasFlag(KafkaReadGrant.Payload)) ? KafkaReadGrant.Envelope | KafkaReadGrant.Payload : KafkaReadGrant.Envelope;

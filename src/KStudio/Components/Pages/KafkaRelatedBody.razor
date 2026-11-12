@@ -306,7 +306,7 @@
                                     <td class="ms-table-cell">@match.Topic</td>
                                     <td class="ms-table-cell"><a href="@RecordHref(match)">@match.Partition / @KafkaDisplay.Number(match.Offset)</a></td>
                                     <td class="ms-table-cell">@KafkaMatchView.TypeOf(match)</td>
-                                    <td class="ms-table-cell">@(isAnchor ? "this record" : MatchedByText(match))</td>
+                                    <td class="ms-table-cell">@(isAnchor ? "this record" : MatchedByOf(match))</td>
                                     <td class="ms-table-cell">
                                         @foreach (KafkaChip chip in KafkaMatchView.Chips(match))
                                         {
@@ -349,6 +349,9 @@
     private readonly List<KafkaMatch> matches = [];
     private readonly List<string> selected = [];
     private readonly Dictionary<string, IReadOnlyList<CorrelationField>> fieldsByTopic = new(StringComparer.Ordinal);
+
+    /// <summary>What each record was found by, worked out once when it arrived (the extractor reads the record's fields), keyed by <see cref="KafkaRelatedView.RowKey" /> and cleared with the matches.</summary>
+    private readonly Dictionary<string, string> matchedBy = new(StringComparer.Ordinal);
 
     private IReadOnlyList<string> readable = [];
     private IReadOnlyList<string> addressTopics = [];
@@ -662,6 +665,14 @@
             return;
         }
 
+        // Nothing chosen: there is nothing to prepare, and nothing to record - a gate has not been asked anything.
+        if (selected.Count == 0)
+        {
+            lanes = [];
+            refusal = seed is not null && readable.Count == 0 ? KafkaStudioText.RelatedNoSeedTopic(seed.Kind) : KafkaStudioText.RelatedChooseTopic;
+            return;
+        }
+
         KafkaRelatedPrepareResult prepared = await Related.PrepareAsync(InputFor(active), lifetime.Token);
 
         switch (prepared)
@@ -749,6 +760,8 @@
         result = null;
         progress = null;
         matches.Clear();
+        matchedBy.Clear();
+        fieldsByTopic.Clear();
         duplicates = [];
         anchor = null;
         error = null;
@@ -884,6 +897,7 @@
             startedRun = run = ((KafkaRelatedStartResult.Running) start).Run;
             running = true;
             matches.Clear();
+            matchedBy.Clear();
             duplicates = [];
             result = null;
             progress = null;
@@ -894,6 +908,7 @@
             await foreach (KafkaScanBatch batch in startedRun.ReadBatchesAsync(lifetime.Token))
             {
                 matches.AddRange(batch.NewMatches);
+                RecordMatchedBy(batch.NewMatches);
                 progress = batch.Progress;
                 duplicates = KafkaDuplicateFinder.Find(matches);
 
@@ -992,19 +1007,25 @@
     private bool IsAnchor(KafkaMatch match) =>
         anchor is not null && string.Equals(KafkaRelatedView.RowKey(anchor), KafkaRelatedView.RowKey(match), StringComparison.Ordinal);
 
-    private string MatchedByText(KafkaMatch match)
+    private string MatchedByOf(KafkaMatch match) => matchedBy.GetValueOrDefault(KafkaRelatedView.RowKey(match), string.Empty);
+
+    /// <summary>Works out, once for each record that arrived, what it was found by; a render only reads the answer.</summary>
+    private void RecordMatchedBy(IReadOnlyList<KafkaMatch> arrived)
     {
         if (State.ActiveCluster is not { } active)
         {
-            return string.Empty;
+            return;
         }
 
-        if (!fieldsByTopic.TryGetValue(match.Topic, out IReadOnlyList<CorrelationField>? fields))
+        foreach (KafkaMatch match in arrived)
         {
-            fields = fieldsByTopic[match.Topic] = Related.FieldsOf(active, match.Topic);
-        }
+            if (!fieldsByTopic.TryGetValue(match.Topic, out IReadOnlyList<CorrelationField>? fields))
+            {
+                fields = fieldsByTopic[match.Topic] = Related.FieldsOf(active, match.Topic);
+            }
 
-        return string.Join(", ", KafkaRelatedView.MatchedBy(match, fields, keys));
+            matchedBy[KafkaRelatedView.RowKey(match)] = string.Join(", ", KafkaRelatedView.MatchedBy(match, fields, keys));
+        }
     }
 
     private string RecordHref(KafkaMatch match) =>

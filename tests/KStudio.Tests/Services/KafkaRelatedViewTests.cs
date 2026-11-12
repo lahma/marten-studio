@@ -22,7 +22,6 @@ public class KafkaRelatedViewTests
             new KafkaTopicName(topic),
             new CorrelationTopicQuery(new KafkaTopicName(topic), scanned ? "header.correlation-id = 'c-1'" : null, false, scanned ? [] : ["no field"]),
             KafkaReadGrant.Envelope,
-            KafkaValueAccess.CapabilityOff,
             scanned ? "header.correlation-id = 'c-1'" : null);
 
     [Fact]
@@ -43,6 +42,27 @@ public class KafkaRelatedViewTests
         CorrelationKeySet keys = CorrelationKeySet.Seed("correlation", "c-1");
 
         KafkaRelatedView.MatchedBy(row, CorrelationRig.Descriptor(builder).CorrelationFields, keys).Should().Equal(KafkaRelatedView.RedactedField);
+    }
+
+    [Fact]
+    public void Matched_by_does_not_claim_a_redacted_field_when_none_of_a_searched_kind_is_masked_on_the_row()
+    {
+        KafkaTopicDescriptor descriptor = CorrelationRig.Descriptor(CorrelationRig.Declare());
+        KafkaMatch row = Match("orders", 1, 5, ("correlation-id", "c-1"));
+
+        KafkaRelatedView.MatchedBy(row, descriptor.CorrelationFields, CorrelationKeySet.Seed("correlation", "c-9")).Should().Equal(KafkaRelatedView.NotShownField);
+        KafkaRelatedView.NotShownField.Should().Be("a field not shown here");
+    }
+
+    [Fact]
+    public void Matched_by_says_a_redacted_field_only_for_a_kind_that_was_searched()
+    {
+        KafkaTopicBuilder builder = CorrelationRig.Declare(t => t.Redact(r => r.Header("correlation-id").Searchable()));
+        KafkaMatch row = CorrelationRig.Match(builder, KafkaReadGrant.Envelope, headers: [("correlation-id", "c-1")]);
+        IReadOnlyList<CorrelationField> fields = CorrelationRig.Descriptor(builder).CorrelationFields;
+
+        KafkaRelatedView.MatchedBy(row, fields, CorrelationKeySet.Seed("saga", "s-1")).Should().Equal([KafkaRelatedView.NotShownField], "the masked field is of a kind nobody searched for");
+        KafkaRelatedView.MatchedBy(row, fields, CorrelationKeySet.Seed("correlation", "c-1")).Should().Equal(KafkaRelatedView.RedactedField);
     }
 
     [Fact]

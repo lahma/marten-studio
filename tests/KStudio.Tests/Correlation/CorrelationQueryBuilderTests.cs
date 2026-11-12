@@ -14,11 +14,36 @@ public class CorrelationQueryBuilderTests
     private static CorrelationKeySet Keys(params (string Kind, string Value)[] values) =>
         new([.. values.Select(static x => new CorrelationValue(x.Kind, x.Value, CorrelationValueForm.Text, "test"))], []);
 
-    private static CorrelationTopicQuery Build(CorrelationKeySet keys, KafkaTopicBuilder? topic = null, bool payload = false, string name = "orders")
+    private static CorrelationTopicQuery Build(CorrelationKeySet keys, KafkaTopicBuilder? topic = null, bool payload = false, string name = "orders", string? seedStore = null)
     {
         KafkaTopicBuilder builder = topic ?? CorrelationRig.Declare();
         KafkaTopicDescriptor descriptor = new(name, builder);
-        return CorrelationQueryBuilder.Build(keys, descriptor, new KafkaRedactor(builder.Rules), payload);
+        return CorrelationQueryBuilder.Build(keys, descriptor, new KafkaRedactor(builder.Rules), payload, seedStore);
+    }
+
+    [Fact]
+    public void A_seed_searches_only_the_fields_of_its_store_and_the_fields_that_name_none()
+    {
+        KafkaTopicBuilder builder = CorrelationRig.Declare(t => t.Correlation(c =>
+        {
+            c.Key().Document("Order", "a");
+            c.Header("x-b").Document("Order", "b");
+            c.Header("x-any").Document("Order");
+        }));
+        CorrelationKeySet seed = CorrelationKeySet.Seed("document:Order", "o-1");
+
+        Build(seed, builder, seedStore: "a").PredicateText.Should().Be("key = 'o-1' or header.x-any = 'o-1'", "store b's field is another store's");
+        Build(seed, builder, seedStore: "A").PredicateText.Should().Be("key = 'o-1' or header.x-any = 'o-1'", "a store is compared ignoring case");
+        Build(seed, builder, seedStore: "b").PredicateText.Should().Be("header.x-b = 'o-1' or header.x-any = 'o-1'");
+        Build(seed, builder).PredicateText.Should().Be("key = 'o-1' or header.x-b = 'o-1' or header.x-any = 'o-1'", "a link that names no store searches every field of the kind");
+    }
+
+    [Fact]
+    public void A_seed_for_a_store_no_field_names_gets_no_query_on_that_topic()
+    {
+        KafkaTopicBuilder builder = CorrelationRig.Declare(t => t.Correlation(c => c.Key().Document("Order", "a")));
+
+        Build(CorrelationKeySet.Seed("document:Order", "o-1"), builder, seedStore: "b").HasQuery.Should().BeFalse();
     }
 
     /// <summary>Compiles the text on the topic, as the scan engine does.</summary>

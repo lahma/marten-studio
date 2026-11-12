@@ -4,9 +4,14 @@ using Bunit;
 
 using KStudio.Components.Pages;
 using KStudio.Components.Shared;
+using KStudio.Core.Scanning;
 using KStudio.Services;
+using KStudio.Tests.Scanning;
 using KStudio.Tests.Support;
 
+using Microsoft.Extensions.DependencyInjection;
+
+using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
 
 namespace KStudio.Tests.Components;
@@ -261,5 +266,87 @@ public class KafkaRelatedPageTests
         second.Find("details.ms-k-duplicates summary").TextContent.Should().Be("Possible duplicates: 1 group");
         second.Find("details.ms-k-duplicates").HasAttribute("open").Should().BeFalse("the panel is collapsed by default");
         second.FindAll("details.ms-k-duplicates a").Select(static x => x.GetAttribute("href")).Should().OnlyContain(static x => x!.Contains("kafka/record") && x.Contains("topic=orders.out"));
+    }
+
+    [Fact]
+    public async Task With_every_topic_unticked_nothing_is_prepared_and_nothing_is_recorded()
+    {
+        await using KafkaSearchRig rig = new(engine: Declare);
+        Seed(rig);
+        IRenderedComponent<KafkaRelatedPage> page = await OpenAsync(rig, "&topic=orders.in&partition=0&offset=0" + Window);
+        page.WaitForAssertion(() => page.FindAll(".ms-k-lane").Should().HaveCount(2));
+        int boxes = page.FindAll(".ms-k-related-topics input[type=checkbox]").Count;
+        for (int i = 0; i < boxes - 1; i++)
+        {
+            await page.FindAll(".ms-k-related-topics input[type=checkbox]")[i].ChangeAsync(new ChangeEventArgs { Value = false });
+        }
+
+        // The last box: the selection is empty, so nothing is prepared - no gate is asked and nothing is recorded.
+        int entries = rig.Ring.Count;
+        int logged = rig.Logs.Entries.Count;
+        int authorizations = rig.Studio.Authorization.Calls.Count;
+        await page.FindAll(".ms-k-related-topics input[type=checkbox]")[boxes - 1].ChangeAsync(new ChangeEventArgs { Value = false });
+
+        page.WaitForAssertion(() => page.Find(".ms-k-search-form").TextContent.Should().Contain("Choose at least one topic to search."));
+        page.FindAll(".ms-k-lane").Should().BeEmpty();
+        page.Find(".ms-k-search-actions button").HasAttribute("disabled").Should().BeTrue();
+        rig.Ring.Count.Should().Be(entries, "no gate was asked, so there is nothing to record");
+        rig.Logs.Entries.Should().NotContain(static x => x.EventId.Id == 9601);
+        rig.Logs.Entries.Count.Should().Be(logged);
+        rig.Studio.Authorization.Calls.Count.Should().Be(authorizations, "PrepareAsync was not called");
+    }
+
+    [Fact]
+    public async Task A_seed_no_readable_topic_has_a_field_for_says_so_and_records_nothing()
+    {
+        await using KafkaSearchRig rig = new(engine: o => o.Topic("orders.in", _ => { }));
+        rig.Topic("orders.in");
+
+        IRenderedComponent<KafkaRelatedPage> page = await OpenAsync(rig, "", "#link=document&type=Order&v=ORD-1");
+
+        page.WaitForAssertion(() => page.Find(".ms-k-search-form").TextContent.Should().Contain("No declared topic you may read on this cluster has a field for this document."));
+        page.FindAll(".ms-k-lane").Should().BeEmpty();
+        rig.Ring.Should().BeEmpty();
+        rig.Logs.Entries.Should().NotContain(static x => x.EventId.Id == 9601);
+
+        await using KafkaSearchRig streams = new(engine: o => o.Topic("orders.in", _ => { }));
+        streams.Topic("orders.in");
+        IRenderedComponent<KafkaRelatedPage> stream = await OpenAsync(streams, "", "#link=stream&v=7c3f");
+        stream.WaitForAssertion(() => stream.Find(".ms-k-search-form").TextContent.Should().Contain("has a field for this stream."));
+    }
+
+    [Fact]
+    public async Task Leaving_the_page_mid_scan_records_one_9600_and_frees_the_owners_slot()
+    {
+        ScriptedReader reader = new();
+        int opened = 0;
+        bool armed = false;
+        await using KafkaSearchRig rig = new(
+            engine: o => o.Topic("orders.in", _ => { }),
+            traceCircuit: true,
+            wrap: wire => new ScriptedWire(wire, options => armed && Interlocked.Increment(ref opened) > 1 ? reader : wire.OpenReader(options)));
+        rig.Topic("orders.in");
+        rig.Produce("orders.in", 0, 10, "k", "v", ("correlation-id", "c-1"));
+        IRenderedComponent<KafkaRelatedPage> page = await OpenAsync(rig, "&topic=orders.in&partition=0&offset=0" + Window);
+        page.WaitForAssertion(() => page.FindAll(".ms-k-lane").Should().HaveCount(1));
+        KafkaScanLimiter limiter = rig.Engine.Provider.GetRequiredService<KafkaScanLimiter>();
+        armed = true;
+
+        // The scripted reader never answers: the scan runs until it is stopped.
+        Task click = page.Find(".ms-k-search-actions button").ClickAsync(new MouseEventArgs());
+        ScanFixture.Until(() => reader.Reads > 0, "the scan is reading");
+        limiter.Running.Should().Be(1);
+        rig.Ring.Where(static x => x.Action == "SearchRecords").Should().BeEmpty("a scan is recorded when it ends");
+
+        await rig.Studio.Context.DisposeComponentsAsync();
+        await click.Bounded();
+
+        rig.Ring.Where(static x => x.Action == "SearchRecords").Should().ContainSingle("the disposal records the scan, once");
+        rig.CircuitLogs.Entries.Count(static x => x.EventId.Id == 9600).Should().Be(1, "the page's own service logs the scan once, into the circuit's log");
+        rig.CircuitLogs.Entries.Should().NotContain(static x => x.EventId.Id == 9601);
+        limiter.Running.Should().Be(0);
+        KafkaScanOwner owner = await rig.Studio.Context.Services.GetRequiredService<KafkaOwnerKey>().OwnerAsync();
+        limiter.TryAcquire(owner.Key, out IDisposable? lease).Should().BeNull("the owner's slot is free");
+        lease?.Dispose();
     }
 }

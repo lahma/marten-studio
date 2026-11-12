@@ -449,4 +449,52 @@ public class KafkaCorrelationServiceTests
         next.Plan.Request.PerTopic.Should().NotBeNull().And.HaveCount(2);
         firstMatches.Concat(nextMatches).Select(static x => (x.Topic, x.Offset)).Distinct().Should().HaveCountGreaterThan(firstMatches.Count, "the continued scan read on, with the same searches");
     }
+
+    [Fact]
+    public async Task A_value_view_is_asked_only_when_the_anchors_topic_has_a_path_field()
+    {
+        // The first ReadPayloads question (the record page's grant) is allowed; any later one is refused. A view that nobody takes a key from must not ask.
+        int asked = 0;
+        Action<KafkaEngineOptions> withPath = o => o.Topic("orders", t => t.Correlation(c => c.JsonPath("$.customer.id").As("customer")));
+        Action<KafkaEngineOptions> without = o => o.Topic("orders", _ => { });
+        const string Value = """{"customer":{"id":"cust-9"}}""";
+
+        await using KafkaSearchRig plain = new(engine: without, payloads: true, studio: o => o.CapabilityAuthorizationPolicy = "kafka-payloads");
+        plain.Studio.Authorization.AllowKafka(resource => resource.Capability != "ReadPayloads" || Interlocked.Increment(ref asked) == 1);
+        plain.Topic("orders");
+        plain.Produce("orders", 0, 10, "k", Value, ("correlation-id", "c-1"));
+
+        KafkaRelatedAnchorResult.Opened opened = (KafkaRelatedAnchorResult.Opened) await plain.Correlation().OpenAnchorAsync(plain.Entry, "orders", 0, 0, Ct);
+
+        opened.Keys.Of("correlation").Should().ContainSingle();
+        asked.Should().Be(1, "no field of the topic is a path, so nothing asks a second time");
+        plain.Logs.Entries.Should().NotContain(static x => x.EventId.Id == 9603, "and nothing is refused or recorded as refused");
+
+        asked = 0;
+        await using KafkaSearchRig pathed = new(engine: withPath, payloads: true, studio: o => o.CapabilityAuthorizationPolicy = "kafka-payloads");
+        pathed.Studio.Authorization.AllowKafka(resource => resource.Capability != "ReadPayloads" || Interlocked.Increment(ref asked) == 1);
+        pathed.Topic("orders");
+        pathed.Produce("orders", 0, 10, "k", Value, ("correlation-id", "c-1"));
+
+        KafkaRelatedAnchorResult.Opened refused = (KafkaRelatedAnchorResult.Opened) await pathed.Correlation().OpenAnchorAsync(pathed.Entry, "orders", 0, 0, Ct);
+
+        asked.Should().BeGreaterThan(1, "a path field makes the view a thing the service asks for");
+        refused.Keys.Of("customer").Should().BeEmpty("the refused view takes no key from the value");
+    }
+
+    [Fact]
+    public async Task A_seeds_store_reaches_the_query_of_each_topic()
+    {
+        await using KafkaSearchRig rig = new(engine: o => o.Topic("orders", t => t.Correlation(c =>
+        {
+            c.Key().Document("Order", "a");
+            c.Header("x-b").Document("Order", "b");
+        })));
+        rig.Topic("orders");
+        KafkaRelatedInput input = rig.RelatedInput(["orders"], Keys("o-1", "document:Order")) with { Subject = KafkaRelatedSubject.Seed("document", "b") };
+
+        KafkaRelatedPrepared prepared = ((KafkaRelatedPrepareResult.Prepared) await rig.Correlation().PrepareAsync(input, Ct)).Value;
+
+        prepared.Lanes.Single().Query.PredicateText.Should().Be("header.x-b = 'o-1'");
+    }
 }
