@@ -65,6 +65,8 @@ public class JsonPathTests
     }
 
     [Theory]
+    [InlineData("a.b", "The JSON path 'a.b' at position 1 must start with $.")]
+    [InlineData("", "The JSON path '' at position 1 must start with $.")]
     [InlineData("$a", "The JSON path '$a' at position 2 must go on with . or [ after $.")]
     [InlineData("$.", "The JSON path '$.' at position 2 has an empty step: write $.name, $.name[0] or $.name[*].")]
     [InlineData("$..a", "The JSON path '$..a' at position 2 has an empty step: write $.name, $.name[0] or $.name[*].")]

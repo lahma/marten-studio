@@ -107,6 +107,14 @@ internal sealed class JsonPathExpression
         ArgumentNullException.ThrowIfNull(text);
 
         path = null;
+
+        // The search lexer only ever hands over a token that starts with $; a redaction rule's path comes from the host as typed.
+        if (text.Length == 0 || text[0] != '$')
+        {
+            error = Error(text, start, 0, "must start with $.");
+            return false;
+        }
+
         List<JsonPathStep> steps = [];
         int i = 1;
 
