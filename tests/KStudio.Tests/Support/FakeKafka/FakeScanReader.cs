@@ -30,6 +30,9 @@ internal sealed class FakeScanReader(FakeKafkaCluster cluster, WireReaderOptions
     /// <summary>Every partition this reader was asked to pause, in order.</summary>
     public List<WirePartition> PausedLog { get; } = [];
 
+    /// <summary>Every position this reader was moved to, in order.</summary>
+    public List<WirePartitionOffset> RepositionLog { get; } = [];
+
     public int CloseCount { get; private set; }
 
     public int DisposeCount { get; private set; }
@@ -80,6 +83,7 @@ internal sealed class FakeScanReader(FakeKafkaCluster cluster, WireReaderOptions
             throw new WireException(new WireError.Failed("Local_InvalidArg", IsFatal: false));
         }
 
+        RepositionLog.Add(position);
         positions[position.Key] = position.Offset;
         stalled.Remove(position.Key);
         endReported.Remove(position.Key);

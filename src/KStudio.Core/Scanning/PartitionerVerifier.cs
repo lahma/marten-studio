@@ -48,13 +48,15 @@ internal abstract record PartitionerCheck
 /// <param name="Partitions">The partitions read, ascending; empty when the topic is not pruned.</param>
 /// <param name="Check">The verification's outcome, when the window was sampled.</param>
 /// <param name="NotPrunedReason">Why every partition is read; <see langword="null" /> when the topic is pruned.</param>
+/// <param name="KeyRedacted">Whether a redaction rule masks the topic's key: the audit text then says how many partitions were read, never which.</param>
 internal sealed record KafkaTopicPruning(
     string Topic,
     string? Partitioner,
     int PartitionCount,
     IReadOnlyList<int> Partitions,
     PartitionerCheck? Check,
-    string? NotPrunedReason)
+    string? NotPrunedReason,
+    bool KeyRedacted = false)
 {
     /// <summary>Whether the topic is read in some of its partitions only.</summary>
     public bool IsPruned => NotPrunedReason is null && Partitions.Count > 0;
@@ -79,10 +81,12 @@ internal sealed record KafkaTopicPruning(
             CultureInfo.InvariantCulture,
             $"This search read only {(Partitions.Count == 1 ? "partition" : "partitions")} {List(Partitions)} of {PartitionCount} of {Topic} ({Partitioner}, verified on {Checked:N0} records).");
 
-    /// <summary>What the audit message adds for this topic: <c>; pruned to partition 3 of orders</c>.</summary>
+    /// <summary>What the audit message adds for this topic: <c>; pruned to partition 3 of orders</c>, or <c>; pruned to 1 of 6 partitions of orders</c> where the key is masked.</summary>
     public string AuditSuffix => !IsPruned
         ? string.Empty
-        : string.Create(CultureInfo.InvariantCulture, $"; pruned to {(Partitions.Count == 1 ? "partition" : "partitions")} {List(Partitions)} of {Topic}");
+        : KeyRedacted
+            ? string.Create(CultureInfo.InvariantCulture, $"; pruned to {Partitions.Count} of {PartitionCount} partitions of {Topic}")
+            : string.Create(CultureInfo.InvariantCulture, $"; pruned to {(Partitions.Count == 1 ? "partition" : "partitions")} {List(Partitions)} of {Topic}");
 
     /// <summary>Writes partitions as <c>3</c>, <c>1 and 3</c> or <c>1, 2 and 3</c>.</summary>
     /// <param name="partitions">The partitions.</param>
@@ -109,6 +113,7 @@ internal sealed record KafkaTopicPruning(
 /// <param name="PartitionCount">The topic's partitions when the window was resolved.</param>
 /// <param name="Ranges">The topic's ranges of this scan, every partition.</param>
 /// <param name="Isolation">The isolation the scan reads under.</param>
+/// <param name="Previous">What the scan this one continues proved for the topic, when it proved a pruning: the same claim is kept, not sampled again.</param>
 internal sealed record PruneRequest(
     string Cluster,
     string Topic,
@@ -118,7 +123,8 @@ internal sealed record PruneRequest(
     bool DisablePruning,
     int PartitionCount,
     IReadOnlyList<PartitionRange> Ranges,
-    WireIsolation Isolation);
+    WireIsolation Isolation,
+    KafkaTopicPruning? Previous = null);
 
 /// <summary>
 /// Decides, topic by topic, whether a key search may read fewer partitions, and proves the host's claim before it does (AGENTS.md D39,
@@ -200,9 +206,48 @@ internal sealed class PartitionerVerifier(
             return NotPruned(request, partitioner, null, "the search does not fix the key with = or in");
         }
 
-        if (forms.Any(x => !partitioner.IsDeterministic(x)))
+        List<byte[]> offenders;
+
+        try
         {
-            return NotPruned(request, partitioner, null, $"{partitioner.Name} does not decide the partition of an empty key");
+            offenders = [.. forms.Where(x => !partitioner.IsDeterministic(x))];
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // Host code: a plan never fails for it.
+            LogFailure(request, exception.GetType().Name);
+            return NotPruned(request, partitioner, new PartitionerCheck.NotReadable(), "the sample could not be read");
+        }
+
+        if (offenders.Count > 0)
+        {
+            return NotPruned(
+                request,
+                partitioner,
+                null,
+                offenders.Any(static x => x.Length == 0)
+                    ? $"{partitioner.Name} does not decide the partition of an empty key"
+                    : $"{partitioner.Name} does not decide the partition of every key the search names");
+        }
+
+        // Where the keys map to is known before anything is read: a key set that reaches every partition has nothing to skip.
+        if (!TryPartitions(request, partitioner, forms, out List<int> partitions))
+        {
+            return NotPruned(request, partitioner, new PartitionerCheck.NotReadable(), "the sample could not be read");
+        }
+
+        if (partitions.Count >= request.PartitionCount)
+        {
+            return NotPruned(request, partitioner, null, "the keys the search names map to every partition of the topic, so there is nothing to skip");
+        }
+
+        if (request.Previous is { IsPruned: true } previous
+            && previous.PartitionCount == request.PartitionCount
+            && previous.Partitioner == partitioner.Name
+            && previous.Partitions.SequenceEqual(partitions))
+        {
+            // A continued scan keeps what its first scan proved: same window, same verdict, and no second sample.
+            return previous.KeyRedacted == request.KeyRedacted ? previous : previous with { KeyRedacted = request.KeyRedacted };
         }
 
         long offsets = request.Ranges.Sum(static x => Math.Max(0, x.End - x.Start));
@@ -217,33 +262,7 @@ internal sealed class PartitionerVerifier(
         switch (check)
         {
             case PartitionerCheck.Verified:
-                List<int> partitions = [];
-
-                try
-                {
-                    foreach (byte[] form in forms)
-                    {
-                        int partition = partitioner.Partition(form, request.PartitionCount);
-
-                        if (partition < 0 || partition >= request.PartitionCount)
-                        {
-                            return NotPruned(request, partitioner, new PartitionerCheck.NotReadable(), "the sample could not be read");
-                        }
-
-                        if (!partitions.Contains(partition))
-                        {
-                            partitions.Add(partition);
-                        }
-                    }
-                }
-                catch (Exception exception) when (exception is not OperationCanceledException)
-                {
-                    LogFailure(request, exception.GetType().Name);
-                    return NotPruned(request, partitioner, new PartitionerCheck.NotReadable(), "the sample could not be read");
-                }
-
-                partitions.Sort();
-                return new KafkaTopicPruning(request.Topic, partitioner.Name, request.PartitionCount, partitions, check, null);
+                return new KafkaTopicPruning(request.Topic, partitioner.Name, request.PartitionCount, partitions, check, null, request.KeyRedacted);
 
             case PartitionerCheck.Mismatch mismatch:
                 string expected = request.KeyRedacted ? "another partition" : "partition " + mismatch.Expected.ToString(CultureInfo.InvariantCulture);
@@ -270,8 +289,40 @@ internal sealed class PartitionerVerifier(
         }
     }
 
+    /// <summary>The partitions the byte forms map to, ascending; false when the host's partitioner threw or answered a partition the topic does not have.</summary>
+    private bool TryPartitions(PruneRequest request, KafkaPartitioner partitioner, IReadOnlyList<byte[]> forms, out List<int> partitions)
+    {
+        partitions = [];
+
+        try
+        {
+            foreach (byte[] form in forms)
+            {
+                int partition = partitioner.Partition(form, request.PartitionCount);
+
+                if (partition < 0 || partition >= request.PartitionCount)
+                {
+                    return false;
+                }
+
+                if (!partitions.Contains(partition))
+                {
+                    partitions.Add(partition);
+                }
+            }
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            LogFailure(request, exception.GetType().Name);
+            return false;
+        }
+
+        partitions.Sort();
+        return true;
+    }
+
     private static KafkaTopicPruning NotPruned(PruneRequest request, KafkaPartitioner? partitioner, PartitionerCheck? check, string reason) =>
-        new(request.Topic, partitioner?.Name, request.PartitionCount, [], check, reason);
+        new(request.Topic, partitioner?.Name, request.PartitionCount, [], check, reason, request.KeyRedacted);
 
     private async Task<PartitionerCheck> CheckAsync(PruneRequest request, KafkaPartitioner partitioner, KafkaScanOwner owner, CancellationToken cancellationToken)
     {
@@ -280,6 +331,13 @@ internal sealed class PartitionerVerifier(
         if (Remembered(key) is { } known)
         {
             return known;
+        }
+
+        // An owner who has read the hour's bytes reads no more, a verification included.
+        if (budget.Remaining(owner.Key) <= 0)
+        {
+            LogFailure(request, "OwnerBudget");
+            return new PartitionerCheck.NotReadable();
         }
 
         SemaphoreSlim gate = perCluster.GetOrAdd(request.Cluster, static _ => new SemaphoreSlim(1, 1));
@@ -323,9 +381,12 @@ internal sealed class PartitionerVerifier(
 
         try
         {
+            long byteBound = Math.Min(MaxBytes, Math.Max(0, budget.Remaining(owner.Key)));
             long offsets = ranges.Sum(static x => x.End - x.Start);
             int target = (int) Math.Min(MaxSampleRecords, offsets / 4);
             int quota = Math.Max(MinPerRange, (int) Math.Ceiling(target / (double) ranges.Count));
+            int firstHalf = (quota + 1) / 2;
+            int lastHalf = quota - firstHalf;
 
             // Small, like the size sampler's consumer: a verification is outside S and the governor.
             KafkaScanLimits small = settings.Limits.Copy();
@@ -334,7 +395,8 @@ internal sealed class PartitionerVerifier(
             WireReaderOptions options = new(Guid.NewGuid(), request.Isolation, small);
             reader = wires.For(request.Cluster).OpenReader(options);
 
-            // From the start of each range: records produced before a partition-count change sit there.
+            // The start of each range, where records produced before a partition-count change sit, and then its end, where a change made
+            // late in the window sits: half the quota is read from each.
             reader.Assign([.. ranges.Select(static x => new WirePartitionOffset(x.Topic, x.Partition, x.Start))]);
 
             Dictionary<WirePartition, RangeSample> samples = ranges.ToDictionary(static x => x.Key, static x => new RangeSample(x.End));
@@ -345,7 +407,7 @@ internal sealed class PartitionerVerifier(
             bool refused = false;
 
             while (finished.Count < ranges.Count
-                && bytes < MaxBytes
+                && bytes < byteBound
                 && idle < MaxIdleReads
                 && time.GetUtcNow() < deadline
                 && !cancellationToken.IsCancellationRequested)
@@ -358,6 +420,13 @@ internal sealed class PartitionerVerifier(
 
                         if (!samples.TryGetValue(place, out RangeSample? sample) || finished.Contains(place))
                         {
+                            break;
+                        }
+
+                        if (record.Offset < sample.MinOffset)
+                        {
+                            // Fetched before the jump to the end of the range: read and counted, not checked.
+                            bytes += record.Size;
                             break;
                         }
 
@@ -396,6 +465,21 @@ internal sealed class PartitionerVerifier(
                         {
                             Finish(reader, finished, place);
                         }
+                        else if (!sample.Jumped && sample.Read >= firstHalf)
+                        {
+                            sample.Jumped = true;
+                            long resume = Math.Max(record.Offset + 1, sample.End - lastHalf);
+
+                            if (resume >= sample.End)
+                            {
+                                Finish(reader, finished, place);
+                            }
+                            else if (resume > record.Offset + 1)
+                            {
+                                reader.Reposition(new WirePartitionOffset(record.Topic, record.Partition, resume));
+                                sample.MinOffset = resume;
+                            }
+                        }
 
                         break;
 
@@ -433,7 +517,7 @@ internal sealed class PartitionerVerifier(
                     return new PartitionerCheck.Verified(checkedCount);
                 }
 
-                LogFailure(request, bytes >= MaxBytes ? "ByteLimit" : idle >= MaxIdleReads ? "Idle" : "Deadline");
+                LogFailure(request, bytes >= byteBound ? "ByteLimit" : idle >= MaxIdleReads ? "Idle" : "Deadline");
                 return new PartitionerCheck.NotReadable();
             }
 
@@ -485,6 +569,10 @@ internal sealed class PartitionerVerifier(
         public long End { get; } = end;
 
         public int Read { get; set; }
+
+        public bool Jumped { get; set; }
+
+        public long MinOffset { get; set; }
 
         public int Keyed { get; set; }
 

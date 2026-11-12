@@ -347,7 +347,9 @@ rule could not be applied to their value` (and the M2 reasons for keys, headers 
 A key search may read fewer partitions, but only when the host declared how its producers choose one
 (`topic.Partitioner(KafkaPartitioner.Murmur2)`) and sampling the window proves the claim. A declared partitioner is a
 claim, not a fact: records produced with an explicit partition, a different partitioner or a different key serializer,
-and partitions added later, all show up as a mismatch, and one mismatch turns pruning off for the topic.
+and partitions added later, all show up as a mismatch when the sample reaches them; the sample reads the start and the end of
+each partition's range, so a change in the middle of a window that is undone before its end can go unseen. One mismatch
+turns pruning off for the topic.
 
 | Partitioner | Hash | Partition | Deterministic for | Known answers (source) |
 |---|---|---|---|---|
@@ -365,16 +367,19 @@ the smallest set among its children that have one; an `or` gives the union only 
 every other clause give none); the key's byte forms are **complete** for the format (every built-in format and a host's
 own are, except `JsonString`, which is pruned only when every literal is ASCII letters, digits, space or one of `-_.:@`,
 because other characters are escaped differently by different serializers); every form is deterministic for the
-partitioner; the topic's window holds at least 400 offsets (below that, reading it whole is cheaper than proving the
+partitioner; the keys do not map to every partition (a key set that reaches all of them has nothing to skip, and is not
+sampled); the topic's window holds at least 400 offsets (below that, reading it whole is cheaper than proving the
 claim); and verification passed. The partitions read are the union of `Partition(form, n)` over every form of every
 literal, with $n$ the topic's partition count when the window was resolved.
 
 **Verification** reads, inside the plan and before the estimate, a target of $S = \min(1000, \lfloor o / 4 \rfloor)$ keyed
 records ($o$ the topic's offsets in the window, so verification never reads more than a quarter of what it may save),
-spread over the $r$ non-empty ranges at $\lceil S / r \rceil$ records each (at least 4). It reads from the **start** of
-each range, where records produced before a partition-count change sit, with a short consumer like the size sampler's
-(1 MiB queue and fetch, explicit offsets, the scan's isolation), at most 4 MiB and 5 seconds in all, and the bytes count
-against the owner's budget. A range stops at its quota, so a fast partition cannot use up the sample, and records past a
+spread over the $r$ non-empty ranges at $\lceil S / r \rceil$ records each (at least 4). It reads half of each range's
+quota from its **start**, where records produced before a partition-count change sit, and the other half from its **end**
+(the consumer moves with `Reposition` to the greater of the next offset and the range's end less half the quota), where a
+change made late in the window sits, with a short consumer like the size sampler's (1 MiB queue and fetch, explicit
+offsets, the scan's isolation), at most 4 MiB (or what is left of the owner's budget, if less) and 5 seconds in all. The
+bytes count against the owner's budget, and an owner with none left gets no verification. A range stops at its quota, so a fast partition cannot use up the sample, and records past a
 range's end are ignored. Each record whose key the partitioner calls deterministic must be in the partition the
 partitioner maps it to; null keys and non-deterministic keys are skipped.
 
@@ -387,16 +392,20 @@ partitioner maps it to; null keys and non-deterministic keys are skipped.
 | `NotReadable` | `READ` refused, a reader failure, a host partitioner that threw, or the time or the bytes ran out before a pass | off; logged at Debug by kind (event 9676) |
 
 **No positive cache.** Each pruned plan proves the claim on its own window: partitions added since an earlier window, or
-a producer that changed, would make an earlier proof wrong.
+a producer that changed, would make an earlier proof wrong. The one exception is **Continue**: a scan's cursor carries the
+pruned entries its scan proved, and a continued scan over the same search keeps them (same partitions, same verdict,
+same caveat and audit text) without sampling again, whatever is left to read. A cursor read back from its text form carries
+positions alone, so its plan decides for itself.
 
 **What a visitor sees.** The plan's ranges keep only the pruned partitions of a pruned topic, so the estimate, the read
 and the cursor cover exactly what is read, and Continue reads only those partitions. The key clause's verdict says what
 was proved (`PointLookup`: "one partition: murmur2 maps the key to partition 3 of 6 (verified on 1,002 records)";
 `PartitionPruned`: "pruned to partitions 1, 3 and 4 of 6 (…)") or why not (appended: "; not pruned: …", for a topic that
 declares none, a search that does not fix the key, the JSON-string characters, an empty key, a window of fewer than 400
-offsets, the first record that disagrees, too few keyed records, a partition without one, an unreadable sample, or a
+offsets, keys that map to every partition, the first record that disagrees, too few keyed records, a partition without one, an unreadable sample, or a
 visitor who asked for every partition). The plan's notes and the result's caveats say which partitions were read, and
-the audit message adds "; pruned to partition 3 of orders". A mismatch names the record's partition and offset and never
+the audit message adds "; pruned to partition 3 of orders" (on a topic whose key is masked, "; pruned to 1 of 6 partitions of
+orders": a count, never a partition). A mismatch names the record's partition and offset and never
 its key; on a topic whose key a redaction rule masks, it does not say which partition the key maps to either.
 
 ## D40

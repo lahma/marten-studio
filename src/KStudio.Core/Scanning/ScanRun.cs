@@ -805,7 +805,10 @@ internal sealed class ScanRun : IDisposable
             KafkaScanCursor cursor = new(
             [
                 .. ordered.Where(static x => x.Next < x.Range.End).Select(static x => new KafkaCursorPosition(x.Range.Topic, x.Range.Partition, x.Next, x.Range.End)),
-            ]);
+            ])
+            {
+                Pruning = [.. plan.Pruning.Where(static x => x.IsPruned)],
+            };
 
             List<KafkaTopicRefusal> refusals =
             [

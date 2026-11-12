@@ -321,12 +321,97 @@ public class PartitionerVerificationTests
         spent.Should().BeGreaterThanOrEqualTo(PartitionerVerifier.MaxBytes, "it did read up to its bound");
     }
 
+    [Fact]
+    public async Task The_sample_reads_the_end_of_each_range_so_a_change_late_in_the_window_is_a_mismatch()
+    {
+        await using ScanFixture fixture = Fixture(KafkaPartitioner.Murmur2, out string topic, records: 0);
+        Dictionary<int, List<string>> murmur = PartitionedData.KeysByPartition(KafkaPartitioner.Murmur2, Partitions, 600);
+
+        // The last tenth of every partition was written by a producer that switched to crc32: keys that crc32 puts here and murmur2 does not.
+        Dictionary<int, List<string>> crc = Enumerable.Range(0, Partitions).ToDictionary(static x => x, static _ => new List<string>());
+
+        for (int i = 0; crc.Values.Any(static x => x.Count < 70); i++)
+        {
+            string key = "late-" + i.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            byte[] bytes = Encoding.UTF8.GetBytes(key);
+            int partition = KafkaPartitioner.Crc32.Partition(bytes, Partitions);
+
+            if (partition != KafkaPartitioner.Murmur2.Partition(bytes, Partitions) && crc[partition].Count < 70)
+            {
+                crc[partition].Add(key);
+            }
+        }
+
+        foreach (int partition in Enumerable.Range(0, Partitions))
+        {
+            for (int i = 0; i < 600; i++)
+            {
+                fixture.Produce(topic, partition, i / 6, murmur[partition][i], "v");
+            }
+
+            for (int i = 0; i < 67; i++)
+            {
+                fixture.Produce(topic, partition, 100 + (i / 6), crc[partition][i], "v");
+            }
+        }
+
+        KafkaTopicPruning pruning = await PruningOf(fixture, topic, $"key = '{murmur[1][0]}'");
+
+        PartitionerCheck.Mismatch mismatch = pruning.Check.Should().BeOfType<PartitionerCheck.Mismatch>("the first half of every range alone would have passed").Subject;
+        mismatch.Offset.Should().BeGreaterThanOrEqualTo(600 - 84, "it was found past the first half of the range");
+        pruning.IsPruned.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task The_two_halves_of_the_sample_do_not_check_a_record_twice_and_the_whole_still_passes_on_a_clean_window()
+    {
+        await using ScanFixture fixture = Fixture(KafkaPartitioner.Murmur2, out string topic);
+
+        KafkaTopicPruning pruning = await PruningOf(fixture, topic);
+
+        pruning.Check.Should().Be(new PartitionerCheck.Verified(6 * 167));
+        new FakeScanReaderView(fixture.Readers[0]).Repositioned.Should().HaveCount(Partitions, "each range jumped once, to its last 83 records");
+    }
+
+    [Fact]
+    public async Task An_owner_with_no_bytes_left_gets_no_verification()
+    {
+        await using ScanFixture fixture = Fixture(KafkaPartitioner.Murmur2, out string topic);
+        OwnerByteBudget budget = fixture.Provider.GetRequiredService<OwnerByteBudget>();
+        budget.Add(fixture.Owner.Key, budget.Remaining(fixture.Owner.Key));
+
+        KafkaTopicPruning pruning = await PruningOf(fixture, topic);
+
+        pruning.Check.Should().Be(new PartitionerCheck.NotReadable());
+        pruning.NotPrunedReason.Should().Be("the sample could not be read");
+        fixture.Readers.Should().HaveCount(1, "only the size sample read: the verification opened no consumer");
+        fixture.Logs.Entries.Should().ContainSingle(static x => x.EventId.Id == 9676).Which.Message.Should().Contain("OwnerBudget");
+    }
+
+    [Fact]
+    public async Task A_verification_never_reads_more_than_the_owner_has_left()
+    {
+        await using ScanFixture fixture = Fixture(KafkaPartitioner.Murmur2, out string topic);
+        OwnerByteBudget budget = fixture.Provider.GetRequiredService<OwnerByteBudget>();
+        long left = 6_000;
+        budget.Add(fixture.Owner.Key, budget.Remaining(fixture.Owner.Key) - left);
+
+        KafkaTopicPruning pruning = await PruningOf(fixture, topic);
+
+        // 6,000 bytes are fewer than a hundred records of 106 bytes: the sample stops at the owner's bound and claims nothing.
+        pruning.Check.Should().Be(new PartitionerCheck.NotReadable());
+        pruning.IsPruned.Should().BeFalse();
+        fixture.Logs.Entries.Should().ContainSingle(static x => x.EventId.Id == 9676).Which.Message.Should().Contain("ByteLimit");
+    }
+
     /// <summary>A reader view for the assertions above.</summary>
     private sealed class FakeScanReaderView(Support.FakeKafka.FakeScanReader reader)
     {
         public IReadOnlyList<WirePartitionOffset> Starts => [.. reader.Assigns.SelectMany(static x => x)];
 
         public int Closed => reader.CloseCount;
+
+        public IReadOnlyList<WirePartitionOffset> Repositioned => reader.RepositionLog;
 
         public IReadOnlyList<int> PausedPartitions => [.. reader.PausedLog.Select(static x => x.Partition)];
     }

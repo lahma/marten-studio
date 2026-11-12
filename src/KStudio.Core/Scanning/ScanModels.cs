@@ -471,6 +471,12 @@ internal sealed class KafkaScanCursor
     /// <summary>The partitions that have more to read.</summary>
     public IReadOnlyList<KafkaCursorPosition> Positions { get; }
 
+    /// <summary>
+    /// What the scan that made this cursor proved about its pruned topics (D-PAYLOAD decision 7): a continued scan keeps the claim and does not
+    /// sample again. Held in memory only; the text form carries positions alone, so a cursor read back from text has none.
+    /// </summary>
+    public IReadOnlyList<KafkaTopicPruning> Pruning { get; init; } = [];
+
     /// <summary>Whether nothing is left to read.</summary>
     public bool IsEmpty => Positions.Count == 0;
 

@@ -223,7 +223,8 @@ internal sealed partial class KafkaScanner(
                 request.DisablePruning,
                 partitionCount,
                 [.. ranges.Where(x => x.Topic == topic.Value)],
-                isolation);
+                isolation,
+                request.ContinueFrom?.Pruning.FirstOrDefault(x => x.Topic == topic.Value && x.IsPruned));
 
             pruning.Add(await verifier.DecideAsync(ask, owner, cancellationToken).ConfigureAwait(false));
         }
