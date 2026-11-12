@@ -480,24 +480,27 @@ reported as values, so "no match" is said only of what was read. A scan stops fo
 keeps an exact per-partition cursor. Full text: [kstudio.md](docs/maintainers/kstudio.md#d38).
 
 **D39 — KStudio's search predicates are one hand-written grammar, three-valued, and compared as bytes where they can
-be.** The engine parses the grammar itself (no package and no expression escape hatch): `key`, `header.<name>`,
-`ce.<attribute>` and `any`, then `value` and JSON paths behind `ReadPayloads` (M3). A key literal is compiled to bytes
-through the topic's key format and compared without decoding. A clause that needs a decode it cannot make is undecidable,
-never false, and undecidable records are counted. Clauses run cheapest first and short-circuit, which a decode counter
-proves. An error names a position and never repeats a literal. Nothing is deserialized into a CLR type. Full text:
-[kstudio.md](docs/maintainers/kstudio.md#d39).
+be.** The engine parses the grammar itself (no package and no expression escape hatch): `key`, `header.<name>`, `ce.<attribute>`
+and `any`, then, behind `ReadPayloads`, `value` and JSON paths (`$.a.b`, `$.a[0]`, `$.a[*].b`), which read a CloudEvent's
+data. A key literal is compiled to bytes through the topic's key format and compared without decoding; numbers compare as
+decimals and a type mismatch is false. A clause that needs a decode it cannot make is undecidable, never false, and
+undecidable records are counted. Clauses run cheapest first and short-circuit, which a decode counter proves. A key search
+reads only the partitions a declared partitioner maps the key to, and only after sampling the window verified the claim;
+one mismatch turns pruning off for that topic. An error names a position and never repeats a literal. Nothing is
+deserialized into a CLR type. Full text: [kstudio.md](docs/maintainers/kstudio.md#d39).
 
 **D40 — KStudio redacts inside the engine, before any sink.** A record leaves the engine only as a `KafkaMatch`, built by
 one factory after the topic's rules and the built-in header deny-list (`authorization`, `proxy-authorization`, `cookie`,
 `set-cookie`, `x-api-key`) have run; the wire record never leaves `KStudio.Core`. A rule that cannot be applied withholds
-the value. A redacted field takes only `=` and `in`, `any` never reads one, and every text the engine writes for a sink -
+the value. JSON-path and pattern rules mask parts of a value; a value they cannot be applied to is withheld, and value clauses compare
+what the visitor would see. A redacted field takes only `=` and `in`, `any` never reads one, and every text the engine writes for a sink -
 the audit's predicate, a permalink's predicate, an error - shows a literal on a redacted field as `<redacted>`. Full
 text: [kstudio.md](docs/maintainers/kstudio.md#d40).
 
 **D41 — KStudio bounds the cost of a scan in the engine.** Concurrency (two scans per process, one per owner), a byte rate
 (10 MiB/s per process, paced by consumption), per-scan bytes, records, duration and matches, and an owner's rolling
 hourly byte budget. Memory is stated, about $S(C + 2mc)$: $C \approx 64$ MiB per consumer (measured), and a kept match holds at most $c$ bytes of key, headers, attributes and value together, kept as UTF-16 text; about 253 MiB at the defaults, as private memory (`RssAnon` on Linux, where .NET's
-`PrivateMemorySize64` counts untouched mappings). A scan above the confirmation
+`PrivateMemorySize64` counts untouched mappings). A record read holds at most 21 matches and the value of the record asked for, up to MaxDecodeBytes; masking never grows a value past twice that. A scan above the confirmation
 threshold starts only with a confirmation the engine checks. A profile or a visitor can only lower a limit. Full text:
 [kstudio.md](docs/maintainers/kstudio.md#d41).
 
