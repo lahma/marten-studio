@@ -185,7 +185,7 @@ internal sealed class KafkaRecordService(
         string message = string.Create(CultureInfo.InvariantCulture, $"value ({match.ValueFormat}, {KafkaDisplay.Bytes(match.ValueLength)}){MaskedSuffix(match)}");
 
         actionLog.Record(cluster, [match.Topic], Action, target, succeeded: true, message, KafkaCapability.ReadPayloads);
-        logger.RecordValueRead(user, match.Topic, match.Partition, match.Offset, cluster.Key, cluster.TenantId);
+        logger.RecordValueRead(user, match.Topic, match.Partition, match.Offset, cluster.Cluster, cluster.TenantId);
         return true;
     }
 
@@ -250,13 +250,13 @@ internal sealed class KafkaRecordService(
                 $"key, headers and value ({record.ValueFormat}, {KafkaDisplay.Bytes(record.ValueLength)}){MaskedSuffix(record)}, {reads}");
 
             actionLog.Record(cluster, [topic], Action, target, succeeded: true, valueMessage, KafkaCapability.ReadPayloads);
-            logger.RecordValueRead(user, topic, partition, offset, cluster.Key, cluster.TenantId);
+            logger.RecordValueRead(user, topic, partition, offset, cluster.Cluster, cluster.TenantId);
             return;
         }
 
         actionLog.Record(cluster, [topic], Action, target, succeeded: true, $"key and headers, {reads}", KafkaCapability.SearchRecords);
 
         // A view of an offset with no record (a compacted gap, a marker) is a view all the same: the neighbours were read and shown.
-        logger.RecordOpened(user, topic, partition, offset, cluster.Key, cluster.TenantId);
+        logger.RecordOpened(user, topic, partition, offset, cluster.Cluster, cluster.TenantId);
     }
 }

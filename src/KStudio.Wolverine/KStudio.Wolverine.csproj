@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- KStudio.Wolverine (AGENTS.md D43): lists the Kafka clusters and topics of a Wolverine application's configuration in KStudio. It reads
+       the built WolverineOptions once and starts, connects and writes nothing. It references KStudio.Core and WolverineFx.Kafka only: no
+       studio, no KStudio, no Marten, Weasel or Npgsql (KStudioWolverineFenceTests). Not packed before KStudio's first release (plan K8). -->
+  <PropertyGroup>
+    <AssemblyName>KStudio.Wolverine</AssemblyName>
+    <RootNamespace>KStudio</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <Product>KStudio</Product>
+    <Description>KStudio.Wolverine lists the Kafka clusters and topics of a Wolverine application in KStudio, by reading its configuration and nothing else.</Description>
+    <!-- Selects the conditional Microsoft.Extensions.* rows in Directory.Packages.props, as KStudio.Core does. -->
+    <KStudioCorePinsExtensions>true</KStudioCorePinsExtensions>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <IsTrimmable>false</IsTrimmable>
+    <IsAotCompatible>false</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../KStudio.Core/KStudio.Core.csproj" />
+    <PackageReference Include="WolverineFx.Kafka" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="KStudio.Wolverine.Tests" />
+    <InternalsVisibleTo Include="KStudio.Integration.Tests" />
+  </ItemGroup>
+
+  <!--
+    WolverineFx references the JasperFx source generator with PrivateAssets="none", so it would run over this compilation. It has nothing to
+    generate here (this assembly has no handler and no aggregate), and its marker attribute would put a JasperFx type on a shipped assembly,
+    which is the reason src/MartenStudio/MartenStudio.csproj drops Marten's. Dropped by file name at CoreCompile, the same way.
+  -->
+  <Target Name="KStudioWolverineWithoutTheJasperFxSourceGenerator" BeforeTargets="CoreCompile">
+    <ItemGroup>
+      <_KStudioWolverineJasperFxGenerator Include="@(Analyzer)"
+                                          Condition="$([System.String]::Copy('%(Filename)').StartsWith('JasperFx')) and $([System.String]::Copy('%(Filename)').EndsWith('SourceGenerator'))" />
+      <Analyzer Remove="@(_KStudioWolverineJasperFxGenerator)" />
+    </ItemGroup>
+  </Target>
+
+</Project>

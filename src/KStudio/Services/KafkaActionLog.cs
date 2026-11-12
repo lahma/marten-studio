@@ -56,7 +56,7 @@ internal sealed class KafkaActionLog(
         ArgumentNullException.ThrowIfNull(topics);
 
         audit.RecordModule(
-            new StudioModuleAuditScope(KafkaStudioText.Key, Bounded(cluster.Label), new KafkaAuditScope(cluster.Key, cluster.TenantId, [.. topics])),
+            new StudioModuleAuditScope(KafkaStudioText.Key, Bounded(cluster.Label), new KafkaAuditScope(cluster.Cluster, cluster.TenantId, [.. topics])),
             action,
             Bounded(target),
             succeeded,
@@ -108,7 +108,7 @@ internal sealed class KafkaActionLog(
         ArgumentNullException.ThrowIfNull(cluster);
 
         Record(cluster, topics, action, target, succeeded: false, KafkaStudioText.RefusedEntry, capability);
-        logger.ClusterRefused(UserName(), cluster.Key, cluster.TenantId, topic, policy);
+        logger.ClusterRefused(UserName(), cluster.Cluster, cluster.TenantId, topic, policy);
     }
 
     /// <summary>The ring's bound for a target or a label: two hundred characters, then an ellipsis.</summary>

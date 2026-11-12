@@ -35,7 +35,11 @@ internal static class KStudioEngineRegistration
         services.TryAddSingleton(options);
         services.TryAddSingleton(settings);
         services.TryAddSingleton<KStudioLoggers>();
-        services.TryAddSingleton<KafkaClusterRegistry>();
+
+        // Built on first use, and given the container so that a cluster source (D43) is run then, after the host has started, and not at the
+        // options delegate. Everything it needs that is registered here is resolved lazily by the sources themselves.
+        services.TryAddSingleton(static provider =>
+            new KafkaClusterRegistry(provider.GetRequiredService<KafkaEngineOptions>(), provider));
         services.TryAddSingleton<KafkaSettingsReader>();
 
         // The options are validated once, by the registry, and read from this snapshot only (REVIEW-ENG-A 8).

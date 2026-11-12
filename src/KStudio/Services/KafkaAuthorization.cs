@@ -66,7 +66,7 @@ internal sealed class KafkaAuthorization(
         }
 
         ClaimsPrincipal user = await PrincipalAsync().ConfigureAwait(false);
-        return await IsAuthorizedAsync(user, cluster.Key, cluster.TenantId, topic, capability, cancellationToken).ConfigureAwait(false);
+        return await IsAuthorizedAsync(user, cluster.Cluster, cluster.TenantId, topic, capability, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>The same question for a caller that already holds the principal and names the entry by its parts (the audit gate).</summary>
@@ -143,7 +143,7 @@ internal sealed class KafkaAuthorization(
 
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (await IsAuthorizedAsync(user, cluster.Key, cluster.TenantId, null, null, cancellationToken).ConfigureAwait(false))
+            if (await IsAuthorizedAsync(user, cluster.Cluster, cluster.TenantId, null, null, cancellationToken).ConfigureAwait(false))
             {
                 allowed.Add(cluster);
             }
@@ -187,7 +187,7 @@ internal sealed class KafkaAuthorization(
 
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (await IsAuthorizedAsync(user, cluster.Key, cluster.TenantId, topic, capability, cancellationToken).ConfigureAwait(false))
+            if (await IsAuthorizedAsync(user, cluster.Cluster, cluster.TenantId, topic, capability, cancellationToken).ConfigureAwait(false))
             {
                 allowed.Add(topic);
             }
@@ -221,7 +221,7 @@ internal sealed class KafkaAuthorization(
 
         ClaimsPrincipal user = await PrincipalAsync().ConfigureAwait(false);
 
-        if (!await IsAuthorizedAsync(user, cluster.Key, cluster.TenantId, null, capability, cancellationToken).ConfigureAwait(false))
+        if (!await IsAuthorizedAsync(user, cluster.Cluster, cluster.TenantId, null, capability, cancellationToken).ConfigureAwait(false))
         {
             return false;
         }
@@ -230,7 +230,7 @@ internal sealed class KafkaAuthorization(
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (!await IsAuthorizedAsync(user, cluster.Key, cluster.TenantId, topic, capability, cancellationToken).ConfigureAwait(false))
+            if (!await IsAuthorizedAsync(user, cluster.Cluster, cluster.TenantId, topic, capability, cancellationToken).ConfigureAwait(false))
             {
                 return false;
             }

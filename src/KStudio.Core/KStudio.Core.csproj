@@ -28,6 +28,9 @@
     <InternalsVisibleTo Include="KStudio" />
     <InternalsVisibleTo Include="KStudio.Tests" />
     <InternalsVisibleTo Include="KStudio.Integration.Tests" />
+    <!-- D43: the one cluster source, and its fast suite. KStudio.Wolverine checks its own build against this one's before it uses any of it. -->
+    <InternalsVisibleTo Include="KStudio.Wolverine" />
+    <InternalsVisibleTo Include="KStudio.Wolverine.Tests" />
   </ItemGroup>
 
 </Project>

@@ -41,7 +41,7 @@ internal static partial class KafkaEngineOptionsValidation
 
         List<string> problems = [];
 
-        if (options.Clusters.Count == 0)
+        if (options.Clusters.Count == 0 && options.ClusterSources.Count == 0)
         {
             problems.Add("At least one Kafka cluster is required: call AddCluster.");
         }

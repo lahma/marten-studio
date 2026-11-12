@@ -265,7 +265,7 @@ internal sealed class KafkaCatalogService(
     private async Task RefusedAsync(KafkaClusterEntry entry, string? topic)
     {
         string user = await authorization.UserNameAsync().ConfigureAwait(false);
-        logger.ClusterRefused(user, entry.Key, entry.TenantId, topic, authorization.PolicyFor(null) ?? "(none)");
+        logger.ClusterRefused(user, entry.Cluster, entry.TenantId, topic, authorization.PolicyFor(null) ?? "(none)");
     }
 
     private static bool Matches(string name, string? filter) =>
