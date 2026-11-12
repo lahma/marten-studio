@@ -253,7 +253,9 @@ the database it is supposed to help you understand. Exact counts are available o
 
 **D9 — Document and stream ids travel in the query string.** The hand-rolled router has no catch-all segment, and Marten
 ids are frequently strings that contain `/`. Scope (`?store=&db=&tenant=`) lives in the URL for the same reason a
-document id does: a link someone pastes into a chat has to reopen the same thing.
+document id does: a link someone pastes into a chat has to reopen the same thing. A link that names a tenant and no
+database opens the first database, among those the visitor may see, whose tenant listing carries that tenant (at most 32
+searched, one enumeration); a link that names both is reopened exactly, and a tenant found nowhere falls back to all tenants.
 
 **D10 — No SignalR hub in v1.** Pages poll with a `PeriodicTimer` at `RefreshInterval`, paused on hidden tabs, through a
 single-flight snapshot cache so that N circuits cost one query per interval; there is no SignalR hub. Where the daemon
@@ -526,8 +528,8 @@ reflection probe of three members that fails closed. A discovered topic never re
 discovery adds no redaction. Full text: [kstudio.md](docs/maintainers/kstudio.md#d43).
 
 **D44 — Links between a studio and a module are pure, internal and grant nothing.** `IStudioRouteLinks` (MartenStudio
-implements it: a document by type and id, a stream by id or key, in the record's tenant, and only for a store whose
-tenants share one database) and `IStudioRecordSearchLinks` (KStudio implements it: "Find in Kafka") live in PostgresStudio
+implements it: a document by type and id, a stream by id or key, in the record's tenant, and only for a store that
+keeps its rows per tenant and lists no `KnownTenantIds`) and `IStudioRecordSearchLinks` (KStudio implements it: "Find in Kafka") live in PostgresStudio
 beside `IStudioLinks`, under its rules. Neither module names the other, a masked value never enters a URL, a value travels
 in the fragment, and the destination authorizes again. External links are host templates with no credential, opened with
 `noreferrer`. Full text: [kstudio.md](docs/maintainers/kstudio.md#d44).
