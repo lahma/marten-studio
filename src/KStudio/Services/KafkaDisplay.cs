@@ -15,6 +15,22 @@ internal static class KafkaDisplay
     /// <param name="span">The span.</param>
     public static string Span(long span) => "~" + Number(span);
 
+    /// <summary>
+    /// A count with its noun in the right number: <c>1 match</c>, <c>2 matches</c>, <c>1,200 records</c>. Every sentence the Kafka pages build around a
+    /// count says it through this, so that no page writes "1 records".
+    /// </summary>
+    /// <param name="value">The count.</param>
+    /// <param name="singular">The noun for exactly one.</param>
+    /// <param name="plural">The noun for any other count; the singular and an <c>s</c> when omitted.</param>
+    public static string Count(long value, string singular, string? plural = null) =>
+        Number(value) + " " + (value == 1 ? singular : plural ?? singular + "s");
+
+    /// <summary>The verb form that agrees with a count: <c>was</c> for exactly one, <c>were</c> otherwise.</summary>
+    /// <param name="value">The count.</param>
+    /// <param name="singular">The form for exactly one.</param>
+    /// <param name="plural">The form for any other count.</param>
+    public static string Agree(long value, string singular, string plural) => value == 1 ? singular : plural;
+
     /// <summary>A number with thousands separators: <c>1,234,567</c>.</summary>
     /// <param name="value">The number.</param>
     public static string Number(long value) => value.ToString("N0", CultureInfo.InvariantCulture);

@@ -52,7 +52,7 @@ internal static class KafkaStudioText
     /// <summary>The open-transaction warning of a topic page.</summary>
     /// <param name="partitions">How many partitions have one.</param>
     public static string OpenTransaction(int partitions) =>
-        $"An open transaction holds offsets back: the last stable offset is below the high watermark on {partitions} partition(s).";
+        $"An open transaction holds offsets back: the last stable offset is below the high watermark on {KafkaDisplay.Count(partitions, "partition")}.";
 
     /// <summary>A topic page with no declared consumer group.</summary>
     public const string NoConsumerGroups =
@@ -141,7 +141,7 @@ internal static class KafkaStudioText
     /// <summary>The line that says a continued search replaced the matches.</summary>
     /// <param name="records">Records read by the search it continues.</param>
     public static string ContinuedAfter(long records) =>
-        $"Continued after offsets read by the previous search ({KafkaDisplay.Number(records)} records).";
+        $"Continued after offsets read by the previous search ({KafkaDisplay.Count(records, "record")}).";
 
     /// <summary>The audit target of a search: <c>orders.v1, payments.v1 · 2026-11-12 10:00Z – 11:00Z</c>.</summary>
     /// <param name="topics">The topics.</param>

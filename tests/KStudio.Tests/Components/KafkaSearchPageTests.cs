@@ -346,8 +346,9 @@ public class KafkaSearchPageTests
         await TypeAsync(page, "key = 'nope'");
         await SearchAsync(page);
 
-        page.WaitForAssertion(() => page.Find(".ms-k-result-banner").TextContent.Should().Contain("No match in the 1 records read from 1 partitions."));
+        page.WaitForAssertion(() => page.Find(".ms-k-result-banner").TextContent.Should().Contain("No match in the 1 record read from 1 partition."));
         page.Find(".ms-k-caveats").TextContent.Should().Contain("What this result does not cover").And.Contain("Compacted topic: a time-window search can miss superseded keys and sees tombstones");
+        Regex.Count(page.Markup, "Compacted topic: a time-window search can miss superseded keys and sees tombstones", RegexOptions.None, TimeSpan.FromSeconds(5)).Should().Be(1, "a caveat is drawn once, not in the plan's notes and again in the result's");
         page.Markup.Should().NotContain("not found");
     }
 
@@ -370,6 +371,103 @@ public class KafkaSearchPageTests
         page.WaitForAssertion(() => Rows(page).Should().Equal("0 / 4"));
         page.FindAll(".ms-k-result-banner button").Should().BeEmpty("a completed search has no cursor to continue from");
         rig.Ring.Count(static x => x.Action == "SearchRecords" && x.Succeeded).Should().Be(3, "each scan is a new audit entry");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Continue_resumes_from_the_cursor_with_or_without_a_confirmation(bool confirmation)
+    {
+        // UI-VERIFY found Continue drawing the first run's rows again when the estimate needs a confirmation.
+        await using KafkaSearchRig rig = new(engine: o =>
+        {
+            o.Limits.MaxMatches = 2;
+            o.Limits.ConfirmAboveRecords = confirmation ? 1 : 1_000_000;
+        });
+        Seed(rig, "orders", 7);
+        IRenderedComponent<KafkaSearchPage> page = await OpenAsync(rig, Window);
+
+        async Task RunAsync(IElement button)
+        {
+            await button.ClickAsync(new MouseEventArgs());
+
+            if (confirmation)
+            {
+                page.WaitForAssertion(() => page.FindAll("dialog").Should().HaveCount(1));
+
+                // While the confirmation waits, nothing else may plan or continue and replace the plan it is about to start.
+                page.Find(".ms-k-search-actions button").HasAttribute("disabled").Should().BeTrue();
+                page.FindAll(".ms-k-result-banner button").Should().OnlyContain(static x => x.HasAttribute("disabled"));
+                await page.Find("dialog .ms-confirm-actions button.ms-button-danger").ClickAsync(new MouseEventArgs());
+            }
+        }
+
+        await RunAsync(page.Find(".ms-k-search-actions button"));
+        page.WaitForAssertion(() => page.Find(".ms-k-result-banner").TextContent.Should().Contain("Stopped at 2 matches"));
+        string[] first = Rows(page);
+        first.Should().Equal("0 / 0", "0 / 1");
+
+        await RunAsync(page.Find(".ms-k-result-banner button"));
+        page.WaitForAssertion(() => Rows(page).Should().Equal("0 / 2", "0 / 3"));
+        Rows(page).Intersect(first).Should().BeEmpty("a continued scan never shows a record of the first one again");
+
+        await RunAsync(page.Find(".ms-k-result-banner button"));
+        page.WaitForAssertion(() => Rows(page).Should().Equal("0 / 4", "0 / 5"));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Continuing_over_several_partitions_reads_every_record_exactly_once(bool confirmation)
+    {
+        await using KafkaSearchRig rig = new(engine: o =>
+        {
+            o.Limits.MaxMatches = 4;
+            o.Limits.ConfirmAboveRecords = confirmation ? 1 : 1_000_000;
+        });
+        rig.Topic("orders", 3);
+
+        for (int partition = 0; partition < 3; partition++)
+        {
+            for (int i = 0; i < 9; i++)
+            {
+                rig.Produce("orders", partition, i, "k" + i, "v", ("correlation-id", "c-" + i));
+            }
+        }
+
+        IRenderedComponent<KafkaSearchPage> page = await OpenAsync(rig, Window);
+        await TypeAsync(page, "key ^= 'k'");
+        List<string> seen = [];
+
+        async Task ClickAsync(IElement button)
+        {
+            await button.ClickAsync(new MouseEventArgs());
+
+            if (confirmation)
+            {
+                page.WaitForAssertion(() => page.FindAll("dialog").Should().HaveCount(1));
+                await page.Find("dialog .ms-confirm-actions button.ms-button-danger").ClickAsync(new MouseEventArgs());
+            }
+        }
+
+        await ClickAsync(page.Find(".ms-k-search-actions button"));
+
+        for (int guard = 0; guard < 12; guard++)
+        {
+            page.WaitForAssertion(() => page.FindAll(".ms-k-result-banner").Should().HaveCount(1));
+            string[] rows = Rows(page);
+            rows.Intersect(seen).Should().BeEmpty("a continued scan never shows a record of an earlier one again");
+            seen.AddRange(rows);
+
+            if (page.FindAll(".ms-k-result-banner button").Count == 0)
+            {
+                break;
+            }
+
+            await ClickAsync(page.Find(".ms-k-result-banner button"));
+        }
+
+        seen.Should().HaveCount(27).And.OnlyHaveUniqueItems();
     }
 
     [Fact]

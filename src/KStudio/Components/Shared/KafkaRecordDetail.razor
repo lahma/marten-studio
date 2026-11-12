@@ -85,7 +85,7 @@
 
         @if (match.HeadersOmitted > 0)
         {
-            <p class="ms-muted">@KafkaDisplay.Number(match.HeadersOmitted) more headers were not kept.</p>
+            <p class="ms-muted">@KafkaDisplay.Count(match.HeadersOmitted, "more header was", "more headers were") not kept.</p>
         }
 
         @if (match.CloudEventMode != CloudEventMode.None)
@@ -110,7 +110,7 @@
 
             @if (match.CloudEventAttributesOmitted > 0)
             {
-                <p class="ms-muted">@KafkaDisplay.Number(match.CloudEventAttributesOmitted) more attributes were not kept.</p>
+                <p class="ms-muted">@KafkaDisplay.Count(match.CloudEventAttributesOmitted, "more attribute was", "more attributes were") not kept.</p>
             }
         }
 

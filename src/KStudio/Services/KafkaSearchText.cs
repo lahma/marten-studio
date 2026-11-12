@@ -32,18 +32,18 @@ internal static class KafkaSearchText
         {
             KafkaScanStopReason.Completed when result.Matches > 0 => string.Create(
                 CultureInfo.InvariantCulture,
-                $"Read every offset in the window: {result.Records:N0} records, {KafkaDisplay.Bytes(result.Bytes)}, {result.Matches:N0} matches."),
+                $"Read every offset in the window: {KafkaDisplay.Count(result.Records, "record")}, {KafkaDisplay.Bytes(result.Bytes)}, {KafkaDisplay.Count(result.Matches, "match", "matches")}."),
             KafkaScanStopReason.Completed => string.Create(
                 CultureInfo.InvariantCulture,
-                $"No match in the {result.Records:N0} records read from {result.Partitions.Count:N0} partitions."),
+                $"No match in the {KafkaDisplay.Count(result.Records, "record")} read from {KafkaDisplay.Count(result.Partitions.Count, "partition")}."),
             KafkaScanStopReason.MatchLimit => string.Create(
                 CultureInfo.InvariantCulture,
-                $"Stopped at {limits.MaxMatches:N0} matches, the most a search keeps (KafkaStudioOptions.Limits.MaxMatches). Continue reads on from where it stopped."),
+                $"Stopped at {KafkaDisplay.Count(limits.MaxMatches, "match", "matches")}, the most a search keeps (KafkaStudioOptions.Limits.MaxMatches). Continue reads on from where it stopped."),
             KafkaScanStopReason.ByteBudget =>
                 $"Stopped after reading {KafkaDisplay.Bytes(result.Bytes)}, this search's budget (KafkaStudioOptions.Limits.MaxBytesPerScan). Continue reads on from where it stopped.",
             KafkaScanStopReason.RecordBudget => string.Create(
                 CultureInfo.InvariantCulture,
-                $"Stopped after {result.Records:N0} records, this search's budget (KafkaStudioOptions.Limits.MaxRecordsPerScan). Continue reads on from where it stopped."),
+                $"Stopped after {KafkaDisplay.Count(result.Records, "record")}, this search's budget (KafkaStudioOptions.Limits.MaxRecordsPerScan). Continue reads on from where it stopped."),
             KafkaScanStopReason.OwnerBudget =>
                 "Stopped: you have read your hourly allowance. Continue reads on from where it stopped, once the allowance frees up.",
             KafkaScanStopReason.Deadline =>
@@ -55,6 +55,26 @@ internal static class KafkaSearchText
             KafkaScanStopReason.Failed => "The search failed. The application's log has the reason.",
             _ => "The search stopped.",
         };
+    }
+
+    /// <summary>
+    /// The window repeated in both zones, so a visitor never guesses which zone a time is in: <c>10:00–11:00 Europe/Helsinki · 08:00Z–09:00Z</c>. A window
+    /// that spans a day or more, or whose ends fall on different dates in either zone, shows the dates as well - 24 h must not read <c>13:48–13:48</c>.
+    /// </summary>
+    /// <param name="from">The window's start (UTC).</param>
+    /// <param name="to">The window's end (UTC).</param>
+    /// <param name="preference">The visitor's time zone.</param>
+    public static string WindowLine(DateTimeOffset from, DateTimeOffset to, TimeZoneInfo preference)
+    {
+        ArgumentNullException.ThrowIfNull(preference);
+
+        CultureInfo c = CultureInfo.InvariantCulture;
+        DateTimeOffset localFrom = TimeZoneInfo.ConvertTime(from, preference);
+        DateTimeOffset localTo = TimeZoneInfo.ConvertTime(to, preference);
+        bool dates = to - from >= TimeSpan.FromDays(1) || localFrom.Date != localTo.Date || from.UtcDateTime.Date != to.UtcDateTime.Date;
+        string format = dates ? "yyyy-MM-dd HH:mm" : "HH:mm";
+
+        return $"{localFrom.ToString(format, c)}–{localTo.ToString(format, c)} {preference.Id} · {from.UtcDateTime.ToString(format, c)}Z–{to.UtcDateTime.ToString(format, c)}Z";
     }
 
     /// <summary>A partition's end state in words, for the progress table and the caveats.</summary>
@@ -91,7 +111,7 @@ internal static class KafkaSearchText
 
         foreach (KafkaScanGap gap in result.Gaps)
         {
-            Add(caveats, string.Create(c, $"{gap.Lost:N0} offsets of {gap.Topic}/{gap.Partition} ({gap.FromOffset}–{gap.ToOffset}) were removed by retention while the search read them."));
+            Add(caveats, string.Create(c, $"{KafkaDisplay.Count(gap.Lost, "offset")} of {gap.Topic}/{gap.Partition} ({gap.FromOffset}–{gap.ToOffset}) {KafkaDisplay.Agree(gap.Lost, "was", "were")} removed by retention while the search read them."));
         }
 
         foreach (string sentence in result.UndecidableSentences)
@@ -101,12 +121,12 @@ internal static class KafkaSearchText
 
         if (result.OutsideWindow > 0)
         {
-            Add(caveats, string.Create(c, $"{result.OutsideWindow:N0} records were read past the window's edges and left out by their own timestamp."));
+            Add(caveats, string.Create(c, $"{KafkaDisplay.Count(result.OutsideWindow, "record")} {KafkaDisplay.Agree(result.OutsideWindow, "was", "were")} read past the window's edges and left out by their own timestamp."));
         }
 
         if (result.NoTimestamp > 0)
         {
-            Add(caveats, string.Create(c, $"{result.NoTimestamp:N0} records had no timestamp and were left out."));
+            Add(caveats, string.Create(c, $"{KafkaDisplay.Count(result.NoTimestamp, "record")} had no timestamp and {KafkaDisplay.Agree(result.NoTimestamp, "was", "were")} left out."));
         }
 
         foreach (KafkaPartitionResult partition in result.Partitions.Where(static x =>
@@ -122,7 +142,7 @@ internal static class KafkaSearchText
 
         if (result.GroupRefusals > 0)
         {
-            Add(caveats, string.Create(c, $"{result.GroupRefusals} consumer could not use its group (expected without a group ACL; nothing was affected)."));
+            Add(caveats, string.Create(c, $"{KafkaDisplay.Count(result.GroupRefusals, "consumer")} could not use {KafkaDisplay.Agree(result.GroupRefusals, "its", "their")} group (expected without a group ACL; nothing was affected)."));
         }
 
         return caveats;

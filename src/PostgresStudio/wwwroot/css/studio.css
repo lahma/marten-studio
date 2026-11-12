@@ -17270,3 +17270,36 @@ dialog.ms-modal::backdrop {
     background: var(--ms-color-primary-soft);
     color: var(--ms-color-primary);
 }
+
+/* No sideways scroll on a narrow screen (UI-VERIFY, 390 px). The matches table's visually hidden "Details" header is absolutely positioned: with no
+   positioned ancestor it sat where the last column is, far outside its scroll region, and widened the page. The table is its containing block now. */
+.ms-k-matches,
+.ms-k-neighbours {
+    position: relative;
+}
+
+/* A fieldset's default minimum width is its content's, which pushed the topics box past the column. Everything the page draws outside a table may
+   shrink and breaks a long unbroken value (a predicate, a key, a topic name) rather than widening the page. */
+.ms-k-search-form fieldset,
+.ms-k-search-form,
+.ms-k-topic-option,
+.ms-k-result-banner,
+.ms-k-caveats,
+.ms-k-plan-notes,
+.ms-k-record-detail {
+    min-width: 0;
+}
+
+.ms-k-result-banner p,
+.ms-k-caveats li,
+.ms-k-plan-notes li,
+.ms-k-verdicts li,
+.ms-k-estimate,
+.ms-k-predicate-errors li,
+.ms-k-window-text,
+.ms-k-copy-note,
+.ms-k-record-address,
+.ms-k-record-detail code,
+.ms-k-syntax-examples code {
+    overflow-wrap: anywhere;
+}

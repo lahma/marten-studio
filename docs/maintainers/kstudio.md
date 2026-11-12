@@ -24,7 +24,7 @@ a second map call would be a second circuit, and a second place to forget author
 at `{mount}/kafka/topics`, so a module never lands over the host's routes, and the route table still refuses a route two
 pages claim. Every id travels in the query string, as D9 says of every id: `?cluster=`, `?topic=`, `?partition=`,
 `?offset=`. A topic name is case-sensitive and may look like a file name (`orders.json`), so it is never a path segment.
-A search's predicate travels in the fragment (`#q=`), which no server log sees.
+A search's predicate travels in the fragment (`#q=`): no HTTP request line, access log or Referer carries it, and the circuit receives it once, over its own connection, to fill the box.
 
 *Rail.* A module's sections go before the host's last section (System), in module key order. Every section title and
 item label on the composed rail is unique, ignoring case, because the rail keys its entries on them. A module's links

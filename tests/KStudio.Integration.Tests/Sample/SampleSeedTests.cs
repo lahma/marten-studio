@@ -71,7 +71,7 @@ public class SampleSeedTests
         KafkaSeedPlan plan = KafkaSeedPlan.Create(Now);
 
         plan.Records.Should().OnlyContain(x => x.Timestamp < Now, "a record from the future would be outside every window the demo searches (F7)");
-        plan.Records.Should().OnlyContain(x => x.Timestamp > Now - TimeSpan.FromHours(6), "a search over the last 6 h must cover the whole seed");
+        plan.Records.Should().OnlyContain(x => x.Timestamp > Now - TimeSpan.FromHours(24), "a search over the last 24 h, the walk-through's window, must cover the whole seed");
     }
 
     [Fact]

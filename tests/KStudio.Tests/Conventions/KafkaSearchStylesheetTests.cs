@@ -35,6 +35,41 @@ public partial class KafkaSearchStylesheetTests
         Regex.Matches(css, Regex.Escape(Header), RegexOptions.None, TimeSpan.FromSeconds(5)).Should().HaveCount(1);
     }
 
+    /// <summary>Every declaration block, in the section, of a rule whose selector list names <paramref name="selector" />.</summary>
+    private static string[] Declarations(string selector) =>
+        [.. Block().Matches(Regex.Replace(Section(), @"/\*.*?\*/", string.Empty, RegexOptions.Singleline, TimeSpan.FromSeconds(5)))
+            .Where(m => m.Groups[1].Value.Split(',').Any(s => s.Trim() == selector))
+            .Select(static m => m.Groups[2].Value)];
+
+    [Theory]
+    [InlineData(".ms-k-matches", "position: relative")]
+    [InlineData(".ms-k-neighbours", "position: relative")]
+    [InlineData(".ms-k-search-form fieldset", "min-width: 0")]
+    [InlineData(".ms-k-search-form", "min-width: 0")]
+    [InlineData(".ms-k-topic-option", "min-width: 0")]
+    [InlineData(".ms-k-result-banner", "min-width: 0")]
+    [InlineData(".ms-k-caveats", "min-width: 0")]
+    [InlineData(".ms-k-plan-notes", "min-width: 0")]
+    [InlineData(".ms-k-record-detail", "min-width: 0")]
+    [InlineData(".ms-k-result-banner p", "overflow-wrap: anywhere")]
+    [InlineData(".ms-k-caveats li", "overflow-wrap: anywhere")]
+    [InlineData(".ms-k-plan-notes li", "overflow-wrap: anywhere")]
+    [InlineData(".ms-k-verdicts li", "overflow-wrap: anywhere")]
+    [InlineData(".ms-k-estimate", "overflow-wrap: anywhere")]
+    [InlineData(".ms-k-predicate-errors li", "overflow-wrap: anywhere")]
+    [InlineData(".ms-k-window-text", "overflow-wrap: anywhere")]
+    [InlineData(".ms-k-copy-note", "overflow-wrap: anywhere")]
+    [InlineData(".ms-k-record-address", "overflow-wrap: anywhere")]
+    [InlineData(".ms-k-record-detail code", "overflow-wrap: anywhere")]
+    [InlineData(".ms-k-syntax-examples code", "overflow-wrap: anywhere")]
+    public void The_narrow_screen_rules_are_there(string selector, string declaration)
+    {
+        Declarations(selector).Should().Contain(x => x.Contains(declaration, StringComparison.Ordinal), selector + " has " + declaration + " (UI-VERIFY, 390 px)");
+    }
+
+    [GeneratedRegex(@"([^{}]+)\{([^{}]*)\}", RegexOptions.None, matchTimeoutMilliseconds: 5000)]
+    private static partial Regex Block();
+
     [Fact]
     public void The_pressed_state_is_styled_by_the_attribute()
     {

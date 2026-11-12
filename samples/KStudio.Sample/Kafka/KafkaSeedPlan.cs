@@ -62,7 +62,7 @@ internal sealed record SeedCommit(string Group, string Topic, int Partition, lon
 /// </para>
 /// <para>
 /// <b>Every timestamp is in the past</b> (F7): records span the five hours and fifty minutes that end five minutes before <c>now</c>, so a
-/// search over "the last 6 h" covers all of them for as long as a demo lasts. The marker record is last.
+/// search over "the last 24 h" covers all of them for as long as a demo lasts. The marker record is last.
 /// </para>
 /// <para>
 /// <b>The needle.</b> <c>orders.v1</c> record <c>order-0042</c> has <c>correlation-id</c> <c>c-0042</c>, and its payment in

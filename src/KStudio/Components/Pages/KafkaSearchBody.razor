@@ -82,7 +82,7 @@
                     </div>
                     @if (hiddenTopics > 0)
                     {
-                        <p class="ms-muted">@KafkaDisplay.Number(hiddenTopics) more topics match; narrow the filter.</p>
+                        <p class="ms-muted">@KafkaDisplay.Count(hiddenTopics, "more topic matches", "more topics match"); narrow the filter.</p>
                     }
                 }
                 else
@@ -486,7 +486,8 @@
     [CascadingParameter(Name = KafkaPageFrame.ReadyName)]
     public Task? Ready { get; set; }
 
-    private bool busy => planning || running;
+    // The confirmation dialog counts: while it waits, nothing else may plan or continue and replace the plan it is about to start.
+    private bool busy => planning || running || confirmOpen;
 
     private string TopicsHref => KafkaAddress.Href(Settings, KafkaAddress.TopicsRoute, State.ActiveCluster?.Key);
 
@@ -787,12 +788,7 @@
         }
 
         windowProblem = null;
-        TimeZoneInfo preference = PreferenceZone();
-        DateTimeOffset localFrom = TimeZoneInfo.ConvertTime(from, preference);
-        DateTimeOffset localTo = TimeZoneInfo.ConvertTime(to, preference);
-
-        return $"{localFrom.ToString("HH:mm", CultureInfo.InvariantCulture)}–{localTo.ToString("HH:mm", CultureInfo.InvariantCulture)} {preference.Id} · "
-            + $"{from.ToString("HH:mm", CultureInfo.InvariantCulture)}Z–{to.ToString("HH:mm", CultureInfo.InvariantCulture)}Z";
+        return KafkaSearchText.WindowLine(from, to, PreferenceZone());
     }
 
     /// <summary>Set by an input event whose only effect is the text in the box: the browser already shows it, so the whole page is not rendered again for each keystroke.</summary>
@@ -1115,7 +1111,7 @@
     }
 
     private string ConfirmTitle() =>
-        planned is null ? "Confirm" : string.Create(CultureInfo.InvariantCulture, $"Read about {planned.Plan.Estimate.Offsets:N0} offsets?");
+        planned is null ? "Confirm" : $"Read about {KafkaDisplay.Count(planned.Plan.Estimate.Offsets, "offset")}?";
 
     private string ConfirmMessage() =>
         planned is null
@@ -1123,15 +1119,23 @@
             : $"About {(planned.Plan.Estimate.Bytes is { } bytes ? KafkaDisplay.Bytes(bytes) : "an unknown number of bytes")} will be read from the cluster, "
               + $"which counts against your hourly allowance ({(allowanceLeft is { } left ? KafkaDisplay.Bytes(left) : "—")} left) and may cost money on a managed cluster.";
 
-    private static IReadOnlyList<string> PlanNotes(KafkaSearchPlanned shown) =>
-        [.. shown.Plan.Notes.Select(static x => x.Text).Distinct(StringComparer.Ordinal)];
+    /// <summary>
+    /// What the plan says about the window before the search runs. Once a result is drawn, its "what this result does not cover" list carries the same
+    /// sentences, and a caveat is drawn once: they are left out here then.
+    /// </summary>
+    private IReadOnlyList<string> PlanNotes(KafkaSearchPlanned shown)
+    {
+        IEnumerable<string> drawnBelow = result is null ? [] : KafkaSearchText.Caveats(result);
+
+        return [.. shown.Plan.Notes.Select(static x => x.Text).Distinct(StringComparer.Ordinal).Except(drawnBelow, StringComparer.Ordinal)];
+    }
 
     private static string EstimateText(KafkaSearchPlanned shown)
     {
         KafkaScanEstimate estimate = shown.Plan.Estimate;
         string bytes = estimate.Bytes is { } size ? ", about " + KafkaDisplay.Bytes(size) : string.Empty;
 
-        return $"{estimate.Basis} About {KafkaDisplay.Number(estimate.Offsets)} offsets{bytes} in {KafkaDisplay.Number(estimate.Partitions)} partitions.";
+        return $"{estimate.Basis} About {KafkaDisplay.Count(estimate.Offsets, "offset")}{bytes} in {KafkaDisplay.Count(estimate.Partitions, "partition")}.";
     }
 
     // ------------------------------------------------------------------------------------------------

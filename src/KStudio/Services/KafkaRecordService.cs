@@ -143,7 +143,7 @@ internal sealed class KafkaRecordService(
         int neighbours = read.Before.Count + read.After.Count;
         string message = string.Create(
             CultureInfo.InvariantCulture,
-            $"key and headers, with {neighbours} neighbours ({read.RecordsRead:N0} records and {KafkaDisplay.Bytes(read.BytesRead)} read)");
+            $"key and headers, with {KafkaDisplay.Count(neighbours, "neighbour")} ({KafkaDisplay.Count(read.RecordsRead, "record")} and {KafkaDisplay.Bytes(read.BytesRead)} read)");
 
         actionLog.Record(cluster, [topic], Action, target, succeeded: true, message, KafkaCapability.SearchRecords);
 

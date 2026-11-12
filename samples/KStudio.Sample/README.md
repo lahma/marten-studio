@@ -37,7 +37,7 @@ Open `http://localhost:5212`, sign in at `/login` as `admin` or `support` (the p
 
 ## What is seeded
 
-Every timestamp is in the past, within the last six hours, so a search over `6 h` covers all of it.
+Every timestamp is in the past, within the last six hours of when the sample started, so a search over the last 24 hours covers all of it for as long as a demo lasts.
 
 | Topic | Partitions | What it shows |
 |---|---|---|
@@ -54,7 +54,7 @@ The sample application's own consumer group, `sample-orders-handler`, has commit
 ## Find a record from a ticket
 
 A support ticket says: *the customer with correlation id `c-0042` has not got their order.* Sign in as `support`, open **Search**, pick
-`orders.v1`, keep the window at the last 6 hours, and type:
+`orders.v1`, choose the last 24 hours, and type:
 
 ```
 header.correlation-id = 'c-0042'

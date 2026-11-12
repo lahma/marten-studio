@@ -319,7 +319,7 @@ internal sealed class KafkaSearchService(
         bool succeeded = result.StopReason is not (KafkaScanStopReason.Failed or KafkaScanStopReason.Unavailable or KafkaScanStopReason.NotAuthorized);
         string message = string.Create(
             CultureInfo.InvariantCulture,
-            $"{result.Records:N0} records and {KafkaDisplay.Bytes(result.Bytes)} read; stopped by {result.StopReason}; predicate: {plan.AuditText}");
+            $"{KafkaDisplay.Count(result.Records, "record")} and {KafkaDisplay.Bytes(result.Bytes)} read; stopped by {result.StopReason}; predicate: {plan.AuditText}");
 
         actionLog.Record(input.Cluster, input.Topics, Action, target, succeeded, message, KafkaCapability.SearchRecords);
         logger.SearchRan(

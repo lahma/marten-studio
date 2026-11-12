@@ -146,7 +146,7 @@ app.MapGet("/", (HttpContext context, IAntiforgery antiforgery) =>
             <li><a href="/marten">Open Marten Studio</a></li>
             <li><a href="/login">Sign in</a> as <code>admin</code> (every topic) or <code>support</code> (<code>orders.*</code> only); the password is the user name</li>
           </ul>
-          <p>Try, as <code>support</code>, in Search over the last 6 hours of <code>orders.v1</code>: <code>header.correlation-id = 'c-0042'</code></p>
+          <p>Try, as <code>support</code>, in Search over the last 24 hours of <code>orders.v1</code>: <code>header.correlation-id = 'c-0042'</code></p>
           <form method="post" action="/logout">
             <input type="hidden" name="{{LoginEndpoints.AntiforgeryFieldName}}" value="{{WebUtility.HtmlEncode(tokens.RequestToken)}}" />
             <button type="submit">Sign out</button>

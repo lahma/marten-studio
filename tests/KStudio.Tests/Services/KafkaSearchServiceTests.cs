@@ -228,6 +228,6 @@ public class KafkaSearchServiceTests
 
         (KafkaScanResult result, _) = await KafkaSearchRig.DrainAsync(run);
 
-        KafkaSearchText.Stop(result, plan.Value.Plan.Limits).Should().Be("No match in the 1 records read from 1 partitions.");
+        KafkaSearchText.Stop(result, plan.Value.Plan.Limits).Should().Be("No match in the 1 record read from 1 partition.");
     }
 }

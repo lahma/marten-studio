@@ -161,7 +161,7 @@ public class KafkaTopicPageTests
         IElement[] rows = [.. page.FindAll("table.ms-k-partitions tbody tr")];
         rows[0].QuerySelectorAll("td")[6].TextContent.Trim().Should().Be("3", "the open transaction holds the stable offset at 3 while the high watermark is 4");
         rows[1].QuerySelectorAll("td")[6].TextContent.Trim().Should().BeEmpty("a partition with nothing open has no LSO to show");
-        Notes(page).Should().Contain("An open transaction holds offsets back: the last stable offset is below the high watermark on 1 partition(s).");
+        Notes(page).Should().Contain("An open transaction holds offsets back: the last stable offset is below the high watermark on 1 partition.");
     }
 
     [Fact]
