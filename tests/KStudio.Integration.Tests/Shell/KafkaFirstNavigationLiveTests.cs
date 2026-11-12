@@ -212,10 +212,10 @@ public abstract class KafkaFirstNavigationLiveTests(KafkaFixture kafka)
 
         foreach (ConsumerGroupListing group in groups.Valid.OrderBy(static x => x.GroupId, StringComparer.Ordinal))
         {
-            List<ListConsumerGroupOffsetsResult> offsets = await admin.ListConsumerGroupOffsetsAsync([new ConsumerGroupTopicPartitions(group.GroupId, null)]);
+            // The tests' own helper, a consumer that is never subscribed: an admin handle crashes librdkafka up to 2.16.0 (#5040).
             lines.Add(group.GroupId + ": " + string.Join(
                 ", ",
-                offsets.SelectMany(static x => x.Partitions).OrderBy(static x => x.Topic, StringComparer.Ordinal).ThenBy(static x => x.Partition.Value)
+                LiveGroupOffsets.CommittedAnywhere(kafka, group.GroupId).OrderBy(static x => x.Topic, StringComparer.Ordinal).ThenBy(static x => x.Partition.Value)
                     .Select(static x => $"{x.Topic}[{x.Partition.Value}]={x.Offset}")));
         }
 

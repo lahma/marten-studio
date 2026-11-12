@@ -106,6 +106,12 @@ projects.
 **One client.** Confluent.Kafka is the only Kafka client (plan K2): floor 2.14.0, the version WolverineFx.Kafka 6.61 pins,
 latest tested 2.16.0. It brings librdkafka's native binaries (`librdkafka.redist`) at its own version.
 
+**The lag read has a consumer group.** The lag read uses a per-cluster consumer that is never subscribed, through a dependent admin
+client, because an admin handle has no consumer group and librdkafka 2.16.0 and earlier crash (#5040) on `NOT_COORDINATOR` in
+`ListConsumerGroupOffsets` (a NULL `rk_cgrp` in `rd_kafka_handle_OffsetFetch`: SIGSEGV, exit 139, just after a broker auto-creates
+`__consumer_offsets` or whenever a group's coordinator moves). Remove it once the Confluent.Kafka floor contains librdkafka's fix
+(PR #5611, merged 2026-10-14; no release has it as of 2.16.0). Every other admin call stays on the plain admin client.
+
 **The wire seam.** Every broker call goes through `IKafkaWire` (`KStudio.Core.Wire`): metadata for all topics, describe
 topics with their authorized operations, describe cluster, list offsets (earliest, latest, max timestamp, for a timestamp;
 one kind per call, each partition once), describe a topic's configs, a declared group's offsets and description, and a
@@ -131,7 +137,12 @@ shown as "Not available: needs `DESCRIBE_CONFIGS` on topic `orders.v1`" and logg
 **Lifecycle.** Nothing connects when KStudio is registered or the application starts, and nothing is a hosted service.
 One admin client per cluster is created by the first read that needs it and disposed when it has been idle for
 `AdminIdleTimeout` (5 minutes). A client a call still holds is never destroyed: the pool retires it and disposes it when the last
-lease is released. Each scan gets one consumer, built, read and closed on a dedicated thread; the scan's
+lease is released. The group-offsets (lag) read is the one admin call that does not run on that client: it runs on a per-cluster
+**offsets reader**, a consumer that is never subscribed, assigned or read, with a dependent admin client built over its handle
+(`DependentAdminClientBuilder`), pooled, leased and idle-disposed exactly as the admin client is, and disposed in the order
+dependent admin client, `Close`, `Dispose`. It is built as a scan consumer is (the clone, the overrides, a group id of its own that is
+never joined, no commit, no offset store, the engine's log and error handlers), and its queue is drained after each read. It commits
+nothing, joins no group and creates no topic (`ReadNeverWritesMetadataLiveTests`). Each scan gets one consumer, built, read and closed on a dedicated thread; the scan's
 reads wait at most 100 ms, so a cancel, the deadline and the governor are seen within 100 ms. At host shutdown the engine
 cancels every scan, waits up to 10 s, and disposes its clients. Catalog reads are single-flight per cluster and key, for
 the host studio's `RefreshInterval` (configs, authorized operations and the cluster description for a minute).

@@ -295,4 +295,39 @@ public class ConfluentOverridesTests
         ConfluentClientSettings.ClientId(new Dictionary<string, string>()).Should().Be("rdkafka.kstudio");
         ConfluentClientSettings.ClientId(new Dictionary<string, string> { ["client.id"] = new string('x', 400) }).Should().HaveLength(255).And.EndWith(".kstudio");
     }
+
+    [Theory]
+    [InlineData("allow.auto.create.topics", "false")]
+    [InlineData("enable.auto.commit", "false")]
+    [InlineData("enable.auto.offset.store", "false")]
+    [InlineData("group.id", "kstudio-11111111222233334444555555555555")]
+    [InlineData("group.protocol", "classic")]
+    [InlineData("client.id", "my-app-1.kstudio")]
+    [InlineData("auto.offset.reset", "error")]
+    [InlineData("statistics.interval.ms", "0")]
+    [InlineData("enable.metrics.push", "false")]
+    [InlineData("queued.max.messages.kbytes", "1024")]
+    [InlineData("fetch.max.bytes", "1048576")]
+    public void The_offsets_reader_is_built_as_the_scan_consumer_is_with_a_group_id_of_its_own_and_a_small_queue(string key, string expected)
+    {
+        // The reader exists so that the lag read has a handle with a consumer group (librdkafka #5040). Hard rule 17 holds for it as for a scan:
+        // it never commits, stores an offset or creates a topic, whatever the host set.
+        ConsumerConfig config = ConfluentClientSettings.BuildOffsetsReaderConfig(Definition(HostConsumerConfig()), ScanId, "kstudio-");
+
+        config.Get(key).Should().Be(expected);
+    }
+
+    [Fact]
+    public void The_offsets_reader_loses_the_keys_the_engine_removes_and_reports_the_host_keys_it_replaced_by_name_only()
+    {
+        List<string> reported = [];
+
+        ConsumerConfig config = ConfluentClientSettings.BuildOffsetsReaderConfig(Definition(HostConsumerConfig()), ScanId, "kstudio-", reported.Add);
+
+        config.Get("group.instance.id").Should().BeNull("no static membership");
+        config.Get("debug").Should().BeNull();
+        config.Get("bootstrap.servers").Should().Be("broker:9092");
+        reported.Should().Contain(["enable.auto.commit", "group.id", "group.instance.id", "debug"]);
+        reported.Should().NotContain(static x => x.Contains("secret", StringComparison.Ordinal) || x.Contains("host-group", StringComparison.Ordinal));
+    }
 }

@@ -70,9 +70,8 @@ public abstract class PerTopicScanLiveTests(KafkaFixture fixture)
         listed.Should().NotContain(group, "the scan's one group id is never joined");
         listed.Should().NotContain(static x => x.StartsWith("kstudio-", StringComparison.Ordinal) && x.Length == "kstudio-".Length + 32, "a per-topic scan leaves no group of any scan");
 
-        List<ListConsumerGroupOffsetsResult> committed = await client.ListConsumerGroupOffsetsAsync(
-            [new ConsumerGroupTopicPartitions(group, [new TopicPartition(orders, 0), new TopicPartition(orders, 1), new TopicPartition(audit, 0)])]);
-        committed.SelectMany(static x => x.Partitions).Where(static x => x.Offset.Value >= 0 && !x.Error.IsError).Should().BeEmpty("the scan committed nothing");
+        LiveGroupOffsets.Committed(fixture, group, [new TopicPartition(orders, 0), new TopicPartition(orders, 1), new TopicPartition(audit, 0)])
+            .Should().BeEmpty("the scan committed nothing");
     }
 
     [Fact]

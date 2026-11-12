@@ -5,15 +5,16 @@ using KStudio.Core.Logging;
 
 namespace KStudio.Core.Wire.Confluent;
 
-/// <summary>The production factory: one <see cref="ConfluentWire" /> per cluster, over the shared admin pool.</summary>
+/// <summary>The production factory: one <see cref="ConfluentWire" /> per cluster, over the shared admin and offsets-reader pools.</summary>
 internal sealed class ConfluentWireFactory(
     KafkaAdminPool<IAdminClient> pool,
+    KafkaAdminPool<ConfluentOffsetsReader> offsetsPool,
     KafkaEngineSnapshot settings,
     ConfluentClientEvents events,
     KStudioLoggers loggers) : IKafkaWireFactory
 {
     /// <inheritdoc />
-    public IKafkaWire Create(KafkaClusterDefinition cluster) => new ConfluentWire(cluster, pool, settings, events, loggers);
+    public IKafkaWire Create(KafkaClusterDefinition cluster) => new ConfluentWire(cluster, pool, offsetsPool, settings, events, loggers);
 
     /// <summary>
     /// Builds the admin client of a cluster: the host's configuration with the engine's overrides, the engine's own log and error

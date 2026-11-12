@@ -60,6 +60,19 @@ internal static class KStudioEngineRegistration
                 snapshot.RequestTimeout + TimeSpan.FromSeconds(1));
         });
 
+        // The group-offsets read's own handle: a consumer that is never subscribed, with an admin client over it (D36, librdkafka #5040).
+        services.TryAddSingleton(static provider =>
+        {
+            ConfluentClientEvents events = provider.GetRequiredService<ConfluentClientEvents>();
+            KafkaEngineSnapshot snapshot = provider.GetRequiredService<KafkaEngineSnapshot>();
+            return new KafkaAdminPool<ConfluentOffsetsReader>(
+                cluster => new ConfluentOffsetsReader(cluster, snapshot.GroupIdPrefix, events),
+                provider.GetRequiredService<TimeProvider>(),
+                snapshot.AdminIdleTimeout,
+                provider.GetRequiredService<KStudioLoggers>().Clients,
+                snapshot.RequestTimeout + TimeSpan.FromSeconds(1));
+        });
+
         services.TryAddSingleton<IKafkaWireFactory, ConfluentWireFactory>();
         services.TryAddSingleton<KafkaWires>();
         services.TryAddSingleton(static provider => new KafkaSnapshotCache(provider.GetRequiredService<TimeProvider>()));

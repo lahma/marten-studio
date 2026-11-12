@@ -98,9 +98,8 @@ public abstract class RelatedRecordsLiveTests(KafkaFixture fixture)
         IReadOnlyList<string> listed = [.. (groups.Valid ?? []).Select(static x => x.GroupId)];
         listed.Should().NotContain(group, "the scan's one group id is never joined");
 
-        List<ListConsumerGroupOffsetsResult> committed = await client.ListConsumerGroupOffsetsAsync(
-            [new ConsumerGroupTopicPartitions(group, [new TopicPartition(incoming, 0), new TopicPartition(outgoing, 0), new TopicPartition(unrelated, 0)])]);
-        committed.SelectMany(static x => x.Partitions).Where(static x => x.Offset.Value >= 0 && !x.Error.IsError).Should().BeEmpty("the scan committed nothing");
+        LiveGroupOffsets.Committed(fixture, group, [new TopicPartition(incoming, 0), new TopicPartition(outgoing, 0), new TopicPartition(unrelated, 0)])
+            .Should().BeEmpty("the scan committed nothing");
     }
 
     [KafkaFact]

@@ -54,10 +54,8 @@ public abstract class ReadNeverWritesScanLiveTests(KafkaFixture fixture)
 
         foreach (string group in scanGroups)
         {
-            List<ListConsumerGroupOffsetsResult> committed = await client.ListConsumerGroupOffsetsAsync(
-                [new ConsumerGroupTopicPartitions(group, [new TopicPartition(topic, 0), new TopicPartition(topic, 1)])]);
-
-            committed.SelectMany(static x => x.Partitions).Where(static x => x.Offset.Value >= 0 && !x.Error.IsError).Should().BeEmpty($"group {group} committed nothing");
+            LiveGroupOffsets.Committed(fixture, group, [new TopicPartition(topic, 0), new TopicPartition(topic, 1)])
+                .Should().BeEmpty($"group {group} committed nothing");
         }
     }
 
