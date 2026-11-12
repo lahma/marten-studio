@@ -1,5 +1,6 @@
 using Confluent.Kafka;
 
+using KStudio.Core.Correlation;
 using KStudio.Core.Wire.Confluent;
 
 namespace KStudio.Core.Clusters;
@@ -7,6 +8,8 @@ namespace KStudio.Core.Clusters;
 /// <summary>What the engine knows about one topic the host declared, or the default for one it did not.</summary>
 internal sealed class KafkaTopicDescriptor
 {
+    private IReadOnlyList<CorrelationField>? correlationFields;
+
     /// <summary>Creates a descriptor from what a host declared.</summary>
     /// <param name="name">The topic's name.</param>
     /// <param name="settings">What the host said, or <see langword="null" /> for a topic that declared nothing.</param>
@@ -37,6 +40,9 @@ internal sealed class KafkaTopicDescriptor
 
     /// <summary>The partitioner the host declared, when it declared one: a claim the engine verifies before it prunes.</summary>
     public KafkaPartitioner? Partitioner => Settings.PartitionerValue;
+
+    /// <summary>The topic's correlation fields (D42): the defaults, with the host's own, resolved once.</summary>
+    public IReadOnlyList<CorrelationField> CorrelationFields => correlationFields ??= CorrelationDefaults.Resolve(Settings.Correlations);
 }
 
 /// <summary>

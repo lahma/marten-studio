@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
 
+using KStudio.Core.Correlation;
 using KStudio.Core.Predicates;
 using KStudio.Core.Redaction;
 
@@ -136,6 +137,8 @@ internal static partial class KafkaEngineOptionsValidation
         {
             ValidateRules(problems, name, rules);
         }
+
+        CorrelationValidation.Validate(problems, "KStudio: topic '" + Display(name) + "'", topic.Correlations);
     }
 
     /// <summary>

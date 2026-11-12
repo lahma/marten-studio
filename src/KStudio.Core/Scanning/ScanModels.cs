@@ -81,6 +81,12 @@ internal sealed record KafkaScanLowering
     }
 }
 
+/// <summary>One topic of a scan whose topics are searched with different predicates and grants (the timeline, D42).</summary>
+/// <param name="Topic">The topic.</param>
+/// <param name="PredicateText">The search for this topic.</param>
+/// <param name="Grant">What this topic is read under: it includes <see cref="KafkaReadGrant.Envelope" /> and is included in the request's grant, which is the most any topic may read.</param>
+internal sealed record KafkaTopicQuery(KafkaTopicName Topic, string PredicateText, KafkaReadGrant Grant);
+
 /// <summary>What to scan (decision 9.1).</summary>
 /// <param name="Cluster">The cluster's key.</param>
 /// <param name="Topics">The topics, already authorized by the host studio.</param>
@@ -92,6 +98,7 @@ internal sealed record KafkaScanLowering
 /// <param name="ContinueFrom">The cursor of an earlier scan: this one reads exactly the offsets that one left.</param>
 /// <param name="Lower">Limits lowered for this scan.</param>
 /// <param name="DisablePruning">Read every partition even where a verified partitioner would allow reading fewer ("Search all partitions", D-PAYLOAD decision 7.6).</param>
+/// <param name="PerTopic">A predicate and a grant for each topic (D42): <paramref name="PredicateText" /> is then <see langword="null" /> and <paramref name="Topics" /> are exactly these topics, in order. One scan still: one consumer, one slot, one estimate and one byte budget.</param>
 internal sealed record KafkaScanRequest(
     string Cluster,
     IReadOnlyList<KafkaTopicName> Topics,
@@ -102,7 +109,8 @@ internal sealed record KafkaScanRequest(
     TimeSpan? CreateTimeMargin = null,
     KafkaScanCursor? ContinueFrom = null,
     KafkaScanLowering? Lower = null,
-    bool DisablePruning = false);
+    bool DisablePruning = false,
+    IReadOnlyList<KafkaTopicQuery>? PerTopic = null);
 
 /// <summary>Why a scan stopped (decision 9.5): exactly one.</summary>
 internal enum KafkaScanStopReason
@@ -299,7 +307,7 @@ internal sealed class KafkaScanPlan
     public bool IsValid => Errors.Count == 0;
 
     /// <summary>Whether judging a record can read its value on any topic: the search is audited as one that reads values.</summary>
-    public bool ReadsValues => Topics.Values.Any(static x => x.Predicate.ReadsValues);
+    public bool ReadsValues => Topics.Values.Any(static x => x.Predicate.ReadsValues && x.Grant.HasFlag(KafkaReadGrant.Payload));
 
     /// <summary>
     /// What each topic's declared partitioner came to, for the topics it was asked of: pruned (and to which partitions), or why not. The

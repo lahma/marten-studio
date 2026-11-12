@@ -514,3 +514,63 @@ A record read keeps one more value: the record asked for may hold up to $F_v$ by
 Before reading, the engine estimates a scan: the offsets in its ranges ("about", since offsets are not records) and the
 bytes, from a small sample of record sizes. Above the confirmation threshold, `Start` refuses unless the visitor's
 confirmation travels with the call. A profile (M5) or a visitor can lower any limit; nothing raises one above the host's.
+
+## D42
+
+**KStudio correlates by declared fields, in one audited scan.**
+
+**Fields and kinds.** A topic's correlation fields are headers, CloudEvents attributes, the key and JSON paths
+(`KafkaTopicBuilder.Correlation`). Each has a **kind**, which says what its values mean, and fields of one kind are compared
+across topics; fields of different kinds never are. A field's kind is the first that applies: what `As(kind)` names,
+`document:{type}` for `Document(...)`, `stream` for `Stream(...)`, the kind of the default it replaces, or its own name (a
+header's or attribute's folded to lower case, a path's canonical text). The registry validates every declaration with the rest
+of the options and reports all problems together: a header name of 1 to 256 characters of `[A-Za-z0-9_.-]`, an attribute of
+`[a-z0-9]{1,20}`, a path the search grammar reads (at most 32 steps), a kind of `[a-z][a-z0-9-]{0,39}` or `document:` and a
+type, a document type of 1 to 200 characters with no control character, a store of 1 to 100, at most 16 fields a topic
+(defaults included), one field per source and name, and not `Document` and `Stream` on one field. The kind `trace` is for
+headers only.
+
+**Defaults.** Unless `WithoutDefaults()` is called, a topic has Wolverine's and CloudEvents' conventions: header
+`correlation-id` (`correlation`); headers `id`, `conversation-id` and `causation-id` and CloudEvents `id` (`message`); header
+`saga-id` (`saga`); and the trace headers `traceparent`, `ce_traceparent` and `parent-id` (`trace`). A host field with the same
+source and name replaces the default. `tenant-id` is not a kind: it is a scope, too broad to correlate on.
+
+**Keys come only from what the anchor shows.** `CorrelationExtractor` reads the anchor's already-redacted fields and only a
+literal: not null, not masked, not cut, text (a binary header is hex and is never a key), at most 1,000 characters and
+holding no mask. `KafkaMatchField.IsLiteral` and `KafkaMatchMasks.IsMasked` are the one rule, in Core, which the chips, the
+copied predicates and the extractor share. A header is read ignoring case and up to 4 times. A JSON path is read only from an
+anchor read with the payload, whose JSON value is whole and not withheld, with no masked path left out of the match and the
+node neither masked nor under a mask, and only a scalar (a string, a number or a boolean). The trace comes from the
+anchor's trace context, and only when the header it came from is a literal. A set holds at most 10 values a kind and 24 in
+all, and says how many it left out.
+
+**One query a topic.** `CorrelationQueryBuilder` writes the search of one topic from the key set and that topic's own fields.
+It leaves a field out, with a reason that names no value, when the header is on the deny-list, when the field is redacted and
+not `Searchable()`, when a trace header is redacted (`^=` is refused on a redacted field), when a JSON path would be searched
+without `ReadPayloads`, or when the topic's key format cannot hold the value. One value is `=`, several are `in`; a JSON
+path also searches a value that reads as a number or a boolean in that type, because the same id is a string on one topic and
+a number on another (not a text with a leading zero). Past the parser's 32 clauses or 2,000 characters whole kinds are
+dropped, in the order trace, the host's kinds, documents and streams, saga, message, correlation, each said. A topic left with
+no clause is not scanned. Every text it writes parses and compiles on the topic.
+
+**One scan, a predicate and a grant per topic.** `KafkaScanRequest.PerTopic` gives each topic a `KafkaTopicQuery` (text and
+grant). `PredicateText` is then `null`, the topics are exactly the queries' topics in order, and each grant includes `Envelope`
+and is included in the request's. Each text is parsed and compiled for its own topic under its own grant, and every read of a
+record asks the topic's grant (`TopicScanContext.Grant`), so a topic searched under `Envelope` never reads a value although
+another topic of the scan does. An error is prefixed `On {topic}: `. Pruning uses each topic's own key clauses. The audit text
+is `{topic}: {text}` for each topic, joined by `; `, and a literal is shown only where **no** topic redacts the field it is
+on. It is still one scan: one consumer, one slot, one estimate and confirmation, one stop reason, one budget, and
+`ReadsValues` is true when a topic whose search reads values has the payload grant. Without `PerTopic` nothing changed.
+
+**Related records, the rules the timeline follows.** The default topic set is the anchor's topic first, then the cluster's
+declared topics in name order, each filtered through the cluster and capability policies, at most 20; a refused topic is absent
+from a default set, and a visitor-chosen set with a refused topic is refused whole, never narrowed (D35). A topic whose query
+is `null` is a lane that says why and is left out of `PerTopic`; a JSON path without `ReadPayloads` is noted on its lane. The
+service asks `SearchRecords`, the cluster policy for every topic, then the `ReadPayloads` question once for each topic that has
+a path, and audits once for the scan, on failure as well as success, with the per-topic audit text.
+
+**Duplicates.** `KafkaDuplicateFinder` groups the matches the visitor already holds; it reads nothing, asks no gate and records
+no audit. Two records are copies when they are on the same topic and share an identity, which is the first of these a record
+has: its `id` header, CloudEvents `source` and `id`, or its key and whole value (read with the payload, neither cut nor
+withheld; a masked value is compared as shown, and the group says so). A masked or cut field is no identity. A group has at
+least two copies.

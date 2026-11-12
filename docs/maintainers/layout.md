@@ -380,6 +380,8 @@ src/KStudio.Core/Scanning/               The scan engine (D38, D41): plan and es
                                          set and the partitioner verification that let a key search read fewer partitions (D39)
 src/KStudio.Core/Redaction/              Redaction inside the engine (D40): the built-in header deny-list, the topic's rules and the
                                          redactor every match is made through
+src/KStudio.Core/Correlation/            Correlation (D42): a topic's declared fields and their kinds, the extractor that reads an
+                                         anchor's literal fields, the per-topic query builder and the duplicate finder
 tests/KStudio.Tests/Conventions/         KStudio's fences and convention scans
 tests/KStudio.Tests/Registration/        AddKafkaStudio, the version guard, the startup guard
 tests/KStudio.Tests/Endpoints/           Mounting, endpoint authorization, a host with no data source
@@ -401,6 +403,7 @@ tests/KStudio.Tests/Logging/             The engine's log events and the parity 
 tests/KStudio.Tests/Predicates/          The grammar, its messages and limits, the canonical text and the evaluation tables
 tests/KStudio.Tests/Decoding/            The detection order, the caps, headers, trace contexts and CloudEvents
 tests/KStudio.Tests/Redaction/           The deny-list, the topic's rules, the match caps and the one place a match is made
+tests/KStudio.Tests/Correlation/         The declarations and their bounds, the extractor, the per-topic query and the duplicate finder
 tests/KStudio.Tests/Scanning/            The scan engine on the fake: every stop reason and end state, the cursor, the governor, the
                                          limits, the estimate, batching and the lifecycle
 tests/KStudio.Tests/Partitioning/        The partitioners' known answers, the key set, the verification by sampling and the pruned scan

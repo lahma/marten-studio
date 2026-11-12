@@ -103,13 +103,34 @@ internal sealed partial class KafkaScanner(
             throw new ArgumentException("A scan needs at least one topic.", nameof(request));
         }
 
+        ValidatePerTopic(request);
+
         KafkaClusterDefinition definition = registry.Get(request.Cluster);
         KafkaScanLimits limits = request.Lower?.Apply(settings.Limits) ?? settings.Limits;
-        PredicateParseResult parsed = PredicateParser.Parse(request.PredicateText);
 
-        if (!parsed.IsValid)
+        // One search for every topic, or (D42) one for each, each under its own grant.
+        bool perTopic = request.PerTopic is not null;
+        PredicateParseResult shared = perTopic ? new PredicateParseResult(null, []) : PredicateParser.Parse(request.PredicateText);
+        Dictionary<string, (PredicateParseResult Parsed, KafkaReadGrant Grant)> searches = new(StringComparer.Ordinal);
+        List<PredicateError> parseErrors = [];
+
+        if (request.PerTopic is { } queries)
         {
-            return new KafkaScanPlan(request, null, [], new Dictionary<string, TopicScanContext>(), parsed.Errors, [], Unknown(0, 0), limits, string.Empty);
+            foreach (KafkaTopicQuery query in queries)
+            {
+                PredicateParseResult parsedQuery = PredicateParser.Parse(query.PredicateText);
+                searches[query.Topic.Value] = (parsedQuery, query.Grant);
+                parseErrors.AddRange(parsedQuery.Errors.Select(x => OnTopic(query.Topic.Value, x)));
+            }
+        }
+        else if (!shared.IsValid)
+        {
+            parseErrors.AddRange(shared.Errors);
+        }
+
+        if (parseErrors.Count > 0)
+        {
+            return new KafkaScanPlan(request, null, [], new Dictionary<string, TopicScanContext>(), parseErrors, [], Unknown(0, 0), limits, string.Empty);
         }
 
         KafkaTopicName[] topics = [.. request.Topics.DistinctBy(static x => x.Value)];
@@ -131,36 +152,44 @@ internal sealed partial class KafkaScanner(
             KafkaTopicName topic = topics[index];
             KafkaTopicDescriptor descriptor = definition.Descriptor(topic.Value);
             IKafkaRedactor redactor = redactors[index];
+            (PredicateParseResult parsed, KafkaReadGrant grant) = perTopic ? searches[topic.Value] : (shared, request.Grant);
 
             // A host decoder runs only for a visitor who may read payloads (decision 8.6): under Envelope it is not even created. The
             // built-in kinds (CloudEvents among them) are instances the host handed over, never made by its factory, so they still count.
-            IKafkaRecordDecoder? decoder = request.Grant.HasFlag(KafkaReadGrant.Payload) || KafkaDecoders.BuiltInKind(descriptor.Settings.DecoderInstance) is not null
+            // The grant is the topic's own: a topic searched under Envelope reads no value though another topic of the scan does.
+            IKafkaRecordDecoder? decoder = grant.HasFlag(KafkaReadGrant.Payload) || KafkaDecoders.BuiltInKind(descriptor.Settings.DecoderInstance) is not null
                 ? decoders.For(descriptor)
                 : null;
             bool structured = KafkaDecoders.BuiltInKind(decoder) == KafkaBuiltInDecoder.CloudEvents;
 
             PredicateCompilation compiled = PredicateCompiler.Compile(
                 parsed.Tree,
-                new PredicateCompileContext(topic.Value, descriptor.KeyFormat, descriptor.KeyFormatDeclared, redactor, request.Grant, structured));
+                new PredicateCompileContext(topic.Value, descriptor.KeyFormat, descriptor.KeyFormatDeclared, redactor, grant, structured));
 
             foreach (PredicateError error in compiled.Errors)
             {
-                if (!errors.Any(x => x.Start == error.Start && x.Message == error.Message))
+                PredicateError shown = perTopic ? OnTopic(topic.Value, error) : error;
+
+                if (!errors.Any(x => x.Start == shown.Start && x.Message == shown.Message))
                 {
-                    errors.Add(error);
+                    errors.Add(shown);
                 }
             }
 
             if (compiled.Predicate is { } predicate)
             {
-                contexts[topic.Value] = new TopicScanContext(topic.Value, descriptor, redactor, predicate, decoder);
+                contexts[topic.Value] = new TopicScanContext(topic.Value, descriptor, redactor, predicate, decoder, grant);
                 verdicts.AddRange(predicate.Verdicts);
             }
         }
 
-        string audit = PredicateFormatter.Format(
-            parsed.Tree,
-            clause => redactors.Any(x => PredicateCompiler.IsRedacted(clause.Field, x)));
+        // A literal is shown only where no topic of the scan redacts the field it is on: one that is plain here and masked there is
+        // <redacted> everywhere in the entry.
+        string audit = perTopic
+            ? string.Join(
+                "; ",
+                topics.Select(topic => topic.Value + ": " + PredicateFormatter.Format(searches[topic.Value].Parsed.Tree, clause => redactors.Any(x => PredicateCompiler.IsRedacted(clause.Field, x)))))
+            : PredicateFormatter.Format(shared.Tree, clause => redactors.Any(x => PredicateCompiler.IsRedacted(clause.Field, x)));
 
         IReadOnlyList<PartitionRange> ranges = Continue(window.Ranges, request.ContinueFrom);
 
@@ -171,7 +200,7 @@ internal sealed partial class KafkaScanner(
 
         // A key search may read fewer partitions, but only after sampling the window has proved the topic's declared partitioner
         // (D-PAYLOAD decision 7): the ranges, the estimate and the cursor then cover exactly what is read.
-        IReadOnlyList<KafkaTopicPruning> pruning = await PruneAsync(request, parsed.Tree, topics, contexts, window, ranges, verdicts, owner, cancellationToken).ConfigureAwait(false);
+        IReadOnlyList<KafkaTopicPruning> pruning = await PruneAsync(request, shared.Tree, perTopic ? searches : null, topics, contexts, window, ranges, verdicts, owner, cancellationToken).ConfigureAwait(false);
         ranges = Pruned(ranges, pruning);
         verdicts = ApplyPruning(verdicts, pruning);
 
@@ -179,13 +208,58 @@ internal sealed partial class KafkaScanner(
         return new KafkaScanPlan(request, window, ranges, contexts, [], verdicts, estimate, limits, audit, pruning);
     }
 
+    /// <summary>The rules of a request with a search for each topic (D42); every violation is a caller's bug and throws.</summary>
+    private static void ValidatePerTopic(KafkaScanRequest request)
+    {
+        if (request.PerTopic is not { } queries)
+        {
+            return;
+        }
+
+        if (request.PredicateText is not null)
+        {
+            throw new ArgumentException("A scan with a search for each topic has no PredicateText.", nameof(request));
+        }
+
+        if (!request.Topics.Select(static x => x.Value).SequenceEqual(queries.Select(static x => x.Topic.Value), StringComparer.Ordinal))
+        {
+            throw new ArgumentException("A scan with a search for each topic scans exactly those topics, in that order.", nameof(request));
+        }
+
+        if (queries.Select(static x => x.Topic.Value).Distinct(StringComparer.Ordinal).Count() != queries.Count)
+        {
+            throw new ArgumentException("A topic has one search in a scan.", nameof(request));
+        }
+
+        foreach (KafkaTopicQuery query in queries)
+        {
+            if (query.PredicateText is null)
+            {
+                throw new ArgumentException("A topic's search is a text; an empty text matches every record.", nameof(request));
+            }
+
+            if (!query.Grant.HasFlag(KafkaReadGrant.Envelope))
+            {
+                throw new ArgumentException("A topic needs at least the Envelope grant.", nameof(request));
+            }
+
+            if ((query.Grant & ~request.Grant) != 0)
+            {
+                throw new ArgumentException("A topic cannot be read under more than the request's grant.", nameof(request));
+            }
+        }
+    }
+
+    private static PredicateError OnTopic(string topic, PredicateError error) => error with { Message = "On " + topic + ": " + error.Message };
+
     /// <summary>
     /// Asks the verifier about every topic that has a key clause to explain: a topic that declared a partitioner, or one whose search fixes
     /// the key (its verdict then says why it is not pruned). A topic with neither says nothing.
     /// </summary>
     private async Task<IReadOnlyList<KafkaTopicPruning>> PruneAsync(
         KafkaScanRequest request,
-        PredicateNode? tree,
+        PredicateNode? sharedTree,
+        Dictionary<string, (PredicateParseResult Parsed, KafkaReadGrant Grant)>? searches,
         KafkaTopicName[] topics,
         Dictionary<string, TopicScanContext> contexts,
         ResolvedWindow window,
@@ -194,7 +268,6 @@ internal sealed partial class KafkaScanner(
         KafkaScanOwner owner,
         CancellationToken cancellationToken)
     {
-        IReadOnlyList<string>? keySet = KeyPruning.KeySet(tree);
         WireIsolation isolation = request.Isolation == KafkaIsolation.Committed ? WireIsolation.ReadCommitted : WireIsolation.ReadUncommitted;
         List<KafkaTopicPruning> pruning = [];
 
@@ -206,6 +279,8 @@ internal sealed partial class KafkaScanner(
                 continue;
             }
 
+            // A topic with a search of its own is pruned by that search's key clauses and by no other topic's.
+            IReadOnlyList<string>? keySet = KeyPruning.KeySet(searches is null ? sharedTree : searches[topic.Value].Parsed.Tree);
             bool declared = context.Descriptor.Partitioner is not null;
 
             if (!declared && keySet is null)

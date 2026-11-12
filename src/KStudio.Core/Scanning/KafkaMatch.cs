@@ -25,6 +25,13 @@ internal readonly record struct KafkaMatchField(string? Text, string? RedactedBy
     /// <summary>Whether a rule masked the value.</summary>
     public bool IsRedacted => RedactedBy is not null;
 
+    /// <summary>
+    /// Whether the text is a faithful rendering of the bytes as a search literal would compare them: not null, not masked, not cut, and text
+    /// (a binary header is kept as hex, whose length is never its byte length). The one rule the chips, the copied predicates and the
+    /// correlation extractor all use, so that none of them can disagree.
+    /// </summary>
+    public bool IsLiteral => !IsNull && !IsRedacted && !Truncated && Text is { } text && Encoding.UTF8.GetByteCount(text) == ByteLength;
+
     /// <summary>A masked value.</summary>
     /// <param name="rule">The rule's name.</param>
     public static KafkaMatchField Masked(string rule) => new(null, rule, false, 0, false);
@@ -136,6 +143,53 @@ internal sealed class KafkaMatch
     public bool ReadWithPayload { get; init; }
 }
 
+/// <summary>Where a match's value is masked: the rule the view and the correlation extractor share.</summary>
+internal static class KafkaMatchMasks
+{
+    /// <summary>The text a mask writes in place of a part of a value; a literal containing it is never a faithful copy.</summary>
+    public const string MaskPrefix = "••• (redacted by";
+
+    /// <summary>Whether the node at <paramref name="segments" /> is a masked node or lies under one: a mask replaces the whole subtree.</summary>
+    /// <param name="match">The match.</param>
+    /// <param name="segments">The node's path: a member name, or <see langword="null" /> and an index.</param>
+    public static bool IsMasked(KafkaMatch match, IReadOnlyList<(string? Key, int Index)> segments)
+    {
+        ArgumentNullException.ThrowIfNull(match);
+        ArgumentNullException.ThrowIfNull(segments);
+
+        foreach (KafkaMaskedPath masked in match.MaskedPaths)
+        {
+            if (masked.Steps.Count <= segments.Count && StartsWith(segments, masked.Steps))
+            {
+                return true;
+            }
+        }
+
+        // The paths beyond the first 64 are counted and not kept: with some left out, no node can be proved unmasked.
+        return match.MaskedPathsOmitted > 0;
+    }
+
+    private static bool StartsWith(IReadOnlyList<(string? Key, int Index)> segments, IReadOnlyList<JsonPathStep> prefix)
+    {
+        for (int i = 0; i < prefix.Count; i++)
+        {
+            bool same = prefix[i] switch
+            {
+                JsonMemberStep member => segments[i].Key is { } key && string.Equals(key, member.Name, StringComparison.OrdinalIgnoreCase),
+                JsonIndexStep index => segments[i].Key is null && segments[i].Index == index.Index,
+                _ => false,
+            };
+
+            if (!same)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+}
+
 /// <summary>Everything the engine knows about one topic of a scan.</summary>
 internal sealed class TopicScanContext
 {
@@ -145,14 +199,26 @@ internal sealed class TopicScanContext
     /// <param name="redactor">Its redaction rules.</param>
     /// <param name="predicate">The predicate compiled for it.</param>
     /// <param name="decoder">Its declared decoder, resolved.</param>
-    public TopicScanContext(string topic, KafkaTopicDescriptor descriptor, IKafkaRedactor redactor, CompiledPredicate predicate, IKafkaRecordDecoder? decoder)
+    /// <param name="grant">What this topic is read under: a scan whose topics have their own predicates (D42) has their own grants too.
+    /// <see cref="KafkaReadGrant.Envelope" /> when not given: a context made outside a scanner reads no value.</param>
+    public TopicScanContext(
+        string topic,
+        KafkaTopicDescriptor descriptor,
+        IKafkaRedactor redactor,
+        CompiledPredicate predicate,
+        IKafkaRecordDecoder? decoder,
+        KafkaReadGrant grant = KafkaReadGrant.Envelope)
     {
         Topic = topic;
         Descriptor = descriptor;
         Redactor = redactor ?? throw new ArgumentNullException(nameof(redactor));
         Predicate = predicate;
         Decoder = decoder;
+        Grant = grant;
     }
+
+    /// <summary>What this topic is read under: every read of a record in this topic, its payload included, asks this and never the request's.</summary>
+    public KafkaReadGrant Grant { get; }
 
     /// <summary>The topic.</summary>
     public string Topic { get; }

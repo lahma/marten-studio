@@ -44,8 +44,7 @@ internal static partial class KafkaMatchView
     /// (a binary header is kept as hex, whose length is never its byte length).
     /// </summary>
     /// <param name="field">The field.</param>
-    public static bool IsLiteral(KafkaMatchField field) =>
-        !field.IsNull && !field.IsRedacted && !field.Truncated && field.Text is { } text && Encoding.UTF8.GetByteCount(text) == field.ByteLength;
+    public static bool IsLiteral(KafkaMatchField field) => field.IsLiteral;
 
     /// <summary>Whether a literal this long is read by the parser (<see cref="PredicateParser.MaxLiteralLength" />).</summary>
     /// <param name="text">The literal.</param>
@@ -286,42 +285,7 @@ internal static partial class KafkaMatchView
     /// <summary>Whether the node at <paramref name="segments" /> is a masked node or lies under one: a mask replaces the whole subtree.</summary>
     /// <param name="match">The match.</param>
     /// <param name="segments">The node's path.</param>
-    public static bool IsMasked(KafkaMatch match, IReadOnlyList<(string? Key, int Index)> segments)
-    {
-        ArgumentNullException.ThrowIfNull(match);
-        ArgumentNullException.ThrowIfNull(segments);
-
-        foreach (KafkaMaskedPath masked in match.MaskedPaths)
-        {
-            if (masked.Steps.Count <= segments.Count && StartsWith(segments, masked.Steps))
-            {
-                return true;
-            }
-        }
-
-        // The paths beyond the first 64 are counted and not kept: with some left out, no node can be proved unmasked.
-        return match.MaskedPathsOmitted > 0;
-    }
-
-    private static bool StartsWith(IReadOnlyList<(string? Key, int Index)> segments, IReadOnlyList<JsonPathStep> prefix)
-    {
-        for (int i = 0; i < prefix.Count; i++)
-        {
-            bool same = prefix[i] switch
-            {
-                JsonMemberStep member => segments[i].Key is { } key && string.Equals(key, member.Name, StringComparison.OrdinalIgnoreCase),
-                JsonIndexStep index => segments[i].Key is null && segments[i].Index == index.Index,
-                _ => false,
-            };
-
-            if (!same)
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
+    public static bool IsMasked(KafkaMatch match, IReadOnlyList<(string? Key, int Index)> segments) => KafkaMatchMasks.IsMasked(match, segments);
 
     /// <summary>Whether the key is a text that is only too long for a search literal: the page says why it does not offer the predicate.</summary>
     /// <param name="match">The match.</param>

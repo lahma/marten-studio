@@ -14,6 +14,20 @@ namespace KStudio
         public KStudio.KafkaClusterBuilder OAuthBearerTokenRefresh(System.Action<Confluent.Kafka.IClient, string> handler) { }
         public KStudio.KafkaClusterBuilder Topic(string name, System.Action<KStudio.KafkaTopicBuilder> configure) { }
     }
+    public sealed class KafkaCorrelationBuilder
+    {
+        public KStudio.KafkaCorrelationField CloudEvent(string attribute) { }
+        public KStudio.KafkaCorrelationField Header(string name) { }
+        public KStudio.KafkaCorrelationField JsonPath(string path) { }
+        public KStudio.KafkaCorrelationField Key() { }
+        public KStudio.KafkaCorrelationBuilder WithoutDefaults() { }
+    }
+    public sealed class KafkaCorrelationField
+    {
+        public KStudio.KafkaCorrelationField As(string kind) { }
+        public KStudio.KafkaCorrelationField Document(string documentType, string? store = null) { }
+        public KStudio.KafkaCorrelationField Stream(string? store = null) { }
+    }
     public sealed class KafkaDecodeContext
     {
         public System.Collections.Generic.IReadOnlyList<KStudio.KafkaHeader> Headers { get; }
@@ -113,6 +127,7 @@ namespace KStudio
     }
     public sealed class KafkaTopicBuilder
     {
+        public KStudio.KafkaTopicBuilder Correlation(System.Action<KStudio.KafkaCorrelationBuilder> configure) { }
         public KStudio.KafkaTopicBuilder Description(string description) { }
         public KStudio.KafkaTopicBuilder Key(KStudio.KafkaKeyFormat format) { }
         public KStudio.KafkaTopicBuilder Partitioner(KStudio.KafkaPartitioner partitioner) { }
