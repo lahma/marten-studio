@@ -4,9 +4,12 @@
     <AssemblyName>KStudio.Core</AssemblyName>
     <RootNamespace>KStudio</RootNamespace>
     <!-- Plan K8: nothing KStudio ships is packed before M4, and the build's Pack target does not list this project. -->
+    <PackageId>KStudio.Core</PackageId>
     <IsPackable>false</IsPackable>
+    <PackageTags>kafka;blazor;studio;admin</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
     <Product>KStudio</Product>
-    <Description>The engine of KStudio, with no ASP.NET Core: the catalog, window resolution, the scan engine, predicates, decoders, the governor and redaction, over Confluent.Kafka behind an internal wire seam.</Description>
+    <Description>The engine of KStudio, with no ASP.NET Core: the catalog, window resolution, the scan engine, predicates, decoders, the governor and redaction, over Confluent.Kafka behind an internal wire seam. Apache Kafka is a trademark of the Apache Software Foundation. KStudio is not affiliated with or endorsed by the Apache Software Foundation.</Description>
     <!-- Selects the conditional Microsoft.Extensions.* rows in Directory.Packages.props (AGENTS.md D36). -->
     <KStudioCorePinsExtensions>true</KStudioCorePinsExtensions>
   </PropertyGroup>
@@ -17,6 +20,10 @@
   </PropertyGroup>
 
   <!-- No FrameworkReference: the engine has no ASP.NET Core (KStudioCoreFenceTests). -->
+  <ItemGroup>
+    <None Include="../KStudio/README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="Confluent.Kafka" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
