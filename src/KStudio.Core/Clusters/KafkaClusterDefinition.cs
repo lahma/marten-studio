@@ -126,6 +126,7 @@ internal sealed class KafkaClusterDefinition
         Source = source;
         DisplayName = registration.Builder.DisplayNameText ?? BaseKey;
         Environment = registration.Builder.EnvironmentText;
+        Profile = registration.Builder.ProfileValue;
         TokenRefresh = registration.Builder.TokenRefresh;
         ConsumerGroups = [.. registration.Builder.ConsumerGroups];
 
@@ -177,6 +178,9 @@ internal sealed class KafkaClusterDefinition
 
     /// <summary>The environment label, when one was set.</summary>
     public string? Environment { get; }
+
+    /// <summary>The profile the host set with <c>KafkaClusterBuilder.Profile</c>, or <see langword="null" /> for none (never inferred: D47).</summary>
+    public KafkaProfile? Profile { get; }
 
     /// <summary>The OAuth token refresh hook, when one was set.</summary>
     public Action<IClient, string>? TokenRefresh { get; }

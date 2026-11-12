@@ -200,6 +200,9 @@ internal enum KafkaScanRefusal
 
     /// <summary>The host is stopping.</summary>
     ShuttingDown,
+
+    /// <summary>The cluster's profile forbids this read: a live tail on a <c>Production</c> cluster, even when the capability is granted (D47).</summary>
+    ProfileForbids,
 }
 
 /// <summary>What <c>Start</c> returns: a handle, or the reason there is none.</summary>

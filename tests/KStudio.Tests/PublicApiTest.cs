@@ -49,6 +49,7 @@ public class PublicApiTest
             "KStudio.KafkaHeader",
             "KStudio.KafkaKeyFormat",
             "KStudio.KafkaPartitioner",
+            "KStudio.KafkaProfile",
             "KStudio.KafkaRedactionBuilder",
             "KStudio.KafkaRedactionRule",
             "KStudio.KafkaScanLimits",

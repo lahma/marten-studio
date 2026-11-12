@@ -597,13 +597,13 @@ public class ScanEngineTests
 
         public string Topic { get; }
 
-        public static async Task<ScriptedScan> StartAsync(Action<KafkaEngineOptions>? configure = null, string? predicate = null)
+        public static async Task<ScriptedScan> StartAsync(Action<KafkaEngineOptions>? configure = null, string? predicate = null, Action<KafkaClusterBuilder>? cluster = null)
         {
             ScriptedReader reader = new();
             int opened = 0;
 
             // The first consumer a plan opens is the size sampler's, and reads the fake; the scan's is the second, and reads the script.
-            ScanFixture fixture = ScanFixture.Create(configure, wrap: wire => new ScriptedWire(wire, options => Interlocked.Increment(ref opened) == 1 ? wire.OpenReader(options) : reader));
+            ScanFixture fixture = ScanFixture.Create(configure, wrap: wire => new ScriptedWire(wire, options => Interlocked.Increment(ref opened) == 1 ? wire.OpenReader(options) : reader), cluster: cluster);
             string topic = fixture.Topic("scripted");
 
             for (int i = 0; i < 100; i++)

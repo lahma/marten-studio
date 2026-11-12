@@ -41,6 +41,8 @@ internal interface IScanObserver
 /// </param>
 /// <param name="FocusOffset">For a record read: the offset of the record asked for, whose value part may hold <paramref name="FocusValueBytes" />.</param>
 /// <param name="FocusValueBytes">For a record read: the bytes of value the record asked for may keep, whatever is left of the match's budget; 0 for none.</param>
+/// <param name="ClusterGovernor">The byte rate of this cluster's own, when its profile lowers the host's (D47): the scan is paced by the slower of the two.</param>
+/// <param name="ClusterOwnerBudget">The hourly allowance of this cluster's own, when its profile lowers the host's: the scan stops when either is spent.</param>
 internal sealed record ScanRunInputs(
     Guid ScanId,
     KafkaScanPlan Plan,
@@ -55,7 +57,9 @@ internal sealed record ScanRunInputs(
     IScanObserver? Observer,
     bool MatchEveryRecordInRange = false,
     long FocusOffset = -1,
-    int FocusValueBytes = 0);
+    int FocusValueBytes = 0,
+    KafkaByteRateGovernor? ClusterGovernor = null,
+    OwnerByteBudget? ClusterOwnerBudget = null);
 
 /// <summary>
 /// One scan's reader (AGENTS.md D36 and D38, decisions 4.2 and 9.2): a synchronous method run on a thread of its own that builds, assigns,
@@ -237,12 +241,20 @@ internal sealed class ScanRun : IDisposable
 
             // In debt, the thread does not call Consume: librdkafka's bounded queue stops fetching, and the broker sends little more than
             // was read (decision 9.3).
+            // The slower of the process's bucket and the cluster's own (D47): the wait is on the one in the deeper debt.
             TimeSpan debt = inputs.Governor.DebtWait();
+            KafkaByteRateGovernor waitOn = inputs.Governor;
+
+            if (inputs.ClusterGovernor is { } clusterGovernor && clusterGovernor.DebtWait() is var clusterDebt && clusterDebt > debt)
+            {
+                debt = clusterDebt;
+                waitOn = clusterGovernor;
+            }
 
             if (debt > TimeSpan.Zero)
             {
                 DateTimeOffset before = time.GetUtcNow();
-                inputs.Governor.Wait(debt, either.Token);
+                waitOn.Wait(debt, either.Token);
                 ExtendStallClocks(time.GetUtcNow() - before);
                 continue;
             }
@@ -295,6 +307,7 @@ internal sealed class ScanRun : IDisposable
     {
         // Everything read is paid for, even what is not counted below.
         inputs.Governor.Take(record.Size);
+        inputs.ClusterGovernor?.Take(record.Size);
 
         if (!partitions.TryGetValue(new WirePartition(record.Topic, record.Partition), out PartitionState? p) || p.State is not null)
         {
@@ -397,6 +410,7 @@ internal sealed class ScanRun : IDisposable
         }
 
         inputs.OwnerBudget.Add(ownerKey, record.Size);
+        inputs.ClusterOwnerBudget?.Add(ownerKey, record.Size);
         inputs.Observer?.AfterRecord(p.Range.Key, record.Offset);
 
         if (p.Next >= p.Range.End)
@@ -418,7 +432,7 @@ internal sealed class ScanRun : IDisposable
         {
             stopReason = KafkaScanStopReason.RecordBudget;
         }
-        else if (inputs.OwnerBudget.Remaining(ownerKey) <= 0)
+        else if (inputs.OwnerBudget.Remaining(ownerKey) <= 0 || inputs.ClusterOwnerBudget?.Remaining(ownerKey) <= 0)
         {
             stopReason = KafkaScanStopReason.OwnerBudget;
         }

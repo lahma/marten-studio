@@ -12,6 +12,7 @@ namespace KStudio
         public KStudio.KafkaClusterBuilder DisplayName(string displayName) { }
         public KStudio.KafkaClusterBuilder Environment(string environment) { }
         public KStudio.KafkaClusterBuilder OAuthBearerTokenRefresh(System.Action<Confluent.Kafka.IClient, string> handler) { }
+        public KStudio.KafkaClusterBuilder Profile(KStudio.KafkaProfile profile) { }
         public KStudio.KafkaClusterBuilder Topic(string name, System.Action<KStudio.KafkaTopicBuilder> configure) { }
     }
     public sealed class KafkaCorrelationBuilder
@@ -92,6 +93,12 @@ namespace KStudio
         public virtual bool IsDeterministic(System.ReadOnlySpan<byte> key) { }
         public abstract int Partition(System.ReadOnlySpan<byte> key, int partitionCount);
     }
+    public enum KafkaProfile
+    {
+        Development = 0,
+        Test = 1,
+        Production = 2,
+    }
     public sealed class KafkaRedactionBuilder
     {
         public KStudio.KafkaRedactionBuilder AllowHeader(string name) { }
@@ -117,13 +124,16 @@ namespace KStudio
         public int MaxConcurrentScans { get; set; }
         public int MaxConcurrentScansPerOwner { get; set; }
         public int MaxDecodeBytes { get; set; }
+        public long MaxExportBytes { get; set; }
         public int MaxMatchBytes { get; set; }
         public int MaxMatches { get; set; }
         public long MaxRecordsPerScan { get; set; }
         public System.TimeSpan MaxScanDuration { get; set; }
+        public int MaxTailMatches { get; set; }
         public long OwnerBytesPerHour { get; set; }
         public System.TimeSpan PartitionStallTimeout { get; set; }
         public int QueueKilobytes { get; set; }
+        public System.TimeSpan TailPauseAfter { get; set; }
     }
     public sealed class KafkaTopicBuilder
     {

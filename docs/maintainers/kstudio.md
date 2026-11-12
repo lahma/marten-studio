@@ -2,7 +2,7 @@
 
 KStudio for Apache Kafka® (working name) is the family's Kafka module. Apache Kafka is a trademark of the Apache Software
 Foundation. KStudio is not affiliated with or endorsed by the Apache Software Foundation. AGENTS.md states each rule; this document holds its
-full text and wins where they differ. D34 and D35 are the shell's half, D36 to D41 the engine's.
+full text and wins where they differ. D34 and D35 are the shell's half, D36 to D41 the engine's, D45 to D48 M5's.
 
 ## D34
 
@@ -536,6 +536,12 @@ sent at most $Q + F$ more than the engine had read.
 
 A record read keeps one more value: the record asked for may hold up to $F_v$ bytes of value (KStudio passes the decode limit, 1 MiB by default) whatever is left of its match budget, and its neighbours keep $c$, so a record read holds at most $21c + F_v$, twice that in UTF-16, within one scan slot of $S(C + 2mc)$. Masking never grows a value past twice the decode limit; a value it would is withheld.
 
+**Profiles and the cluster's own buckets (D47).** A cluster's profile caps the limits above in the engine (`min(host, ceiling)`, the table in `docs/kstudio.md`), and a
+profiled cluster whose capped rate or hourly allowance is below the host's gets a token bucket and a rolling-hour budget of its own, beside the process-wide ones:
+the scan is paced by the slower and stops when either allowance is spent. The byte rate and the allowance guard the cluster's quota and egress; concurrency and the
+consumer's sizes guard the process's memory, so they stay the host's. Exports in flight (D45) add $2 \cdot$ `MaxExportBytes` to the memory statement, 64 MiB at the defaults:
+the file is written whole into a `MemoryStream` before it is sent, and at most two are in flight.
+
 Before reading, the engine estimates a scan: the offsets in its ranges ("about", since offsets are not records) and the
 bytes, from a small sample of record sizes. Above the confirmation threshold, `Start` refuses unless the visitor's
 confirmation travels with the call. A profile (M5) or a visitor can lower any limit; nothing raises one above the host's.
@@ -750,3 +756,38 @@ same cluster gate as the settings beside it (`KafkaCatalogService.GetDiscoveryAs
 (the section, the compact form, the envelope lines, the external link line), `KafkaRecordSearchLinksTests` (fragment-only value, store rule, cluster
 choice with tenants, a throwing registry), `ExternalLinkTemplateTests` (each rule of the credential check, error text, escaping, both time forms),
 `AddKafkaStudioTests` (the host refused at start), `KafkaDiscoveredFactsTests`, and `PublicApiTest_KStudio`, whose baseline moves by `ExternalLink`.
+
+## D47
+
+**D47 — A profile lowers a cluster's limits, only ever lowers, and is set explicitly.** `KafkaClusterBuilder.Profile(KafkaProfile)` says what kind of
+cluster this is: `Development` (the host's limits, unchanged), `Test` (every per-scan limit capped at KStudio's defaults) or `Production` (lower caps, a slower
+byte rate and a smaller hourly budget on this cluster, and no export and no live tail even when granted). A cluster with no call has **no profile** and the
+host's limits exactly as before; the profile is never taken from `IHostEnvironment` and never from `Environment(...)`'s free text. ASP.NET Core's
+environment defaults to `Production` when unset and describes the host process, not the cluster (a laptop host reads a production cluster; a production
+host reads its own test cluster), and free text (`prod-eu`, `Prd`) would cap some hosts and silently not others; a host that sets nothing must be the
+application it was. It is an enum with a fixed table, not a host-supplied ceiling set, because the host already has a ceiling set (its own `Limits`)
+and a fixed, documented table is what makes the word mean the same in every host.
+
+**The ceilings** are `KafkaProfileCeilings` (internal, data and one pure function): every limit is `min(host, ceiling)`, the confirmation thresholds are capped again at the
+capped budgets so the result passes `Validate`, and the last row of the table (concurrent scans, the consumer's queue and fetch sizes, the `CreateTimeMargin`
+and the stall timeout) stays the host's: concurrency and the sizes guard the **process's** memory, whatever cluster is read, and the margin and the timeout are
+about correctness, not cost. `MaxExportBytes`, `MaxTailMatches` and `TailPauseAfter` are Test's values for a `Test` cluster; for `Production` the
+export and the tail are forbidden (`KafkaProfileCeilings.ForbidsExport` and `ForbidsTail`, which the services and the engine's `StartTail` ask) and the three
+are capped like Test's, because nothing reads them. The table is in `docs/kstudio.md`, *Profiles*. A test holds the table to the public properties of
+`KafkaScanLimits` by reflection, so a limit added later fails by name until it has a row, and holds for three host settings (the defaults, every limit at its lowest
+bound, every limit at its highest) that no value rises and the result validates.
+
+**Where it applies.** In the engine, so no page can skip it: `PlanAsync` and `ReadRecordAsync` compute `Cap(definition.Profile, settings.Limits)` and only then
+apply the request's `Lower`, which may go below the capped value and throws above it, as above the host's. `IKafkaScanner.LimitsFor(cluster)` hands the capped
+copy to a caller that needs it (the export reads `MaxExportBytes` there). The correlation scan goes through `PlanAsync` and is covered.
+
+**A bucket and an allowance of the cluster's own.** The byte rate protects the broker principal's quota and the egress bill, which are the **cluster's**, so a
+profiled cluster whose capped `BytesPerSecond` is below the host's gets a `KafkaByteRateGovernor` of its own, and one whose capped `OwnerBytesPerHour` is below
+the host's an `OwnerByteBudget` of its own: `KafkaClusterCostControls`, a singleton keyed by the cluster's entry key (`{cluster}/{tenant}` is a cluster with a bucket of its
+own), made on first use and kept, because a rolling hour and a bucket's debt outlive the scan that started them. The scan thread pays both buckets for
+every record, waits on whichever is in the deeper debt, adds to both budgets, and stops with `OwnerBudget` when either is spent; `Start`, `StartTail` and the record
+read refuse `OwnerBudgetSpent` when either has nothing left. A cluster with no profile, or one whose profile lowers neither, has none of this and nothing is allocated.
+
+**A profile never grants.** It has no capability in it: `ForbidsExport` and `ForbidsTail` can only refuse, and the limits above can only fall. `KafkaProfileTests`
+and `ProfileEngineTests` hold the engine's half; the capability half (every profile over every combination of the four capabilities leaves the usable ones a subset
+of those configured, and none under `ReadOnly`) is held where the capabilities live, in the services' tests.

@@ -67,6 +67,21 @@ public sealed class KafkaScanLimits
     /// <summary>How long a partition may make no progress before it is reported stalled (1 second to 5 minutes). Default 15 seconds.</summary>
     public TimeSpan PartitionStallTimeout { get; set; } = TimeSpan.FromSeconds(15);
 
+    /// <summary>The largest file an export writes (1 MiB to 256 MiB). Default 32 MiB, which holds the default 500 matches at their 64 KiB cap.</summary>
+    public long MaxExportBytes { get; set; } = 32 * MiB;
+
+    /// <summary>
+    /// The matches a live tail keeps and shows, newest first (1 to 10,000). Default 200. A tail never keeps more than <see cref="MaxMatches" />
+    /// (see <see cref="TailCapacity" />), so a host that lowers <see cref="MaxMatches" /> need not lower this too.
+    /// </summary>
+    public int MaxTailMatches { get; set; } = 200;
+
+    /// <summary>How long a live tail reads before it pauses itself (10 seconds to 30 minutes). Default 5 minutes.</summary>
+    public TimeSpan TailPauseAfter { get; set; } = TimeSpan.FromMinutes(5);
+
+    /// <summary>The matches a live tail keeps: <see cref="MaxTailMatches" />, and never more than <see cref="MaxMatches" />.</summary>
+    internal int TailCapacity => Math.Min(MaxTailMatches, MaxMatches);
+
     /// <summary>A copy of every value, for the engine's snapshot of the options.</summary>
     internal KafkaScanLimits Copy() => (KafkaScanLimits) MemberwiseClone();
 
@@ -92,6 +107,9 @@ public sealed class KafkaScanLimits
         Check(problems, prefix, nameof(FetchBytes), FetchBytes, MiB, 50 * MiB);
         Check(problems, prefix, nameof(CreateTimeMargin), CreateTimeMargin, TimeSpan.Zero, TimeSpan.FromHours(1));
         Check(problems, prefix, nameof(PartitionStallTimeout), PartitionStallTimeout, TimeSpan.FromSeconds(1), TimeSpan.FromMinutes(5));
+        Check(problems, prefix, nameof(MaxExportBytes), MaxExportBytes, MiB, 256 * MiB);
+        Check(problems, prefix, nameof(MaxTailMatches), MaxTailMatches, 1, 10_000);
+        Check(problems, prefix, nameof(TailPauseAfter), TailPauseAfter, TimeSpan.FromSeconds(10), TimeSpan.FromMinutes(30));
 
         return problems;
     }

@@ -124,6 +124,7 @@ internal sealed record KafkaRecordRead(
         KafkaScanRefusal.OwnerBudgetSpent => $"You have read your hourly allowance of {Bytes(ownerBytesPerHour)}. It frees up as the hour rolls on.",
         KafkaScanRefusal.NeedsConfirmation => "This search needs your confirmation first.",
         KafkaScanRefusal.PredicateInvalid => "The search text has errors.",
+        KafkaScanRefusal.ProfileForbids => "This cluster's profile forbids this.",
         _ => "The application is shutting down.",
     };
 
@@ -187,7 +188,8 @@ internal sealed partial class KafkaScanner
             return KafkaRecordRead.Without(KafkaRecordReadStatus.PartitionNotFound, KafkaRecordRead.NotAnOffset(request.Offset));
         }
 
-        KafkaScanLimits limits = settings.Limits;
+        KafkaScanLimits limits = KafkaProfileCeilings.Cap(definition.Profile, settings.Limits);
+        KafkaClusterCost cost = clusterCosts.For(definition);
 
         // A refusal is decided before the broker is asked anything, and the slot is held from here to the end of the read.
         if (coordinator.IsShuttingDown)
@@ -195,7 +197,7 @@ internal sealed partial class KafkaScanner
             return Refused(request.Cluster, KafkaScanRefusal.ShuttingDown, limits);
         }
 
-        if (ownerBudget.Remaining(owner.Key) <= 0)
+        if (cost.Remaining(owner.Key, ownerBudget) <= 0)
         {
             return Refused(request.Cluster, KafkaScanRefusal.OwnerBudgetSpent, limits);
         }
@@ -209,7 +211,7 @@ internal sealed partial class KafkaScanner
 
         try
         {
-            return await ReadWithSlotAsync(request, owner, definition, key, limits, lease, handOver: () => lease = null, cancellationToken).ConfigureAwait(false);
+            return await ReadWithSlotAsync(request, owner, definition, key, limits, cost, lease, handOver: () => lease = null, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -223,6 +225,7 @@ internal sealed partial class KafkaScanner
         KafkaClusterDefinition definition,
         WirePartition key,
         KafkaScanLimits limits,
+        KafkaClusterCost cost,
         IDisposable? lease,
         Action handOver,
         CancellationToken cancellationToken)
@@ -292,7 +295,7 @@ internal sealed partial class KafkaScanner
         long first = Math.Max(logStart!.Value, request.Offset - request.Neighbours);
         long stop = Math.Min(end!.Value, request.Offset + request.Neighbours + 1);
 
-        return await RunRecordReadAsync(request, owner, definition, key, new PartitionRange(topic, request.Partition, first, stop, logStart.Value, end.Value, null, []), limits, lease, handOver, cancellationToken).ConfigureAwait(false);
+        return await RunRecordReadAsync(request, owner, definition, key, new PartitionRange(topic, request.Partition, first, stop, logStart.Value, end.Value, null, []), limits, cost, lease, handOver, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<KafkaRecordRead> RunRecordReadAsync(
@@ -302,6 +305,7 @@ internal sealed partial class KafkaScanner
         WirePartition key,
         PartitionRange range,
         KafkaScanLimits limits,
+        KafkaClusterCost cost,
         IDisposable? lease,
         Action handOver,
         CancellationToken cancellationToken)
@@ -368,7 +372,9 @@ internal sealed partial class KafkaScanner
                 observer,
                 MatchEveryRecordInRange: true,
                 FocusOffset: request.Offset,
-                FocusValueBytes: request.Grant.HasFlag(KafkaReadGrant.Payload) ? Math.Clamp(request.FocusValueBytes, 0, limits.MaxDecodeBytes) : 0);
+                FocusValueBytes: request.Grant.HasFlag(KafkaReadGrant.Payload) ? Math.Clamp(request.FocusValueBytes, 0, limits.MaxDecodeBytes) : 0,
+                ClusterGovernor: cost.Governor,
+                ClusterOwnerBudget: cost.OwnerBudget);
             ScanRun run = new(inputs);
             string clusterText = KafkaLogValue.Cap(request.Cluster)!;
             string isolationText = request.Isolation.ToString();

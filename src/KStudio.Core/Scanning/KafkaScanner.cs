@@ -44,6 +44,13 @@ internal interface IKafkaScanner
     /// <param name="owner">Whose read it is.</param>
     /// <param name="cancellationToken">Stops the read and throws <see cref="OperationCanceledException" />.</param>
     Task<KafkaRecordRead> ReadRecordAsync(KafkaRecordRequest request, KafkaScanOwner owner, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The limits that apply on one cluster: the host's, capped by the cluster's profile when it has one (AGENTS.md D47). A new copy on every call.
+    /// A plan's <c>Limits</c> are these with the request's lowering applied; the export reads <c>MaxExportBytes</c> here.
+    /// </summary>
+    /// <param name="cluster">The cluster's entry key.</param>
+    KafkaScanLimits LimitsFor(string cluster);
 }
 
 /// <summary>Resolves a topic's declared decoder once and keeps it: a singleton per topic descriptor (decision 2.3).</summary>
@@ -80,6 +87,7 @@ internal sealed partial class KafkaScanner(
     KafkaScanLimiter limiter,
     OwnerByteBudget ownerBudget,
     KafkaByteRateGovernor governor,
+    KafkaClusterCostControls clusterCosts,
     KafkaScanCoordinator coordinator,
     KafkaEngineSnapshot settings,
     TimeProvider time,
@@ -106,7 +114,10 @@ internal sealed partial class KafkaScanner(
         ValidatePerTopic(request);
 
         KafkaClusterDefinition definition = registry.Get(request.Cluster);
-        KafkaScanLimits limits = request.Lower?.Apply(settings.Limits) ?? settings.Limits;
+
+        // The cluster's profile caps the host's limits first, in the engine, so that no page can skip it; a lowering may then only go below that.
+        KafkaScanLimits profiled = KafkaProfileCeilings.Cap(definition.Profile, settings.Limits);
+        KafkaScanLimits limits = request.Lower?.Apply(profiled) ?? profiled;
 
         // One search for every topic, or (D42) one for each, each under its own grant.
         bool perTopic = request.PerTopic is not null;
@@ -369,6 +380,9 @@ internal sealed partial class KafkaScanner(
     }
 
     /// <inheritdoc />
+    public KafkaScanLimits LimitsFor(string cluster) => KafkaProfileCeilings.Cap(registry.Get(cluster).Profile, settings.Limits);
+
+    /// <inheritdoc />
     public KafkaScanStart Start(KafkaScanPlan plan, KafkaScanOwner owner, bool confirmed)
     {
         ArgumentNullException.ThrowIfNull(plan);
@@ -385,7 +399,21 @@ internal sealed partial class KafkaScanner(
         }
 
         Guid scanId = Guid.NewGuid();
-        ScanRunInputs inputs = new(scanId, plan, owner, wires.For(plan.Request.Cluster), settings, governor, ownerBudget, time, loggers, once, observer);
+        KafkaClusterCost cost = clusterCosts.For(registry.Get(plan.Request.Cluster));
+        ScanRunInputs inputs = new(
+            scanId,
+            plan,
+            owner,
+            wires.For(plan.Request.Cluster),
+            settings,
+            governor,
+            ownerBudget,
+            time,
+            loggers,
+            once,
+            observer,
+            ClusterGovernor: cost.Governor,
+            ClusterOwnerBudget: cost.OwnerBudget);
         long offsets = plan.Estimate.Offsets;
         string isolation = plan.Request.Isolation.ToString();
 
@@ -403,7 +431,7 @@ internal sealed partial class KafkaScanner(
             return Refuse(plan, KafkaScanRefusal.NeedsConfirmation);
         }
 
-        if (ownerBudget.Remaining(owner.Key) <= 0)
+        if (cost.Remaining(owner.Key, ownerBudget) <= 0)
         {
             return Refuse(plan, KafkaScanRefusal.OwnerBudgetSpent);
         }
@@ -619,6 +647,7 @@ internal static class ScanningRegistration
         ArgumentNullException.ThrowIfNull(services);
 
         services.TryAddSingleton(static provider => new KafkaByteRateGovernor(provider.GetRequiredService<KafkaEngineSnapshot>(), provider.GetRequiredService<TimeProvider>()));
+        services.TryAddSingleton(static provider => new KafkaClusterCostControls(provider.GetRequiredService<KafkaEngineSnapshot>(), provider.GetRequiredService<TimeProvider>()));
         services.TryAddSingleton(static provider => new KafkaScanLimiter(provider.GetRequiredService<KafkaEngineSnapshot>()));
         services.TryAddSingleton(static provider => new OwnerByteBudget(provider.GetRequiredService<KafkaEngineSnapshot>(), provider.GetRequiredService<TimeProvider>()));
         services.TryAddSingleton<RecordSizeSampler>();

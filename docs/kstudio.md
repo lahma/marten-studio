@@ -158,6 +158,53 @@ headers `authorization`, `proxy-authorization`, `cookie`, `set-cookie` and `x-ap
 out with `r.AllowHeader(…)`, and can never be searched. A masked field takes only `=` and `in`, so it cannot be read a
 character at a time, and a search link leaves its value out.
 
+## Profiles
+
+A cluster can say what kind of cluster it is, and KStudio lowers its limits there:
+
+```csharp
+o.AddCluster("prod", config, c => c.Profile(KafkaProfile.Production));
+```
+
+A profile only lowers limits and forbids; it never turns a capability on and never raises a limit above yours. A cluster with no
+profile uses your limits as they are; KStudio never guesses one from the host's environment or the cluster's `Environment` text.
+
+| Limit | `Development` | `Test` | `Production` |
+|---|---|---|---|
+| `MaxBytesPerScan` | yours | 256 MiB | 64 MiB |
+| `MaxRecordsPerScan` | yours | 5,000,000 | 1,000,000 |
+| `MaxScanDuration` | yours | 2 min | 1 min |
+| `MaxMatches` | yours | 500 | 500 |
+| `MaxMatchBytes` | yours | 64 KiB | 64 KiB |
+| `MaxDecodeBytes` | yours | 1 MiB | 1 MiB |
+| `ConfirmAboveBytes` | yours | 64 MiB | 16 MiB |
+| `ConfirmAboveRecords` | yours | 1,000,000 | 250,000 |
+| `BytesPerSecond` (this cluster's own bucket) | yours | 10 MiB/s | 5 MiB/s |
+| `OwnerBytesPerHour` (this cluster's own) | yours | 2 GiB | 512 MiB |
+| `MaxExportBytes` | yours | 32 MiB | export forbidden |
+| `MaxTailMatches` | yours | 200 | live tail forbidden |
+| `TailPauseAfter` | yours | 5 min | live tail forbidden |
+| `MaxConcurrentScans`, `MaxConcurrentScansPerOwner`, `QueueKilobytes`, `FetchBytes`, `CreateTimeMargin`, `PartitionStallTimeout` | yours | yours | yours |
+
+Each limit is the smaller of yours and the profile's, so a host that set a limit lower keeps it. The confirmation thresholds are then
+capped at the capped budgets. Concurrency and the consumer's sizes guard the application's memory, whichever cluster is read, and stay
+yours.
+
+`Production` also forbids export and live tail on that cluster even when `ExportRecords` and `LiveTail` are granted, and its byte
+rate and hourly allowance are the cluster's own, on top of the process-wide ones: a scan of a profiled cluster is paced by the slower
+of the two buckets and stops when either allowance is spent. They are made only where the profile's value is below yours. `Production`
+keeps 5 MiB/s and 512 MiB an hour for each visitor; the rate must stay well below your principal's broker quota, and a host
+that bills by egress may want it lower, which it does by lowering its own `BytesPerSecond` and `OwnerBytesPerHour`.
+
+With Wolverine, a profile is set per cluster, and for a broker per tenant per tenant, because each is a broker of its own with its own
+quota:
+
+```csharp
+k.UseWolverineKafka(w => w.Cluster((tenant, c) => c.Profile(KafkaProfile.Production)));
+```
+
+The cluster selector and the Settings page show each cluster's profile and the limits it comes to.
+
 ## Wolverine
 
 `KStudio.Wolverine` lists the Kafka clusters and topics of the application's Wolverine configuration:

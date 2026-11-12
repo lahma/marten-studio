@@ -62,15 +62,16 @@ internal sealed class ScanFixture : IAsyncDisposable
     public static ScanFixture Create(
         Action<KafkaEngineOptions>? configure = null,
         IScanObserver? observer = null,
-        Func<FakeKafkaWire, IKafkaWire>? wrap = null)
+        Func<FakeKafkaWire, IKafkaWire>? wrap = null,
+        Action<KafkaClusterBuilder>? cluster = null)
     {
         ManualTimeProvider clock = new(new DateTimeOffset(2026, 11, 8, 18, 0, 0, TimeSpan.Zero));
-        FakeKafkaCluster cluster = new(clock);
-        FakeKafkaWire wire = new(cluster, EngineHarness.ClusterKey);
+        FakeKafkaCluster fake = new(clock);
+        FakeKafkaWire wire = new(fake, EngineHarness.ClusterKey);
         CapturingLoggerProvider logs = new();
 
         KafkaEngineOptions options = new();
-        options.AddCluster(EngineHarness.ClusterKey, new ClientConfig { BootstrapServers = "fake:9092" });
+        options.AddCluster(EngineHarness.ClusterKey, new ClientConfig { BootstrapServers = "fake:9092" }, cluster);
         configure?.Invoke(options);
 
         ServiceCollection services = new();
@@ -84,7 +85,7 @@ internal sealed class ScanFixture : IAsyncDisposable
         }
 
         KStudioEngineRegistration.Add(services, _ => options, _ => new TestEngineSettings(TimeSpan.Zero));
-        return new ScanFixture(clock, cluster, wire, services.BuildServiceProvider(), logs);
+        return new ScanFixture(clock, fake, wire, services.BuildServiceProvider(), logs);
     }
 
     /// <summary>Creates a topic and returns its name.</summary>
