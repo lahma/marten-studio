@@ -136,6 +136,25 @@ public class KafkaRelatedPageTests
     }
 
     [Fact]
+    public async Task A_key_the_topics_format_cannot_hold_is_a_note_in_its_lane()
+    {
+        await using KafkaSearchRig rig = new(engine: o =>
+        {
+            o.Topic("orders.in", _ => { });
+            o.Topic("orders.out", t => t.Key(KafkaKeyFormat.Int64BigEndian).Correlation(c => c.Key().As("correlation")));
+        });
+        Seed(rig);
+
+        IRenderedComponent<KafkaRelatedPage> page = await OpenAsync(rig, "&topic=orders.in&partition=0&offset=0" + Window);
+        page.WaitForAssertion(() => page.FindAll(".ms-k-lane").Should().HaveCount(2));
+
+        IElement lane = page.FindAll(".ms-k-lane").Single(static x => x.QuerySelector("strong")!.TextContent.Trim() == "orders.out");
+        lane.QuerySelectorAll(".ms-k-lane-note").Select(static x => x.TextContent.Trim())
+            .Should().Contain("key: 1 value cannot be held in this topic's key format and was not searched.");
+        page.FindAll(".ms-k-lane").Single(static x => x.QuerySelector("strong")!.TextContent.Trim() == "orders.in").QuerySelectorAll(".ms-k-lane-note").Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task A_record_with_no_usable_key_offers_nothing_to_run()
     {
         await using KafkaSearchRig rig = new(engine: Declare);
@@ -218,7 +237,7 @@ public class KafkaRelatedPageTests
 
         page.WaitForAssertion(() => rig.Ring.Count(static x => x.Action == "SearchRecords").Should().BeGreaterThanOrEqualTo(2));
         page.Markup.Should().Contain("Continued after offsets read by the previous search");
-        rig.Ring.Where(static x => x.Action == "SearchRecords").Should().OnlyContain(static x => x.Message!.Contains("orders.in: ") && x.Message.Contains("orders.out: "), "each scan's entry carries every topic's own search");
+        rig.Ring.Where(static x => x.Action == "SearchRecords").Should().OnlyContain(static x => x.Message!.Contains("orders.in, orders.out: "), "each scan's entry carries the search of every topic, grouped where it is shared");
     }
 
     [Fact]

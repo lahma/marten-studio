@@ -281,7 +281,7 @@ public class KafkaCorrelationServiceTests
         entry.Succeeded.Should().BeTrue();
         entry.Action.Should().Be("SearchRecords");
         entry.Target.Should().StartWith("records related to orders/0/0, 2 topics, ");
-        entry.Message.Should().Contain("2 records").And.Contain("orders: ").And.Contain("payments: ");
+        entry.Message.Should().Contain("2 records").And.Contain("predicate: orders, payments: header.correlation-id = 'c-1'", "topics that share a search are grouped");
         rig.Logs.Entries.Should().ContainSingle(static x => x.EventId.Id == 9600);
     }
 

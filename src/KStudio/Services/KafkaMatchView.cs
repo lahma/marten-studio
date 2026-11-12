@@ -99,9 +99,6 @@ internal static partial class KafkaMatchView
         return match.Key.IsLiteral && FitsLiteral(match.Key.Text!) ? "key = " + PredicateFormatter.QuoteText(match.Key.Text!) : null;
     }
 
-    /// <summary>The text a mask writes in place of a part of a value; a literal containing it is never a faithful copy.</summary>
-    public const string MaskText = KafkaMatchMasks.MaskPrefix;
-
     /// <summary>Whether the match holds a value that can be shown or copied: the payload grant read it, and no rule withheld it.</summary>
     /// <param name="match">The match.</param>
     public static bool HasShowableValue(KafkaMatch match)
@@ -127,7 +124,7 @@ internal static partial class KafkaMatchView
             || match.ValueMaskedBy.Count > 0
             || match.ValueText is not { Length: > 0 } text
             || !FitsLiteral(text)
-            || text.Contains(MaskText, StringComparison.Ordinal))
+            || text.Contains(KafkaMatchMasks.MaskPrefix, StringComparison.Ordinal))
         {
             return null;
         }
@@ -191,7 +188,7 @@ internal static partial class KafkaMatchView
             {
                 case JsonValueKind.String:
                     string? text = node.GetString();
-                    return text is not null && FitsLiteral(text) && !text.Contains(MaskText, StringComparison.Ordinal) ? PredicateFormatter.QuoteText(text) : null;
+                    return text is not null && FitsLiteral(text) && !text.Contains(KafkaMatchMasks.MaskPrefix, StringComparison.Ordinal) ? PredicateFormatter.QuoteText(text) : null;
                 case JsonValueKind.Number:
                     string raw = node.GetRawText();
                     return IsNumberLiteral(raw) && decimal.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out _) ? raw : null;
