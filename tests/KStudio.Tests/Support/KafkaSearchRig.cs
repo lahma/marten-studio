@@ -116,6 +116,31 @@ internal sealed class KafkaSearchRig : IAsyncDisposable
             Logs.CreateFactory().CreateLogger<KafkaRecordService>());
     }
 
+    /// <summary>A related-records service over the engine's scanner and registry whose events land in <see cref="Logs" />.</summary>
+    public KafkaCorrelationService Correlation()
+    {
+        IServiceProvider services = Studio.Context.Services;
+        KafkaActionLog actionLog = new(
+            Studio.Context.ActionLog,
+            Logs.CreateFactory().CreateLogger<KafkaActionLog>(),
+            Studio.Visitor);
+
+        return new KafkaCorrelationService(
+            services.GetRequiredService<KafkaCapabilityGuard>(),
+            Studio.KafkaAuthorization,
+            services.GetRequiredService<KafkaReadGrants>(),
+            Records(),
+            Engine.Provider.GetRequiredService<KStudio.Core.Clusters.KafkaClusterRegistry>(),
+            Engine.Provider.GetRequiredService<IKafkaScanner>(),
+            new KafkaOwnerKey(Studio.Visitor),
+            actionLog,
+            Logs.CreateFactory().CreateLogger<KafkaCorrelationService>());
+    }
+
+    /// <summary>A related-records search over <paramref name="topics" /> for the first hour of the seeded time, around <paramref name="keys" />.</summary>
+    public KafkaRelatedInput RelatedInput(string[] topics, KStudio.Core.Correlation.CorrelationKeySet keys, string anchorTopic = "orders", KafkaScanCursor? cursor = null) =>
+        new(Entry, KafkaRelatedSubject.Anchor(anchorTopic, 0, 0), keys, topics, T0, T0.AddHours(1), false, cursor);
+
     /// <summary>Creates a topic.</summary>
     public void Topic(string name, int partitions = 1) => Cluster.CreateTopic(name, partitions);
 

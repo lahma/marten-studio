@@ -197,6 +197,7 @@ internal sealed class KafkaStudioHarness : IDisposable
             services.AddSingleton<KafkaReadGrants>();
             services.AddSingleton<KafkaSearchService>();
             services.AddSingleton<KafkaRecordService>();
+            services.AddSingleton<KafkaCorrelationService>();
             extra?.Invoke(services);
         });
     }
