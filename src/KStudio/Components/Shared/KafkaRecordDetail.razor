@@ -1,0 +1,252 @@
+@using System.Globalization
+@using KStudio.Core.Decoding
+@using KStudio.Core.Scanning
+@using PostgresStudio.Services
+@using PostgresStudio.Services.Live
+@using PostgresStudio.Services.Settings
+@inject IStudioSettings Settings
+@inject StudioState Studio
+@inject ToastService Toasts
+@inject IJSRuntime JsRuntime
+
+@* One record as a definition list and two tables (D-UI decision 14), drawn from an in-memory KafkaMatch: every field in it was masked inside the
+   engine before it got here (D40), so this component can only show what is safe. It reads nothing and records no audit entry: the scan's entry already
+   covers the matches it read and showed. The value is not read in M2. *@
+
+@if (match is not null)
+{
+    <div class="ms-k-record-detail" data-ms-k-record="@(match.Topic + "/" + match.Partition + "/" + match.Offset)">
+        <dl class="ms-k-record-meta">
+            <dt>Topic</dt><dd>@match.Topic</dd>
+            <dt>Partition</dt><dd>@match.Partition</dd>
+            <dt>Offset</dt><dd>@KafkaDisplay.Number(match.Offset)</dd>
+            <dt>Timestamp</dt>
+            <dd title="@match.Timestamp.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss'Z'", CultureInfo.InvariantCulture)">
+                @Studio.FormatInSelectedTimeZone(match.Timestamp, "yyyy-MM-dd HH:mm:ss") (@match.TimestampType)
+            </dd>
+            @if (match.LeaderEpoch is { } epoch)
+            {
+                <dt>Leader epoch</dt><dd>@epoch</dd>
+            }
+            <dt>Key</dt>
+            <dd>
+                <span class="@KeyClass()">@KafkaMatchView.KeyDisplay(match.Key)</span>
+                @if (match.Key.Truncated)
+                {
+                    <span class="ms-muted"> (cut)</span>
+                }
+                <span class="ms-muted"> · @match.KeyFormat</span>
+            </dd>
+            <dt>Value</dt>
+            <dd>
+                @if (match.ValueKind == KafkaValueKind.Tombstone)
+                {
+                    <span class="ms-chip ms-k-tombstone">tombstone</span>
+                }
+                else
+                {
+                    <span>@match.ValueKind, @match.ValueFormat, @KafkaDisplay.Bytes(match.ValueLength)</span>
+                }
+            </dd>
+            @if (match.SchemaId is { } schema)
+            {
+                <dt>Schema id</dt><dd>@schema</dd>
+            }
+            @if (match.UndecodableReason is { } reason)
+            {
+                <dt>Not decoded</dt><dd>@UndecodableText(reason)</dd>
+            }
+        </dl>
+
+        <h3 class="ms-section-title">Headers</h3>
+        @if (match.Headers.Count == 0)
+        {
+            <p class="ms-muted">No headers.</p>
+        }
+        else
+        {
+            <TableScroll Label="Headers">
+                <table class="ms-table">
+                    <thead>
+                        <tr><th>Name</th><th>Value</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (KafkaMatchHeader header in match.Headers)
+                        {
+                            <tr class="ms-table-row">
+                                <td class="ms-table-cell"><code>@header.Name</code></td>
+                                <td class="ms-table-cell">@FieldCell(header.Value)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </TableScroll>
+        }
+
+        @if (match.HeadersOmitted > 0)
+        {
+            <p class="ms-muted">@KafkaDisplay.Count(match.HeadersOmitted, "more header was", "more headers were") not kept.</p>
+        }
+
+        @if (match.CloudEventMode != CloudEventMode.None)
+        {
+            <h3 class="ms-section-title">CloudEvents attributes <span class="ms-chip">@ModeText(match.CloudEventMode)</span></h3>
+            <TableScroll Label="CloudEvents attributes">
+                <table class="ms-table">
+                    <thead>
+                        <tr><th>Attribute</th><th>Value</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (KafkaMatchHeader ceAttribute in match.CloudEventAttributes)
+                        {
+                            <tr class="ms-table-row">
+                                <td class="ms-table-cell"><code>@ceAttribute.Name</code></td>
+                                <td class="ms-table-cell">@FieldCell(ceAttribute.Value)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </TableScroll>
+
+            @if (match.CloudEventAttributesOmitted > 0)
+            {
+                <p class="ms-muted">@KafkaDisplay.Count(match.CloudEventAttributesOmitted, "more attribute was", "more attributes were") not kept.</p>
+            }
+        }
+
+        @if (match.Trace is { } trace)
+        {
+            <p class="ms-k-trace">trace <code>@trace.TraceId</code> · span <code>@trace.SpanId</code></p>
+        }
+
+        <p class="ms-muted ms-k-value-note">@KafkaStudioText.ValueNotShown</p>
+
+        <div class="ms-k-record-actions">
+            <MenuButton ElementId="@elementId"
+                        WrapperClass="ms-k-copy-menu"
+                        ButtonClass="ms-btn ms-btn-sm"
+                        PopoverClass="ms-k-copy-popover"
+                        Text="Copy as"
+                        Title="Copy a search for this record, or a kcat command that reads it"
+                        Label="@($"Copy as, for {match.Topic} {match.Partition}/{match.Offset}")"
+                        Items="items" />
+            <a class="ms-btn ms-btn-sm ms-k-permalink" href="@PermalinkHref()">Permalink</a>
+        </div>
+
+        @if (KafkaMatchView.HasLiteralTooLong(match))
+        {
+            <p class="ms-muted ms-k-copy-note">@KafkaStudioText.CopyLiteralTooLong</p>
+        }
+    </div>
+}
+
+@code {
+    private static int nextId;
+
+    private readonly string elementId = "ms-k-copy-" + Interlocked.Increment(ref nextId).ToString(CultureInfo.InvariantCulture);
+
+    private KafkaMatch? match;
+    private IReadOnlyList<(string Label, string? Detail, Func<Task> OnSelect)> items = [];
+
+    /// <summary>The record, as a <c>KafkaMatch</c>. Typed <see cref="object" />: the engine's types are internal and a component's parameters are public.</summary>
+    [Parameter]
+    public object? Model { get; set; }
+
+    /// <summary>The cluster entry's key, for the permalink.</summary>
+    [Parameter]
+    public string? Cluster { get; set; }
+
+    /// <summary>The kcat command "Copy as" offers: built by the page from the settings reader, so it never holds a credential.</summary>
+    [Parameter]
+    public string? Kcat { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        match = Model as KafkaMatch;
+        items = match is null ? [] : BuildItems(match);
+    }
+
+    private IReadOnlyList<(string Label, string? Detail, Func<Task> OnSelect)> BuildItems(KafkaMatch record)
+    {
+        List<(string Label, string? Detail, Func<Task> OnSelect)> list = [];
+
+        if (KafkaMatchView.KeyPredicate(record) is { } key)
+        {
+            list.Add(("Predicate for this key", key, () => CopyAsync(key, "predicate")));
+        }
+
+        foreach (KafkaChip chip in KafkaMatchView.Chips(record))
+        {
+            string predicate = chip.Predicate;
+            list.Add(("Predicate for " + chip.Display, predicate, () => CopyAsync(predicate, "predicate")));
+        }
+
+        if (Kcat is { Length: > 0 } command)
+        {
+            list.Add(("kcat command", "reads this record; add your own credentials", () => CopyAsync(command, "kcat command")));
+        }
+
+        return list;
+    }
+
+    private async Task CopyAsync(string text, string what)
+    {
+        try
+        {
+            bool copied = await JsRuntime.InvokeAsync<bool>("martenStudio.clipboard.copyText", new object?[] { text });
+
+            await (copied ? Toasts.Success("Copied the " + what + ".") : Toasts.Error("This browser refused the clipboard."));
+        }
+        catch (Exception exception) when (StudioLiveUpdates.IsInteropUnavailable(exception))
+        {
+            await Toasts.Error("This browser refused the clipboard.");
+        }
+    }
+
+    private string PermalinkHref() =>
+        KafkaAddress.Href(
+            Settings,
+            KafkaAddress.RecordRoute,
+            Cluster,
+            (KafkaAddress.TopicParameter, match!.Topic),
+            (KafkaAddress.PartitionParameter, match.Partition.ToString(CultureInfo.InvariantCulture)),
+            (KafkaAddress.OffsetParameter, match.Offset.ToString(CultureInfo.InvariantCulture)));
+
+    private string KeyClass() => match!.Key.IsRedacted ? "ms-k-redacted" : match.Key.IsNull ? "ms-k-null" : string.Empty;
+
+    private static RenderFragment FieldCell(KafkaMatchField field) => builder =>
+    {
+        builder.OpenElement(0, "span");
+
+        if (field.IsRedacted)
+        {
+            builder.AddAttribute(1, "class", "ms-k-redacted");
+        }
+        else if (field.IsNull)
+        {
+            builder.AddAttribute(1, "class", "ms-k-null");
+        }
+
+        builder.AddContent(2, field.Display + (field.Truncated ? " (cut)" : string.Empty));
+        builder.CloseElement();
+    };
+
+    private static string ModeText(CloudEventMode mode) => mode switch
+    {
+        CloudEventMode.Binary => "binary",
+        CloudEventMode.Structured => "structured",
+        CloudEventMode.StructuredBatch => "structured batch",
+        _ => mode.ToString(),
+    };
+
+    private static string UndecodableText(KafkaUndecodableReason reason) => reason switch
+    {
+        KafkaUndecodableReason.InvalidJson => "the value is not valid JSON",
+        KafkaUndecodableReason.TooLarge => "the value is larger than the engine decodes",
+        KafkaUndecodableReason.InvalidUtf8 => "the value is not valid UTF-8",
+        KafkaUndecodableReason.NotACloudEvent => "the value is not a CloudEvent",
+        KafkaUndecodableReason.DecoderFailed => "the topic's decoder failed",
+        KafkaUndecodableReason.DecoderRefused => "the topic's decoder refused it",
+        _ => reason.ToString(),
+    };
+}

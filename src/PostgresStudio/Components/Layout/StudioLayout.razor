@@ -37,6 +37,11 @@
                 Its pages carry no authorization, so @Descriptor.ExposedContent is readable by anyone who can
                 reach this URL.
             </span>
+            @* A module's own sentence follows the host's, never spliced into it (D34): the host's words do not move. *@
+            @foreach (IStudioModule registered in Descriptor.Modules)
+            {
+                <span @key="registered.Key">@registered.ExposedSentence</span>
+            }
         </div>
     }
     <div class="ms-layout">
@@ -50,11 +55,23 @@
                     @* The environment first: it is context like the scope, and the first thing to check before doing anything to a
                        database (1.2). *@
                     <EnvironmentBadge />
-                    <ScopeSelector />
+                    @* On a module's page (D34) the module's own scope selector stands in the host's: such a page is about the module's own scope. *@
+                    @if (currentModule is { } module)
+                    {
+                        <DynamicComponent Type="module.ScopeSelector" />
+                    }
+                    else
+                    {
+                        <ScopeSelector />
+                    }
                 </div>
                 @* Find by id (1.2): between the context on the left and the actions on the right. Drawn only with a scope to search in and a
-                   kind to search for; a magnifier below 1024 px (see FindBox). *@
-                <FindBox />
+                   kind to search for; a magnifier below 1024 px (see FindBox). Not on a module's page: its contributors search the host's
+                   scope, which such a page is not about (D34). *@
+                @if (currentModule is null)
+                {
+                    <FindBox />
+                }
                 <div class="ms-header-right">
                     <CapabilityBanner />
                     @* The way out (ApplicationPath, absent unless the host set it) and the address of this page with its scope in it. *@
@@ -76,7 +93,9 @@
                 @* The page frame is where a per-store refusal belongs: a page that is never rendered never
                    runs its OnInitializedAsync, so nothing about a store the visitor may not see is read on
                    their behalf. The header above stays, so they can pick one they may. *@
-                @if (access is ScopeAccess.Granted)
+                @* A module's page (D34) is gated by the module's own frame, never by the host's scope: a visitor the host's store policy
+                   refuses still reaches a module whose own policies admit them. Keyed on the matched page's assembly (CurrentModule). *@
+                @if (currentModule is not null || access is ScopeAccess.Granted)
                 {
                     @Body
                 }
@@ -124,6 +143,20 @@
     private bool interactive;
     private bool addressScopeApplied;
     private bool locationSubscribed;
+
+    /// <summary>
+    /// The module whose page the address names (D34), or <see langword="null" /> for a page of the host studio. Found from the matched
+    /// page's assembly (<see cref="StudioDescriptor.ModuleOf" />) and never from the address's text, so that no address can name a page
+    /// that is not a module's and be treated as one - the host's scope gate is skipped only for a module's own pages.
+    /// </summary>
+    private IStudioModule? currentModule;
+
+    /// <summary>
+    /// Whether <see cref="OnInitializedAsync" /> has finished loading the catalog, so that the host's scope gate has a scope to ask about. A
+    /// module's page left before then is gated by that method's own last step, never by <see cref="OnParametersSet" />, which would ask a gate
+    /// that has no scope yet and take "nothing to be about" for a grant.
+    /// </summary>
+    private bool initialized;
     private PersistingComponentStateSubscription persistingSubscription;
 
     /// <summary>
@@ -153,7 +186,12 @@
 
         // The scope travels in the query string so a pasted link reopens the same thing (plan D9).
         // Anything the listings do not carry is ignored by StudioState rather than reported.
-        (string? storeKey, string? databaseId, string? tenantId) = StudioScopeQuery.Read(Navigation.Uri, Descriptor.SourceQueryParameter);
+        currentModule = ModuleOfAddress(Navigation.Uri);
+
+        // A module's address names no host scope (D34): its pages are about their own, and the host's scope waits in memory, untouched.
+        (string? storeKey, string? databaseId, string? tenantId) = currentModule is null
+            ? StudioScopeQuery.Read(Navigation.Uri, Descriptor.SourceQueryParameter)
+            : (null, null, null);
 
         // The rail is drawn while the listings load and the scope is applied below, and a link a visitor clicks in that time must
         // carry the scope the address names, not the one the studio is still on (1.2). Ended whatever happens next.
@@ -180,8 +218,28 @@
         // From here on a link the visitor clicks may name another scope (1.2, SCOPE-1-FIX).
         Navigation.LocationChanged += OnLocationChanged;
         locationSubscribed = true;
+        initialized = true;
 
         await UpdateAccessAsync();
+    }
+
+    /// <summary>
+    /// Follows the page on screen, on every render the router causes (D34, D-SHELL 4.1): <see cref="StudioRoutes" /> re-renders the page
+    /// before this layout's own <see cref="OnLocationChanged" /> may have run - and for as long as the catalog loads, before it is subscribed
+    /// at all - so the module is found here, from the address the router just matched, never from a handler. On the way from a module's page
+    /// to a host page the host's scope gate goes back to <see cref="ScopeAccess.Unknown" /> in the same render that brings the host's body
+    /// in, so that body is not rendered until the gate has answered.
+    /// </summary>
+    protected override void OnParametersSet()
+    {
+        IStudioModule? previous = currentModule;
+        currentModule = ModuleOfAddress(Navigation.Uri);
+
+        if (previous is not null && currentModule is null && initialized)
+        {
+            access = ScopeAccess.Unknown;
+            _ = InvokeAsync(UpdateAccessAfterLeavingModuleAsync);
+        }
     }
 
     /// <summary>
@@ -211,6 +269,14 @@
     /// </remarks>
     private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
     {
+        // A module's page (D34) is rendered and nothing else: no host scope is read from its address, none is applied, and the address is
+        // not rewritten. The host's scope stays in StudioState for the way back, and the rail's host links carry it. Which module is on
+        // screen, and the host's gate on the way back, are OnParametersSet's; this handler is the scope's alone.
+        if (ModuleOfAddress(e.Location) is not null)
+        {
+            return;
+        }
+
         (string? storeKey, string? databaseId, string? tenantId) = StudioScopeQuery.Read(e.Location, Descriptor.SourceQueryParameter);
 
         if (e.IsNavigationIntercepted && NamesAnotherScope(State.ActiveScope, storeKey, databaseId, tenantId))
@@ -270,6 +336,46 @@
         }
     }
 
+    /// <summary>
+    /// The host's scope gate, asked now that a page of the host studio is on screen again. A failure fails closed: the page says the
+    /// scope is not authorized rather than rendering without the gate's answer.
+    /// </summary>
+    private async Task UpdateAccessAfterLeavingModuleAsync()
+    {
+        try
+        {
+            await UpdateAccessAsync();
+        }
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
+        {
+            // The circuit went away while the gate was being asked.
+            return;
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            Logger.LogDebug(e, "The studio could not ask the scope policy after a module's page; the page stays closed");
+            access = ScopeAccess.Denied;
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>
+    /// The module whose page <paramref name="uri" /> names, or <see langword="null" />: the route table matches the address, and the matched
+    /// page's assembly decides (D34). An address no page matches is not a module's.
+    /// </summary>
+    private IStudioModule? ModuleOfAddress(string uri)
+    {
+        if (Descriptor.Modules.Count == 0
+            || StudioLink.ToDashboardRelativePath(uri, Navigation.BaseUri, Settings) is not { } relative
+            || Descriptor.Routes.Match(relative, Settings) is not { } match)
+        {
+            return null;
+        }
+
+        return Descriptor.ModuleOf(match.PageType);
+    }
+
     private Task PersistPreferences()
     {
         PersistentState.PersistAsJson(
@@ -285,6 +391,12 @@
     /// </summary>
     private async Task UpdateAccessAsync()
     {
+        // The host's gate is not asked on a module's page (D34); it is asked again, below, when the visitor is back on the host's.
+        if (currentModule is not null)
+        {
+            return;
+        }
+
         StudioScope? scope = State.ActiveScope;
         if (scope is null)
         {
@@ -337,7 +449,8 @@
         // an address no page matches (a file, an endpoint) is the browser's to load, as it was named (StudioRoutes), and a scope appended
         // to it would change what is loaded - while a force-load of it is in flight, say.
         if (StudioLink.ToDashboardRelativePath(Navigation.Uri, Navigation.BaseUri, Settings) is not { } relative
-            || Descriptor.Routes.Match(relative, Settings) is null)
+            || Descriptor.Routes.Match(relative, Settings) is not { } match
+            || Descriptor.ModuleOf(match.PageType) is not null)
         {
             return;
         }

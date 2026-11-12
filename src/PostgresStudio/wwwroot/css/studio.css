@@ -16770,3 +16770,536 @@ dialog.ms-modal::backdrop {
     font-weight: 400;
     font-size: var(--ms-font-size-xs);
 }
+
+/* ===== KS-SHELL: the module seams (cluster selector, the Kafka capability group, the trademark line) ===== */
+
+/* The Kafka pages end with the Apache Software Foundation disclaimer, small and muted, set apart from the body above it. */
+.ms-k-trademark {
+    margin: var(--ms-space-xl) 0 0;
+    padding-top: var(--ms-space-md);
+    border-top: 1px solid var(--ms-color-border);
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-secondary);
+}
+
+/* The cluster selector reuses .ms-scope-selector for its look; a single cluster is plain text beside its label. */
+.ms-k-cluster-name {
+    font-size: var(--ms-font-size-sm);
+    font-weight: 600;
+}
+
+/* ===== KS-UI-A: the Kafka catalog (topics, topic overview, cluster settings) ===== */
+
+/* The cluster strip at the top of Topics: the cluster's name, its environment and what the admin client said about it. */
+.ms-k-cluster-strip {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-sm) var(--ms-space-md);
+    margin-bottom: var(--ms-space-lg);
+}
+
+.ms-k-cluster-strip .ms-k-environment {
+    text-transform: lowercase;
+}
+
+.ms-k-cluster-strip .ms-k-cluster-facts {
+    font-size: var(--ms-font-size-sm);
+}
+
+/* The filter and the topic count above the table. */
+.ms-k-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-md);
+    margin-bottom: var(--ms-space-md);
+}
+
+/* A notice that is an expected state, not an error: a narrow key cannot describe the cluster, or a topic's configuration. */
+.ms-k-note {
+    margin: 0 0 var(--ms-space-md);
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    border: 1px solid var(--ms-color-border);
+    border-left-width: 3px;
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface-alt);
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-k-note-warning {
+    border-color: var(--ms-color-warning);
+    background: var(--ms-color-warning-bg);
+    color: var(--ms-color-text);
+}
+
+/* The topic table's groups: a header row for Declared and for Other topics, and the closed details of internal topics below. */
+.ms-k-topic-group > .ms-k-group-row > th {
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    background: var(--ms-color-surface-alt);
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-xs);
+    font-weight: var(--ms-font-weight-medium);
+    text-align: left;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.ms-k-internal {
+    margin-top: var(--ms-space-lg);
+}
+
+.ms-k-internal > summary {
+    cursor: pointer;
+    margin-bottom: var(--ms-space-sm);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-k-not-listed {
+    display: block;
+    font-size: var(--ms-font-size-xs);
+}
+
+/* An offset span is a number with a tilde: aligned like the numbers beside it, and never mistaken for a count. */
+.ms-k-span {
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.ms-k-refresh-error {
+    margin: 0 0 var(--ms-space-md);
+}
+
+/* The topic overview: chips under the title, the stat cards, the partitions table and the configuration list. */
+.ms-k-topic-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-sm);
+    margin-bottom: var(--ms-space-md);
+}
+
+.ms-k-stats {
+    margin-bottom: var(--ms-space-lg);
+}
+
+.ms-k-partitions td {
+    font-variant-numeric: tabular-nums;
+}
+
+.ms-k-under-replicated {
+    margin-left: var(--ms-space-xs);
+}
+
+.ms-k-config {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: var(--ms-space-xs) var(--ms-space-lg);
+    margin: 0 0 var(--ms-space-lg);
+}
+
+.ms-k-config dt {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-k-config dd {
+    margin: 0;
+}
+
+.ms-k-group-lag {
+    margin-top: var(--ms-space-md);
+}
+
+.ms-k-group-lag > summary {
+    cursor: pointer;
+    margin-bottom: var(--ms-space-sm);
+}
+
+/* Cluster settings: the exposure chip beside a value that is not shown as the host set it. */
+.ms-k-exposure {
+    margin-left: var(--ms-space-sm);
+    text-transform: lowercase;
+}
+
+.ms-k-exposure-secret,
+.ms-k-exposure-withheld {
+    border-color: var(--ms-color-warning);
+    background: var(--ms-color-warning-bg);
+    color: var(--ms-color-warning);
+}
+
+.ms-k-oauth {
+    margin: var(--ms-space-md) 0 0;
+    color: var(--ms-color-text-secondary);
+}
+
+/* The home: a wide enough filter, the table's description column allowed to wrap, and the two groups told apart by their header rows. */
+.ms-k-filter {
+    min-width: 18rem;
+}
+
+.ms-k-total {
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-k-topics-table td {
+    vertical-align: top;
+}
+
+.ms-k-topics-table td:nth-child(2) {
+    max-width: 36ch;
+    white-space: normal;
+}
+
+.ms-k-topic-group-declared > .ms-k-group-row > th {
+    border-left: 3px solid var(--ms-color-border-strong);
+}
+
+.ms-k-topic-group-other > .ms-k-group-row > th {
+    border-left: 3px solid transparent;
+}
+
+.ms-k-topic-description {
+    margin: 0 0 var(--ms-space-md);
+    color: var(--ms-color-text-secondary);
+}
+
+/* Cluster settings: a setting's key is a long dotted name, and a value (a bootstrap list, a path) may be longer still. */
+.ms-k-settings code,
+.ms-k-settings td {
+    overflow-wrap: anywhere;
+}
+
+/* ===== KS-UI-B: search, results, the record detail ===== */
+
+/* The form: topics, window, isolation and the predicate, one under another in a column the width of the page. */
+.ms-k-search-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-md);
+    margin-bottom: var(--ms-space-lg);
+}
+
+.ms-k-search-form fieldset {
+    margin: 0;
+    padding: var(--ms-space-md);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+}
+
+.ms-k-search-form legend {
+    padding: 0 var(--ms-space-sm);
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-k-topics-header,
+.ms-k-presets,
+.ms-k-absolute,
+.ms-k-window-mode {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-sm) var(--ms-space-md);
+    margin-bottom: var(--ms-space-sm);
+}
+
+.ms-k-topic-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+    gap: var(--ms-space-xs) var(--ms-space-md);
+    max-height: 16rem;
+    overflow-y: auto;
+}
+
+.ms-k-topic-option {
+    display: flex;
+    align-items: center;
+    gap: var(--ms-space-sm);
+    overflow-wrap: anywhere;
+}
+
+.ms-k-window-text {
+    margin: var(--ms-space-sm) 0 0;
+    font-variant-numeric: tabular-nums;
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-k-isolation {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-sm);
+}
+
+/* The predicate box is a code box: monospace, no spell-checking, and as wide as the form. */
+.ms-k-predicate-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-xs);
+}
+
+.ms-k-predicate {
+    width: 100%;
+    font-family: var(--ms-font-mono);
+    resize: vertical;
+}
+
+.ms-k-predicate-errors {
+    margin: 0;
+    padding-left: var(--ms-space-lg);
+    color: var(--ms-color-text);
+}
+
+.ms-k-predicate-marks {
+    margin: 0;
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface-alt);
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.ms-k-predicate-marks mark {
+    background: var(--ms-color-warning-bg);
+    color: var(--ms-color-text);
+    text-decoration: underline wavy var(--ms-color-warning);
+}
+
+.ms-k-syntax > summary,
+.ms-k-verdicts > summary,
+.ms-k-progress > summary {
+    cursor: pointer;
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-k-syntax-examples code {
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-k-search-actions {
+    display: flex;
+    gap: var(--ms-space-md);
+}
+
+.ms-k-allowance {
+    margin: 0;
+}
+
+/* The plan, shown before anything is read: how each clause runs on each topic, what the window cannot cover, and the estimate. */
+.ms-k-verdicts {
+    margin-bottom: var(--ms-space-md);
+}
+
+.ms-k-verdicts ul,
+.ms-k-plan-notes ul,
+.ms-k-caveats ul {
+    margin: var(--ms-space-sm) 0 0;
+    padding-left: var(--ms-space-lg);
+}
+
+.ms-k-plan-notes,
+.ms-k-estimate {
+    margin-bottom: var(--ms-space-md);
+}
+
+.ms-k-estimate {
+    font-variant-numeric: tabular-nums;
+}
+
+/* How the search ended, and everything that could make a "no match" untrue, always beside it. */
+.ms-k-result-banner {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--ms-space-md);
+    margin: var(--ms-space-md) 0;
+    padding: var(--ms-space-md);
+    border: 1px solid var(--ms-color-border);
+    border-left-width: 3px;
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface-alt);
+}
+
+.ms-k-result-banner p {
+    margin: 0;
+}
+
+.ms-k-caveats {
+    margin-bottom: var(--ms-space-lg);
+    padding: var(--ms-space-md);
+    border: 1px solid var(--ms-color-warning);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-warning-bg);
+}
+
+.ms-k-caveats h2 {
+    margin-top: 0;
+}
+
+/* The matches. */
+.ms-k-sort {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-sm);
+    margin-bottom: var(--ms-space-sm);
+}
+
+.ms-k-matches td {
+    vertical-align: top;
+}
+
+.ms-k-chip {
+    margin: 0 var(--ms-space-xs) var(--ms-space-xs) 0;
+    cursor: pointer;
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-k-tombstone {
+    text-transform: lowercase;
+}
+
+/* A masked field and a null one never look like a value. */
+.ms-k-redacted {
+    color: var(--ms-color-text-secondary);
+    font-style: italic;
+}
+
+.ms-k-null {
+    color: var(--ms-color-text-secondary);
+    font-style: italic;
+    font-family: var(--ms-font-mono);
+}
+
+.ms-k-match-detail > td {
+    padding: var(--ms-space-md);
+    background: var(--ms-color-surface-alt);
+}
+
+/* The record detail, inline in the results and on the record page. */
+.ms-k-record-meta {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: var(--ms-space-xs) var(--ms-space-lg);
+    margin: 0 0 var(--ms-space-md);
+}
+
+.ms-k-record-meta dt {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-k-record-meta dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.ms-k-record-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-sm);
+    margin-top: var(--ms-space-md);
+}
+
+.ms-k-copy-note {
+    margin-top: var(--ms-space-sm);
+}
+
+/* The record page's neighbours: the record asked for stands out. */
+.ms-k-neighbours tr[aria-current="true"] td {
+    background: var(--ms-color-surface-alt);
+    font-weight: var(--ms-font-weight-medium);
+}
+
+.ms-k-neighbours td {
+    font-variant-numeric: tabular-nums;
+}
+
+.ms-k-topic-count {
+    font-variant-numeric: tabular-nums;
+}
+
+.ms-k-record-address,
+.ms-k-trace,
+.ms-k-value-note {
+    margin: 0 0 var(--ms-space-md);
+}
+
+.ms-k-record-detail {
+    min-width: 0;
+}
+
+.ms-k-permalink {
+    text-decoration: none;
+}
+
+/* The "Copy as" menu: the same look as the object browser's copy menu, which a MenuButton gets from its caller's classes. */
+.ms-k-copy-menu {
+    display: inline-flex;
+}
+
+.ms-k-copy-popover {
+    min-width: 16rem;
+    max-width: min(28rem, calc(100vw - 2rem));
+    padding: var(--ms-space-xs);
+    border: 1px solid var(--ms-color-border-strong);
+    border-radius: var(--ms-radius-lg);
+    background-color: var(--ms-color-surface);
+    color: var(--ms-color-text);
+    box-shadow: var(--ms-shadow-lg);
+    font-family: var(--ms-font-family);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-k-copy-popover::backdrop {
+    background-color: transparent;
+}
+
+/* The pressed state of a toggle button (the relative presets, the sort): the attribute is the state, for the eye and for a screen reader. */
+.ms-k-presets [aria-pressed="true"],
+.ms-k-sort [aria-pressed="true"] {
+    border-color: var(--ms-color-primary);
+    background: var(--ms-color-primary-soft);
+    color: var(--ms-color-primary);
+}
+
+/* No sideways scroll on a narrow screen (UI-VERIFY, 390 px). The matches table's visually hidden "Details" header is absolutely positioned: with no
+   positioned ancestor it sat where the last column is, far outside its scroll region, and widened the page. The table is its containing block now. */
+.ms-k-matches,
+.ms-k-neighbours {
+    position: relative;
+}
+
+/* A fieldset's default minimum width is its content's, which pushed the topics box past the column. Everything the page draws outside a table may
+   shrink and breaks a long unbroken value (a predicate, a key, a topic name) rather than widening the page. */
+.ms-k-search-form fieldset,
+.ms-k-search-form,
+.ms-k-topic-option,
+.ms-k-result-banner,
+.ms-k-caveats,
+.ms-k-plan-notes,
+.ms-k-record-detail {
+    min-width: 0;
+}
+
+.ms-k-result-banner p,
+.ms-k-caveats li,
+.ms-k-plan-notes li,
+.ms-k-verdicts li,
+.ms-k-estimate,
+.ms-k-predicate-errors li,
+.ms-k-window-text,
+.ms-k-copy-note,
+.ms-k-record-address,
+.ms-k-record-detail code,
+.ms-k-syntax-examples code {
+    overflow-wrap: anywhere;
+}

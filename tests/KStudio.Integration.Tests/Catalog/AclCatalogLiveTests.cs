@@ -126,7 +126,7 @@ public abstract class AclCatalogLiveTests(KafkaFixture fixture)
         (LiveContractCluster admin, string topic, _) = await SeedAsync("grouplag");
         await using LiveContractCluster seeded = admin;
         string group = $"kstudio-lag-{fixture.RunId}";
-        admin.CommitGroupOffset(group, topic, 0, 2);
+        await admin.CommitGroupOffsetAsync(group, topic, 0, 2);
         await using EngineHarness engine = As("reader", options => options.AddCluster("groups", fixture.Client("reader"), c => c.ConsumerGroup(group)));
 
         KafkaTopicOverview overview = (await engine.Catalog.GetTopicOverviewAsync("groups", new KafkaTopicName(topic), Token)).Value;

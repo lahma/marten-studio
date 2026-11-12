@@ -302,7 +302,7 @@ public abstract class WireContract
         string topic = cluster.NewTopic("abort");
         await cluster.CreateTopicAsync(topic, 1);
         await cluster.ProduceAsync(topic, 0, Sequence(3));
-        IContractTransaction transaction = await cluster.BeginTransactionAsync(topic, 0, Sequence(2));
+        await using IContractTransaction transaction = await cluster.BeginTransactionAsync(topic, 0, Sequence(2));
         await transaction.AbortAsync();
 
         List<WireReadOutcome> committed = await OnReaderThread(cluster, WireIsolation.ReadCommitted, reader =>

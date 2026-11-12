@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <!-- The Kafka module's Razor Class Library (AGENTS.md D34, D35): AddKafkaStudio() adds a Kafka section to the studio the host
+       registered. It has no Marten (hard rule 16), no static web assets (its CSS is a section of PostgresStudio's one stylesheet)
+       and it is not packed before KStudio's first release (plan K8). -->
+  <PropertyGroup>
+    <AssemblyName>KStudio</AssemblyName>
+    <RootNamespace>KStudio</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <Product>KStudio</Product>
+    <Description>KStudio for Apache Kafka: a Kafka section for Marten Studio or Postgres Studio, over the application's own Kafka credentials. Apache Kafka is a trademark of the Apache Software Foundation. KStudio is not affiliated with or endorsed by the Apache Software Foundation.</Description>
+  </PropertyGroup>
+
+  <!-- Components are bound by name, as in the other studios (D2). -->
+  <PropertyGroup>
+    <IsTrimmable>false</IsTrimmable>
+    <IsAotCompatible>false</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <!-- The shell this module joins, and the engine it shows. Confluent.Kafka reaches this project only through KStudio.Core: the
+       built KStudio.dll references no Confluent assembly (KStudioFenceTests). -->
+  <ItemGroup>
+    <ProjectReference Include="../PostgresStudio/PostgresStudio.csproj" />
+    <ProjectReference Include="../KStudio.Core/KStudio.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <SupportedPlatform Include="browser" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="KStudio.Tests" />
+    <InternalsVisibleTo Include="KStudio.Integration.Tests" />
+  </ItemGroup>
+
+</Project>

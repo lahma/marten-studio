@@ -61,6 +61,20 @@ internal sealed class KafkaRedactionRules
     private readonly List<(RedactionTarget Target, string Field, string Name, bool Searchable)> rules = [];
     private readonly HashSet<string> allowed = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>A copy that later declarations on this object do not reach: the registry's snapshot of what validation approved.</summary>
+    internal KafkaRedactionRules Copy()
+    {
+        KafkaRedactionRules copy = new();
+        copy.rules.AddRange(rules);
+
+        foreach (string name in allowed)
+        {
+            copy.allowed.Add(name);
+        }
+
+        return copy;
+    }
+
     /// <summary>The rules in the order they were declared.</summary>
     internal IReadOnlyList<(RedactionTarget Target, string Field, string Name, bool Searchable)> Declared => rules;
 
@@ -144,12 +158,21 @@ internal interface IKafkaRedactor
     RedactionRule? AnyCloudEventRule();
 }
 
-/// <summary>The redactor built from a topic's rules and the deny-list.</summary>
+/// <summary>
+/// The redactor built from a topic's rules and the deny-list. Redaction fails closed, so a rule's name is compared ignoring case (a rule on
+/// <c>Customer-Email</c> masks <c>customer-email</c> too), and the two ways a CloudEvent travels are one field: the binary mode of the
+/// CloudEvents Kafka binding carries attribute <c>a</c> as header <c>ce_a</c> and <c>datacontenttype</c> as <c>content-type</c>, and a
+/// rule on either spelling masks both. The predicate's <c>header.&lt;name&gt;</c> keeps matching the record's header names case-sensitively.
+/// </summary>
 internal sealed class KafkaRedactor : IKafkaRedactor
 {
-    private readonly Dictionary<string, RedactionRule> headers = new(StringComparer.Ordinal);
+    private const string BinaryPrefix = "ce_";
+    private const string ContentTypeHeader = "content-type";
+    private const string ContentTypeAttribute = "datacontenttype";
+
+    private readonly Dictionary<string, RedactionRule> headers = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, RedactionRule> denyListed = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, RedactionRule> attributes = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, RedactionRule> attributes = new(StringComparer.OrdinalIgnoreCase);
     private readonly RedactionRule? key;
 
     /// <summary>The redactor of a topic that declared no rules: the deny-list only.</summary>
@@ -171,7 +194,10 @@ internal sealed class KafkaRedactor : IKafkaRedactor
 
         foreach ((RedactionTarget target, string field, string name, bool searchable) in rules?.Declared ?? [])
         {
-            RedactionRule rule = new(target, field, name, searchable, BuiltIn: false);
+            // A deny-listed header is never searchable, whatever was declared (validation refuses the declaration; this keeps the rule even
+            // where validation did not run).
+            bool canSearch = searchable && !(target == RedactionTarget.Header && HeaderDenyList.Contains(field));
+            RedactionRule rule = new(target, field, name, canSearch, BuiltIn: false);
 
             switch (target)
             {
@@ -189,20 +215,62 @@ internal sealed class KafkaRedactor : IKafkaRedactor
     }
 
     /// <inheritdoc />
-    public RedactionRule? ForHeader(string name) =>
-        headers.TryGetValue(name, out RedactionRule? declared) ? declared
-        : denyListed.TryGetValue(name, out RedactionRule? builtIn) ? builtIn
+    public RedactionRule? ForHeader(string name)
+    {
+        if (headers.TryGetValue(name, out RedactionRule? declared))
+        {
+            return declared;
+        }
 
-        // A binary-mode CloudEvent carries its attribute in a ce_ header: a rule on the attribute masks the header too.
-        : name.StartsWith("ce_", StringComparison.Ordinal) && attributes.TryGetValue(name[3..], out RedactionRule? attribute) ? attribute
-        : null;
+        if (denyListed.TryGetValue(name, out RedactionRule? builtIn))
+        {
+            return builtIn;
+        }
+
+        // A binary-mode CloudEvent carries its attribute in a ce_ header, and its content type in content-type: a rule on the attribute
+        // masks the header too.
+        if (name.StartsWith(BinaryPrefix, StringComparison.OrdinalIgnoreCase) && attributes.TryGetValue(name[BinaryPrefix.Length..], out RedactionRule? attribute))
+        {
+            return attribute;
+        }
+
+        return string.Equals(name, ContentTypeHeader, StringComparison.OrdinalIgnoreCase) && attributes.TryGetValue(ContentTypeAttribute, out RedactionRule? contentType)
+            ? contentType
+            : null;
+    }
 
     /// <inheritdoc />
     public RedactionRule? ForKey() => key;
 
     /// <inheritdoc />
-    public RedactionRule? ForCloudEvent(string attribute) => attributes.GetValueOrDefault(attribute);
+    public RedactionRule? ForCloudEvent(string attribute)
+    {
+        if (attributes.TryGetValue(attribute, out RedactionRule? declared))
+        {
+            return declared;
+        }
+
+        // The other direction: a header rule on the binary-mode carrier of this attribute masks the attribute as well.
+        if (headers.TryGetValue(BinaryPrefix + attribute, out RedactionRule? carrier))
+        {
+            return carrier;
+        }
+
+        return string.Equals(attribute, ContentTypeAttribute, StringComparison.OrdinalIgnoreCase) && headers.TryGetValue(ContentTypeHeader, out RedactionRule? contentType)
+            ? contentType
+            : null;
+    }
 
     /// <inheritdoc />
-    public RedactionRule? AnyCloudEventRule() => attributes.Values.FirstOrDefault();
+    public RedactionRule? AnyCloudEventRule()
+    {
+        if (attributes.Values.FirstOrDefault() is { } attribute)
+        {
+            return attribute;
+        }
+
+        // A structured envelope holds every attribute, so a header rule on any binary-mode carrier makes the envelope unsafe to keep whole.
+        return headers.Values.FirstOrDefault(static x =>
+            x.Field.StartsWith(BinaryPrefix, StringComparison.OrdinalIgnoreCase) || string.Equals(x.Field, ContentTypeHeader, StringComparison.OrdinalIgnoreCase));
+    }
 }

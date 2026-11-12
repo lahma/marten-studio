@@ -1,0 +1,388 @@
+@implements IAsyncDisposable
+@using System.Globalization
+@using KStudio.Core.Clusters
+@using KStudio.Core.Scanning
+@using Microsoft.Extensions.Logging
+@using PostgresStudio.Services
+@using PostgresStudio.Services.Settings
+@inject KafkaState State
+@inject KafkaRecordService Records
+@inject KafkaCatalogService Catalog
+@inject KafkaCapabilityGuard Capabilities
+@inject NavigationManager Navigation
+@inject IStudioSettings Settings
+@inject StudioState Studio
+@inject ILogger<KafkaRecordBody> Logger
+
+@* The record page (D-UI decision 14): one record by its offset and its neighbours. It reads once per address, after the frame's Ready - never while
+   prerendering - and shows KafkaRecordRead.Text verbatim for every status that is not Found: there is one source for those sentences. A link whose
+   partition, offset or topic is not valid makes no broker call. *@
+
+<div class="ms-page ms-k-record">
+    <nav class="ms-db-breadcrumb" aria-label="Breadcrumb">
+        <a href="@TopicsHref">Topics</a>
+        <span class="ms-db-breadcrumb-sep" aria-hidden="true">/</span>
+        <span>@(topic ?? "Record")</span>
+    </nav>
+
+    <div class="ms-page-header">
+        <h1 class="ms-page-title">Record</h1>
+    </div>
+
+    @if (!Capabilities.IsEnabled(KafkaCapability.SearchRecords))
+    {
+        <KafkaCapabilityDisabled Capability="@nameof(KafkaStudioCapabilities.SearchRecords)" Action="open a record" />
+    }
+    else if (!valid)
+    {
+        <div class="ms-empty" role="status">
+            <p class="ms-empty-title">Not a record</p>
+            <p class="ms-empty-description">@KafkaStudioText.RecordLinkInvalid</p>
+        </div>
+    }
+    else if (error is not null)
+    {
+        <ErrorAlert Message="@error" />
+    }
+    else if (loading)
+    {
+        <LoadingSpinner />
+    }
+    else if (result is KafkaRecordPageResult.CapabilityOff off)
+    {
+        <p class="ms-k-note" role="note">@off.Text</p>
+    }
+    else if (result is KafkaRecordPageResult.Read { Value: { } read })
+    {
+        <p class="ms-muted ms-k-record-address">
+            <code>@topic</code> · partition @partition · offset @KafkaDisplay.Number(offset)
+        </p>
+
+        @if (read.Status != KafkaRecordReadStatus.Found)
+        {
+            <p class="ms-k-note" role="note">@read.Text</p>
+        }
+
+        @if (read.Record is { } record)
+        {
+            <KafkaRecordDetail Model="@record" Cluster="@State.ActiveCluster?.Key" Kcat="@kcat" />
+        }
+
+        @if (Neighbours(read) is { Count: > 0 } rows)
+        {
+            <h2 class="ms-section-title">Neighbours</h2>
+            <TableScroll Label="Neighbours">
+                <table class="ms-table ms-k-neighbours">
+                    <thead>
+                        <tr>
+                            <th>Offset</th>
+                            <th>Time</th>
+                            <th>Key</th>
+                            <th>Type</th>
+                            <th>Size</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach ((long rowOffset, KafkaMatch? match) in rows)
+                        {
+                            <tr class="ms-table-row" @key="rowOffset" aria-current="@(rowOffset == offset ? "true" : null)">
+                                <td class="ms-table-cell"><a href="@RecordHref(rowOffset)">@KafkaDisplay.Number(rowOffset)</a></td>
+                                @if (match is null)
+                                {
+                                    <td class="ms-table-cell ms-muted" colspan="4">@KafkaStudioText.NoRecordAtThisOffset</td>
+                                }
+                                else
+                                {
+                                    <td class="ms-table-cell">@Studio.FormatInSelectedTimeZone(match.Timestamp, "yyyy-MM-dd HH:mm:ss")</td>
+                                    <td class="ms-table-cell"><span class="@KeyClass(match)">@KafkaMatchView.KeyDisplay(match.Key)</span></td>
+                                    <td class="ms-table-cell">@KafkaMatchView.TypeOf(match)</td>
+                                    <td class="ms-table-cell">
+                                        @if (match.ValueKind == KStudio.Core.Decoding.KafkaValueKind.Tombstone)
+                                        {
+                                            <span class="ms-chip ms-k-tombstone">tombstone</span>
+                                        }
+                                        else
+                                        {
+                                            @KafkaDisplay.Bytes(match.ValueLength)
+                                        }
+                                    </td>
+                                }
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </TableScroll>
+        }
+
+        @if (SearchAroundHref(read) is { } around)
+        {
+            <p><a class="ms-button" href="@around">Search around this record</a></p>
+        }
+    }
+    else
+    {
+        <div class="ms-empty" role="status">
+            <p class="ms-empty-title">Not found</p>
+            <p class="ms-empty-description">@KafkaStudioText.TopicNotAvailable(topic ?? string.Empty)</p>
+        </div>
+    }
+</div>
+
+@code {
+    private readonly CancellationTokenSource lifetime = new();
+    private readonly SemaphoreSlim gate = new(1, 1);
+
+    private string? topic;
+    private int partition;
+    private long offset;
+    private bool valid;
+    private KafkaRecordPageResult? result;
+    private string? kcat;
+    private string? error;
+    private bool loading = true;
+    private bool disposed;
+    private bool ready;
+    private bool started;
+    private string? loadedKey;
+
+    /// <summary>Completed by the frame once the cluster policy passed and the circuit is interactive: a body reads nothing before it.</summary>
+    [CascadingParameter(Name = KafkaPageFrame.ReadyName)]
+    public Task? Ready { get; set; }
+
+    private string TopicsHref => KafkaAddress.Href(Settings, KafkaAddress.TopicsRoute, State.ActiveCluster?.Key);
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            if (Ready is not null)
+            {
+                await Ready;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        if (disposed)
+        {
+            return;
+        }
+
+        ParseAddress();
+        State.ClusterChanged += OnClusterChangedAsync;
+        Navigation.LocationChanged += OnLocationChanged;
+        ready = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Not keyed on firstRender: a body created before the frame released reads becomes ready after its first render.
+        if (disposed || !ready || started)
+        {
+            return;
+        }
+
+        started = true;
+        await ReloadAsync();
+    }
+
+    private void ParseAddress()
+    {
+        topic = KafkaAddress.Get(Navigation.Uri, KafkaAddress.TopicParameter);
+
+        valid = KafkaTopicName.IsValid(topic)
+            && int.TryParse(KafkaAddress.Get(Navigation.Uri, KafkaAddress.PartitionParameter), NumberStyles.None, CultureInfo.InvariantCulture, out partition)
+            && long.TryParse(KafkaAddress.Get(Navigation.Uri, KafkaAddress.OffsetParameter), NumberStyles.None, CultureInfo.InvariantCulture, out offset);
+
+        if (!valid)
+        {
+            loading = false;
+        }
+    }
+
+    private async Task ReloadAsync()
+    {
+        if (disposed || !valid || !Capabilities.IsEnabled(KafkaCapability.SearchRecords) || State.ActiveCluster is not { } active)
+        {
+            loading = false;
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        // What this read is about, captured before it starts: the fields move when the address does.
+        (string? askedTopic, int askedPartition, long askedOffset) = (topic, partition, offset);
+        string key = string.Join('\n', active.Key, askedTopic, askedPartition.ToString(CultureInfo.InvariantCulture), askedOffset.ToString(CultureInfo.InvariantCulture));
+
+        try
+        {
+            await gate.WaitAsync(lifetime.Token);
+
+            try
+            {
+                if (string.Equals(loadedKey, key, StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                loading = true;
+                error = null;
+                await InvokeAsync(StateHasChanged);
+
+                KafkaRecordPageResult read = await Records.ReadAsync(active, askedTopic, askedPartition, askedOffset, lifetime.Token);
+
+                // The address or the cluster moved while this was reading: the answer is about something nobody is looking at.
+                if (disposed || State.ActiveCluster != active || !string.Equals(topic, askedTopic, StringComparison.Ordinal) || partition != askedPartition || offset != askedOffset)
+                {
+                    return;
+                }
+
+                loadedKey = key;
+                result = read;
+                kcat = read is KafkaRecordPageResult.Read { Value.Record: { } record }
+                    ? KafkaMatchView.Kcat(record.Topic, record.Partition, record.Offset, await SettingsAsync(active))
+                    : null;
+            }
+            finally
+            {
+                gate.Release();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception e) when (!disposed)
+        {
+            Logger.LogWarning(e, "The Kafka record page failed to read the record");
+            error = KafkaStudioText.ReadFailed;
+        }
+
+        loading = false;
+
+        if (!disposed)
+        {
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    /// <summary>The cluster's settings as the reader shows them, for the kcat line; a failure is a kcat line without the optional parts.</summary>
+    private async Task<KafkaClusterSettingsView?> SettingsAsync(KafkaClusterEntry active)
+    {
+        try
+        {
+            return await Catalog.GetSettingsAsync(active, lifetime.Token);
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            Logger.LogDebug(e, "The Kafka record page could not read the cluster's settings");
+            return null;
+        }
+    }
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+    {
+        if (disposed || !KafkaAddress.IsPage(e.Location, KafkaAddress.RecordRoute))
+        {
+            return;
+        }
+
+        _ = InvokeAsync(ApplyAddressAsync);
+    }
+
+    private async Task ApplyAddressAsync()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        result = null;
+        loading = true;
+        ParseAddress();
+        await InvokeAsync(StateHasChanged);
+        await ReloadAsync();
+    }
+
+    private async Task OnClusterChangedAsync()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        loadedKey = null;
+        result = null;
+        loading = true;
+        await InvokeAsync(StateHasChanged);
+        await ReloadAsync();
+    }
+
+    /// <summary>The records around the offset in offset order; the missing offset of a compacted gap is a row of its own.</summary>
+    private List<(long Offset, KafkaMatch? Match)> Neighbours(KafkaRecordRead read)
+    {
+        List<(long Offset, KafkaMatch? Match)> rows = [];
+
+        foreach (KafkaMatch match in read.Before)
+        {
+            rows.Add((match.Offset, match));
+        }
+
+        rows.Add((offset, read.Record));
+
+        foreach (KafkaMatch match in read.After)
+        {
+            rows.Add((match.Offset, match));
+        }
+
+        // A status with no neighbours and no record has nothing to table.
+        return rows.Count == 1 && rows[0].Match is null ? [] : rows;
+    }
+
+    private string RecordHref(long rowOffset) =>
+        KafkaAddress.Href(
+            Settings,
+            KafkaAddress.RecordRoute,
+            State.ActiveCluster?.Key,
+            (KafkaAddress.TopicParameter, topic),
+            (KafkaAddress.PartitionParameter, partition.ToString(CultureInfo.InvariantCulture)),
+            (KafkaAddress.OffsetParameter, rowOffset.ToString(CultureInfo.InvariantCulture)));
+
+    /// <summary>A search of this topic, five minutes either side of the record, with no predicate.</summary>
+    private string? SearchAroundHref(KafkaRecordRead read)
+    {
+        KafkaMatch? near = read.Record ?? read.Before.LastOrDefault() ?? read.After.FirstOrDefault();
+        if (near is null)
+        {
+            return null;
+        }
+
+        DateTimeOffset from = near.Timestamp.AddMinutes(-5);
+        DateTimeOffset to = near.Timestamp.AddMinutes(5);
+
+        return KafkaAddress.Href(
+            Settings,
+            KafkaAddress.SearchRoute,
+            State.ActiveCluster?.Key,
+            (KafkaAddress.TopicParameter, topic),
+            (KafkaAddress.FromParameter, KafkaAddress.FormatWindow(from)),
+            (KafkaAddress.ToParameter, KafkaAddress.FormatWindow(to)));
+    }
+
+    private static string KeyClass(KafkaMatch match) => match.Key.IsRedacted ? "ms-k-redacted" : match.Key.IsNull ? "ms-k-null" : string.Empty;
+
+    public async ValueTask DisposeAsync()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        disposed = true;
+        State.ClusterChanged -= OnClusterChangedAsync;
+        Navigation.LocationChanged -= OnLocationChanged;
+        await lifetime.CancelAsync();
+        lifetime.Dispose();
+    }
+}

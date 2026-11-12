@@ -1,0 +1,10 @@
+@page "/kafka/search"
+
+<PageTitle>Kafka search</PageTitle>
+
+@* Search (D-UI decisions 10 to 13): the cluster, the topics and the window are in the query string and the predicate is in the fragment. The page holds no
+   logic; the body is created below the frame only once reads are released, and it never runs a search by itself. *@
+
+<KafkaPageFrame>
+    <KafkaSearchBody />
+</KafkaPageFrame>

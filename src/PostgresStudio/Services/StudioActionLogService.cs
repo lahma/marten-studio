@@ -37,7 +37,25 @@ internal sealed record StudioActionLogEntry(
     /// a timestamp, and the ring is already ordered by insertion.
     /// </remarks>
     public long Sequence { get; init; }
+
+    /// <summary>
+    /// <see langword="null" /> for the host studio's own scope (every entry before a module existed); a module's key otherwise (D34). An
+    /// entry with a kind is judged only by that kind's <see cref="IStudioAuditScopeGate" />, never by the host's store policy.
+    /// </summary>
+    public string? ScopeKind { get; init; }
+
+    /// <summary>What the Activity screen's Scope column shows for a module's entry (<c>primary · tenant-a</c>). Bounded like <see cref="Target" />.</summary>
+    public string? ScopeLabel { get; init; }
+
+    /// <summary>The module's own immutable scope value, read only by that module's <see cref="IStudioAuditScopeGate" />.</summary>
+    public object? ModuleScope { get; init; }
 }
+
+/// <summary>A module's scope as the audit records it (D34).</summary>
+/// <param name="Kind">The module's key, which names the gate that judges the entry.</param>
+/// <param name="Label">What the Activity screen's Scope column shows.</param>
+/// <param name="Value">The module's own scope value, read only by its gate.</param>
+internal sealed record StudioModuleAuditScope(string Kind, string Label, object Value);
 
 /// <summary>
 /// The process's ring of recent actions, newest first.

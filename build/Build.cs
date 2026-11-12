@@ -179,7 +179,15 @@ partial class Build : FalloutBuild,
     static DotNetTestSettings WithBlameHang(DotNetTestSettings settings, Project project) =>
         BlameHangTestProjects.Contains(project.Name, StringComparer.Ordinal)
             ? settings.EnableBlameHang().SetBlameHangTimeout(BlameHangTimeout).SetBlameHangDumpType("mini")
-            : settings;
+            : BlameCrashTestProjects.Contains(project.Name, StringComparer.Ordinal)
+                ? settings.EnableBlameCrash()
+                : settings;
+
+    /// <summary>
+    /// KS-CI-FIX-4: the suite that loads native librdkafka runs with the blame-crash collector, so a native crash (exit code 139, marten-latest run
+    /// 43212361402) names the test that was running in the log and a sequence file, instead of only "Test process crashed".
+    /// </summary>
+    static readonly string[] BlameCrashTestProjects = ["KStudio.Integration.Tests"];
 
     string ICreateGitHubRelease.Name => $"v{Version}";
 

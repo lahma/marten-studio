@@ -353,7 +353,8 @@ internal sealed record KafkaScanProgress(
 /// <param name="FromOffset">The first offset lost.</param>
 /// <param name="ToOffset">The last offset lost.</param>
 /// <param name="Lost">How many offsets.</param>
-internal sealed record KafkaScanGap(string Topic, int Partition, long FromOffset, long ToOffset, long Lost);
+/// <param name="LogStart">The log start the partition reported when the loss was found, when it was read.</param>
+internal sealed record KafkaScanGap(string Topic, int Partition, long FromOffset, long ToOffset, long Lost, long? LogStart = null);
 
 /// <summary>One partition's part of a finished scan.</summary>
 /// <param name="Topic">The topic.</param>

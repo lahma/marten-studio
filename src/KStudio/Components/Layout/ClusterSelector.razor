@@ -1,0 +1,178 @@
+@using KStudio.Services
+@using Microsoft.Extensions.Logging
+@using PostgresStudio.Components
+@using PostgresStudio.Services.Live
+@using PostgresStudio.Services.Settings
+@implements IDisposable
+@inject KafkaState State
+@inject NavigationManager Navigation
+@inject StudioDescriptor Descriptor
+@inject IStudioSettings Settings
+@inject ILogger<ClusterSelector> Logger
+
+@* The header's scope on a Kafka page (D34): the module's own selector, drawn by the shell in place of the host's ScopeSelector, with the
+   same markup and classes. A picker only while the visitor may see two or more clusters - the rule ScopeSelector applies to stores.
+   The address carries ?cluster=<key> and nothing of the host's scope: a Kafka address names no store, database or tenant. *@
+
+<div class="ms-scope-selector">
+    @if (State.AvailableClusters.Count > 1)
+    {
+        <div class="ms-header-control">
+            <label class="ms-header-control-label" for="ms-cluster-select">Cluster</label>
+            <select id="ms-cluster-select"
+                    class="ms-select ms-header-select"
+                    aria-label="Cluster"
+                    value="@State.ActiveCluster?.Key"
+                    @onchange="OnClusterPickedAsync">
+                @foreach (KafkaClusterEntry cluster in State.AvailableClusters)
+                {
+                    @* `selected` as well as the select's `value`: during static server-side rendering `value` on a <select> is ignored. *@
+                    <option value="@cluster.Key"
+                            selected="@(cluster.Key == State.ActiveCluster?.Key)">@cluster.Label</option>
+                }
+            </select>
+        </div>
+    }
+    else if (State.ActiveCluster is { } only)
+    {
+        <div class="ms-header-control">
+            <span class="ms-header-control-label">Cluster</span>
+            <span class="ms-k-cluster-name">@only.Label</span>
+        </div>
+    }
+</div>
+
+@code {
+    private bool interactive;
+    private bool subscribed;
+    private bool addressApplied;
+
+    protected override async Task OnInitializedAsync()
+    {
+        State.ClusterChanged += OnClusterChanged;
+        Navigation.LocationChanged += OnLocationChanged;
+        subscribed = true;
+
+        try
+        {
+            await State.EnsureInitializedAsync();
+
+            // This selector is drawn when a module's page comes on screen, so its first render is every Kafka page's: the cluster the address
+            // names is taken here, before the address is written (SyncAddress), or arriving from a host page or by Back would rewrite the
+            // address to the cluster the state last held.
+            if (IsKafkaAddress(Navigation.Uri))
+            {
+                await State.ApplyAddressAsync();
+            }
+        }
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
+        {
+            // The circuit went away while the clusters were being listed.
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            Logger.LogDebug(e, "KStudio could not list the clusters this visitor may see");
+        }
+        finally
+        {
+            addressApplied = true;
+        }
+
+        SyncAddress();
+    }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        // The one signal that says "this render is interactive" (the shell's rule): a NavigateTo while prerendering is a redirect.
+        interactive = true;
+        SyncAddress();
+    }
+
+    /// <summary>A change event's value comes from the browser: <see cref="KafkaState.SetClusterAsync" /> takes only a key it lists.</summary>
+    private async Task OnClusterPickedAsync(ChangeEventArgs args)
+    {
+        try
+        {
+            await State.SetClusterAsync(args.Value?.ToString());
+        }
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
+        {
+            // The circuit went away while the cluster was being picked.
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            Logger.LogDebug(e, "KStudio could not move to the cluster the visitor picked");
+        }
+    }
+
+    private async Task OnClusterChanged()
+    {
+        SyncAddress();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>
+    /// A link the visitor clicked to another cluster's address moves the scope to it; any other Kafka address is rewritten to name the cluster
+    /// on screen. A handler that starts the work and does not wait for it, never an async lambda (hard rule 6).
+    /// </summary>
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        if (!IsKafkaAddress(e.Location))
+        {
+            return;
+        }
+
+        string? named = KafkaState.ReadCluster(e.Location);
+        if (e.IsNavigationIntercepted
+            && named is not null
+            && !string.Equals(named, State.ActiveCluster?.Key, StringComparison.Ordinal)
+            && State.AvailableClusters.Any(x => string.Equals(x.Key, named, StringComparison.Ordinal)))
+        {
+            _ = InvokeAsync(() => OnClusterPickedAsync(new ChangeEventArgs { Value = named }));
+            return;
+        }
+
+        SyncAddress();
+    }
+
+    /// <summary>
+    /// Writes the cluster on screen into the address, so a link someone pastes reopens the same cluster (D9). Only once interactive and only
+    /// after the address's own cluster was applied: a rewrite earlier would strip a pasted ?cluster= or write the first cluster over it.
+    /// </summary>
+    private void SyncAddress()
+    {
+        if (!interactive || !addressApplied || !State.AddressRead || State.ActiveCluster is not { } active || !IsKafkaAddress(Navigation.Uri))
+        {
+            return;
+        }
+
+        string target = Navigation.GetUriWithQueryParameter(KafkaState.ClusterParameter, active.Key);
+        if (!string.Equals(target, Navigation.Uri, StringComparison.Ordinal))
+        {
+            Navigation.NavigateTo(target, forceLoad: false, replace: true);
+        }
+    }
+
+    /// <summary>
+    /// Whether <paramref name="uri" /> is a page of the Kafka module, by the page the route table matches, never by the address's text: this
+    /// selector is drawn on a module's page and goes away with it, and an address of the host studio must never be given a ?cluster=.
+    /// </summary>
+    private bool IsKafkaAddress(string uri) =>
+        StudioLink.ToDashboardRelativePath(uri, Navigation.BaseUri, Settings) is { } relative
+        && Descriptor.Routes.Match(relative, Settings) is { } match
+        && Descriptor.ModuleOf(match.PageType)?.Key == KafkaStudioText.Key;
+
+    public void Dispose()
+    {
+        if (subscribed)
+        {
+            State.ClusterChanged -= OnClusterChanged;
+            Navigation.LocationChanged -= OnLocationChanged;
+        }
+    }
+}

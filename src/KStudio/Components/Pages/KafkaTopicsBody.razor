@@ -1,0 +1,480 @@
+@implements IAsyncDisposable
+@using KStudio.Core.Catalog
+@using KStudio.Core.Wire
+@using Microsoft.Extensions.Logging
+@using PostgresStudio.Services.Live
+@using PostgresStudio.Services.Settings
+@inject KafkaState State
+@inject KafkaCatalogService Catalog
+@inject NavigationManager Navigation
+@inject StudioLiveUpdatesFactory LiveFactory
+@inject IStudioSettings Settings
+@inject ILogger<KafkaTopicsBody> Logger
+
+@* The body of Topics, the home (D-UI decision 7). It lives under KafkaPageFrame and reads only once the frame has released reads, so the
+   prerendering request makes no broker call. Filter and page are read from the address and written back to it with replace once interactive;
+   the offset spans are read for the rows of the current page only. *@
+
+<div class="ms-page ms-k-topics">
+    <div class="ms-page-header">
+        <h1 class="ms-page-title">Kafka topics</h1>
+    </div>
+
+    @if (refreshError is not null)
+    {
+        <p class="ms-muted ms-k-refresh-error" role="status">@refreshError</p>
+    }
+
+    @if (error is not null)
+    {
+        <ErrorAlert Message="@error" />
+    }
+    else if (loading)
+    {
+        <LoadingSpinner />
+    }
+    else if (entry is not null)
+    {
+        <div class="ms-k-cluster-strip">
+            <span class="ms-k-cluster-name">@entry.DisplayName</span>
+            @if (!string.IsNullOrWhiteSpace(entry.Environment))
+            {
+                <span class="ms-chip ms-k-environment">@entry.Environment</span>
+            }
+            @if (cluster?.Description is { IsAvailable: true } description)
+            {
+                <span class="ms-muted ms-k-cluster-facts">
+                    Cluster id <code>@(description.Value.ClusterId ?? "unknown")</code>
+                    · @(description.Value.ControllerId is { } controller ? "controller broker " + controller : "controller unknown")
+                    · @description.Value.Nodes.Count broker@(description.Value.Nodes.Count == 1 ? string.Empty : "s")
+                </span>
+            }
+            else if (cluster is not null)
+            {
+                <p class="ms-k-note" role="note">@KafkaAccessText.Describe(cluster.Description.Error!)</p>
+            }
+        </div>
+
+        @if (listing?.RefusalText is { } refusal)
+        {
+            <ErrorAlert Message="@refusal" />
+        }
+        else if (listing is not null)
+        {
+            <div class="ms-k-toolbar">
+                <KafkaFilterBox Value="@filter" Placeholder="Filter topics by name" OnFilterChanged="OnFilterChangedAsync" />
+                <span class="ms-muted ms-k-total">@KafkaDisplay.Number(listing.Rows.Count) topic@(listing.Rows.Count == 1 ? string.Empty : "s")</span>
+            </div>
+
+            <TableScroll Label="Topics">
+                <table class="ms-table ms-k-topics-table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Description</th>
+                            <th>Partitions</th>
+                            <th title="@KafkaDisplay.OffsetSpanTitle">Offset span</th>
+                            <th>Key format</th>
+                        </tr>
+                    </thead>
+
+                    @if (pageRows.Any(static x => x.Declared))
+                    {
+                        <tbody class="ms-k-topic-group ms-k-topic-group-declared">
+                            <tr class="ms-k-group-row"><th scope="rowgroup" colspan="5">Declared</th></tr>
+                            @foreach (KafkaTopicRow row in pageRows.Where(static x => x.Declared))
+                            {
+                                @RowFragment(row)
+                            }
+                        </tbody>
+                    }
+
+                    @if (pageRows.Any(static x => !x.Declared))
+                    {
+                        <tbody class="ms-k-topic-group ms-k-topic-group-other">
+                            <tr class="ms-k-group-row"><th scope="rowgroup" colspan="5">Other topics</th></tr>
+                            @foreach (KafkaTopicRow row in pageRows.Where(static x => !x.Declared))
+                            {
+                                @RowFragment(row)
+                            }
+                        </tbody>
+                    }
+
+                    @if (pageRows.Count == 0)
+                    {
+                        <tbody>
+                            <tr><td class="ms-table-cell ms-muted" colspan="5">@(string.IsNullOrWhiteSpace(filter) ? "No topics are visible to this application's credentials." : "No topic matches the filter.")</td></tr>
+                        </tbody>
+                    }
+                </table>
+            </TableScroll>
+
+            <Pagination TotalItems="@listing.Rows.Count"
+                        PageSize="@KafkaCatalogService.PageSize"
+                        CurrentPage="@pageNumber"
+                        OnPageChanged="OnPageChangedAsync" />
+
+            @if (listing.Internal.Count > 0)
+            {
+                <details class="ms-k-topic-group ms-k-internal">
+                    <summary>Internal topics (@listing.Internal.Count)</summary>
+                    <TableScroll Label="Internal topics">
+                        <table class="ms-table">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Partitions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (KafkaTopicRow row in listing.Internal)
+                                {
+                                    <tr class="ms-table-row" @key="row.Name">
+                                        <td class="ms-table-cell"><a href="@TopicHref(row.Name)"><BreakableName Value="@row.Name" /></a></td>
+                                        <td class="ms-table-cell">@(row.Partitions is { } count ? KafkaDisplay.Number(count) : "—")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </TableScroll>
+                </details>
+            }
+        }
+    }
+</div>
+
+@code {
+    private readonly CancellationTokenSource lifetime = new();
+    private readonly SemaphoreSlim gate = new(1, 1);
+
+    private StudioLiveUpdates? live;
+    private KafkaClusterEntry? entry;
+    private KafkaClusterOverview? cluster;
+    private KafkaTopicListing? listing;
+    private IReadOnlyList<KafkaTopicRow> pageRows = [];
+    private Dictionary<string, KafkaField<long>> spans = new(StringComparer.Ordinal);
+    private string? filter;
+    private int pageNumber = 1;
+    private string? error;
+    private string? refreshError;
+    private bool loading = true;
+    private bool disposed;
+    private bool ready;
+    private bool started;
+
+    /// <summary>Completed by the frame once the cluster policy passed and the circuit is interactive: a body reads nothing before it.</summary>
+    [CascadingParameter(Name = KafkaPageFrame.ReadyName)]
+    public Task? Ready { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            if (Ready is not null)
+            {
+                await Ready;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // The frame went away before it released reads: there is nothing to show.
+            return;
+        }
+
+        if (disposed)
+        {
+            return;
+        }
+
+        ReadAddress();
+        State.ClusterChanged += OnClusterChangedAsync;
+        Navigation.LocationChanged += OnLocationChanged;
+        ready = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Not keyed on firstRender: a body created before the frame released reads becomes ready after its first render.
+        if (disposed || !ready || started)
+        {
+            return;
+        }
+
+        started = true;
+
+        await ReloadAsync();
+
+        if (disposed)
+        {
+            return;
+        }
+
+        live = LiveFactory.Create();
+        live.Failed += OnLiveFailedAsync;
+        await live.StartAsync(Settings.RefreshInterval, TickAsync, lifetime.Token);
+    }
+
+    private async Task TickAsync(CancellationToken cancellationToken)
+    {
+        await LoadAsync(cancellationToken, first: false);
+        refreshError = null;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OnLiveFailedAsync(Exception exception)
+    {
+        refreshError = KafkaStudioText.CouldNotRefresh;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task LoadAsync(CancellationToken poll, bool first)
+    {
+        if (disposed || State.ActiveCluster is not { } active)
+        {
+            return;
+        }
+
+        using CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token, poll);
+        CancellationToken token = linked.Token;
+
+        await gate.WaitAsync(token);
+
+        try
+        {
+            if (disposed)
+            {
+                return;
+            }
+
+            string? asked = filter;
+            Task<KafkaClusterOverview?> clusterTask = Catalog.GetClusterAsync(active, token);
+            Task<KafkaTopicListing?> listingTask = Catalog.ListTopicsAsync(active, asked, token);
+            await Task.WhenAll(clusterTask, listingTask);
+
+            KafkaTopicListing? read = listingTask.Result;
+            int lastPage = read is null ? 1 : Math.Max(1, (int) Math.Ceiling((double) read.Rows.Count / KafkaCatalogService.PageSize));
+            int shown = Math.Clamp(pageNumber, 1, lastPage);
+            KafkaTopicRow[] rows = read is null
+                ? []
+                : [.. read.Rows.Skip((shown - 1) * KafkaCatalogService.PageSize).Take(KafkaCatalogService.PageSize)];
+
+            // Spans for the rows of this page only (decision 2): two cached reads however many rows it holds.
+            Dictionary<string, KafkaField<long>> readSpans = new(StringComparer.Ordinal);
+            string[] listed = [.. rows.Where(static x => x.Listed).Select(static x => x.Name)];
+
+            if (listed.Length > 0)
+            {
+                KafkaField<IReadOnlyList<KafkaTopicSpan>>? field = await Catalog.GetSpansAsync(active, listed, token);
+
+                if (field is { IsAvailable: true } available)
+                {
+                    foreach (KafkaTopicSpan span in available.Value)
+                    {
+                        readSpans[span.Topic] = span.OffsetSpan;
+                    }
+                }
+                else if (field is { } withheld)
+                {
+                    foreach (string name in listed)
+                    {
+                        readSpans[name] = KafkaField<long>.Withheld(withheld.Error!);
+                    }
+                }
+            }
+
+            // The cluster moved, or the page was left, while this read was running: the answer is about something nobody is looking at.
+            if (disposed || State.ActiveCluster != active || !string.Equals(asked, filter, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            entry = active;
+            cluster = clusterTask.Result;
+            listing = read;
+            pageRows = rows;
+            spans = readSpans;
+            pageNumber = shown;
+            error = null;
+            loading = false;
+        }
+        finally
+        {
+            gate.Release();
+        }
+
+        if (first)
+        {
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void ReadAddress()
+    {
+        filter = KafkaAddress.Get(Navigation.Uri, "filter");
+        pageNumber = int.TryParse(KafkaAddress.Get(Navigation.Uri, "page"), out int parsed) && parsed >= 1 ? parsed : 1;
+    }
+
+    /// <summary>Back and Forward, a pasted link: the address changed to a filter or page this body did not write itself.</summary>
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+    {
+        if (disposed || !KafkaAddress.IsPage(e.Location, KafkaAddress.TopicsRoute))
+        {
+            return;
+        }
+
+        _ = InvokeAsync(ApplyAddressAsync);
+    }
+
+    private async Task ApplyAddressAsync()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        string? newFilter = KafkaAddress.Get(Navigation.Uri, "filter");
+        int newPage = int.TryParse(KafkaAddress.Get(Navigation.Uri, "page"), out int parsed) && parsed >= 1 ? parsed : 1;
+
+        if (string.Equals(newFilter, filter, StringComparison.Ordinal) && newPage == pageNumber)
+        {
+            return;
+        }
+
+        filter = newFilter;
+        pageNumber = newPage;
+        await ReloadAsync();
+    }
+
+    private async Task OnClusterChangedAsync()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        cluster = null;
+        listing = null;
+        pageRows = [];
+        spans = new Dictionary<string, KafkaField<long>>(StringComparer.Ordinal);
+        loading = true;
+        await InvokeAsync(StateHasChanged);
+        await ReloadAsync();
+    }
+
+    private async Task OnFilterChangedAsync(string text)
+    {
+        string? next = string.IsNullOrWhiteSpace(text) ? null : text.Trim();
+
+        if (string.Equals(next, filter, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        filter = next;
+        pageNumber = 1;
+        await ReloadAsync();
+        WriteAddress();
+    }
+
+    private async Task OnPageChangedAsync(int next)
+    {
+        pageNumber = next;
+        await ReloadAsync();
+        WriteAddress();
+    }
+
+    private void WriteAddress() =>
+        Navigation.NavigateTo(
+            Navigation.GetUriWithQueryParameters(new Dictionary<string, object?>
+            {
+                ["filter"] = filter,
+                ["page"] = pageNumber > 1 ? pageNumber : null,
+            }),
+            forceLoad: false,
+            replace: true);
+
+    private async Task ReloadAsync()
+    {
+        try
+        {
+            await LoadAsync(poll: default, first: true);
+            refreshError = null;
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception e) when (!disposed)
+        {
+            Logger.LogWarning(e, "The Kafka topics page failed to read the catalog");
+            error = KafkaStudioText.ReadFailed;
+            loading = false;
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private string TopicHref(string topic) =>
+        KafkaAddress.Href(Settings, KafkaAddress.TopicRoute, State.ActiveCluster?.Key, (KafkaAddress.TopicParameter, topic));
+
+    private RenderFragment RowFragment(KafkaTopicRow row) => @<tr class="ms-table-row" @key="row.Name">
+        <td class="ms-table-cell">
+            @if (row.Listed)
+            {
+                <a href="@TopicHref(row.Name)"><BreakableName Value="@row.Name" /></a>
+            }
+            else
+            {
+                <BreakableName Value="@row.Name" />
+                <span class="ms-muted ms-k-not-listed">@KafkaStudioText.TopicNotListed</span>
+            }
+        </td>
+        <td class="ms-table-cell">@row.Description</td>
+        <td class="ms-table-cell">@(row.Partitions is { } count ? KafkaDisplay.Number(count) : "—")</td>
+        <td class="ms-table-cell ms-k-span">
+            @if (row.Listed && spans.TryGetValue(row.Name, out KafkaField<long> span))
+            {
+                if (span.IsAvailable)
+                {
+                    @KafkaDisplay.Span(span.Value)
+                }
+                else
+                {
+                    <span title="@KafkaAccessText.Describe(span.Error!)">—</span>
+                }
+            }
+            else
+            {
+                @("—")
+            }
+        </td>
+        <td class="ms-table-cell">@KafkaDisplay.KeyFormat(row.KeyFormat, row.KeyFormatDeclared)</td>
+    </tr>;
+
+    public async ValueTask DisposeAsync()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        disposed = true;
+        State.ClusterChanged -= OnClusterChangedAsync;
+        Navigation.LocationChanged -= OnLocationChanged;
+
+        try
+        {
+            if (live is not null)
+            {
+                live.Failed -= OnLiveFailedAsync;
+                await live.DisposeAsync();
+                live = null;
+            }
+        }
+        finally
+        {
+            await lifetime.CancelAsync();
+            lifetime.Dispose();
+        }
+    }
+}

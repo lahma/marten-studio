@@ -1,8 +1,92 @@
 # KStudio
 
-KStudio (working name) is the Kafka module of the studio family. AGENTS.md states each rule; this document holds its
-full text and wins where they differ. D34 and D35, the shell seams and KStudio's authorization, land with the shell
-(KStudio M2).
+KStudio for Apache Kafka® (working name) is the family's Kafka module. Apache Kafka is a trademark of the Apache Software
+Foundation. KStudio is not affiliated with or endorsed by the Apache Software Foundation. AGENTS.md states each rule; this document holds its
+full text and wins where they differ. D34 and D35 are the shell's half, D36 to D41 the engine's.
+
+## D34
+
+**D34 — A module joins the registered studio's shell: KStudio is one.** KStudio is not a third studio. One studio per
+process still holds (D30): `AddKafkaStudio()` adds a *module* to the studio the host registered, and the module shares
+that studio's mount, circuit, rail, header, audit ring and capability chip.
+
+*Registration.* `AddKafkaStudio()` runs `KStudioVersionGuard` before it names a PostgresStudio or KStudio.Core type
+(its public body names none, and `KStudioVersionGuardTests` scans its IL), then registers `KafkaStudioModule` as an
+`IStudioModule` with `TryAddEnumerable`, and its options, services and startup guard with `TryAdd`. It reads nothing
+the host studio registered, so it may come before or after `AddMartenStudio()` or `AddPostgresStudio()`, and calling it
+twice adds one module. The shell's `StudioDescriptor` singleton is the host's static descriptor composed with the
+registered modules when it is first resolved (`StudioModuleComposition`); with no module it is that very instance,
+which is the proof that a host without KStudio is unchanged. `KafkaStudioStartupGuard` refuses to start a host that
+registered no studio, and one that enables a Kafka capability no policy answers (D35). There is no `MapKafkaStudio()`:
+a second map call would be a second circuit, and a second place to forget authorization.
+
+*Routes.* A module's page assembly keeps its root (`StudioPageAssembly.KeepsRoot`): `@page "/kafka/topics"` is served
+at `{mount}/kafka/topics`, so a module never lands over the host's routes, and the route table still refuses a route two
+pages claim. Every id travels in the query string, as D9 says of every id: `?cluster=`, `?topic=`, `?partition=`,
+`?offset=`. A topic name is case-sensitive and may look like a file name (`orders.json`), so it is never a path segment.
+A search's predicate travels in the fragment (`#q=`): no HTTP request line, access log or Referer carries it, and the circuit receives it once, over its own connection, to fill the box.
+
+*Rail.* A module's sections go before the host's last section (System), in module key order. Every section title and
+item label on the composed rail is unique, ignoring case, because the rail keys its entries on them. A module's links
+carry no host scope, and its entries' `IsShown` read its own options. The rail's credit names each module.
+
+*Scope.* The layout knows a module's page by the matched page's assembly, never by the address. On it, the header draws
+the module's scope selector (KStudio's `ClusterSelector`) and no Find box, and the layout neither gates the body on the
+host's scope nor reads or writes `?store=&db=&tenant=`. The host's scope stays in `StudioState`, untouched, and the
+rail's host links carry it back. KStudio's own scope is `KafkaState`'s cluster, read from `?cluster=` and written back
+only once interactive and after it was read. A broker-per-tenant cluster is one entry per tenant, carrying its tenant id;
+no Kafka address names a tenant.
+
+*Audit.* A module's ring entry carries `ScopeKind`, `ScopeLabel` and its own `ModuleScope`, and
+`StudioActionLog.GetVisibleAsync` judges it only through that kind's `IStudioAuditScopeGate`, never through the host's
+store policy; an entry of a kind no gate answers is hidden. KStudio logs its own events (9600-9649) with its own
+properties, never 9200 or 9201, whose templates name a store. A predicate reaches the audit only through the engine's
+audit printer, with every literal on a redacted field written `<redacted>`; the visitor's typed text never does.
+
+*Words and assets.* The host's `StudioText` does not change. The anonymous banner adds the module's own sentence. Every
+Kafka page ends with the trademark line, and no Kafka logo is drawn. KStudio ships no static web asset: its CSS is in
+`studio.css`, in sections headed `KS-…` with classes prefixed `ms-k-`, and a JS helper, if one is ever needed, is a
+module-neutral function in `studio.js`.
+
+*Links (M4).* `IStudioRouteLinks` (implemented by MartenStudio) and `IStudioRecordSearchLinks` (implemented by KStudio)
+are owned by PostgresStudio, so neither module references the other. A link is pure, escapes every id, and grants
+nothing: the destination authorizes again.
+
+## D35
+
+**D35 — KStudio is authorized on a resource of its own, by policies of its own.** D5's three layers hold, on
+`KafkaTopicResource(Cluster, TenantId, Topic, Capability)`. *Who gets in* is the host studio's `AuthorizationPolicy`
+(or the map builder's `RequireAuthorization()`), because Kafka pages are endpoints of that mapping, at page load and at
+circuit connect alike. *Which cluster and topic* is `KafkaStudioOptions.ClusterAuthorizationPolicy`, asked by every
+service call at cluster level (`Topic = null`) and once per topic it touches. *Each capability use* is
+`CapabilityAuthorizationPolicy`, asked once per topic with the capability named, falling back to the cluster policy when
+it is blank. Neither falls back to the host studio's policies: `StoreAuthorizationPolicy`, `SourceAuthorizationPolicy`
+and `WriteAuthorizationPolicy` have handlers written for `MartenStoreResource` and `PostgresStudioResource`, and a
+handler written for one resource must never be handed another (D30). That is why KStudio has its own
+`KafkaAuthorization` rather than a second resource factory on `StudioAuthorization`.
+
+A topic the cluster policy refuses is absent from every list. A request that names one is refused whole, with a refusal
+that names nothing, because a search silently narrowed to the allowed topics would report a false negative. The audit
+names the topic, and shows it only to a visitor who may read it.
+
+`KafkaStudioCapabilities` default to `false` (D4); metadata needs none (K5). The host's `ReadOnly` is the one master
+switch: it turns every Kafka capability off, and KStudio has no switch of its own. Each disabled control names
+`KafkaStudioOptions.Capabilities.<name>`, or the host's `ReadOnly` option. A startup guard refuses to start a host that
+enables a Kafka capability, with `ReadOnly` off, while both Kafka policies are blank: every admitted visitor could then
+read every topic the application's credentials can read. There is no escape hatch; a development host states a
+one-line policy.
+
+### The pages (M2)
+
+The Kafka section is Topics (`kafka`), the topic overview (`kafka/topic`), Search (`kafka/search`), the record page
+(`kafka/record`) and Cluster settings (`kafka/settings`). Each renders inside `KafkaPageFrame` and reads nothing before
+its `Ready`, so prerendering makes no broker call; each service method asks `KafkaAuthorization` itself. Catalog reads
+are not audited; scans (9600, 9601) and record views (9604, once per circuit per record) are, through `KafkaActionLog`,
+on failure as well as success. A search link's predicate is `KafkaScanPlan.AuditText` in the fragment, never the typed
+text, so a literal on a redacted field reaches no address; a pasted link fills the form and never runs by itself. A
+record view is a scan of at most 21 offsets (`IKafkaScanner.ReadRecordAsync`) and takes one of the owner's slots. The
+settings page reads `KafkaSettingsReader`, and `KStudioReadsNoRawSettingsTests` holds that KStudio never touches the
+definition's raw dictionaries. "No match" is always drawn beside its count and every caveat the result carries (D38).
 
 ## D36
 
@@ -46,7 +130,8 @@ shown as "Not available: needs `DESCRIBE_CONFIGS` on topic `orders.v1`" and logg
 
 **Lifecycle.** Nothing connects when KStudio is registered or the application starts, and nothing is a hosted service.
 One admin client per cluster is created by the first read that needs it and disposed when it has been idle for
-`AdminIdleTimeout` (5 minutes). Each scan gets one consumer, built, read and closed on a dedicated thread; the scan's
+`AdminIdleTimeout` (5 minutes). A client a call still holds is never destroyed: the pool retires it and disposes it when the last
+lease is released. Each scan gets one consumer, built, read and closed on a dedicated thread; the scan's
 reads wait at most 100 ms, so a cancel, the deadline and the governor are seen within 100 ms. At host shutdown the engine
 cancels every scan, waits up to 10 s, and disposes its clients. Catalog reads are single-flight per cluster and key, for
 the host studio's `RefreshInterval` (configs, authorized operations and the cluster description for a minute).
@@ -224,6 +309,11 @@ A redacted field takes only `=` and `in`: `^=`, `~`, `<`, `>` and `any` would le
 time, and `any` never looks at a redacted field. Every try is a scan, and counts against the owner's budget. The texts the
 engine writes for other sinks show a literal on a redacted field as `<redacted>`: the audit's predicate, and a search
 permalink's predicate (which then asks the person who opens it to type the value in).
+
+Redaction rule names are compared ignoring case. A CloudEvents attribute rule also masks its `ce_` header (and
+`datacontenttype` masks `content-type`), and a header rule on the carrier masks the attribute. A header on the
+built-in deny-list can never be searchable; the options validation refuses it. The trace context is read only from
+unmasked headers.
 
 ## D41
 

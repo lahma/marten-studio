@@ -25,7 +25,9 @@ public class OneStudioPerApplicationTests
             + "One studio per application: Marten Studio and Postgres Studio share their services, so a second one would answer "
             + "for the first. Register one of them.");
 
-        services.Single(static x => x.ServiceType == typeof(StudioDescriptor)).ImplementationInstance
+        // A factory since D34 (the composition with the registered modules); with no module it answers the very instance.
+        using ServiceProvider provider = services.BuildServiceProvider();
+        provider.GetRequiredService<StudioDescriptor>()
             .Should().BeSameAs(MartenStudio.Services.MartenStudioDescriptor.Instance, "nothing of the refused studio was registered");
     }
 

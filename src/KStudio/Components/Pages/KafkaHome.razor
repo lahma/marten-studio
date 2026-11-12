@@ -1,0 +1,10 @@
+@page "/kafka"
+
+<PageTitle>Kafka topics</PageTitle>
+
+@* Topics, the home of the Kafka section (D-UI decision 7). The page itself holds no logic: everything that reads is in the body below the frame, which
+   is created only once the frame has released reads, so prerendering makes no broker call. *@
+
+<KafkaPageFrame>
+    <KafkaTopicsBody />
+</KafkaPageFrame>

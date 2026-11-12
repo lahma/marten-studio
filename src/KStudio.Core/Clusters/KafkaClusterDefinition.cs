@@ -13,7 +13,7 @@ internal sealed class KafkaTopicDescriptor
     public KafkaTopicDescriptor(string name, KafkaTopicBuilder? settings)
     {
         Name = name;
-        Settings = settings ?? new KafkaTopicBuilder();
+        Settings = settings?.Snapshot() ?? new KafkaTopicBuilder();
         Declared = settings is not null;
     }
 

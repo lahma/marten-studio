@@ -166,6 +166,14 @@ internal static partial class PredicateFormatter
             _ => PredicateParser.RedactedToken,
         };
 
+    /// <summary>A string as the canonical text writes a literal, so that it parses back to the same value ("copy as" uses it).</summary>
+    /// <param name="value">The value.</param>
+    public static string QuoteText(string value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        return Quote(value);
+    }
+
     private static string Quote(string value) => "'" + value.Replace("'", "''", StringComparison.Ordinal) + "'";
 
     [GeneratedRegex("^[A-Za-z0-9_.-]+$", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]

@@ -109,7 +109,7 @@ public class RedactionTests
     }
 
     [Fact]
-    public void A_header_rule_masks_that_header_by_exact_name()
+    public void A_header_rule_masks_that_header_whatever_its_case()
     {
         KafkaRedactionRules rules = new();
         rules.Header("x-email");
@@ -117,7 +117,8 @@ public class RedactionTests
         KafkaMatch match = Match(Record(Bytes("k"), Bytes("v"), ("x-email", Secret), ("X-Email", "visible")), Topic(rules));
 
         match.Headers[0].Value.RedactedBy.Should().Be("header x-email");
-        match.Headers[1].Value.Text.Should().Be("visible", "a rule's name is exact; only the deny-list ignores case");
+        match.Headers[1].Value.RedactedBy.Should().Be("header x-email", "redaction fails closed: a rule's name is compared ignoring case (decision 4)");
+        JsonSerializer.Serialize(match).Should().NotContain("visible");
     }
 
     [Fact]

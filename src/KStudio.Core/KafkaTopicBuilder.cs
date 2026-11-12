@@ -10,6 +10,24 @@ public sealed partial class KafkaTopicBuilder
     {
     }
 
+    /// <summary>
+    /// A copy of what this builder says now, rules included: the registry keeps this, so that a declaration made on a builder the host
+    /// kept after validation is not seen.
+    /// </summary>
+    internal KafkaTopicBuilder Snapshot()
+    {
+        KafkaTopicBuilder copy = new()
+        {
+            DescriptionText = DescriptionText,
+            KeyFormat = KeyFormat,
+            DecoderSource = DecoderSource,
+            DecoderInstance = DecoderInstance,
+            Rules = Rules?.Copy(),
+        };
+
+        return copy;
+    }
+
     /// <summary>The description, when one was declared.</summary>
     internal string? DescriptionText { get; private set; }
 

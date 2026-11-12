@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 
 using PostgresStudio.Components;
@@ -10,7 +11,15 @@ namespace PostgresStudio.Services.Settings;
 /// The rooted prefix every page template in <paramref name="Assembly" /> starts with - <c>/marten</c> - and which the
 /// endpoint mapping re-roots under the configured mount path.
 /// </param>
-internal sealed record StudioPageAssembly(Assembly Assembly, string CompileTimeRoot);
+internal sealed record StudioPageAssembly(Assembly Assembly, string CompileTimeRoot)
+{
+    /// <summary>
+    /// Whether the assembly's pages keep their compile-time root as their first relative segment (D34): a module's
+    /// <c>@page "/orders/list"</c> is served at <c>{mount}/orders/list</c>, where a host studio's <c>/marten/documents</c> is served
+    /// at <c>{mount}/documents</c>. <see langword="false" /> for every host studio's own assemblies.
+    /// </summary>
+    public bool KeepsRoot { get; init; }
+}
 
 /// <summary>
 /// What makes one studio this studio: its name, its pages, its navigation, how it names a source, and how it builds the
@@ -38,7 +47,70 @@ internal sealed class StudioDescriptor : DiagnosticsDescriptor
         routes = new Lazy<StudioRouteTable>(BuildRoutes);
     }
 
+    /// <summary>
+    /// Copies <paramref name="source" /> - every property of this class and of <see cref="DiagnosticsDescriptor" /> - and adds
+    /// <paramref name="modules" /> (D34): their page assemblies after the host's, their rail sections before the host's last, and
+    /// their shortcuts after the host's. <c>StudioDescriptorCopyTests</c> fails on a property added without a copy here.
+    /// </summary>
+    [SetsRequiredMembers]
+    private StudioDescriptor(StudioDescriptor source, IReadOnlyList<IStudioModule> modules)
+        : this()
+    {
+        Key = source.Key;
+        ProductName = source.ProductName;
+        HealthCheckAssemblies = source.HealthCheckAssemblies;
+        SourceQueryParameter = source.SourceQueryParameter;
+        SourceNoun = source.SourceNoun;
+        SourceLabel = source.SourceLabel;
+        CheckCodeOwner = source.CheckCodeOwner;
+        RetiredCheckCodes = source.RetiredCheckCodes;
+
+        OverviewComponent = source.OverviewComponent;
+        QueryComponent = source.QueryComponent;
+        ExposedContent = source.ExposedContent;
+        CreateResource = source.CreateResource;
+        Surface = source.Surface;
+        Exposure = source.Exposure;
+        Remedies = source.Remedies;
+
+        PageAssemblies = [.. source.PageAssemblies, .. modules.Select(static x => x.Pages)];
+        ExtraShortcuts = [.. source.ExtraShortcuts, .. modules.SelectMany(static x => x.Shortcuts)];
+        Modules = modules;
+
+        // The modules' sections go immediately before the host's last section (System, which holds Activity), in key order.
+        List<StudioNavSection> navigation = [.. source.Navigation];
+        int at = Math.Max(navigation.Count - 1, 0);
+        navigation.InsertRange(
+            at,
+            modules.SelectMany(static module => module.Navigation.Select(section => section with { ModuleKey = module.Key })));
+        Navigation = navigation;
+    }
+
     private StudioRouteTable BuildRoutes() => new(PageAssemblies);
+
+    /// <summary>This descriptor composed with <paramref name="modules" />, already validated and in key order (<see cref="StudioModuleComposition" />).</summary>
+    /// <param name="modules">The modules.</param>
+    internal StudioDescriptor WithModules(IReadOnlyList<IStudioModule> modules) => new(this, modules);
+
+    /// <summary>The modules composed into this descriptor, in key order; empty for the host studio's own static descriptor.</summary>
+    public IReadOnlyList<IStudioModule> Modules { get; private init; } = [];
+
+    /// <summary>The module whose pages are <paramref name="pageType" />'s assembly, or <see langword="null" /> for a page of the host studio.</summary>
+    /// <param name="pageType">A routed page component.</param>
+    public IStudioModule? ModuleOf(Type pageType)
+    {
+        ArgumentNullException.ThrowIfNull(pageType);
+
+        foreach (IStudioModule module in Modules)
+        {
+            if (module.Pages.Assembly == pageType.Assembly)
+            {
+                return module;
+            }
+        }
+
+        return null;
+    }
 
     /// <summary>
     /// Every assembly whose pages this studio serves, each with its compile-time root. The route table and the endpoint
@@ -102,7 +174,14 @@ internal sealed class StudioDescriptor : DiagnosticsDescriptor
 /// <summary>One section of the sidebar.</summary>
 /// <param name="Title">The section's heading.</param>
 /// <param name="Items">Its entries, in order.</param>
-internal sealed record StudioNavSection(string Title, IReadOnlyList<StudioNavItem> Items);
+internal sealed record StudioNavSection(string Title, IReadOnlyList<StudioNavItem> Items)
+{
+    /// <summary>
+    /// The key of the module that contributed the section, set by the composition and never by a module (D34); <see langword="null" />
+    /// for a host studio's own. A module's links carry no host scope.
+    /// </summary>
+    public string? ModuleKey { get; init; }
+}
 
 /// <summary>One sidebar entry.</summary>
 /// <param name="Label">What the link says, and its accessible name.</param>

@@ -274,6 +274,40 @@ public class LogLevelsTests
         ["src/PostgresStudio.Diagnostics/Services/PostgresStudioLog.HealthActions.cs : 9223 PostgresStudioHealthActionFailed"] = (Verdict.VisitorAction,
             "9223 in Postgres Studio's words: a finding's action the visitor pressed failed after its gates passed; one line per press."),
 
+        // ---- KS-SHELL: KStudio's own events (D34, D35) -------------------------------------------------
+        ["src/KStudio/Services/KafkaStudioLog.cs : 9602 CapabilityRefusedCore"] = (Verdict.Refusal,
+            "A Kafka capability refusal reaches the service only when a client drives a control the page disabled or hid."),
+        ["src/KStudio/Services/KafkaStudioLog.cs : 9603 ClusterRefusedCore"] = (Verdict.Refusal,
+            "A policy refusal of a cluster or topic on a request that names it; listings are filtered and log nothing."),
+        ["src/KStudio/Services/KafkaStudioLog.cs : 9611 LiveUpdateHandlerFailedCore"] = (Verdict.Throttled,
+            "9220's twin: a Kafka page's own refresh-failure handler threw, on a loop that runs every RefreshInterval; the level comes from the throttle."),
+
+        // ---- KS-UI-A: the catalog pages (D-UI decisions 7 to 9) --------------------------------------
+        ["src/KStudio/Components/Pages/KafkaTopicsBody.razor : The Kafka topics page failed to read the catalog"] = (Verdict.VisitorAction,
+            "The engine returns broker errors as values, so an exception here is a fault in a page the visitor opened or filtered; one line per load, the page says the same, and a poll's failure goes to the Failed handler, not here."),
+        ["src/KStudio/Components/Pages/KafkaTopicBody.razor : The Kafka topic page failed to read the catalog"] = (Verdict.VisitorAction,
+            "The topic overview threw rather than returning a value: a fault in a page the visitor opened; one line per load, the page says the same."),
+        ["src/KStudio/Components/Pages/KafkaSettingsBody.razor : The Kafka settings page failed to read the cluster's settings"] = (Verdict.VisitorAction,
+            "The settings reader threw on a page the visitor opened (it reads memory, so this is a bug); one line per load, the page says the same."),
+
+        // ---- KS-UI-B: search, results and the record page (D-UI decisions 10 to 16) ---------------------
+        ["src/KStudio/Components/Pages/KafkaSearchBody.razor : The Kafka search page failed to read the catalog"] = (Verdict.VisitorAction,
+            "The topic list threw rather than returning a value: a fault in a page the visitor opened; one line per load, the page says the same."),
+        ["src/KStudio/Components/Pages/KafkaSearchBody.razor : The Kafka search page failed to plan a search"] = (Verdict.VisitorAction,
+            "Planning threw, on a click: one line per click, and the page says the search failed."),
+        ["src/KStudio/Components/Pages/KafkaSearchBody.razor : The Kafka search page failed to record a cancelled confirmation"] = (Verdict.VisitorAction,
+            "Writing the 'not confirmed' entry threw, on the visitor's Cancel: one line per click; the dialog is already closed."),
+        ["src/KStudio/Components/Pages/KafkaSearchBody.razor : The Kafka search page failed while reading a search"] = (Verdict.VisitorAction,
+            "The batch loop of a search the visitor started threw (the engine returns every broker failure as a value): one line per search, the page says the same."),
+        ["src/KStudio/Components/Pages/KafkaRecordBody.razor : The Kafka record page failed to read the record"] = (Verdict.VisitorAction,
+            "The record read threw rather than returning a status: a fault in a page the visitor opened; one line per load, the page says the same."),
+        ["src/KStudio/Services/KafkaSearchService.cs : KStudio could not plan a search"] = (Verdict.VisitorAction,
+            "The engine threw while planning a search the visitor asked for; one line per click, the ring records the failure and the page says the same."),
+        ["src/KStudio/Services/KafkaSearchService.cs : KStudio could not start a search"] = (Verdict.VisitorAction,
+            "The engine threw while starting a search the visitor confirmed; one line per click, the ring records the failure and the page says the same."),
+        ["src/KStudio/Services/KafkaRecordService.cs : KStudio could not read a record"] = (Verdict.VisitorAction,
+            "The engine threw while reading a record the visitor opened; one line per load, the ring records the failure and the page says the same."),
+
         // ---- W5-V1 ------------------------------------------------------------------------------------
         ["src/PostgresStudio.Diagnostics/Services/StudioLog.Maintenance.cs : 9420 BloatMeasureFailed"] = (Verdict.VisitorAction,
             "A bloat measure the visitor pressed failed after its gates and preconditions passed; one line per press, never polled, and the page shows it."),

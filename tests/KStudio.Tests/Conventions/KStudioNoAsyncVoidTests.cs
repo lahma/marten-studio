@@ -41,7 +41,7 @@ public class KStudioNoAsyncVoidTests
     [Fact]
     public void No_compiled_method_in_a_kstudio_assembly_is_an_async_void()
     {
-        Assembly[] assemblies = [typeof(KafkaEngineOptions).Assembly];
+        Assembly[] assemblies = [typeof(KafkaEngineOptions).Assembly, typeof(KafkaStudioOptions).Assembly];
 
         Type[] types = [.. assemblies.SelectMany(static x => x.GetTypes())];
         types.Should().HaveCountGreaterThan(50, "scanning nothing would pass for the wrong reason");

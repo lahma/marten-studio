@@ -47,7 +47,8 @@ This is the full text of hard rules 1 to 16, moved word for word from AGENTS.md 
    `WriteAuthorizationPolicy`) → the operation → `audit.Record`, written on failure as well as on success.
    A value a visitor could shape reaches the log only through `StudioLogValue`: escaped, a backslash doubled, a name
    bounded at 256 characters and other text at 4,000. That holds in these events: 9200–9205, 9223, 9224, 9235, 9236,
-   9245 and 9452 (the per-product dispatchers); 9206, 9207, 9209, 9225, 9226 and 9265 (MartenLog's wrappers); 9260–9263
+   9245 and 9452 (the per-product dispatchers); 9600–9605 (KStudio's audit and refusal events, through `KafkaStudioLog`'s
+   wrappers, `KafkaStudioRefusalLogValuesTests`); 9206, 9207, 9209, 9225, 9226 and 9265 (MartenLog's wrappers); 9260–9263
    (LINQ mode's `Logged*` values); and every Warning that carries a typed route value. `RefusalLogValuesTests` also
    holds every `[LoggerMessage]` template's call sites, at any level, to it. The one exception is 9204's executed
    statement, which is kept whole up to the circuit's 32 KB receive bound, and by its head and tail beyond it.
@@ -80,6 +81,9 @@ This is the full text of hard rules 1 to 16, moved word for word from AGENTS.md 
    (`AddPostgresConnectionHistory`), `PostgresConnectionHistoryOptions`, `IPostgresConnectionHistoryStore` - an interface a
    host implements, so a member added later needs a default body (`PublicApiShapeTests`) - and `PostgresConnectionSample`,
    whose `ByApplication` reuses the read model's `PostgresConnectionCounts`.
+   KStudio's is one static class, two classes and one record (`KafkaStudioServiceCollectionExtensions`
+   (`AddKafkaStudio`), `KafkaStudioOptions`, `KafkaStudioCapabilities`, `KafkaTopicResource`), in
+   `tests/KStudio.Tests/Verify/PublicApiTest_KStudio.verified.txt`; KStudio.Core's is its own too.
    Anything else that appears in any baseline is a mistake, not a feature.
    Never hand-edit a `.verified.txt`: run the test, read the diff deliberately, say in the pull request
    what moved and why, then accept the baseline. The read model is extend-only (D31), and `PublicApiShapeTests` holds
@@ -202,6 +206,10 @@ This is the full text of hard rules 1 to 16, moved word for word from AGENTS.md 
     `PostgresStudio.Diagnostics [x.y.z]`, asserted by `Pack` and checked by `AddPostgresStudio()`, and again by
     `AddMartenStudio()`'s guard). A page route belongs to one assembly of a studio, below that assembly's own compile-time root
     (`/postgres`, `/marten`), and the route table refuses a route two pages claim (`StudioRouteTableTests`).
+    PostgresStudio, PostgresStudio.Diagnostics and MartenStudio reference no `Confluent.*`, `Wolverine*` or `KStudio*`
+    assembly or package, and their source names no Kafka (`ModuleNeutralityTests`); KStudio references no Marten, JasperFx,
+    Weasel or Wolverine, and its built assembly no `Confluent.*` (the client is KStudio.Core's). A module's pages sit
+    below its own root, which stays a segment under the mount.
 17. **In KStudio, a read never writes.** No client the engine builds may create a topic, commit or store an offset,
     join or subscribe a group, or run a host's builder delegate; every assign carries explicit offsets, and the wire
     seam has no produce, commit, delete or alter method. D37 has the overrides; `ConfluentOverridesTests`,

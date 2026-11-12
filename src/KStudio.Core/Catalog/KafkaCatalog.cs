@@ -18,6 +18,15 @@ internal interface IKafkaCatalog
     /// <param name="cancellationToken">Abandons this caller's wait.</param>
     Task<KafkaField<KafkaTopicList>> ListTopicsAsync(string cluster, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// The offset spans of one page of topics (the home): partitions come from the cached metadata and the offsets from two cached reads,
+    /// whatever the page holds. A topic whose offsets were refused is withheld alone.
+    /// </summary>
+    /// <param name="cluster">The cluster's key.</param>
+    /// <param name="topics">At most <see cref="KafkaCatalog.MaxSpanTopics" /> topics (the home's page size); <see cref="ArgumentException" /> above.</param>
+    /// <param name="cancellationToken">Abandons this caller's wait.</param>
+    Task<KafkaField<IReadOnlyList<KafkaTopicSpan>>> ListTopicSpansAsync(string cluster, IReadOnlyList<KafkaTopicName> topics, CancellationToken cancellationToken);
+
     /// <summary>A topic's overview; the field is withheld with <c>NotFound</c> when metadata does not list the topic.</summary>
     /// <param name="cluster">The cluster's key.</param>
     /// <param name="topic">The topic.</param>
@@ -60,6 +69,90 @@ internal sealed class KafkaCatalog(
         }
 
         return KafkaField<KafkaTopicList>.Of(new KafkaTopicList(topics, internalTopics));
+    }
+
+    /// <summary>The most topics one <see cref="IKafkaCatalog.ListTopicSpansAsync" /> call takes: the home's page size, so the cost of a page is bounded whatever the cluster's size.</summary>
+    public const int MaxSpanTopics = 100;
+
+    /// <inheritdoc />
+    public async Task<KafkaField<IReadOnlyList<KafkaTopicSpan>>> ListTopicSpansAsync(
+        string cluster, IReadOnlyList<KafkaTopicName> topics, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(topics);
+
+        if (topics.Count > MaxSpanTopics)
+        {
+            throw new ArgumentException($"At most {MaxSpanTopics} topics can be asked for at once: one page of the home's list.", nameof(topics));
+        }
+
+        WireResult<WireMetadata> metadata = await reads.MetadataAsync(cluster, cancellationToken).ConfigureAwait(false);
+
+        if (metadata.Error is { } error)
+        {
+            return KafkaField<IReadOnlyList<KafkaTopicSpan>>.Withheld(error);
+        }
+
+        Dictionary<string, WireTopicInfo> listed = metadata.Value.Topics
+            .Where(static x => x.Error is null)
+            .GroupBy(static x => x.Name, StringComparer.Ordinal)
+            .ToDictionary(static x => x.Key, static x => x.First(), StringComparer.Ordinal);
+
+        List<WirePartition> partitions = [];
+
+        foreach (string name in topics.Select(static x => x.Value).Distinct(StringComparer.Ordinal))
+        {
+            if (listed.TryGetValue(name, out WireTopicInfo? info))
+            {
+                partitions.AddRange(info.Partitions.Select(x => new WirePartition(name, x.Partition)));
+            }
+        }
+
+        WireResult<IReadOnlyList<WireOffset>> low = WireResult<IReadOnlyList<WireOffset>>.Ok([]);
+        WireResult<IReadOnlyList<WireOffset>> high = low;
+
+        if (partitions.Count > 0)
+        {
+            // Earliest and Latest are two calls (one spec per call, F6), each for every partition of the page, run together.
+            Task<WireResult<IReadOnlyList<WireOffset>>> earliest = reads.OffsetsForTopicsAsync(cluster, partitions, WireOffsetSpec.Earliest, WireIsolation.ReadUncommitted, cancellationToken);
+            Task<WireResult<IReadOnlyList<WireOffset>>> latest = reads.OffsetsForTopicsAsync(cluster, partitions, WireOffsetSpec.Latest, WireIsolation.ReadUncommitted, cancellationToken);
+            await Task.WhenAll(earliest, latest).ConfigureAwait(false);
+            low = earliest.Result;
+            high = latest.Result;
+        }
+
+        List<KafkaTopicSpan> spans = [];
+
+        foreach (KafkaTopicName topic in topics)
+        {
+            if (!listed.TryGetValue(topic.Value, out WireTopicInfo? info))
+            {
+                // Not listed: missing, or this principal may not describe it - the same thing to a visitor.
+                spans.Add(new KafkaTopicSpan(topic.Value, KafkaField<long>.Withheld(new WireError.NotFound(KafkaResourceType.Topic, topic.Value))));
+                continue;
+            }
+
+            long total = 0;
+            WireError? refused = null;
+
+            foreach (WirePartitionInfo partition in info.Partitions)
+            {
+                WirePartition key = new(topic.Value, partition.Partition);
+                KafkaField<long> start = Offset(low, key);
+                KafkaField<long> end = Offset(high, key);
+
+                if ((start.Error ?? end.Error) is { } partitionError)
+                {
+                    refused = partitionError;
+                    break;
+                }
+
+                total += Math.Max(0, end.Value - start.Value);
+            }
+
+            spans.Add(new KafkaTopicSpan(topic.Value, refused is null ? KafkaField<long>.Of(total) : KafkaField<long>.Withheld(refused)));
+        }
+
+        return KafkaField<IReadOnlyList<KafkaTopicSpan>>.Of(spans);
     }
 
     /// <inheritdoc />

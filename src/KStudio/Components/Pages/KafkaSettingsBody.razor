@@ -1,0 +1,201 @@
+@implements IAsyncDisposable
+@using KStudio.Core.Clusters
+@using Microsoft.Extensions.Logging
+@inject KafkaState State
+@inject KafkaCatalogService Catalog
+@inject ILogger<KafkaSettingsBody> Logger
+
+@* The body of Cluster settings (D-UI decision 8b): the engine's reader's view of what the host handed KStudio, one setting at a time. The raw
+   dictionaries never reach this assembly (KStudioReadsNoRawSettingsTests). The configuration is fixed at registration, so there is no refresh. *@
+
+<div class="ms-page ms-k-settings">
+    <div class="ms-page-header">
+        <h1 class="ms-page-title">Cluster settings</h1>
+    </div>
+
+    @if (error is not null)
+    {
+        <ErrorAlert Message="@error" />
+    }
+    else if (view is null)
+    {
+        <LoadingSpinner />
+    }
+    else
+    {
+        <p class="ms-muted">@KafkaStudioText.SettingsLead</p>
+
+        <h2 class="ms-section-title">Your settings</h2>
+        <TableScroll Label="Your settings">
+            <table class="ms-table">
+                <thead>
+                    <tr>
+                        <th>Setting</th>
+                        <th>Value</th>
+                        @if (ShowRole)
+                        {
+                            <th>Role</th>
+                        }
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (KafkaSettingRow row in view.Host)
+                    {
+                        <tr class="ms-table-row" @key="(row.Key, row.Role)">
+                            <td class="ms-table-cell"><code>@row.Key</code></td>
+                            <td class="ms-table-cell">
+                                @row.Shown
+                                @if (row.Exposure != KafkaSettingExposure.Shown)
+                                {
+                                    <span class="ms-chip ms-k-exposure ms-k-exposure-@ExposureName(row.Exposure)">@ExposureName(row.Exposure)</span>
+                                }
+                            </td>
+                            @if (ShowRole)
+                            {
+                                <td class="ms-table-cell">@RoleName(row.Role)</td>
+                            }
+                        </tr>
+                    }
+                    @if (view.Host.Count == 0)
+                    {
+                        <tr><td class="ms-table-cell ms-muted" colspan="@(ShowRole ? 3 : 2)">The application handed KStudio no settings for this cluster.</td></tr>
+                    }
+                </tbody>
+            </table>
+        </TableScroll>
+
+        <h2 class="ms-section-title">What KStudio's clients change</h2>
+        <p class="ms-muted">A read never writes: KStudio's clients are copies of the settings above with these changes.</p>
+        <TableScroll Label="What KStudio's clients change">
+            <table class="ms-table">
+                <thead>
+                    <tr>
+                        <th>Setting</th>
+                        <th>KStudio's value</th>
+                        <th>Why</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (KafkaSettingOverride change in view.Overrides)
+                    {
+                        <tr class="ms-table-row" @key="change.Key">
+                            <td class="ms-table-cell"><code>@change.Key</code></td>
+                            <td class="ms-table-cell">@change.KStudioValue</td>
+                            <td class="ms-table-cell">@change.Why</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </TableScroll>
+
+        <p class="ms-k-oauth">OAuth token refresh: @(view.TokenRefreshDeclared ? "declared" : "not declared")</p>
+    }
+</div>
+
+@code {
+    private readonly CancellationTokenSource lifetime = new();
+
+    private KafkaClusterSettingsView? view;
+    private string? error;
+    private bool disposed;
+    private bool ready;
+    private bool started;
+
+    /// <summary>Completed by the frame once the cluster policy passed and the circuit is interactive: a body reads nothing before it.</summary>
+    [CascadingParameter(Name = KafkaPageFrame.ReadyName)]
+    public Task? Ready { get; set; }
+
+    private bool ShowRole => view?.Host.Any(static x => x.Role != KafkaSettingRole.Both) == true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            if (Ready is not null)
+            {
+                await Ready;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        if (disposed)
+        {
+            return;
+        }
+
+        State.ClusterChanged += OnClusterChangedAsync;
+        ready = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Not keyed on firstRender: a body created before the frame released reads becomes ready after its first render.
+        if (ready && !started && !disposed)
+        {
+            started = true;
+            await LoadAsync();
+        }
+    }
+
+    private async Task OnClusterChangedAsync()
+    {
+        view = null;
+        await InvokeAsync(StateHasChanged);
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        if (disposed || State.ActiveCluster is not { } active)
+        {
+            return;
+        }
+
+        try
+        {
+            KafkaClusterSettingsView? read = await Catalog.GetSettingsAsync(active, lifetime.Token);
+
+            if (!disposed && State.ActiveCluster == active)
+            {
+                view = read;
+                error = read is null ? KafkaStudioText.ClusterNotAuthorized : null;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception e) when (!disposed)
+        {
+            Logger.LogWarning(e, "The Kafka settings page failed to read the cluster's settings");
+            error = KafkaStudioText.ReadFailed;
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private static string ExposureName(KafkaSettingExposure exposure) => exposure.ToString().ToLowerInvariant();
+
+    private static string RoleName(KafkaSettingRole role) => role switch
+    {
+        KafkaSettingRole.ScansOnly => "scans",
+        KafkaSettingRole.MetadataOnly => "metadata",
+        _ => "both",
+    };
+
+    public async ValueTask DisposeAsync()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        disposed = true;
+        State.ClusterChanged -= OnClusterChangedAsync;
+        await lifetime.CancelAsync();
+        lifetime.Dispose();
+    }
+}

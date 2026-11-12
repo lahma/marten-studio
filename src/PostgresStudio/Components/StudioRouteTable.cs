@@ -69,13 +69,26 @@ internal sealed class StudioRouteTable
     /// A template is not under its root, or two templates claim the same relative route.
     /// </exception>
     internal StudioRouteTable(IEnumerable<(Type Page, string CompileTimeRoot)> pages)
+        : this(pages?.Select(static x => (x.Page, x.CompileTimeRoot, KeepsRoot: false)) ?? throw new ArgumentNullException(nameof(pages)))
+    {
+    }
+
+    /// <summary>
+    /// Builds the table from explicit components, each with its root and whether its assembly keeps it (D34): a root-keeping
+    /// assembly's relative routes start with the root's own segment, <c>/orders/list</c> being <c>orders/list</c>.
+    /// </summary>
+    /// <param name="pages">The routable components, each with its assembly's root and whether it keeps it.</param>
+    /// <exception cref="InvalidOperationException">
+    /// A template is not under its root, or two templates claim the same relative route.
+    /// </exception>
+    internal StudioRouteTable(IEnumerable<(Type Page, string CompileTimeRoot, bool KeepsRoot)> pages)
     {
         ArgumentNullException.ThrowIfNull(pages);
 
         routes = Build(pages);
     }
 
-    private static IEnumerable<(Type Page, string CompileTimeRoot)> Pages(IEnumerable<StudioPageAssembly> pageAssemblies)
+    private static IEnumerable<(Type Page, string CompileTimeRoot, bool KeepsRoot)> Pages(IEnumerable<StudioPageAssembly> pageAssemblies)
     {
         ArgumentNullException.ThrowIfNull(pageAssemblies);
 
@@ -85,7 +98,7 @@ internal sealed class StudioRouteTable
             {
                 if (typeof(IComponent).IsAssignableFrom(type))
                 {
-                    yield return (type, pageAssembly.CompileTimeRoot);
+                    yield return (type, pageAssembly.CompileTimeRoot, pageAssembly.KeepsRoot);
                 }
             }
         }
@@ -179,7 +192,7 @@ internal sealed class StudioRouteTable
         return true;
     }
 
-    private static List<RouteEntry> Build(IEnumerable<(Type Page, string CompileTimeRoot)> pages)
+    private static List<RouteEntry> Build(IEnumerable<(Type Page, string CompileTimeRoot, bool KeepsRoot)> pages)
     {
         List<RouteEntry> built = [];
 
@@ -187,7 +200,7 @@ internal sealed class StudioRouteTable
         // are one route to the endpoint router and to this table alike.
         Dictionary<string, Type> claimed = new(StringComparer.OrdinalIgnoreCase);
 
-        foreach ((Type type, string root) in pages)
+        foreach ((Type type, string root, bool keepsRoot) in pages)
         {
             foreach (RouteAttribute attribute in type.GetCustomAttributes<RouteAttribute>())
             {
@@ -202,7 +215,7 @@ internal sealed class StudioRouteTable
                         $"'{root}'. All dashboard page templates in {type.Assembly.GetName().Name} must start with '{root}'.");
                 }
 
-                string remainder = template.Substring(root.Length);
+                string remainder = keepsRoot ? template : template.Substring(root.Length);
                 string[] segments = remainder.Length == 0 ? [] : remainder.TrimStart('/').Split('/');
 
                 string shape = string.Join('/', segments.Select(static x => x.Length > 1 && x[0] == '{' ? "{}" : x));

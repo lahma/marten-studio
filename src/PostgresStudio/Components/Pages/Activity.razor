@@ -67,7 +67,15 @@
                                 @* The separators are text and not `aria-hidden` decoration: hiding them
                                    would leave a screen reader reading the three values run together as
                                    one word, and a dot between them is how the cell reads out loud too. *@
-                                @entry.StoreKey<span class="ms-activity-scope-separator"> · </span>@entry.DatabaseId<span class="ms-activity-scope-separator"> · </span>@(entry.TenantId ?? "all")
+                                @if (entry.ScopeKind is not null)
+                                {
+                                    @* A module's entry says its own scope (D34): the cluster, not a store, a database and a tenant. *@
+                                    @entry.ScopeLabel
+                                }
+                                else
+                                {
+                                    @entry.StoreKey<span class="ms-activity-scope-separator"> · </span>@entry.DatabaseId<span class="ms-activity-scope-separator"> · </span>@(entry.TenantId ?? "all")
+                                }
                             </td>
                             <td class="ms-table-cell">@entry.Action</td>
                             <td class="ms-table-cell ms-table-cell-mono ms-activity-target">@entry.Target</td>
@@ -102,7 +110,9 @@
     /// ambiguous on its own about which dot-separated part is which. The title says.
     /// </remarks>
     private static string ScopeTitle(StudioActionLogEntry entry) =>
-        "Store " + entry.StoreKey + ", database " + entry.DatabaseId + ", tenant " + (entry.TenantId ?? "all");
+        entry.ScopeKind is not null
+            ? entry.ScopeLabel ?? entry.ScopeKind
+            : "Store " + entry.StoreKey + ", database " + entry.DatabaseId + ", tenant " + (entry.TenantId ?? "all");
 
     protected override async Task OnInitializedAsync()
     {
