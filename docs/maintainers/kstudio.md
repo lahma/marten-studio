@@ -586,3 +586,74 @@ re-publishes to another topic and the timeline already shows that as related, no
 **Tests.** `tests/KStudio.Tests/Correlation/` (validation, extractor, query builder, duplicate finder, with its 20 ms bound at
 the largest values), `Scanning/PerTopicScanTests` on the fake and `PerTopicScanLiveTests` on Kafka 3.9 and 4.x (one consumer, a
 group never joined), and `Redaction/MaskTextTests`.
+
+## D43
+
+**D43 — KStudio.Wolverine discovers configuration and nothing else.** `UseWolverineKafka()` reads the built `WolverineOptions` once, when
+the cluster registry is first built, through KStudio.Core's internal `IKafkaClusterSource` (`InternalsVisibleTo`, an exact version pin and a
+version guard). It starts, connects and writes nothing, runs no builder callback, and reads no message store or handler graph. Broker-per-tenant
+clusters (`{cluster}/{tenant}`, `TenantId` on the resource) come from a reflection probe of three members that fails closed. A discovered topic
+never replaces a host's descriptor, and discovery adds no redaction.
+
+**The seam, and a reversal of D-ENGINE 1.4.** D-ENGINE 1.4 said the adapter would use the public registration API only. It cannot: the public
+registration is an options delegate, which `KafkaStudioStartupGuard` reads at host start with no service provider, possibly before Wolverine's
+runtime has connected its transports, and a broker-per-tenant registration has no configuration until it has (`KafkaTenant.Compile`, called by
+`KafkaTransport.ConnectAsync`). So `KafkaEngineOptions` carries an internal list of source factories, and `KafkaClusterRegistry` - built lazily, on
+the first Kafka page, link or catalog read, which is after ASP.NET Core started its hosted services - gets the container and runs every source once,
+after the host's own clusters. The pattern is D30's: an internal interface, `InternalsVisibleTo` for the one assembly (and its tests), and
+`KStudioWolverineVersionGuard`, which refuses to wire the adapter to any KStudio.Core but its own build before anything of KStudio.Core's
+internals is touched (`UseWolverineKafka` names only the public `KafkaEngineOptions`; the body that adds the source is a `NoInlining` method of its
+own, and `KStudioWolverineVersionGuardTests` scans the IL to keep it so). A public contributor interface would have frozen a seam with one
+consumer into KStudio.Core's baseline.
+
+**What a source may contribute.** Clusters, each with its consumer and admin configuration (cloned by the registry as `AddCluster` clones the
+host's, so a source cannot write back), a builder, and the topics it found; and notes. A cluster that breaks a rule of the host's own (a key, a
+display name, 50 groups, bootstrap servers, a topic name), or whose key a host cluster holds, is skipped and noted, never thrown: one bad discovery
+must not take down the host's own clusters. A source that throws costs a note. The notes are on the Settings page with their names; the log
+carries them as event 9677 with only general words - `a tenant cluster`, `Wolverine had not connected it yet` - Warning the first time within ten
+minutes for the same source, item and reason and Debug after, and never a tenant id, a topic or a value. Event 9678 (Debug) is for Find in Kafka
+failing to read the clusters.
+
+**Tenant entries (decision 6).** An entry's key is `{cluster}/{tenant}`: the registry's key and the engine's `KafkaScanRequest.Cluster`. A host
+cluster's key still cannot hold a `/`, so the entry key splits at the first one. `KafkaClusterDefinition` gains `BaseKey`, `TenantId` and `Source`;
+`KafkaClusterEntry` keeps `Key` and `TenantId` and gains `Cluster`, the base key. **Every question a policy is asked and every audit scope and
+log carries `Cluster` and `TenantId`, never the entry key** (`KafkaAuthorization`, `KafkaActionLog`, `KafkaAuditGate`): a policy never parses a key,
+and the gate judges an entry by the question its page asked. The address carries the entry key escaped (`?cluster=wolverine%2Facme`), as D9 already
+does for any id with a `/`.
+
+**The tenant probe.** Wolverine 6.61 keeps `KafkaTransport.Tenants` and the `KafkaTenant` class internal; the public surface can only write them
+(`AddTenant`). The probe is the only reflection in the adapter and touches exactly three members: `KafkaTransport.Tenants`, `KafkaTenant.TenantId`
+and `KafkaTenant.Transport`. It fails closed. A shape that is not the one read - the property missing, a cache that is not enumerable, an item whose
+type is not `Wolverine.Kafka.Internals.KafkaTenant`, a member of another type, a getter or an enumerator that throws - lists no tenant of that
+transport and says so once; it never lists the parent's cluster in a tenant's place. A tenant whose child transport has no bootstrap servers is "not
+listed yet": Wolverine had not connected it when KStudio read its configuration, and a registry built before then (a host that serves requests
+before Wolverine's runtime has started, or a test) will not list it. A tenant id that is blank, over 128 characters or holds a control character is
+not listed, and its note does not repeat it. Wolverine keeps its tenants in a dictionary, so they are listed ordinal by id, at most 200 a transport.
+`ForbiddenWolverineCallsTests` fails on any `GetProperty`, `GetField` or other member lookup whose name is not one of the three, and on any
+reflection call that invokes or sets. Asking Wolverine for a public, read-only view of a transport's tenants is a decision for the user, not the
+adapter's; until there is one, the probe is the guarded path.
+
+**What a discovered topic becomes.** `KafkaTopicDescriptor` gains the source's facts beside the host's declaration. The host's descriptor
+of that name - the cluster's own, which replaces a global one, or the global - stays the descriptor, and the source fills only what it left open:
+the description; the key format (`Utf8String`, now declared and not assumed: Wolverine writes the envelope's group id as the key); the decoder
+(`KafkaDecoders.CloudEvents` when the endpoint's serializer is Wolverine's `CloudEventsMapper`, whose structured events carry
+`content-type: application/json` and so would not be detected as CloudEvents); and the partitioner claim from the producer configuration's
+`partitioner` setting (`consistent_random` or unset: CRC32; `murmur2`, `murmur2_random`: murmur2; `fnv1a`, `fnv1a_random`: FNV-1a; anything else:
+none), which is verified by sampling before any pruning (D39). **Redaction comes only from the host**: discovery adds no rule and removes none, and the
+deny-list applies as always. A discovered topic is `Declared`, so it is in the catalog's declared group and in the timeline's default set.
+
+**What the adapter never does.** It reads no message store, envelope table, dead-letter store, node table or runtime agent, and no handler
+graph. It calls none of `GetEffectiveConsumerConfig` and `GetEffectiveProducerConfig` (which write the parent's values into a topic's own
+configuration), `CreateConsumer`, `CreateProducer`, `CreateAdminClient`, `ConnectAsync`, `InitializeAsync`, `SetupAsync`, `CheckAsync`,
+`TeardownAsync`, `BuildListenerAsync`, `Compile` or `ConfigureClient`. It enumerates `KafkaTransport.Topics` and never indexes it - the cache's
+indexer creates an endpoint - and never reads the internal topic groups (it takes them from `Endpoints()`). It never runs, reads or keeps
+`ConfigureConsumerBuilders`, `ConfigureProducerBuilders` or `ConfigureAdminClientBuilders`, and never uses a Wolverine group id to consume (D37
+replaces it). Every configuration it touches is byte for byte unchanged afterwards. The tests: `WolverineNeverWritesTests` (a snapshot of every pair
+of every transport, topic and tenant before and after; the builder callbacks replaced by recorders; the configurations handed over are copies),
+`ForbiddenWolverineCallsTests` (the IL scan), and the live `WolverineDiscoveryLiveTests`, which also proves on both brokers that KStudio created no
+topic, joined no group, committed no offset, and that Wolverine's own group offsets are as they were.
+
+**Fences.** `KStudio.Wolverine` references KStudio.Core and WolverineFx.Kafka only: no studio, no KStudio, no Marten, Weasel or Npgsql
+(`KStudioWolverineFenceTests`, by project file, restore graph, built references and its test project's output folder). JasperFx arrives through
+WolverineFx, and its source generator is dropped from the adapter's compilation. `KStudio.Tests` does not reference the adapter, so the module's own
+output folder stays free of Wolverine (`KStudioFenceTests`).

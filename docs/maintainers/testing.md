@@ -4,12 +4,12 @@ This is the full text of D16, D19 and the description of the seven kinds of test
 
 ## D16
 
-**D16 — xunit.v3 3.2.2 and Verify.XunitV3 32.0.0, six test projects all matching `*.Tests`.**
+**D16 — xunit.v3 3.2.2 and Verify.XunitV3 32.0.0, seven test projects all matching `*.Tests`.**
 `tests/MartenStudio.Tests` and `tests/PostgresStudio.Tests` are fast and need no Docker;
 `tests/MartenStudio.Integration.Tests` and `tests/PostgresStudio.Integration.Tests` need Testcontainers and
 Playwright. PostgresStudio's two have no Marten anywhere in their graph. `tests/KStudio.Tests` (fast) and
-`tests/KStudio.Integration.Tests` (Testcontainers, Kafka) are KStudio's, with no Marten in their graph either. All six
-match the glob in
+`tests/KStudio.Integration.Tests` (Testcontainers, Kafka) are KStudio's, with no Marten in their graph either, and
+`tests/KStudio.Wolverine.Tests` (fast, no Docker) is KStudio.Wolverine's. All seven match the glob in
 `ITest.TestProjects`, so one `dotnet fallout Test` runs everything. The pins are load-bearing — see *Package budget
 changes*.
 
@@ -22,7 +22,7 @@ skip message names the exact command that would install them.
 
 ## The seven kinds of test
 
-There are seven kinds of test, in six projects. Each kind below names MartenStudio's folder; PostgresStudio's two
+There are seven kinds of test, in seven projects. Each kind below names MartenStudio's folder; PostgresStudio's two
 projects mirror it for the shared studio - its fast suite (public API baseline, the assembly fence, the shared pages,
 the 0.5 pages' services and evaluators, the diagnostics API) and its live suite - with no Marten anywhere in their
 graph:
@@ -136,3 +136,5 @@ graph:
 **The loopback listener.** Testcontainers.Kafka 4.15.0's startup script ends `KAFKA_ADVERTISED_LISTENERS` with a comma when the container has no additional listener. Kafka 3.9 ignores the empty entry; 4.4 refuses to start ("advertised.listeners values must not be empty"). The fixture therefore adds `.WithListener("localhost:9095")`, a `PLAINTEXT` listener bound to the container's own loopback and mapped to no host port, which fills the empty slot. No test connects to it. Testcontainers 4.16.0 fixes the script ([testcontainers-dotnet#1772](https://github.com/testcontainers/testcontainers-dotnet/pull/1772)): drop the listener in the same pull request that moves the repository's Testcontainers rows to 4.16.0 or later.
 
 **Volumes.** The `apache/kafka` image declares six anonymous volumes, and removing the container with `docker rm -f` leaves them behind. The fixture records the container's volumes when it starts and removes them with the container when it does not reuse it. `KafkaFixtureTests.A_disposed_broker_leaves_no_volume_of_ours` starts and disposes a throwaway 4.4 broker and asserts that none of its volumes is left; it skips, saying why, while reuse is on, because a reused broker keeps its volumes by design. Remove a reused broker by hand with `docker rm -f -v <container>`, which takes its volumes too. Never prune volumes by filter on a shared machine: the other sessions' volumes match the same filter.
+
+**`KStudio.Wolverine.Tests`.** It is fast and runs no Wolverine host: the adapter over a `WolverineOptions` built in the test (Wolverine's fluent endpoint configuration is deferred until its runtime compiles it, so the tests shape the endpoints through their public members, which is what the adapter reads), the tenant probe against the real 6.61 types and against fakes with the probe's three member names, an IL scan of every method of the adapter for what it must never call, and the fences, with an output folder that holds no studio. The live Wolverine test is in `KStudio.Integration.Tests/Wolverine` and starts a real host on the 3.9 and 4.x brokers together (the collection `kafka-wolverine-pair` holds both fixtures): 3.9 for the application's own cluster and 4.x for its tenant `acme`, so a scan of `wolverine/acme` that finds the 4.x broker's record and not the 3.9 broker's proves which broker was read. Wolverine 6.61 does not start in its dynamic code mode without a runtime compiler package, so that host has no handler and runs in `TypeLoadMode.Static`.

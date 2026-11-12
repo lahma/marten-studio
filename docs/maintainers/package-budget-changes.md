@@ -697,3 +697,21 @@ commits one consumer group's offsets, through the project reference to `src/KStu
 package; the sample has no `PackageReference` to it. That producer and consumer are the sample's own, never KStudio's, which reads and
 never writes (hard rule 17). The sample is not packed and is not in `postgres-studio.slnf`, because it has Marten.
 
+
+**2026-11-12 — `WolverineFx.Kafka` 6.61.0, floor (KStudio M4, WOLV).** What: Wolverine's Kafka transport, referenced by
+`src/KStudio.Wolverine` (configuration discovery, D43), by `tests/KStudio.Integration.Tests` (a live test with a real Wolverine host)
+and, in SAMPLE-M4, by `samples/KStudio.Sample`. The adapter's fast suite, `tests/KStudio.Wolverine.Tests`, takes it through its project
+reference to the adapter and so has no `PackageReference` of its own. What it replaces: nothing. KStudio could only be told about a
+Wolverine application's clusters and topics by hand, twice, and drifting. Why nothing present does it: the clusters, topics, groups,
+serializers and dead-letter topic live in `WolverineOptions`, whose types only this package defines. Floor, not exact pin: 6.61.0 pins
+Confluent.Kafka 2.14.0, which set KStudio.Core's own floor (K2), so a Wolverine host is never raised by KStudio. It brings WolverineFx,
+JasperFx 2.99.0, JasperFx.Events and the Confluent Schema Registry serdes (Avro and JSON) at their own versions, unpinned. JasperFx
+2.99.0 is above Marten 9.57.0's 2.98.0, so a project that holds both resolves 2.99.0, as every Marten-plus-Wolverine host does;
+`KStudio.Integration.Tests` and the KStudio sample are such projects (D-CORR decision 11), and measured at WOLV the live classes that
+start a Marten Studio host and the sample (`KafkaFirstNavigationLiveTests`, `SampleHostLiveTests`) pass with it. No studio and neither
+`KStudio` nor `KStudio.Core` references it (`KStudioWolverineFenceTests`, `KStudioFenceTests`, `KStudioCoreFenceTests`). The latest
+tested version is the floor until Wolverine releases past 6.61.0. The JasperFx source generator it brings (`JasperFx.SourceGenerator`,
+`PrivateAssets="none"`) is dropped from the adapter's compilation by a target in `KStudio.Wolverine.csproj`, as `MartenStudio.csproj`
+drops Marten's. **Measured, and not added:** Wolverine 6.61 no longer ships its runtime compiler; a host that has handlers needs
+`WolverineFx.RuntimeCompilation` (or pre-generated code, `TypeLoadMode.Static`) to start. The live test has no handler and runs in
+`TypeLoadMode.Static`, so it needs neither; a host with a handler, the SAMPLE-M4 sample, is a decision about that package.

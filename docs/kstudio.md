@@ -129,6 +129,28 @@ headers `authorization`, `proxy-authorization`, `cookie`, `set-cookie` and `x-ap
 out with `r.AllowHeader(…)`, and can never be searched. A masked field takes only `=` and `in`, so it cannot be read a
 character at a time, and a search link leaves its value out.
 
+## Wolverine
+
+`KStudio.Wolverine` lists the Kafka clusters and topics of the application's Wolverine configuration:
+
+```csharp
+builder.Services.AddKafkaStudio(k => k.UseWolverineKafka());
+```
+
+It reads `WolverineOptions` once, when KStudio first needs its clusters, and starts, connects and writes nothing. Each
+Kafka transport becomes a cluster (`wolverine`, or `wolverine-{broker}` for a named broker), and each broker-per-tenant
+registration becomes a cluster of its own, `wolverine/{tenant}`, which your policies see as `Cluster = "wolverine"`
+with `TenantId` set. Listener and sender endpoints become topics with their direction, message types, serializer and
+consumer group, and the native dead-letter topic is listed. A topic Wolverine serializes as CloudEvents is decoded as
+CloudEvents.
+
+KStudio never reads Wolverine's message store, never runs Wolverine's builder callbacks (pass a token refresh through
+`w.Cluster((broker, c) => c.OAuthBearerTokenRefresh(…))`), and never consumes with Wolverine's group ids. **Discovery
+adds no redaction rule:** declare rules for every topic that carries personal data.
+
+Wolverine 6.61 keeps its broker-per-tenant registrations internal. KStudio reads them through a guarded probe that lists
+nothing when Wolverine's shape differs, and lists a tenant only once Wolverine has connected it.
+
 ## Audit
 
 Every search and every record opened is recorded in the studio's Activity page and in your log (events 9600-9605), with

@@ -68,7 +68,7 @@ samples/PostgresStudio.Sample/Properties/  launchSettings.json, fixed at http://
 samples/PostgresStudio.Worker/           The diagnostics worker (0.11-D, issue #29): a generic host that references
                                          src/PostgresStudio.Diagnostics alone - no ASP.NET Core, no studio - and logs a
                                          summary of every database's findings at start and every Summary:Interval (D18)
-tests/                                   All six test projects match *.Tests, so one Test run covers them all
+tests/                                   All seven test projects match *.Tests, so one Test run covers them all
 tests/MartenStudio.Tests/                Fast suite: unit, bUnit, endpoint metadata, API snapshot,
                                          conventions. No Docker
 tests/MartenStudio.Tests/Conventions/    Rules too easy to break silently to leave to review
@@ -424,4 +424,14 @@ tests/KStudio.Integration.Tests/Redaction/ Payload redaction on real brokers: a 
 tests/KStudio.Integration.Tests/Search/  Find the message with this id (the M1 exit), as restricted principals, and the search service against live brokers
 tests/KStudio.Integration.Tests/Sample/  The sample host, started once, and the sample's seed, judge and policies without Docker
 tests/KStudio.Integration.Tests/Shell/   Live Kafka and Postgres: first navigation creates no topic, commits no offset, writes no row, makes no broker call while prerendering
+src/KStudio.Wolverine/                   KStudio.Wolverine (D43): UseWolverineKafka() and its options. It lists a Wolverine application's Kafka
+                                         clusters and topics by reading its built configuration and nothing else. References KStudio.Core and
+                                         WolverineFx.Kafka only (KStudioWolverineFenceTests); not packed (K8)
+src/KStudio.Wolverine/Internal/          The cluster source KStudio.Core runs, the topic reader, the tenant probe (the only reflection) and the version guard
+tests/KStudio.Wolverine.Tests/           The adapter's fast suite (D16): no Docker and no Wolverine host. Its output folder holds no studio
+tests/KStudio.Wolverine.Tests/Conventions/ The IL scan of what the adapter may call, the fences and the version guard
+tests/KStudio.Wolverine.Tests/Discovery/ What a WolverineOptions becomes: clusters, topics, tenants through the probe, and that nothing is written
+tests/KStudio.Wolverine.Tests/Support/   The rig that builds a WolverineOptions and runs the adapter over it
+tests/KStudio.Wolverine.Tests/Verify/    KStudio.Wolverine's public API baseline
+tests/KStudio.Integration.Tests/Wolverine/ A real Wolverine host on two brokers: the adapter lists its cluster and its tenant, and a scan reads the tenant's broker
 ```
