@@ -133,7 +133,7 @@
             <a class="ms-btn ms-btn-sm ms-k-permalink" href="@PermalinkHref()">Permalink</a>
         </div>
 
-        @if (KafkaMatchView.KeyTooLongForPredicate(match))
+        @if (KafkaMatchView.HasLiteralTooLong(match))
         {
             <p class="ms-muted ms-k-copy-note">@KafkaStudioText.CopyLiteralTooLong</p>
         }

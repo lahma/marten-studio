@@ -116,6 +116,20 @@ public class KafkaRecordDetailTests
     }
 
     [Fact]
+    public async Task A_correlation_header_longer_than_a_search_literal_is_refused_with_its_reason()
+    {
+        await using KafkaSearchRig rig = new();
+        rig.Topic("orders");
+        rig.Produce("orders", 0, 1, "k", "v", ("correlation-id", new string('c', 1_001)));
+
+        KafkaMatch match = await ReadAsync(rig, "orders", 0);
+
+        KafkaMatchView.Chips(match).Should().BeEmpty("no chip would be a search the parser reads");
+        KafkaMatchView.HasLiteralTooLong(match).Should().BeTrue();
+        Render(rig, match).Markup.Should().Contain(KafkaStudioText.CopyLiteralTooLong);
+    }
+
+    [Fact]
     public async Task The_kcat_line_has_no_credential()
     {
         await using KafkaSearchRig rig = new(engine: o => o.AddCluster(

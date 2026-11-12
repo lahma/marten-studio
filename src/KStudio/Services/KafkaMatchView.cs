@@ -92,6 +92,20 @@ internal static class KafkaMatchView
     /// <param name="match">The match.</param>
     public static bool KeyTooLongForPredicate(KafkaMatch match) => IsLiteral(match.Key) && !FitsLiteral(match.Key.Text!);
 
+    /// <summary>
+    /// Whether the key, or a header or attribute a chip would be made of, is a faithful text that is only too long for a search literal: the detail says
+    /// why it offers no predicate for it, instead of leaving the item out in silence.
+    /// </summary>
+    /// <param name="match">The match.</param>
+    public static bool HasLiteralTooLong(KafkaMatch match)
+    {
+        ArgumentNullException.ThrowIfNull(match);
+
+        return KeyTooLongForPredicate(match)
+            || match.Headers.Where(x => CorrelationHeaders.Contains(x.Name, StringComparer.OrdinalIgnoreCase)).Any(static x => IsLiteral(x.Value) && !FitsLiteral(x.Value.Text!))
+            || match.CloudEventAttributes.Where(x => CorrelationAttributes.Contains(x.Name, StringComparer.OrdinalIgnoreCase)).Any(static x => IsLiteral(x.Value) && !FitsLiteral(x.Value.Text!));
+    }
+
     /// <summary>The results table's key cell text: <see cref="KafkaMatchField.Display" />, cut at <see cref="KeyCut" /> characters.</summary>
     /// <param name="field">The key.</param>
     public static string KeyDisplay(KafkaMatchField field) => field.IsRedacted || field.IsNull ? field.Display : Cut(field.Text ?? string.Empty, KeyCut);
