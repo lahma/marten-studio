@@ -1,6 +1,7 @@
 using KStudio.Core.Clusters;
 using KStudio.Core.Decoding;
 using KStudio.Core.Scanning;
+using KStudio.Core.Wire;
 using KStudio.Core.Windows;
 using KStudio.Tests.Contract;
 using KStudio.Tests.Support;
@@ -179,6 +180,54 @@ public class TailPlanTests
         atStart.Gaps.Should().BeEmpty();
         inside.Ranges.Single().Start.Should().Be(7);
         inside.Gaps.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task A_cursor_past_the_end_of_a_recreated_or_truncated_partition_starts_at_its_end_and_says_so()
+    {
+        await using ScanFixture fixture = ScanFixture.Create();
+        string topic = fixture.Topic("shorter");
+        Seed(fixture, topic, 0, 10);
+
+        KafkaScanPlan plan = await fixture.PlanTailAsync(TailRig.Request([topic], resume: new KafkaScanCursor([new KafkaCursorPosition(topic, 0, 25, KafkaScanCursor.OpenEnd)])));
+
+        PartitionRange range = plan.Ranges.Single();
+        range.Start.Should().Be(10, "the high watermark: the partition is shorter than where the tail paused");
+        range.Notes.Should().ContainSingle().Which.Should().Be(new WindowNote.TailPositionPastEnd(topic, 0, 10));
+        range.Notes[0].Text.Should().Be($"Partition 0 of {topic} is shorter than where the tail paused (recreated or truncated); it is read from offset 10.");
+        plan.Gaps.Should().BeEmpty("nothing can be said about records that are not in this partition");
+
+        // At the end exactly is not past it: a tail that had read everything resumes there, with no note.
+        KafkaScanPlan atEnd = await fixture.PlanTailAsync(TailRig.Request([topic], resume: new KafkaScanCursor([new KafkaCursorPosition(topic, 0, 10, KafkaScanCursor.OpenEnd)])));
+        atEnd.Ranges.Single().Start.Should().Be(10);
+        atEnd.Ranges.Single().Notes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task A_tails_notes_carry_no_window_words_only_uncommitted_records_and_an_unreadable_configuration()
+    {
+        await using ScanFixture fixture = ScanFixture.Create();
+        string compacted = fixture.Topic("compacted", config: new Dictionary<string, string> { ["cleanup.policy"] = "compact" });
+        string plain = fixture.Topic("plain");
+        Seed(fixture, compacted, 0, 3);
+        Seed(fixture, plain, 0, 3);
+        fixture.Cluster.Deny(KafkaAclOperation.DescribeConfigs, KafkaResourceType.Topic, plain);
+
+        KafkaScanPlan committed = await fixture.PlanTailAsync(TailRig.Request([compacted, plain]));
+        KafkaScanPlan uncommitted = await fixture.PlanTailAsync(TailRig.Request([compacted, plain], isolation: KafkaIsolation.IncludeUncommitted));
+
+        // The resolver said these of a window: a compacted topic, a partition list fixed at a time, a margin past an end. A tail has none of them.
+        committed.Notes.OfType<WindowNote.CompactedTopic>().Should().BeEmpty();
+        committed.Notes.OfType<WindowNote.PartitionsFixed>().Should().BeEmpty();
+        committed.Notes.OfType<WindowNote.CreateTimeMargin>().Should().BeEmpty();
+        committed.Notes.OfType<WindowNote.IncludesUncommitted>().Should().BeEmpty();
+        committed.Notes.OfType<WindowNote.ConfigNotReadable>().Should().ContainSingle().Which.Topic.Should().Be(plain);
+        committed.Notes.Should().AllBeOfType<WindowNote.ConfigNotReadable>();
+
+        uncommitted.Notes.OfType<WindowNote.IncludesUncommitted>().Should().ContainSingle();
+        uncommitted.Notes.OfType<WindowNote.CompactedTopic>().Should().BeEmpty();
+        uncommitted.Notes.OfType<WindowNote.PartitionsFixed>().Should().BeEmpty();
+        uncommitted.Notes.Where(static x => x is not (WindowNote.ConfigNotReadable or WindowNote.IncludesUncommitted)).Should().BeEmpty();
     }
 
     [Fact]

@@ -86,7 +86,7 @@ public abstract class ReadNeverWritesScanLiveTests(KafkaFixture fixture)
         await using KafkaScanHandle firstGuard = first;
         TailLiveTests.UntilCaughtUp(first);
 
-        // Records arrive for the whole of the tail's life, one every second across both partitions.
+        // Records arrive for the whole of the tail's life, one at a time across both partitions, each after the tail has read the one before.
         DateTime end = DateTime.UtcNow.AddSeconds(seconds);
         int produced = 0;
         KafkaScanResult? paused = null;
@@ -105,15 +105,19 @@ public abstract class ReadNeverWritesScanLiveTests(KafkaFixture fixture)
                 second = await TailLiveTests.StartAsync(engine, [topic], resume: paused.Cursor);
             }
 
-            await Task.Delay(TimeSpan.FromSeconds(1), Token);
+            // The producer is paced by the tail itself, not by a delay: the next record is produced when the tail has read this one and reported its
+            // end. The loop runs for the time asked, whatever the pace.
+            KafkaScanHandle current = second ?? first;
+            long expected = produced - (paused?.Records ?? 0);
+            SpinWait.SpinUntil(() => current.Progress.Records == expected && current.Progress.Partitions.All(static x => x.CaughtUp), TimeSpan.FromSeconds(30))
+                .Should().BeTrue($"the tail read record {produced} and reported its end");
         }
 
         paused.Should().NotBeNull();
         await using KafkaScanHandle secondGuard = second!;
-        SpinWait.SpinUntil(() => first.Matches.Count + second!.Matches.Count == produced, TimeSpan.FromSeconds(30)).Should().BeTrue("every record produced during the tail was read, none twice");
-
         second!.Stop();
         KafkaScanResult last = await second.Result.WaitAsync(TimeSpan.FromSeconds(30), Token);
+        (paused!.Matches + last.Matches).Should().Be(produced, "every record produced during the tail was read by one segment or the other, none twice (matches found, not matches kept)");
 
         TopicNames().Should().BeEquivalentTo(topicsBefore, "a tail creates no topic, as a principal that could have created one");
 

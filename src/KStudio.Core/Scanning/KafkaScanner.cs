@@ -309,6 +309,15 @@ internal sealed partial class KafkaScanner(
             .ResolveAsync(request.Cluster, topics, image.Window, request.Isolation, TimeSpan.Zero, cancellationToken)
             .ConfigureAwait(false);
 
+        // A tail has no window: the resolver's notes about one (a margin, a compaction that hides superseded keys from a time window, a partition list
+        // fixed at a time) are not the tail's to show. What stays is what is true of any read: uncommitted records are included, and a configuration that
+        // could not be read.
+        window = window with
+        {
+            Notes = [.. window.Notes.OfType<WindowNote.IncludesUncommitted>()],
+            Topics = [.. window.Topics.Select(static x => x with { Notes = [.. x.Notes.OfType<WindowNote.ConfigNotReadable>()] })],
+        };
+
         Compiled compiled = Compile(definition, topics, perTopic: false, shared, request.Grant, new Dictionary<string, (PredicateParseResult Parsed, KafkaReadGrant Grant)>());
         string audit = PredicateFormatter.Format(shared.Tree, clause => compiled.Redactors.Any(x => PredicateCompiler.IsRedacted(clause.Field, x)));
         (IReadOnlyList<PartitionRange> ranges, List<KafkaScanGap> gaps) = TailRanges(window.Ranges, request.ResumeFrom, request.Isolation);
@@ -345,10 +354,15 @@ internal sealed partial class KafkaScanner(
                         gaps.Add(new KafkaScanGap(range.Topic, range.Partition, position.Next, range.LogStart - 1, range.LogStart - position.Next, range.LogStart));
                         start = range.LogStart;
                     }
+                    else if (position.Next > range.HighWatermark)
+                    {
+                        // Recreated or truncated: what the paused tail had read is not in this partition. It is read from the end, and the plan says so.
+                        start = range.HighWatermark;
+                        notes.Add(new WindowNote.TailPositionPastEnd(range.Topic, range.Partition, range.HighWatermark));
+                    }
                     else
                     {
-                        // A position past the end belongs to a partition that was recreated; there is nothing to say about what it skipped.
-                        start = Math.Min(position.Next, range.HighWatermark);
+                        start = position.Next;
                     }
                 }
                 else

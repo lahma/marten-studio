@@ -184,6 +184,54 @@ public class TailRunTests
     }
 
     [Fact]
+    public async Task The_batcher_takes_matches_only_when_the_reader_has_room_so_a_tail_holds_the_ring_plus_one_batch_and_no_more()
+    {
+        await using ScanFixture fixture = ScanFixture.Create(static o => o.Limits.MaxTailMatches = 10);
+        string topic = fixture.Topic("bounded");
+
+        await using KafkaScanHandle handle = await fixture.TailAsync(TailRig.Request([topic]));
+        handle.UntilCaughtUp();
+
+        // Nobody reads the channel yet. The first tick takes five matches and fills the channel.
+        for (int i = 0; i < 5; i++)
+        {
+            fixture.Produce(topic, 0, i, "k" + i, "v");
+        }
+
+        handle.UntilRecords(5);
+        fixture.Clock.Advance(KafkaScanHandle.BatchInterval);
+        ScanFixture.Until(() => handle.Passes == 1, "the first batch was taken");
+
+        // Five more, and a second tick: the channel is full, so the batcher takes nothing. A bounded wait for something that must not happen.
+        for (int i = 5; i < 10; i++)
+        {
+            fixture.Produce(topic, 0, i, "k" + i, "v");
+        }
+
+        handle.UntilRecords(10);
+        fixture.Clock.Advance(KafkaScanHandle.BatchInterval);
+        SpinWait.SpinUntil(() => handle.Passes > 1, TimeSpan.FromMilliseconds(500)).Should().BeFalse("the batcher waits for room before it takes matches");
+
+        for (int i = 10; i < 30; i++)
+        {
+            fixture.Produce(topic, 0, i, "k" + i, "v");
+        }
+
+        handle.UntilRecords(30);
+
+        // The reader arrives: the first batch is the five, and the second is taken only now, from the ring as it is now.
+        List<KafkaScanBatch> batches = TailRig.Collect(handle);
+        ScanFixture.Until(() => TailRig.Snapshot(batches).Count >= 2, "both batches");
+        List<KafkaScanBatch> seen = TailRig.Snapshot(batches);
+
+        seen[0].NewMatches.Should().HaveCount(5);
+        seen[0].Skipped.Should().Be(0);
+        seen[1].NewMatches.Should().HaveCount(10, "the ring");
+        seen[1].Skipped.Should().Be(15, "thirty arrived, five were shown, ten are kept: fifteen were never held by a batch");
+        Offsets(seen[1].NewMatches).Should().Equal(Enumerable.Range(20, 10).Select(static x => (long) x));
+    }
+
+    [Fact]
     public async Task A_caught_up_partition_is_never_reported_stalled_however_long_it_is_quiet()
     {
         ScriptedTail tail = await ScriptedTail.StartAsync(partitions: 2);
@@ -306,22 +354,24 @@ public class TailRunTests
     [Fact]
     public async Task A_tail_pauses_itself_after_TailPauseAfter_and_not_after_MaxScanDuration()
     {
-        await using ScanFixture fixture = ScanFixture.Create(static o => o.Limits.MaxScanDuration = TimeSpan.FromSeconds(5));
-        string topic = fixture.Topic("deadline");
-        Seed(fixture, topic, 0, 2);
+        ScriptedTail tail = await ScriptedTail.StartAsync(static o => o.Limits.MaxScanDuration = TimeSpan.FromSeconds(5));
+        await using ScriptedTail guard = tail;
+        tail.Reader.Enqueue(End(tail.Topic, 0, 10));
+        tail.Handle.UntilCaughtUp();
 
-        await using KafkaScanHandle handle = await fixture.TailAsync(TailRig.Request([topic]));
-        handle.UntilCaughtUp();
+        // TailPauseAfter is five minutes by default; MaxScanDuration is five seconds and does not apply. Each step runs on the scan's own thread and
+        // waits until its loop has looked at the deadline again, so "still running" is what the loop saw, not what a test thread saw first.
+        PassStallCheck(tail, TimeSpan.FromSeconds(30));
+        tail.Handle.IsRunning.Should().BeTrue("MaxScanDuration (5 s) does not apply to a tail");
+        tail.Handle.Progress.StopReason.Should().BeNull();
 
-        // TailPauseAfter is five minutes by default; MaxScanDuration is five seconds and does not apply.
-        fixture.Clock.Advance(TimeSpan.FromSeconds(30));
-        fixture.Clock.Advance(TimeSpan.FromMinutes(4));
-        handle.IsRunning.Should().BeTrue();
-        ScanFixture.Until(() => handle.Progress.Elapsed >= TimeSpan.FromMinutes(4), "the clock moved");
-        handle.IsRunning.Should().BeTrue("MaxScanDuration does not apply to a tail");
+        PassStallCheck(tail, TimeSpan.FromSeconds(269));
+        tail.Handle.Progress.Elapsed.Should().Be(TimeSpan.FromMinutes(5) - TimeSpan.FromSeconds(1));
+        tail.Handle.IsRunning.Should().BeTrue("4 min 59 s is before TailPauseAfter");
+        tail.Handle.Progress.StopReason.Should().BeNull();
 
-        fixture.Clock.Advance(TimeSpan.FromMinutes(1));
-        KafkaScanResult result = await handle.Result.Bounded();
+        tail.Fixture.Clock.Advance(TimeSpan.FromSeconds(2));
+        KafkaScanResult result = await tail.Handle.Result.Bounded();
 
         result.StopReason.Should().Be(KafkaScanStopReason.Deadline);
         result.Cursor.Positions.Should().ContainSingle().Which.End.Should().Be(KafkaScanCursor.OpenEnd);
@@ -419,32 +469,67 @@ public class TailRunTests
         await using KafkaScanHandle firstGuard = first;
         first.UntilCaughtUp();
 
-        for (int i = 5; i < 45; i++)
+        // The first segment reads twenty records and is paused at a place it is known to have reached, whatever the machine's pace.
+        for (int i = 5; i < 25; i++)
         {
             fixture.Produce(topic, 0, i, "k" + i, "v" + i);
         }
 
-        first.UntilRecords(17);
+        first.UntilRecords(20);
+        first.UntilCaughtUp();
         first.Stop(KafkaScanStopReason.Paused);
         KafkaScanResult one = await first.Result.Bounded();
         IReadOnlyList<KafkaMatch> firstMatches = first.Matches;
 
         one.StopReason.Should().Be(KafkaScanStopReason.Paused);
-        one.Records.Should().BeInRange(17, 40);
-        one.Cursor.Positions.Single().Next.Should().Be(5 + one.Records);
+        one.Records.Should().Be(20);
+        one.Cursor.Positions.Single().Next.Should().Be(25);
 
-        // The segment resumes from the cursor: nothing is read twice and nothing is skipped, even though records arrived while it was paused.
+        // Twenty more arrive while it is paused; the resume reads exactly those.
+        for (int i = 25; i < 45; i++)
+        {
+            fixture.Produce(topic, 0, i, "k" + i, "v" + i);
+        }
+
         KafkaScanHandle second = await fixture.TailAsync(TailRig.Request([topic], resume: one.Cursor));
         await using KafkaScanHandle secondGuard = second;
-        second.UntilRecords(40 - one.Records);
+        second.UntilRecords(20);
         second.UntilCaughtUp();
         second.Stop();
         KafkaScanResult two = await second.Result.Bounded();
 
-        (one.Records + two.Records).Should().Be(40, "an uninterrupted tail of these records read 40");
+        two.Records.Should().Be(20, "the twenty produced while paused, and nothing read twice");
         long[] all = [.. Offsets(firstMatches), .. Offsets(second.Matches)];
-        all.Should().Equal(Enumerable.Range(5, 40).Select(static x => (long) x), "every offset exactly once, in order");
+        all.Should().Equal(Enumerable.Range(5, 40).Select(static x => (long) x), "offsets 5 to 44, each exactly once, in order");
         two.Cursor.Positions.Single().Next.Should().Be(45);
+    }
+
+    [Fact]
+    public async Task A_tail_paused_in_the_middle_of_a_backlog_resumes_at_the_next_offset_it_had_not_read()
+    {
+        ScriptedTail tail = await ScriptedTail.StartAsync();
+        await using ScriptedTail guard = tail;
+
+        // Five records are in the log (offsets 10 to 14); the segment reads two of them and the third is never handed to it.
+        for (int i = 10; i < 15; i++)
+        {
+            tail.Fixture.Produce(tail.Topic, 0, i, "k" + i, "v" + i);
+        }
+
+        tail.Reader.Enqueue(Record(tail.Topic, 0, 10));
+        tail.Reader.Enqueue(Record(tail.Topic, 0, 11));
+        tail.Reader.EnqueueAction(() => tail.Handle.Stop(KafkaScanStopReason.Paused));
+        KafkaScanResult result = await tail.Handle.Result.Bounded();
+
+        result.StopReason.Should().Be(KafkaScanStopReason.Paused);
+        result.Records.Should().Be(2);
+        KafkaCursorPosition position = result.Cursor.Positions.Single();
+        position.Next.Should().Be(12);
+        position.End.Should().Be(KafkaScanCursor.OpenEnd);
+
+        KafkaScanPlan resumed = await tail.Fixture.PlanTailAsync(TailRig.Request([tail.Topic], resume: result.Cursor));
+        resumed.Ranges.Should().ContainSingle().Which.Start.Should().Be(12, "the next offset the paused segment had not read");
+        resumed.Gaps.Should().BeEmpty();
     }
 
     [Fact]

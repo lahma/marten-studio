@@ -131,6 +131,18 @@ internal abstract record WindowNote
             $"Partition {Partition} of {Topic} was added after the tail started; it is read from its end.");
     }
 
+    /// <summary>A paused tail's cursor lies past the end of the partition (recreated or truncated): the resumed tail reads it from its end, and says so (D-M5 decision 3.1).</summary>
+    /// <param name="Topic">The topic.</param>
+    /// <param name="Partition">The partition.</param>
+    /// <param name="HighWatermark">Where it is read from.</param>
+    public sealed record TailPositionPastEnd(string Topic, int Partition, long HighWatermark) : WindowNote
+    {
+        /// <inheritdoc />
+        public override string Text => string.Create(
+            CultureInfo.InvariantCulture,
+            $"Partition {Partition} of {Topic} is shorter than where the tail paused (recreated or truncated); it is read from offset {HighWatermark}.");
+    }
+
     /// <summary>The topic is compacted.</summary>
     /// <param name="Topic">The topic.</param>
     public sealed record CompactedTopic(string Topic) : WindowNote

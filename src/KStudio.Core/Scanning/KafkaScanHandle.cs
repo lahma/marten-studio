@@ -32,6 +32,7 @@ internal sealed class KafkaScanHandle : IAsyncDisposable
     private readonly Task batcher;
     private int reading;
     private int disposed;
+    private int passes;
 
     internal KafkaScanHandle(ScanRun run, Task<KafkaScanResult> scanTask, TimeProvider time)
     {
@@ -45,6 +46,9 @@ internal sealed class KafkaScanHandle : IAsyncDisposable
         PeriodicTimer timer = new(BatchInterval, time);
         batcher = Task.Run(() => BatchLoopAsync(timer));
     }
+
+    /// <summary>How many times the batcher took matches from the store: for tests that hold the channel and ask that it takes no more than one batch ahead.</summary>
+    internal int Passes => Volatile.Read(ref passes);
 
     /// <summary>The scan's id.</summary>
     public Guid ScanId => run.ScanId;
@@ -129,15 +133,21 @@ internal sealed class KafkaScanHandle : IAsyncDisposable
         {
             while (await timer.WaitForNextTickAsync(batcherStop.Token).ConfigureAwait(false))
             {
+                // Room first, matches second: a batcher that took its matches and then waited for the reader would hold them in addition to the ring's,
+                // and a tail holds at most the ring plus one batch (2 x TailCapacity, D46). The matches are taken when the reader can take them.
+                if (!await channel.Writer.WaitToWriteAsync(batcherStop.Token).ConfigureAwait(false))
+                {
+                    return;
+                }
+
+                Interlocked.Increment(ref passes);
                 bool finished = scanTask.IsCompleted;
+                KafkaScanResult? result = finished ? await scanTask.ConfigureAwait(false) : null;
                 KafkaScanProgress progress = run.Snapshot();
                 IReadOnlyList<KafkaMatch> fresh = run.Store.From(sentSequence, out long skipped);
 
-                if (finished)
+                if (result is not null)
                 {
-                    KafkaScanResult result = await scanTask.ConfigureAwait(false);
-                    progress = run.Snapshot();
-                    fresh = run.Store.From(sentSequence, out skipped);
                     await channel.Writer.WriteAsync(new KafkaScanBatch(fresh, progress, result, skipped), batcherStop.Token).ConfigureAwait(false);
                     return;
                 }

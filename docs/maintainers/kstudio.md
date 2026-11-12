@@ -543,6 +543,8 @@ consumer's sizes guard the process's memory, so they stay the host's. Exports in
 them once into a buffer of exactly the file's size, so an export peaks at twice its file (the rows and the buffer; no growing stream holds its old and new arrays
 together), the file is sent from that buffer without another copy, and at most two exports are in flight.
 
+A live tail (D46) is a scan in this statement: it holds a scan slot, and the matches it holds are its ring plus the one batch its batcher may have taken, at most  cdot$ `TailCapacity` (400 at the defaults, within a scan's 500).
+
 Before reading, the engine estimates a scan: the offsets in its ranges ("about", since offsets are not records) and the
 bytes, from a small sample of record sizes. Above the confirmation threshold, `Start` refuses unless the visitor's
 confirmation travels with the call. A profile (M5) or a visitor can lower any limit; nothing raises one above the host's.
@@ -845,13 +847,15 @@ holds records below the high watermark that commit later, and starting at the hi
 gap D38 refuses; under `IncludeUncommitted` the high watermark is the end of what can be read. Every range ends at `long.MaxValue` (`KafkaScanCursor.OpenEnd`, written
 `-` in a cursor's text, which `TryParse` accepts). With `ResumeFrom`, a partition the cursor names starts at its `Next`; one it does not name (added since) starts at
 its end with the note `Partition {p} of {topic} was added after the tail started; it is read from its end.`; a position below the log start moves to it and the records
-between are a `KafkaScanGap` (the plan's `Gaps`, which the run starts its own with), never a reset policy; a position past the high watermark (a recreated
-partition) starts at the high watermark.
+between are a `KafkaScanGap` (the plan's `Gaps`, which the run starts its own with), never a reset policy; a position past the high watermark (a recreated or
+truncated partition) starts at the high watermark and the plan says so (`TailPositionPastEnd`: `Partition {p} of {t} is shorter than where the tail paused (recreated or
+truncated); it is read from offset {hw}.`), because what the paused tail had read is not in that partition. A tail's plan carries no note about a window (a margin, a compacted
+topic, a partition list fixed at a time): only `IncludesUncommitted` and an unreadable configuration (`ConfigNotReadable`) stay.
 
 **`StartTail`.** The order of `Start`: `ShuttingDown`, `PredicateInvalid`, then `ProfileForbids` (`KafkaProfileCeilings.ForbidsTail`: a `Production` cluster, even when the
 capability is granted; nothing is spent or taken), `OwnerBudgetSpent` (the process's and the cluster's own allowance, `KafkaClusterCostControls.For`, as `Start`), then
 the limiter (`ProcessBusy`, `OwnerBusy`). **A tail holds one of `MaxConcurrentScans` and one of `MaxConcurrentScansPerOwner` while it reads**, on a thread of its own with
-the same `ScanRun`, so D41's memory statement holds with tails counted in $S$ (a tail's ring is at most `MaxMatches`) and "two readers per process" stays true. A scan's
+the same `ScanRun`, so D41's memory statement holds with tails counted in $S$ (a tail holds at most  cdot$ `TailCapacity` matches: the ring and one batch, 400 at the defaults, within the 500 a scan keeps; see *The ring*) and "two readers per process" stays true. A scan's
 plan handed to `StartTail`, or a tail's to `Start`, is a defect and throws `ArgumentException`. A plan with no partition to follow (every topic refused) starts no
 consumer and takes no slot; the run ends `NotAuthorized`.
 
@@ -871,7 +875,10 @@ at. The governor, both owner budgets, byte accounting, redaction (the match fact
 the kept matches from a sequence on and how many with a sequence at or above it were evicted unread. The batcher tracks a sequence, not an index, and
 `KafkaScanBatch.Skipped` carries what a page never saw between two batches, so a page can say `{n} matches arrived faster than they could be shown`. Without the ring
 the store is the append-only store a search always had. The ring's size is `KafkaScanLimits.TailCapacity`, the smaller of `MaxTailMatches` and `MaxMatches`. A run's and a
-progress's `Matches` is the number found (`Added`), which for a search equals the number kept.
+progress's `Matches` is the number found (`Added`), which for a search equals the number kept. **The batcher takes matches only when the reader has room**
+(`WaitToWriteAsync` on the one-slot channel before `From`): were it to take its batch and then wait, a slow reader would leave it holding a batch beside the ring and the
+next pass taking another. A tail therefore holds at most the ring plus one batch,  cdot$ `TailCapacity` matches, which D41's statement counts; `TailCapacity` is not halved
+for it. A batch is taken from the ring as it is when the reader is ready, so `Skipped` counts the matches that never reached a batch.
 
 **Pausing releases the slot.** A tail pauses by ending its segment (`Deadline`, a segment's budget, `OwnerBudget`, or `Paused`), not by holding a paused consumer: the slot
 and the consumer's memory ($C \approx 64$ MiB) go to whoever needs them, and the next segment starts from the exact cursor (`ResumeFrom`), paced, budgeted and slotted like any
