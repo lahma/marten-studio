@@ -603,13 +603,17 @@
     private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
     {
         // The page's own rewrite of the address (after a plan) is not a new address.
-        if (disposed || string.Equals(e.Location, lastWritten, StringComparison.Ordinal) || running)
+        if (disposed || IsOwnWrite(e.Location) || running)
         {
             return;
         }
 
         _ = InvokeAsync(ApplyAddressAndReloadAsync);
     }
+
+    /// <summary>Whether <paramref name="location" /> is the address this page just wrote (compared unescaped: a browser and a <c>Uri</c> disagree about which characters stay escaped).</summary>
+    private bool IsOwnWrite(string location) =>
+        lastWritten is not null && string.Equals(Uri.UnescapeDataString(location), Uri.UnescapeDataString(lastWritten), StringComparison.Ordinal);
 
     private async Task ApplyAddressAndReloadAsync()
     {

@@ -17139,7 +17139,7 @@ dialog.ms-modal::backdrop {
     background: var(--ms-color-warning-bg);
 }
 
-.ms-k-caveats .ms-section-title {
+.ms-k-caveats h2 {
     margin-top: 0;
 }
 
