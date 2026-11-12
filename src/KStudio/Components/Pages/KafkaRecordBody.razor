@@ -69,7 +69,7 @@
 
             @* Saves this record, or its value alone, as a file (D-M5 decision 2.8). JsonView's own Download stays off: its link is a data: URL the
                server never hears about, so it could be neither gated nor audited. *@
-            <KafkaExportMenu Cluster="@State.ActiveCluster"
+            <KafkaExportMenu Cluster="@readCluster"
                              Matches="@((IReadOnlyList<KafkaMatch>)[record])"
                              Source="@KafkaExportSource.Record"
                              Topics="@((IReadOnlyList<string>)[record.Topic])"
@@ -179,6 +179,9 @@
     private readonly HashSet<string> valueRefused = new(StringComparer.Ordinal);
     private string? loadedKey;
 
+    /// <summary>The cluster entry the record on screen was read from: the export is bound to it, never to whatever the selector shows now.</summary>
+    private KafkaClusterEntry? readCluster;
+
     /// <summary>Completed by the frame once the cluster policy passed and the circuit is interactive: a body reads nothing before it.</summary>
     [CascadingParameter(Name = KafkaPageFrame.ReadyName)]
     public Task? Ready { get; set; }
@@ -273,6 +276,7 @@
                 }
 
                 loadedKey = key;
+                readCluster = active;
                 result = read;
                 kcat = read is KafkaRecordPageResult.Read { Value.Record: { } record }
                     ? KafkaMatchView.Kcat(record.Topic, record.Partition, record.Offset, await SettingsAsync(active))
@@ -333,6 +337,7 @@
         }
 
         result = null;
+        readCluster = null;
         compared = null;
         valueRefused.Clear();
         loading = true;
@@ -350,6 +355,7 @@
 
         loadedKey = null;
         result = null;
+        readCluster = null;
         compared = null;
         valueRefused.Clear();
         loading = true;

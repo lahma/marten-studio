@@ -303,10 +303,12 @@
             </details>
         }
 
-        @if (result is not null && planned is not null)
+        @* The banner, Continue, Search all partitions and Export belong to the run whose rows are on screen (shownRun), never to the latest plan: a new plan
+           (an unparsable predicate, a refused start, a cancelled confirmation, another cluster) replaces `planned` while the rows stay. *@
+        @if (result is not null && shownRun is { } ran)
         {
             <div class="ms-k-result-banner" role="status">
-                <p>@KafkaSearchText.Stop(result, planned.Plan.Limits)</p>
+                <p>@KafkaSearchText.Stop(result, ran.Plan.Limits)</p>
                 @if (continuedAfter is { } previous)
                 {
                     <p class="ms-muted">@KafkaStudioText.ContinuedAfter(previous)</p>
@@ -319,20 +321,24 @@
                 {
                     <button type="button" class="ms-button" disabled="@busy" @onclick="SearchAllPartitionsAsync">@KafkaStudioText.SearchAllPartitions</button>
                 }
-                @if (!busy)
-                {
-                    @* The records on screen, saved as a file (D-M5 decision 2.8): nothing is read again, and the service asks every gate at the click. *@
-                    <KafkaExportMenu Cluster="@planned.Input.Cluster"
+            </div>
+
+            @if (!busy)
+            {
+                @* The records on screen, saved as a file (D-M5 decision 2.8): nothing is read again, and the service asks every gate at the click. Outside the
+                   banner's status region, so that the notice and the "Saved" line are not announced again with every result. Bound to the run on screen. *@
+                <div class="ms-k-export-row">
+                    <KafkaExportMenu Cluster="@ran.Input.Cluster"
                                      Matches="@matches"
                                      Source="@KafkaExportSource.Search"
-                                     Topics="@planned.Input.Topics"
-                                     From="@planned.Input.From"
-                                     To="@planned.Input.To"
-                                     AuditText="@planned.Plan.AuditText"
+                                     Topics="@ran.Input.Topics"
+                                     From="@ran.Input.From"
+                                     To="@ran.Input.To"
+                                     AuditText="@ran.Plan.AuditText"
                                      SourceRecords="@result.Records"
                                      SourceBytes="@result.Bytes" />
-                }
-            </div>
+                </div>
+            }
 
             @if (KafkaSearchText.Caveats(result) is { Count: > 0 } caveats)
             {
@@ -527,6 +533,9 @@
     private IReadOnlyList<KafkaDuplicateGroup> duplicates = [];
     private IReadOnlyList<string> addressTopics = [];
     private KafkaSearchPlanned? planned;
+
+    /// <summary>The search whose rows, result and cursor are on screen: set when a run starts, cleared when the cluster changes. <see cref="planned" /> is only the latest plan.</summary>
+    private KafkaSearchPlanned? shownRun;
     private KafkaGrantDecision? runGrant;
     private KafkaSearchRun? run;
     private KafkaScanProgress? progress;
@@ -723,6 +732,7 @@
         selected.Clear();
         addressTopics = [];
         planned = null;
+        shownRun = null;
         result = null;
         progress = null;
         matches.Clear();
@@ -975,25 +985,25 @@
 
     private async Task ContinueAsync()
     {
-        if (busy || result is null || planned is null || result.Cursor.IsEmpty)
+        if (busy || result is null || shownRun is null || result.Cursor.IsEmpty)
         {
             return;
         }
 
-        // The same cluster, topics, window, isolation and predicate; the cursor stays in memory and never enters the address.
+        // The same cluster, topics, window, isolation and predicate as the run on screen; the cursor stays in memory and never enters the address.
         long records = result.Records;
-        await PlanAndStartAsync(planned.Input with { ContinueFrom = result.Cursor }, records);
+        await PlanAndStartAsync(shownRun.Input with { ContinueFrom = result.Cursor }, records);
     }
 
     private async Task SearchAllPartitionsAsync()
     {
-        if (busy || planned is null)
+        if (busy || shownRun is null)
         {
             return;
         }
 
-        // The same search with pruning off: verdicts, estimate and confirmation again, a new scan and a new audit entry.
-        await PlanAndStartAsync(planned.Input with { ContinueFrom = null, SearchAllPartitions = true });
+        // The same search as the run on screen with pruning off: verdicts, estimate and confirmation again, a new scan and a new audit entry.
+        await PlanAndStartAsync(shownRun.Input with { ContinueFrom = null, SearchAllPartitions = true });
     }
 
     private async Task PlanAndStartAsync(KafkaSearchInput input, long? continuing = null)
@@ -1104,6 +1114,7 @@
             started = run = ((KafkaSearchStartResult.Running) start).Run;
             running = true;
             matches.Clear();
+            shownRun = toStart;
             duplicates = [];
             expanded.Clear();
             compareKeys.Clear();

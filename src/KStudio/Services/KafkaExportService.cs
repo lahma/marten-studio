@@ -140,7 +140,11 @@ internal sealed class KafkaExportService(
         return registry.TryGet(cluster.Key, out KafkaClusterDefinition? definition) && KafkaProfileCeilings.ForbidsExport(definition.Profile);
     }
 
-    /// <summary>Writes <paramref name="input" />'s records as a file and hands it to <paramref name="deliver" />. Refusals are values; the audit is written once.</summary>
+    /// <summary>
+    /// Writes <paramref name="input" />'s records as a file and hands it to <paramref name="deliver" />. Refusals are values; the audit is written once, and
+    /// whatever ends the call - a dispose that cancels it mid-delivery, a policy that throws - leaves an entry: an export that ends before one was
+    /// written is recorded as abandoned, because the browser may already have saved the file.
+    /// </summary>
     /// <param name="input">What to save.</param>
     /// <param name="deliver">Hands the finished file to the browser.</param>
     /// <param name="cancellationToken">Abandons the export.</param>
@@ -149,6 +153,36 @@ internal sealed class KafkaExportService(
         ArgumentNullException.ThrowIfNull(input);
         ArgumentNullException.ThrowIfNull(deliver);
 
+        Audited audited = new();
+
+        try
+        {
+            return await RunAsync(input, deliver, audited, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            await AbandonAsync(input, audited, null).ConfigureAwait(false);
+            throw;
+        }
+        catch (Exception e)
+        {
+            await AbandonAsync(input, audited, e).ConfigureAwait(false);
+            return new KafkaExportOutcome(false, KafkaStudioText.ExportFailed);
+        }
+    }
+
+    /// <summary>Whether this call has written its audit entry; the last resort in <see cref="ExportAsync" /> writes one only when nothing did.</summary>
+    private sealed class Audited
+    {
+        private int recorded;
+
+        public bool IsRecorded => Volatile.Read(ref recorded) != 0;
+
+        public void Mark() => Interlocked.Exchange(ref recorded, 1);
+    }
+
+    private async Task<KafkaExportOutcome> RunAsync(KafkaExportInput input, KafkaExportDelivery deliver, Audited audited, CancellationToken cancellationToken)
+    {
         KafkaClusterEntry cluster = input.Cluster;
         IReadOnlyList<string> topics = input.Topics;
         string? place = input.Source == KafkaExportSource.Record && input.Matches.Count == 1
@@ -164,30 +198,32 @@ internal sealed class KafkaExportService(
         catch (KafkaCapabilityDeniedException denial)
         {
             actionLog.RecordCapabilityDenied(cluster, topics, denial, KafkaStudioText.ExportAction, target);
+            audited.Mark();
             return new KafkaExportOutcome(false, denial.Message);
         }
 
         // 2. The cluster's profile: Production never exports, even when the capability is granted.
         if (!registry.TryGet(cluster.Key, out KafkaClusterDefinition? definition))
         {
-            return await NotRunAsync(input, target, KafkaStudioText.RequestRefused).ConfigureAwait(false);
+            return await NotRunAsync(input, audited, target, KafkaStudioText.RequestRefused).ConfigureAwait(false);
         }
 
         if (KafkaProfileCeilings.ForbidsExport(definition.Profile))
         {
-            return await NotRunAsync(input, target, KafkaStudioText.ProfileForbids(KafkaStudioText.ExportingRecords, cluster)).ConfigureAwait(false);
+            return await NotRunAsync(input, audited, target, KafkaStudioText.ProfileForbids(KafkaStudioText.ExportingRecords, cluster)).ConfigureAwait(false);
         }
 
         // 3. The input's own bounds.
         if (Bounds(input) is { } bounds)
         {
-            return await NotRunAsync(input, target, bounds).ConfigureAwait(false);
+            return await NotRunAsync(input, audited, target, bounds).ConfigureAwait(false);
         }
 
         // 4. The cluster policy, then both policies for every topic: any refusal refuses the whole export and names nothing.
         if (!await authorization.IsAuthorizedAsync(cluster, null, null, cancellationToken).ConfigureAwait(false))
         {
             actionLog.RecordClusterDenied(cluster, null, topics, authorization.PolicyFor(null) ?? "(none)", KafkaStudioText.ExportAction, target, KafkaCapability.ExportRecords);
+            audited.Mark();
             return new KafkaExportOutcome(false, KafkaStudioText.RequestRefused);
         }
 
@@ -205,6 +241,7 @@ internal sealed class KafkaExportService(
                     KafkaStudioText.ExportAction,
                     target,
                     KafkaCapability.ExportRecords);
+                audited.Mark();
                 return new KafkaExportOutcome(false, KafkaStudioText.RequestRefused);
             }
         }
@@ -226,7 +263,7 @@ internal sealed class KafkaExportService(
 
             if (!grant.HasPayload)
             {
-                return await NotRunAsync(input, target, KafkaStudioText.ExportGrantChanged).ConfigureAwait(false);
+                return await NotRunAsync(input, audited, target, KafkaStudioText.ExportGrantChanged).ConfigureAwait(false);
             }
         }
 
@@ -234,57 +271,45 @@ internal sealed class KafkaExportService(
         using IDisposable? lease = gate.TryEnter();
         if (lease is null)
         {
-            return await NotRunAsync(input, target, KafkaStudioText.ExportsBusy).ConfigureAwait(false);
+            return await NotRunAsync(input, audited, target, KafkaStudioText.ExportsBusy).ConfigureAwait(false);
         }
 
         string user = await authorization.UserNameAsync().ConfigureAwait(false);
-        KafkaExportFile file;
-        string fileName;
+        long maxBytes = scanner.LimitsFor(cluster.Key).MaxExportBytes;
+        KafkaExportFile file = KafkaExportWriter.Write(input.Matches, input.Format, maxBytes);
+
+        if (file.Refusal is { } refusal)
+        {
+            return await NotRunAsync(input, audited, target, refusal).ConfigureAwait(false);
+        }
+
+        // A single value larger than the limit: nothing fits, and an empty file is not an export.
+        if (file.Written == 0)
+        {
+            return await NotRunAsync(input, audited, target, KafkaStudioText.ExportLimited(0, file.LeftOut, maxBytes)).ConfigureAwait(false);
+        }
+
+        KafkaMatch first = input.Matches[0];
+        string part = input.Source == KafkaExportSource.Record
+            ? KafkaExportFileName.RecordPart(first.Topic, first.Partition, first.Offset)
+            : KafkaExportFileName.TopicsPart(topics);
+        string fileName = KafkaExportFileName.For(cluster.Key, part, time.GetUtcNow(), file.Extension);
+
+        // 7. The delivery. Interop loss is a file that did not arrive, not a failure of the export. A cancellation is neither: the browser may have saved the
+        // file, so it goes on to ExportAsync, which records the export as abandoned.
+        bool delivered;
 
         try
         {
-            long maxBytes = scanner.LimitsFor(cluster.Key).MaxExportBytes;
-            file = KafkaExportWriter.Write(input.Matches, input.Format, maxBytes);
-
-            if (file.Refusal is { } refusal)
-            {
-                return await NotRunAsync(input, target, refusal).ConfigureAwait(false);
-            }
-
-            // A single value larger than the limit: nothing fits, and an empty file is not an export.
-            if (file.Written == 0)
-            {
-                return await NotRunAsync(input, target, KafkaStudioText.ExportLimited(0, file.LeftOut, maxBytes)).ConfigureAwait(false);
-            }
-
-            KafkaMatch first = input.Matches[0];
-            string part = input.Source == KafkaExportSource.Record
-                ? KafkaExportFileName.RecordPart(first.Topic, first.Partition, first.Offset)
-                : KafkaExportFileName.TopicsPart(topics);
-            fileName = KafkaExportFileName.For(cluster.Key, part, time.GetUtcNow(), file.Extension);
-
-            // 7. The delivery. Interop loss is a file that did not arrive, not a failure of the export.
-            bool delivered;
-
-            try
-            {
-                delivered = await deliver(fileName, file.ContentType, new MemoryStream(file.Content, writable: false), cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
-            {
-                delivered = false;
-            }
-
-            // 8. The audit, once.
-            return Record(input, target, user, file, fileName, delivered);
+            delivered = await deliver(fileName, file.ContentType, new MemoryStream(file.Content, writable: false), cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception e) when (e is not OperationCanceledException)
+        catch (Exception e) when (e is not OperationCanceledException && StudioLiveUpdates.IsInteropUnavailable(e))
         {
-            logger.LogWarning(e, "KStudio could not export records");
-            actionLog.Record(cluster, topics, KafkaStudioText.ExportAction, target, succeeded: false, KafkaStudioText.ExportFailed, KafkaCapability.ExportRecords);
-            logger.ActionNotRun(user, "export", string.Join(", ", topics), cluster.Cluster, cluster.TenantId, KafkaStudioText.ExportFailed, input.AuditText);
-            return new KafkaExportOutcome(false, KafkaStudioText.ExportFailed);
+            delivered = false;
         }
+
+        // 8. The audit, once.
+        return Record(input, audited, target, user, file, fileName, delivered);
     }
 
     /// <summary>The extension the record page saves a value with (<c>json</c> or <c>txt</c>), or <see langword="null" /> when the value has no text to save.</summary>
@@ -325,23 +350,59 @@ internal sealed class KafkaExportService(
         return null;
     }
 
-    private async Task<KafkaExportOutcome> NotRunAsync(KafkaExportInput input, string target, string reason)
+    /// <summary>
+    /// The last resort: the call ended (cancelled, or a policy or the delivery threw) before any entry was written. One failed entry and event 9609 say so; the
+    /// delivery may have reached the browser, so the entry says the export ended before it was confirmed. Best effort: a failing audit is logged.
+    /// </summary>
+    private async Task AbandonAsync(KafkaExportInput input, Audited audited, Exception? failure)
+    {
+        if (failure is not null)
+        {
+            logger.LogWarning(failure, "KStudio could not export records");
+        }
+
+        if (audited.IsRecorded)
+        {
+            return;
+        }
+
+        try
+        {
+            string user = await authorization.UserNameAsync().ConfigureAwait(false);
+            string? place = input.Source == KafkaExportSource.Record && input.Matches.Count == 1
+                ? $"{input.Matches[0].Topic}/{input.Matches[0].Partition}/{input.Matches[0].Offset}"
+                : null;
+            string target = KafkaStudioText.ExportTarget(input.Source, input.Topics, input.From, input.To, place);
+
+            actionLog.Record(input.Cluster, input.Topics, KafkaStudioText.ExportAction, target, succeeded: false, KafkaStudioText.ExportAbandoned, KafkaCapability.ExportRecords);
+            audited.Mark();
+            logger.ActionNotRun(user, "export", string.Join(", ", input.Topics), input.Cluster.Cluster, input.Cluster.TenantId, KafkaStudioText.ExportAbandoned, input.AuditText);
+        }
+        catch (Exception e)
+        {
+            logger.LogWarning(e, "KStudio could not record an export that ended early");
+        }
+    }
+
+    private async Task<KafkaExportOutcome> NotRunAsync(KafkaExportInput input, Audited audited, string target, string reason)
     {
         string user = await authorization.UserNameAsync().ConfigureAwait(false);
 
         actionLog.Record(input.Cluster, input.Topics, KafkaStudioText.ExportAction, target, succeeded: false, reason, KafkaCapability.ExportRecords);
+        audited.Mark();
         logger.ActionNotRun(user, "export", string.Join(", ", input.Topics), input.Cluster.Cluster, input.Cluster.TenantId, reason, input.AuditText);
 
         return new KafkaExportOutcome(false, reason);
     }
 
-    private KafkaExportOutcome Record(KafkaExportInput input, string target, string user, KafkaExportFile file, string fileName, bool delivered)
+    private KafkaExportOutcome Record(KafkaExportInput input, Audited audited, string target, string user, KafkaExportFile file, string fileName, bool delivered)
     {
         string format = FormatName(file.Format);
 
         if (!delivered)
         {
             actionLog.Record(input.Cluster, input.Topics, KafkaStudioText.ExportAction, target, succeeded: false, KafkaStudioText.ExportNotDelivered, KafkaCapability.ExportRecords);
+            audited.Mark();
             logger.ActionNotRun(user, "export", string.Join(", ", input.Topics), input.Cluster.Cluster, input.Cluster.TenantId, KafkaStudioText.ExportNotDelivered, input.AuditText);
             return new KafkaExportOutcome(false, KafkaStudioText.ExportNotDelivered, fileName, file.Written, file.LeftOut);
         }
@@ -358,6 +419,7 @@ internal sealed class KafkaExportService(
             input.AuditText);
 
         actionLog.Record(input.Cluster, input.Topics, KafkaStudioText.ExportAction, target, succeeded: true, message, KafkaCapability.ExportRecords);
+        audited.Mark();
         logger.RecordsExported(
             user,
             file.Written,

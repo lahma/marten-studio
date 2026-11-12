@@ -45,7 +45,7 @@
     @if (State.ActiveCluster?.Profile is { } profile)
     {
         <span class="ms-chip ms-k-profile-chip ms-k-profile-@profile.ToString().ToLowerInvariant()"
-              title="@("This cluster's profile is " + profile + ": it lowers KStudio's limits here (Settings shows them).")">@profile profile</span>
+              title="@KafkaStudioText.ProfileChipTitle(profile)">@profile profile</span>
     }
 </div>
 

@@ -17700,6 +17700,10 @@ dialog.ms-modal::backdrop {
     min-width: 0;
 }
 
+.ms-k-export-row {
+    margin: 0 0 var(--ms-space-md);
+}
+
 .ms-k-export-menu {
     display: inline-flex;
 }

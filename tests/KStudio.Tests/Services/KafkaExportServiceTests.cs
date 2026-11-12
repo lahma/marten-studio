@@ -449,6 +449,7 @@ public class KafkaExportServiceTests
         entry.Message.Should().Be(KafkaStudioText.ExportNotDelivered);
         rig.Logs.Entries.Should().NotContain(static x => x.EventId.Id == 9606);
         rig.Logs.Entries.Should().Contain(static x => x.EventId.Id == 9609);
+        rig.Logs.Entries.Single(static x => x.EventId.Id == 9609).Message.Should().NotContain("..", "the reason's own full stop is not doubled by the template's");
     }
 
     [Fact]
@@ -481,6 +482,47 @@ public class KafkaExportServiceTests
 
         outcome.Text.Should().Be(KafkaStudioText.ExportFailed);
         Exports(rig).Should().ContainSingle().Which.Succeeded.Should().BeFalse();
+    }
+
+    // ---- every ending is audited
+
+    [Fact]
+    public async Task A_delivery_cancelled_by_a_dispose_leaves_one_failed_entry_and_one_9609_and_the_cancellation_goes_on()
+    {
+        await using KafkaSearchRig rig = Rig();
+        Seed(rig);
+        (KafkaSearchPlanned planned, List<KafkaMatch> matches, KafkaScanResult result) = await SearchAsync(rig, ["orders"]);
+
+        Func<Task> export = () => rig.Export().ExportAsync(
+            InputOf(rig, planned, matches, result),
+            static (_, _, _, _) => throw new OperationCanceledException(),
+            Ct);
+
+        await export.Should().ThrowAsync<OperationCanceledException>();
+        StudioActionLogEntry entry = Exports(rig).Should().ContainSingle("the browser may have saved the file, so the export is not left unaudited").Which;
+        entry.Succeeded.Should().BeFalse();
+        entry.Message.Should().Be(KafkaStudioText.ExportAbandoned);
+        entry.Capability.Should().Be("ExportRecords");
+        rig.Logs.Entries.Where(static x => x.EventId.Id == 9609).Should().ContainSingle();
+        rig.Logs.Entries.Should().NotContain(static x => x.EventId.Id == 9606);
+    }
+
+    [Fact]
+    public async Task A_policy_that_throws_leaves_one_failed_entry_and_one_9609()
+    {
+        await using KafkaSearchRig rig = Rig();
+        Seed(rig);
+        (KafkaSearchPlanned planned, List<KafkaMatch> matches, KafkaScanResult result) = await SearchAsync(rig, ["orders"]);
+        rig.Studio.Authorization.AllowKafka(static _ => throw new InvalidOperationException("the host's policy failed"));
+        Capture capture = new();
+
+        KafkaExportOutcome outcome = await rig.Export().ExportAsync(InputOf(rig, planned, matches, result), capture.DeliverAsync, Ct);
+
+        outcome.Delivered.Should().BeFalse();
+        outcome.Text.Should().Be(KafkaStudioText.ExportFailed);
+        capture.Calls.Should().Be(0);
+        Exports(rig).Should().ContainSingle().Which.Succeeded.Should().BeFalse();
+        rig.Logs.Entries.Where(static x => x.EventId.Id == 9609).Should().ContainSingle();
     }
 
     // ---- two at a time

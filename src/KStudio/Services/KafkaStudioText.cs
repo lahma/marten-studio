@@ -306,6 +306,9 @@ internal static class KafkaStudioText
     /// <summary>The refusal of an export whose reader lost access since the records were read.</summary>
     public const string ExportGrantChanged = "Your access changed since these records were read. Search again.";
 
+    /// <summary>The audit message of an export that ended (cancelled, or a policy or the delivery threw) before any entry was written: the browser may have saved the file.</summary>
+    public const string ExportAbandoned = "The export ended before the browser confirmed the file.";
+
     /// <summary>The audit message of a file the browser never received.</summary>
     public const string ExportNotDelivered = "The file did not reach the browser.";
 
@@ -407,6 +410,15 @@ internal static class KafkaStudioText
         null => "your hourly allowance",
         { Scope: KStudio.Core.Scanning.KafkaBudgetScope.Cluster } => $"your hourly allowance on this cluster of {KafkaDisplay.Bytes(spent.BytesPerHour)}",
         _ => $"your hourly allowance of {KafkaDisplay.Bytes(spent.BytesPerHour)}",
+    };
+
+    /// <summary>What a profile does, for its chip's tooltip: Development caps nothing beyond the host's own limits, so it must not say it lowers them.</summary>
+    /// <param name="profile">The profile.</param>
+    public static string ProfileChipTitle(KafkaProfile profile) => profile switch
+    {
+        KafkaProfile.Development => "This cluster's profile is Development: it caps nothing; the limits are the ones the host set (Settings shows them).",
+        KafkaProfile.Test => "This cluster's profile is Test: it caps each scan at KStudio's default limits (Settings shows them).",
+        _ => "This cluster's profile is Production: it caps scans, the byte rate and the hourly allowance, and turns export and live tail off (Settings shows them).",
     };
 
     /// <summary>The Settings page's warning for a cluster with no profile (M5 decisions, OPEN-1).</summary>

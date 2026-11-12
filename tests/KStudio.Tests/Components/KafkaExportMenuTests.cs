@@ -9,7 +9,10 @@ using KStudio.Components.Pages;
 using KStudio.Services;
 using KStudio.Tests.Support;
 
+using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
+
+using PostgresStudio.Services;
 
 namespace KStudio.Tests.Components;
 
@@ -81,8 +84,10 @@ public class KafkaExportMenuTests
         arguments[2].Should().BeOfType<Microsoft.JSInterop.DotNetStreamReference>();
         rig.Ring.Where(static x => x.Action == "ExportRecords").Should().ContainSingle().Which.Succeeded.Should().BeTrue();
 
-        // A re-render records nothing more.
-        await page.InvokeAsync(() => { });
+        // A re-render records nothing more: the page is drawn again, from the top, and the entry count stays.
+        IRenderedComponent<KafkaSearchPage> again = page;
+        again.Render();
+        again.Find(".ms-k-export").Should().NotBeNull();
         rig.Ring.Count(static x => x.Action == "ExportRecords").Should().Be(1);
     }
 
@@ -110,6 +115,8 @@ public class KafkaExportMenuTests
 
         page.FindAll(".ms-k-export-menu").Should().BeEmpty();
         page.Find(".ms-k-export-off").TextContent.Should().Contain("KafkaStudioOptions.Capabilities.ExportRecords").And.Contain("Exporting records is not enabled");
+        page.FindAll(".ms-k-export-off .ms-alert").Should().BeEmpty("one line, not the alert block of the other disabled controls");
+        page.FindAll("[role=status] .ms-k-export-off").Should().BeEmpty("outside the banner's status region, so it is not announced again with every result");
     }
 
     [Fact]
@@ -189,8 +196,85 @@ public class KafkaExportMenuTests
         Seed(rig);
         IRenderedComponent<KafkaSearchPage> search = await SearchedAsync(rig);
 
+        // Open a row's detail first, so that a JsonView is really on the page: it is the component that has a Download.
+        await search.FindAll("table.ms-k-matches button").First(static x => x.TextContent.Trim() == "Details").ClickAsync(new MouseEventArgs());
+        search.WaitForAssertion(() => search.FindAll(".ms-json").Should().NotBeEmpty("the value of the record is shown by a JsonView"));
+
         Regex.IsMatch(search.Markup, @"(href|src)\s*=\s*[""']?data:", RegexOptions.IgnoreCase, TimeSpan.FromSeconds(5)).Should().BeFalse();
         search.FindAll("a[download]").Should().BeEmpty();
+    }
+
+    // ---- the export is the run on screen
+
+    [Fact]
+    public async Task After_an_unparsable_predicate_the_export_is_still_the_run_on_screen_and_audits_its_predicate_and_window()
+    {
+        await using KafkaSearchRig rig = Rig();
+        Seed(rig);
+        rig.Studio.Context.JSInterop.Setup<bool>("martenStudio.download.stream", static _ => true).SetResult(true);
+        await rig.Studio.Context.ReadyAsync();
+        rig.Studio.Navigation.Simulate("kafka/search?cluster=test" + Window, intercepted: false);
+        IRenderedComponent<KafkaSearchPage> page = rig.Studio.Context.Render<KafkaSearchPage>();
+        page.WaitForAssertion(() => page.FindAll("textarea.ms-k-predicate").Should().HaveCount(1));
+        await page.Find("textarea.ms-k-predicate").InputAsync(new ChangeEventArgs { Value = "header.correlation-id ~ 'c-'" });
+        await page.Find(".ms-k-search-actions button").ClickAsync(new MouseEventArgs());
+        page.WaitForAssertion(() => page.FindAll(".ms-k-result-banner").Should().HaveCount(1));
+        string ran = rig.Ring.Single(static x => x.Action == "SearchRecords").Message!;
+        string ranPredicate = ran[(ran.IndexOf("predicate: ", StringComparison.Ordinal) + "predicate: ".Length)..];
+
+        // A second plan the page returns before any topic is looked up: it replaces the latest plan and nothing on screen.
+        await page.Find("textarea.ms-k-predicate").InputAsync(new ChangeEventArgs { Value = "key = " });
+        await page.Find(".ms-k-search-actions button").ClickAsync(new MouseEventArgs());
+        page.WaitForAssertion(() => page.FindAll(".ms-k-predicate-errors li").Should().NotBeEmpty());
+        page.FindAll("table.ms-k-matches > tbody > tr.ms-table-row").Should().HaveCount(3, "the rows of the first search are still on screen");
+
+        await Items(page)[0].ClickAsync(new MouseEventArgs());
+
+        page.WaitForAssertion(() => page.Find(".ms-k-export").TextContent.Should().Contain("Saved "));
+        StudioActionLogEntry export = rig.Ring.Single(static x => x.Action == "ExportRecords");
+        export.Message.Should().EndWith("predicate: " + ranPredicate).And.NotContain("key =");
+        export.Target.Should().Contain("2026-11-08 11:00Z");
+    }
+
+    [Fact]
+    public async Task Continue_after_an_unparsable_predicate_continues_the_run_on_screen()
+    {
+        await using KafkaSearchRig rig = new(engine: o => o.Limits.MaxMatches = 2);
+        rig.Topic("orders");
+
+        for (int i = 0; i < 5; i++)
+        {
+            rig.Produce("orders", 0, i, "k" + i, "v" + i);
+        }
+
+        await rig.Studio.Context.ReadyAsync();
+        rig.Studio.Navigation.Simulate("kafka/search?cluster=test" + Window, intercepted: false);
+        IRenderedComponent<KafkaSearchPage> page = rig.Studio.Context.Render<KafkaSearchPage>();
+        page.WaitForAssertion(() => page.FindAll("textarea.ms-k-predicate").Should().HaveCount(1));
+        await page.Find(".ms-k-search-actions button").ClickAsync(new MouseEventArgs());
+        page.WaitForAssertion(() => page.Find(".ms-k-result-banner").TextContent.Should().Contain("Stopped at 2 matches"));
+
+        await page.Find("textarea.ms-k-predicate").InputAsync(new ChangeEventArgs { Value = "key = " });
+        await page.Find(".ms-k-search-actions button").ClickAsync(new MouseEventArgs());
+        page.WaitForAssertion(() => page.FindAll(".ms-k-predicate-errors li").Should().NotBeEmpty());
+
+        await page.Find(".ms-k-result-banner button").ClickAsync(new MouseEventArgs());
+
+        page.WaitForAssertion(
+            () => page.FindAll("table.ms-k-matches > tbody > tr.ms-table-row").Select(static x => x.QuerySelectorAll("td")[2].TextContent.Trim())
+                .Should().Equal("0 / 2", "0 / 3"));
+
+        // Continue reads on from the run on screen, with its own predicate, not from the plan that did not parse.
+    }
+
+    // ---- the profile chip says what the profile does
+
+    [Fact]
+    public void The_chips_tooltip_says_what_each_profile_does_and_Development_does_not_claim_to_lower_anything()
+    {
+        KafkaStudioText.ProfileChipTitle(KafkaProfile.Development).Should().Contain("caps nothing").And.NotContain("lower");
+        KafkaStudioText.ProfileChipTitle(KafkaProfile.Test).Should().Contain("default limits");
+        KafkaStudioText.ProfileChipTitle(KafkaProfile.Production).Should().Contain("turns export and live tail off");
     }
 
     // ---- Settings and the selector

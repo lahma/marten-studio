@@ -315,6 +315,8 @@ public class LogLevelsTests
         // ---- KS-UI-EXPORT: the export service and its menu (D45) --------------------------------------
         ["src/KStudio/Services/KafkaExportService.cs : KStudio could not export records"] = (Verdict.VisitorAction,
             "Writing or sending the file threw (the writer is pure and the delivery's interop loss is a value), on a click the visitor made; one line per click, the ring records the failure and the page says the same."),
+        ["src/KStudio/Services/KafkaExportService.cs : KStudio could not record an export that ended early"] = (Verdict.VisitorAction,
+            "The last-resort entry of an export that was cancelled or threw could not be written (the audit ring itself failed); one line per such click, and the first failure is already logged."),
         ["src/KStudio/Components/Shared/KafkaExportMenu.razor : The Kafka export menu failed to save records"] = (Verdict.VisitorAction,
             "The export call threw rather than returning a value, on the visitor's click; one line per click, and the menu says the export failed."),
 

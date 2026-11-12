@@ -2,6 +2,8 @@
 @using KStudio.Core.Export
 @using KStudio.Core.Scanning
 @using Microsoft.Extensions.Logging
+@using PostgresStudio.Services.Settings
+@inject IStudioSettings Settings
 @inject KafkaCapabilityGuard Capabilities
 @inject KafkaExportService Export
 @inject IJSRuntime JsRuntime
@@ -14,9 +16,18 @@
 
 @if (!Capabilities.IsEnabled(KafkaCapability.ExportRecords))
 {
-    <div class="ms-k-export-off">
-        <KafkaCapabilityDisabled Capability="@nameof(KafkaStudioCapabilities.ExportRecords)" Action="@KafkaStudioText.ExportingRecords" />
-    </div>
+    @* One line, not the alert block of the other disabled controls (D-M5 decision 2.8): the result already says a lot, and this sits beside it. *@
+    <p class="ms-muted ms-k-export-off">
+        @KafkaStudioText.ExportingRecords is not enabled.
+        @if (Capabilities.ReadOnly)
+        {
+            <code>@Settings.ReadOnlyOption()</code> <text>is</text> <code>true</code><text>, which turns every capability off.</text>
+        }
+        else
+        {
+            <text>Set</text> <code>@KafkaCapabilityGuard.OptionFor(KafkaCapability.ExportRecords)</code> <text>to</text> <code>true</code><text>.</text>
+        }
+    </p>
 }
 else if (CurrentCluster is { } cluster && Export.ForbiddenByProfile(cluster))
 {
@@ -194,7 +205,7 @@ else if (CurrentMatches.Count > 0)
         {
             return await JsRuntime.InvokeAsync<bool>("martenStudio.download.stream", cancellationToken, fileName, mime, reference);
         }
-        catch (Exception e) when (PostgresStudio.Services.Live.StudioLiveUpdates.IsInteropUnavailable(e))
+        catch (Exception e) when (e is not OperationCanceledException && PostgresStudio.Services.Live.StudioLiveUpdates.IsInteropUnavailable(e))
         {
             return false;
         }

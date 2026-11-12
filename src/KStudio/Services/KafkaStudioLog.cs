@@ -119,7 +119,7 @@ internal static partial class KafkaStudioLog
     {
         string tenant = StudioLogValue.Cap(tenantId ?? NoTenant)!;
         (user, action, topics, cluster, reason, predicate) =
-            (StudioLogValue.Cap(user)!, StudioLogValue.Cap(action)!, StudioLogValue.Cap(topics)!, StudioLogValue.Cap(cluster)!, StudioLogValue.CapText(reason)!, StudioLogValue.CapText(predicate)!);
+            (StudioLogValue.Cap(user)!, StudioLogValue.Cap(action)!, StudioLogValue.Cap(topics)!, StudioLogValue.Cap(cluster)!, StudioLogValue.CapText(reason.TrimEnd('.'))!, StudioLogValue.CapText(predicate)!);
 
         ActionNotRunCore(logger, user, action, topics, cluster, tenant, reason, predicate);
     }
