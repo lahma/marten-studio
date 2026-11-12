@@ -130,7 +130,8 @@ shown as "Not available: needs `DESCRIBE_CONFIGS` on topic `orders.v1`" and logg
 
 **Lifecycle.** Nothing connects when KStudio is registered or the application starts, and nothing is a hosted service.
 One admin client per cluster is created by the first read that needs it and disposed when it has been idle for
-`AdminIdleTimeout` (5 minutes). Each scan gets one consumer, built, read and closed on a dedicated thread; the scan's
+`AdminIdleTimeout` (5 minutes). A client a call still holds is never destroyed: the pool retires it and disposes it when the last
+lease is released. Each scan gets one consumer, built, read and closed on a dedicated thread; the scan's
 reads wait at most 100 ms, so a cancel, the deadline and the governor are seen within 100 ms. At host shutdown the engine
 cancels every scan, waits up to 10 s, and disposes its clients. Catalog reads are single-flight per cluster and key, for
 the host studio's `RefreshInterval` (configs, authorized operations and the cluster description for a minute).

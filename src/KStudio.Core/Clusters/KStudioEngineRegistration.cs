@@ -47,11 +47,13 @@ internal static class KStudioEngineRegistration
         services.TryAddSingleton(static provider =>
         {
             ConfluentClientEvents events = provider.GetRequiredService<ConfluentClientEvents>();
+            KafkaEngineSnapshot snapshot = provider.GetRequiredService<KafkaEngineSnapshot>();
             return new KafkaAdminPool<IAdminClient>(
                 cluster => ConfluentWireFactory.BuildAdminClient(cluster, events),
                 provider.GetRequiredService<TimeProvider>(),
-                provider.GetRequiredService<KafkaEngineSnapshot>().AdminIdleTimeout,
-                provider.GetRequiredService<KStudioLoggers>().Clients);
+                snapshot.AdminIdleTimeout,
+                provider.GetRequiredService<KStudioLoggers>().Clients,
+                snapshot.RequestTimeout + TimeSpan.FromSeconds(1));
         });
 
         services.TryAddSingleton<IKafkaWireFactory, ConfluentWireFactory>();

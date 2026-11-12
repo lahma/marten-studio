@@ -18,6 +18,7 @@ namespace KStudio.Tests.Clusters;
 public class AdminPoolTests
 {
     private static readonly TimeSpan Idle = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan RetiredWait = TimeSpan.FromSeconds(31);
 
     private static KafkaClusterDefinition Cluster(string key)
     {
@@ -40,7 +41,8 @@ public class AdminPoolTests
                 },
                 Clock,
                 Idle,
-                Logs.CreateFactory().CreateLogger("test"));
+                Logs.CreateFactory().CreateLogger("test"),
+                RetiredWait);
         }
 
         public ManualTimeProvider Clock { get; } = new();
@@ -54,14 +56,20 @@ public class AdminPoolTests
 
     private sealed class StubClient(string cluster) : IDisposable
     {
+        private readonly int owner = Environment.CurrentManagedThreadId;
+
         public string Cluster { get; } = cluster;
 
         public bool Disposed { get; private set; }
+
+        /// <summary>Whether the dispose ran on the thread that created the client (the test's), which a retired client's never does.</summary>
+        public bool DisposedOnCallerThread { get; private set; }
 
         public bool ThrowOnDispose { get; set; }
 
         public void Dispose()
         {
+            DisposedOnCallerThread = Environment.CurrentManagedThreadId == owner;
             Disposed = true;
 
             if (ThrowOnDispose)
@@ -227,10 +235,10 @@ public class AdminPoolTests
     }
 
     [Fact]
-    public async Task Shutdown_disposes_every_client_and_refuses_new_leases()
+    public async Task Shutdown_disposes_every_idle_client_and_refuses_new_leases()
     {
         Rig rig = new();
-        using KafkaAdminPool<StubClient>.Lease a = rig.Pool.Rent(Cluster("a"));
+        rig.Pool.Rent(Cluster("a")).Dispose();
         rig.Pool.Rent(Cluster("b")).Dispose();
 
         await rig.Pool.DisposeAsync();
@@ -239,6 +247,95 @@ public class AdminPoolTests
         Action rent = () => rig.Pool.Rent(Cluster("a"));
         rent.Should().Throw<ObjectDisposedException>();
         await rig.Pool.DisposeAsync();
+    }
+
+    [Fact]
+    public void A_client_a_call_still_holds_is_not_destroyed_by_the_pool_s_dispose_and_is_disposed_when_the_last_lease_is_released()
+    {
+        Rig rig = new();
+        KafkaAdminPool<StubClient>.Lease first = rig.Pool.Rent(Cluster("a"));
+        KafkaAdminPool<StubClient>.Lease second = rig.Pool.Rent(Cluster("a"));
+        rig.Pool.Rent(Cluster("b")).Dispose();
+
+        rig.Pool.Dispose();
+
+        rig.Created.Single(static x => x.Cluster == "b").Disposed.Should().BeTrue("nobody held it");
+        StubClient held = rig.Created.Single(static x => x.Cluster == "a");
+        held.Disposed.Should().BeFalse("a call that is blocked in the client would touch freed native memory");
+        Action rent = () => rig.Pool.Rent(Cluster("a"));
+        rent.Should().Throw<ObjectDisposedException>("a rent after the dispose is refused as before");
+
+        first.Dispose();
+        held.Disposed.Should().BeFalse("one lease is still held");
+
+        second.Dispose();
+        SpinWait.SpinUntil(() => held.Disposed, TimeSpan.FromSeconds(10)).Should().BeTrue("the last lease disposes the retired client, on a pool thread");
+        held.DisposedOnCallerThread.Should().BeFalse("disposing blocks while librdkafka tears down, so the release never does it inline");
+    }
+
+    [Fact]
+    public async Task The_asynchronous_dispose_waits_for_a_retired_client_and_returns_when_its_last_lease_is_released()
+    {
+        Rig rig = new();
+        KafkaAdminPool<StubClient>.Lease lease = rig.Pool.Rent(Cluster("a"));
+
+        ValueTask dispose = rig.Pool.DisposeAsync();
+        dispose.IsCompleted.Should().BeFalse("a lease is held");
+        rig.Created[0].Disposed.Should().BeFalse();
+
+        lease.Dispose();
+        await dispose.AsTask().WaitAsync(TimeSpan.FromSeconds(10), TimeProvider.System, TestContext.Current.CancellationToken);
+
+        rig.Created[0].Disposed.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task The_asynchronous_dispose_gives_up_after_the_retired_wait_and_leaves_the_client_to_its_last_lease()
+    {
+        Rig rig = new();
+        KafkaAdminPool<StubClient>.Lease lease = rig.Pool.Rent(Cluster("a"));
+
+        ValueTask dispose = rig.Pool.DisposeAsync();
+        rig.Clock.Advance(RetiredWait);
+        await dispose.AsTask().WaitAsync(TimeSpan.FromSeconds(10), TimeProvider.System, TestContext.Current.CancellationToken);
+
+        rig.Created[0].Disposed.Should().BeFalse("a call is still in flight");
+
+        lease.Dispose();
+        SpinWait.SpinUntil(() => rig.Created[0].Disposed, TimeSpan.FromSeconds(10)).Should().BeTrue();
+    }
+
+    [Fact]
+    public void A_retired_client_that_throws_on_dispose_is_logged_and_does_not_escape_the_release()
+    {
+        Rig rig = new();
+        KafkaAdminPool<StubClient>.Lease lease = rig.Pool.Rent(Cluster("a"));
+        rig.Created[0].ThrowOnDispose = true;
+        rig.Pool.Dispose();
+
+        Action release = lease.Dispose;
+
+        release.Should().NotThrow("the dispose runs on a pool thread, where an exception would end the process");
+        SpinWait.SpinUntil(() => rig.Logs.Entries.Any(static x => x.EventId.Id == 9664), TimeSpan.FromSeconds(10)).Should().BeTrue();
+    }
+
+    [Fact]
+    public void The_reaper_takes_only_clients_without_a_lease_and_never_a_retired_one()
+    {
+        Rig rig = new();
+        KafkaAdminPool<StubClient>.Lease held = rig.Pool.Rent(Cluster("a"));
+        rig.Pool.Rent(Cluster("b")).Dispose();
+
+        rig.Clock.Advance(Idle * 3);
+
+        rig.Created.Single(static x => x.Cluster == "a").Disposed.Should().BeFalse("it is leased");
+        rig.Created.Single(static x => x.Cluster == "b").Disposed.Should().BeTrue("it was idle");
+
+        rig.Pool.Dispose();
+        rig.Clock.Advance(Idle * 3);
+        rig.Created.Single(static x => x.Cluster == "a").Disposed.Should().BeFalse("retired clients wait for their lease, not for the reaper");
+
+        held.Dispose();
     }
 
     [Fact]

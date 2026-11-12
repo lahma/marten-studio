@@ -8,7 +8,8 @@ namespace KStudio.Core.Wire.Confluent;
 /// <summary>
 /// One admin client per cluster, created by the first call that needs it and disposed when it has been idle for the idle timeout
 /// (decision 4.1). Nothing is created at startup, and there is no hosted service: the reaper is a timer started with the first client
-/// that stops itself when none is left.
+/// that stops itself when none is left. A client a call still holds is never destroyed: shutting the pool down retires it, and the last
+/// lease released disposes it.
 /// </summary>
 /// <typeparam name="TClient">The client; <c>IAdminClient</c> in production, anything disposable in a test.</typeparam>
 internal sealed class KafkaAdminPool<TClient> : IDisposable, IAsyncDisposable
@@ -17,23 +18,33 @@ internal sealed class KafkaAdminPool<TClient> : IDisposable, IAsyncDisposable
     private readonly Func<KafkaClusterDefinition, TClient> create;
     private readonly TimeProvider timeProvider;
     private readonly TimeSpan idleTimeout;
+    private readonly TimeSpan retiredWait;
     private readonly ILogger logger;
     private readonly Lock gate = new();
     private readonly Dictionary<string, Slot> slots = new(StringComparer.Ordinal);
     private ITimer? reaper;
     private bool disposed;
+    private int retiredPending;
+    private TaskCompletionSource? retiredDrained;
 
     /// <summary>Creates a pool; it connects to nothing.</summary>
     /// <param name="create">Builds the client of a cluster.</param>
     /// <param name="timeProvider">The clock the idle time is read from.</param>
     /// <param name="idleTimeout">How long a client may sit unused.</param>
     /// <param name="logger">Where 9650 and 9651 go.</param>
-    public KafkaAdminPool(Func<KafkaClusterDefinition, TClient> create, TimeProvider timeProvider, TimeSpan idleTimeout, ILogger logger)
+    /// <param name="retiredWait">How long <see cref="DisposeAsync" /> waits for the clients that were leased at shutdown (the request timeout and a second).</param>
+    public KafkaAdminPool(
+        Func<KafkaClusterDefinition, TClient> create,
+        TimeProvider timeProvider,
+        TimeSpan idleTimeout,
+        ILogger logger,
+        TimeSpan retiredWait = default)
     {
         this.create = create;
         this.timeProvider = timeProvider;
         this.idleTimeout = idleTimeout;
         this.logger = logger;
+        this.retiredWait = retiredWait;
     }
 
     /// <summary>How many clients exist right now, for a test.</summary>
@@ -58,7 +69,7 @@ internal sealed class KafkaAdminPool<TClient> : IDisposable, IAsyncDisposable
 
             if (!slots.TryGetValue(cluster.Key, out Slot? slot))
             {
-                slot = new Slot(create(cluster), timeProvider.GetUtcNow());
+                slot = new Slot(cluster.Key, create(cluster), timeProvider.GetUtcNow());
                 slots[cluster.Key] = slot;
                 string key = KafkaLogValue.Cap(cluster.Key);
                 KStudioLog.AdminClientCreated(logger, key);
@@ -72,12 +83,14 @@ internal sealed class KafkaAdminPool<TClient> : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Disposes every client and refuses new leases. A failing client does not stop the others and is logged at Debug (9664). Both
-    /// interfaces are implemented, so that a synchronous <c>ServiceProvider.Dispose()</c> can dispose the pool as well as an asynchronous one.
+    /// Refuses new leases and disposes every client no call holds. A client a call still holds is retired instead, and its last lease
+    /// disposes it (on a thread-pool thread, never inline), so that no blocking call touches freed native memory. A failing client does
+    /// not stop the others and is logged at Debug (9664). Both interfaces are implemented, so that a synchronous
+    /// <c>ServiceProvider.Dispose()</c> can dispose the pool as well as an asynchronous one.
     /// </summary>
     public void Dispose()
     {
-        List<KeyValuePair<string, Slot>> toDispose;
+        List<KeyValuePair<string, Slot>> toDispose = [];
 
         lock (gate)
         {
@@ -87,7 +100,25 @@ internal sealed class KafkaAdminPool<TClient> : IDisposable, IAsyncDisposable
             }
 
             disposed = true;
-            toDispose = [.. slots];
+
+            foreach (KeyValuePair<string, Slot> pair in slots)
+            {
+                if (pair.Value.Leases == 0)
+                {
+                    toDispose.Add(pair);
+                }
+                else
+                {
+                    pair.Value.Retired = true;
+                    retiredPending++;
+                }
+            }
+
+            if (retiredPending > 0)
+            {
+                retiredDrained = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            }
+
             slots.Clear();
             reaper?.Dispose();
             reaper = null;
@@ -100,11 +131,34 @@ internal sealed class KafkaAdminPool<TClient> : IDisposable, IAsyncDisposable
         }
     }
 
-    /// <inheritdoc />
-    public ValueTask DisposeAsync()
+    /// <summary>
+    /// Disposes as <see cref="Dispose" /> does, then waits at most the retired wait (the request timeout and a second) for the clients
+    /// that were leased; one still leased after that is left to its last lease.
+    /// </summary>
+    public async ValueTask DisposeAsync()
     {
         Dispose();
-        return ValueTask.CompletedTask;
+
+        Task? drained;
+
+        lock (gate)
+        {
+            drained = retiredDrained?.Task;
+        }
+
+        if (drained is null || drained.IsCompleted)
+        {
+            return;
+        }
+
+        try
+        {
+            await drained.WaitAsync(retiredWait, timeProvider).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            // A call is still in flight; its lease disposes the client when the call ends.
+        }
     }
 
     private void Reap(object? state)
@@ -179,18 +233,54 @@ internal sealed class KafkaAdminPool<TClient> : IDisposable, IAsyncDisposable
 
     private void Release(Slot slot)
     {
+        bool dispose = false;
+
         lock (gate)
         {
             slot.Leases--;
             slot.LastUsed = timeProvider.GetUtcNow();
+
+            if (slot.Retired && slot.Leases == 0)
+            {
+                slot.Retired = false;
+                dispose = true;
+            }
+        }
+
+        if (dispose)
+        {
+            // The lease is released on whatever thread finished the call, and disposing the client blocks while librdkafka tears down.
+            ThreadPool.UnsafeQueueUserWorkItem(DisposeRetired, slot, preferLocal: false);
         }
     }
 
-    internal sealed class Slot(TClient client, DateTimeOffset lastUsed)
+    private void DisposeRetired(Slot slot)
     {
+        try
+        {
+            DisposeClient(slot.Key, slot);
+        }
+        finally
+        {
+            lock (gate)
+            {
+                if (--retiredPending == 0)
+                {
+                    retiredDrained?.TrySetResult();
+                }
+            }
+        }
+    }
+
+    internal sealed class Slot(string key, TClient client, DateTimeOffset lastUsed)
+    {
+        public string Key { get; } = key;
+
         public TClient Client { get; } = client;
 
         public int Leases { get; set; }
+
+        public bool Retired { get; set; }
 
         public DateTimeOffset LastUsed { get; set; } = lastUsed;
     }
