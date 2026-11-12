@@ -44,7 +44,8 @@ Reading records does:
 
 | Capability | Default | What it allows |
 |---|---|---|
-| `SearchRecords` | `false` | Searches by key, header and CloudEvents attribute; the record page; keys, timestamps, headers and attributes. Values are not read in this preview. |
+| `SearchRecords` | `false` | Searches by key, header and CloudEvents attribute; the record page; keys, timestamps, headers and attributes. Values need `ReadPayloads`. |
+| `ReadPayloads` | `false` | Record values: the value on the record page and in a search's detail, `value` and JSON-path searches, compare, and copying a value as a search. Needs `SearchRecords`. |
 
 `KafkaStudioOptions.ClusterAuthorizationPolicy` is asked about every cluster and every topic a page or a search touches,
 on a `KafkaTopicResource(Cluster, TenantId, Topic, Capability)`; a topic it refuses is absent from every list, and a
@@ -64,6 +65,25 @@ ce.type ^= 'Orders.' and not header.tenant-id = 'test'
 header.tenant-id in ('acme', 'globex')
 any ~ 'ORD-2026-'
 ```
+
+With `ReadPayloads`, a search can read values:
+
+    value ~ 'refund'
+    $.customer.id = 'customer-042'
+    $.items[*].sku in ('A-1', 'B-2')
+    $.total >= 100
+
+A JSON path reads the value, or a CloudEvent's data: `$.a.b`, `$.a[0]`, and `$.a[*].b` for any element. Numbers compare as
+numbers (`1.5 = 1.50`), and a value of another type never matches. A record whose value cannot be decoded is counted as
+undecidable, never as a non-match, and the count stands beside every "no match". With `ReadPayloads`, `any` also reads every
+text in the value.
+
+When a topic declares how its producer partitions keys, a search that fixes the key reads only the partitions the key maps to:
+
+    o.Topic("orders.v1", t => t.Partitioner(KafkaPartitioner.Murmur2));   // Java clients, Dekaf; Crc32 for Confluent.Kafka's default; Fnv1a for Sarama
+
+The claim is checked on the window first, on up to 1,000 records; one record in another partition turns pruning off for that
+topic, and the page says which. A pruned "no match" offers a search of every partition.
 
 Before reading, the page shows how each clause runs on each topic, what the window cannot cover (retention, open
 transactions, compaction, the margin a `CreateTime` topic needs), and an estimate; above your threshold it asks you to
@@ -89,6 +109,20 @@ o.Topic("orders.v1", t => t.Redact(r =>
 }));
 ```
 
+```csharp
+o.Topic("orders.v1", t => t.Redact(r =>
+{
+    r.JsonPath("$.customer.email").Searchable();     // a leaf or subtree of the value (or of a CloudEvent's data)
+    r.Pattern(@"\b[0-9]{16}\b", "card");             // every match in every text of the value
+}));
+```
+
+A masked part reads `••• (redacted by $.customer.email)` in the value, in compare and nowhere else: it is never copied, never
+in a link, and its literal reads `<redacted>` in the audit. A value a rule cannot be applied to (a text value under a JSON-path
+rule, a binary value, a pattern that takes too long) is withheld whole. Searches compare what you would see: a masked leaf
+only by an exact `=` or `in` on a searchable JSON-path rule, and pattern-masked text never. Patterns run without
+backtracking and may not use backreferences or lookarounds. Redaction hides content, not size: a value's length stays visible.
+
 A masked field shows `••• (redacted by …)` everywhere: the results, the record page, chips, "copy as", search links,
 the audit and error messages. It is masked inside the engine before anything else sees it, and no copy is kept. The
 headers `authorization`, `proxy-authorization`, `cookie`, `set-cookie` and `x-api-key` are always masked unless you opt one
@@ -97,6 +131,7 @@ character at a time, and a search link leaves its value out.
 
 ## Audit
 
-Every search and every record opened is recorded in the studio's Activity page and in your log (events 9600-9604), with
+Every search and every record opened is recorded in the studio's Activity page and in your log (events 9600-9605), with
 who, the cluster, the topics, the window, the predicate with every redacted value replaced by `<redacted>`, what was read
-and why it stopped. A visitor sees an entry only if your policies would let them make the same read.
+and why it stopped. Reading a record's value is recorded separately from the search that found it, once per record per
+session. A visitor sees an entry only if your policies would let them make the same read.

@@ -60,9 +60,59 @@ public class SampleSeedTests
         plan.Topics.Single(static x => x.Name == KafkaSeedPlan.CustomersTopic).Config.Should().Contain("cleanup.policy", "compact");
         plan.Records.Where(static x => x.Topic == KafkaSeedPlan.CustomersTopic && x.Value is null).Should().HaveCount(50, "the compacted topic carries 50 tombstones");
 
-        // Six partitions of 1,000 orders each, three of 500 payments each.
-        plan.Records.Where(static x => x.Topic == KafkaSeedPlan.OrdersTopic).GroupBy(static x => x.Partition).Select(static x => x.Count()).Should().AllBeEquivalentTo(1000);
+        // Six partitions of about 1,000 orders each, where murmur2 puts the keys (the host's consumer has committed 800 of each, so none is shorter), three of 500 payments each.
+        int[] perPartition = [.. plan.Records.Where(static x => x.Topic == KafkaSeedPlan.OrdersTopic).GroupBy(static x => x.Partition).OrderBy(static x => x.Key).Select(static x => x.Count())];
+        perPartition.Should().HaveCount(6).And.OnlyContain(static x => x >= 900, "the lag panel's committed offset of 800 must lie inside every partition");
+        perPartition.Sum().Should().Be(6000);
         plan.Records.Where(static x => x.Topic == KafkaSeedPlan.PaymentsTopic).GroupBy(static x => x.Partition).Select(static x => x.Count()).Should().AllBeEquivalentTo(500);
+    }
+
+    [Fact]
+    public void Orders_are_where_murmur2_puts_them()
+    {
+        KafkaSeedPlan plan = KafkaSeedPlan.Create(Now);
+
+        foreach (SeedRecord order in plan.Records.Where(static x => x.Topic == KafkaSeedPlan.OrdersTopic))
+        {
+            order.Partition.Should().Be(KafkaPartitioner.Murmur2.Partition(System.Text.Encoding.UTF8.GetBytes(order.Key!), 6), order.Key);
+        }
+
+        // The payments are round-robin on purpose: the topic declares crc32 against them so that the page can show a verification that fails.
+        plan.Records.Where(static x => x.Topic == KafkaSeedPlan.PaymentsTopic).Select(static x => x.Partition).Distinct().Should().BeEquivalentTo([0, 1, 2]);
+    }
+
+    [Fact]
+    public void Every_order_has_a_customer_email_in_its_data()
+    {
+        KafkaSeedPlan plan = KafkaSeedPlan.Create(Now);
+
+        foreach (SeedRecord order in plan.Records.Where(static x => x.Topic == KafkaSeedPlan.OrdersTopic))
+        {
+            using System.Text.Json.JsonDocument document = System.Text.Json.JsonDocument.Parse(order.ValueText!);
+            System.Text.Json.JsonElement customer = document.RootElement.GetProperty("data").GetProperty("customer");
+            int number = int.Parse(order.Key!["order-".Length..], CultureInfo.InvariantCulture);
+
+            customer.GetProperty("email").GetString().Should().Be(KafkaSeedPlan.CustomerEmail(number));
+            customer.GetProperty("id").GetString().Should().Be("customer-" + number.ToString("000", CultureInfo.InvariantCulture));
+            document.RootElement.GetProperty("data").GetProperty("customerId").GetString().Should().NotBeNull("customerId stays");
+        }
+    }
+
+    [Fact]
+    public void Customers_carry_a_phone_the_pattern_matches()
+    {
+        KafkaSeedPlan plan = KafkaSeedPlan.Create(Now);
+        System.Text.RegularExpressions.Regex phone = new(@"\+[0-9]{3} [0-9]{2} [0-9]{3} [0-9]{4}", System.Text.RegularExpressions.RegexOptions.NonBacktracking, TimeSpan.FromSeconds(5));
+
+        foreach (SeedRecord customer in plan.Records.Where(static x => x.Topic == KafkaSeedPlan.CustomersTopic && x.Value is not null))
+        {
+            using System.Text.Json.JsonDocument document = System.Text.Json.JsonDocument.Parse(customer.ValueText!);
+            string number = document.RootElement.GetProperty("phone").GetString()!;
+            string note = document.RootElement.GetProperty("note").GetString()!;
+
+            phone.IsMatch(number).Should().BeTrue(number);
+            phone.Matches(note).Should().ContainSingle("the note contains the phone once").Which.Value.Should().Be(number);
+        }
     }
 
     [Fact]
@@ -148,7 +198,18 @@ public class SampleSeedTests
     {
         SampleKafkaJudge.Judge(["__consumer_offsets", "billing.v2"]).Verdict.Should().Be(SampleKafkaVerdict.Empty);
         SampleKafkaJudge.Judge([]).Verdict.Should().Be(SampleKafkaVerdict.Empty);
-        SampleKafkaJudge.Judge(["orders.v1", "payments.v1", "kstudio-sample.seed-v1"]).Verdict.Should().Be(SampleKafkaVerdict.AlreadySeeded);
+        SampleKafkaJudge.Judge(["orders.v1", "payments.v1", "kstudio-sample.seed-v2"]).Verdict.Should().Be(SampleKafkaVerdict.AlreadySeeded);
+    }
+
+    [Fact]
+    public void The_judge_names_an_earlier_seed()
+    {
+        SampleKafkaJudgement earlier = SampleKafkaJudge.Judge(["orders.v1", "payments.v1", "kstudio-sample.seed-v1"]);
+
+        earlier.Verdict.Should().Be(SampleKafkaVerdict.Refuse);
+        earlier.Message.Should().Be(
+            "KStudio sample: this Kafka holds an earlier sample's topics. Delete the container (or unset KSTUDIO_SAMPLE_REUSE) so that the sample can seed it again.");
+        SampleKafkaJudge.Judge(["orders.v1", "kstudio-sample.seed-v1", "kstudio-sample.seed-v2"]).Verdict.Should().Be(SampleKafkaVerdict.AlreadySeeded, "a cluster with the new marker is the sample's own");
     }
 
     [Fact]

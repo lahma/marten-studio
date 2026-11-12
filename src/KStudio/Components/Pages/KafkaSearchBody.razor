@@ -346,7 +346,7 @@
             @if (compareKeys.Count > 0)
             {
                 <div class="ms-k-compare-bar" role="group" aria-label="Compare records">
-                    <button type="button" class="ms-btn ms-btn-sm" disabled="@(compareKeys.Count != 2 || busy)" @onclick="OpenCompareAsync">Compare @compareKeys.Count of 2 records</button>
+                    <button type="button" class="ms-btn ms-btn-sm" disabled="@(compareKeys.Count != 2 || busy)" @onclick="OpenCompareAsync">Compare 2 records</button>
                     @if (compareKeys.Count < 2)
                     {
                         <span class="ms-muted">Check a second record to compare.</span>

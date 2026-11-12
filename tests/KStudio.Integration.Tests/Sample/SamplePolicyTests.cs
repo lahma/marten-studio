@@ -48,7 +48,7 @@ public class SamplePolicyTests
     [InlineData("support", "payments.v1", false)]
     [InlineData("support", "customers.v1", false)]
     [InlineData("support", "secrets.v1", false)]
-    [InlineData("support", "kstudio-sample.seed-v1", false)]
+    [InlineData("support", "kstudio-sample.seed-v2", false)]
     [InlineData("support", "xorders.v1", false)]
     [InlineData(null, null, false)]
     [InlineData(null, "orders.v1", false)]
@@ -65,6 +65,21 @@ public class SamplePolicyTests
     public async Task The_search_policy_admits_admin_and_support_with_support_bounded_to_orders(string? user, string topic, bool expected)
     {
         (await AllowedAsync(user, SampleKafkaPolicies.Search, topic, "SearchRecords")).Should().Be(expected, $"{user ?? "anonymous"} searching {topic}");
+    }
+
+    [Fact]
+    public async Task Admin_is_granted_ReadPayloads()
+    {
+        (await AllowedAsync("admin", SampleKafkaPolicies.Search, "orders.v1", "ReadPayloads")).Should().BeTrue();
+        (await AllowedAsync("admin", SampleKafkaPolicies.Search, "customers.v1", "ReadPayloads")).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Support_is_refused_ReadPayloads()
+    {
+        (await AllowedAsync("support", SampleKafkaPolicies.Search, "orders.v1", "ReadPayloads")).Should().BeFalse("support finds a record from a ticket by its keys and headers; the value is the payload gate's");
+        (await AllowedAsync("support", SampleKafkaPolicies.Search, "orders.v1", "SearchRecords")).Should().BeTrue("and searching stays open to support");
+        (await AllowedAsync(null, SampleKafkaPolicies.Search, "orders.v1", "ReadPayloads")).Should().BeFalse();
     }
 
     [Fact]

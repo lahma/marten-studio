@@ -83,6 +83,8 @@ src/PostgresStudio/Services/Postgres/    PostgresStudio's own: the studio's sett
 tests/PostgresStudio.Tests/              PostgresStudio's fast suite: no Docker, and no Marten anywhere in its graph
 tests/PostgresStudio.Tests/Components/   bUnit: PostgresStudioComponentContext and the core pages' smoke tests, the plan view
                                          and the console's Explain buttons
+tests/PostgresStudio.Tests/Components/Json/  The JSON viewer's parameters a host that is not a Postgres studio sets (KStudio): no download, no
+                                         Postgres copy items, and a host's "Copy as search"
 tests/PostgresStudio.Tests/Conventions/  The assembly fence: no Marten family in the assembly, the restore or the output folder
 tests/PostgresStudio.Tests/Endpoints/    An API-only host with one NpgsqlDataSource; the two registration guards
 tests/PostgresStudio.Tests/Sources/      The source provider over DI descriptors and host database sources

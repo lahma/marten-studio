@@ -137,6 +137,7 @@ public class KafkaSearchPagePayloadTests
 
         page.FindAll("table.ms-k-matches input[type=checkbox]").Count(static x => x.HasAttribute("disabled")).Should().Be(1, "the third is disabled once two are checked");
 
+        page.Find(".ms-k-compare-bar button").TextContent.Should().Be("Compare 2 records");
         await page.Find(".ms-k-compare-bar button").ClickAsync(new MouseEventArgs());
         page.WaitForAssertion(() => page.FindAll(".ms-k-compare").Should().HaveCount(1));
         await page.Find(".ms-k-compare-header button").ClickAsync(new MouseEventArgs());
