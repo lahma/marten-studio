@@ -56,6 +56,11 @@ internal sealed record KafkaTopicSummary(string Name, int PartitionCount, bool I
 /// <param name="InternalTopics">The topics whose names start with <c>__</c>.</param>
 internal sealed record KafkaTopicList(IReadOnlyList<KafkaTopicSummary> Topics, IReadOnlyList<KafkaTopicSummary> InternalTopics);
 
+/// <summary>One topic's offset span on the home: the sum over its partitions of high minus low, shown as <c>~N</c> and never called a count.</summary>
+/// <param name="Topic">The topic.</param>
+/// <param name="OffsetSpan">The span; withheld alone when the broker refused this topic's offsets or metadata does not list it.</param>
+internal sealed record KafkaTopicSpan(string Topic, KafkaField<long> OffsetSpan);
+
 /// <summary>A record's offset and timestamp.</summary>
 /// <param name="Offset">The offset.</param>
 /// <param name="Timestamp">The timestamp.</param>

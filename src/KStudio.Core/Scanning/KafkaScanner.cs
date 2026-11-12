@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Globalization;
 
+using KStudio.Core.Catalog;
 using KStudio.Core.Clusters;
 using KStudio.Core.Decoding;
 using KStudio.Core.Logging;
@@ -33,6 +34,16 @@ internal interface IKafkaScanner
     /// <param name="owner">Whose scan it is.</param>
     /// <param name="confirmed">Whether the visitor confirmed a scan above the confirmation threshold; the engine checks it.</param>
     KafkaScanStart Start(KafkaScanPlan plan, KafkaScanOwner owner, bool confirmed);
+
+    /// <summary>
+    /// Reads one record by its place, with some neighbours on each side, through the scan machinery (D-UI decision 1): a record permalink names
+    /// an offset and not a time. It takes a scan slot, counts against the owner's budget, is redacted by the match factory like every
+    /// match, and never throws for a state of the cluster: the status says what happened.
+    /// </summary>
+    /// <param name="request">Which record.</param>
+    /// <param name="owner">Whose read it is.</param>
+    /// <param name="cancellationToken">Stops the read and throws <see cref="OperationCanceledException" />.</param>
+    Task<KafkaRecordRead> ReadRecordAsync(KafkaRecordRequest request, KafkaScanOwner owner, CancellationToken cancellationToken);
 }
 
 /// <summary>Resolves a topic's declared decoder once and keeps it: a singleton per topic descriptor (decision 2.3).</summary>
@@ -58,9 +69,10 @@ internal sealed class KafkaDecoderResolver(IServiceProvider services)
 }
 
 /// <summary>The scan engine (decisions 9.1, 9.7, 9.10 and 9.11).</summary>
-internal sealed class KafkaScanner(
+internal sealed partial class KafkaScanner(
     KafkaClusterRegistry registry,
     KafkaWires wires,
+    KafkaWireReads reads,
     WindowResolver resolver,
     RecordSizeSampler sampler,
     KafkaDecoderResolver decoders,

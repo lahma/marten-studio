@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
 
+using KStudio.Core.Redaction;
+
 namespace KStudio.Core.Clusters;
 
 /// <summary>
@@ -126,6 +128,68 @@ internal static partial class KafkaEngineOptionsValidation
         {
             problems.Add(label + " '" + Display(name) + "': Description must be 1 to 500 characters.");
         }
+
+        if (topic.Rules is { } rules)
+        {
+            ValidateRules(problems, name, rules);
+        }
+    }
+
+    /// <summary>
+    /// The redaction rules of a topic (decision 4): names inside their bounds, no rule declared twice (names are compared ignoring case,
+    /// because redaction fails closed), and no searchable rule on a header of the built-in deny-list, whatever its case and whether or not
+    /// the host opted it out of masking.
+    /// </summary>
+    private static void ValidateRules(List<string> problems, string topic, KafkaRedactionRules rules)
+    {
+        string label = "KStudio: topic '" + Display(topic) + "'";
+        HashSet<string> seenHeaders = new(StringComparer.OrdinalIgnoreCase);
+        HashSet<string> seenAttributes = new(StringComparer.OrdinalIgnoreCase);
+        bool seenKey = false;
+
+        foreach ((RedactionTarget target, string field, _, bool searchable) in rules.Declared)
+        {
+            switch (target)
+            {
+                case RedactionTarget.Key:
+                    if (seenKey)
+                    {
+                        problems.Add(label + " declares a redaction rule on the key twice.");
+                    }
+
+                    seenKey = true;
+                    break;
+
+                case RedactionTarget.Header:
+                    if (field.Length is < 1 or > 256 || field.Any(char.IsControl))
+                    {
+                        problems.Add(label + ": a redaction rule's header name must be 1 to 256 characters with no control character.");
+                    }
+                    else if (!seenHeaders.Add(field))
+                    {
+                        problems.Add(label + " declares a redaction rule on header '" + Display(field) + "' twice (names are compared ignoring case).");
+                    }
+
+                    if (searchable && HeaderDenyList.Contains(field))
+                    {
+                        problems.Add(label + ": header '" + Display(field) + "' is on the built-in deny-list, which can never be searched. Remove Searchable().");
+                    }
+
+                    break;
+
+                default:
+                    if (!AttributeNamePattern().IsMatch(field))
+                    {
+                        problems.Add(label + ": a redaction rule's CloudEvents attribute name must be 1 to 64 lower-case letters and digits.");
+                    }
+                    else if (!seenAttributes.Add(field))
+                    {
+                        problems.Add(label + " declares a redaction rule on CloudEvents attribute '" + Display(field) + "' twice.");
+                    }
+
+                    break;
+            }
+        }
     }
 
     private static void Range(List<string> problems, string name, TimeSpan value, TimeSpan min, TimeSpan max)
@@ -139,6 +203,9 @@ internal static partial class KafkaEngineOptionsValidation
     /// <summary>A name as a message shows it: bounded, so a very long one cannot flood a log.</summary>
     private static string Display(string? value) =>
         value is null ? string.Empty : value.Length > 64 ? value[..64] + "…" : value;
+
+    [GeneratedRegex(@"\A[a-z0-9]{1,64}\z", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]
+    private static partial Regex AttributeNamePattern();
 
     [GeneratedRegex("^[A-Za-z0-9._-]{0,100}$", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]
     private static partial Regex GroupIdPrefixPattern();

@@ -68,6 +68,17 @@ namespace KStudio
         public virtual bool TryEncodePrefix(string literal, out System.Collections.Generic.IReadOnlyList<byte[]> forms, out string? problem) { }
         public abstract bool TryFormat(System.ReadOnlySpan<byte> key, out string? text);
     }
+    public sealed class KafkaRedactionBuilder
+    {
+        public KStudio.KafkaRedactionBuilder AllowHeader(string name) { }
+        public KStudio.KafkaRedactionRule CloudEvent(string attribute) { }
+        public KStudio.KafkaRedactionRule Header(string name) { }
+        public KStudio.KafkaRedactionRule Key() { }
+    }
+    public sealed class KafkaRedactionRule
+    {
+        public KStudio.KafkaRedactionBuilder Searchable() { }
+    }
     public sealed class KafkaScanLimits
     {
         public KafkaScanLimits() { }
@@ -92,6 +103,7 @@ namespace KStudio
     {
         public KStudio.KafkaTopicBuilder Description(string description) { }
         public KStudio.KafkaTopicBuilder Key(KStudio.KafkaKeyFormat format) { }
+        public KStudio.KafkaTopicBuilder Redact(System.Action<KStudio.KafkaRedactionBuilder> configure) { }
         public KStudio.KafkaTopicBuilder Value(KStudio.IKafkaRecordDecoder decoder) { }
         public KStudio.KafkaTopicBuilder Value<TDecoder>()
             where TDecoder :  class, KStudio.IKafkaRecordDecoder { }

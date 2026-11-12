@@ -70,6 +70,31 @@ internal sealed class KafkaWireReads(
             async ct => Observe(cluster, WireCall.ListOffsets, await wires.For(cluster).ListOffsetsAsync(partitions, spec, isolation, ct).ConfigureAwait(false)),
             cancellationToken);
 
+    /// <summary>
+    /// One kind of offset for the partitions of several topics, in one call (the home's page of spans): single-flight and cached for the same
+    /// set of topics, so two callers within a refresh interval cost one read.
+    /// </summary>
+    /// <param name="cluster">The cluster's key.</param>
+    /// <param name="partitions">The partitions of every topic; none twice.</param>
+    /// <param name="spec">What to look up.</param>
+    /// <param name="isolation">The isolation level.</param>
+    /// <param name="cancellationToken">Abandons this caller's wait.</param>
+    public Task<WireResult<IReadOnlyList<WireOffset>>> OffsetsForTopicsAsync(
+        string cluster,
+        IReadOnlyList<WirePartition> partitions,
+        WireOffsetSpec spec,
+        WireIsolation isolation,
+        CancellationToken cancellationToken)
+    {
+        string topics = string.Join(',', partitions.Select(static x => x.Topic).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal));
+
+        return cache.GetAsync(
+            string.Create(CultureInfo.InvariantCulture, $"{cluster}|offsets|[{topics}]|{SpecText(spec)}|{isolation}"),
+            Refresh,
+            async ct => Observe(cluster, WireCall.ListOffsets, await wires.For(cluster).ListOffsetsAsync(partitions, spec, isolation, ct).ConfigureAwait(false)),
+            cancellationToken);
+    }
+
     /// <summary>A topic's configuration entries.</summary>
     /// <param name="cluster">The cluster's key.</param>
     /// <param name="topic">The topic.</param>

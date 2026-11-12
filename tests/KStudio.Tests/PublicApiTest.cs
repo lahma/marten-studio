@@ -46,6 +46,8 @@ public class PublicApiTest
             "KStudio.KafkaEngineOptions",
             "KStudio.KafkaHeader",
             "KStudio.KafkaKeyFormat",
+            "KStudio.KafkaRedactionBuilder",
+            "KStudio.KafkaRedactionRule",
             "KStudio.KafkaScanLimits",
             "KStudio.KafkaTopicBuilder");
     }

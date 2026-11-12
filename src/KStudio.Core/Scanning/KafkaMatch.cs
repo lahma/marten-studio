@@ -325,7 +325,7 @@ internal static class KafkaMatchFactory
             CloudEventAttributes = attributes,
             CloudEventAttributesOmitted = attributesOmitted,
             CloudEventMode = decoded.CloudEvent?.Mode ?? CloudEventMode.None,
-            Trace = HeaderDecoder.FindTrace(record.Headers.Select(static x => KeyValuePair.Create(x.Name, x.Value))),
+            Trace = HeaderDecoder.FindTrace(record.Headers.Where(x => redactor.ForHeader(x.Name) is null).Select(static x => KeyValuePair.Create(x.Name, x.Value))),
             ValueText = text,
             ValuePreview = preview,
             ValueTruncated = truncated,

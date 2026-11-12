@@ -40,6 +40,24 @@ public class PredicateTextFormTests
         PredicateFormatter.Format(Parse(typed)).Should().Be(canonical);
     }
 
+    [Theory]
+    [InlineData("'")]
+    [InlineData("\\")]
+    [InlineData("")]
+    [InlineData("é")]
+    [InlineData("😀")]
+    [InlineData("it's \"quoted\"")]
+    public void QuoteText_round_trips_through_the_parser(string value)
+    {
+        string quoted = PredicateFormatter.QuoteText(value);
+
+        PredicateParseResult parsed = PredicateParser.Parse("key = " + quoted);
+
+        parsed.Errors.Should().BeEmpty();
+        PredicateFormatter.Format(parsed.Tree).Should().Be("key = " + quoted);
+        ((StringLiteral) ((ClauseNode) parsed.Tree!).Literals.Single()).Value.Should().Be(value);
+    }
+
     [Fact]
     public void Parsing_the_canonical_text_gives_the_same_tree_for_a_corpus()
     {

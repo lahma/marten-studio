@@ -34,6 +34,10 @@ internal interface IScanObserver
 /// <param name="Loggers">The engine's loggers.</param>
 /// <param name="Once">Logs a repeatable state once per window.</param>
 /// <param name="Observer">The test seam.</param>
+/// <param name="MatchEveryRecordInRange">
+/// Set only by a record read (D-UI decision 1): every record in the range is a match, whatever its timestamp, because a permalink names an
+/// offset and not a time. The window filter and the predicate are skipped.
+/// </param>
 internal sealed record ScanRunInputs(
     Guid ScanId,
     KafkaScanPlan Plan,
@@ -45,7 +49,8 @@ internal sealed record ScanRunInputs(
     TimeProvider Time,
     KStudioLoggers Loggers,
     KafkaLogOnce Once,
-    IScanObserver? Observer);
+    IScanObserver? Observer,
+    bool MatchEveryRecordInRange = false);
 
 /// <summary>
 /// One scan's reader (AGENTS.md D36 and D38, decisions 4.2 and 9.2): a synchronous method run on a thread of its own that builds, assigns,
@@ -304,7 +309,11 @@ internal sealed class ScanRun : IDisposable
         bool outside = false;
         bool withoutTimestamp = false;
 
-        if (record.TimestampType == WireTimestampType.NotAvailable)
+        if (inputs.MatchEveryRecordInRange)
+        {
+            match = KafkaMatchFactory.Create(record, topic, plan.Request.Grant, limits, matchCounters, exception => OnDecoderFailed(topic, exception));
+        }
+        else if (record.TimestampType == WireTimestampType.NotAvailable)
         {
             withoutTimestamp = true;
         }

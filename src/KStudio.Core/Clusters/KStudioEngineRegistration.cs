@@ -36,6 +36,7 @@ internal static class KStudioEngineRegistration
         services.TryAddSingleton(settings);
         services.TryAddSingleton<KStudioLoggers>();
         services.TryAddSingleton<KafkaClusterRegistry>();
+        services.TryAddSingleton<KafkaSettingsReader>();
 
         // The options are validated once, by the registry, and read from this snapshot only (REVIEW-ENG-A 8).
         services.TryAddSingleton(static provider => provider.GetRequiredService<KafkaClusterRegistry>().Settings);

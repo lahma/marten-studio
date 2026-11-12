@@ -40,6 +40,23 @@ internal static class ConfluentClientSettings
 
     private static readonly string[] PluginPrefixes = ["confluent.monitoring.interceptor."];
 
+    /// <summary>The keys a scan consumer's configuration drops outright: no static membership, no host debug contexts, and every consume-result field is needed.</summary>
+    public static IReadOnlyList<string> ConsumerRemoved { get; } = ["group.instance.id", "debug", "dotnet.consumer.consume.result.fields"];
+
+    /// <summary>The keys the admin client's configuration drops outright.</summary>
+    public static IReadOnlyList<string> AdminRemoved { get; } = ["debug"];
+
+    /// <summary>
+    /// Whether the engine never gives <paramref name="key" /> to a client of its own, whatever the host set: a plugin, a key a client of
+    /// either role drops, or the second name of a setting the engine sets (D37). The settings page says "removed" for these.
+    /// </summary>
+    /// <param name="key">The configuration key.</param>
+    public static bool IsRemoved(string key) =>
+        IsPlugin(key)
+        || ConsumerRemoved.Contains(key, StringComparer.Ordinal)
+        || AdminRemoved.Contains(key, StringComparer.Ordinal)
+        || Aliases.Values.Any(names => names.Contains(key, StringComparer.Ordinal));
+
     /// <summary>The scan consumer's configuration (decision 2.4).</summary>
     /// <param name="cluster">The cluster.</param>
     /// <param name="scanId">The scan; its id ends the group id.</param>
@@ -53,7 +70,21 @@ internal static class ConfluentClientSettings
         WireIsolation isolation,
         KafkaScanLimits limits,
         string groupIdPrefix,
-        Action<string>? overridden = null)
+        Action<string>? overridden = null) =>
+        new(Compose(cluster.ConsumerSettings, ConsumerEngineSettings(cluster, scanId, isolation, limits, groupIdPrefix), ConsumerRemoved, overridden));
+
+    /// <summary>The values the engine writes last into a scan consumer's configuration, in the order it writes them.</summary>
+    /// <param name="cluster">The cluster.</param>
+    /// <param name="scanId">The scan; its id ends the group id.</param>
+    /// <param name="isolation">The isolation level.</param>
+    /// <param name="limits">Where the queue and fetch sizes come from.</param>
+    /// <param name="groupIdPrefix">The group id's prefix.</param>
+    public static IReadOnlyList<KeyValuePair<string, string>> ConsumerEngineSettings(
+        KafkaClusterDefinition cluster,
+        Guid scanId,
+        WireIsolation isolation,
+        KafkaScanLimits limits,
+        string groupIdPrefix)
     {
         IReadOnlyDictionary<string, string> host = cluster.ConsumerSettings;
 
@@ -86,28 +117,25 @@ internal static class ConfluentClientSettings
             engine.Add(new("message.max.bytes", fetchMax.ToString(CultureInfo.InvariantCulture)));
         }
 
-        // Removed outright: no static membership, no host debug contexts, and every consume-result field is needed.
-        return new ConsumerConfig(Compose(host, engine, ["group.instance.id", "debug", "dotnet.consumer.consume.result.fields"], overridden));
+        return engine;
     }
 
     /// <summary>The admin client's configuration, one per cluster (decision 2.4).</summary>
     /// <param name="cluster">The cluster.</param>
     /// <param name="overridden">Told the name of each host key that was replaced or dropped.</param>
-    public static AdminClientConfig BuildAdminConfig(KafkaClusterDefinition cluster, Action<string>? overridden = null)
-    {
-        IReadOnlyDictionary<string, string> host = cluster.AdminSettings;
+    public static AdminClientConfig BuildAdminConfig(KafkaClusterDefinition cluster, Action<string>? overridden = null) =>
+        new(Compose(cluster.AdminSettings, AdminEngineSettings(cluster), AdminRemoved, overridden));
 
-        List<KeyValuePair<string, string>> engine =
-        [
-            // A default admin client creates a topic on a single-topic metadata request when the principal may (SPIKE S1.6).
-            new("allow.auto.create.topics", "false"),
-            new("client.id", ClientId(host)),
-            new("statistics.interval.ms", "0"),
-            new("enable.metrics.push", "false"),
-        ];
-
-        return new AdminClientConfig(Compose(host, engine, ["debug"], overridden));
-    }
+    /// <summary>The values the engine writes last into the admin client's configuration.</summary>
+    /// <param name="cluster">The cluster.</param>
+    public static IReadOnlyList<KeyValuePair<string, string>> AdminEngineSettings(KafkaClusterDefinition cluster) =>
+    [
+        // A default admin client creates a topic on a single-topic metadata request when the principal may (SPIKE S1.6).
+        new("allow.auto.create.topics", "false"),
+        new("client.id", ClientId(cluster.AdminSettings)),
+        new("statistics.interval.ms", "0"),
+        new("enable.metrics.push", "false"),
+    ];
 
     /// <summary>
     /// <c>{host client.id, or "rdkafka"}.kstudio</c>, each character outside <c>[A-Za-z0-9._-]</c> replaced by <c>-</c>, at most 255
