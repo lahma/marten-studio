@@ -115,8 +115,76 @@ internal static class KafkaStudioText
     /// <summary>The record page for a link whose partition, offset or topic is not valid.</summary>
     public const string RecordLinkInvalid = "This record link is not valid.";
 
-    /// <summary>The line that says why the value is not shown.</summary>
-    public const string ValueNotShown = "The value is not shown: reading values needs ReadPayloads, which arrives in a later release.";
+    // ------------------------------------------------------------------------------------------------
+    // Values, compare and pruning (UI-C, D-PAYLOAD decisions 1, 4, 5 and 7)
+    // ------------------------------------------------------------------------------------------------
+
+    /// <summary>What a search says when it reads values and one of its topics does not allow the visitor to: whole, and naming no topic.</summary>
+    public const string SearchValuesRefusedTopic = "This search reads record values, and one of its topics does not allow you to read them.";
+
+    /// <summary>What a start says when the visitor's access to values fell between the plan and the start.</summary>
+    public const string GrantChanged = "Your access changed since this search was planned. Search again.";
+
+    /// <summary>The value part of a record whose topic's capability policy refused <c>ReadPayloads</c>.</summary>
+    public const string ValueNotAvailable = "The value of this record is not available to you.";
+
+    /// <summary>The value part of a record of a search that read no values on a topic that would have allowed them.</summary>
+    public const string ValueNotReadBySearch =
+        "This search could not read values on every topic it named. Open the record page to read this record's value.";
+
+    /// <summary>The value part of a tombstone.</summary>
+    public const string ValueTombstone = "Tombstone: a null value, which deletes this key on a compacted topic.";
+
+    /// <summary>The value part of a record whose value has no bytes.</summary>
+    public const string ValueEmpty = "Empty: the value has 0 bytes.";
+
+    /// <summary>The value part of a value a payload rule could not be applied to.</summary>
+    /// <param name="rule">The rule's name.</param>
+    public static string ValueWithheld(string rule) => $"Value withheld: rule {rule} could not be applied.";
+
+    /// <summary>The value part of a value that could not be decoded.</summary>
+    /// <param name="reason">Why, in words.</param>
+    public static string ValueUndecodable(string reason) => $"The value could not be decoded: {reason}.";
+
+    /// <summary>The line above a CloudEvent's data.</summary>
+    public const string ValueCloudEventData = "The event's data:";
+
+    /// <summary>The line a record page adds to a cut value.</summary>
+    public const string ValueCutOnRecordPage = "Values above KafkaStudioOptions.Limits.MaxDecodeBytes are not shown whole.";
+
+    /// <summary>The line a search's detail adds to a cut value, before the link.</summary>
+    public const string ValueCutOpenRecordPage = "Open the record page to read it whole.";
+
+    /// <summary>The help line in place of the value syntax when <c>ReadPayloads</c> is off.</summary>
+    public const string SearchSyntaxNeedsReadPayloads = "value and $.json.paths need KafkaStudioOptions.Capabilities.ReadPayloads.";
+
+    /// <summary>The help line for <c>value</c> and JSON paths when they are available.</summary>
+    public const string SearchSyntaxValues =
+        "Values: value (the text of a value), and $.json.paths into a JSON value or a CloudEvent's data: $.a.b, $.a[0], $.a[*].b; with = in ^= ~ and, on numbers, < <= > >=.";
+
+    /// <summary>The button that searches again without partition pruning.</summary>
+    public const string SearchAllPartitions = "Search all partitions";
+
+    /// <summary>The line above the compare table of two records.</summary>
+    public const string CompareHeading = "Compare";
+
+    /// <summary>A masked part, shown wherever a value is shown.</summary>
+    /// <param name="rule">The rule's name.</param>
+    public static string Masked(string rule) => $"••• (redacted by {rule})";
+
+    /// <summary>Why a value could not be decoded, in words.</summary>
+    /// <param name="reason">The engine's reason.</param>
+    public static string UndecodableReason(KStudio.Core.Decoding.KafkaUndecodableReason reason) => reason switch
+    {
+        KStudio.Core.Decoding.KafkaUndecodableReason.InvalidJson => "it is not valid JSON",
+        KStudio.Core.Decoding.KafkaUndecodableReason.TooLarge => "it is larger than KafkaStudioOptions.Limits.MaxDecodeBytes",
+        KStudio.Core.Decoding.KafkaUndecodableReason.InvalidUtf8 => "it is not valid UTF-8",
+        KStudio.Core.Decoding.KafkaUndecodableReason.InvalidBase64 => "its data_base64 is not valid base64",
+        KStudio.Core.Decoding.KafkaUndecodableReason.DecoderFailed => "the topic's decoder failed",
+        KStudio.Core.Decoding.KafkaUndecodableReason.DecoderRefused => "the topic's decoder refused it",
+        KStudio.Core.Decoding.KafkaUndecodableReason.NotACloudEvent => "the topic declares CloudEvents and this is not one",
+        _ => reason.ToString(),
+    };
 
     /// <summary>The row of the neighbours table for an offset with no record.</summary>
     public const string NoRecordAtThisOffset = "no record at this offset";

@@ -23,18 +23,23 @@ internal static class SampleKafkaRegistration
             .Environment("Development")
             .ConsumerGroup(KafkaSeedPlan.ConsumerGroup));
 
-        // Each rule is its own statement: a rule offers only Searchable(), which returns the builder.
+        // A rule offers only Searchable(), which returns the builder, so the next rule chains from it.
         o.Topic("orders.v1", t => t
             .Description("Orders placed and shipped, as CloudEvents.")
             .Key(KafkaKeyFormat.Utf8String)
             .Value(KafkaDecoders.CloudEvents)
-            .Redact(r => r.Header("customer-email").Searchable()));
+            .Partitioner(KafkaPartitioner.Murmur2)
+            .Redact(r => r.Header("customer-email").Searchable().JsonPath("$.customer.email").Searchable()));
 
         o.Topic("payments.v1", t => t
             .Description("Payments, as binary-mode CloudEvents.")
+            // Declared on purpose against a round-robin seed: the search page shows a verification that fails, and why.
+            .Partitioner(KafkaPartitioner.Crc32)
             .Redact(r => r.CloudEvent("subject")));
 
-        o.Topic("customers.v1", t => t.Description("The customer table, compacted."));
+        o.Topic("customers.v1", t => t
+            .Description("The customer table, compacted.")
+            .Redact(r => r.Pattern(@"\+[0-9]{3} [0-9]{2} [0-9]{3} [0-9]{4}", "phone")));
 
         o.Capabilities = KafkaStudioCapabilities.All();
         o.ClusterAuthorizationPolicy = SampleKafkaPolicies.Topics;

@@ -90,7 +90,13 @@ internal sealed class KafkaSeedPlan
     public const string SecretsTopic = "secrets.v1";
 
     /// <summary>The topic whose presence says the sample seeded this cluster.</summary>
-    public const string MarkerTopic = "kstudio-sample.seed-v1";
+    public const string MarkerTopic = "kstudio-sample.seed-v2";
+
+    /// <summary>The marker of the sample's earlier seed (before values, JSON-path redaction and a declared partitioner): such a cluster is stopped at, not seeded again.</summary>
+    public const string EarlierMarkerTopic = "kstudio-sample.seed-v1";
+
+    /// <summary>The partitions of <c>orders.v1</c>.</summary>
+    public const int OrderPartitions = 6;
 
     /// <summary>The consumer group of the sample application's own consumer: its lag is shown on the topic page.</summary>
     public const string ConsumerGroup = "sample-orders-handler";
@@ -125,7 +131,7 @@ internal sealed class KafkaSeedPlan
     /// <summary>The topics to create, before any record is produced.</summary>
     public IReadOnlyList<SeedTopic> Topics { get; } =
     [
-        new(OrdersTopic, 6),
+        new(OrdersTopic, OrderPartitions),
         new(PaymentsTopic, 3),
         new(CustomersTopic, 1, new Dictionary<string, string> { ["cleanup.policy"] = "compact" }),
         new(DeadLetterTopic, 1),
@@ -151,6 +157,15 @@ internal sealed class KafkaSeedPlan
     /// <param name="number">The order's number, from 1.</param>
     public static string CustomerEmail(int number) => "customer" + number.ToString(CultureInfo.InvariantCulture) + "@example.com";
 
+    /// <summary>The phone of customer number <paramref name="number" />: <c>+358 40 042 0301</c>, which the registered <c>phone</c> pattern matches.</summary>
+    /// <param name="number">The customer's number, from 1.</param>
+    public static string CustomerPhone(int number) =>
+        "+358 40 " + (number % 1000).ToString("000", CultureInfo.InvariantCulture) + " " + (((number * 7) + 13) % 10_000).ToString("0000", CultureInfo.InvariantCulture);
+
+    /// <summary>The partition <c>orders.v1</c> puts order number <paramref name="number" /> in: where the Java clients, and a murmur2 producer, would.</summary>
+    /// <param name="number">The order's number, from 1.</param>
+    public static int OrderPartition(int number) => KafkaPartitioner.Murmur2.Partition(Utf8(OrderKey(number)), OrderPartitions);
+
     /// <summary>Makes the plan for <paramref name="now" />.</summary>
     /// <param name="now">The instant the seed is made; every timestamp is before it.</param>
     public static KafkaSeedPlan Create(DateTimeOffset now)
@@ -163,7 +178,7 @@ internal sealed class KafkaSeedPlan
         plan.AddSecrets();
         plan.AddMarker();
 
-        // The host's own consumer has read 800 of the 1,000 records in each partition of orders.v1 and committed, so the lag panel has a number.
+        // The host's own consumer has read 800 of the (about 1,000) records in each partition of orders.v1 and committed, so the lag panel has a number.
         plan.Commits = [.. Enumerable.Range(0, 6).Select(static partition => new SeedCommit(ConsumerGroup, OrdersTopic, partition, 800))];
         return plan;
     }
@@ -227,6 +242,10 @@ internal sealed class KafkaSeedPlan
                 w.WriteStartObject("data");
                 w.WriteString("orderId", key);
                 w.WriteString("customerId", "customer-" + ((number % 500) + 1).ToString("000", CultureInfo.InvariantCulture));
+                w.WriteStartObject("customer");
+                w.WriteString("id", "customer-" + number.ToString("000", CultureInfo.InvariantCulture));
+                w.WriteString("email", CustomerEmail(number));
+                w.WriteEndObject();
                 w.WriteNumber("total", total);
                 w.WriteString("currency", "EUR");
                 w.WriteStartArray("lines");
@@ -255,7 +274,8 @@ internal sealed class KafkaSeedPlan
                 Header("customer-email", CustomerEmail(number)),
             ];
 
-            records.Add(new SeedRecord(OrdersTopic, (number - 1) % 6, key, value, headers, timestamp));
+            // Where a murmur2 producer puts the key, so that the topic's declared partitioner is true and a key search reads one partition.
+            records.Add(new SeedRecord(OrdersTopic, OrderPartition(number), key, value, headers, timestamp));
         }
     }
 
@@ -307,6 +327,7 @@ internal sealed class KafkaSeedPlan
             DateTimeOffset timestamp = At(number - 1, Total);
             int tier = random.Next(1, 4);
             string name = "Customer " + number.ToString(CultureInfo.InvariantCulture);
+            string phone = CustomerPhone(number);
 
             byte[] value = Json(w =>
             {
@@ -314,6 +335,8 @@ internal sealed class KafkaSeedPlan
                 w.WriteString("customerId", key);
                 w.WriteString("name", name);
                 w.WriteNumber("tier", tier);
+                w.WriteString("phone", phone);
+                w.WriteString("note", "Call " + phone + " to confirm the delivery address.");
                 w.WriteEndObject();
             });
 
@@ -392,7 +415,7 @@ internal sealed class KafkaSeedPlan
             {
                 w.WriteStartObject();
                 w.WriteString("seededBy", "KStudio.Sample");
-                w.WriteNumber("version", 1);
+                w.WriteNumber("version", 2);
                 w.WriteEndObject();
             }),
             [],

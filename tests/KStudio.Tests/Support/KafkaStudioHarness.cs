@@ -174,6 +174,8 @@ internal sealed class KafkaStudioHarness : IDisposable
             services.AddSingleton(Engine.Provider.GetRequiredService<KStudio.Core.Scanning.IKafkaScanner>());
             services.AddSingleton(Engine.Provider.GetRequiredService<KStudio.Core.Scanning.OwnerByteBudget>());
             services.AddSingleton<KafkaOwnerKey>();
+            services.AddSingleton(Engine.Provider.GetRequiredService<KStudio.Core.Clusters.KafkaEngineSnapshot>());
+            services.AddSingleton<KafkaReadGrants>();
             services.AddSingleton<KafkaSearchService>();
             services.AddSingleton<KafkaRecordService>();
             extra?.Invoke(services);

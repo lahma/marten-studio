@@ -9,9 +9,15 @@ public sealed class KafkaStudioCapabilities
     /// <summary>Run scans, and read keys, timestamps, headers and CloudEvents attributes.</summary>
     public bool SearchRecords { get; set; }
 
+    /// <summary>
+    /// Read record values: the value in the record detail and on the record page, value and JSON-path searches, compare and
+    /// "copy as" of a value. Needs <see cref="SearchRecords" />.
+    /// </summary>
+    public bool ReadPayloads { get; set; }
+
     /// <summary>No capability: the clusters and topics can be described and nothing is read.</summary>
     public static KafkaStudioCapabilities None() => new();
 
     /// <summary>Every capability on.</summary>
-    public static KafkaStudioCapabilities All() => new() { SearchRecords = true };
+    public static KafkaStudioCapabilities All() => new() { SearchRecords = true, ReadPayloads = true };
 }

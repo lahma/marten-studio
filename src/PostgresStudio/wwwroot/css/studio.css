@@ -17303,3 +17303,108 @@ dialog.ms-modal::backdrop {
 .ms-k-syntax-examples code {
     overflow-wrap: anywhere;
 }
+
+/* ===== KS-UI-C: values, compare and pruning ===== */
+
+/* A record's value (D-PAYLOAD decision 4.3): a section of its own under the detail's tables. It may shrink and never widens the shell. */
+.ms-k-value {
+    min-width: 0;
+    margin-bottom: var(--ms-space-md);
+}
+
+.ms-k-value-lead {
+    margin: 0 0 var(--ms-space-sm);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-k-value-text,
+.ms-k-value-hex {
+    max-height: 32rem;
+    margin: 0 0 var(--ms-space-sm);
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    overflow: auto;
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface-alt);
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-k-value-text {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+/* A hex dump keeps its columns: it scrolls inside its own box instead of wrapping. */
+.ms-k-value-hex {
+    white-space: pre;
+}
+
+.ms-k-value-cut {
+    margin: 0 0 var(--ms-space-sm);
+    overflow-wrap: anywhere;
+}
+
+/* What was masked in a value, above the view: the paths and the rule names, never the masked content. */
+.ms-k-masked-note {
+    margin: 0 0 var(--ms-space-sm);
+    padding: var(--ms-space-xs) var(--ms-space-sm);
+    border-left: 3px solid var(--ms-color-warning);
+    background: var(--ms-color-warning-bg);
+    color: var(--ms-color-text);
+    overflow-wrap: anywhere;
+}
+
+/* Compare: two records under the matches, or under the neighbours. */
+.ms-k-compare-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-sm) var(--ms-space-md);
+    margin-bottom: var(--ms-space-sm);
+}
+
+.ms-k-compare {
+    min-width: 0;
+    margin-top: var(--ms-space-lg);
+    padding: var(--ms-space-md);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+}
+
+.ms-k-compare-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--ms-space-sm);
+}
+
+.ms-k-compare-table td,
+.ms-k-compare-table th {
+    overflow-wrap: anywhere;
+}
+
+/* A masked header, attribute or path: never "same" and never "changed". */
+.ms-k-compare-masked {
+    color: var(--ms-color-text-secondary);
+    font-style: italic;
+    overflow-wrap: anywhere;
+}
+
+.ms-k-compare-sides {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+    gap: var(--ms-space-md);
+}
+
+.ms-k-compare-sides > div {
+    min-width: 0;
+}
+
+/* A key search that read fewer partitions (the verdict of a verified partitioner): marked, so that it is not read as an ordinary scan. */
+.ms-k-pruned {
+    border-left: 3px solid var(--ms-color-primary);
+    padding-left: var(--ms-space-sm);
+    overflow-wrap: anywhere;
+}

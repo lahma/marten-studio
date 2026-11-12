@@ -7,13 +7,18 @@ namespace KStudio.Sample.Kafka;
 /// <summary>
 /// KStudio's two policies for the demo (D35), asked about a <see cref="KafkaTopicResource" /> and never about the host studio's own
 /// resources: <see cref="Topics" /> for which cluster and topic a visitor may reach, and <see cref="Search" /> for the use of the
-/// <c>SearchRecords</c> capability.
+/// <c>SearchRecords</c> capability, and of <c>ReadPayloads</c>.
 /// </summary>
 /// <remarks>
 /// <para>
 /// <b>The per-topic gate, shown.</b> <c>admin</c> reaches everything. <c>support</c> reaches the cluster itself (a question with no topic)
 /// and the topics whose names start with <c>orders.</c>, so <c>payments.v1</c>, <c>customers.v1</c> and <c>secrets.v1</c> are absent from every
 /// list and a search that names one is refused whole. Every other visitor is refused.
+/// </para>
+/// <para>
+/// <b>Payloads: admin yes, support no</b> (D-PAYLOAD decision 8.3). M2's exit (a support user finds a record from a ticket) needs keys and
+/// headers only, and the sample then shows both sides of the payload gate: support reads <c>The value of this record is not available to you.</c>
+/// on the very record admin reads whole, and a value search is refused for support.
 /// </para>
 /// <para>
 /// <b>Search admits admin and support</b> (orchestrator decision OPEN-3: M2's exit criterion is that a support user finds a record from a
@@ -81,16 +86,30 @@ internal sealed class KafkaTopicsHandler : AuthorizationHandler<KafkaTopicsRequi
     }
 }
 
-/// <summary>Decides <see cref="KafkaSearchRequirement" />: admin and support, with support bounded to <c>orders.*</c> (OPEN-3).</summary>
+/// <summary>
+/// Decides <see cref="KafkaSearchRequirement" />: <c>SearchRecords</c> for admin and support, with support bounded to <c>orders.*</c> (OPEN-3), and
+/// <c>ReadPayloads</c> for admin only.
+/// </summary>
 internal sealed class KafkaSearchHandler : AuthorizationHandler<KafkaSearchRequirement, KafkaTopicResource>
 {
     /// <inheritdoc />
     protected override Task HandleRequirementAsync(AuthorizationHandlerContext context, KafkaSearchRequirement requirement, KafkaTopicResource resource)
     {
-        if (SampleKafkaPolicies.MayReach(
-                context.User.HasClaim(SamplePolicies.ScopeClaim, DevUsers.KafkaAllScope),
-                context.User.HasClaim(SamplePolicies.ScopeClaim, DevUsers.KafkaOrdersScope),
-                resource.Topic))
+        bool admin = context.User.HasClaim(SamplePolicies.ScopeClaim, DevUsers.KafkaAllScope);
+        bool support = context.User.HasClaim(SamplePolicies.ScopeClaim, DevUsers.KafkaOrdersScope);
+
+        // A value is the payload gate's: admin only, whatever support may search.
+        if (string.Equals(resource.Capability, nameof(KafkaStudioCapabilities.ReadPayloads), StringComparison.Ordinal))
+        {
+            if (admin)
+            {
+                context.Succeed(requirement);
+            }
+
+            return Task.CompletedTask;
+        }
+
+        if (SampleKafkaPolicies.MayReach(admin, support, resource.Topic))
         {
             context.Succeed(requirement);
         }

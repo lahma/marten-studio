@@ -67,7 +67,10 @@ public static class KafkaStudioServiceCollectionExtensions
             .AddOptions<KafkaStudioOptions>()
             .Validate(
                 static options => options.Capabilities is not null,
-                "KafkaStudioOptions.Capabilities cannot be null: use new KafkaStudioCapabilities() for none, or KafkaStudioCapabilities.All()");
+                "KafkaStudioOptions.Capabilities cannot be null: use new KafkaStudioCapabilities() for none, or KafkaStudioCapabilities.All()")
+            .Validate(
+                static options => options.Capabilities is null || !options.Capabilities.ReadPayloads || options.Capabilities.SearchRecords,
+                "KafkaStudioOptions.Capabilities.ReadPayloads needs KafkaStudioOptions.Capabilities.SearchRecords: a value is read only as part of a record a search or a permalink opened");
 
         if (configure is not null)
         {
@@ -91,6 +94,7 @@ public static class KafkaStudioServiceCollectionExtensions
 
         // Search and the record page (UI-B): scoped, because a search and its audit are one circuit's, and so is the owner of its scans.
         services.TryAddScoped<KafkaOwnerKey>();
+        services.TryAddScoped<KafkaReadGrants>();
         services.TryAddScoped<KafkaSearchService>();
         services.TryAddScoped<KafkaRecordService>();
 

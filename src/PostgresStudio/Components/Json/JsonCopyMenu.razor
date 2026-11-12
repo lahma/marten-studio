@@ -96,6 +96,14 @@
     [Parameter]
     public string ContainmentFilter { get; set; } = string.Empty;
 
+    /// <summary>Whether the Postgres expressions, the Marten LINQ path and the containment filter are offered.</summary>
+    [Parameter]
+    public bool ShowPostgresItems { get; set; } = true;
+
+    /// <summary>A search predicate for the node, or <see langword="null" />; when set, the menu adds "Copy as search".</summary>
+    [Parameter]
+    public string? SearchPredicate { get; set; }
+
     /// <summary>Raised with the sentence to announce after a copy.</summary>
     [Parameter]
     public EventCallback<string> OnCopied { get; set; }
@@ -137,25 +145,33 @@
             new MenuItem("Copy JSONPath", JsonPath, null, JsonPath, "JSONPath"),
         ];
 
-        // A path through a member whose name would not print as itself has no Postgres expression to offer
-        // (JsonPathExpressions.QuoteLiteral): the offer is left out rather than copy something that reads otherwise.
-        if (PgExpression is { } pg)
+        if (SearchPredicate is { Length: > 0 } search)
         {
-            items.Add(new MenuItem("Copy Postgres expression", pg, null, pg, "Postgres expression"));
+            items.Add(new MenuItem("Copy as search", Preview(search), null, search, "search"));
         }
 
-        if (PgTextPath is { } pgPath)
+        if (ShowPostgresItems)
         {
-            items.Add(new MenuItem("Copy Postgres #>> path", pgPath, null, pgPath, "Postgres path expression"));
-        }
+            // A path through a member whose name would not print as itself has no Postgres expression to offer
+            // (JsonPathExpressions.QuoteLiteral): the offer is left out rather than copy something that reads otherwise.
+            if (PgExpression is { } pg)
+            {
+                items.Add(new MenuItem("Copy Postgres expression", pg, null, pg, "Postgres expression"));
+            }
 
-        items.Add(new MenuItem("Copy Marten LINQ path", LinqPath, LinqNote, LinqPath, "Marten LINQ path"));
-        items.Add(new MenuItem(
-            "Copy containment filter",
-            Preview(ContainmentFilter),
-            null,
-            ContainmentFilter,
-            "containment filter"));
+            if (PgTextPath is { } pgPath)
+            {
+                items.Add(new MenuItem("Copy Postgres #>> path", pgPath, null, pgPath, "Postgres path expression"));
+            }
+
+            items.Add(new MenuItem("Copy Marten LINQ path", LinqPath, LinqNote, LinqPath, "Marten LINQ path"));
+            items.Add(new MenuItem(
+                "Copy containment filter",
+                Preview(ContainmentFilter),
+                null,
+                ContainmentFilter,
+                "containment filter"));
+        }
 
         _items = items;
 

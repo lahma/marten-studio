@@ -1,8 +1,12 @@
 using System.Globalization;
 using System.Text;
+using System.Text.Json;
+using System.Text.RegularExpressions;
 
 using KStudio.Core.Clusters;
+using KStudio.Core.Decoding;
 using KStudio.Core.Predicates;
+using KStudio.Core.Redaction;
 using KStudio.Core.Scanning;
 
 namespace KStudio.Services;
@@ -18,7 +22,7 @@ internal sealed record KafkaChip(string Name, string Value, string Display, stri
 /// What the result rows and the record detail derive from a <see cref="KafkaMatch" /> (D-UI decisions 13, 15 and 16). Everything here reads only the
 /// match's already-redacted fields, so it inherits D40: a field that is masked, null, cut, or not text never becomes a chip or a copied predicate.
 /// </summary>
-internal static class KafkaMatchView
+internal static partial class KafkaMatchView
 {
     /// <summary>The headers Wolverine writes, confirmed at <c>V6.61.0</c> in <c>EnvelopeConstants</c>; compared ignoring case.</summary>
     public static readonly IReadOnlyList<string> CorrelationHeaders = ["correlation-id", "conversation-id", "tenant-id", "saga-id"];
@@ -101,6 +105,222 @@ internal static class KafkaMatchView
         ArgumentNullException.ThrowIfNull(match);
 
         return IsLiteral(match.Key) && FitsLiteral(match.Key.Text!) ? "key = " + PredicateFormatter.QuoteText(match.Key.Text!) : null;
+    }
+
+    /// <summary>The text a mask writes in place of a part of a value; a literal containing it is never a faithful copy.</summary>
+    public const string MaskText = "••• (redacted by";
+
+    /// <summary>Whether the match holds a value that can be shown or copied: the payload grant read it, and no rule withheld it.</summary>
+    /// <param name="match">The match.</param>
+    public static bool HasShowableValue(KafkaMatch match)
+    {
+        ArgumentNullException.ThrowIfNull(match);
+
+        return match.ValueWithheldBy is null && (match.ValueText is not null || match.ValuePreview is not null);
+    }
+
+    /// <summary>
+    /// The predicate that finds this value, <c>value = '…'</c>, for a <b>text</b> value only: an exact match on a whole JSON text depends on its spacing.
+    /// <see langword="null" /> when the value is JSON, cut, withheld, masked, empty, or longer than a search literal.
+    /// </summary>
+    /// <param name="match">The match.</param>
+    public static string? ValuePredicate(KafkaMatch match)
+    {
+        ArgumentNullException.ThrowIfNull(match);
+
+        if (match.ValueKind != KafkaValueKind.Text
+            || match.ValueTextKind != KafkaValueTextKind.Text
+            || match.ValueWithheldBy is not null
+            || match.ValueTruncated
+            || match.ValueMaskedBy.Count > 0
+            || match.ValueText is not { Length: > 0 } text
+            || !FitsLiteral(text)
+            || text.Contains(MaskText, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        return "value = " + PredicateFormatter.QuoteText(text);
+    }
+
+    /// <summary>
+    /// The predicate that finds a JSON leaf of the value shown, <c>$.a.b = 'x'</c>: <see langword="null" /> unless the node is a scalar the grammar can write,
+    /// its path is one the grammar can write, the value is whole and the node is not at or under a masked path. A CloudEvent's value is its data, so its
+    /// paths are data paths, which is what <c>$</c> addresses.
+    /// </summary>
+    /// <param name="match">The match.</param>
+    /// <param name="segments">The node's path: a member name, or <see langword="null" /> and an index.</param>
+    /// <param name="valueJson">The node's value as JSON.</param>
+    public static string? LeafPredicate(KafkaMatch match, IReadOnlyList<(string? Key, int Index)> segments, string valueJson)
+    {
+        ArgumentNullException.ThrowIfNull(match);
+        ArgumentNullException.ThrowIfNull(segments);
+
+        if (match.ValueTextKind != KafkaValueTextKind.Json || match.ValueWithheldBy is not null || match.ValueTruncated)
+        {
+            return null;
+        }
+
+        if (segments.Count > JsonPathExpression.MaxSteps || IsMasked(match, segments))
+        {
+            return null;
+        }
+
+        List<JsonPathStep> steps = [];
+
+        foreach ((string? key, int index) in segments)
+        {
+            if (key is null)
+            {
+                steps.Add(new JsonIndexStep(index));
+            }
+            else if (key.Length is > 0 and <= JsonPathExpression.MaxMemberLength)
+            {
+                steps.Add(new JsonMemberStep(key));
+            }
+            else
+            {
+                return null;
+            }
+        }
+
+        string? literal = Literal(valueJson);
+        return literal is null ? null : JsonPathExpression.Format(steps) + " = " + literal;
+    }
+
+    private static string? Literal(string valueJson)
+    {
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(valueJson);
+            JsonElement node = document.RootElement;
+
+            switch (node.ValueKind)
+            {
+                case JsonValueKind.String:
+                    string? text = node.GetString();
+                    return text is not null && FitsLiteral(text) && !text.Contains(MaskText, StringComparison.Ordinal) ? PredicateFormatter.QuoteText(text) : null;
+                case JsonValueKind.Number:
+                    string raw = node.GetRawText();
+                    return IsNumberLiteral(raw) && decimal.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out _) ? raw : null;
+                case JsonValueKind.True:
+                    return "true";
+                case JsonValueKind.False:
+                    return "false";
+                case JsonValueKind.Null:
+                    return "null";
+                default:
+                    return null;
+            }
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>The most bytes of a binary value the page draws as hex.</summary>
+    public const int MaxHexBytes = 64 * 1024;
+
+    /// <summary>The most characters of a text value the page puts in its markup.</summary>
+    public const int MaxTextChars = 256 * 1024;
+
+    /// <summary>
+    /// A hex dump of the engine's preview (<c>0x</c> and lower-case hex): sixteen bytes a line, the offset, the bytes and the printable ASCII, at most
+    /// <see cref="MaxHexBytes" /> bytes. <see cref="string.Empty" /> for a preview that is not hex.
+    /// </summary>
+    /// <param name="preview">The match's <see cref="KafkaMatch.ValuePreview" />.</param>
+    /// <param name="shown">How many bytes were drawn.</param>
+    public static string HexDump(string preview, out int shown)
+    {
+        ArgumentNullException.ThrowIfNull(preview);
+
+        string hex = preview.StartsWith("0x", StringComparison.Ordinal) ? preview[2..] : preview;
+        int bytes = Math.Min(hex.Length / 2, MaxHexBytes);
+        shown = 0;
+
+        if (bytes == 0 || !hex.All(static c => char.IsAsciiHexDigit(c)))
+        {
+            return string.Empty;
+        }
+
+        StringBuilder dump = new();
+
+        for (int line = 0; line < bytes; line += 16)
+        {
+            int count = Math.Min(16, bytes - line);
+            dump.Append(line.ToString("x4", CultureInfo.InvariantCulture)).Append("  ");
+            StringBuilder ascii = new();
+
+            for (int i = 0; i < 16; i++)
+            {
+                if (i < count)
+                {
+                    byte value = Convert.ToByte(hex.Substring((line + i) * 2, 2), 16);
+                    dump.Append(value.ToString("x2", CultureInfo.InvariantCulture)).Append(' ');
+                    ascii.Append(value is >= 0x20 and < 0x7f ? (char) value : '.');
+                }
+                else
+                {
+                    dump.Append("   ");
+                }
+            }
+
+            dump.Append(' ').Append(ascii).Append('\n');
+        }
+
+        shown = bytes;
+        return dump.ToString();
+    }
+
+    /// <summary>The value's text as it is shown, UTF-8 bytes of it; used for "Shown N of M".</summary>
+    /// <param name="text">The text.</param>
+    public static int Utf8Length(string text) => Encoding.UTF8.GetByteCount(text);
+
+    /// <summary>Whether <paramref name="raw" /> is a number as the search grammar lexes one.</summary>
+    private static bool IsNumberLiteral(string raw) => NumberShape().IsMatch(raw);
+
+    [GeneratedRegex(@"^-?[0-9]+(\.[0-9]+)?([eE][+-]?[0-9]+)?$", RegexOptions.CultureInvariant)]
+    private static partial Regex NumberShape();
+
+    /// <summary>Whether the node at <paramref name="segments" /> is a masked node or lies under one: a mask replaces the whole subtree.</summary>
+    /// <param name="match">The match.</param>
+    /// <param name="segments">The node's path.</param>
+    public static bool IsMasked(KafkaMatch match, IReadOnlyList<(string? Key, int Index)> segments)
+    {
+        ArgumentNullException.ThrowIfNull(match);
+        ArgumentNullException.ThrowIfNull(segments);
+
+        foreach (KafkaMaskedPath masked in match.MaskedPaths)
+        {
+            if (masked.Steps.Count <= segments.Count && StartsWith(segments, masked.Steps))
+            {
+                return true;
+            }
+        }
+
+        // The paths beyond the first 64 are counted and not kept: with some left out, no node can be proved unmasked.
+        return match.MaskedPathsOmitted > 0;
+    }
+
+    private static bool StartsWith(IReadOnlyList<(string? Key, int Index)> segments, IReadOnlyList<JsonPathStep> prefix)
+    {
+        for (int i = 0; i < prefix.Count; i++)
+        {
+            bool same = prefix[i] switch
+            {
+                JsonMemberStep member => segments[i].Key is { } key && string.Equals(key, member.Name, StringComparison.OrdinalIgnoreCase),
+                JsonIndexStep index => segments[i].Key is null && segments[i].Index == index.Index,
+                _ => false,
+            };
+
+            if (!same)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /// <summary>Whether the key is a text that is only too long for a search literal: the page says why it does not offer the predicate.</summary>

@@ -31,6 +31,7 @@
                          OnCopyDocument="CopyDocumentAsync"
                          OnExpandAll="ExpandAllAsync"
                          OnCollapseAll="CollapseAllAsync"
+                         AllowDownload="AllowDownload"
                          DownloadHref="@DownloadHref"
                          DownloadFileName="@DownloadFileName" />
     }
@@ -146,6 +147,8 @@
                   LinqPath="@_menuLinq"
                   LinqNote="@_menuLinqNote"
                   ContainmentFilter="@_menuFilter"
+                  ShowPostgresItems="ShowPostgresCopyItems"
+                  SearchPredicate="@_menuSearch"
                   OnCopied="AnnounceAsync" />
 
     <p class="ms-json-live ms-sr-only" role="status" aria-live="polite">@_announcement</p>
@@ -205,6 +208,7 @@
     private string _menuLinq = "x";
     private string? _menuLinqNote;
     private string _menuFilter = string.Empty;
+    private string? _menuSearch;
 
     /// <summary>The document to show.</summary>
     [Parameter]
@@ -245,6 +249,27 @@
     /// <summary>The file name the download anchor suggests.</summary>
     [Parameter]
     public string DownloadFileName { get; set; } = "document.json";
+
+    /// <summary>
+    /// Whether the toolbar offers a download. <see langword="false" /> hides the link and its disabled twin: a host whose values are not its
+    /// to export (a Kafka record's, until its export capability) keeps copying and drops downloading.
+    /// </summary>
+    [Parameter]
+    public bool AllowDownload { get; set; } = true;
+
+    /// <summary>
+    /// Whether the node menu offers the Postgres expressions, the Marten LINQ path and the containment filter. <see langword="false" /> leaves
+    /// "Copy value" and "Copy JSONPath" for a value that is not in a Postgres column.
+    /// </summary>
+    [Parameter]
+    public bool ShowPostgresCopyItems { get; set; } = true;
+
+    /// <summary>
+    /// Given a node's path (a member name, or <see langword="null" /> and an index, for each step) and its value as JSON, answers a search
+    /// predicate for it, or <see langword="null" />. When it answers, the node menu adds "Copy as search".
+    /// </summary>
+    [Parameter]
+    public Func<IReadOnlyList<(string? Key, int Index)>, string, string?>? CopyAsSearch { get; set; }
 
     /// <summary>Above this many nodes the document is shown raw until the user asks for the tree.</summary>
     [Parameter]
@@ -774,6 +799,7 @@
         _menuPgPath = JsonPathExpressions.ToPostgresTextPath(segments, Column);
         _menuValue = ValueJsonOf(node, segments);
         _menuFilter = JsonPathExpressions.ToContainmentFilter(segments, _menuValue);
+        _menuSearch = CopyAsSearch?.Invoke([.. segments.Select(static x => (x.Key, x.Index))], _menuValue);
 
         var resolution = JsonPathExpressions.ResolveClrPath(DocumentType, segments, NamingPolicy);
         _menuLinq = resolution.Path;
