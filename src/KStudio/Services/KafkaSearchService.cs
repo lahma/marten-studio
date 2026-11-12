@@ -330,7 +330,7 @@ internal sealed class KafkaSearchService(
         string target = KafkaStudioText.SearchTarget(input.Topics, input.From, input.To);
 
         actionLog.Record(input.Cluster, input.Topics, Action, target, succeeded: false, reason, KafkaCapability.SearchRecords);
-        logger.SearchNotRun(user, string.Join(", ", input.Topics), input.Cluster.Key, input.Cluster.TenantId, reason, predicate);
+        logger.SearchNotRun(user, string.Join(", ", input.Topics), input.Cluster.Cluster, input.Cluster.TenantId, reason, predicate);
     }
 
     /// <summary>Records a search that ran, once, when it ended: the ring entry and event 9600. Needs nothing from a scope that may be disposing.</summary>
@@ -342,7 +342,7 @@ internal sealed class KafkaSearchService(
         {
             const string Reason = "The search ended without a result.";
             actionLog.Record(input.Cluster, input.Topics, Action, target, succeeded: false, Reason, KafkaCapability.SearchRecords);
-            logger.SearchNotRun(user, string.Join(", ", input.Topics), input.Cluster.Key, input.Cluster.TenantId, Reason, plan.AuditText);
+            logger.SearchNotRun(user, string.Join(", ", input.Topics), input.Cluster.Cluster, input.Cluster.TenantId, Reason, plan.AuditText);
             return;
         }
 
@@ -356,7 +356,7 @@ internal sealed class KafkaSearchService(
         logger.SearchRan(
             user,
             string.Join(", ", input.Topics),
-            input.Cluster.Key,
+            input.Cluster.Cluster,
             input.Cluster.TenantId,
             input.From,
             input.To,

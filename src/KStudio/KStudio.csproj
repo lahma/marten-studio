@@ -6,7 +6,10 @@
   <PropertyGroup>
     <AssemblyName>KStudio</AssemblyName>
     <RootNamespace>KStudio</RootNamespace>
+    <PackageId>KStudio</PackageId>
     <IsPackable>false</IsPackable>
+    <PackageTags>kafka;blazor;studio;admin</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
     <Product>KStudio</Product>
     <Description>KStudio for Apache Kafka: a Kafka section for Marten Studio or Postgres Studio, over the application's own Kafka credentials. Apache Kafka is a trademark of the Apache Software Foundation. KStudio is not affiliated with or endorsed by the Apache Software Foundation.</Description>
   </PropertyGroup>
@@ -29,6 +32,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Include="../KStudio/README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+
+  <ItemGroup>
     <SupportedPlatform Include="browser" />
   </ItemGroup>
 
@@ -36,5 +43,19 @@
     <InternalsVisibleTo Include="KStudio.Tests" />
     <InternalsVisibleTo Include="KStudio.Integration.Tests" />
   </ItemGroup>
+
+  <!-- Exactly its own build of what sits below it, as MartenStudio's MartenStudioPinsPostgresStudioExactly does: `PostgresStudio [x.y.z]` and `KStudio.Core [x.y.z]`
+       in the nuspec, not NuGet's default `>=`. Inert while IsPackable is false (plan K8). -->
+  <Target Name="KStudioPinsFamilyExactly" AfterTargets="_GetProjectReferenceVersions">
+    <ItemGroup>
+      <_ProjectReferencesWithVersions Condition="'%(Filename)' == 'PostgresStudio' or '%(Filename)' == 'KStudio.Core'">
+        <ProjectVersion>[%(ProjectVersion)]</ProjectVersion>
+      </_ProjectReferencesWithVersions>
+    </ItemGroup>
+    <Error Condition="'@(_ProjectReferencesWithVersions->WithMetadataValue('Filename', 'PostgresStudio'))' == ''"
+           Text="KStudio must depend on exactly its own PostgresStudio build, and pack found no PostgresStudio project reference to pin." />
+    <Error Condition="'@(_ProjectReferencesWithVersions->WithMetadataValue('Filename', 'KStudio.Core'))' == ''"
+           Text="KStudio must depend on exactly its own KStudio.Core build, and pack found no KStudio.Core project reference to pin." />
+  </Target>
 
 </Project>

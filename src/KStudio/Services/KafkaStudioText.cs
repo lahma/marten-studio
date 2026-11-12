@@ -244,4 +244,127 @@ internal static class KafkaStudioText
         KStudio.Core.Scanning.KafkaScanRefusal.ShuttingDown => "The application is shutting down.",
         _ => SearchFailed,
     };
+
+    // ------------------------------------------------------------------------------------------------
+    // Related records and duplicates (UI-D, D42, decisions 3 and 4 of D-CORR)
+    // ------------------------------------------------------------------------------------------------
+
+    /// <summary>The page's lead: what it searches and what it uses.</summary>
+    public const string RelatedLead =
+        "Searches the declared topics you may read on this cluster for records that share a correlation value with this one. "
+        + "Only values this page already shows you are used: a field that is redacted, cut or absent is never a key.";
+
+    /// <summary>The Keys panel when the anchor offers nothing to search for.</summary>
+    public const string RelatedNoKeys =
+        "This record has no correlation value KStudio can use: its correlation fields are absent, redacted or cut.";
+
+    /// <summary>The page for a link that names neither a record nor a value to look for.</summary>
+    public const string RelatedLinkInvalid = "This link names no record or value to look for.";
+
+    /// <summary>The refusal of a value too long to be searched.</summary>
+    public const string RelatedValueTooLong = "The value this link names is longer than the 1,000 characters a search can hold.";
+
+    /// <summary>The refusal of a search in which no topic has a field to compare.</summary>
+    public const string RelatedNothingToSearch = "No topic has a field to compare for these values, so there is nothing to search.";
+
+    /// <summary>The sentence that names the set of topics searched by default.</summary>
+    public const string RelatedScope = "the declared topics you may read on this cluster";
+
+    /// <summary>The 9601 reason of a related search whose lanes all had nothing to compare.</summary>
+    public const string RelatedNothingReason = "no topic had a field to compare";
+
+    /// <summary>The line about the topics a default search left out.</summary>
+    /// <param name="count">How many readable declared topics were not searched.</param>
+    public static string RelatedMoreTopics(int count) =>
+        $"{count} more declared {(count == 1 ? "topic was" : "topics were")} not searched; choose the topics to search.";
+
+    /// <summary>The refusal of a search with every topic unticked.</summary>
+    public const string RelatedChooseTopic = "Choose at least one topic to search.";
+
+    /// <summary>The refusal of a seed no readable declared topic has a field for.</summary>
+    /// <param name="label">What the link names: <c>document</c> or <c>stream</c>.</param>
+    public static string RelatedNoSeedTopic(string label) => $"No declared topic you may read on this cluster has a field for this {label}.";
+
+    /// <summary>The lane of a topic with no query.</summary>
+    /// <param name="reasons">Why, in words that name no value.</param>
+    public static string RelatedNothingToCompare(IReadOnlyList<string> reasons) =>
+        "Nothing to compare on this topic" + (reasons.Count == 0 ? "." : ": " + string.Join(" ", reasons));
+
+    /// <summary>The state of a lane Kafka refused.</summary>
+    /// <param name="text">The engine's sentence.</param>
+    public static string RelatedNotReadable(string text) => "not readable: " + text;
+
+    /// <summary>The audit target of a related-records scan: <c>records related to orders/2/1042, 3 topics, 2026-11-12 10:00Z – 11:00Z</c>.</summary>
+    /// <param name="subject">What the search is about.</param>
+    /// <param name="topics">How many topics it names.</param>
+    /// <param name="from">The window's start (UTC).</param>
+    /// <param name="to">The window's end (UTC).</param>
+    public static string RelatedTarget(KafkaRelatedSubject subject, int topics, DateTimeOffset from, DateTimeOffset to)
+    {
+        System.Globalization.CultureInfo invariant = System.Globalization.CultureInfo.InvariantCulture;
+        const string Full = "yyyy-MM-dd HH:mm'Z'";
+        string what = subject.SeedLabel is { } seed
+            ? "a " + seed + " value"
+            : string.Create(invariant, $"{subject.AnchorTopic}/{subject.AnchorPartition}/{subject.AnchorOffset}");
+
+        return string.Create(
+            invariant,
+            $"records related to {what}, {topics} {(topics == 1 ? "topic" : "topics")}, {from.ToUniversalTime().ToString(Full, invariant)} – {to.ToUniversalTime().ToString(Full, invariant)}");
+    }
+
+    /// <summary>The heading of the duplicates panel.</summary>
+    /// <param name="groups">How many groups.</param>
+    public static string DuplicatesHeading(int groups) =>
+        $"Possible duplicates: {groups} {(groups == 1 ? "group" : "groups")}";
+
+    /// <summary>The sentence under the duplicates heading.</summary>
+    /// <param name="count">How many records were compared.</param>
+    public static string DuplicatesScope(int count) =>
+        $"Compared among the {KafkaDisplay.Count(count, "record")} found. A copy outside these results is not seen.";
+
+    /// <summary>The note on a group compared by its key and value as shown.</summary>
+    public const string DuplicatesComparedAsShown = "Compared as shown: a masked part counts as equal to any other mask.";
+
+    /// <summary>The words of the button a Marten Studio record screen draws to look a record up in Kafka (D44). The studio never spells it.</summary>
+    public const string FindInKafka = "Find in Kafka";
+
+    /// <summary>Said instead of Marten links on a record whose <c>tenant-id</c> header is hidden: the address would carry the hidden value.</summary>
+    public const string LinksTenantHidden = "No links to Marten records: this record's tenant-id is redacted or cut, and a link would carry it.";
+
+    /// <summary>The heading of the line that links a record to the host's own tracing or log tool.</summary>
+    public const string OpenIn = "Open in";
+
+    /// <summary>The heading of a topic page's facts from a cluster source.</summary>
+    /// <param name="source">The source's name, for example <c>Wolverine</c>.</param>
+    public static string DiscoveredHeading(string source) => "Discovered from " + source;
+
+    /// <summary>The sentence under the discovered facts: what they are and are not.</summary>
+    public const string DiscoveredLead =
+        "Read from the application's Wolverine configuration when KStudio first needed it. They describe how the application uses the topic, not what it holds.";
+
+    /// <summary>The heading of the Settings page's section on what a cluster source listed and could not list.</summary>
+    /// <param name="sources">The names of the sources, for example <c>Wolverine</c>.</param>
+    public static string DiscoveryHeading(string sources) => "Discovered from " + sources;
+
+    /// <summary>The sentence under the Settings page's discovery section.</summary>
+    public const string DiscoveryLead =
+        "KStudio read the application's configuration once, and started, connected and wrote nothing. Discovery adds no redaction: declare rules for every topic that carries personal data.";
+
+    /// <summary>What the Settings page says of a cluster a source listed.</summary>
+    /// <param name="source">The source's name.</param>
+    public static string DiscoveryListed(string source) => "This cluster was listed from the application's " + source + " configuration.";
+
+    /// <summary>The heading of what a source did not list.</summary>
+    public const string DiscoveryNotesHeading = "Not listed";
+
+    /// <summary>The role a discovered topic has, in words.</summary>
+    /// <param name="role">The role.</param>
+    public static string DiscoveredRole(KStudio.Core.Clusters.KafkaTopicRole role) => role switch
+    {
+        KStudio.Core.Clusters.KafkaTopicRole.Listener => "Listener",
+        KStudio.Core.Clusters.KafkaTopicRole.Sender => "Sender",
+        KStudio.Core.Clusters.KafkaTopicRole.ListenerAndSender => "Listener and sender",
+        KStudio.Core.Clusters.KafkaTopicRole.DeadLetter => "Dead letters",
+        _ => role.ToString(),
+    };
 }

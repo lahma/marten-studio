@@ -35,7 +35,11 @@ internal static class KStudioEngineRegistration
         services.TryAddSingleton(options);
         services.TryAddSingleton(settings);
         services.TryAddSingleton<KStudioLoggers>();
-        services.TryAddSingleton<KafkaClusterRegistry>();
+
+        // Built on first use, and given the container so that a cluster source (D43) is run then, after the host has started, and not at the
+        // options delegate. Everything it needs that is registered here is resolved lazily by the sources themselves.
+        services.TryAddSingleton(static provider =>
+            new KafkaClusterRegistry(provider.GetRequiredService<KafkaEngineOptions>(), provider));
         services.TryAddSingleton<KafkaSettingsReader>();
 
         // The options are validated once, by the registry, and read from this snapshot only (REVIEW-ENG-A 8).
@@ -50,6 +54,21 @@ internal static class KStudioEngineRegistration
             KafkaEngineSnapshot snapshot = provider.GetRequiredService<KafkaEngineSnapshot>();
             return new KafkaAdminPool<IAdminClient>(
                 cluster => ConfluentWireFactory.BuildAdminClient(cluster, events),
+                "admin",
+                provider.GetRequiredService<TimeProvider>(),
+                snapshot.AdminIdleTimeout,
+                provider.GetRequiredService<KStudioLoggers>().Clients,
+                snapshot.RequestTimeout + TimeSpan.FromSeconds(1));
+        });
+
+        // The group-offsets read's own handle: a consumer that is never subscribed, with an admin client over it (D36, librdkafka #5040).
+        services.TryAddSingleton(static provider =>
+        {
+            ConfluentClientEvents events = provider.GetRequiredService<ConfluentClientEvents>();
+            KafkaEngineSnapshot snapshot = provider.GetRequiredService<KafkaEngineSnapshot>();
+            return new KafkaAdminPool<ConfluentOffsetsReader>(
+                cluster => new ConfluentOffsetsReader(cluster, snapshot.GroupIdPrefix, events),
+                "offsets",
                 provider.GetRequiredService<TimeProvider>(),
                 snapshot.AdminIdleTimeout,
                 provider.GetRequiredService<KStudioLoggers>().Clients,

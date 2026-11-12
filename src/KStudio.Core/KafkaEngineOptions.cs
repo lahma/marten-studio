@@ -1,5 +1,7 @@
 using Confluent.Kafka;
 
+using KStudio.Core.Clusters;
+
 namespace KStudio;
 
 /// <summary>
@@ -14,6 +16,7 @@ public class KafkaEngineOptions
 {
     private readonly List<ClusterRegistration> clusters = [];
     private readonly List<KeyValuePair<string, KafkaTopicBuilder>> topics = [];
+    private readonly List<Func<IServiceProvider, IKafkaClusterSource>> clusterSources = [];
 
     /// <summary>What a scan may cost (D41).</summary>
     public KafkaScanLimits Limits { get; } = new();
@@ -32,6 +35,12 @@ public class KafkaEngineOptions
 
     /// <summary>The topic descriptors declared for every cluster, in the order declared.</summary>
     internal IReadOnlyList<KeyValuePair<string, KafkaTopicBuilder>> Topics => topics;
+
+    /// <summary>
+    /// The sources of further clusters (D43), run once by the registry when it is built. Internal: the one source is KStudio.Wolverine's, granted
+    /// by <c>InternalsVisibleTo</c> and an exact version pin.
+    /// </summary>
+    internal List<Func<IServiceProvider, IKafkaClusterSource>> ClusterSources => clusterSources;
 
     /// <summary>Adds a cluster from the host's own client configuration (a consumer, admin or producer config all work).</summary>
     /// <param name="key">The cluster's key: lower-case letters, digits and hyphens, at most 63 characters. It travels in the address.</param>

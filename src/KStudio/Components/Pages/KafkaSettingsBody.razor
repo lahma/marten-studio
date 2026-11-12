@@ -89,6 +89,28 @@
         </TableScroll>
 
         <p class="ms-k-oauth">OAuth token refresh: @(view.TokenRefreshDeclared ? "declared" : "not declared")</p>
+
+        @if (discovery is { IsEmpty: false })
+        {
+            <section class="ms-k-discovery" aria-label="@KafkaStudioText.DiscoveryHeading(discovery.SourceNames)">
+                <h2 class="ms-section-title">@KafkaStudioText.DiscoveryHeading(discovery.SourceNames)</h2>
+                <p class="ms-muted">@KafkaStudioText.DiscoveryLead</p>
+                @if (discovery.Source is { } listedBy)
+                {
+                    <p class="ms-k-discovery-listed">@KafkaStudioText.DiscoveryListed(listedBy)</p>
+                }
+                @if (discovery.Notes.Count > 0)
+                {
+                    <h3 class="ms-section-title">@KafkaStudioText.DiscoveryNotesHeading</h3>
+                    <ul class="ms-k-discovery-notes">
+                        @foreach (KafkaRegistryNote note in discovery.Notes)
+                        {
+                            <li>@note.Generic</li>
+                        }
+                    </ul>
+                }
+            </section>
+        }
     }
 </div>
 
@@ -96,6 +118,7 @@
     private readonly CancellationTokenSource lifetime = new();
 
     private KafkaClusterSettingsView? view;
+    private KafkaDiscoveryView? discovery;
     private string? error;
     private bool disposed;
     private bool ready;
@@ -143,6 +166,7 @@
     private async Task OnClusterChangedAsync()
     {
         view = null;
+        discovery = null;
         await InvokeAsync(StateHasChanged);
         await LoadAsync();
     }
@@ -157,10 +181,12 @@
         try
         {
             KafkaClusterSettingsView? read = await Catalog.GetSettingsAsync(active, lifetime.Token);
+            KafkaDiscoveryView? discovered = read is null ? null : await Catalog.GetDiscoveryAsync(active, lifetime.Token);
 
             if (!disposed && State.ActiveCluster == active)
             {
                 view = read;
+                discovery = discovered;
                 error = read is null ? KafkaStudioText.ClusterNotAuthorized : null;
             }
         }

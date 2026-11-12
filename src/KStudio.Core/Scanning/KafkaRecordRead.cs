@@ -330,7 +330,7 @@ internal sealed partial class KafkaScanner
 
             Dictionary<string, TopicScanContext> contexts = new(StringComparer.Ordinal)
             {
-                [topic] = new TopicScanContext(topic, descriptor, redactor, compiled.Predicate!, decoder),
+                [topic] = new TopicScanContext(topic, descriptor, redactor, compiled.Predicate!, decoder, request.Grant),
             };
 
             KafkaScanRequest scanRequest = new(

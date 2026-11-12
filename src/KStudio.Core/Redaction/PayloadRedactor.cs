@@ -7,6 +7,7 @@ using System.Text.RegularExpressions;
 
 using KStudio.Core.Decoding;
 using KStudio.Core.Predicates;
+using KStudio.Core.Scanning;
 
 namespace KStudio.Core.Redaction;
 
@@ -139,7 +140,7 @@ internal static class PayloadRedactor
 
     /// <summary>The text that stands in for a masked part.</summary>
     /// <param name="rule">The rule's name.</param>
-    public static string MaskText(string rule) => "••• (redacted by " + rule + ")";
+    public static string MaskText(string rule) => KafkaMatchMasks.MaskPrefix + " " + rule + ")";
 
     /// <summary>Applies the rules to a value.</summary>
     /// <param name="value">The value, whole.</param>

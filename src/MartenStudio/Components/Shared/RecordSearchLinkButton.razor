@@ -1,0 +1,68 @@
+@using PostgresStudio.Components.Shared
+@using Microsoft.Extensions.Logging
+@using PostgresStudio.Services.Settings
+@inject IServiceProvider Services
+@inject ILogger<RecordSearchLinkButton> Logger
+
+@*
+    The button a record screen draws to search a module for the record it shows (D-CORR 8.2).
+
+    It is drawn only when a module registered IStudioRecordSearchLinks and the module answers the request with a link: with no
+    module, and with a module that knows nothing that refers to such a record, this component renders nothing at all, so a
+    Marten-only host's screen is byte for byte what it was. The label is the module's; this assembly names no module.
+
+    The request holds only values the page already shows the visitor, and the call is pure, so nothing is read or asked of a policy
+    for the link. The module's page authorizes what it reads, on its own.
+*@
+
+@if (href is not null && label is not null)
+{
+    <a class="ms-btn ms-btn-sm ms-record-search-link" href="@href">@label</a>
+}
+
+@code {
+    private object? answered;
+    private string? href;
+    private string? label;
+
+    /// <summary>
+    /// The record to search for, as a <c>StudioRecordSearchRequest</c>: typed <see cref="object" /> because a component is public and the
+    /// request is internal, and read back through <see cref="ComponentModel" /> like every such parameter. A new instance asks the
+    /// module again; the same one does not.
+    /// </summary>
+    [Parameter]
+    public object? Request { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        if (ReferenceEquals(Request, answered))
+        {
+            return;
+        }
+
+        answered = Request;
+        href = null;
+        label = null;
+
+        StudioRecordSearchRequest? request = ComponentModel.Read<StudioRecordSearchRequest?>(Request, null);
+
+        if (request is null || Services.GetService(typeof(IStudioRecordSearchLinks)) is not IStudioRecordSearchLinks links)
+        {
+            return;
+        }
+
+        // A module that throws is a module without a link: a Marten page never fails because of one. It is said at Debug, with the
+        // exception's type, so that a button that never appears has a reason somebody can find.
+        try
+        {
+            href = links.ToSearch(request);
+            label = links.Label;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            Logger.LogDebug(exception, "A module's record search link failed ({ExceptionType}); no button is drawn", exception.GetType().FullName);
+            href = null;
+            label = null;
+        }
+    }
+}

@@ -173,4 +173,37 @@ public class KafkaAuthorizationTests
 
         (harness.Visitor.Reads - before).Should().Be(1, "the cluster question and each topic's share one principal");
     }
+
+    [Fact]
+    public async Task A_tenant_entry_is_asked_about_as_the_cluster_and_its_tenant_and_never_by_its_entry_key()
+    {
+        // D43, decision 6: the entry key is {cluster}/{tenant}, the engine's; a policy sees Cluster = the base and TenantId = the tenant, so it never parses a key.
+        using KafkaStudioHarness harness = new(static o => o.ClusterAuthorizationPolicy = "kafka-topics");
+        KafkaClusterEntry tenant = new("wolverine/acme", "acme", "Wolverine", null);
+
+        tenant.Cluster.Should().Be("wolverine");
+
+        await harness.KafkaAuthorization.IsAuthorizedAsync(tenant, "orders.v1", KafkaCapability.SearchRecords, cancellationToken: Ct);
+        await harness.KafkaAuthorization.FilterClustersAsync([tenant], cancellationToken: Ct);
+        await harness.KafkaAuthorization.FilterTopicsAsync(tenant, ["orders.v1"], cancellationToken: Ct);
+        await harness.KafkaAuthorization.AreAllAuthorizedAsync(tenant, ["orders.v1", "payments.v1"], KafkaCapability.SearchRecords, cancellationToken: Ct);
+
+        harness.Authorization.KafkaCalls.Should().NotBeEmpty().And.OnlyContain(
+            static x => x.Resource.Cluster == "wolverine" && x.Resource.TenantId == "acme",
+            "no policy is ever handed the composite key");
+        harness.Authorization.KafkaCalls.Select(static x => x.Resource).Should().Contain(new KafkaTopicResource("wolverine", "acme", "orders.v1", "SearchRecords"));
+    }
+
+    [Fact]
+    public async Task A_policy_can_refuse_one_tenant_of_a_cluster_and_not_another()
+    {
+        using KafkaStudioHarness harness = new(static o => o.ClusterAuthorizationPolicy = "kafka-topics");
+        harness.Authorization.AllowKafka(static r => r.TenantId != "globex");
+        KafkaClusterEntry acme = new("wolverine/acme", "acme", "Wolverine", null);
+        KafkaClusterEntry globex = new("wolverine/globex", "globex", "Wolverine", null);
+
+        IReadOnlyList<KafkaClusterEntry> visible = await harness.KafkaAuthorization.FilterClustersAsync([acme, globex], cancellationToken: Ct);
+
+        visible.Select(static x => x.Key).Should().Equal("wolverine/acme");
+    }
 }

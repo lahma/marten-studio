@@ -43,6 +43,9 @@ internal sealed class LiveSearchHost : IAsyncDisposable
 
     public KafkaSearchService Search => scope.ServiceProvider.GetRequiredService<KafkaSearchService>();
 
+    /// <summary>The related-records service (D42).</summary>
+    public KafkaCorrelationService Correlation => scope.ServiceProvider.GetRequiredService<KafkaCorrelationService>();
+
     /// <summary>The studio's audit ring.</summary>
     public IReadOnlyList<StudioActionLogEntry> Ring => provider.GetRequiredService<StudioActionLogService>().GetLatest();
 

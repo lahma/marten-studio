@@ -25,6 +25,9 @@ using Fallout.Components;
     CacheIncludePatterns = ["~/.nuget/packages", "~/.cache/ms-playwright"],
     InvokedTargets = [nameof(ITest.Test)],
     PublishArtifacts = true,
+    // The test results are uploaded when the tests fail too: that is when the blame collector's sequence file and the TRX files are
+    // needed (KS-CI-FIX-6: a native crash's sequence file was lost twice because the upload ran only on success).
+    PublishCondition = "always()",
     // Said out loud rather than left to GitHub's repository default, which is configurable and may be
     // read-write. This job only reads the source; it must never be able to write to the repository, and
     // naming one read permission makes every other permission `none` for the run. A convention test
@@ -71,6 +74,7 @@ using Fallout.Components;
     CacheKeyFiles = ["**/global.json", "**/*.csproj", "**/Directory.Packages.props", ".github/workflows/marten-latest.yml"],
     InvokedTargets = [nameof(ITest.Test)],
     PublishArtifacts = true,
+    PublishCondition = "always()",
     Env = ["MARTEN_VERSION: latest", "NPGSQL_VERSION: latest", "CONFLUENT_VERSION: latest"],
     ReadPermissions = [GitHubActionsPermissions.Contents])]
 // .github/workflows/publish.yml - the nuget.org leg (D15).

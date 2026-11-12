@@ -7,6 +7,7 @@ using Confluent.Kafka;
 using KStudio.Core.Scanning;
 using KStudio.Sample.Auth;
 using KStudio.Sample.Kafka;
+using KStudio.Sample.Wolverine;
 using KStudio.Services;
 
 using Microsoft.AspNetCore.Components.Authorization;
@@ -33,6 +34,9 @@ public class SampleHostLiveTests(SampleHostFixture fixture) : IClassFixture<Samp
 {
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
+    private static bool IsWolverinesTopic(string topic) =>
+        topic is SampleWolverine.CheckoutTopic or SampleWolverine.ConfirmedTopic or SampleWolverine.DeadLetterTopic;
+
     [KafkaFact]
     public void The_host_prints_the_banner_at_warning_naming_both_containers()
     {
@@ -54,7 +58,9 @@ public class SampleHostLiveTests(SampleHostFixture fixture) : IClassFixture<Samp
         using IAdminClient admin = new AdminClientBuilder(new ClientConfig { BootstrapServers = fixture.Host.KafkaBootstrap }).Build();
         Metadata metadata = admin.GetMetadata(TimeSpan.FromSeconds(30));
 
-        metadata.Topics.Where(static x => !x.Topic.StartsWith("__", StringComparison.Ordinal)).ToDictionary(static x => x.Topic, static x => x.Partitions.Count).Should().BeEquivalentTo(
+        // The seed's topics. The sample's Wolverine application creates three of its own (checkout.v1, checkout.confirmed.v1 and Wolverine's
+        // dead-letter topic) beside them, which SampleWolverineLiveTests holds.
+        metadata.Topics.Where(static x => !x.Topic.StartsWith("__", StringComparison.Ordinal) && !IsWolverinesTopic(x.Topic)).ToDictionary(static x => x.Topic, static x => x.Partitions.Count).Should().BeEquivalentTo(
             new Dictionary<string, int>
             {
                 ["orders.v1"] = 6,
@@ -113,7 +119,8 @@ public class SampleHostLiveTests(SampleHostFixture fixture) : IClassFixture<Samp
         KafkaTopicListing supportTopics = (await support.Catalog.ListTopicsAsync(support.Entry, null, Token))!;
         KafkaTopicListing adminTopics = (await admin.Catalog.ListTopicsAsync(admin.Entry, null, Token))!;
 
-        supportTopics.Rows.Select(static x => x.Name).Should().BeEquivalentTo("orders.v1", "orders.v1.dlq");
+        // The cluster is the broker, and the broker also holds the Wolverine application's checkout topics, which support may reach.
+        supportTopics.Rows.Select(static x => x.Name).Should().BeEquivalentTo("orders.v1", "orders.v1.dlq", "checkout.v1", "checkout.confirmed.v1");
         adminTopics.Rows.Select(static x => x.Name).Should().Contain(["orders.v1", "payments.v1", "customers.v1", "secrets.v1", "orders.v1.dlq"]);
     }
 

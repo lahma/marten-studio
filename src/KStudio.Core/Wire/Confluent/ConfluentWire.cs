@@ -13,6 +13,7 @@ namespace KStudio.Core.Wire.Confluent;
 internal sealed class ConfluentWire(
     KafkaClusterDefinition cluster,
     KafkaAdminPool<IAdminClient> pool,
+    KafkaAdminPool<ConfluentOffsetsReader> offsetsPool,
     KafkaEngineSnapshot options,
     ConfluentClientEvents events,
     KStudioLoggers loggers) : IKafkaWire
@@ -204,14 +205,22 @@ internal sealed class ConfluentWire(
     /// <inheritdoc />
     public Task<WireResult<IReadOnlyList<WireGroupOffset>>> ListGroupOffsetsAsync(
         string groupId, IReadOnlyList<WirePartition> partitions, CancellationToken cancellationToken) =>
-        Admin<IReadOnlyList<WireGroupOffset>>(
+        Leased(
+            offsetsPool,
             WireCall.GroupOffsets,
             groupId,
-            async (client, resource) =>
+            async (reader, resource) =>
             {
                 try
                 {
-                    List<ListConsumerGroupOffsetsResult> results = await client
+                    // librdkafka queues the host's OAuth token-refresh op on the main queue inside rd_kafka_new; a consumer redirects that
+                    // queue to its poll queue, and the dependent admin client polls only its own result queue. Until the consumer is polled
+                    // the hook never runs, and the first read on an OAUTHBEARER cluster would wait out its timeout. One poll first (off the
+                    // caller's thread, and not cancelled with the caller: the lease is held until the call ends).
+                    await Task.Run(reader.Drain, CancellationToken.None).ConfigureAwait(false);
+
+                    // On the dependent admin client of a consumer handle, never on the plain admin client (librdkafka #5040, D36).
+                    List<ListConsumerGroupOffsetsResult> results = await reader.Admin
                         .ListConsumerGroupOffsetsAsync(
                             [new ConsumerGroupTopicPartitions(groupId, [.. partitions.Select(static x => new TopicPartition(x.Topic, x.Partition))])],
                             new ListConsumerGroupOffsetsOptions { RequestTimeout = options.RequestTimeout })
@@ -229,6 +238,10 @@ internal sealed class ConfluentWire(
                 {
                     Error error = exception.Results.Select(static x => x.Error).FirstOrDefault(static x => x is { IsError: true }) ?? exception.Error;
                     return WireResult<IReadOnlyList<WireGroupOffset>>.Fail(ConfluentErrors.Map(error, WireCall.GroupOffsets, resource));
+                }
+                finally
+                {
+                    reader.Drain();
                 }
             },
             cancellationToken);
@@ -314,20 +327,30 @@ internal sealed class ConfluentWire(
     /// Runs one admin call: leases the cluster's client, returns the call's value or the error that withheld it, and lets the caller's
     /// token end the wait without ending the call. The lease is held until the call itself completes.
     /// </summary>
-    private async Task<WireResult<T>> Admin<T>(
+    private Task<WireResult<T>> Admin<T>(
         WireCall call,
         string resource,
         Func<IAdminClient, string, Task<WireResult<T>>> run,
+        CancellationToken cancellationToken) =>
+        Leased(pool, call, resource, run, cancellationToken);
+
+    /// <summary>The same, over any pool: the lag read leases the offsets reader, every other call the admin client.</summary>
+    private async Task<WireResult<T>> Leased<TClient, T>(
+        KafkaAdminPool<TClient> clients,
+        WireCall call,
+        string resource,
+        Func<TClient, string, Task<WireResult<T>>> run,
         CancellationToken cancellationToken)
+        where TClient : class, IDisposable
     {
         cancellationToken.ThrowIfCancellationRequested();
 
         Task<WireResult<T>> work;
-        KafkaAdminPool<IAdminClient>.Lease lease;
+        KafkaAdminPool<TClient>.Lease lease;
 
         try
         {
-            lease = pool.Rent(cluster);
+            lease = clients.Rent(cluster);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -354,11 +377,11 @@ internal sealed class ConfluentWire(
         return await work.WaitAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task<WireResult<T>> Guard<T>(
+    private async Task<WireResult<T>> Guard<TClient, T>(
         WireCall call,
         string resource,
-        Func<IAdminClient, string, Task<WireResult<T>>> run,
-        IAdminClient client)
+        Func<TClient, string, Task<WireResult<T>>> run,
+        TClient client)
     {
         try
         {

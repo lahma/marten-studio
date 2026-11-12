@@ -113,7 +113,9 @@ Each rule's full text, with its lists of events, tests and history, is in
    `IPostgresCapacitySource` and their records), the D31 read model and, since 1.0, the connection history's four
    (`AddPostgresConnectionHistory`, its options, `IPostgresConnectionHistoryStore` and `PostgresConnectionSample`).
    KStudio's is one static class, two classes and one record (`AddKafkaStudio`, `KafkaStudioOptions`,
-   `KafkaStudioCapabilities`, `KafkaTopicResource`), in a baseline of its own; KStudio.Core's is its own too.
+   `KafkaStudioCapabilities`, `KafkaTopicResource`), in a baseline of its own; KStudio.Core's is its own too; and
+   KStudio.Wolverine's is one static class and one class (`UseWolverineKafka`, `KafkaWolverineOptions`), in a baseline of
+   its own.
    Anything else that appears in any baseline is a mistake, not a feature.
    Never hand-edit a `.verified.txt`: run the test, read the diff deliberately, say in the pull request what moved and
    why, then accept the baseline. The read model is extend-only (D31). **`docs/health/codes.md` is a contract too, and a
@@ -190,7 +192,9 @@ Each rule's full text, with its lists of events, tests and history, is in
     route two pages claim. PostgresStudio, PostgresStudio.Diagnostics and MartenStudio reference no `Confluent.*`,
     `Wolverine*` or `KStudio*` assembly or package, and their source names no Kafka (`ModuleNeutralityTests`); KStudio
     references no Marten, JasperFx, Weasel or Wolverine, and its built assembly no `Confluent.*` (the client is
-    KStudio.Core's). A module's pages sit below its own root, which stays a segment under the mount. Full text: hard
+    KStudio.Core's). KStudio.Wolverine references KStudio.Core and WolverineFx.Kafka only: no studio, no KStudio, no
+    Marten, Weasel or Npgsql (`KStudioWolverineFenceTests`), and `KStudio.Tests` does not reference it. A module's pages
+    sit below its own root, which stays a segment under the mount. Full text: hard
     rule 16.
 
 17. **In KStudio, a read never writes.** No client the engine builds may create a topic, commit or store an offset, join
@@ -198,7 +202,7 @@ Each rule's full text, with its lists of events, tests and history, is in
     no produce, commit, delete or alter method. D37 has the overrides; `ConfluentOverridesTests`,
     `ReadNeverWritesMetadataLiveTests` and `ReadNeverWritesScanLiveTests` hold them. Full text: hard rule 17.
 
-## Design decisions (D1–D41)
+## Design decisions (D1–D44)
 
 Every one of these was taken deliberately. Reversing one is allowed; doing it without reading the rationale is not. D1,
 D8, D9, D14, D15 and D20 are short enough to stand whole here; every other entry is the decision itself, with a pointer
@@ -249,7 +253,9 @@ the database it is supposed to help you understand. Exact counts are available o
 
 **D9 — Document and stream ids travel in the query string.** The hand-rolled router has no catch-all segment, and Marten
 ids are frequently strings that contain `/`. Scope (`?store=&db=&tenant=`) lives in the URL for the same reason a
-document id does: a link someone pastes into a chat has to reopen the same thing.
+document id does: a link someone pastes into a chat has to reopen the same thing. A link that names a tenant and no
+database opens the first database, among those the visitor may see, whose tenant listing carries that tenant (at most 32
+searched, one enumeration); a link that names both is reopened exactly, and a tenant found nowhere falls back to all tenants.
 
 **D10 — No SignalR hub in v1.** Pages poll with a `PeriodicTimer` at `RefreshInterval`, paused on hidden tabs, through a
 single-flight snapshot cache so that N circuits cost one query per interval; there is no SignalR hub. Where the daemon
@@ -287,9 +293,10 @@ have.
 for nuget.org.** See *Build* and *Release engineering* below. The important half is that the version lives in one file
 that a human edits and no tool rewrites, and that the only credential anywhere in the release path lives for minutes.
 
-**D16 — xunit.v3 3.2.2 and Verify.XunitV3 32.0.0, six test projects all matching `*.Tests`.**
-`tests/MartenStudio.Tests`, `tests/PostgresStudio.Tests` and `tests/KStudio.Tests` are fast and need no Docker; the three
-`*.Integration.Tests` need Testcontainers, and MartenStudio's and PostgresStudio's also need Playwright. All six match the
+**D16 — xunit.v3 3.2.2 and Verify.XunitV3 32.0.0, seven test projects all matching `*.Tests`.**
+`tests/MartenStudio.Tests`, `tests/PostgresStudio.Tests`, `tests/KStudio.Tests` and `tests/KStudio.Wolverine.Tests` are fast
+and need no Docker; the three `*.Integration.Tests` need Testcontainers, and MartenStudio's and PostgresStudio's also need
+Playwright. All seven match the
 glob in `ITest.TestProjects`. The pins are load-bearing — see *Package budget*. Full text: [testing.md](docs/maintainers/testing.md#d16).
 
 **D17 — The demo domain lives in `samples/MartenStudio.SampleDomain` and does not reference `MartenStudio`.** The
@@ -460,7 +467,10 @@ internal `IKafkaWire`, whose only other implementation is the fast suite's hand-
 runs on the fake and on real brokers (Kafka 3.9 and 4.x), so the fake cannot drift from Kafka. No Confluent type crosses
 the seam, and errors are values. Nothing connects at startup and nothing is a hosted service: one admin client per
 cluster, created on first use and disposed when idle, and one consumer per scan, on a thread of its own. Engine log events
-are 9650 to 9699. Full text: [kstudio.md](docs/maintainers/kstudio.md#d36).
+are 9650 to 9699. The lag read (group offsets) uses a per-cluster consumer that is never subscribed, through a dependent admin client
+drained before and after each read, because an admin handle has no consumer group and librdkafka 2.16.0 and earlier crash
+(#5040) on `NOT_COORDINATOR` in `ListConsumerGroupOffsets`; remove it once the Confluent.Kafka floor contains librdkafka's fix
+(PR #5611). Full text: [kstudio.md](docs/maintainers/kstudio.md#d36).
 
 **D37 — In KStudio, a read never writes.** Every client the engine builds is a clone of the host's configuration with the
 engine's overrides: no topic auto-creation, no commit and no offset store, explicit offsets on every assign, a group id of
@@ -504,6 +514,29 @@ hourly byte budget. Memory is stated, about $S(C + 2mc)$: $C \approx 64$ MiB per
 threshold starts only with a confirmation the engine checks. A profile or a visitor can only lower a limit. Full text:
 [kstudio.md](docs/maintainers/kstudio.md#d41).
 
+**D42 — KStudio correlates by declared fields, in one audited scan.** A topic's correlation fields (headers,
+CloudEvents attributes, the key, JSON paths under `ReadPayloads`) each have a kind, and fields of one kind are compared
+across topics. Wolverine's and CloudEvents' fields are the defaults. Keys come only from an anchor's literal,
+unmasked fields. Related records are one scan over the declared topics the visitor may read, each topic with its own
+predicate and grant (`KafkaTopicQuery`), estimated, confirmed, audited once with every topic's predicate, and refused
+whole when the visitor names a refused topic. Duplicates are found among the matches already held, and read nothing.
+Full text: [kstudio.md](docs/maintainers/kstudio.md#d42).
+
+**D43 — KStudio.Wolverine discovers configuration and nothing else.** `UseWolverineKafka()` reads the built
+`WolverineOptions` when the cluster registry is first built, through KStudio.Core's internal `IKafkaClusterSource`
+(`InternalsVisibleTo`, an exact pin and a version guard), and its tenants once more after the host has started. It starts,
+connects and writes nothing, runs no builder callback, and reads no message store or handler graph. Broker-per-tenant
+clusters (`{cluster}/{tenant}`, `TenantId` on the resource, listed only under their listed cluster) come from a
+reflection probe of three members that fails closed. A discovered topic never replaces a host's descriptor, and
+discovery adds no redaction. Full text: [kstudio.md](docs/maintainers/kstudio.md#d43).
+
+**D44 — Links between a studio and a module are pure, internal and grant nothing.** `IStudioRouteLinks` (MartenStudio
+implements it: a document by type and id, a stream by id or key, in the record's tenant, and only for a store that
+keeps its rows per tenant and lists no `KnownTenantIds`) and `IStudioRecordSearchLinks` (KStudio implements it: "Find in Kafka") live in PostgresStudio
+beside `IStudioLinks`, under its rules. Neither module names the other, a masked value never enters a URL, a value travels
+in the fragment, and the destination authorizes again. External links are host templates with no credential, opened with
+`noreferrer`. Full text: [kstudio.md](docs/maintainers/kstudio.md#d44).
+
 ## Package budget
 
 Complete, as of the bootstrap commit. Versions are centrally pinned in `Directory.Packages.props`, with
@@ -518,16 +551,18 @@ Complete, as of the bootstrap commit. Versions are centrally pinned in `Director
 | `src/KStudio.Core` | `Confluent.Kafka` | `2.14.0` (latest tested `2.16.0`) | KStudio's only Kafka client (plan K2), behind the engine's internal wire seam (D36). Floor, not exact pin: 2.14.0 is what WolverineFx.Kafka 6.61 pins, so a Wolverine host is never raised. It brings `librdkafka.redist` (native librdkafka for Windows, Linux and macOS) at its own version, unpinned. Unconditional row: only the KStudio projects reference it, and the KStudio sample transitively, for its seeder. Not packed before M4 (K8). *Package budget changes* 2026-11-09. |
 | `src/KStudio.Core` | `Microsoft.Extensions.DependencyInjection.Abstractions`, `Microsoft.Extensions.Logging.Abstractions`, `Microsoft.Extensions.Options` | `10.0.0` each | The diagnostics engine's conditional rows, seen by KStudio.Core through `KStudioCorePinsExtensions`: the engine has no ASP.NET Core either (D36). |
 | `tests/KStudio.Integration.Tests`, `samples/KStudio.Sample` | `Testcontainers.Kafka` | `4.15.0` | The live suite's brokers, `apache/kafka:3.9.2` and `4.4.0` in KRaft mode, one per image with SASL/PLAIN and ACLs; and the KStudio sample's throwaway `apache/kafka:4.4.0` (D18). |
+| `src/KStudio.Wolverine` | `WolverineFx.Kafka` | `6.61.0` | Wolverine's Kafka transport, for configuration discovery only (D43): clusters, tenants and topics read from the built `WolverineOptions`, nothing started or written. Floor, not exact pin: 6.61.0 pins Confluent.Kafka 2.14.0, KStudio.Core's floor, so a Wolverine host is never raised. It brings JasperFx 2.99.0, above Marten 9.57.0's 2.98.0. `tests/KStudio.Wolverine.Tests` takes it through the project reference; `tests/KStudio.Integration.Tests` and `samples/KStudio.Sample` reference it for a real Wolverine host. Not packed before K8. *Package budget changes* 2026-11-12. |
+| `samples/KStudio.Sample` | `WolverineFx.RuntimeCompilation` | `6.61.0` | Wolverine's opt-in Roslyn code generation, for the sample's Wolverine application only (D-CORR decision 11): Wolverine 6.61 no longer ships its runtime compiler, and a host with a handler (`PlaceCheckoutHandler`, which stores a Marten document) needs it, or pre-generated code, to start. It matches `WolverineFx.Kafka` 6.61.0 and registers itself when referenced. One central row in `Directory.Packages.props`; no shipped package, `KStudio`, `KStudio.Core`, `KStudio.Wolverine` or test project references it. *Package budget changes* 2026-11-12. |
 | the four sample hosts, `tests/MartenStudio.Integration.Tests`, `tests/PostgresStudio.Integration.Tests` | `Testcontainers.PostgreSql` | `4.15.0` | D18's throwaway Postgres (the Marten, Postgres Studio and KStudio sample hosts and the diagnostics worker), and the container each integration suite runs against. |
 | `samples/PostgresStudio.Worker` | `Microsoft.Extensions.Hosting` | `10.0.0` | The generic host the diagnostics worker sample runs in (*Package budget changes* 2026-11-01). A fifth row of the conditional `PostgresStudioDiagnosticsPinsExtensions` group: no shipped package references it. |
-| all six test projects | `Microsoft.NET.Test.Sdk` | `18.10.0` | The VSTest host Fallout's `ITest` drives. |
-| all six test projects | `xunit.v3` | `3.2.2` | Held — see below. |
-| all six test projects | `xunit.runner.visualstudio` | `3.1.5` | The VSTest bridge. |
-| all six test projects | `GitHubActionsTestLogger` | `2.4.1` | Held — see below. |
-| all six test projects | `AwesomeAssertions` | `9.6.0` | The MIT fork of FluentAssertions. One assertion library, and **no mocking library**: the data seam is our own set of interfaces, and hand-written fakes are smaller and more auditable than a mocking framework's call-matching DSL. Its namespace is `AwesomeAssertions`, not `FluentAssertions` (verified 2026-09-14); every test project declares it as a global using. |
+| all seven test projects | `Microsoft.NET.Test.Sdk` | `18.10.0` | The VSTest host Fallout's `ITest` drives. |
+| all seven test projects | `xunit.v3` | `3.2.2` | Held — see below. |
+| all seven test projects | `xunit.runner.visualstudio` | `3.1.5` | The VSTest bridge. |
+| all seven test projects | `GitHubActionsTestLogger` | `2.4.1` | Held — see below. |
+| all seven test projects | `AwesomeAssertions` | `9.6.0` | The MIT fork of FluentAssertions. One assertion library, and **no mocking library**: the data seam is our own set of interfaces, and hand-written fakes are smaller and more auditable than a mocking framework's call-matching DSL. Its namespace is `AwesomeAssertions`, not `FluentAssertions` (verified 2026-09-14); every test project declares it as a global using. |
 | the three fast suites (`tests/MartenStudio.Tests`, `tests/PostgresStudio.Tests`, `tests/KStudio.Tests`) | `bunit` | `2.13.3` | Component tests. |
-| the three fast suites | `Verify.XunitV3` | `32.0.0` | Held — see below. Also the source of each fast suite's `global using Xunit;`, which is why none of them declares one. |
-| the three fast suites | `PublicApiGenerator` | `11.5.4` | The public API snapshots (D20), one per package. |
+| the four fast suites | `Verify.XunitV3` | `32.0.0` | Held — see below. Also the source of each fast suite's `global using Xunit;`, which is why none of them declares one. |
+| the four fast suites | `PublicApiGenerator` | `11.5.4` | The public API snapshots (D20), one per package. |
 | `tests/MartenStudio.Tests`, `tests/PostgresStudio.Tests`, `tests/KStudio.Tests` | `Microsoft.AspNetCore.TestHost` | `10.0.12` | `UseTestServer()` for the endpoint-metadata and startup-guard tests. TestHost rather than Mvc.Testing: those tests never need a `WebApplicationFactory`. |
 | `tests/MartenStudio.Integration.Tests` | `Microsoft.AspNetCore.Mvc.Testing` | `10.0.12` | `WebApplicationFactory` over the real sample host. |
 | `tests/MartenStudio.Integration.Tests`, `tests/PostgresStudio.Integration.Tests` | `Microsoft.Playwright` | `1.62.0` | The browser suites (D19). |
@@ -554,7 +589,7 @@ longer exists. The roots in brief:
 - `src/PostgresStudio/` is the shared studio, with no Marten; `src/MartenStudio/` holds the Marten screens and checks.
   Each has `Components/`, `Services/` and `Internal/Sql/` (hard rule 4).
 - `samples/` holds both demo hosts and their demo data (D17, D18).
-- `tests/` holds the six test projects (*Testing*).
+- `tests/` holds the seven test projects (*Testing*).
 - `build/` is the Fallout orchestrator.
 - `docs/` holds the user documentation. `docs/maintainers/` holds the layout tree, the budget's dated entries and the
   decision notes.
@@ -634,7 +669,7 @@ packets, two terminals — must do, because schema names derive from test class 
 drop each other's tables. `TESTCONTAINERS_REUSE_ENABLE` is **not** read by Testcontainers 4.x (verified by
 decompilation, 2026-09-14) and must not be used.
 
-There are seven kinds of test, in six projects: unit, component, endpoint and metadata, public API snapshot,
+There are seven kinds of test, in seven projects: unit, component, endpoint and metadata, public API snapshot,
 conventions, Marten API surface, and integration and browser. Waits are always wait-on-condition, **never
 `Task.Delay`**. Integration tests drive everything through the studio's own services, so the gating is exercised, not
 bypassed. A class that needs a server setting of its own starts a `postgres:17-alpine` of its own, never reused; a test

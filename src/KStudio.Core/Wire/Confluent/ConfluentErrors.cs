@@ -80,6 +80,7 @@ internal static class ConfluentErrors
                 or ErrorCode.KafkaStorageError
                 or ErrorCode.GroupCoordinatorNotAvailable
                 or ErrorCode.NotCoordinatorForGroup
+                or ErrorCode.GroupLoadInProgress
                 or ErrorCode.Local_WaitCoord
                 or ErrorCode.FencedLeaderEpoch
                 or ErrorCode.UnknownLeaderEpoch

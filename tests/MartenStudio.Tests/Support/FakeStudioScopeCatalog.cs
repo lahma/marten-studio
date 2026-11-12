@@ -27,6 +27,18 @@ internal sealed class FakeStudioScopeCatalog : IStudioScopeCatalog
     /// <summary>What <see cref="DescribeAsync" /> answers, by store key.</summary>
     public Dictionary<string, StoreScopeFacts> Facts { get; } = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>What <see cref="DescribeAsync" /> answers for one database, by store key and database identity; it wins over <see cref="Facts" />.</summary>
+    public Dictionary<(string StoreKey, string DatabaseId), StoreScopeFacts> DatabaseFacts { get; } = new();
+
+    /// <summary>Every <see cref="DescribeAsync" /> call, in order: the store and the database it was asked about.</summary>
+    public List<(string StoreKey, string DatabaseId)> DescribeCalls { get; } = [];
+
+    /// <summary>A gate held shut on one database's <see cref="DescribeAsync" />, by store key and database identity, which holds only that one.</summary>
+    public Dictionary<(string StoreKey, string DatabaseId), TaskCompletionSource> DescribeGates { get; } = new();
+
+    /// <summary>The databases whose <see cref="DescribeAsync" /> throws, by store key and database identity.</summary>
+    public HashSet<(string StoreKey, string DatabaseId)> DescribeThrows { get; } = new();
+
     /// <summary>How many times the refresh button asked for everything again.</summary>
     public int InvalidateCount { get; private set; }
 
@@ -63,6 +75,14 @@ internal sealed class FakeStudioScopeCatalog : IStudioScopeCatalog
         Stores.Add(new StoreListing(key, displayName, StoreAvailability.Unavailable(message, DateTimeOffset.UnixEpoch)));
         Databases[key] = [];
         Facts[key] = StoreScopeFacts.Unavailable(message);
+        return this;
+    }
+
+    /// <summary>Says which tenants one database of a store lists, as the policy filtered them: the tenant selector is on for it.</summary>
+    public FakeStudioScopeCatalog WithDatabaseTenants(string key, string databaseId, TenantList tenants)
+    {
+        StoreScopeFacts existing = Facts.TryGetValue(key, out StoreScopeFacts? facts) ? facts : StoreScopeFacts.None;
+        DatabaseFacts[(key, databaseId)] = existing with { ShowTenantSelector = true, Tenants = tenants };
         return this;
     }
 
@@ -107,6 +127,23 @@ internal sealed class FakeStudioScopeCatalog : IStudioScopeCatalog
         if (DescribeGate is { } gate)
         {
             await gate.Task.Bounded();
+        }
+
+        DescribeCalls.Add((storeKey, databaseId));
+
+        if (DescribeGates.TryGetValue((storeKey, databaseId), out TaskCompletionSource? own))
+        {
+            await own.Task.Bounded();
+        }
+
+        if (DescribeThrows.Contains((storeKey, databaseId)))
+        {
+            throw new InvalidOperationException("the database's listing threw");
+        }
+
+        if (DatabaseFacts.TryGetValue((storeKey, databaseId), out StoreScopeFacts? forDatabase))
+        {
+            return forDatabase;
         }
 
         return Facts.TryGetValue(storeKey, out StoreScopeFacts? facts) ? facts : StoreScopeFacts.None;

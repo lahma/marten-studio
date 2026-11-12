@@ -146,7 +146,7 @@ partial class Build : FalloutBuild,
     // The Marten version goes to all three, the floor included (Build.Marten.cs says why). The Npgsql version of
     // this whole-solution pass is always the floor - never the requested one, which would reach MartenStudio through
     // its PostgresStudio reference - and is said explicitly for the same reason (Build.Npgsql.cs). The Confluent.Kafka
-    // version goes to all three too: only the KStudio projects reference the package (Build.Confluent.cs).
+    // version goes to all three too: only the KStudio projects (KStudio.Wolverine among them, which takes it through WolverineFx.Kafka) reference the package (Build.Confluent.cs).
     Configure<DotNetRestoreSettings> IRestore.RestoreSettings => _ => _
         .SetProperty(MartenVersionProperty, ResolvedMartenVersion)
         .SetProperty(NpgsqlVersionProperty, NpgsqlFloor)
@@ -170,7 +170,7 @@ partial class Build : FalloutBuild,
     Configure<DotNetTestSettings, Project> ITest.TestProjectSettings => (_, project) => WithBlameHang(_, project);
 
     /// <summary>The test projects that run without Docker or a browser: nothing in them takes ten minutes, so a test that does is hung.</summary>
-    static readonly string[] BlameHangTestProjects = ["MartenStudio.Tests", "PostgresStudio.Tests", "KStudio.Tests"];
+    static readonly string[] BlameHangTestProjects = ["MartenStudio.Tests", "PostgresStudio.Tests", "KStudio.Tests", "KStudio.Wolverine.Tests"];
 
     /// <summary>How long a single fast-suite test may run before the run is stopped and a mini dump taken (<c>--blame-hang-timeout</c>).</summary>
     const string BlameHangTimeout = "10m";

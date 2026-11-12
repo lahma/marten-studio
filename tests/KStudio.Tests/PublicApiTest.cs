@@ -40,6 +40,8 @@ public class PublicApiTest
         Core.GetExportedTypes().Select(static type => type.FullName!).Order(StringComparer.Ordinal).Should().Equal(
             "KStudio.IKafkaRecordDecoder",
             "KStudio.KafkaClusterBuilder",
+            "KStudio.KafkaCorrelationBuilder",
+            "KStudio.KafkaCorrelationField",
             "KStudio.KafkaDecodeContext",
             "KStudio.KafkaDecodeResult",
             "KStudio.KafkaDecoders",

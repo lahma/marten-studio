@@ -9,6 +9,8 @@
 @using PostgresStudio.Components.Json
 @using PostgresStudio.Components.Shared
 @using PostgresStudio.Services
+@using MartenStudio.Components.Shared
+@using PostgresStudio.Services.Settings
 @implements IAsyncDisposable
 @inject IDocumentDataService Data
 @inject PostgresStudio.Services.Relationships.IRelationshipDataService RelationshipData
@@ -75,6 +77,9 @@
                     {
                         <a class="ms-btn ms-btn-sm" href="@DocumentLinks.ToStream(Options.Value, State.ActiveScope, detail.Id)" title="An event stream with this id exists">View stream</a>
                     }
+
+                    @* D-CORR 8.2: a module's search over this document, when one is registered and knows a reference to it. *@
+                    <RecordSearchLinkButton Request="searchRequest" />
 
                     <button type="button" class="ms-btn ms-btn-sm" @onclick="() => DownloadAsync(detail)">Download</button>
 
@@ -193,6 +198,7 @@
     private IReadOnlyList<DocumentIdProbe> probes = [];
     private bool probing;
     private bool streamExists;
+    private StudioRecordSearchRequest? searchRequest;
     private bool loading = true;
     private string? loadedSignature;
     private string? previousId;
@@ -271,7 +277,9 @@
 
         if (differs)
         {
-            await State.SetScopeAsync(StoreKey ?? active?.StoreKey, DatabaseId ?? active?.DatabaseId, TenantId);
+            // DatabaseId as the address gave it: a tenant named with no database is looked for in the store's databases, and a
+            // database filled in from the scope on screen would hide that the address named none.
+            await State.SetScopeAsync(StoreKey ?? active?.StoreKey, DatabaseId, TenantId);
         }
     }
 
@@ -293,6 +301,7 @@
         related = RelatedModel.None;
         referencedBy = ReferencedByModel.None;
         streamExists = false;
+        searchRequest = null;
         editing = false;
         editProbe = null;
         editRefusal = null;
@@ -320,6 +329,7 @@
                 related = await Data.GetRelatedAsync(scope, Alias, result.Detail!, token);
                 referencedBy = await RelationshipData.GetReferencedByAsync(scope, Alias, Id, token);
                 streamExists = await Data.StreamExistsAsync(scope, Id, token);
+                searchRequest = SearchRequestFor(scope, result.Detail!);
             }
         }
         catch (OperationCanceledException)
@@ -420,6 +430,44 @@
                 State.ActiveScope,
                 alias,
                 new Dictionary<string, string?>(StringComparer.Ordinal) { ["q"] = filter });
+
+    /// <summary>The metadata column the search window is read from, when the table has it (hard rule 10: every one is optional).</summary>
+    private const string LastModifiedColumn = "mt_last_modified";
+
+    /// <summary>
+    /// What a module is asked to search for (D-CORR 8.2): the document by the names its type goes by, in the page's scope, within an hour of
+    /// its last modification when the table keeps that column. Only values this page already shows.
+    /// </summary>
+    internal static StudioRecordSearchRequest SearchRequestFor(StudioScope scope, DocumentModel detail)
+    {
+        List<string> names = [detail.Alias];
+
+        foreach (string? name in (string?[])[detail.ClrType?.FullName, detail.ClrType?.Name])
+        {
+            if (!string.IsNullOrEmpty(name) && !names.Contains(name, StringComparer.Ordinal))
+            {
+                names.Add(name);
+            }
+        }
+
+        DateTimeOffset? modified = null;
+        foreach (PhysicalColumnValue column in detail.Columns)
+        {
+            if (string.Equals(column.Name, LastModifiedColumn, StringComparison.OrdinalIgnoreCase)
+                && column.Value is { } text
+                && DateTimeOffset.TryParse(text, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal, out DateTimeOffset parsed))
+            {
+                modified = parsed;
+            }
+        }
+
+        return new StudioRecordSearchRequest(
+            scope.StoreKey,
+            scope.TenantId,
+            new StudioRecordReference(StudioRecordKind.Document, names, detail.Id),
+            modified?.AddHours(-1),
+            modified?.AddHours(1));
+    }
 
     private static string FileName(DocumentModel detail) => detail.Alias + "-" + detail.Id + ".json";
 

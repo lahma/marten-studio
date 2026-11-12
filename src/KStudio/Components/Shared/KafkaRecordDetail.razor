@@ -56,6 +56,19 @@
             {
                 <dt>Not decoded</dt><dd>@UndecodableText(reason)</dd>
             }
+            @* Wolverine's envelope, read from its headers as they are: a masked one reads redacted, and a topic without them draws no line (5.8 of D-CORR). *@
+            @if (HeaderOf("id") is { } envelopeId)
+            {
+                <dt>Envelope id</dt><dd class="ms-k-envelope-id">@FieldCell(envelopeId.Value)</dd>
+            }
+            @if (HeaderOf("sent-at") is { } sentAt)
+            {
+                <dt>Sent at</dt><dd class="ms-k-sent-at">@FieldCell(sentAt.Value)</dd>
+            }
+            @if (HeaderOf("partition-key") is { } partitionKey)
+            {
+                <dt>Partition key</dt><dd class="ms-k-partition-key">@FieldCell(partitionKey.Value)</dd>
+            }
         </dl>
 
         <h3 class="ms-section-title">Headers</h3>
@@ -119,6 +132,9 @@
             <p class="ms-k-trace">trace <code>@trace.TraceId</code> · span <code>@trace.SpanId</code></p>
         }
 
+        <KafkaRecordLinks Model="@match" Cluster="@Cluster" />
+        <KafkaExternalLinks Model="@match" />
+
         <h3 class="ms-section-title">Value</h3>
         <KafkaRecordValue Model="@match" Access="@Access" OnRecordPage="@OnRecordPage" RecordHref="@PermalinkHref()" />
 
@@ -132,6 +148,7 @@
                         Label="@($"Copy as, for {match.Topic} {match.Partition}/{match.Offset}")"
                         Items="items" />
             <a class="ms-btn ms-btn-sm ms-k-permalink" href="@PermalinkHref()">Permalink</a>
+            <a class="ms-btn ms-btn-sm ms-k-related-link" href="@RelatedHref()">Related records</a>
         </div>
 
         @if (KafkaMatchView.HasLiteralTooLong(match))
@@ -226,6 +243,20 @@
             (KafkaAddress.TopicParameter, match!.Topic),
             (KafkaAddress.PartitionParameter, match.Partition.ToString(CultureInfo.InvariantCulture)),
             (KafkaAddress.OffsetParameter, match.Offset.ToString(CultureInfo.InvariantCulture)));
+
+    /// <summary>Related records around this record: a link, so that opening it is a page of its own and runs nothing until the visitor presses its button.</summary>
+    private string RelatedHref() =>
+        KafkaAddress.Href(
+            Settings,
+            KafkaAddress.RelatedRoute,
+            Cluster,
+            (KafkaAddress.TopicParameter, match!.Topic),
+            (KafkaAddress.PartitionParameter, match.Partition.ToString(CultureInfo.InvariantCulture)),
+            (KafkaAddress.OffsetParameter, match.Offset.ToString(CultureInfo.InvariantCulture)));
+
+    /// <summary>The first header of this name, ignoring case; <see langword="null" /> when the record has none.</summary>
+    private KafkaMatchHeader? HeaderOf(string name) =>
+        match!.Headers.FirstOrDefault(x => string.Equals(x.Name, name, StringComparison.OrdinalIgnoreCase));
 
     private string KeyClass() => match!.Key.IsRedacted ? "ms-k-redacted" : match.Key.IsNull ? "ms-k-null" : string.Empty;
 

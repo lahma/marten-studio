@@ -47,7 +47,7 @@ namespace KStudio.Integration.Tests.Shell;
 /// <b>A prerendering request reads nothing from a broker</b> (the page frame releases reads only to a live circuit), so the interactive half of the
 /// walk is the component suite's, against the fake broker; what this class holds is the part only a real broker and a real database can: that nothing
 /// the shell and the catalog pages do on a first navigation writes, and that no GET calls a broker. UI-A added Topics, the topic overview and Cluster
-/// settings to <see cref="Pages" />; UI-B adds its pages.
+/// settings to <see cref="Pages" />; UI-B added its pages, and UI-D adds related records.
 /// </para>
 /// </remarks>
 public abstract class KafkaFirstNavigationLiveTests(KafkaFixture kafka)
@@ -72,6 +72,9 @@ public abstract class KafkaFirstNavigationLiveTests(KafkaFixture kafka)
         "/kafka/record?cluster=live&topic=orders.v1&partition=0&offset=0",
         "/kafka/record?cluster=live&topic=does-not-exist&partition=0&offset=0",
         "/kafka/record?cluster=live&topic=orders.v1&partition=x&offset=-1",
+        "/kafka/related?cluster=live",
+        "/kafka/related?cluster=live&topic=orders.v1&partition=0&offset=0",
+        "/kafka/related?cluster=live&topic=does-not-exist&partition=0&offset=0&topics=orders.v1,does-not-exist",
     ];
 
     /// <summary>Counts the wires the engine creates, which is the engine's first contact with a cluster.</summary>
@@ -209,10 +212,10 @@ public abstract class KafkaFirstNavigationLiveTests(KafkaFixture kafka)
 
         foreach (ConsumerGroupListing group in groups.Valid.OrderBy(static x => x.GroupId, StringComparer.Ordinal))
         {
-            List<ListConsumerGroupOffsetsResult> offsets = await admin.ListConsumerGroupOffsetsAsync([new ConsumerGroupTopicPartitions(group.GroupId, null)]);
+            // The tests' own helper, a consumer that is never subscribed: an admin handle crashes librdkafka up to 2.16.0 (#5040).
             lines.Add(group.GroupId + ": " + string.Join(
                 ", ",
-                offsets.SelectMany(static x => x.Partitions).OrderBy(static x => x.Topic, StringComparer.Ordinal).ThenBy(static x => x.Partition.Value)
+                LiveGroupOffsets.CommittedAnywhere(kafka, group.GroupId).OrderBy(static x => x.Topic, StringComparer.Ordinal).ThenBy(static x => x.Partition.Value)
                     .Select(static x => $"{x.Topic}[{x.Partition.Value}]={x.Offset}")));
         }
 

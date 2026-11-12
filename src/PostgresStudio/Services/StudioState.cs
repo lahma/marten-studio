@@ -34,6 +34,13 @@ internal sealed class StudioState
     /// <summary>The cookie and <c>localStorage</c> key the time zone is remembered under.</summary>
     public const string TimeZonePreferenceKey = "ms_tz";
 
+    /// <summary>
+    /// The most databases, the usual one excluded, that <see cref="SetScopeAsync" /> asks for a tenant when an address names a tenant and no
+    /// database. Each one is a tenant listing, which may be a query; past the bound the search stops and the address is applied as if
+    /// nothing had been found.
+    /// </summary>
+    public const int MaxTenantDatabaseSearch = 32;
+
     private readonly IStudioScopeCatalog catalog;
     private readonly ILogger<StudioState> logger;
     private readonly StudioProduct product;
@@ -276,6 +283,17 @@ internal sealed class StudioState
     /// <b>A tenant the new listing does not carry</b> falls back to the previous scope's tenant only if the new store and
     /// database accept that one too; otherwise to all tenants.
     /// </para>
+    /// <para>
+    /// <b>A tenant named with no database</b> (a link from another page or a module knows a store and a tenant, D44) that the database
+    /// resolved as above does not list is looked for in the store's other databases, in listing order and at most
+    /// <see cref="MaxTenantDatabaseSearch" /> of them: the first whose tenant listing carries it becomes the database. Only the listings
+    /// the visitor already sees are asked - <see cref="AvailableDatabases" /> and <see cref="IStudioScopeCatalog.FindTenantDatabaseAsync" />,
+    /// which reads the listings <see cref="IStudioScopeCatalog.DescribeAsync" /> reads (already the policy's answer per database and per
+    /// tenant), enumerating the source's databases once - so nothing is revealed and no tenancy is enumerated again. A tenant found nowhere,
+    /// when at least one other database was looked in, is dropped: the scope is all tenants, not the tenant the visitor was on. (A
+    /// single-database store has nothing to look in, and its usual rules stand.) If another scope change begins while the search waits, the
+    /// search applies nothing. An address that names a database is applied exactly (D9).
+    /// </para>
     /// </remarks>
     public async Task SetScopeAsync(
         string? storeKey,
@@ -307,17 +325,55 @@ internal sealed class StudioState
 
             string resolvedDatabaseId = PickDatabase(databaseId ?? (storeChanged ? null : previous?.DatabaseId));
 
+            // The facts of the database being applied are held, not applied, until the last await is behind: a header change that
+            // completes while this call waits must not have its listing overwritten by this call's.
+            StoreScopeFacts? facts = null;
             if (storeChanged || !string.Equals(resolvedDatabaseId, previous?.DatabaseId, StringComparison.OrdinalIgnoreCase))
             {
-                ApplyFacts(await catalog.DescribeAsync(store.Key, resolvedDatabaseId, cancellationToken).ConfigureAwait(false));
+                facts = await catalog.DescribeAsync(store.Key, resolvedDatabaseId, cancellationToken).ConfigureAwait(false);
+            }
+
+            // An address that names a tenant and no database, whose usual database does not list that tenant: in a store that keeps
+            // each tenant in a database of its own the tenant is in another one, so look for it among the databases the visitor may see.
+            bool missed = false;
+            if (NamesTenantWithoutDatabase(databaseId, tenantId) && !ListsTenant(facts?.Tenants ?? AvailableTenants, tenantId))
+            {
+                (TenantDatabaseHit? hit, int searched) = await FindTenantDatabaseAsync(store.Key, resolvedDatabaseId, tenantId!, cancellationToken).ConfigureAwait(false);
+
+                // A later scope change began (or applied) its own while this search waited: it stands, and this call applies nothing.
+                if (generation != Volatile.Read(ref applyingGeneration))
+                {
+                    return;
+                }
+
+                if (hit is not null)
+                {
+                    resolvedDatabaseId = hit.DatabaseId;
+                    facts = hit.Facts;
+                }
+                else
+                {
+                    // Looked for in other databases and found nowhere: the link's tenant is not one of this store's, and the scope is all
+                    // tenants rather than whichever tenant the visitor was on (which a link never named). With no other database to look
+                    // in (a single-database store, whose listing may be truncated) nothing was searched and the usual rules stand.
+                    missed = searched > 0;
+                }
+            }
+
+            // No await from here to the scope becoming the active one.
+            if (facts is not null)
+            {
+                ApplyFacts(facts);
             }
 
             // A tenant the listing does not carry falls back to the previous one only while this store and database still
             // accept it: after a store or database change the previous tenant is the old scope's, and is checked against the
             // new listing like any other name - or dropped, as RefreshAsync drops one.
-            string? resolvedTenantId = TenantList.IsAcceptable(AvailableTenants, tenantId)
-                ? NullIfBlank(tenantId)
-                : TenantList.IsAcceptable(AvailableTenants, previous?.TenantId) ? NullIfBlank(previous?.TenantId) : null;
+            string? resolvedTenantId = missed
+                ? null
+                : TenantList.IsAcceptable(AvailableTenants, tenantId)
+                    ? NullIfBlank(tenantId)
+                    : TenantList.IsAcceptable(AvailableTenants, previous?.TenantId) ? NullIfBlank(previous?.TenantId) : null;
 
             await SetActiveScopeAsync(new StudioScope(store.Key, resolvedDatabaseId, resolvedTenantId), previous, generation).ConfigureAwait(false);
         }
@@ -375,9 +431,14 @@ internal sealed class StudioState
     {
         // The new store's databases are not read yet, so a database named with it is the request's word; with the same store
         // the listing is the current one and the name is resolved as PickDatabase will.
+        //
+        // A tenant named with no database that the database on screen does not list is being looked for in the others (SetScopeAsync): until
+        // it is found the database is the request's - empty, as it named none - never the database on screen with a tenant that is not in it.
         string pendingDatabase = storeChanged
             ? NullIfBlank(databaseId) ?? string.Empty
-            : PickDatabase(databaseId ?? previous?.DatabaseId);
+            : NamesTenantWithoutDatabase(databaseId, tenantId) && AvailableDatabases.Count > 1 && !ListsTenant(AvailableTenants, tenantId)
+                ? string.Empty
+                : PickDatabase(databaseId ?? previous?.DatabaseId);
 
         bool databaseChanged = storeChanged || !string.Equals(pendingDatabase, previous?.DatabaseId, StringComparison.OrdinalIgnoreCase);
 
@@ -390,6 +451,86 @@ internal sealed class StudioState
                 : TenantList.IsAcceptable(AvailableTenants, previous?.TenantId) ? NullIfBlank(previous?.TenantId) : null;
 
         return new StudioScope(storeKey, pendingDatabase, pendingTenant);
+    }
+
+    private static bool NamesTenantWithoutDatabase(string? databaseId, string? tenantId) =>
+        string.IsNullOrWhiteSpace(databaseId) && !string.IsNullOrWhiteSpace(tenantId);
+
+    /// <summary>
+    /// Whether the listing names <paramref name="tenantId" />. Not <see cref="TenantList.IsAcceptable" />, which also takes any plausible id
+    /// from a truncated listing - and a listing a policy filtered is always marked truncated - so it says nothing about where a tenant is.
+    /// </summary>
+    private static bool ListsTenant(TenantList tenants, string? tenantId)
+    {
+        if (string.IsNullOrWhiteSpace(tenantId))
+        {
+            return false;
+        }
+
+        foreach (string id in tenants.Ids)
+        {
+            if (string.Equals(id, tenantId, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Looks for <paramref name="tenantId" /> in the store's other databases, in listing order and the usual one excluded, at most
+    /// <see cref="MaxTenantDatabaseSearch" /> of them, in one call to the catalog (which enumerates the source's databases once).
+    /// </summary>
+    /// <returns>The first database whose tenant listing carries the tenant, if any, and how many databases were looked in.</returns>
+    /// <remarks>
+    /// Only the scope picker's own listings are asked (<see cref="AvailableDatabases" /> and
+    /// <see cref="IStudioScopeCatalog.FindTenantDatabaseAsync" />, which reads what <see cref="IStudioScopeCatalog.DescribeAsync" /> reads), so
+    /// nothing is revealed that the visitor does not see and no tenancy is enumerated again. A database whose tenants could not be read is
+    /// skipped.
+    /// </remarks>
+    private async Task<(TenantDatabaseHit? Hit, int Searched)> FindTenantDatabaseAsync(
+        string storeKey,
+        string usualDatabaseId,
+        string tenantId,
+        CancellationToken cancellationToken)
+    {
+        List<string> others = [];
+        foreach (DatabaseListing database in AvailableDatabases)
+        {
+            if (!string.Equals(database.Identity, usualDatabaseId, StringComparison.OrdinalIgnoreCase))
+            {
+                others.Add(database.Identity);
+            }
+        }
+
+        bool bounded = others.Count > MaxTenantDatabaseSearch;
+        if (bounded)
+        {
+            others.RemoveRange(MaxTenantDatabaseSearch, others.Count - MaxTenantDatabaseSearch);
+        }
+
+        if (others.Count == 0)
+        {
+            return (null, 0);
+        }
+
+        TenantDatabaseHit? hit = await catalog.FindTenantDatabaseAsync(storeKey, others, tenantId, cancellationToken).ConfigureAwait(false);
+
+        if (hit is null && bounded)
+        {
+            // The tenant is named nowhere in the first databases, and the rest are not asked: the address is applied as if it were found nowhere.
+            if (product == StudioProduct.PostgresStudio)
+            {
+                logger.PostgresStudioTenantDatabaseSearchBounded(others.Count, storeKey);
+            }
+            else
+            {
+                logger.TenantDatabaseSearchBounded(others.Count, storeKey);
+            }
+        }
+
+        return (hit, others.Count);
     }
 
     private long SetApplying(StudioScope scope)

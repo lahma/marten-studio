@@ -60,6 +60,7 @@ samples/PostgresStudio.SampleData/       The demo data with no Marten in it, sha
 samples/KStudio.Sample/                  The KStudio sample: Marten Studio and KStudio over throwaway Postgres and Kafka (D18)
 samples/KStudio.Sample/Kafka/            Its Kafka container, seeder and judge
 samples/KStudio.Sample/Auth/             Its cookie sign-in, copied from the Marten sample
+samples/KStudio.Sample/Wolverine/        Its Wolverine application: the checkout handler, document and startup sender (D-CORR decision 11)
 samples/KStudio.Sample/Properties/       Its launch profile, port 5212
 samples/PostgresStudio.Sample/           The Postgres Studio sample host (D18), no Marten: an admin database and three
                                          tenant databases through its own IPostgresDatabaseSource - README snippet regions
@@ -68,7 +69,7 @@ samples/PostgresStudio.Sample/Properties/  launchSettings.json, fixed at http://
 samples/PostgresStudio.Worker/           The diagnostics worker (0.11-D, issue #29): a generic host that references
                                          src/PostgresStudio.Diagnostics alone - no ASP.NET Core, no studio - and logs a
                                          summary of every database's findings at start and every Summary:Interval (D18)
-tests/                                   All six test projects match *.Tests, so one Test run covers them all
+tests/                                   All seven test projects match *.Tests, so one Test run covers them all
 tests/MartenStudio.Tests/                Fast suite: unit, bUnit, endpoint metadata, API snapshot,
                                          conventions. No Docker
 tests/MartenStudio.Tests/Conventions/    Rules too easy to break silently to leave to review
@@ -122,6 +123,7 @@ samples/MartenStudio.SampleDomain/Documents/  The demo document types
 samples/MartenStudio.Sample/Auth/        Cookie auth, the three demo users, the two policies
 samples/MartenStudio.Sample/Properties/  launchSettings.json, fixed at http://localhost:5210
 tests/MartenStudio.Tests/Endpoints/      Authorization matrix, sub-path re-rooting, the startup guard
+tests/MartenStudio.Tests/Links/          MartenStudioRouteLinks, the record search button and the pages' scope from a link - no database
 tests/MartenStudio.Tests/Services/       Registry, scope resolver, audit log, tenant discovery
 tests/MartenStudio.Tests/Components/     bUnit: StudioComponentContext, StudioMarkup and the page tests
 tests/MartenStudio.Tests/Support/        Test doubles shared by the tiers - never a mocking library
@@ -143,6 +145,8 @@ tests/MartenStudio.Tests/Documents/       Document service unit tests - no datab
 tests/MartenStudio.Integration.Tests/Documents/ Live Postgres: the document write path end to end
 src/MartenStudio/Services/Tenants/        The Tenants overview's service (TenantOverviewService), its models and TenantBoundText:
                                          read-only, statistics only, activity-gated
+src/MartenStudio/Services/Links/          The links a module's page makes into Documents and Streams (D-CORR 7): MartenStudioRouteLinks, by type
+                                         name and id, with a store and a tenant and never a database; pure, reads StoreOptions only
 src/MartenStudio/Services/Find/           Find by id's Marten kinds (1.2-SCOPE-3): the document, stream and natural-key, and event-sequence
                                          contributors, each asking the data service of the page its hit opens, and the helper (FindScopes)
                                          that reads the event store's shape once per Find and decides the tenant restriction (FindTenants:
@@ -191,6 +195,7 @@ src/MartenStudio/Services/Connection/     Database > Connection's Marten half (1
 tests/MartenStudio.Tests/Connection/      The Marten connection section, its hint notes, the redaction sentinel and the page - no database
 tests/MartenStudio.Integration.Tests/Connection/  Live Postgres: UseNpgsqlDataSource() versus Connection(string), and the hosted
                                          daemon's connections
+src/MartenStudio/Components/Shared/       MartenStudio's building blocks: RecordSearchLinkButton (D-CORR 8), the module's search from a record screen
 src/MartenStudio/Components/Pages/Documents/  The documents browser: collections rail, list, detail
 src/MartenStudio/Components/Pages/Query/  The Marten query body: the mode switch and LINQ mode
 src/PostgresStudio/Components/Pages/Query/  The shared query parts: editor, result grid, stats, saved queries,
@@ -380,6 +385,8 @@ src/KStudio.Core/Scanning/               The scan engine (D38, D41): plan and es
                                          set and the partitioner verification that let a key search read fewer partitions (D39)
 src/KStudio.Core/Redaction/              Redaction inside the engine (D40): the built-in header deny-list, the topic's rules and the
                                          redactor every match is made through
+src/KStudio.Core/Correlation/            Correlation (D42): a topic's declared fields and their kinds, the extractor that reads an
+                                         anchor's literal fields, the per-topic query builder and the duplicate finder
 tests/KStudio.Tests/Conventions/         KStudio's fences and convention scans
 tests/KStudio.Tests/Registration/        AddKafkaStudio, the version guard, the startup guard
 tests/KStudio.Tests/Endpoints/           Mounting, endpoint authorization, a host with no data source
@@ -401,6 +408,7 @@ tests/KStudio.Tests/Logging/             The engine's log events and the parity 
 tests/KStudio.Tests/Predicates/          The grammar, its messages and limits, the canonical text and the evaluation tables
 tests/KStudio.Tests/Decoding/            The detection order, the caps, headers, trace contexts and CloudEvents
 tests/KStudio.Tests/Redaction/           The deny-list, the topic's rules, the match caps and the one place a match is made
+tests/KStudio.Tests/Correlation/         The declarations and their bounds, the extractor, the per-topic query and the duplicate finder
 tests/KStudio.Tests/Scanning/            The scan engine on the fake: every stop reason and end state, the cursor, the governor, the
                                          limits, the estimate, batching and the lifecycle
 tests/KStudio.Tests/Partitioning/        The partitioners' known answers, the key set, the verification by sampling and the pruned scan
@@ -415,6 +423,17 @@ tests/KStudio.Integration.Tests/Scanning/  The scan engine on real records: stop
 tests/KStudio.Integration.Tests/Partitioning/ Each partitioner against a real producer's on two partition counts, and a pruned scan on real brokers
 tests/KStudio.Integration.Tests/Redaction/ Payload redaction on real brokers: a scan, a record read, the logs and the exact match, with no masked value in any sink
 tests/KStudio.Integration.Tests/Search/  Find the message with this id (the M1 exit), as restricted principals, and the search service against live brokers
+tests/KStudio.Integration.Tests/Correlation/ Related records on real brokers (the M4 exit): an in and an out topic found by their own fields in one scan, and a topic the principal may not describe
 tests/KStudio.Integration.Tests/Sample/  The sample host, started once, and the sample's seed, judge and policies without Docker
 tests/KStudio.Integration.Tests/Shell/   Live Kafka and Postgres: first navigation creates no topic, commits no offset, writes no row, makes no broker call while prerendering
+src/KStudio.Wolverine/                   KStudio.Wolverine (D43): UseWolverineKafka() and its options. It lists a Wolverine application's Kafka
+                                         clusters and topics by reading its built configuration and nothing else. References KStudio.Core and
+                                         WolverineFx.Kafka only (KStudioWolverineFenceTests); not packed (K8)
+src/KStudio.Wolverine/Internal/          The cluster source KStudio.Core runs, the topic reader, the tenant probe (the only reflection) and the version guard
+tests/KStudio.Wolverine.Tests/           The adapter's fast suite (D16): no Docker and no Wolverine host. Its output folder holds no studio
+tests/KStudio.Wolverine.Tests/Conventions/ The IL scan of what the adapter may call, the fences and the version guard
+tests/KStudio.Wolverine.Tests/Discovery/ What a WolverineOptions becomes: clusters, topics, tenants through the probe, and that nothing is written
+tests/KStudio.Wolverine.Tests/Support/   The rig that builds a WolverineOptions and runs the adapter over it
+tests/KStudio.Wolverine.Tests/Verify/    KStudio.Wolverine's public API baseline
+tests/KStudio.Integration.Tests/Wolverine/ A real Wolverine host on two brokers: the adapter lists its cluster and its tenant, and a scan reads the tenant's broker
 ```

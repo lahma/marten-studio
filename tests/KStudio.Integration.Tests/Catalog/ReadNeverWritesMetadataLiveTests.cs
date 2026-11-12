@@ -10,6 +10,7 @@ using KStudio.Core.Windows;
 using KStudio.Integration.Tests.Support;
 using KStudio.Tests.Contract;
 
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace KStudio.Integration.Tests.Catalog;
@@ -40,7 +41,7 @@ public abstract class ReadNeverWritesMetadataLiveTests(KafkaFixture fixture)
         using IAdminClient plain = new AdminClientBuilder(fixture.Client("admin")).Build();
         plain.GetMetadata(topic, TimeSpan.FromSeconds(10));
 
-        TopicsExist(fixture, topic).Should().BeTrue("a default admin client's GetMetadata(topic) creates the topic here: the tests below mean something");
+        TopicAppears(fixture, topic).Should().BeTrue("a default admin client's GetMetadata(topic) creates the topic here: the tests below mean something");
         await DeleteAsync(topic);
     }
 
@@ -65,8 +66,9 @@ public abstract class ReadNeverWritesMetadataLiveTests(KafkaFixture fixture)
         TopicsExist(fixture, listed).Should().BeFalse("ListOffsets does not create");
 
         string grouped = cluster.NewTopic("ctl-group");
-        await SwallowAsync(() => plain.ListConsumerGroupOffsetsAsync([new ConsumerGroupTopicPartitions("kstudio-ctl-" + fixture.RunId, [new TopicPartition(grouped, 0)])]));
-        TopicsExist(fixture, grouped).Should().BeFalse("ListConsumerGroupOffsets does not create");
+        // Read by a consumer that carries the group's id and is never subscribed (the tests' own helper, not an admin handle: librdkafka #5040).
+        await SwallowAsync(() => Task.Run(() => LiveGroupOffsets.Committed(fixture, "kstudio-ctl-" + fixture.RunId, [new TopicPartition(grouped, 0)])));
+        TopicsExist(fixture, grouped).Should().BeFalse("an OffsetFetch does not create");
     }
 
     [Fact]
@@ -104,6 +106,40 @@ public abstract class ReadNeverWritesMetadataLiveTests(KafkaFixture fixture)
         await wire.GetMetadataAsync(Token);
 
         TopicsExist(fixture, topic).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task The_lag_read_runs_on_a_consumer_backed_handle_and_that_consumer_joins_no_group_and_commits_nothing()
+    {
+        // D36: the group-offsets read goes through the offsets reader (a consumer that is never subscribed, with a dependent admin client),
+        // because an admin handle has no consumer group and librdkafka up to 2.16.0 crashes on NOT_COORDINATOR (#5040). Hard rule 17 holds for it.
+        await using LiveContractCluster cluster = LiveContractCluster.Open(fixture);
+        string topic = cluster.NewTopic("lag");
+        await cluster.CreateTopicAsync(topic, 1);
+        await cluster.ProduceAsync(topic, 0, [LiveRecords.At(0, "k", "v")]);
+        string asked = "kstudio-lag-" + fixture.RunId;
+
+        WireResult<IReadOnlyList<WireGroupOffset>> read = await cluster.Wire.ListGroupOffsetsAsync(asked, [new WirePartition(topic, 0)], Token);
+        read.IsOk.Should().BeTrue("a group that does not exist has no committed offsets, which is an answer");
+
+        KafkaAdminPool<ConfluentOffsetsReader> readers = cluster.Engine.Provider.GetRequiredService<KafkaAdminPool<ConfluentOffsetsReader>>();
+        readers.ClientCount.Should().Be(1, "the read created the cluster's offsets reader");
+
+        string readerGroup;
+        using (KafkaAdminPool<ConfluentOffsetsReader>.Lease lease = readers.Rent(cluster.Engine.Provider.GetRequiredService<KafkaClusterRegistry>().Get(EngineHarness.ClusterKey)))
+        {
+            readerGroup = lease.Client.GroupId;
+        }
+
+        readerGroup.Should().StartWith("kstudio-").And.NotBe(asked);
+
+        using IAdminClient client = new AdminClientBuilder(fixture.Client("admin")).Build();
+        ListConsumerGroupsResult groups = await client.ListConsumerGroupsAsync();
+        IReadOnlyList<string> listed = [.. (groups.Valid ?? []).Select(static x => x.GroupId)];
+        listed.Should().NotContain([asked, readerGroup], "neither the asked group nor the reader's own was ever joined");
+        listed.Should().NotContain(static x => x.StartsWith("kstudio-", StringComparison.Ordinal) && x.Length == "kstudio-".Length + 32, "no group named for the reader exists");
+        LiveGroupOffsets.Committed(fixture, readerGroup, [new TopicPartition(topic, 0)]).Should().BeEmpty("the reader committed nothing");
+        TopicAppears(fixture, topic).Should().BeTrue();
     }
 
     [Fact]
@@ -217,6 +253,28 @@ public abstract class ReadNeverWritesMetadataLiveTests(KafkaFixture fixture)
             TaskScheduler.Default);
 
         TopicsExist(fixture, topic).Should().BeFalse("the scan consumer is built with allow.auto.create.topics=false whatever the host's config says");
+    }
+
+    /// <summary>
+    /// Whether the topic exists within 30 s. A broker creates an auto-created topic asynchronously after the metadata request that asked for
+    /// it, so a positive control waits on the condition (never a delay); the negative checks stay immediate.
+    /// </summary>
+    private static bool TopicAppears(KafkaFixture fixture, string topic)
+    {
+        DateTime deadline = DateTime.UtcNow.AddSeconds(30);
+
+        while (true)
+        {
+            if (TopicsExist(fixture, topic))
+            {
+                return true;
+            }
+
+            if (DateTime.UtcNow >= deadline)
+            {
+                return false;
+            }
+        }
     }
 
     private static bool TopicsExist(KafkaFixture fixture, string topic)

@@ -39,11 +39,21 @@ internal readonly struct KafkaField<T>
 }
 
 /// <summary>A registered cluster, as a page lists it. Read with no I/O.</summary>
-/// <param name="Key">The key.</param>
+/// <param name="Key">The entry key: the cluster's key, or <c>{key}/{tenant}</c> for one tenant of a broker-per-tenant cluster.</param>
 /// <param name="DisplayName">The name shown.</param>
 /// <param name="Environment">The environment label.</param>
 /// <param name="ConsumerGroups">The groups the host declared.</param>
-internal sealed record KafkaClusterInfo(string Key, string DisplayName, string? Environment, IReadOnlyList<string> ConsumerGroups);
+/// <param name="BaseKey">The cluster's key without a tenant.</param>
+/// <param name="TenantId">The tenant this entry is a cluster of, or <see langword="null" />.</param>
+/// <param name="Source">The source that contributed the cluster, or <see langword="null" /> for a host cluster.</param>
+internal sealed record KafkaClusterInfo(
+    string Key,
+    string DisplayName,
+    string? Environment,
+    IReadOnlyList<string> ConsumerGroups,
+    string BaseKey,
+    string? TenantId,
+    string? Source);
 
 /// <summary>A topic in the list.</summary>
 /// <param name="Name">The name.</param>

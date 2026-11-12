@@ -320,7 +320,7 @@ internal sealed class ScanRun : IDisposable
             int focus = inputs.FocusValueBytes > 0 && record.Offset == inputs.FocusOffset ? inputs.FocusValueBytes : 0;
             TopicHooks hook = HooksOf(topic);
             match = KafkaMatchFactory.Create(
-                record, topic, plan.Request.Grant, limits, matchCounters, hook.DecoderFailed, focusValueBytes: focus, onRedactionFailed: hook.RedactionFailed);
+                record, topic, topic.Grant, limits, matchCounters, hook.DecoderFailed, focusValueBytes: focus, onRedactionFailed: hook.RedactionFailed);
         }
         else if (record.TimestampType == WireTimestampType.NotAvailable)
         {
@@ -339,7 +339,7 @@ internal sealed class ScanRun : IDisposable
                 counters,
                 limits.MaxDecodeBytes,
                 topic.DeclaresCloudEvents,
-                plan.Request.Grant,
+                topic.Grant,
                 topic.Decoder,
                 topic.Redactor,
                 hook.DecoderFailed,
@@ -349,7 +349,7 @@ internal sealed class ScanRun : IDisposable
             {
                 case TriState.True:
                     match = KafkaMatchFactory.Create(
-                        record, topic, plan.Request.Grant, limits, matchCounters, hook.DecoderFailed, context, onRedactionFailed: hook.RedactionFailed);
+                        record, topic, topic.Grant, limits, matchCounters, hook.DecoderFailed, context, onRedactionFailed: hook.RedactionFailed);
                     break;
                 case TriState.Unknown:
                     unknown = context.UnknownReason ?? KafkaUnknownReason.InvalidJson;

@@ -12,7 +12,7 @@ namespace KStudio.Sample.Kafka;
 /// <remarks>
 /// <para>
 /// <b>The per-topic gate, shown.</b> <c>admin</c> reaches everything. <c>support</c> reaches the cluster itself (a question with no topic)
-/// and the topics whose names start with <c>orders.</c>, so <c>payments.v1</c>, <c>customers.v1</c> and <c>secrets.v1</c> are absent from every
+/// and the topics whose names start with <c>orders.</c> or <c>checkout.</c> (the Wolverine application's), so <c>payments.v1</c>, <c>customers.v1</c> and <c>secrets.v1</c> are absent from every
 /// list and a search that names one is refused whole. Every other visitor is refused.
 /// </para>
 /// <para>
@@ -34,8 +34,11 @@ internal static class SampleKafkaPolicies
     /// <summary>The capability policy: who may search records.</summary>
     public const string Search = "kafka-search";
 
-    /// <summary>The topic prefix support is limited to.</summary>
+    /// <summary>The topic prefix support starts with.</summary>
     public const string SupportPrefix = "orders.";
+
+    /// <summary>The topic prefix of the Wolverine application's checkout topics, which support may also reach.</summary>
+    public const string SupportCheckoutPrefix = "checkout.";
 
     /// <summary>Registers both policies.</summary>
     /// <param name="options">The application's authorization options.</param>
@@ -59,7 +62,9 @@ internal static class SampleKafkaPolicies
 
     /// <summary>Whether a user holding <paramref name="isAdmin" /> or <paramref name="isSupport" /> may reach <paramref name="topic" /> (or the cluster, for <see langword="null" />).</summary>
     internal static bool MayReach(bool isAdmin, bool isSupport, string? topic) =>
-        isAdmin || (isSupport && (topic is null || topic.StartsWith(SupportPrefix, StringComparison.Ordinal)));
+        isAdmin || (isSupport && (topic is null
+            || topic.StartsWith(SupportPrefix, StringComparison.Ordinal)
+            || topic.StartsWith(SupportCheckoutPrefix, StringComparison.Ordinal)));
 }
 
 /// <summary>The requirement behind <see cref="SampleKafkaPolicies.Topics" />.</summary>

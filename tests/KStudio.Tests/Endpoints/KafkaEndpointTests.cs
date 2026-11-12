@@ -87,7 +87,7 @@ public class KafkaEndpointTests
             app.MapPostgresStudio(mount).AllowAnonymous();
         }
 
-        RouteEndpoints(app).Where(IsKafkaPage).Select(static x => x.RoutePattern.RawText).Should().BeEquivalentTo([expected, expected + "/record", expected + "/search", expected + "/settings", expected + "/topic"], "the home, the record page, search, the settings and the topic overview");
+        RouteEndpoints(app).Where(IsKafkaPage).Select(static x => x.RoutePattern.RawText).Should().BeEquivalentTo([expected, expected + "/record", expected + "/related", expected + "/search", expected + "/settings", expected + "/topic"], "the home, the record page, related records, search, the settings and the topic overview");
 
         await app.StartAsync(Token);
         try
@@ -125,7 +125,7 @@ public class KafkaEndpointTests
         });
         app.MapPostgresStudio().AllowAnonymous();
 
-        RouteEndpoints(app).Where(IsKafkaPage).Select(static x => x.RoutePattern.RawText).Should().BeEquivalentTo(["/kafka", "/kafka/record", "/kafka/search", "/kafka/settings", "/kafka/topic"], "the pages, at the root of the host");
+        RouteEndpoints(app).Where(IsKafkaPage).Select(static x => x.RoutePattern.RawText).Should().BeEquivalentTo(["/kafka", "/kafka/record", "/kafka/related", "/kafka/search", "/kafka/settings", "/kafka/topic"], "the pages, at the root of the host");
 
         await app.StartAsync(Token);
         try

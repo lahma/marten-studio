@@ -18,6 +18,13 @@
     <PackageReference Include="Testcontainers.Kafka" />
   </ItemGroup>
 
+  <!-- The sample's Wolverine application (D-CORR decision 11): the Kafka transport, and the runtime compiler Wolverine 6.61 no longer ships, which
+       the handler that stores a Marten document needs to start. Only this host references the compiler (Package budget changes, 2026-11-12). -->
+  <ItemGroup>
+    <PackageReference Include="WolverineFx.Kafka" />
+    <PackageReference Include="WolverineFx.RuntimeCompilation" />
+  </ItemGroup>
+
   <!-- The seed, the judge and the policies are tested; all of them are internal to the demo. -->
   <ItemGroup>
     <InternalsVisibleTo Include="KStudio.Integration.Tests" />
@@ -26,6 +33,7 @@
   <ItemGroup>
     <ProjectReference Include="../../src/MartenStudio/MartenStudio.csproj" />
     <ProjectReference Include="../../src/KStudio/KStudio.csproj" />
+    <ProjectReference Include="../../src/KStudio.Wolverine/KStudio.Wolverine.csproj" />
     <ProjectReference Include="../MartenStudio.SampleDomain/MartenStudio.SampleDomain.csproj" />
   </ItemGroup>
 

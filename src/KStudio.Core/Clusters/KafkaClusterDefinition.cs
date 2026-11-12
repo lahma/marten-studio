@@ -1,5 +1,6 @@
 using Confluent.Kafka;
 
+using KStudio.Core.Correlation;
 using KStudio.Core.Wire.Confluent;
 
 namespace KStudio.Core.Clusters;
@@ -7,23 +8,71 @@ namespace KStudio.Core.Clusters;
 /// <summary>What the engine knows about one topic the host declared, or the default for one it did not.</summary>
 internal sealed class KafkaTopicDescriptor
 {
+    private IReadOnlyList<CorrelationField>? correlationFields;
+
     /// <summary>Creates a descriptor from what a host declared.</summary>
     /// <param name="name">The topic's name.</param>
     /// <param name="settings">What the host said, or <see langword="null" /> for a topic that declared nothing.</param>
     public KafkaTopicDescriptor(string name, KafkaTopicBuilder? settings)
+        : this(name, settings, null)
+    {
+    }
+
+    /// <summary>
+    /// Creates a descriptor from what a host declared and what a source found out (decision 5.6). The host's declaration is the descriptor and
+    /// the source's facts fill only what the host left open: a source never replaces a host's key format, decoder, partitioner or description,
+    /// and never adds a redaction rule.
+    /// </summary>
+    /// <param name="name">The topic's name.</param>
+    /// <param name="settings">What the host said, or <see langword="null" /> for a topic it declared nothing about.</param>
+    /// <param name="discovered">What a source found, or <see langword="null" />.</param>
+    public KafkaTopicDescriptor(string name, KafkaTopicBuilder? settings, KafkaDiscoveredTopic? discovered)
     {
         Name = name;
-        Settings = settings?.Snapshot() ?? new KafkaTopicBuilder();
-        Declared = settings is not null;
+        Discovered = discovered;
+
+        KafkaTopicBuilder composed = settings?.Snapshot() ?? new KafkaTopicBuilder();
+
+        if (discovered is not null)
+        {
+            if (composed.DescriptionText is null && discovered.Description is { Length: > 0 } description)
+            {
+                composed.Description(description);
+            }
+
+            // Wolverine writes the envelope's group id as the record key, UTF-8 (F8), so the key format is declared, not assumed.
+            if (composed.KeyFormat is null)
+            {
+                composed.Key(KafkaKeyFormat.Utf8String);
+            }
+
+            // Wolverine's structured CloudEvents carry content-type application/json, which detection does not take for CloudEvents (F6).
+            if (composed.DecoderSource is null && discovered.CloudEvents)
+            {
+                composed.Value(KafkaDecoders.CloudEvents);
+            }
+
+            // A claim, verified by sampling before any pruning (D39).
+            if (composed.PartitionerValue is null && discovered.Partitioner is { } partitioner)
+            {
+                composed.Partitioner(partitioner);
+            }
+        }
+
+        Settings = composed;
+        Declared = settings is not null || discovered is not null;
     }
 
     /// <summary>The topic's name.</summary>
     public string Name { get; }
 
-    /// <summary>Whether the host declared this topic at all.</summary>
+    /// <summary>Whether the host declared this topic at all, or a source found it (decision 5.6).</summary>
     public bool Declared { get; }
 
-    /// <summary>What the host said (empty for an undeclared topic). ENG-B's decoder lives here too.</summary>
+    /// <summary>What a source found out about this topic, or <see langword="null" /> for a topic only the host declared or nobody did.</summary>
+    public KafkaDiscoveredTopic? Discovered { get; }
+
+    /// <summary>What the host said (empty for an undeclared topic), with a source's facts filled in where the host left them open. ENG-B's decoder lives here too.</summary>
     public KafkaTopicBuilder Settings { get; }
 
     /// <summary>The description, when declared.</summary>
@@ -37,6 +86,9 @@ internal sealed class KafkaTopicDescriptor
 
     /// <summary>The partitioner the host declared, when it declared one: a claim the engine verifies before it prunes.</summary>
     public KafkaPartitioner? Partitioner => Settings.PartitionerValue;
+
+    /// <summary>The topic's correlation fields (D42): the defaults, with the host's own, resolved once.</summary>
+    public IReadOnlyList<CorrelationField> CorrelationFields => correlationFields ??= CorrelationDefaults.Resolve(Settings.Correlations);
 }
 
 /// <summary>
@@ -53,9 +105,26 @@ internal sealed class KafkaClusterDefinition
     public KafkaClusterDefinition(
         KafkaEngineOptions.ClusterRegistration registration,
         IReadOnlyList<KeyValuePair<string, KafkaTopicBuilder>> globalTopics)
+        : this(registration, globalTopics, null, null)
+    {
+    }
+
+    /// <summary>Builds a definition from a registration, the topics declared for every cluster and, for a cluster a source contributed, what it found.</summary>
+    /// <param name="registration">The registration; its key is the entry key.</param>
+    /// <param name="globalTopics">The topics declared on the options.</param>
+    /// <param name="contributed">The cluster a source contributed, or <see langword="null" /> for a host cluster.</param>
+    /// <param name="source">The source's name, or <see langword="null" />.</param>
+    public KafkaClusterDefinition(
+        KafkaEngineOptions.ClusterRegistration registration,
+        IReadOnlyList<KeyValuePair<string, KafkaTopicBuilder>> globalTopics,
+        KafkaContributedCluster? contributed,
+        string? source)
     {
         Key = registration.Key;
-        DisplayName = registration.Builder.DisplayNameText ?? registration.Key;
+        BaseKey = contributed?.Key ?? registration.Key;
+        TenantId = contributed?.TenantId;
+        Source = source;
+        DisplayName = registration.Builder.DisplayNameText ?? BaseKey;
         Environment = registration.Builder.EnvironmentText;
         TokenRefresh = registration.Builder.TokenRefresh;
         ConsumerGroups = [.. registration.Builder.ConsumerGroups];
@@ -75,10 +144,33 @@ internal sealed class KafkaClusterDefinition
         {
             topics[own.Key] = new KafkaTopicDescriptor(own.Key, own.Value);
         }
+
+        // A topic a source found: the host's descriptor of that name (the cluster's own, else a global one) stays the descriptor, and the
+        // source's facts are composed beside it (decision 5.6). A source never competes with a host's declaration.
+        if (contributed is not null)
+        {
+            foreach (KafkaDiscoveredTopic discovered in contributed.Topics)
+            {
+                KafkaTopicBuilder? host = HostBuilder(discovered.Name, globalTopics, registration.Builder.Topics);
+                topics[discovered.Name] = new KafkaTopicDescriptor(discovered.Name, host, discovered);
+            }
+        }
     }
 
-    /// <summary>The cluster's key.</summary>
+    /// <summary>
+    /// The cluster's entry key, the engine's key for it: the cluster's own key, or <c>{base}/{tenant}</c> for one tenant of a broker-per-tenant
+    /// cluster (decision 6). It is what <c>?cluster=</c> carries.
+    /// </summary>
     public string Key { get; }
+
+    /// <summary>The cluster's key without a tenant: what a policy sees as <c>KafkaTopicResource.Cluster</c>.</summary>
+    public string BaseKey { get; }
+
+    /// <summary>The tenant this entry is a cluster of, or <see langword="null" />.</summary>
+    public string? TenantId { get; }
+
+    /// <summary>The name of the source that contributed the cluster, or <see langword="null" /> for a host cluster.</summary>
+    public string? Source { get; }
 
     /// <summary>The name shown for the cluster.</summary>
     public string DisplayName { get; }
@@ -105,4 +197,30 @@ internal sealed class KafkaClusterDefinition
     /// <param name="topic">The topic's name.</param>
     public KafkaTopicDescriptor Descriptor(string topic) =>
         topics.TryGetValue(topic, out KafkaTopicDescriptor? declared) ? declared : new KafkaTopicDescriptor(topic, null);
+
+    private static KafkaTopicBuilder? HostBuilder(
+        string name,
+        IReadOnlyList<KeyValuePair<string, KafkaTopicBuilder>> globalTopics,
+        IReadOnlyList<KeyValuePair<string, KafkaTopicBuilder>> ownTopics)
+    {
+        KafkaTopicBuilder? found = null;
+
+        foreach (KeyValuePair<string, KafkaTopicBuilder> global in globalTopics)
+        {
+            if (string.Equals(global.Key, name, StringComparison.Ordinal))
+            {
+                found = global.Value;
+            }
+        }
+
+        foreach (KeyValuePair<string, KafkaTopicBuilder> own in ownTopics)
+        {
+            if (string.Equals(own.Key, name, StringComparison.Ordinal))
+            {
+                found = own.Value;
+            }
+        }
+
+        return found;
+    }
 }

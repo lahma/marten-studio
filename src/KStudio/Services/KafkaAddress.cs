@@ -26,6 +26,30 @@ internal static class KafkaAddress
     /// <summary>A record's page, the permalink (D-UI decision 14).</summary>
     public const string RecordRoute = "kafka/record";
 
+    /// <summary>Related records, the timeline (D42): around a record, or around a value a link names.</summary>
+    public const string RelatedRoute = "kafka/related";
+
+    /// <summary>The query-string name of the topics a timeline searches, comma separated (topic names hold no comma).</summary>
+    public const string TopicsParameter = "topics";
+
+    /// <summary>The fragment key of a seed's kind: <c>document</c> or <c>stream</c>.</summary>
+    public const string SeedKindKey = "link";
+
+    /// <summary>The fragment key of a seed document's type.</summary>
+    public const string SeedTypeKey = "type";
+
+    /// <summary>The fragment key of a seed's store.</summary>
+    public const string SeedStoreKey = "store";
+
+    /// <summary>The fragment key of a seed's value: a document or stream id, which may be personal data and so never travels in the query string.</summary>
+    public const string SeedValueKey = "v";
+
+    /// <summary>The seed kind of a Marten document.</summary>
+    public const string SeedDocument = "document";
+
+    /// <summary>The seed kind of a Marten stream.</summary>
+    public const string SeedStream = "stream";
+
     /// <summary>The query-string name of a topic.</summary>
     public const string TopicParameter = "topic";
 
@@ -91,6 +115,52 @@ internal static class KafkaAddress
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// The seed of an address's fragment (<c>#link=document&amp;type=Order&amp;store=main&amp;v=42</c>), unescaped; <see langword="null" /> when the fragment
+    /// names no kind, or a kind other than <c>document</c> and <c>stream</c>, or no value. Each part is cut at <paramref name="maxLength" /> + 1, so a
+    /// longer value can be told from one that fits.
+    /// </summary>
+    /// <param name="uri">An absolute address.</param>
+    /// <param name="maxLength">The longest value kept whole.</param>
+    public static KafkaRelatedSeed? ReadSeed(string uri, int maxLength)
+    {
+        int hash = uri.IndexOf('#', StringComparison.Ordinal);
+        if (hash < 0)
+        {
+            return null;
+        }
+
+        Dictionary<string, string> parts = new(StringComparer.Ordinal);
+
+        foreach (string part in uri[(hash + 1)..].Split('&'))
+        {
+            int equals = part.IndexOf('=', StringComparison.Ordinal);
+            if (equals <= 0)
+            {
+                continue;
+            }
+
+            string text = Uri.UnescapeDataString(part[(equals + 1)..]);
+            parts[part[..equals]] = text.Length > maxLength + 1 ? text[..(maxLength + 1)] : text;
+        }
+
+        if (!parts.TryGetValue(SeedKindKey, out string? kind) || !parts.TryGetValue(SeedValueKey, out string? value) || value.Length == 0)
+        {
+            return null;
+        }
+
+        parts.TryGetValue(SeedTypeKey, out string? type);
+        parts.TryGetValue(SeedStoreKey, out string? store);
+        store = string.IsNullOrEmpty(store) ? null : store;
+
+        return kind switch
+        {
+            SeedDocument when !string.IsNullOrEmpty(type) => new KafkaRelatedSeed(SeedDocument, type, store, value),
+            SeedStream => new KafkaRelatedSeed(SeedStream, null, store, value),
+            _ => null,
+        };
     }
 
     /// <summary>

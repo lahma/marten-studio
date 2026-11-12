@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- KStudio.Wolverine's fast suite (AGENTS.md D16, D43): no Docker and no Wolverine host. The adapter against a WolverineOptions built in the
+       test, the tenant probe against the real 6.61 types, the IL scan of what the adapter may call, the fences and the public API baseline.
+       The live test with a real Wolverine host is in KStudio.Integration.Tests/Wolverine. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsTestProject>true</IsTestProject>
+    <!-- The linked SourceScanner.cs documents itself with crefs to the other suite's tests (CS1574), which this project does not compile. -->
+    <NoWarn>$(NoWarn);CS1574</NoWarn>
+    <!-- Selects the conditional Microsoft.Extensions.* rows in Directory.Packages.props, as KStudio.Core and the adapter do. -->
+    <KStudioCorePinsExtensions>true</KStudioCorePinsExtensions>
+  </PropertyGroup>
+
+  <!-- Global usings: `Xunit` comes from Verify.XunitV3's build props. -->
+  <ItemGroup>
+    <Using Include="AwesomeAssertions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="GitHubActionsTestLogger" />
+    <PackageReference Include="AwesomeAssertions" />
+    <PackageReference Include="Verify.XunitV3" />
+    <PackageReference Include="PublicApiGenerator" />
+  </ItemGroup>
+
+  <!-- KStudio.Core and the adapter only: nothing of a studio, so the output folder proves at the file level that the adapter brings none. -->
+  <ItemGroup>
+    <ProjectReference Include="../../src/KStudio.Core/KStudio.Core.csproj" />
+    <ProjectReference Include="../../src/KStudio.Wolverine/KStudio.Wolverine.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="../MartenStudio.Tests/Conventions/RepositoryRoot.cs" Link="Support/Linked/RepositoryRoot.cs" />
+  </ItemGroup>
+
+</Project>

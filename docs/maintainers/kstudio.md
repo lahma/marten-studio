@@ -106,6 +106,12 @@ projects.
 **One client.** Confluent.Kafka is the only Kafka client (plan K2): floor 2.14.0, the version WolverineFx.Kafka 6.61 pins,
 latest tested 2.16.0. It brings librdkafka's native binaries (`librdkafka.redist`) at its own version.
 
+**The lag read has a consumer group.** The lag read uses a per-cluster consumer that is never subscribed, through a dependent admin
+client, because an admin handle has no consumer group and librdkafka 2.16.0 and earlier crash (#5040) on `NOT_COORDINATOR` in
+`ListConsumerGroupOffsets` (a NULL `rk_cgrp` in `rd_kafka_handle_OffsetFetch`: SIGSEGV, exit 139, just after a broker auto-creates
+`__consumer_offsets` or whenever a group's coordinator moves). Remove it once the Confluent.Kafka floor contains librdkafka's fix
+(PR #5611, merged 2026-10-14; no release has it as of 2.16.0). Every other admin call stays on the plain admin client.
+
 **The wire seam.** Every broker call goes through `IKafkaWire` (`KStudio.Core.Wire`): metadata for all topics, describe
 topics with their authorized operations, describe cluster, list offsets (earliest, latest, max timestamp, for a timestamp;
 one kind per call, each partition once), describe a topic's configs, a declared group's offsets and description, and a
@@ -131,7 +137,17 @@ shown as "Not available: needs `DESCRIBE_CONFIGS` on topic `orders.v1`" and logg
 **Lifecycle.** Nothing connects when KStudio is registered or the application starts, and nothing is a hosted service.
 One admin client per cluster is created by the first read that needs it and disposed when it has been idle for
 `AdminIdleTimeout` (5 minutes). A client a call still holds is never destroyed: the pool retires it and disposes it when the last
-lease is released. Each scan gets one consumer, built, read and closed on a dedicated thread; the scan's
+lease is released. The group-offsets (lag) read is the one admin call that does not run on that client: it runs on a per-cluster
+**offsets reader**, a consumer that is never subscribed and never assigned, so it never fetches, with a dependent admin client built
+over its handle (`DependentAdminClientBuilder`), pooled, leased and idle-disposed exactly as the admin client is (the pool's log lines
+say `admin` or `offsets`), and disposed in the order dependent admin client, `Close`, `Dispose`. It is built as a scan consumer is
+(the clone, the overrides, a group id of its own that is never joined, no commit, no offset store, the engine's log and error
+handlers). Its queue is drained **before and after** each read, with a poll of zero wait: that is where the host's OAuth
+token-refresh hook runs, because librdkafka queues the refresh on the main queue inside `rd_kafka_new`, a consumer redirects that
+queue to its poll queue, and the dependent admin client polls only its own result queue; without the drain before, the first lag read
+on an OAUTHBEARER cluster would wait out its timeout (and so would the first after every idle disposal). The drain after keeps log
+and error events from piling up. The reader commits nothing, joins no group and creates no topic (`ReadNeverWritesMetadataLiveTests`).
+Each scan gets one consumer, built, read and closed on a dedicated thread; the scan's
 reads wait at most 100 ms, so a cancel, the deadline and the governor are seen within 100 ms. At host shutdown the engine
 cancels every scan, waits up to 10 s, and disposes its clients. Catalog reads are single-flight per cluster and key, for
 the host studio's `RefreshInterval` (configs, authorized operations and the cluster description for a minute).
@@ -149,23 +165,23 @@ The engine clones the host's configuration when a cluster is registered and neve
 client it builds is that clone with these overrides, applied last; each overridden host key is logged at Debug by name,
 never by value.
 
-| Setting | Scan consumer | Admin client | Why |
-|---|---|---|---|
-| `allow.auto.create.topics` | `false` | `false` | a metadata request must never create a topic |
-| `enable.auto.commit`, `enable.auto.offset.store` | `false` | - | nothing is committed or stored |
-| `group.id` | `{GroupIdPrefix}{scan id}`, `kstudio-` by default | - | Confluent's consumer requires one; it is never subscribed and never committed |
-| `group.instance.id` | removed | - | no static membership |
-| `group.protocol` | `classic` | - | one tested path |
-| `client.id` | `{host client.id or rdkafka}.kstudio` | the same | broker metrics and client-id quotas tell the studio apart |
-| `isolation.level` | `read_committed`, or `read_uncommitted` when a scan includes uncommitted records | - | explicit, never inherited |
-| `enable.partition.eof` | `true` | - | the engine must know a partition ran out |
-| `auto.offset.reset` | `error` | - | an offset deleted during a scan is reported, never skipped |
-| `statistics.interval.ms` | `0` | `0` | no statistics |
-| `enable.metrics.push` | `false` | `false` | the studio's clients never appear in the cluster's client metrics |
-| `queued.max.messages.kbytes`, `fetch.max.bytes`, `max.partition.fetch.bytes` | the engine's limits (D41) | - | the clients' defaults prefetch 64 MiB per consumer |
-| `debug` | removed | removed | the host's debug contexts are not the studio's |
-| `plugin.library.paths`, `confluent.monitoring.interceptor.*` | removed | removed | a host's interceptor would make the studio's clients produce to the host's monitoring topic |
-| `fetch.message.max.bytes` (librdkafka's own name for `max.partition.fetch.bytes`), `auto.commit.enable` (the legacy topic property that `enable.auto.commit` also names) | removed | - | one setting under two names never reaches the client twice |
+| Setting | Scan consumer | Offsets reader | Admin client | Why |
+|---|---|---|---|---|
+| `allow.auto.create.topics` | `false` | `false` | `false` | a metadata request must never create a topic |
+| `enable.auto.commit`, `enable.auto.offset.store` | `false` | `false` | - | nothing is committed or stored |
+| `group.id` | `{GroupIdPrefix}{scan id}`, `kstudio-` by default | `{GroupIdPrefix}{reader id}` | - | Confluent's consumer requires one; it is never subscribed and never committed |
+| `group.instance.id` | removed | removed | - | no static membership |
+| `group.protocol` | `classic` | `classic` | - | one tested path |
+| `client.id` | `{host client.id or rdkafka}.kstudio` | the same | the same | broker metrics and client-id quotas tell the studio apart |
+| `isolation.level` | `read_committed`, or `read_uncommitted` when a scan includes uncommitted records | always `read_committed` | - | explicit, never inherited |
+| `enable.partition.eof` | `true` | `true` | - | the engine must know a partition ran out |
+| `auto.offset.reset` | `error` | `error` | - | an offset deleted during a scan is reported, never skipped |
+| `statistics.interval.ms` | `0` | `0` | `0` | no statistics |
+| `enable.metrics.push` | `false` | `false` | `false` | the studio's clients never appear in the cluster's client metrics |
+| `queued.max.messages.kbytes`, `fetch.max.bytes`, `max.partition.fetch.bytes` | the engine's limits (D41) | 1 MiB queue and 1 MiB fetch (it never fetches) | - | the clients' defaults prefetch 64 MiB per consumer |
+| `debug` | removed | removed | removed | the host's debug contexts are not the studio's |
+| `plugin.library.paths`, `confluent.monitoring.interceptor.*` | removed | removed | removed | a host's interceptor would make the studio's clients produce to the host's monitoring topic |
+| `fetch.message.max.bytes` (librdkafka's own name for `max.partition.fetch.bytes`), `auto.commit.enable` (the legacy topic property that `enable.auto.commit` also names) | removed | removed | - | one setting under two names never reaches the client twice |
 
 Every assign carries explicit offsets, so the consumer never fetches committed offsets, which would need a group ACL.
 The engine sets its own log and error handlers on both builders, so librdkafka never writes to the host's stderr, and
@@ -202,8 +218,13 @@ within about half a second of the assign, possibly after the first records; the 
 reader returns it as a failure naming the scan's group, and the scan counts it, logs 9671 once at Debug and goes on: it
 is never a stop and never a warning. Without a group ACL `Offset.Stored` stalls with no record, no end and no error, so
 the reader refuses every negative offset and the engine always assigns a concrete one. A `PREFIXED` `READ` ACL on group
-`kstudio-` (or on the host's own `GroupIdPrefix`) silences the one refusal and changes nothing else; reading never needs
-it. The consumer groups a host declares for the lag panel are another matter: without `DESCRIBE` on the group,
+`kstudio-` (or on the host's own `GroupIdPrefix`) silences the one refusal on a scan, and reading never needs it. It matters more
+for the **offsets reader** (D36), which lives as long as its pool slot, up to `AdminIdleTimeout` after the last lag read: with no
+`DESCRIBE` on its own group, librdkafka keeps looking that group's coordinator up for as long as the reader exists. Measured on
+`apache/kafka` 4.4.0 and Confluent.Kafka 2.16.0 with the `nogroup` principal (`debug=cgrp,protocol` on a reader built from the
+engine's own table, ten lag reads over 30 s): 42 `FindCoordinator` requests, one a second for the reader's own group on top of the
+reads' own (the principal has no ACL on that group, so each is a refused lookup). With a `PREFIXED` ACL on `kstudio-` (`DESCRIBE` is enough, `READ` implies it) the same
+run sent 5, all in the first 100 ms, and none after. Grant it where lookups in the broker's authorizer log matter. The consumer groups a host declares for the lag panel are another matter: without `DESCRIBE` on the group,
 `DescribeConsumerGroups` and `ListConsumerGroupOffsets` fail with `GroupAuthorizationFailed`, which the overview shows
 as "Not available: needs `DESCRIBE` on group `orders-service`" while the topic's own fields still load.
 `ListConsumerGroups`, which the engine never calls, answers such a principal with an empty list and no error, one more
@@ -505,7 +526,11 @@ to 267 MiB against the ceiling of 253 MiB and the live test's allowance of 316 M
 characters) and then its value, each cut with a count of what was left out; so a record of 64 headers of 4 KiB keeps the
 first of them and none of its value. The formula is a ceiling only because of that budget. The record-size sampler's
 consumer is outside $S$ and the governor, so it is small: 1 MiB of queue and 1 MiB of fetch, for at most three seconds
-at a time per cluster. The live suite allows $1.25 \cdot S(C + 2mc)$ for two scans over records of a 96 KiB value and 64
+at a time per cluster. The **offsets reader** (D36) is outside $S$ and the scan count too, and lives for as long as its pool slot, up
+to `AdminIdleTimeout` after the last lag read, one per cluster: measured on Linux (`apache/kafka` 4.4.0, Confluent.Kafka 2.16.0, eight
+readers at once, three runs, `RssAnon` and `/proc/self/status` threads after a GC), it costs about 0.3 MiB of private memory
+(0.1 to 0.4 MiB, at the limit of what `RssAnon` resolves), 5 threads and 2 broker connections each, in addition to what the admin client
+costs. The live suite allows $1.25 \cdot S(C + 2mc)$ for two scans over records of a 96 KiB value and 64
 headers of 4 KiB, and prints what they actually held. Broker egress is bounded separately: with these limits the broker
 sent at most $Q + F$ more than the engine had read.
 
@@ -514,3 +539,214 @@ A record read keeps one more value: the record asked for may hold up to $F_v$ by
 Before reading, the engine estimates a scan: the offsets in its ranges ("about", since offsets are not records) and the
 bytes, from a small sample of record sizes. Above the confirmation threshold, `Start` refuses unless the visitor's
 confirmation travels with the call. A profile (M5) or a visitor can lower any limit; nothing raises one above the host's.
+
+## D42
+
+**KStudio correlates by declared fields, in one audited scan.**
+
+**Fields and kinds.** A topic's correlation fields are headers, CloudEvents attributes, the key and JSON paths
+(`KafkaTopicBuilder.Correlation`). Each has a **kind**, which says what its values mean, and fields of one kind are compared
+across topics; fields of different kinds never are. A field's kind is the first that applies: what `As(kind)` names,
+`document:{type}` for `Document(...)`, `stream` for `Stream(...)`, the kind of the default it replaces, or its own name (a
+header's or attribute's folded to lower case, a path's canonical text). The registry validates every declaration with the rest
+of the options and reports all problems together: a header name of 1 to 256 characters of `[A-Za-z0-9_.-]`, an attribute of
+`[a-z0-9]{1,20}`, a path the search grammar reads (at most 32 steps), a kind of `[a-z][a-z0-9-]{0,39}` or `document:` and a
+type, a document type of 1 to 200 characters with no control character, a store of 1 to 100, at most 16 fields a topic
+(defaults included), one field per source and name, and not `Document` and `Stream` on one field. The kind `trace` is for
+headers only.
+
+**Defaults.** Unless `WithoutDefaults()` is called, a topic has Wolverine's and CloudEvents' conventions: header
+`correlation-id` (`correlation`); headers `id`, `conversation-id` and `causation-id` and CloudEvents `id` (`message`); header
+`saga-id` (`saga`); and the trace headers `traceparent`, `ce_traceparent` and `parent-id` (`trace`). A host field with the same
+source and name replaces the default. `tenant-id` is not a kind: it is a scope, too broad to correlate on.
+
+**Keys come only from what the anchor shows.** `CorrelationExtractor` reads the anchor's already-redacted fields and only a
+literal: not null, not masked, not cut, text (a binary header is hex and is never a key), at most 1,000 characters and
+holding no mask. `KafkaMatchField.IsLiteral` and `KafkaMatchMasks.IsMasked` are the one rule, in Core, which the chips, the
+copied predicates and the extractor share. A header is read ignoring case and up to 4 times. A JSON path is read only from an
+anchor read with the payload, whose JSON value is whole and not withheld, with no masked path left out of the match and the
+node neither masked nor under a mask, and only a scalar (a string, a number or a boolean). The trace comes from the
+anchor's trace context, and only when the header it came from is a literal. A set holds at most 10 values a kind and 24 in
+all, and says how many it left out.
+
+**One query a topic.** `CorrelationQueryBuilder` writes the search of one topic from the key set and that topic's own fields.
+It leaves a field out, with a reason that names no value, when the header is on the deny-list, when the field is redacted and
+not `Searchable()`, when a trace header is redacted (`^=` is refused on a redacted field), when a JSON path would be searched
+without `ReadPayloads`, or when the topic's key format cannot hold the value. One value is `=`, several are `in`; a JSON
+path also searches a value that reads as a number or a boolean in that type, because the same id is a string on one topic and
+a number on another (not a text with a leading zero). Past the parser's 32 clauses or 2,000 characters whole kinds are
+dropped, in the order trace, the host's kinds, documents and streams, saga, message, correlation, each said. A topic left with
+no clause is not scanned. Every text it writes parses and compiles on the topic.
+
+**One scan, a predicate and a grant per topic.** `KafkaScanRequest.PerTopic` gives each topic a `KafkaTopicQuery` (text and
+grant). `PredicateText` is then `null`, the topics are exactly the queries' topics in order, and each grant includes `Envelope`
+and is included in the request's. Each text is parsed and compiled for its own topic under its own grant, and every read of a
+record asks the topic's grant (`TopicScanContext.Grant`), so a topic searched under `Envelope` never reads a value although
+another topic of the scan does. An error is prefixed `On {topic}: `. Pruning uses each topic's own key clauses. The audit text
+is `{topics}: {text}` for each distinct text, the topics that share one named together and the groups joined by `; ` (so 20
+topics with one search are one entry that fits the log), and a literal is shown only where **no** topic redacts the field it is
+on. A topic's text is never empty or blank: a topic with nothing to search is left out of the request. It is still one scan: one consumer, one slot, one estimate and confirmation, one stop reason, one budget, and
+`ReadsValues` is true when a topic whose search reads values has the payload grant. Without `PerTopic` nothing changed.
+
+**Related records, the rules the timeline follows.** The default topic set is the anchor's topic first, then the cluster's
+declared topics in name order, each filtered through the cluster and capability policies, at most 20; a refused topic is absent
+from a default set, and a visitor-chosen set with a refused topic is refused whole, never narrowed (D35). A topic with no query (`HasQuery` false)
+is a lane that says why and is left out of `PerTopic`; a JSON path without `ReadPayloads` is noted on its lane. The
+service asks `SearchRecords`, the cluster question, then both policies for every topic in `PerTopic` (after the cluster
+question), then the `ReadPayloads` question once for each topic that has a path, and audits once for the scan, on failure as well as success, with the per-topic audit text.
+
+**Duplicates.** `KafkaDuplicateFinder` groups the matches the visitor already holds; it reads nothing, asks no gate and records
+no audit. Two records are copies when they are on the same topic and share an identity, which is the first of these a record
+has: its `id` header, CloudEvents `source` and `id`, or its key and whole value (read with the payload, neither cut nor
+withheld; a masked value is compared as shown, and the group says so). A masked or cut field is no identity. A group has at
+least two copies. The pass keys its buckets on the strings the matches already hold, in parts, and copies no value. A header on
+the deny-list is never a correlation field: validation refuses it, and the extractor skips it besides.
+
+**Why.** One scan, because the owner may run one at a time (D41) and a timeline is one read with one estimate, one stop reason and
+one audit entry; a query a topic, because a field one topic redacts must not fail the others. Kinds are the smallest vocabulary
+that says which fields mean the same thing on topics that spell them differently, and keys come only from what the anchor
+shows, so a link can reveal nothing the visitor could not already see (D40). Duplicates are same-topic, because a retry tier
+re-publishes to another topic and the timeline already shows that as related, not as a copy.
+
+**Tests.** `tests/KStudio.Tests/Correlation/` (validation, extractor, query builder, duplicate finder, with its 20 ms bound at
+the largest values), `Scanning/PerTopicScanTests` on the fake and `PerTopicScanLiveTests` on Kafka 3.9 and 4.x (one consumer, a
+group never joined), and `Redaction/MaskTextTests`.
+
+## D43
+
+**D43 — KStudio.Wolverine discovers configuration and nothing else.** `UseWolverineKafka()` reads the built `WolverineOptions` once, when
+the cluster registry is first built, through KStudio.Core's internal `IKafkaClusterSource` (`InternalsVisibleTo`, an exact version pin and a
+version guard). It starts, connects and writes nothing, runs no builder callback, and reads no message store or handler graph. Broker-per-tenant
+clusters (`{cluster}/{tenant}`, `TenantId` on the resource) come from a reflection probe of three members that fails closed. A discovered topic
+never replaces a host's descriptor, and discovery adds no redaction.
+
+**The seam, and a reversal of D-ENGINE 1.4.** D-ENGINE 1.4 said the adapter would use the public registration API only. It cannot: the public
+registration is an options delegate, which `KafkaStudioStartupGuard` reads at host start with no service provider, possibly before Wolverine's
+runtime has connected its transports, and a broker-per-tenant registration has no configuration until it has (`KafkaTenant.Compile`, called by
+`KafkaTransport.ConnectAsync`). So `KafkaEngineOptions` carries an internal list of source factories, and `KafkaClusterRegistry` - built lazily, on
+the first Kafka page, link or catalog read, which is after ASP.NET Core started its hosted services - gets the container and runs every source once,
+after the host's own clusters. The pattern is D30's: an internal interface, `InternalsVisibleTo` for the one assembly (and its tests), and
+`KStudioWolverineVersionGuard`, which refuses to wire the adapter to any KStudio.Core but its own build before anything of KStudio.Core's
+internals is touched (`UseWolverineKafka` names only the public `KafkaEngineOptions`; the body that adds the source is a `NoInlining` method of its
+own, and `KStudioWolverineVersionGuardTests` scans the IL to keep it so). A public contributor interface would have frozen a seam with one
+consumer into KStudio.Core's baseline.
+
+**What a source may contribute.** Clusters, each with its consumer and admin configuration (cloned by the registry as `AddCluster` clones the
+host's, so a source cannot write back), a builder, and the topics it found; and notes. A cluster that breaks a rule of the host's own (a key, a
+display name, 50 groups, bootstrap servers, a topic name), or whose key a host cluster holds, is skipped and noted, never thrown: one bad discovery
+must not take down the host's own clusters. A source that throws costs a note. The Settings page shows each note in its general words only (`What` and `Reason`, built by `KafkaRegistryNote.Generic`), never the note's own sentence,
+which can name a tenant, a topic or a broker a visitor's policy refuses (D35); the log
+carries the same general words as event 9677 - `a tenant cluster`, `Wolverine had not connected it` - Warning the first time within ten
+minutes for the same source, item and reason and Debug after, and never a tenant id, a topic or a value. Event 9678 (Debug) is for Find in Kafka
+failing to read the clusters.
+
+**Tenant entries (decision 6).** An entry's key is `{cluster}/{tenant}`: the registry's key and the engine's `KafkaScanRequest.Cluster`. A host
+cluster's key still cannot hold a `/`, so the entry key splits at the first one. `KafkaClusterDefinition` gains `BaseKey`, `TenantId` and `Source`;
+`KafkaClusterEntry` keeps `Key` and `TenantId` and gains `Cluster`, the base key. **Every question a policy is asked and every audit scope and
+studio log event carries `Cluster` and `TenantId`, never the entry key** (`KafkaAuthorization`, `KafkaActionLog`, `KafkaAuditGate`): a policy never
+parses a key, and the gate judges an entry by the question its page asked. **The engine's own events (9650 to 9699) carry the entry key**, because
+the engine knows only entries; the studio's events (9600 to 9649) and the Activity entries carry the base key and the tenant. The address carries the entry key escaped (`?cluster=wolverine%2Facme`), as D9 already
+does for any id with a `/`.
+
+**The tenant probe.** Wolverine 6.61 keeps `KafkaTransport.Tenants` and the `KafkaTenant` class internal; the public surface can only write them
+(`AddTenant`). The probe is the only reflection in the adapter and touches exactly three members: `KafkaTransport.Tenants`, `KafkaTenant.TenantId`
+and `KafkaTenant.Transport`. It fails closed. A shape that is not the one read - the property missing, a cache that is not enumerable, an item whose
+type is not `Wolverine.Kafka.Internals.KafkaTenant`, a member of another type, a getter or an enumerator that throws - lists no tenant of that
+transport and says so once; it never lists the parent's cluster in a tenant's place. A tenant whose child transport has no bootstrap servers is not
+listed: Wolverine had not connected it. **Tenants are read only after the host has started.** The source lists the transports' own clusters at once
+and, when `IHostApplicationLifetime` is registered and `ApplicationStarted` has not fired, no tenants: its contribution is marked incomplete (with the
+token it waits on and the Settings page's sentence, "Tenant clusters are listed once the application has started."). The registry runs an incomplete
+source once more, on the first access of the registry after the token has fired, and adds that answer's tenant entries as one new snapshot; it never
+changes or removes an entry already listed and never runs the source a third time. With no host lifetime registered the source behaves as if the host had
+started. A tenant is listed only under a parent cluster the same source listed (a parent that broke a rule, or whose key was taken, takes its tenants
+with it), and two named brokers whose names make one slug list only the first, with its tenants. A tenant id that is blank, over 128 characters, holds a
+control character or a `|` (the engine's log-once keys use it as a separator) is not listed, and its note does not repeat it. Wolverine keeps its tenants in a dictionary, so they are listed ordinal by id, at most 200 a transport.
+`ForbiddenWolverineCallsTests` fails on any `GetProperty`, `GetField` or other member lookup whose name is not one of the three, and on any
+reflection call that invokes or sets. Asking Wolverine for a public, read-only view of a transport's tenants is a decision for the user, not the
+adapter's; until there is one, the probe is the guarded path.
+
+**What a discovered topic becomes.** `KafkaTopicDescriptor` gains the source's facts beside the host's declaration. The host's descriptor
+of that name - the cluster's own, which replaces a global one, or the global - stays the descriptor, and the source fills only what it left open:
+the description; the key format (`Utf8String`, now declared and not assumed: Wolverine writes the envelope's group id as the key); the decoder
+(`KafkaDecoders.CloudEvents` when the endpoint's serializer is Wolverine's `CloudEventsMapper`, whose structured events carry
+`content-type: application/json` and so would not be detected as CloudEvents); and the partitioner claim from the producer configuration's
+`partitioner` setting (`consistent_random` or unset: CRC32; `murmur2`, `murmur2_random`: murmur2; `fnv1a`, `fnv1a_random`: FNV-1a; anything else:
+none), which is verified by sampling before any pruning (D39). **Redaction comes only from the host**: discovery adds no rule and removes none, and the
+deny-list applies as always. A discovered topic is `Declared`, so it is in the catalog's declared group and in the timeline's default set.
+
+**What the adapter never does.** It reads no message store, envelope table, dead-letter store, node table or runtime agent, and no handler
+graph. It calls none of `GetEffectiveConsumerConfig` and `GetEffectiveProducerConfig` (which write the parent's values into a topic's own
+configuration), `CreateConsumer`, `CreateProducer`, `CreateAdminClient`, `ConnectAsync`, `InitializeAsync`, `SetupAsync`, `CheckAsync`,
+`TeardownAsync`, `BuildListenerAsync`, `Compile` or `ConfigureClient`. It enumerates `KafkaTransport.Topics` and never indexes it - the cache's
+indexer creates an endpoint - and never reads the internal topic groups (it takes them from `Endpoints()`). It never runs, reads or keeps
+`ConfigureConsumerBuilders`, `ConfigureProducerBuilders` or `ConfigureAdminClientBuilders`, and never uses a Wolverine group id to consume (D37
+replaces it). Every configuration it touches is byte for byte unchanged afterwards. The tests: `WolverineNeverWritesTests` (a snapshot of every pair
+of every transport, topic and tenant before and after; the builder callbacks replaced by recorders; the configurations handed over are copies),
+`ForbiddenWolverineCallsTests` (the IL scan), and the live `WolverineDiscoveryLiveTests`, which also proves on both brokers that KStudio created no
+topic, joined no group, committed no offset, and that Wolverine's own group offsets are as they were.
+
+**Fences.** `KStudio.Wolverine` references KStudio.Core and WolverineFx.Kafka only: no studio, no KStudio, no Marten, Weasel or Npgsql
+(`KStudioWolverineFenceTests`, by project file, restore graph, built references and its test project's output folder). JasperFx arrives through
+WolverineFx, and its source generator is dropped from the adapter's compilation. `KStudio.Tests` does not reference the adapter, so the module's own
+output folder stays free of Wolverine (`KStudioFenceTests`).
+
+## D44
+
+**D44 — Links between a studio and a module are pure, internal and grant nothing.** `IStudioRouteLinks` (MartenStudio implements it: a document
+by type and id, a stream by id or key, in the record's tenant; for a store with a database per tenant only when the store keeps its rows per tenant and the host listed no `KnownTenantIds`) and
+`IStudioRecordSearchLinks` (KStudio implements it: "Find in Kafka") live in PostgresStudio beside `IStudioLinks`, under its rules: no IO, no policy,
+every id escaped, and the page a link opens resolves its own scope and asks its own policies again. Neither module names the other, a masked value
+never enters a URL, a value travels in the fragment, and the destination authorizes again. External links are host templates with no credential,
+opened with `noreferrer`.
+
+**From a record to Marten (decision 7).** `KafkaRecordLinkBuilder` is pure. For each correlation field of the record's topic that names a
+document (`Document(type, store)`) or a stream (`Stream(store)`), it takes the field's values from the record through `CorrelationExtractor` - so a
+masked, cut, absent or over-long value is never an id - and asks the seam: `ToDocument(new StudioLinkScope(store, tenant), type, id)` or `ToStream`.
+The address is the seam's, verbatim; a `null` answer draws the words and a reason ("not a document this studio shows") and no link. Without the
+seam (a Postgres Studio host) nothing is drawn. MartenStudio answers `null` for a hidden
+document type, for an ambiguous type, for a tenancy of the application's own (nothing says where its tenants are), and for a multi-tenanted store
+with no tenant, whether its tenants share a database or each has one (a link would open the visitor's own tenant and say "not found", which is false).
+A store that keeps each tenant in a database of its own gets a link with the tenant and no `db` only when it keeps its rows per tenant
+(`StoreTenancy.KeepsRowsPerTenant`, the test behind its tenant selector) and the host listed no `KnownTenantIds`: `StudioState.SetScopeAsync` opens the
+first database, among those the visitor may see, whose tenant listing carries that tenant (at most 32 searched, TENANT-DB), and no database lists tenants
+where documents and events are single-tenanted (master table, one-server and static tenancies in Marten 9.57.0), so there the link would reopen the id
+in the database on screen; such a store gets no link yet. **The tenant**, the first that applies: the record's `tenant-id` header when it is a literal; **no Marten link at all when the
+header is present and redacted or cut** - the address would carry the hidden value, and the page says so without it; the cluster entry's own tenant
+(a Wolverine broker-per-tenant cluster); none. The words cut an id at 24 characters, never the address.
+
+**Find in Kafka (decision 8).** `KafkaRecordSearchLinks` is a singleton that reads the registry's declarations (no broker call, no policy). A link
+is offered when some cluster has a declared topic with a correlation field that refers to the record: `Document(type, store)` where `type` equals any of
+the request's names (ordinal, ignoring case) or `Stream(store)`, the field's store being unnamed or the screen's store (ordinal, ignoring case). One
+cluster entry has such topics: it is named. Several: the entry whose tenant is the request's; otherwise no `cluster=`, and the page uses the visitor's
+current cluster. The address is relative to the studio's base, `kafka/related?cluster=…&from=…&to=…#link=document&type=…&store=…&v=…`: every part
+escaped, the window in the query when both ends are known, **the value only in the fragment** (a browser never sends one to a server, so an id that is
+personal data stays out of server logs and referrers), and the type in the link is the matching field's own spelling, so that the timeline's comparison of
+correlation kinds holds. A registry that cannot be built answers `null` and says so once at Debug (event 9678, the exception's type only): a Marten
+page never fails because of the module. **A deviation from B.11.2's wording, recorded:** the reverse link opens the timeline's seed mode and not a
+one-predicate search permalink. A search has one predicate over all its topics, but the fields that refer to a document differ per topic (the key on one,
+`$.orderId` on another); one predicate would read values on every topic or be refused without `ReadPayloads`. Seed mode is still a permalink (the cluster
+and window in the query, the value in the fragment), and it searches each topic by its own fields.
+
+**External links (decision 9).** `o.ExternalLink(label, urlTemplate)`, at most eight. The placeholders are `{traceId}`, `{correlationId}`, `{from}`,
+`{to}`, `{fromMs}` and `{toMs}`; the time forms are the record's timestamp 15 minutes either side, in ISO 8601 UTC with milliseconds and in Unix
+milliseconds. `{traceId}` is the record's trace id only when the header it came from is a literal (the chip rule); `{correlationId}` is the first literal
+`correlation-id` header. Every value is `Uri.EscapeDataString`-escaped wherever the placeholder stands, and **a masked, cut or absent value means no
+link, never a link with a hole.** The options are validated at the first read, which the startup guard makes at host start (F3): a label of 1 to 40
+characters, unique ignoring case; a template of at most 2,000 characters that, once each placeholder is replaced by `x`, is an absolute `http` or
+`https` address; only the six placeholders; **no credential - no user info, and no query or fragment parameter (a fragment is unescaped and split on `?`, `&` and `;`, so `#/view?token=x` and `#%2Fview%3Ftoken=x` are seen) whose name, lower-cased and without `-`, `_` and `.`, is `key`, `sig`, `auth`, `pwd`, `passwd` or `code`, or ends in `token`, `secret`, `password`, `signature`, `apikey`, `accesskey` or `credential`** (`api-key`, `X-Amz-Signature`, `X-Amz-Security-Token` and `private_token` are refused; `tokenizer`, `author` and `keyword` are not); **and no placeholder before the end of the authority** (`https://{correlationId}/` would let a value decide the host). The reason is that a
+template is rendered into every visitor's page and kept in their browser history. An error names the label and the rule and never the template, whose
+text can hold what the rules refuse. A link is `<a target="_blank" rel="noopener noreferrer">`, so no referrer carries the studio's address (cluster,
+topic, offset) to the other tool. It is neither gated nor audited: no record is read for it, the values are already on the visitor's screen, and a link
+grants nothing.
+
+**What the module shows of Wolverine (UI-E).** The record detail's **Envelope id**, **Sent at** and **Partition key** lines are Wolverine's `id`,
+`sent-at` and `partition-key` headers as the record shows them (a redacted one reads redacted, a topic without them draws no line). The topic overview's
+discovered facts - role, message types, consumer group, serializer and source - and the Settings page's section on what a source listed and could not
+list are drawn from the registry's declarations and notes. **A note's own sentence can name a broker, a tenant or a topic its source did not list, and the visitor may be refused that tenant or topic (D35).
+So the Settings page shows each note only in its general words (`Not listed: a tenant cluster, because Wolverine had not connected it.`), under the
+same cluster gate as the settings beside it (`KafkaCatalogService.GetDiscoveryAsync`); `ClusterSourceTests` and `KafkaDiscoveredFactsTests` hold it.**
+
+**The tests.** `KafkaRecordLinkBuilderTests` (tenant rules, masked key, header and tenant, cut value, the store, the bound), `KafkaRecordLinksTests`
+(the section, the compact form, the envelope lines, the external link line), `KafkaRecordSearchLinksTests` (fragment-only value, store rule, cluster
+choice with tenants, a throwing registry), `ExternalLinkTemplateTests` (each rule of the credential check, error text, escaping, both time forms),
+`AddKafkaStudioTests` (the host refused at start), `KafkaDiscoveredFactsTests`, and `PublicApiTest_KStudio`, whose baseline moves by `ExternalLink`.

@@ -39,6 +39,7 @@ public class AdminPoolTests
                     Created.Add(client);
                     return client;
                 },
+                "admin",
                 Clock,
                 Idle,
                 Logs.CreateFactory().CreateLogger("test"),
@@ -107,7 +108,7 @@ public class AdminPoolTests
         rig.Created.Should().OnlyContain(static x => x.Disposed, "the failing client did not stop the other");
         CapturedLogEntry entry = rig.Logs.Entries.Single(static x => x.EventId.Id == 9664);
         entry.Level.Should().Be(LogLevel.Debug);
-        entry.Message.Should().Contain("cluster a");
+        entry.Message.Should().Contain("admin client of cluster a");
     }
 
     [Fact]
@@ -188,7 +189,7 @@ public class AdminPoolTests
 
         rig.Created.Single(static x => x.Cluster == "a").Disposed.Should().BeTrue("idle for the whole timeout");
         rig.Created.Single(static x => x.Cluster == "b").Disposed.Should().BeFalse("a lease blocks disposal");
-        rig.Logs.Entries.Where(static x => x.EventId.Id == 9651).Should().ContainSingle().Which.Message.Should().Contain("cluster a").And.Contain("300 s idle");
+        rig.Logs.Entries.Where(static x => x.EventId.Id == 9651).Should().ContainSingle().Which.Message.Should().Contain("admin client of cluster a").And.Contain("300 s idle");
 
         rig.Clock.Advance(Idle * 2);
         rig.Created.Single(static x => x.Cluster == "b").Disposed.Should().BeFalse("still leased");

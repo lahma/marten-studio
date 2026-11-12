@@ -81,22 +81,7 @@ internal sealed class TenantDiscovery
     {
         ArgumentNullException.ThrowIfNull(store);
 
-        if (store.Options.Events.TenancyStyle == TenancyStyle.Conjoined)
-        {
-            return true;
-        }
-
-        Func<Type, bool>? visible = options.Value.IsDocumentTypeVisible;
-        foreach (IDocumentType documentType in store.Options.AllKnownDocumentTypes())
-        {
-            if (documentType.TenancyStyle == TenancyStyle.Conjoined
-                && (visible is null || visible(documentType.DocumentType)))
-            {
-                return true;
-            }
-        }
-
-        return false;
+        return StoreTenancy.KeepsRowsPerTenant(store.Options, options.Value.IsDocumentTypeVisible);
     }
 
     /// <summary>

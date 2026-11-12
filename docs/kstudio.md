@@ -98,6 +98,35 @@ Limits (`o.Limits`) bound every search: bytes and records per search, duration, 
 two searches at a time per application and one per user, and a byte rate for the whole application. They can only be
 lowered.
 
+## Related records
+
+**Related records** on a record's page searches the topics around it for records that share one of its correlation
+values. The values come only from what the page already shows you: a field that is redacted, cut or absent is never
+used. By default KStudio compares Wolverine's headers (`correlation-id`; `id`, `conversation-id` and `causation-id`;
+`saga-id`), the CloudEvents `id` and the record's trace id. Declare more per topic:
+
+```csharp
+o.Topic("orders.v1", t => t.Correlation(c =>
+{
+    c.Key().Document("Order");
+    c.JsonPath("$.customer.id").As("customer");
+}));
+```
+
+Fields of the same kind are compared across topics. A JSON path is read only for a visitor with `ReadPayloads` on that
+topic. Without it, the topic is searched by its other fields, and the page says so.
+
+The search runs over the declared topics you may read on this cluster, 30 minutes either side of the record by default.
+It is one search: it is estimated before it runs, confirmed above the same thresholds as a search, recorded once in the
+audit with every topic and each topic's predicate, and stopped by the same limits. A topic you may not read is not
+listed. A topic Kafka refuses shows why. Nothing runs until you press **Search related records**.
+
+## Duplicates
+
+Under search results and related records, **Possible duplicates** groups the records found on one topic that carry the
+same identity: the same `id` header, the same CloudEvents source and id, or, when you may read values, the same key and
+value as shown. Only the records found are compared, and nothing more is read.
+
 ## Redaction
 
 ```csharp
@@ -128,6 +157,51 @@ the audit and error messages. It is masked inside the engine before anything els
 headers `authorization`, `proxy-authorization`, `cookie`, `set-cookie` and `x-api-key` are always masked unless you opt one
 out with `r.AllowHeader(…)`, and can never be searched. A masked field takes only `=` and `in`, so it cannot be read a
 character at a time, and a search link leaves its value out.
+
+## Wolverine
+
+`KStudio.Wolverine` lists the Kafka clusters and topics of the application's Wolverine configuration:
+
+```csharp
+builder.Services.AddKafkaStudio(k => k.UseWolverineKafka());
+```
+
+It reads `WolverineOptions` once, when KStudio first needs its clusters, and starts, connects and writes nothing. Each
+Kafka transport becomes a cluster (`wolverine`, or `wolverine-{broker}` for a named broker), and each broker-per-tenant
+registration becomes a cluster of its own, `wolverine/{tenant}`, which your policies see as `Cluster = "wolverine"`
+with `TenantId` set. Listener and sender endpoints become topics with their direction, message types, serializer and
+consumer group, and the native dead-letter topic is listed. A topic Wolverine serializes as CloudEvents is decoded as
+CloudEvents.
+
+KStudio never reads Wolverine's message store, never runs Wolverine's builder callbacks (pass a token refresh through
+`w.Cluster((broker, c) => c.OAuthBearerTokenRefresh(…))`), and never consumes with Wolverine's group ids. **Discovery
+adds no redaction rule:** declare rules for every topic that carries personal data.
+
+Wolverine 6.61 keeps its broker-per-tenant registrations internal. KStudio reads them through a guarded probe that lists
+nothing when Wolverine's shape differs. A tenant's cluster has no configuration until Wolverine has connected it, which
+happens as the application starts, so KStudio reads tenants only after the application has started: until then the
+Settings page says "Not listed: some clusters, because the application had not started", and the first read after it adds the
+tenants Wolverine has connected. A tenant Wolverine had not connected by then is not listed.
+
+The Settings page says what was not listed and why, without names.
+
+A policy that checks only `Cluster` admits every tenant entry of that cluster: check `TenantId` to tell tenants apart.
+
+## Links
+
+In Marten Studio, a correlation field declared with `Document("Order")` or `Stream()` links a record to that document
+or stream, in the tenant of the record's `tenant-id` header. The document and stream pages offer **Find in Kafka**, which
+opens related records for that id. A link grants nothing: the page it opens checks your access again. A record whose
+`tenant-id` is redacted has no Marten links.
+
+In a store that keeps each tenant in a database of its own, the link names the tenant when the store keeps its rows per tenant, and the studio opens the database that holds it among those you may see; a store whose documents are single-tenanted in each tenant's database gets no Marten link yet.
+
+`o.ExternalLink("Traces", "https://tempo.example.com/trace/{traceId}")` adds a link to your tracing or log tool, with
+`{traceId}`, `{correlationId}`, `{from}`, `{to}`, `{fromMs}` and `{toMs}`. Never put a credential in a template: it is
+shown to every visitor, and KStudio refuses user info and credential parameters at start: in the query or the fragment, any parameter named
+`key`, `sig`, `auth`, `pwd`, `passwd` or `code`, or ending in `token`, `secret`, `password`, `signature`, `apikey`, `accesskey` or `credential`, whatever
+its case and whatever `-`, `_` or `.` it holds (`api-key`, `X-Amz-Signature` and `private_token` are refused; `tokenizer` and `author` are not). A
+placeholder goes in the path, the query or the fragment, never in the scheme or the host.
 
 ## Audit
 

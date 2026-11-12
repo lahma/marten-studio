@@ -1,6 +1,7 @@
 @implements IAsyncDisposable
 @using System.Globalization
 @using KStudio.Core.Catalog
+@using KStudio.Core.Clusters
 @using KStudio.Core.Windows
 @using Microsoft.Extensions.Logging
 @using PostgresStudio.Services
@@ -61,6 +62,38 @@
         @if (!string.IsNullOrWhiteSpace(found.Description))
         {
             <p class="ms-k-topic-description">@found.Description</p>
+        }
+
+        @if (found.Discovered is { } discovered)
+        {
+            <section class="ms-k-discovered" aria-label="@KafkaStudioText.DiscoveredHeading(discovered.Source)">
+                <h2 class="ms-section-title">@KafkaStudioText.DiscoveredHeading(discovered.Source)</h2>
+                <p class="ms-muted">@KafkaStudioText.DiscoveredLead</p>
+                <dl class="ms-k-discovered-facts">
+                    <dt>Role</dt><dd>@KafkaStudioText.DiscoveredRole(discovered.Role)</dd>
+                    @if (discovered.MessageTypes.Count > 0)
+                    {
+                        <dt>Message types</dt>
+                        <dd>
+                            <ul class="ms-k-discovered-types">
+                                @foreach (string type in discovered.MessageTypes)
+                                {
+                                    <li><code>@type</code></li>
+                                }
+                            </ul>
+                        </dd>
+                    }
+                    @if (!string.IsNullOrEmpty(discovered.ConsumerGroup))
+                    {
+                        <dt>Consumer group</dt><dd><code>@discovered.ConsumerGroup</code></dd>
+                    }
+                    @if (!string.IsNullOrEmpty(discovered.Serializer))
+                    {
+                        <dt>Serializer</dt><dd>@discovered.Serializer@(discovered.CloudEvents ? " (CloudEvents)" : string.Empty)</dd>
+                    }
+                    <dt>Source</dt><dd>@discovered.Source</dd>
+                </dl>
+            </section>
         }
 
         @if (config is { IsCompacted: true })

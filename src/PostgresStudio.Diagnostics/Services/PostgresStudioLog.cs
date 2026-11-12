@@ -60,6 +60,10 @@ internal static partial class PostgresStudioLog
     [LoggerMessage(EventId = 9219, Message = "Postgres Studio could not discover the tenants of data source {StoreKey}")]
     public static partial void PostgresStudioTenantDiscoveryFailed(this ILogger logger, LogLevel level, Exception exception, string storeKey);
 
+    /// <remarks>9229 in Postgres Studio's words.</remarks>
+    [LoggerMessage(EventId = 9229, Level = LogLevel.Debug, Message = "Postgres Studio looked for a tenant in {Count} databases of data source {StoreKey} and stopped at that bound")]
+    public static partial void PostgresStudioTenantDatabaseSearchBounded(this ILogger logger, int count, string storeKey);
+
     [LoggerMessage(EventId = 9220, Message = "A Postgres Studio page failed to handle a live update failure")]
     public static partial void PostgresStudioLiveUpdateHandlerFailed(this ILogger logger, LogLevel level, Exception exception);
 

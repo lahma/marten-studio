@@ -46,8 +46,8 @@ internal sealed class KafkaCatalog(
     KafkaThroughputSamples throughput) : IKafkaCatalog
 {
     /// <inheritdoc />
-    public IReadOnlyList<KafkaClusterInfo> Clusters { get; } =
-        [.. registry.Clusters.Select(static x => new KafkaClusterInfo(x.Key, x.DisplayName, x.Environment, x.ConsumerGroups))];
+    public IReadOnlyList<KafkaClusterInfo> Clusters =>
+        [.. registry.Clusters.Select(static x => new KafkaClusterInfo(x.Key, x.DisplayName, x.Environment, x.ConsumerGroups, x.BaseKey, x.TenantId, x.Source))];
 
     /// <inheritdoc />
     public async Task<KafkaField<KafkaTopicList>> ListTopicsAsync(string cluster, CancellationToken cancellationToken)

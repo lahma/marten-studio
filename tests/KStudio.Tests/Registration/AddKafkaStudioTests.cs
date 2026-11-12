@@ -2,6 +2,7 @@ using KStudio.Internal;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 
 using PostgresStudio;
 using PostgresStudio.Services.Settings;
@@ -155,5 +156,60 @@ public class AddKafkaStudioTests
             new StudioModuleCapability("SearchRecords", "KafkaStudioOptions.Capabilities.SearchRecords", Configured: true),
             new StudioModuleCapability("ReadPayloads", "KafkaStudioOptions.Capabilities.ReadPayloads", Configured: false));
         module.Navigation.Should().ContainSingle().Which.Items.Select(static x => x.Label).Should().Equal("Topics", "Search", "Cluster settings");
+    }
+
+    [Fact]
+    public void The_module_offers_find_in_kafka_to_the_studios_record_screens_once()
+    {
+        using ServiceProvider provider = Build(static services =>
+        {
+            services.AddPostgresStudio();
+            services.AddKafkaStudio();
+            services.AddKafkaStudio();
+        });
+
+        IStudioRecordSearchLinks links = provider.GetRequiredService<IStudioRecordSearchLinks>();
+
+        links.Label.Should().Be("Find in Kafka");
+        provider.GetServices<IStudioRecordSearchLinks>().Should().ContainSingle();
+    }
+
+    [Fact]
+    public void A_host_without_kafka_has_no_find_in_kafka_seam()
+    {
+        using ServiceProvider provider = Build(static services => services.AddPostgresStudio());
+
+        provider.GetService<IStudioRecordSearchLinks>().Should().BeNull();
+    }
+
+    [Fact]
+    public async Task A_valid_external_link_starts_the_host()
+    {
+        using ServiceProvider provider = Build(static services =>
+        {
+            services.AddPostgresStudio();
+            services.AddKafkaStudio(static o => o.ExternalLink("Traces", "https://tempo.example.com/trace/{traceId}").ExternalLink("Logs", "https://logs.example.com/?c={correlationId}"));
+        });
+
+        await Start(provider);
+    }
+
+    [Theory]
+    [InlineData("https://user:S3NT1NEL@tempo.example.com/{traceId}", "user info")]
+    [InlineData("https://tempo.example.com/{traceId}?api_key=S3NT1NEL", "names a credential")]
+    [InlineData("https://tempo.example.com/{S3NT1NEL}", "does not know")]
+    public async Task An_external_link_that_breaks_a_rule_stops_the_host_at_start_and_the_error_never_holds_the_template(string template, string rule)
+    {
+        using ServiceProvider provider = Build(services =>
+        {
+            services.AddPostgresStudio();
+            services.AddKafkaStudio(o => o.ExternalLink("Traces", template));
+        });
+
+        Func<Task> start = () => Start(provider);
+
+        string message = (await start.Should().ThrowAsync<OptionsValidationException>()).Which.Message;
+
+        message.Should().Contain("External link 'Traces'").And.Contain(rule).And.NotContain("S3NT1NEL").And.NotContain("tempo.example.com");
     }
 }

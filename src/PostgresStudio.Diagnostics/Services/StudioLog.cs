@@ -134,6 +134,13 @@ internal static partial class StudioLog
     public static partial void TenantDiscoveryFailed(this ILogger logger, LogLevel level, Exception exception, string storeKey);
 
     /// <remarks>
+    /// 9229: Debug, like 9227, on a path a visitor started (a link that names a tenant and no database) and nothing polls. The search for the
+    /// tenant stopped at its bound of databases; the line names the store and the count, never the tenant.
+    /// </remarks>
+    [LoggerMessage(EventId = 9229, Level = LogLevel.Debug, Message = "Marten Studio looked for a tenant in {Count} databases of store {StoreKey} and stopped at that bound")]
+    public static partial void TenantDatabaseSearchBounded(this ILogger logger, int count, string storeKey);
+
+    /// <remarks>
     /// A page's own failure handler threw while a refresh was already failing - a bug in the studio, and
     /// on a polling loop, which is why it is throttled rather than written once per tick.
     /// </remarks>

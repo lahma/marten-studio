@@ -20,6 +20,8 @@
     <PackageReference Include="GitHubActionsTestLogger" />
     <PackageReference Include="AwesomeAssertions" />
     <PackageReference Include="Testcontainers.Kafka" />
+    <!-- Only for WolverineDiscoveryLiveTests (D43): a real Wolverine host on two brokers, and the adapter reading its configuration. -->
+    <PackageReference Include="WolverineFx.Kafka" />
   </ItemGroup>
 
   <!-- Not a package: the shared framework brings the container and logging implementations the engine's real registration is run with
@@ -31,6 +33,7 @@
   <ItemGroup>
     <ProjectReference Include="../../src/KStudio.Core/KStudio.Core.csproj" />
     <ProjectReference Include="../../src/KStudio/KStudio.csproj" />
+    <ProjectReference Include="../../src/KStudio.Wolverine/KStudio.Wolverine.csproj" />
     <!-- Only for KafkaFirstNavigationLiveTests' Marten Studio host case (D-SHELL 12.1): KStudio is a module of either studio. Marten arrives through it. -->
     <ProjectReference Include="../../src/MartenStudio/MartenStudio.csproj" />
     <!-- Only for SampleSeedTests, SampleHostLiveTests and the sample's live search (SAMPLE): the demo's seed, judge and policies are internal to it

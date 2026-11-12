@@ -57,6 +57,27 @@ internal static class ConfluentClientSettings
         || AdminRemoved.Contains(key, StringComparer.Ordinal)
         || Aliases.Values.Any(names => names.Contains(key, StringComparer.Ordinal));
 
+    /// <summary>
+    /// The configuration of the offsets reader, the per-cluster consumer that only gives the group-offsets read a handle with a consumer
+    /// group (librdkafka #5040): the scan consumer's table with a small queue and fetch size, since it never fetches, and a group id of its own.
+    /// </summary>
+    /// <param name="cluster">The cluster.</param>
+    /// <param name="readerId">The reader; its id ends the group id.</param>
+    /// <param name="groupIdPrefix">The group id's prefix.</param>
+    /// <param name="overridden">Told the name of each host key that was replaced or dropped.</param>
+    public static ConsumerConfig BuildOffsetsReaderConfig(
+        KafkaClusterDefinition cluster,
+        Guid readerId,
+        string groupIdPrefix,
+        Action<string>? overridden = null) =>
+        BuildConsumerConfig(
+            cluster,
+            readerId,
+            WireIsolation.ReadCommitted,
+            new KafkaScanLimits { QueueKilobytes = 1024, FetchBytes = LibrdkafkaPartitionFetchBytes },
+            groupIdPrefix,
+            overridden);
+
     /// <summary>The scan consumer's configuration (decision 2.4).</summary>
     /// <param name="cluster">The cluster.</param>
     /// <param name="scanId">The scan; its id ends the group id.</param>

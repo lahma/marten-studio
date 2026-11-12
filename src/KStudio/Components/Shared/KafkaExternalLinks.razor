@@ -1,0 +1,40 @@
+@using KStudio.Core.Scanning
+@using KStudio.Internal
+@using Microsoft.Extensions.Options
+@inject IOptions<KafkaStudioOptions> Options
+
+@* The host's links from a record to its own tracing or log tool (D44, decision 9 of D-CORR). A link is drawn only for a record that has a value for every
+   placeholder its template names, and a value that is masked, cut or absent is no link, never a link with a hole. Opened in a new tab with
+   rel="noopener noreferrer", so that no referrer carries the studio's address (cluster, topic, offset) to the other tool. Neither gated nor audited: no record is
+   read for it, the values are already on the visitor's screen, and a link grants nothing. *@
+
+@if (links.Count > 0)
+{
+    <p class="ms-k-external-links">
+        <span class="ms-muted">@KafkaStudioText.OpenIn</span>
+        @foreach (KafkaExternalLink link in links)
+        {
+            <a class="ms-k-external-link" href="@link.Href" target="_blank" rel="noopener noreferrer">@link.Label</a>
+        }
+    </p>
+}
+
+@code {
+    private object? answered;
+    private IReadOnlyList<KafkaExternalLink> links = [];
+
+    /// <summary>The record, as a <c>KafkaMatch</c>. Typed <see cref="object" />: the engine's types are internal and a component's parameters are public.</summary>
+    [Parameter]
+    public object? Model { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        if (ReferenceEquals(Model, answered))
+        {
+            return;
+        }
+
+        answered = Model;
+        links = Model is KafkaMatch match ? KafkaMatchView.ExternalLinks(Options.Value.ExternalLinks, match) : [];
+    }
+}

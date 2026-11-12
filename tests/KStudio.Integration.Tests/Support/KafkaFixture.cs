@@ -159,13 +159,19 @@ public abstract class KafkaFixture : IAsyncLifetime
             return;
         }
 
-        container = CreateContainer(Image, ShouldReuse, Environment.GetEnvironmentVariable(PacketEnvironmentVariable));
+        container = CreateContainer(Image, Reuse, Environment.GetEnvironmentVariable(PacketEnvironmentVariable));
         await container.StartAsync();
         Bootstrap = $"{container.Hostname}:{container.GetMappedPublicPort(KafkaBuilder.KafkaPort)}";
         volumes = await DockerCli.VolumesOfAsync(container.Id);
 
         await WaitUntilReadyAsync();
         await CreateAclsAsync();
+
+        if (WarmUpCoordinator)
+        {
+            await WarmUpGroupCoordinatorAsync();
+        }
+
         Started = true;
     }
 
@@ -181,14 +187,52 @@ public abstract class KafkaFixture : IAsyncLifetime
 
         await container.DisposeAsync();
 
-        if (!ShouldReuse)
+        if (!Reuse)
         {
             await DockerCli.RemoveVolumesAsync(volumes);
         }
     }
 
+    /// <summary>Whether this instance asks for a reusable container; <see cref="ShouldReuse" /> unless a derived fixture needs a broker of its own.</summary>
+    protected virtual bool Reuse => ShouldReuse;
+
+    /// <summary>
+    /// Whether the fixture waits for the group coordinator before it is ready. A broker answers a group request with <c>NOT_COORDINATOR</c>
+    /// until it has created and elected <c>__consumer_offsets</c>, which the first group request on a pristine broker starts; the fixture
+    /// does it with a consumer so that no test is the first. Only the fresh-broker test turns this off, because it is that first request.
+    /// </summary>
+    protected virtual bool WarmUpCoordinator => true;
+
     /// <summary>The anonymous volumes the container declared, recorded when it started.</summary>
     public IReadOnlyList<string> Volumes => volumes;
+
+    /// <summary>
+    /// Waits until the broker's group coordinator answers an OffsetFetch. The first group lookup on a pristine broker auto-creates
+    /// <c>__consumer_offsets</c>, and an admin client that asks for a group's offsets before the coordinator is elected gets
+    /// <c>NOT_COORDINATOR</c> or <c>COORDINATOR_NOT_AVAILABLE</c>, which librdkafka up to 2.16.0 turns into a NULL dereference (issue #5040, PR
+    /// #5611). A consumer's own OffsetFetch takes the path that has a consumer group, so it is the safe way to wait. The engine itself reads on
+    /// a consumer-backed handle (D36) and needs none of this; the fixture does it for the tests' other clients.
+    /// </summary>
+    private async Task WarmUpGroupCoordinatorAsync()
+    {
+        ConsumerConfig config = new(Client("admin")) { GroupId = "kstudio-warmup-" + RunId, EnableAutoCommit = false };
+        using IConsumer<byte[], byte[]> consumer = new ConsumerBuilder<byte[], byte[]>(config).Build();
+        DateTime deadline = DateTime.UtcNow.AddSeconds(60);
+
+        while (true)
+        {
+            try
+            {
+                consumer.Committed([new TopicPartition("ks.warmup", 0)], TimeSpan.FromSeconds(5));
+                return;
+            }
+            catch (KafkaException) when (DateTime.UtcNow < deadline)
+            {
+                // A poll of a condition, not a delay: the call itself waits up to five seconds.
+                await Task.Yield();
+            }
+        }
+    }
 
     private async Task WaitUntilReadyAsync()
     {
@@ -242,6 +286,20 @@ public sealed class Kafka39Fixture() : KafkaFixture(Image39);
 
 /// <summary>The broker for Kafka 4.x.</summary>
 public sealed class Kafka4Fixture() : KafkaFixture(Image4);
+
+/// <summary>
+/// A broker of its own, never reused and never warmed up: the first group request it sees is the test's, which is how a pristine cluster
+/// behaves (<c>FreshBrokerLagReadLiveTests</c>).
+/// </summary>
+/// <param name="image">The image.</param>
+public sealed class FreshKafkaFixture(string image) : KafkaFixture(image)
+{
+    /// <inheritdoc />
+    protected override bool Reuse => false;
+
+    /// <inheritdoc />
+    protected override bool WarmUpCoordinator => false;
+}
 
 /// <summary>The xunit collections that give each image one broker for every live class on it.</summary>
 public static class KafkaCollections

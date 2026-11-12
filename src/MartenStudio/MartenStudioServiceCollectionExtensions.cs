@@ -10,6 +10,7 @@ using MartenStudio.Services.Events;
 using MartenStudio.Services.Find;
 using MartenStudio.Services.Health;
 using MartenStudio.Services.Health.Checks;
+using MartenStudio.Services.Links;
 using MartenStudio.Services.Live;
 using MartenStudio.Services.Projections;
 using MartenStudio.Services.Query;
@@ -125,6 +126,9 @@ public static partial class MartenStudioServiceCollectionExtensions
         // discovery it holds: a circuit's discovered tenants and its refresh button are its own.
         services.TryAddScoped<IStudioSourceProvider, MartenStudioSourceProvider>();
         services.TryAddSingleton<IStudioLinks, MartenStudioLinks>();
+
+        // D-CORR 7: the links a module's page makes into Documents and Streams, by type and id, with a store and a tenant and no database.
+        services.TryAddSingleton<IStudioRouteLinks, MartenStudioRouteLinks>();
         services.TryAddSingleton<ISessionLockLabeler, MartenSessionLockLabeler>();
         services.TryAddScoped<IDatabaseDeclarationsSource, MartenDatabaseDeclarationsSource>();
         services.TryAddSingleton<IHealthTableSource, MartenHealthTableSource>();
