@@ -179,9 +179,27 @@ internal sealed class ConfluentSeedTarget(ClientConfig config) : IKafkaSeedTarge
             using IConsumer<Ignore, Ignore> consumer = new ConsumerBuilder<Ignore, Ignore>(
                 new ConsumerConfig(config) { GroupId = group.Key, EnableAutoCommit = false }).Build();
 
-            consumer.Commit(group.Select(static x => new TopicPartitionOffset(x.Topic, x.Partition, x.Offset)));
+            TopicPartitionOffset[] offsets = [.. group.Select(static x => new TopicPartitionOffset(x.Topic, x.Partition, x.Offset))];
+            DateTime deadline = DateTime.UtcNow.AddSeconds(60);
+
+            while (true)
+            {
+                try
+                {
+                    consumer.Commit(offsets);
+                    break;
+                }
+                catch (KafkaException e) when (IsCoordinatorNotReady(e.Error.Code) && DateTime.UtcNow < deadline)
+                {
+                    // On a broker that has just started, the group's coordinator can still be elected or loading: retry until it answers.
+                    cancellationToken.ThrowIfCancellationRequested();
+                }
+            }
         }
 
         return Task.CompletedTask;
     }
+
+    private static bool IsCoordinatorNotReady(ErrorCode code) =>
+        code is ErrorCode.NotCoordinatorForGroup or ErrorCode.GroupLoadInProgress or ErrorCode.GroupCoordinatorNotAvailable;
 }

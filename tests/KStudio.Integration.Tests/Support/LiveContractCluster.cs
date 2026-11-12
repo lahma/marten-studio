@@ -203,9 +203,27 @@ internal sealed class LiveContractCluster : IContractCluster
     {
         ConsumerConfig config = new(fixture.Client("admin")) { GroupId = group, EnableAutoCommit = false };
         using IConsumer<byte[], byte[]> consumer = new ConsumerBuilder<byte[], byte[]>(config).Build();
-        consumer.Commit([new TopicPartitionOffset(topic, partition, offset)]);
+        DateTime deadline = DateTime.UtcNow.AddSeconds(60);
+
+        while (true)
+        {
+            try
+            {
+                consumer.Commit([new TopicPartitionOffset(topic, partition, offset)]);
+                break;
+            }
+            catch (KafkaException e) when (IsCoordinatorNotReady(e.Error.Code) && DateTime.UtcNow < deadline)
+            {
+                // A new group's coordinator is still being elected or loaded on a fresh broker (CI, marten-latest run 43208517391):
+                // the commit is retried until the coordinator answers, a poll of a condition, not a delay.
+            }
+        }
+
         consumer.Close();
     }
+
+    private static bool IsCoordinatorNotReady(ErrorCode code) =>
+        code is ErrorCode.NotCoordinatorForGroup or ErrorCode.GroupLoadInProgress or ErrorCode.GroupCoordinatorNotAvailable;
 
     public async ValueTask DisposeAsync()
     {
