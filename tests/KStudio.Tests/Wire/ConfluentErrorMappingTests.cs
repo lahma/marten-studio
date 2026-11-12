@@ -102,6 +102,7 @@ public class ConfluentErrorMappingTests
     [InlineData(ErrorCode.KafkaStorageError)]
     [InlineData(ErrorCode.GroupCoordinatorNotAvailable)]
     [InlineData(ErrorCode.NotCoordinatorForGroup)]
+    [InlineData(ErrorCode.GroupLoadInProgress)]
     [InlineData(ErrorCode.Local_WaitCoord)]
     [InlineData(ErrorCode.FencedLeaderEpoch)]
     [InlineData(ErrorCode.UnknownLeaderEpoch)]

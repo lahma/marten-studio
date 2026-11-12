@@ -467,7 +467,10 @@ internal `IKafkaWire`, whose only other implementation is the fast suite's hand-
 runs on the fake and on real brokers (Kafka 3.9 and 4.x), so the fake cannot drift from Kafka. No Confluent type crosses
 the seam, and errors are values. Nothing connects at startup and nothing is a hosted service: one admin client per
 cluster, created on first use and disposed when idle, and one consumer per scan, on a thread of its own. Engine log events
-are 9650 to 9699. Full text: [kstudio.md](docs/maintainers/kstudio.md#d36).
+are 9650 to 9699. The lag read (group offsets) uses a per-cluster consumer that is never subscribed, through a dependent admin client
+drained before and after each read, because an admin handle has no consumer group and librdkafka 2.16.0 and earlier crash
+(#5040) on `NOT_COORDINATOR` in `ListConsumerGroupOffsets`; remove it once the Confluent.Kafka floor contains librdkafka's fix
+(PR #5611). Full text: [kstudio.md](docs/maintainers/kstudio.md#d36).
 
 **D37 — In KStudio, a read never writes.** Every client the engine builds is a clone of the host's configuration with the
 engine's overrides: no topic auto-creation, no commit and no offset store, explicit offsets on every assign, a group id of
