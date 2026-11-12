@@ -424,6 +424,7 @@
         // prerendering request had none (a browser never sends one).
         ParseAddress();
         State.ClusterChanged += OnClusterChangedAsync;
+        Navigation.LocationChanged += OnLocationChanged;
         ready = true;
     }
 
@@ -715,13 +716,32 @@
         }
     }
 
-    private async Task OnClusterChangedAsync()
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
     {
-        if (disposed || running)
+        // A new address for this page (the browser's back and forward): it is read again, from the beginning. The page writes no address of its own.
+        if (disposed || running || !KafkaAddress.IsPage(e.Location, KafkaAddress.RelatedRoute))
         {
             return;
         }
 
+        _ = InvokeAsync(ApplyAddressAndReloadAsync);
+    }
+
+    private async Task ApplyAddressAndReloadAsync()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        ParseAddress();
+        await ResetAndLoadAsync();
+    }
+
+    private Task OnClusterChangedAsync() => disposed || running ? Task.CompletedTask : ResetAndLoadAsync();
+
+    private async Task ResetAndLoadAsync()
+    {
         selected.Clear();
         readable = [];
         lanes = [];
@@ -731,6 +751,8 @@
         matches.Clear();
         duplicates = [];
         anchor = null;
+        error = null;
+        refusal = null;
         keys = CorrelationKeySet.Empty;
         loading = true;
         await InvokeAsync(StateHasChanged);
@@ -1009,6 +1031,7 @@
 
         disposed = true;
         State.ClusterChanged -= OnClusterChangedAsync;
+        Navigation.LocationChanged -= OnLocationChanged;
 
         try
         {
