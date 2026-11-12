@@ -13,7 +13,7 @@ namespace KStudio.Internal;
 internal sealed record WolverineProbedTenant(string TenantId, KafkaTransport Transport);
 
 /// <summary>What the probe found for one transport.</summary>
-/// <param name="Tenants">The tenants that are ready, in Wolverine's order.</param>
+/// <param name="Tenants">The tenants that are ready, ordinal by id.</param>
 /// <param name="Notes">What was not listed and why.</param>
 internal sealed record WolverineTenantProbeResult(IReadOnlyList<WolverineProbedTenant> Tenants, IReadOnlyList<KafkaSourceNote> Notes)
 {
@@ -84,14 +84,14 @@ internal static class WolverineTenantProbe
 
     /// <summary>Reads the tenants out of the cache's items, each checked for its type and its members.</summary>
     /// <param name="cache">What <c>KafkaTransport.Tenants</c> returned.</param>
-    internal static WolverineTenantProbeResult Read(IEnumerable cache)
+    /// <param name="tenantTypeName">The full name an item's type must have; only the tests name another, to give the probe a shape Wolverine 6.61 does not have.</param>
+    internal static WolverineTenantProbeResult Read(IEnumerable cache, string tenantTypeName = TenantTypeName)
     {
         ArgumentNullException.ThrowIfNull(cache);
 
         List<WolverineProbedTenant> ready = [];
         List<KafkaSourceNote> notes = [];
         HashSet<string> seen = new(StringComparer.Ordinal);
-        int skippedForCount = 0;
 
         try
         {
@@ -105,7 +105,7 @@ internal static class WolverineTenantProbe
 
             foreach (object? item in items)
             {
-                if (item is null || !string.Equals(item.GetType().FullName, TenantTypeName, StringComparison.Ordinal))
+                if (item is null || !string.Equals(item.GetType().FullName, tenantTypeName, StringComparison.Ordinal))
                 {
                     return ShapeMismatch();
                 }
@@ -141,12 +141,6 @@ internal static class WolverineTenantProbe
                     continue;
                 }
 
-                if (ready.Count >= MaxTenants)
-                {
-                    skippedForCount++;
-                    continue;
-                }
-
                 ready.Add(new WolverineProbedTenant(id, tenantTransport));
             }
         }
@@ -155,12 +149,17 @@ internal static class WolverineTenantProbe
             return ShapeMismatch();
         }
 
-        if (skippedForCount > 0)
+        // Wolverine keeps its tenants in a dictionary, whose order is not the order they were added in: ordinal by id, so the answer is the same every time.
+        ready.Sort(static (a, b) => string.CompareOrdinal(a.TenantId, b.TenantId));
+
+        if (ready.Count > MaxTenants)
         {
+            int skipped = ready.Count - MaxTenants;
+            ready.RemoveRange(MaxTenants, skipped);
             notes.Add(new KafkaSourceNote(
                 "tenant clusters",
                 "there are more than " + MaxTenants + " of them",
-                "Only the first " + MaxTenants + " tenant clusters of a transport are listed; " + skippedForCount + " more were not."));
+                "Only the first " + MaxTenants + " tenant clusters of a transport, by id, are listed; " + skipped + " more were not."));
         }
 
         return new WolverineTenantProbeResult(ready, notes);

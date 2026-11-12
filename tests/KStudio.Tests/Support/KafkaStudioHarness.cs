@@ -148,7 +148,8 @@ internal sealed class KafkaStudioHarness : IDisposable
             new FakeKafkaWire(new FakeKafkaCluster(TimeProvider.System), EngineHarness.ClusterKey),
             configure: options =>
             {
-                foreach (KafkaClusterEntry entry in entries.Where(static x => x.Key != EngineHarness.ClusterKey))
+                // A tenant entry ({cluster}/{tenant}, D43) is not a cluster a host registers: the engine's registry would refuse its key.
+                foreach (KafkaClusterEntry entry in entries.Where(static x => x.Key != EngineHarness.ClusterKey && !x.Key.Contains('/', StringComparison.Ordinal)))
                 {
                     options.AddCluster(entry.Key, new ClientConfig { BootstrapServers = "fake:9092" });
                 }

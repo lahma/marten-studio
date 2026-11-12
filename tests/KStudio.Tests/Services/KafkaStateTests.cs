@@ -129,4 +129,30 @@ public class KafkaStateTests
         harness.Context.Services.GetRequiredService<NavigationManager>().Should().NotBeNull();
         harness.State.Should().BeSameAs(harness.Context.Services.GetRequiredService<KafkaState>());
     }
+
+    [Fact]
+    public async Task An_escaped_tenant_entry_key_selects_the_entry()
+    {
+        // D43, decision 6: the entry key travels in the query string escaped, wolverine%2Facme, and selects exactly that entry.
+        using KafkaStudioHarness harness = new(null, Entry("wolverine"), Entry("wolverine/acme", "acme"), Entry("wolverine/globex", "globex"));
+        harness.Context.Navigate("/postgres/kafka?cluster=wolverine%2Facme");
+
+        await harness.State.EnsureInitializedAsync(Ct);
+
+        harness.State.ActiveCluster!.Key.Should().Be("wolverine/acme");
+        harness.State.ActiveCluster.TenantId.Should().Be("acme");
+        harness.State.ActiveCluster.Cluster.Should().Be("wolverine");
+        harness.State.AvailableClusters.Select(static x => x.Label).Should().Equal("wolverine", "wolverine · acme", "wolverine · globex");
+    }
+
+    [Fact]
+    public async Task An_unknown_tenant_entry_in_the_address_falls_back_to_the_first_available_one()
+    {
+        using KafkaStudioHarness harness = new(null, Entry("wolverine"), Entry("wolverine/acme", "acme"));
+        harness.Context.Navigate("/postgres/kafka?cluster=wolverine%2Finitech");
+
+        await harness.State.EnsureInitializedAsync(Ct);
+
+        harness.State.ActiveCluster!.Key.Should().Be("wolverine");
+    }
 }

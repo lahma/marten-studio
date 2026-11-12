@@ -186,13 +186,13 @@ internal sealed class KafkaClusterRegistry
     {
         notes.Add(new KafkaRegistryNote(source, note.Text));
 
-        if (logger is null)
+        if (logger is null || once is null)
         {
             return;
         }
 
         // The item is the general words, never a name: the sentence with the name is on the Settings page (event 9677).
-        LogLevel level = once is null ? LogLevel.Warning : KafkaLogOnce.WarningOrDebug(once, source + "|" + note.What + "|" + note.Reason);
+        LogLevel level = KafkaLogOnce.WarningOrDebug(once, source + "|" + note.What + "|" + note.Reason);
         KStudioLog.ClusterSourceItemNotListed(logger, level, note.What, source, note.Reason);
     }
 }

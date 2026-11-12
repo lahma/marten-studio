@@ -176,4 +176,25 @@ public class KafkaAuditTests
         page.WaitForAssertion(() => page.Find(".ms-activity-scope").TextContent.Trim().Should().Be("Primary · tenant-a"));
         page.Find(".ms-activity-scope").GetAttribute("title").Should().Be("Primary · tenant-a");
     }
+
+    [Fact]
+    public async Task A_tenant_entry_is_recorded_and_judged_by_its_cluster_and_tenant_not_its_entry_key()
+    {
+        // D43, decision 6: the audit scope carries the cluster's own key and the tenant, so the gate asks the question the entry's pages asked.
+        using KafkaStudioHarness harness = new(static o => o.ClusterAuthorizationPolicy = "kafka-topics");
+        harness.Authorization.AllowKafka(static r => r is { Cluster: "wolverine", TenantId: "acme" });
+        KafkaClusterEntry acme = new("wolverine/acme", "acme", "Wolverine", null);
+        KafkaClusterEntry globex = new("wolverine/globex", "globex", "Wolverine", null);
+
+        Record(harness, ["orders.v1"], cluster: acme);
+        Record(harness, ["orders.v1"], cluster: globex);
+
+        List<StudioActionLogEntry> visible = await Visible(harness);
+
+        StudioActionLogEntry entry = visible.Should().ContainSingle().Which;
+        entry.ScopeLabel.Should().Be("Wolverine · acme");
+        KafkaAuditScope scope = entry.ModuleScope.Should().BeOfType<KafkaAuditScope>().Which;
+        (scope.Cluster, scope.TenantId).Should().Be(("wolverine", "acme"));
+        harness.Authorization.KafkaCalls.Should().OnlyContain(static x => x.Resource.Cluster == "wolverine");
+    }
 }

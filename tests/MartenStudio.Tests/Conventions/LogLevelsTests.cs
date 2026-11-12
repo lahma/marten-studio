@@ -373,6 +373,8 @@ public class LogLevelsTests
         // ---- KStudio.Core: the engine's events above Debug (9650 to 9699) ----------------------------
         ["src/KStudio.Core/Logging/KStudioLog.Catalog.cs : 9654 ClusterUnavailable"] = (Verdict.Throttled,
             "A Kafka cluster the catalog cannot reach; every polling page asks it, so Warning once per cluster per ten minutes, Debug in between."),
+        ["src/KStudio.Core/Logging/KStudioLog.Clusters.cs : 9677 ClusterSourceItemNotListed"] = (Verdict.Throttled,
+            "A cluster, tenant or topic a source (Wolverine) found was not listed; the registry is built once, so Warning once per source, item and reason per ten minutes, Debug in between, with no tenant, topic or value in the line."),
         ["src/KStudio.Core/Logging/KStudioLog.Clients.cs : 9655 AuthenticationFailed"] = (Verdict.Throttled,
             "The cluster refused KStudio's credentials; every client meets it, so Warning once per cluster per ten minutes, Debug in between."),
         ["src/KStudio.Core/Logging/KStudioLog.Clients.cs : 9658 ClientFatalError"] = (Verdict.Fault,
