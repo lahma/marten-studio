@@ -127,15 +127,46 @@ public class KafkaRecordServiceTests
         // The topic's capability policy refuses values: the page opens the record with its key and headers only (9604).
         rig.Studio.Authorization.AllowKafka(static r => r.Capability != "ReadPayloads");
         KafkaRecordPageResult.Read key = (KafkaRecordPageResult.Read) await records.ReadAsync(rig.Entry, "orders", 0, 0, Ct);
-        (await records.RecordValueViewAsync(rig.Entry, key.Value.Record!, Ct)).Should().BeFalse("the view is judged where it is recorded");
+        key.Value.Record!.ReadWithPayload.Should().BeFalse();
         key.Grant.AccessFor("orders").Should().Be(KafkaValueAccess.PolicyRefused);
 
-        // The policy then passes: the same record's value is a different view and records its own entry.
+        // A match read under the envelope holds no value, so showing it is no view of one, whatever the policy says now: nothing is recorded as read.
         rig.Studio.Authorization.AllowKafka(static _ => true);
-        (await records.RecordValueViewAsync(rig.Entry, key.Value.Record!, Ct)).Should().BeTrue();
+        (await records.RecordValueViewAsync(rig.Entry, key.Value.Record!, Ct)).Should().BeFalse();
+        rig.Ring.Should().ContainSingle().Which.Capability.Should().Be("SearchRecords");
+        rig.Logs.Entries.Select(static x => x.EventId.Id).Should().NotContain(9605);
+
+        // The record is read again with values (a new read): its value is a view of its own, recorded once.
+        KafkaRecordPageResult.Read value = (KafkaRecordPageResult.Read) await records.ReadAsync(rig.Entry, "orders", 0, 0, Ct);
+        value.Value.Record!.ReadWithPayload.Should().BeTrue();
+        (await records.RecordValueViewAsync(rig.Entry, value.Value.Record!, Ct)).Should().BeTrue();
 
         rig.Ring.Where(static x => x.Succeeded).Select(static x => x.Capability).Should().BeEquivalentTo(["SearchRecords", "ReadPayloads"]);
         rig.Logs.Entries.Select(static x => x.EventId.Id).Should().Contain([9604, 9605]);
+        rig.Logs.Entries.Count(static x => x.EventId.Id == 9605).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task A_value_view_asks_SearchRecords_too()
+    {
+        await using KafkaSearchRig rig = new(payloads: true);
+        rig.Topic("orders");
+        rig.Produce("orders", 0, 1, "k1", "{\"a\":1}");
+        KafkaRecordService records = rig.Records();
+        KafkaMatch match = ((KafkaRecordPageResult.Read) await records.ReadAsync(rig.Entry, "orders", 0, 0, Ct)).Value.Record!;
+        rig.Studio.Authorization.Calls.Clear();
+
+        // The capability policy passes ReadPayloads and refuses SearchRecords: the prerequisite is judged where the view is recorded.
+        rig.Studio.Authorization.AllowKafka(static r => r.Capability != "SearchRecords");
+
+        (await records.RecordValueViewAsync(rig.Entry, match, Ct)).Should().BeFalse();
+        rig.Studio.Authorization.KafkaCalls.Should().Contain(static x => x.Resource.Capability == "SearchRecords" && x.Resource.Topic == "orders");
+
+        // And the capability itself: SearchRecords off with ReadPayloads on is refused naming SearchRecords.
+        rig.Studio.Authorization.AllowKafka(static _ => true);
+        rig.Studio.Options.Capabilities.SearchRecords = false;
+        (await records.RecordValueViewAsync(rig.Entry, match, Ct)).Should().BeFalse();
+        rig.Ring[0].Message.Should().Contain("SearchRecords");
     }
 
     [Fact]

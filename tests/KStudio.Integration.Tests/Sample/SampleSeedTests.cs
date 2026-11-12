@@ -82,6 +82,23 @@ public class SampleSeedTests
     }
 
     [Fact]
+    public void The_payments_crc32_declaration_fails_verification_on_the_seed()
+    {
+        // The verifier reads the start and the end of each partition's range and fails on the first record whose partition is not the one the declared
+        // partitioner maps its key to. The seed is round-robin: in every partition both ends hold records crc32 puts elsewhere, so any sample catches it.
+        KafkaSeedPlan plan = KafkaSeedPlan.Create(Now);
+
+        foreach (IGrouping<int, SeedRecord> partition in plan.Records.Where(static x => x.Topic == KafkaSeedPlan.PaymentsTopic).GroupBy(static x => x.Partition))
+        {
+            SeedRecord[] records = [.. partition];
+            static bool Mismatch(SeedRecord record) => KafkaPartitioner.Crc32.Partition(System.Text.Encoding.UTF8.GetBytes(record.Key!), 3) != record.Partition;
+
+            records.Take(20).Any(Mismatch).Should().BeTrue($"payments.v1/{partition.Key}, start of the range");
+            records.TakeLast(20).Any(Mismatch).Should().BeTrue($"payments.v1/{partition.Key}, end of the range");
+        }
+    }
+
+    [Fact]
     public void Every_order_has_a_customer_email_in_its_data()
     {
         KafkaSeedPlan plan = KafkaSeedPlan.Create(Now);

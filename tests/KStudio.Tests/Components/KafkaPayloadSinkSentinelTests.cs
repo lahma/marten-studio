@@ -27,6 +27,20 @@ public class KafkaPayloadSinkSentinelTests
     private static string Json(int number, string status) =>
         "{\"status\":\"" + status + "\",\"customer\":{\"id\":\"customer-" + number + "\",\"email\":\"" + Email + "\"},\"note\":\"call " + Phone + " today\"}";
 
+    /// <summary>Opens the node menu of the first tree row containing <paramref name="text" />, copies each of its items and returns their labels.</summary>
+    private static async Task<string[]> OpenNodeMenuAsync(IRenderedComponent<KafkaSearchPage> search, string text)
+    {
+        search.FindAll("[role=treeitem]").First(x => x.TextContent.Contains(text, StringComparison.Ordinal)).QuerySelector(".ms-json-key")!.Click();
+        string[] labels = [.. search.FindAll(".ms-copy-menu")[0].QuerySelectorAll(".ms-menu-item-label").Select(static x => x.TextContent)];
+
+        for (int i = 0; i < labels.Length; i++)
+        {
+            await search.FindAll(".ms-copy-menu")[0].QuerySelectorAll(".ms-menu-item")[i].ClickAsync(new MouseEventArgs());
+        }
+
+        return labels;
+    }
+
     private static string Describe(object? argument)
     {
         try
@@ -73,6 +87,15 @@ public class KafkaPayloadSinkSentinelTests
         {
             await search.FindAll(".ms-k-copy-popover button")[i].ClickAsync(new MouseEventArgs());
         }
+
+        // The JSON view's node menu, opened on the masked leaf and on an unmasked one, with every item copied.
+        string[] maskedItems = await OpenNodeMenuAsync(search, "redacted by $.customer.email");
+        maskedItems.Should().Equal("Copy value", "Copy JSONPath");
+        string[] idItems = await OpenNodeMenuAsync(search, "customer-1");
+        idItems.Should().Equal("Copy value", "Copy JSONPath", "Copy as search");
+        rig.Studio.Context.JSInterop.Invocations["martenStudio.clipboard.copyText"]
+            .Select(static x => x.Arguments[0]?.ToString())
+            .Should().Contain(x => x != null && x.Contains("$.customer.id = 'customer-1'", StringComparison.Ordinal), "Copy as search copied the unmasked leaf's predicate");
 
         for (int i = 0; i < 2; i++)
         {

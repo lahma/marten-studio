@@ -111,7 +111,14 @@ public class KafkaAuditTests
         (await Visible(harness)).Should().BeEmpty("the capability is off, so reading the entry would reveal a value read the visitor may not make");
 
         harness.Options.Capabilities.ReadPayloads = true;
+        (await Visible(harness)).Should().BeEmpty("ReadPayloads is judged with its prerequisite, and SearchRecords is off");
+
+        harness.Options.Capabilities.SearchRecords = true;
         (await Visible(harness)).Should().ContainSingle();
+
+        harness.Authorization.AllowKafka(static r => r.Capability != "SearchRecords");
+        (await Visible(harness)).Should().BeEmpty("the capability policy refuses SearchRecords for the topic, the prerequisite of a value read");
+        harness.Authorization.KafkaCalls.Should().Contain(static x => x.Resource.Capability == "SearchRecords" && x.Resource.Topic == "orders.v1");
 
         harness.Authorization.AllowKafka(static r => r.Capability != "ReadPayloads");
         (await Visible(harness)).Should().BeEmpty("the capability policy refuses ReadPayloads for the topic");

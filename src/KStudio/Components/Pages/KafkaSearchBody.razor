@@ -1259,15 +1259,17 @@
             return;
         }
 
-        expanded.Add(rowKey);
         await EnsureSettingsAsync();
 
-        // Showing a value is a view of it, recorded here and never during a render (D-PAYLOAD decision 1.4).
+        // Showing a value is a view of it, checked and recorded here and never during a render (D-PAYLOAD decision 1.4): the detail is drawn only
+        // after the check has answered, so that a refusal is the first thing the visitor sees and the value is never in the markup before it.
         KafkaMatch? shown = matches.FirstOrDefault(x => string.Equals(RowKey(x), rowKey, StringComparison.Ordinal));
         if (shown is not null)
         {
             await RecordValueViewsAsync(shown);
         }
+
+        expanded.Add(rowKey);
     }
 
     /// <summary>Records the view of each value about to be shown; a refusal marks the record as not the visitor's to read.</summary>

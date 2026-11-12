@@ -183,6 +183,30 @@ public class KafkaRecordCompareTests
     }
 
     [Fact]
+    public async Task A_repeated_member_name_does_not_crash_the_compare()
+    {
+        await using KafkaSearchRig rig = new(payloads: true, engine: o => o.Topic("orders", t => t.Redact(r => r.JsonPath("$.customer.email"))));
+        rig.Topic("orders");
+
+        // JSON allows a repeated member; every deserializer keeps the last. JsonNode.Parse would throw on it.
+        rig.Produce("orders", 0, 1, "k0", "{\"status\":\"placed\",\"status\":\"paid\",\"customer\":{\"email\":\"" + EmailA + "\"}}");
+        rig.Produce("orders", 0, 2, "k1", "{\"status\":\"placed\",\"status\":\"shipped\",\"customer\":{\"email\":\"" + EmailB + "\"}}");
+        (KafkaMatch second, KafkaMatch first) = await PairAsync(rig);
+
+        IRenderedComponent<KafkaRecordCompare> compare = Render(rig, first, second);
+
+        Section(compare, "Value").Should().Contain("Not compared, masked: $.customer.email");
+        compare.FindAll(".ms-diff-path").Select(static x => x.TextContent).Should().Equal("$.status");
+        compare.FindAll(".ms-diff-before, .ms-diff-after").Select(static x => x.TextContent).Should().Equal("\"paid\"", "\"shipped\"");
+        compare.Markup.Should().NotContain(EmailA).And.NotContain(EmailB);
+
+        // The value view and copy-as take the same record without trouble.
+        IRenderedComponent<KafkaRecordValue> value = rig.Studio.Context.Render<KafkaRecordValue>(p => p.Add(x => x.Model, first).Add(x => x.Access, KafkaValueAccess.Granted));
+        value.Markup.Should().Contain("status");
+        KafkaMatchView.LeafPredicate(first, [("status", -1)], "\"paid\"").Should().Be("$.status = 'paid'");
+    }
+
+    [Fact]
     public async Task Different_kinds_say_so()
     {
         await using KafkaSearchRig rig = new(payloads: true);

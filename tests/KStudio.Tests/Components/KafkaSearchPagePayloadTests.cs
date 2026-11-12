@@ -176,6 +176,79 @@ public class KafkaSearchPagePayloadTests
     }
 
     [Fact]
+    public async Task A_value_is_not_in_the_markup_until_its_check_has_answered_and_a_refusal_shows_the_sentence()
+    {
+        await using KafkaSearchRig rig = new(payloads: true);
+        rig.Topic("orders");
+        for (int n = 0; n < 3; n++)
+        {
+            rig.Produce("orders", 0, n, "k" + n, "{\"secret\":\"VALUE-SENTINEL-" + n + "\"}");
+        }
+
+        IRenderedComponent<KafkaSearchPage> page = await OpenAsync(rig, "orders");
+        await SearchForAsync(page, "key ^= 'k'");
+        page.WaitForAssertion(() => Rows(page).Should().HaveCount(3));
+
+        // The view check's ReadPayloads question waits; the visitor clicks Details meanwhile.
+        TaskCompletionSource<bool> gate = rig.Studio.Authorization.HoldKafka(static r => r.Capability == "ReadPayloads");
+        Task click = page.Find("table.ms-k-matches button.ms-btn-sm").ClickAsync(new MouseEventArgs());
+
+        page.FindAll(".ms-k-match-detail").Should().BeEmpty("the detail is drawn after the check, not before");
+        page.Markup.Should().NotContain("VALUE-SENTINEL-0").And.NotContain("Record value");
+        rig.Ring.Should().NotContain(static x => x.Action == "ViewRecord", "nothing is recorded as viewed until the check has answered");
+
+        gate.SetResult(false);
+        await click;
+
+        page.WaitForAssertion(() => page.Find(".ms-k-match-detail .ms-k-value").TextContent.Trim().Should().Be("The value of this record is not available to you."));
+        page.Markup.Should().NotContain("VALUE-SENTINEL-0").And.NotContain("Record value");
+        rig.Ring.Should().NotContain(static x => x.Action == "ViewRecord" && x.Succeeded);
+    }
+
+    [Fact]
+    public async Task Continue_after_Search_all_partitions_keeps_every_partition()
+    {
+        await using KafkaSearchRig rig = new(engine: o =>
+        {
+            o.Limits.MaxRecordsPerScan = 1_000;
+            o.Limits.ConfirmAboveRecords = 1_000;
+            o.Topic("pruned", t => t.Partitioner(KafkaPartitioner.Murmur2));
+        });
+        rig.Topic("pruned", 6);
+
+        for (int i = 0; i < 12_000; i++)
+        {
+            string key = "k-" + i.ToString("D5", System.Globalization.CultureInfo.InvariantCulture);
+            rig.Produce("pruned", KafkaPartitioner.Murmur2.Partition(Encoding.UTF8.GetBytes(key), 6), i / 6, key, new string('x', 50));
+        }
+
+        IRenderedComponent<KafkaSearchPage> page = await OpenAsync(rig, "pruned");
+
+        async Task ConfirmAsync()
+        {
+            page.WaitForAssertion(() => page.FindAll("dialog").Should().HaveCount(1));
+            await page.Find("dialog .ms-confirm-actions button.ms-button-danger").ClickAsync(new MouseEventArgs());
+        }
+
+        await SearchForAsync(page, "key = 'k-99999'");
+        await ConfirmAsync();
+        page.WaitForAssertion(() => page.FindAll(".ms-k-result-banner button").Should().Contain(static x => x.TextContent == "Search all partitions"));
+
+        await page.FindAll(".ms-k-result-banner button").Single(static x => x.TextContent == "Search all partitions").ClickAsync(new MouseEventArgs());
+        await ConfirmAsync();
+        page.WaitForAssertion(() => page.FindAll(".ms-k-result-banner button").Should().Contain(static x => x.TextContent == "Continue"));
+        page.FindAll("details.ms-k-progress tbody tr").Should().HaveCount(6, "the search of every partition reads all six");
+
+        await page.FindAll(".ms-k-result-banner button").Single(static x => x.TextContent == "Continue").ClickAsync(new MouseEventArgs());
+        await ConfirmAsync();
+        page.WaitForAssertion(() => page.Find(".ms-k-result-banner").TextContent.Should().Contain("Continued after offsets read by the previous search"));
+
+        page.Find("details.ms-k-verdicts").TextContent.Should().Contain("not pruned: you asked to search every partition", "Continue keeps the flag of the scan it continues");
+        page.FindAll("details.ms-k-progress tbody tr").Should().HaveCount(6);
+        page.Markup.Should().NotContain("This search read only partition");
+    }
+
+    [Fact]
     public async Task Continue_on_a_pruned_search_stays_pruned_and_still_offers_Search_all_partitions()
     {
         await using KafkaSearchRig rig = new(engine: o =>

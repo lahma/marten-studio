@@ -7,6 +7,8 @@ using KStudio.Core.Predicates;
 using KStudio.Core.Redaction;
 using KStudio.Core.Scanning;
 
+using PostgresStudio.Services.Json;
+
 namespace KStudio.Services;
 
 /// <summary>How one header or attribute compares across two records.</summary>
@@ -299,8 +301,9 @@ internal static class KafkaCompare
     {
         try
         {
-            JsonNode? a = JsonNode.Parse(left);
-            JsonNode? b = JsonNode.Parse(right);
+            // PostgresStudio's canonicalizer, which keeps the last of a repeated member name (JsonNode.Parse would throw on it) and sorts members.
+            JsonNode? a = JsonCanonicalizer.Canonicalize(left);
+            JsonNode? b = JsonCanonicalizer.Canonicalize(right);
 
             foreach (KafkaMaskedPath path in masked.OrderByDescending(static x => x.Steps.Count))
             {
@@ -310,7 +313,7 @@ internal static class KafkaCompare
 
             return (a?.ToJsonString(), b?.ToJsonString());
         }
-        catch (JsonException)
+        catch (Exception e) when (e is JsonException or ArgumentException or FormatException or OverflowException)
         {
             return (null, null);
         }

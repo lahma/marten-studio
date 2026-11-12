@@ -147,10 +147,18 @@ internal sealed class KafkaRecordService(
         ArgumentNullException.ThrowIfNull(cluster);
         ArgumentNullException.ThrowIfNull(match);
 
+        // A match read under the envelope alone holds no value: showing it is no view of one, and nothing is recorded as read.
+        if (!match.ReadWithPayload)
+        {
+            return false;
+        }
+
         string target = match.Topic + "/" + match.Partition.ToString(CultureInfo.InvariantCulture) + "/" + match.Offset.ToString(CultureInfo.InvariantCulture);
 
         try
         {
+            // ReadPayloads is judged with its prerequisite: a value is read only as part of a record SearchRecords opened.
+            capabilities.Require(KafkaCapability.SearchRecords);
             capabilities.Require(KafkaCapability.ReadPayloads);
         }
         catch (KafkaCapabilityDeniedException denial)
@@ -161,6 +169,7 @@ internal sealed class KafkaRecordService(
 
         if (!await authorization.IsAuthorizedAsync(cluster, null, null, cancellationToken).ConfigureAwait(false)
             || !await authorization.IsAuthorizedAsync(cluster, match.Topic, null, cancellationToken).ConfigureAwait(false)
+            || !await authorization.IsAuthorizedAsync(cluster, match.Topic, KafkaCapability.SearchRecords, cancellationToken).ConfigureAwait(false)
             || !await authorization.IsAuthorizedAsync(cluster, match.Topic, KafkaCapability.ReadPayloads, cancellationToken).ConfigureAwait(false))
         {
             actionLog.RecordClusterDenied(cluster, match.Topic, [match.Topic], authorization.PolicyFor(KafkaCapability.ReadPayloads) ?? "(none)", Action, target, KafkaCapability.ReadPayloads);

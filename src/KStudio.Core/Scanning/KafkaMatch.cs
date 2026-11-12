@@ -131,6 +131,9 @@ internal sealed class KafkaMatch
 
     /// <summary>Whether the value shown is a CloudEvent's data and not the record's value.</summary>
     public bool ValueIsCloudEventData { get; init; }
+
+    /// <summary>Whether the scan or read that made this match had the payload grant: a match read under the envelope alone holds no value, and showing it is no view of one.</summary>
+    public bool ReadWithPayload { get; init; }
 }
 
 /// <summary>Everything the engine knows about one topic of a scan.</summary>
@@ -421,6 +424,7 @@ internal static class KafkaMatchFactory
             ValuePreview = preview,
             ValueTruncated = truncated,
             ValueWithheldBy = withheld,
+            ReadWithPayload = grant.HasFlag(KafkaReadGrant.Payload),
         };
     }
 
