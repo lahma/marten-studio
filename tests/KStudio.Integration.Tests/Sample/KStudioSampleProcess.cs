@@ -56,6 +56,23 @@ internal sealed class KStudioSampleProcess : IAsyncDisposable
         }
     }
 
+    /// <summary>The throwaway Postgres' connection string, from the banner's <c>host:port</c> and the Testcontainers module's defaults.</summary>
+    public string PostgresConnectionString
+    {
+        get
+        {
+            Match match = Regex.Match(Log, @"throwaway Postgres at (?<hostport>[^\s;]+);", RegexOptions.None, TimeSpan.FromSeconds(5));
+
+            if (!match.Success)
+            {
+                throw new InvalidOperationException("The banner did not name a Postgres. Log:" + Environment.NewLine + Log);
+            }
+
+            string[] parts = match.Groups["hostport"].Value.Split(':');
+            return $"Host={parts[0]};Port={parts[1]};Database=postgres;Username=postgres;Password=postgres";
+        }
+    }
+
     /// <summary>Starts the sample with the given extra environment and waits until it answers its landing page.</summary>
     /// <param name="environment">Environment variables to set on the child (a <see langword="null" /> value removes one).</param>
     /// <param name="cancellationToken">Cancels the wait.</param>

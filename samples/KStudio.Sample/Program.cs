@@ -8,12 +8,15 @@ using KStudio;
 using KStudio.Sample;
 using KStudio.Sample.Auth;
 using KStudio.Sample.Kafka;
+using KStudio.Sample.Wolverine;
 
 using MartenStudio;
 using MartenStudio.SampleDomain;
 
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication.Cookies;
+
+using Wolverine;
 
 // The one switch this host understands. It is taken out of the arguments before the host sees them: .NET's command-line provider binds a bare
 // `--key` to the token after it, and would swallow whatever follows.
@@ -74,8 +77,21 @@ SampleKafkaPolicies.AddHandlers(builder.Services);
 
 // The Marten half of the studio runs over the demo store: KStudio is a module of the studio it joins, and this sample hosts Marten Studio.
 builder.Services.AddSingleton(new SampleSeeding(GrantConsoleRole: false));
+// The sample's Wolverine application (D-CORR decision 11) creates topics of its own (AutoProvision) and produces to them, so it runs where the seed
+// may: on the throwaway broker, or on a configured one the host was told it may generate data in. Elsewhere the sample is the browser it was.
+bool wolverine = kafka.IsThrowaway || allowDataGeneration;
+
 builder.Services
-    .AddMarten(options => SampleStore.Configure(options, postgres))
+    .AddMarten(options =>
+    {
+        SampleStore.Configure(options, postgres);
+
+        if (wolverine)
+        {
+            // After the demo domain's configuration: the checkout document is the sample's, not the domain's (D17), and it is conjoined like Invoice.
+            options.Schema.For<CheckoutOrder>().MultiTenanted();
+        }
+    })
     .UseLightweightSessions()
     .AddAsyncDaemon(DaemonMode.Solo)
     .InitializeWith<SampleDataSeeder>();
@@ -95,7 +111,25 @@ builder.Services.AddMartenStudio(options =>
 // The header's "Back to application" link, to the sample's own landing page.
 builder.Services.Configure<MartenStudioOptions>(static options => options.ApplicationPath = "/");
 
-builder.Services.AddKafkaStudio(o => SampleKafkaRegistration.Configure(o, kafka.BootstrapServers));
+if (wolverine)
+{
+    SampleWolverine.ListenToTraces();
+    builder.Services.AddWolverine(options => SampleWolverine.Configure(options, kafka.BootstrapServers));
+
+    // After Wolverine's own hosted service, so that its bus is up when the sender publishes.
+    builder.Services.AddSingleton(new SampleKafkaAddress(kafka.BootstrapServers));
+    builder.Services.AddHostedService<CheckoutSender>();
+}
+
+builder.Services.AddKafkaStudio(o =>
+{
+    SampleKafkaRegistration.Configure(o, kafka.BootstrapServers);
+
+    if (wolverine)
+    {
+        SampleKafkaRegistration.ConfigureWolverine(o);
+    }
+});
 
 WebApplication app = builder.Build();
 
@@ -144,7 +178,7 @@ app.MapGet("/", (HttpContext context, IAntiforgery antiforgery) =>
           <ul>
             <li><a href="/marten/kafka">Open KStudio</a> &mdash; the Kafka pages of Marten Studio, mounted at <code>/marten</code></li>
             <li><a href="/marten">Open Marten Studio</a></li>
-            <li><a href="/login">Sign in</a> as <code>admin</code> (every topic) or <code>support</code> (<code>orders.*</code> only); the password is the user name</li>
+            <li><a href="/login">Sign in</a> as <code>admin</code> (every topic) or <code>support</code> (<code>orders.*</code> and <code>checkout.*</code> only); the password is the user name</li>
           </ul>
           <p>Try, as <code>support</code>, in Search over the last 24 hours of <code>orders.v1</code>: <code>header.correlation-id = 'c-0042'</code></p>
           <form method="post" action="/logout">

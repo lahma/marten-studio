@@ -60,6 +60,7 @@ samples/PostgresStudio.SampleData/       The demo data with no Marten in it, sha
 samples/KStudio.Sample/                  The KStudio sample: Marten Studio and KStudio over throwaway Postgres and Kafka (D18)
 samples/KStudio.Sample/Kafka/            Its Kafka container, seeder and judge
 samples/KStudio.Sample/Auth/             Its cookie sign-in, copied from the Marten sample
+samples/KStudio.Sample/Wolverine/        Its Wolverine application: the checkout handler, document and startup sender (D-CORR decision 11)
 samples/KStudio.Sample/Properties/       Its launch profile, port 5212
 samples/PostgresStudio.Sample/           The Postgres Studio sample host (D18), no Marten: an admin database and three
                                          tenant databases through its own IPostgresDatabaseSource - README snippet regions

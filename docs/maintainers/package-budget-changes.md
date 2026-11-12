@@ -715,3 +715,13 @@ tested version is the floor until Wolverine releases past 6.61.0. The JasperFx s
 drops Marten's. **Measured, and not added:** Wolverine 6.61 no longer ships its runtime compiler; a host that has handlers needs
 `WolverineFx.RuntimeCompilation` (or pre-generated code, `TypeLoadMode.Static`) to start. The live test has no handler and runs in
 `TypeLoadMode.Static`, so it needs neither; a host with a handler, the SAMPLE-M4 sample, is a decision about that package.
+
+**2026-11-12 — `WolverineFx.RuntimeCompilation` 6.61.0, for `samples/KStudio.Sample` only (KStudio M4, SAMPLE-M4).** What: Wolverine's opt-in
+Roslyn code generation (it brings `JasperFx.RuntimeCompiler`), which registers itself when the package is referenced. Why: the sample's
+Wolverine application has a handler (`PlaceCheckoutHandler` stores a `CheckoutOrder` document in the sample's Marten store), and Wolverine
+6.61 no longer ships its runtime compiler (GH-2876): in `TypeLoadMode.Dynamic`, the default, a host with a handler throws at start without
+an `IAssemblyGenerator`. What it replaces: nothing; the alternative, pre-generated code (`TypeLoadMode.Static` and `dotnet run -- codegen
+write`), would put generated source into a demo that is started with a plain `dotnet run`. Version: 6.61.0, the version that matches
+`WolverineFx.Kafka` 6.61.0 (one release train); its row is unconditional in `Directory.Packages.props` and no project but the sample has it
+in its graph. **No shipped package references it**, and neither `KStudio`, `KStudio.Core`, `KStudio.Wolverine` nor any test project does
+(the adapter's live test runs in `TypeLoadMode.Static` with no handler). Nothing here is packed.

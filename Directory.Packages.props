@@ -185,6 +185,15 @@
   </ItemGroup>
 
   <!--
+    Wolverine's runtime code generation, for samples/KStudio.Sample only (KStudio M4, SAMPLE-M4; Package budget changes, 2026-11-12 entry
+    "WolverineFx.RuntimeCompilation 6.61.0"). Wolverine 6.61 no longer ships its Roslyn compiler, and a host with a handler needs this package
+    (or pre-generated code) to start. Version matches WolverineFx 6.61.0. No shipped project and no test project references it.
+  -->
+  <ItemGroup Label="KStudio sample (samples/KStudio.Sample)">
+    <PackageVersion Include="WolverineFx.RuntimeCompilation" Version="6.61.0" />
+  </ItemGroup>
+
+  <!--
     The Microsoft.Extensions.* packages of src/PostgresStudio.Diagnostics, which has no FrameworkReference to
     Microsoft.AspNetCore.App and so needs the abstractions it uses as packages (AGENTS.md, Package budget
     changes, 2026-11-01). They are floors, not exact pins.

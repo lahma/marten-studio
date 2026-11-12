@@ -11,7 +11,7 @@ namespace KStudio.Integration.Tests.Sample;
 /// <summary>
 /// The sample's two KStudio policies (D35), asked the way KStudio asks them - about a <see cref="KafkaTopicResource" /> through the application's
 /// own <see cref="IAuthorizationService" /> - for the sample's two users (D-UI decision 18, OPEN-3): admin reaches everything, support reaches the
-/// cluster and <c>orders.*</c> and no other topic, and an anonymous visitor reaches nothing. No Docker.
+/// cluster, <c>orders.*</c> and <c>checkout.*</c> (the Wolverine application's) and no other topic, and an anonymous visitor reaches nothing. No Docker.
 /// </summary>
 public class SamplePolicyTests
 {
@@ -45,6 +45,10 @@ public class SamplePolicyTests
     [InlineData("support", null, true)]
     [InlineData("support", "orders.v1", true)]
     [InlineData("support", "orders.v1.dlq", true)]
+    [InlineData("support", "checkout.v1", true)]
+    [InlineData("support", "checkout.confirmed.v1", true)]
+    [InlineData("support", "wolverine-dead-letter-queue", false)]
+    [InlineData("support", "xcheckout.v1", false)]
     [InlineData("support", "payments.v1", false)]
     [InlineData("support", "customers.v1", false)]
     [InlineData("support", "secrets.v1", false)]
@@ -60,6 +64,7 @@ public class SamplePolicyTests
     [Theory]
     [InlineData("admin", "payments.v1", true)]
     [InlineData("support", "orders.v1", true)]
+    [InlineData("support", "checkout.v1", true)]
     [InlineData("support", "payments.v1", false)]
     [InlineData(null, "orders.v1", false)]
     public async Task The_search_policy_admits_admin_and_support_with_support_bounded_to_orders(string? user, string topic, bool expected)
