@@ -170,6 +170,13 @@ public class SampleSeedTests
     }
 
     [Fact]
+    public void The_banner_never_promises_a_reused_container_is_deleted()
+    {
+        SampleKafka.Banner("localhost:32770", "localhost:32771", reused: true).Should().Be(
+            "KStudio sample: started a throwaway Kafka at localhost:32770 and a throwaway Postgres at localhost:32771; both are kept for the next run (KSTUDIO_SAMPLE_REUSE=true); docker rm -f removes a container when you are done. Set ConnectionStrings:Kafka and ConnectionStrings:Postgres to use your own.");
+    }
+
+    [Fact]
     public void Reuse_is_asked_for_only_by_a_literal_true()
     {
         SampleKafka.IsReuseRequested("true").Should().BeTrue();

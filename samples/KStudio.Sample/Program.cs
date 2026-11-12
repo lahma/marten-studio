@@ -100,7 +100,10 @@ builder.Services.AddKafkaStudio(o => SampleKafkaRegistration.Configure(o, kafka.
 WebApplication app = builder.Build();
 
 // The loud banner (D18): at Warning, on start, naming whichever of the two is a container.
-if (SampleKafka.Banner(kafka.IsThrowaway ? kafka.BootstrapServers : null, postgresHostAndPort) is { } banner)
+if (SampleKafka.Banner(
+        kafka.IsThrowaway ? kafka.BootstrapServers : null,
+        postgresHostAndPort,
+        SampleKafka.IsReuseRequested(Environment.GetEnvironmentVariable(SampleKafka.ReuseEnvironmentVariable))) is { } banner)
 {
     app.Logger.LogWarning("{Banner}", banner);
 }

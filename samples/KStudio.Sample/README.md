@@ -24,7 +24,7 @@ Open `http://localhost:5212`, sign in at `/login` as `admin` or `support` (the p
 | Switch or variable | What it does |
 |---|---|
 | `--allow-data-generation` | Lets the sample create and seed its topics on a cluster you configured. Without it a configured cluster is only browsed. A configured cluster that has an `orders.v1` the sample did not seed is refused either way. |
-| `KSTUDIO_SAMPLE_REUSE=true` | Reuses the two containers between runs instead of starting fresh ones. The seed is not repeated: the marker topic says it was done. |
+| `KSTUDIO_SAMPLE_REUSE=true` | Reuses the two containers between runs instead of starting fresh ones, and the banner says they are kept; `docker rm -f` removes them. The seed is not repeated: the marker topic says it was done. |
 | `ConnectionStrings:Kafka` | The bootstrap servers of a cluster of your own. |
 | `ConnectionStrings:Postgres` | A Postgres of your own for the Marten half. |
 

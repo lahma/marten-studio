@@ -134,8 +134,9 @@ internal sealed class SampleKafka : IAsyncDisposable
     /// <summary>The loud banner (D-SHELL 11), logged at Warning on start.</summary>
     /// <param name="kafkaBootstrap">The throwaway Kafka's bootstrap servers, or <see langword="null" /> when the host configured its own.</param>
     /// <param name="postgresHost">The throwaway Postgres' <c>host:port</c>, or <see langword="null" /> when the host configured its own.</param>
+    /// <param name="reused">Whether <c>KSTUDIO_SAMPLE_REUSE=true</c> asked for reuse: the containers are then kept for the next run, and the banner says so.</param>
     /// <returns>The sentence, or <see langword="null" /> when neither is a container.</returns>
-    public static string? Banner(string? kafkaBootstrap, string? postgresHost)
+    public static string? Banner(string? kafkaBootstrap, string? postgresHost, bool reused = false)
     {
         if (kafkaBootstrap is null && postgresHost is null)
         {
@@ -144,9 +145,9 @@ internal sealed class SampleKafka : IAsyncDisposable
 
         string what = (kafkaBootstrap, postgresHost) switch
         {
-            ({ } kafka, { } postgres) => $"a throwaway Kafka at {kafka} and a throwaway Postgres at {postgres}; both are deleted",
-            ({ } kafka, null) => $"a throwaway Kafka at {kafka}; it is deleted",
-            (null, { } postgres) => $"a throwaway Postgres at {postgres}; it is deleted",
+            ({ } kafka, { } postgres) => $"a throwaway Kafka at {kafka} and a throwaway Postgres at {postgres}; both are",
+            ({ } kafka, null) => $"a throwaway Kafka at {kafka}; it is",
+            (null, { } postgres) => $"a throwaway Postgres at {postgres}; it is",
             _ => string.Empty,
         };
 
@@ -157,7 +158,11 @@ internal sealed class SampleKafka : IAsyncDisposable
             _ => "Set ConnectionStrings:Postgres to use your own.",
         };
 
-        return $"KStudio sample: started {what} when this process stops. {configure}";
+        string fate = reused
+            ? $"kept for the next run ({ReuseEnvironmentVariable}=true); docker rm -f removes a container when you are done"
+            : "deleted when this process stops";
+
+        return $"KStudio sample: started {what} {fate}. {configure}";
     }
 
     /// <summary>
