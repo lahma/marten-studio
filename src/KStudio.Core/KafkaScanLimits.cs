@@ -67,7 +67,7 @@ public sealed class KafkaScanLimits
     /// <summary>How long a partition may make no progress before it is reported stalled (1 second to 5 minutes). Default 15 seconds.</summary>
     public TimeSpan PartitionStallTimeout { get; set; } = TimeSpan.FromSeconds(15);
 
-    /// <summary>The largest file an export writes (1 MiB to 256 MiB). Default 32 MiB, which holds the default 500 matches at their 64 KiB cap.</summary>
+    /// <summary>The largest file an export writes (1 MiB to 256 MiB). Default 32 MiB. The default 500 matches at their 64 KiB cap come to 32 MiB of text before each row's own names and escaping, so a search whose matches are all full ends at its last whole row, and the export says how many it left out.</summary>
     public long MaxExportBytes { get; set; } = 32 * MiB;
 
     /// <summary>

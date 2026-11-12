@@ -539,8 +539,9 @@ A record read keeps one more value: the record asked for may hold up to $F_v$ by
 **Profiles and the cluster's own buckets (D47).** A cluster's profile caps the limits above in the engine (`min(host, ceiling)`, the table in `docs/kstudio.md`), and a
 profiled cluster whose capped rate or hourly allowance is below the host's gets a token bucket and a rolling-hour budget of its own, beside the process-wide ones:
 the scan is paced by the slower and stops when either allowance is spent. The byte rate and the allowance guard the cluster's quota and egress; concurrency and the
-consumer's sizes guard the process's memory, so they stay the host's. Exports in flight (D45) add $2 \cdot$ `MaxExportBytes` to the memory statement, 64 MiB at the defaults:
-the file is written whole into a `MemoryStream` before it is sent, and at most two are in flight.
+consumer's sizes guard the process's memory, so they stay the host's. Exports in flight (D45) add $2 \cdot 2 \cdot$ `MaxExportBytes` to the memory statement, 128 MiB at the defaults: the writer keeps each row as it makes it and copies
+them once into a buffer of exactly the file's size, so an export peaks at twice its file (the rows and the buffer; no growing stream holds its old and new arrays
+together), the file is sent from that buffer without another copy, and at most two exports are in flight.
 
 Before reading, the engine estimates a scan: the offsets in its ranges ("about", since offsets are not records) and the
 bytes, from a small sample of record sizes. Above the confirmation threshold, `Start` refuses unless the visitor's

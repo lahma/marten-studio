@@ -194,9 +194,9 @@ yours.
 rate and hourly allowance are the cluster's own, on top of the process-wide ones: a scan of a profiled cluster is paced by the slower
 of the two buckets and stops when either allowance is spent. They are made only where the profile's value is below yours. `Production`
 keeps 5 MiB/s and 512 MiB an hour for each visitor; the rate must stay well below your principal's broker quota, and a host
-that bills by egress may want it lower, which it does by lowering its own `BytesPerSecond` and `OwnerBytesPerHour`.
+that bills by egress may want it lower. Lowering your own `BytesPerSecond` or `OwnerBytesPerHour` lowers them for every cluster, not for one.
 
-With Wolverine, a profile is set per cluster, and for a broker per tenant per tenant, because each is a broker of its own with its own
+With Wolverine, a profile is set for each cluster, and for a broker per tenant for each tenant, because each is a broker of its own with its own
 quota:
 
 ```csharp

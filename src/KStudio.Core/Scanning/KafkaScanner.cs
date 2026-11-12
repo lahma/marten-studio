@@ -115,6 +115,9 @@ internal sealed partial class KafkaScanner(
 
         KafkaClusterDefinition definition = registry.Get(request.Cluster);
 
+        // The cluster's own allowance is charged by the planning reads too (the size sample and the partitioner verification).
+        KafkaClusterCost cost = clusterCosts.For(definition);
+
         // The cluster's profile caps the host's limits first, in the engine, so that no page can skip it; a lowering may then only go below that.
         KafkaScanLimits profiled = KafkaProfileCeilings.Cap(definition.Profile, settings.Limits);
         KafkaScanLimits limits = request.Lower?.Apply(profiled) ?? profiled;
@@ -207,11 +210,11 @@ internal sealed partial class KafkaScanner(
 
         // A key search may read fewer partitions, but only after sampling the window has proved the topic's declared partitioner
         // (D-PAYLOAD decision 7): the ranges, the estimate and the cursor then cover exactly what is read.
-        IReadOnlyList<KafkaTopicPruning> pruning = await PruneAsync(request, shared.Tree, perTopic ? searches : null, topics, contexts, window, ranges, verdicts, owner, cancellationToken).ConfigureAwait(false);
+        IReadOnlyList<KafkaTopicPruning> pruning = await PruneAsync(request, shared.Tree, perTopic ? searches : null, topics, contexts, window, ranges, verdicts, owner, cost, cancellationToken).ConfigureAwait(false);
         ranges = Pruned(ranges, pruning);
         verdicts = ApplyPruning(verdicts, pruning);
 
-        KafkaScanEstimate estimate = await EstimateAsync(request, ranges, owner, limits, cancellationToken).ConfigureAwait(false);
+        KafkaScanEstimate estimate = await EstimateAsync(request, ranges, owner, cost, limits, cancellationToken).ConfigureAwait(false);
         return new KafkaScanPlan(request, window, ranges, contexts, [], verdicts, estimate, limits, audit, pruning);
     }
 
@@ -287,6 +290,7 @@ internal sealed partial class KafkaScanner(
         IReadOnlyList<PartitionRange> ranges,
         List<ClauseVerdict> verdicts,
         KafkaScanOwner owner,
+        KafkaClusterCost cost,
         CancellationToken cancellationToken)
     {
         WireIsolation isolation = request.Isolation == KafkaIsolation.Committed ? WireIsolation.ReadCommitted : WireIsolation.ReadUncommitted;
@@ -322,7 +326,7 @@ internal sealed partial class KafkaScanner(
                 isolation,
                 request.ContinueFrom?.Pruning.FirstOrDefault(x => x.Topic == topic.Value && x.IsPruned));
 
-            pruning.Add(await verifier.DecideAsync(ask, owner, cancellationToken).ConfigureAwait(false));
+            pruning.Add(await verifier.DecideAsync(ask, owner, cost, cancellationToken).ConfigureAwait(false));
         }
 
         return pruning;
@@ -518,6 +522,7 @@ internal sealed partial class KafkaScanner(
         KafkaScanRequest request,
         IReadOnlyList<PartitionRange> ranges,
         KafkaScanOwner owner,
+        KafkaClusterCost cost,
         KafkaScanLimits limits,
         CancellationToken cancellationToken)
     {
@@ -538,7 +543,7 @@ internal sealed partial class KafkaScanner(
         {
             long topicOffsets = topic.Sum(static x => x.End - x.Start);
             long? mean = await sampler
-                .MeanRecordBytesAsync(request.Cluster, topic.Key, [.. topic], isolation, owner, cancellationToken)
+                .MeanRecordBytesAsync(request.Cluster, topic.Key, [.. topic], isolation, owner, cost, cancellationToken)
                 .ConfigureAwait(false);
 
             if (mean is { } size)

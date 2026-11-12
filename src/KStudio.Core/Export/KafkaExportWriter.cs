@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Globalization;
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 
 using KStudio.Core.Decoding;
@@ -59,6 +60,9 @@ internal static class KafkaExportWriter
     public const string NoValueText = "This value has no text to save";
 
     private static readonly UTF8Encoding Utf8 = new(false);
+
+    // A cell is read by a person in a spreadsheet: the characters stay as they are (a header's ä is not \u00E4); the cell is quoted by RFC 4180, not by JSON.
+    private static readonly JsonWriterOptions SpreadsheetOptions = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
     private static readonly byte[] Bom = [0xEF, 0xBB, 0xBF];
 
     private static readonly string[] CsvColumns =
@@ -95,31 +99,43 @@ internal static class KafkaExportWriter
         byte[]? header,
         Func<KafkaMatch, byte[]> row)
     {
-        using MemoryStream stream = new();
-        int written = 0;
+        // The rows are kept as they are made and copied once into a buffer of exactly the file's size, so that the peak is twice the file (the rows and
+        // the buffer, never a growing stream's old and new arrays together) and the file is handed over without a further copy.
+        List<byte[]> rows = [];
+        long length = header?.Length ?? 0;
         bool values = false;
-
-        if (header is not null)
-        {
-            stream.Write(header);
-        }
 
         foreach (KafkaMatch match in ordered)
         {
             byte[] bytes = row(match);
 
             // The first row that would not fit, and every one after it, is left out and counted: a file never holds a cut row.
-            if (stream.Length + bytes.Length > maxBytes)
+            if (length + bytes.Length > maxBytes)
             {
                 break;
             }
 
-            stream.Write(bytes);
-            written++;
+            rows.Add(bytes);
+            length += bytes.Length;
             values |= match.ReadWithPayload;
         }
 
-        return new KafkaExportFile(format, stream.ToArray(), extension, contentType, written, ordered.Length - written, values, false, null);
+        byte[] content = new byte[length];
+        int at = 0;
+
+        if (header is not null)
+        {
+            header.CopyTo(content, 0);
+            at = header.Length;
+        }
+
+        foreach (byte[] bytes in rows)
+        {
+            bytes.CopyTo(content, at);
+            at += bytes.Length;
+        }
+
+        return new KafkaExportFile(format, content, extension, contentType, rows.Count, ordered.Length - rows.Count, values, false, null);
     }
 
     private static KafkaExportFile WriteValue(KafkaMatch[] ordered, long maxBytes)
@@ -142,9 +158,12 @@ internal static class KafkaExportWriter
         string contentType = json ? "application/json" : "text/plain";
         byte[] content = Utf8.GetBytes(text);
 
+        // A value over the limit is refused by name, so that the visitor learns which setting to raise; it is never an empty file.
         if (content.Length > maxBytes)
         {
-            return new KafkaExportFile(KafkaExportFormat.Value, [], extension, contentType, 0, 1, true, match.ValueTruncated, null);
+            return Refused(string.Create(
+                CultureInfo.InvariantCulture,
+                $"This value is {KafkaRecordRead.Bytes(content.Length)}, more than KafkaStudioOptions.Limits.MaxExportBytes ({KafkaRecordRead.Bytes(maxBytes)})"));
         }
 
         return new KafkaExportFile(KafkaExportFormat.Value, content, extension, contentType, 1, 0, true, match.ValueTruncated, null);
@@ -328,9 +347,13 @@ internal static class KafkaExportWriter
         {
             json.WritePropertyName("value");
 
-            if (match.ValueTextKind == KafkaValueTextKind.Json && !match.ValueTruncated && IsJson(text))
+            // Re-emitted compact: a producer's newlines inside a JSON value must never end a line, or forge one.
+            if (match.ValueTextKind == KafkaValueTextKind.Json && !match.ValueTruncated && TryParse(text) is { } document)
             {
-                json.WriteRawValue(text);
+                using (document)
+                {
+                    document.RootElement.WriteTo(json);
+                }
             }
             else
             {
@@ -357,17 +380,37 @@ internal static class KafkaExportWriter
         }
     }
 
-    /// <summary>Whether the text is exactly one JSON value that can be embedded as it is.</summary>
-    private static bool IsJson(string text)
+    /// <summary>The text parsed as exactly one JSON value, or <see langword="null" /> when it is not (the caller disposes it).</summary>
+    private static JsonDocument? TryParse(string text)
     {
         try
         {
-            using JsonDocument _ = JsonDocument.Parse(text);
-            return true;
+            return JsonDocument.Parse(text);
         }
         catch (JsonException)
         {
-            return false;
+            return null;
+        }
+    }
+
+    /// <summary>The text of a JSON value written compactly with the characters kept as they are; <see langword="null" /> when the text is not JSON.</summary>
+    private static string? Compact(string text)
+    {
+        if (TryParse(text) is not { } document)
+        {
+            return null;
+        }
+
+        using (document)
+        {
+            ArrayBufferWriter<byte> buffer = new(text.Length);
+
+            using (Utf8JsonWriter json = new(buffer, SpreadsheetOptions))
+            {
+                document.RootElement.WriteTo(json);
+            }
+
+            return Utf8.GetString(buffer.WrittenSpan);
         }
     }
 
@@ -400,7 +443,7 @@ internal static class KafkaExportWriter
     {
         ArrayBufferWriter<byte> buffer = new(256);
 
-        using (Utf8JsonWriter json = new(buffer))
+        using (Utf8JsonWriter json = new(buffer, SpreadsheetOptions))
         {
             WriteHeaders(json, match);
         }
@@ -408,7 +451,7 @@ internal static class KafkaExportWriter
         string headers = Utf8.GetString(buffer.WrittenSpan);
 
         // The value, as text: a JSON value compact, a binary one as the preview's hex; empty under the envelope or when the engine withheld it.
-        string value = match.ReadWithPayload && match.ValueWithheldBy is null ? match.ValueText ?? match.ValuePreview ?? string.Empty : string.Empty;
+        string value = match.ReadWithPayload && match.ValueWithheldBy is null ? CsvValue(match) : string.Empty;
         bool truncated = match.ReadWithPayload && match.ValueWithheldBy is null && match.ValueTruncated;
 
         string[] cells =
@@ -442,6 +485,17 @@ internal static class KafkaExportWriter
 
         line.Append("\r\n");
         return Utf8.GetBytes(line.ToString());
+    }
+
+    /// <summary>A JSON value compact on one line (a newline inside it is not the producer's to put in a cell); any other text as it is.</summary>
+    private static string CsvValue(KafkaMatch match)
+    {
+        if (match.ValueText is { } text)
+        {
+            return match.ValueTextKind == KafkaValueTextKind.Json && !match.ValueTruncated ? Compact(text) ?? text : text;
+        }
+
+        return match.ValuePreview ?? string.Empty;
     }
 
     /// <summary>

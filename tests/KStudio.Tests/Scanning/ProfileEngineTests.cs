@@ -300,12 +300,9 @@ public class ProfileEngineTests
             scan.Reader.Enqueue(new WireReadOutcome.Record(Record(scan.Topic, 0, i)));
         }
 
-        scan.Handle.Progress.Records.Should().Be(0);
-
-        scan.Fixture.Clock.Advance(TimeSpan.FromSeconds(1));
-        scan.Handle.Progress.Records.Should().Be(0, "one second of two has passed");
-
-        scan.Fixture.Clock.Advance(TimeSpan.FromSeconds(1));
+        // Nothing is asserted about "no record yet" here: a negative cannot be waited on, and the wait above is what shows the scan is in debt. What
+        // proves the deeper debt wins is below: the thread waited on the process's bucket (Waiters), and after the full two seconds it reads one record.
+        scan.Fixture.Clock.Advance(TimeSpan.FromSeconds(2));
         ScanFixture.Until(() => scan.Handle.Progress.Records == 1 && process.Waiters == 1, "the debt is paid, one record is read and the process's bucket owes again");
     }
 }

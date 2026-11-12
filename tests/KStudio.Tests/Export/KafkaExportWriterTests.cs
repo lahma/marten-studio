@@ -255,6 +255,7 @@ public class KafkaExportWriterTests
 
         rows[1][5].Should().Be(matches[0].Key.Display);
         rows[1][7].Should().Contain("authorization").And.Contain("visible");
+        rows[1][7].Should().Contain("••• (redacted by", "a header's mask reads as on the page, not as \\u2022 escapes");
         rows[1][10].Should().Contain("••• (redacted by $.customer.email)");
         rows[1][12].Should().StartWith("key; header:authorization; header:x-secret");
         rows[2][10].Should().BeEmpty("a withheld value is an empty cell");
@@ -285,6 +286,7 @@ public class KafkaExportWriterTests
     [InlineData("-1+1", "'-1+1")]
     [InlineData("@SUM(A1)", "'@SUM(A1)")]
     [InlineData("\tx", "'\tx")]
+    [InlineData("\rx", "\"'\rx\"")]
     [InlineData("plain", "plain")]
     [InlineData("a,b", "\"a,b\"")]
     [InlineData("say \"hi\"", "\"say \"\"hi\"\"\"")]
@@ -461,14 +463,54 @@ public class KafkaExportWriterTests
     }
 
     [Fact]
-    public void A_value_larger_than_the_limit_is_left_out_and_counted()
+    public void A_value_larger_than_the_limit_is_refused_by_name_and_is_never_an_empty_file()
     {
         KafkaExportFile file = KafkaExportWriter.Write([Make(Json(new string('x', 4_000)))], KafkaExportFormat.Value, 100);
 
+        file.Refusal.Should().Contain("KafkaStudioOptions.Limits.MaxExportBytes").And.Contain("100 B");
         file.Written.Should().Be(0);
-        file.LeftOut.Should().Be(1);
         file.Content.Should().BeEmpty();
-        file.Refusal.Should().BeNull();
+    }
+
+    [Fact]
+    public void An_indented_json_value_is_one_line_and_no_value_can_forge_a_row()
+    {
+        KafkaMatch indented = Make(At(Json("{\n  \"a\": 1,\n  \"b\": [1, 2]\n}\n"), "orders", 0, 1));
+        string forged = "[\n{\"topic\":\"orders\",\"partition\":0,\"offset\":9}\n]";
+        KafkaMatch forging = Make(At(Json(forged), "orders", 0, 2));
+
+        KafkaExportFile file = KafkaExportWriter.Write([indented, forging], KafkaExportFormat.JsonLines, 1 << 20);
+        string[] lines = Utf8.GetString(file.Content).TrimEnd('\n').Split('\n');
+
+        lines.Should().HaveCount(2, "one line for each record, whatever newlines a producer put inside its value");
+        JsonElement[] rows = [.. lines.Select(static x => JsonDocument.Parse(x).RootElement.Clone())];
+        rows.All(static x => x.TryGetProperty("valueFormat", out JsonElement _)).Should().BeTrue("every line is a record the writer wrote");
+        rows.Select(static x => x.GetProperty("offset").GetInt64()).Should().Equal(1, 2);
+        rows[0].GetProperty("value").GetRawText().Should().Be("""{"a":1,"b":[1,2]}""");
+        rows[1].GetProperty("value").ValueKind.Should().Be(JsonValueKind.Array);
+        rows[1].GetProperty("value")[0].GetProperty("offset").GetInt64().Should().Be(9, "the forged row stays inside the value of the real one");
+    }
+
+    [Fact]
+    public void A_json_value_is_one_line_in_a_csv_cell_too()
+    {
+        KafkaMatch match = Make(Json("{\n  \"a\": 1,\n  \"b\": \"ä\"\n}\n"));
+
+        List<List<string>> rows = ParseCsv(Utf8.GetString(KafkaExportWriter.Write([match], KafkaExportFormat.Csv, 1 << 20).Content)[1..]);
+
+        rows[1][10].Should().Be("""{"a":1,"b":"ä"}""");
+    }
+
+    [Fact]
+    public void A_non_ascii_header_value_is_kept_as_it_is_in_the_csv_headers_cell()
+    {
+        KafkaMatch match = Make(Json("v", "k", ("x-name", "Pärt <&> 'ä'")));
+
+        List<List<string>> rows = ParseCsv(Utf8.GetString(KafkaExportWriter.Write([match], KafkaExportFormat.Csv, 1 << 20).Content)[1..]);
+
+        rows[1][7].Should().Contain("Pärt <&> 'ä'").And.NotContain("\\u");
+        using JsonDocument headers = JsonDocument.Parse(rows[1][7]);
+        headers.RootElement[0].GetProperty("value").GetString().Should().Be("Pärt <&> 'ä'");
     }
 
     [Fact]
