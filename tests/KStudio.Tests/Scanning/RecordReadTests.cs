@@ -6,6 +6,7 @@ using KStudio.Core.Scanning;
 using KStudio.Core.Wire;
 using KStudio.Core.Windows;
 using KStudio.Tests.Contract;
+using KStudio.Tests.Support;
 
 using Microsoft.Extensions.DependencyInjection;
 
@@ -249,6 +250,52 @@ public class RecordReadTests
 
         (await ReadAsync(fixture, topic, 5)).Status.Should().Be(KafkaRecordReadStatus.Found, "the slot is free again for the next read of the same owner");
         fixture.Readers.Should().HaveCount(2).And.OnlyContain(static x => x.CloseCount == 1);
+    }
+
+    [Fact]
+    public async Task A_read_counts_against_the_owners_hourly_budget_and_a_spent_budget_refuses()
+    {
+        await using ScanFixture fixture = ScanFixture.Create();
+        string topic = fixture.Topic("budget");
+        Seed(fixture, topic, 20);
+        OwnerByteBudget budget = fixture.Provider.GetRequiredService<OwnerByteBudget>();
+        long before = budget.Remaining(fixture.Owner.Key);
+
+        KafkaRecordRead read = await ReadAsync(fixture, topic, 4);
+
+        budget.Remaining(fixture.Owner.Key).Should().Be(before - read.BytesRead, "what a record read reads is paid for like any scan's bytes");
+
+        budget.Add(fixture.Owner.Key, before);
+        KafkaRecordRead refused = await ReadAsync(fixture, topic, 4);
+
+        refused.Status.Should().Be(KafkaRecordReadStatus.Refused);
+        refused.Refusal.Should().Be(KafkaScanRefusal.OwnerBudgetSpent);
+        refused.Text.Should().Be("You have read your hourly allowance of 2 GiB. It frees up as the hour rolls on.");
+        fixture.Provider.GetRequiredService<KafkaScanLimiter>().Running.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task A_cancelled_read_stops_its_scan_throws_and_gives_the_slot_back()
+    {
+        ScriptedReader reader = new();
+        await using ScanFixture fixture = ScanFixture.Create(wrap: wire => new ScriptedWire(wire, _ => reader));
+        string topic = fixture.Topic("cancel");
+        Seed(fixture, topic, 20);
+        using CancellationTokenSource cancel = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+
+        // The scripted reader returns nothing, so the read runs until it is told to stop.
+        Task<KafkaRecordRead> read = fixture.Scanner.ReadRecordAsync(
+            new KafkaRecordRequest(EngineHarness.ClusterKey, new KafkaTopicName(topic), 0, 4, 5, KafkaReadGrant.Envelope),
+            fixture.Owner,
+            cancel.Token);
+
+        ScanFixture.Until(() => reader.Reads > 0, "the scan's thread is reading");
+        await cancel.CancelAsync();
+
+        Func<Task> wait = () => read.Bounded();
+        await wait.Should().ThrowAsync<OperationCanceledException>();
+        fixture.Provider.GetRequiredService<KafkaScanLimiter>().Running.Should().Be(0);
+        reader.CloseCount.Should().Be(1);
     }
 
     [Fact]
