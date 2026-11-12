@@ -422,6 +422,7 @@ tests/KStudio.Integration.Tests/Scanning/  The scan engine on real records: stop
 tests/KStudio.Integration.Tests/Partitioning/ Each partitioner against a real producer's on two partition counts, and a pruned scan on real brokers
 tests/KStudio.Integration.Tests/Redaction/ Payload redaction on real brokers: a scan, a record read, the logs and the exact match, with no masked value in any sink
 tests/KStudio.Integration.Tests/Search/  Find the message with this id (the M1 exit), as restricted principals, and the search service against live brokers
+tests/KStudio.Integration.Tests/Correlation/ Related records on real brokers (the M4 exit): an in and an out topic found by their own fields in one scan, and a topic the principal may not describe
 tests/KStudio.Integration.Tests/Sample/  The sample host, started once, and the sample's seed, judge and policies without Docker
 tests/KStudio.Integration.Tests/Shell/   Live Kafka and Postgres: first navigation creates no topic, commits no offset, writes no row, makes no broker call while prerendering
 src/KStudio.Wolverine/                   KStudio.Wolverine (D43): UseWolverineKafka() and its options. It lists a Wolverine application's Kafka

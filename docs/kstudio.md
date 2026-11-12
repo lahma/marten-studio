@@ -98,6 +98,35 @@ Limits (`o.Limits`) bound every search: bytes and records per search, duration, 
 two searches at a time per application and one per user, and a byte rate for the whole application. They can only be
 lowered.
 
+## Related records
+
+**Related records** on a record's page searches the topics around it for records that share one of its correlation
+values. The values come only from what the page already shows you: a field that is redacted, cut or absent is never
+used. By default KStudio compares Wolverine's headers (`correlation-id`; `id`, `conversation-id` and `causation-id`;
+`saga-id`), the CloudEvents `id` and the record's trace id. Declare more per topic:
+
+```csharp
+o.Topic("orders.v1", t => t.Correlation(c =>
+{
+    c.Key().Document("Order");
+    c.JsonPath("$.customer.id").As("customer");
+}));
+```
+
+Fields of the same kind are compared across topics. A JSON path is read only for a visitor with `ReadPayloads` on that
+topic. Without it, the topic is searched by its other fields, and the page says so.
+
+The search runs over the declared topics you may read on this cluster, 30 minutes either side of the record by default.
+It is one search: it is estimated before it runs, confirmed above the same thresholds as a search, recorded once in the
+audit with every topic and each topic's predicate, and stopped by the same limits. A topic you may not read is not
+listed. A topic Kafka refuses shows why. Nothing runs until you press **Search related records**.
+
+## Duplicates
+
+Under search results and related records, **Possible duplicates** groups the records found on one topic that carry the
+same identity: the same `id` header, the same CloudEvents source and id, or, when you may read values, the same key and
+value as shown. Only the records found are compared, and nothing more is read.
+
 ## Redaction
 
 ```csharp
