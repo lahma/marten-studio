@@ -342,6 +342,63 @@ decode limit`, `had a value that could not be read as text`, `had a number too l
 the topic's decoder`, `had CloudEvents data_base64 that is not valid base64`, `could not be searched, because a redaction
 rule could not be applied to their value` (and the M2 reasons for keys, headers and CloudEvents).
 
+### Partition pruning
+
+A key search may read fewer partitions, but only when the host declared how its producers choose one
+(`topic.Partitioner(KafkaPartitioner.Murmur2)`) and sampling the window proves the claim. A declared partitioner is a
+claim, not a fact: records produced with an explicit partition, a different partitioner or a different key serializer,
+and partitions added later, all show up as a mismatch, and one mismatch turns pruning off for the topic.
+
+| Partitioner | Hash | Partition | Deterministic for | Known answers (source) |
+|---|---|---|---|---|
+| `Murmur2` | MurmurHash2, seed `0x9747b28c`, `m = 0x5bd1e995`, `r = 24`, `h = seed ^ length`, four-byte little-endian words, the tail, then `h ^= h >> 13; h *= m; h ^= h >> 15` | `(h & 0x7fffffff) % n` | every non-null key, an empty one included (`murmur2_random` randomises only a null key) | librdkafka `v2.14.0`, `src/rdmurmur2.c`, `unittest_murmur2` (the Java client's results for eleven keys); Apache Kafka `3.9.0`, `UtilsTest.testMurmur2` |
+| `Crc32` | CRC-32/ISO-HDLC (zlib's): reflected polynomial `0xEDB88320`, initial and final xor `0xFFFFFFFF` | `crc % n` (`rd_kafka_msg_partitioner_consistent`) | a non-empty key (`consistent_random` randomises an empty key as well as a null one) | librdkafka `src/rdcrc32.c` (its table); the CRC catalogue's check value for `"123456789"`, `0xCBF43926` |
+| `Fnv1a` | FNV-1a 32-bit, taken as a signed value and made positive by negation (`int.MinValue` stays itself), as librdkafka does to match Sarama | `h % n`, unsigned | every non-null key | librdkafka `v2.14.0`, `src/rdfnv1a.c`, `unittest_fnv1a` ("acquired via Go's hash/fnv") |
+
+The hashes are hand-written (`System.IO.Hashing` is not in the budget, hard rule 1). A null key is never deterministic:
+the producer picks its partition at random, stickily or in turn. A host may subclass `KafkaPartitioner`; its claim is
+verified in the same way.
+
+**When the engine prunes**, per topic, all of these: the request does not ask for every partition (`DisablePruning`); the
+topic declared a partitioner; the search **fixes the key** (a key `=` or `in` clause gives its literals; an `and` gives
+the smallest set among its children that have one; an `or` gives the union only when every child has one; `not` and
+every other clause give none); the key's byte forms are **complete** for the format (every built-in format and a host's
+own are, except `JsonString`, which is pruned only when every literal is ASCII letters, digits, space or one of `-_.:@`,
+because other characters are escaped differently by different serializers); every form is deterministic for the
+partitioner; the topic's window holds at least 400 offsets (below that, reading it whole is cheaper than proving the
+claim); and verification passed. The partitions read are the union of `Partition(form, n)` over every form of every
+literal, with $n$ the topic's partition count when the window was resolved.
+
+**Verification** reads, inside the plan and before the estimate, a target of $S = \min(1000, \lfloor o / 4 \rfloor)$ keyed
+records ($o$ the topic's offsets in the window, so verification never reads more than a quarter of what it may save),
+spread over the $r$ non-empty ranges at $\lceil S / r \rceil$ records each (at least 4). It reads from the **start** of
+each range, where records produced before a partition-count change sit, with a short consumer like the size sampler's
+(1 MiB queue and fetch, explicit offsets, the scan's isolation), at most 4 MiB and 5 seconds in all, and the bytes count
+against the owner's budget. A range stops at its quota, so a fast partition cannot use up the sample, and records past a
+range's end are ignored. Each record whose key the partitioner calls deterministic must be in the partition the
+partitioner maps it to; null keys and non-deterministic keys are skipped.
+
+| Outcome | When | Pruning |
+|---|---|---|
+| `Verified(checked)` | at least 100 keyed records checked, at least one from every non-empty range, no mismatch | on |
+| `Mismatch(partition, offset, expected)` | the first record that disagrees; the read stops there | off for the topic; the answer is kept for 10 minutes per (cluster, topic, partitioner name, partition count) |
+| `TooFewKeys(checked)` | fewer than 100 | off |
+| `RangeWithoutKeys(partition)` | a non-empty range gave no keyed record | off |
+| `NotReadable` | `READ` refused, a reader failure, a host partitioner that threw, or the time or the bytes ran out before a pass | off; logged at Debug by kind (event 9676) |
+
+**No positive cache.** Each pruned plan proves the claim on its own window: partitions added since an earlier window, or
+a producer that changed, would make an earlier proof wrong.
+
+**What a visitor sees.** The plan's ranges keep only the pruned partitions of a pruned topic, so the estimate, the read
+and the cursor cover exactly what is read, and Continue reads only those partitions. The key clause's verdict says what
+was proved (`PointLookup`: "one partition: murmur2 maps the key to partition 3 of 6 (verified on 1,002 records)";
+`PartitionPruned`: "pruned to partitions 1, 3 and 4 of 6 (…)") or why not (appended: "; not pruned: …", for a topic that
+declares none, a search that does not fix the key, the JSON-string characters, an empty key, a window of fewer than 400
+offsets, the first record that disagrees, too few keyed records, a partition without one, an unreadable sample, or a
+visitor who asked for every partition). The plan's notes and the result's caveats say which partitions were read, and
+the audit message adds "; pruned to partition 3 of orders". A mismatch names the record's partition and offset and never
+its key; on a topic whose key a redaction rule masks, it does not say which partition the key maps to either.
+
 ## D40
 
 **KStudio redacts inside the engine, before any sink.**
