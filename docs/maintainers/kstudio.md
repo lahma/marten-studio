@@ -262,7 +262,7 @@ two scans read exactly what one would have.
 The grammar is the engine's own parser - no package, and no expression language behind it (spec open decision 6):
 conditions on `key`, `header.<name>` (or `header['…']`), `ce.<attribute>` and `any`, with `=`, `^=` (prefix), `~`
 (contains, ignoring case; slow), `in (…)` and `is [not] null`, joined by `and`, `or`, `not` and parentheses. M3 adds
-`value` and JSON paths (`$.a.b`, `$.a[0]`, `$.a[*].b`) with `<`, `<=`, `>` and `>=` on numbers, behind `ReadPayloads`.
+`value` and JSON paths (`$.a.b`, `$.a[0]`, `$.a[*].b`) with `<`, `<=`, `>` and `>=` on numbers, behind `ReadPayloads` (see *Values and JSON paths* below).
 Strings are quoted with `'` or `"`, a quote doubled inside; there are no backslash escapes. The text form is canonical
 and round-trips, and KStudio carries it in the URL's fragment.
 
@@ -293,6 +293,55 @@ or hex, in that order. Nothing is deserialized into a CLR type: JSON is a `JsonE
 or text that the engine parses under its own caps. Under `SearchRecords` the engine reads the value's kind, its length
 and its CloudEvents attributes, and nothing else of it.
 
+### Values and JSON paths
+
+`value` and JSON paths need `ReadPayloads` (the engine's `Payload` grant); a search that names one without it does not
+compile. `value is null` and `value is not null` look at the record, not at its content (true of a tombstone only; an empty
+value is not null), cost nothing and need only `SearchRecords`.
+
+**The value is a CloudEvent's data** when the record is one: in binary mode the record's value; in structured mode the
+`data` member (its raw JSON when `datacontenttype` is absent or contains `json`, a JSON string's text when it is `text/*`),
+or `data_base64` decoded and typed by `datacontenttype`; in a batch each event's data, a clause being true if it is true of
+any event. A CloudEvent without data has no value, and every value clause is false. Attributes keep their own `ce.` field.
+
+**A JSON path** is `$`, then up to 32 steps: `.name` (letters, digits and underscores, starting with a letter or an
+underscore, at most 128 characters), `['name']` (any name, a quote doubled; this is how `$['customer-email']` and
+`$['$type']` are written), `[n]` (0 to 999,999,999, no sign, no leading zero) or `[*]` (any element of an array; on an
+object it selects nothing). There are no filters and no recursive descent: a path selects by structure, never by content,
+so a redaction rule can say exactly which paths it covers. A bad path fails the parse with a sentence that names its
+position and says what to write. Member names are compared exactly by a search and ignoring case by a rule.
+
+| Field | `=` and `in` | `^=` | `~` | `<` `<=` `>` `>=` | `is [not] null` |
+|---|---|---|---|---|---|
+| `value` | the decoded text equals a string literal (ordinal) | prefix (ordinal) | contains, ordinal ignoring case | refused: `numbers compare only JSON paths` | `is null` only (above) |
+| `$…` | a selected leaf equals a literal of its own type: a string (ordinal), a number (as `decimal`: `1.5 = 1.50`), `true`, `false`, `null` (a JSON null; an absent member is not null) | a string leaf has the string literal's prefix | a string leaf contains the literal, ignoring case | a number leaf compares with a number literal | refused: write `$.a = null` |
+| `any` (with `ReadPayloads`) | the M1 fields, then every string leaf of a JSON value (member names excluded) or the whole text of a text value | as `=` | as `=` | refused | refused |
+
+A selection is existential: `$.items[*].sku = 'A'` is true when any element's `sku` is `'A'`, and `not` negates the
+whole clause. A value of another type never matches (`'42'` against `42` is false).
+
+| The value | `value` `=` `^=` | `value` `~` | `$…` | `any`, value part |
+|---|---|---|---|---|
+| JSON (or CloudEvent data that is JSON) | the UTF-8 text of the bytes, never reformatted | the same | the path's selection; none: false | its string leaves |
+| Text | the text | the same | false | the text |
+| Empty (0 bytes) | the text `""` | `""` | false | nothing |
+| Tombstone, or an event without data | false | false | false | nothing |
+| Binary, Confluent wire format | false | **unknown** (`ValueNotText`) | false | nothing |
+| Starts like JSON and does not parse | the text | the same | **unknown** (`InvalidJson`) | its text |
+| Undecodable, a text over the decode limit, a decoder that failed, rules that could not be applied | **unknown**, with its reason | the same | the same | the same |
+
+Cost classes, cheapest first: 0 key bytes and `key is null`; 1 header bytes; 2 binary CloudEvents attributes; 3 `~` on a
+key or header; 4 structured CloudEvents attributes; 5 `any` without `ReadPayloads`; **6 `value`; 7 JSON path; 8 `any` with
+`ReadPayloads`**. A record's value is detected and parsed once however many clauses read it, and a match made from the
+record reuses it, so a host decoder runs once per matching record; counters prove both.
+
+A number is read with `decimal.TryParse` (invariant culture); a leaf outside `decimal`'s range makes the clause unknown
+(`NumberOutOfRange`) unless another selected leaf decides it. The reasons a record is counted as undecidable beside a "no
+match" are, with the sentence the page completes as "{n} records …": `could not be decoded as JSON`, `were larger than the
+decode limit`, `had a value that could not be read as text`, `had a number too large to compare`, `could not be decoded by
+the topic's decoder`, `had CloudEvents data_base64 that is not valid base64`, `could not be searched, because a redaction
+rule could not be applied to their value` (and the M2 reasons for keys, headers and CloudEvents).
+
 ## D40
 
 **KStudio redacts inside the engine, before any sink.**
@@ -300,8 +349,8 @@ and its CloudEvents attributes, and nothing else of it.
 A record leaves KStudio.Core only as a `KafkaMatch`, and `KafkaMatchFactory` is the only way to make one. The factory
 runs the topic's rules and the built-in deny-list - the headers `authorization`, `proxy-authorization`, `cookie`,
 `set-cookie` and `x-api-key`, masked unless the host opts one out by name - before the match exists, and the match keeps
-no unredacted copy: a masked field is `••• (redacted by rule)`. Header and key rules arrive in M2, JSON-path and pattern
-rules in M3, each with the first surface it protects. A rule that cannot be applied, to an undecodable value for example,
+no unredacted copy: a masked field is `••• (redacted by rule)`. Header, key and CloudEvents rules arrived in M2, JSON-path and
+pattern rules in M3, each with the first surface it protects. A rule that cannot be applied, to an undecodable value for example,
 withholds the whole value. The wire record never leaves the engine, and a test reads KStudio's compiled references to
 prove it, so the view, facets, chips, "copy as", exports and every later sink are built from redacted matches.
 
@@ -314,6 +363,48 @@ Redaction rule names are compared ignoring case. A CloudEvents attribute rule al
 `datacontenttype` masks `content-type`), and a header rule on the carrier masks the attribute. A header on the
 built-in deny-list can never be searchable; the options validation refuses it. The trace context is read only from
 unmasked headers.
+
+### Payload rules
+
+`JsonPath(path)` masks the leaf, or the whole subtree, at a JSON path of the value (of a CloudEvent's data); `Pattern(regex,
+name)` masks every match of a regular expression in the value's text. The masking runs in the match factory and where a
+clause needs the masked form, only under the `Payload` grant and always **before** the value is cut to what a match keeps,
+so a secret past the cut is masked, never lost and never leaked.
+
+| The value | JSON-path rules | Pattern rules |
+|---|---|---|
+| JSON (or CloudEvent data that is JSON) | each node a rule covers is written as the string `••• (redacted by {rule})`, whatever its type; its concrete path is kept (at most 64, the rest counted) | each string and number leaf: every match replaced by `••• (redacted by pattern {name})`; **a member name that matches withholds the whole value** |
+| Text | the value is **withheld** (a path cannot be found in text) | every match replaced in the text |
+| Binary, Confluent wire format | withheld | withheld |
+| Tombstone, empty, undecodable | nothing is kept anyway | nothing is kept anyway |
+
+The masked JSON is written compactly, for display and copying (so on a topic with payload rules `value` compares that
+compact form, not the producer's spacing). A pattern runs without backtracking, under a timeout of its own: backreferences,
+lookarounds, atomic groups and conditionals are refused when the options are validated, as are a pattern over 500
+characters, one that matches the empty text, more than 8 patterns or 32 paths on a topic, and a path declared twice.
+
+**Fail closed.** A pattern that times out, a value whose rules use more than 250 ms in all, a member name a pattern matches,
+and a path or pattern rule that cannot be applied to the kind of value withhold the value whole: the match keeps no text and
+no preview, names the rule in `ValueWithheldBy`, and every value clause on that record is unknown
+(`RedactionNotApplied`). The engine logs it once per cluster, topic and rule per ten minutes at Debug (event 9675), with
+the rule's kind and the exception's type name and nothing else.
+
+**What a search can do with a masked payload.**
+
+- A clause whose path a rule **covers** (the rule's path, or an ancestor of it, with member names ignoring case; a `[*]` in
+  the clause is covered only by a `[*]` in the rule) is a redacted field: only `=` and `in`, and only when the rule is
+  `Searchable()`. It compares the **raw** leaf, an exact match only, so no character is ever read at a time, and its literal
+  is `<redacted>` in the audit text and in a link. Where several rules cover a path, one that is not searchable wins.
+- A clause on an **ancestor** of a masked node is allowed: it can only compare a container with a scalar, and `[*]` never
+  selects an object's members, so no clause reaches the masked leaf through it.
+- `value`, `any` and every other path compare **what the visitor would see**, masks included. A pattern is never
+  searchable, so no exact match on pattern-masked content exists.
+
+**A host decoder is handed only the headers no rule masks**, the built-in deny-list included: a decoder that echoed a header
+into its text would otherwise put a masked value into a match.
+
+**Redaction hides content, not size.** A value's byte length stays visible (it is envelope metadata the results show under
+`SearchRecords`), so the length of a masked leaf can be bounded from the rest.
 
 ## D41
 
