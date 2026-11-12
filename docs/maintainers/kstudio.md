@@ -76,6 +76,18 @@ enables a Kafka capability, with `ReadOnly` off, while both Kafka policies are b
 read every topic the application's credentials can read. There is no escape hatch; a development host states a
 one-line policy.
 
+### The pages (M2)
+
+The Kafka section is Topics (`kafka`), the topic overview (`kafka/topic`), Search (`kafka/search`), the record page
+(`kafka/record`) and Cluster settings (`kafka/settings`). Each renders inside `KafkaPageFrame` and reads nothing before
+its `Ready`, so prerendering makes no broker call; each service method asks `KafkaAuthorization` itself. Catalog reads
+are not audited; scans (9600, 9601) and record views (9604, once per circuit per record) are, through `KafkaActionLog`,
+on failure as well as success. A search link's predicate is `KafkaScanPlan.AuditText` in the fragment, never the typed
+text, so a literal on a redacted field reaches no address; a pasted link fills the form and never runs by itself. A
+record view is a scan of at most 21 offsets (`IKafkaScanner.ReadRecordAsync`) and takes one of the owner's slots. The
+settings page reads `KafkaSettingsReader`, and `KStudioReadsNoRawSettingsTests` holds that KStudio never touches the
+definition's raw dictionaries. "No match" is always drawn beside its count and every caveat the result carries (D38).
+
 ## D36
 
 **KStudio.Core is the Kafka engine: Confluent.Kafka alone, behind a wire seam that exists for the fake.**
@@ -296,6 +308,11 @@ A redacted field takes only `=` and `in`: `^=`, `~`, `<`, `>` and `any` would le
 time, and `any` never looks at a redacted field. Every try is a scan, and counts against the owner's budget. The texts the
 engine writes for other sinks show a literal on a redacted field as `<redacted>`: the audit's predicate, and a search
 permalink's predicate (which then asks the person who opens it to type the value in).
+
+Redaction rule names are compared ignoring case. A CloudEvents attribute rule also masks its `ce_` header (and
+`datacontenttype` masks `content-type`), and a header rule on the carrier masks the attribute. A header on the
+built-in deny-list can never be searchable; the options validation refuses it. The trace context is read only from
+unmasked headers.
 
 ## D41
 

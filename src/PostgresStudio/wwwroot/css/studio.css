@@ -17222,3 +17222,43 @@ dialog.ms-modal::backdrop {
 .ms-k-neighbours td {
     font-variant-numeric: tabular-nums;
 }
+
+.ms-k-topic-count {
+    font-variant-numeric: tabular-nums;
+}
+
+.ms-k-record-address,
+.ms-k-trace,
+.ms-k-value-note {
+    margin: 0 0 var(--ms-space-md);
+}
+
+.ms-k-record-detail {
+    min-width: 0;
+}
+
+.ms-k-permalink {
+    text-decoration: none;
+}
+
+/* The "Copy as" menu: the same look as the object browser's copy menu, which a MenuButton gets from its caller's classes. */
+.ms-k-copy-menu {
+    display: inline-flex;
+}
+
+.ms-k-copy-popover {
+    min-width: 16rem;
+    max-width: min(28rem, calc(100vw - 2rem));
+    padding: var(--ms-space-xs);
+    border: 1px solid var(--ms-color-border-strong);
+    border-radius: var(--ms-radius-lg);
+    background-color: var(--ms-color-surface);
+    color: var(--ms-color-text);
+    box-shadow: var(--ms-shadow-lg);
+    font-family: var(--ms-font-family);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-k-copy-popover::backdrop {
+    background-color: transparent;
+}

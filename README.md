@@ -74,6 +74,23 @@ studio's own path, at `/kafka`. It never creates a topic, never commits an offse
 cluster and topic it reads. Apache Kafka is a trademark of the Apache Software Foundation. KStudio is not affiliated with
 or endorsed by the Apache Software Foundation.
 
+#### KStudio in five lines
+
+```csharp
+builder.Services.AddMartenStudio();                    // or AddPostgresStudio()
+builder.Services.AddKafkaStudio(o =>
+{
+    o.AddCluster("primary", new ClientConfig { BootstrapServers = "…" });
+    o.Topic("orders.v1", t => t.Key(KafkaKeyFormat.Utf8String).Redact(r => r.Header("customer-email")));
+});
+```
+
+The Kafka pages are at `{studio path}/kafka`: the topics this application's credentials can describe, each topic's
+partitions, watermarks, configuration and consumer-group lag, and the cluster's settings, with every secret shown only as
+"set" or "not set". With `o.Capabilities.SearchRecords = true` and a policy that answers who may use it, **Search** finds
+records by key, header and CloudEvents attribute in a time window, shows exactly what it read and why it stopped, and links
+every record by its offset. Values are not read in this preview. See [docs/kstudio.md](docs/kstudio.md).
+
 **Upgrade them together.** The assemblies are one program in several files, so `MartenStudio` depends on exactly its
 own `PostgresStudio` (an exact `[x.y.z]` dependency in the nuspec), and `PostgresStudio` on exactly its own `PostgresStudio.Diagnostics`. A
 central `PackageVersion` for either, if your repository has one, must equal `MartenStudio`'s, or be removed. Under

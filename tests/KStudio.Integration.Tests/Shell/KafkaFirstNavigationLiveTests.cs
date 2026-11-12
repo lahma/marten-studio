@@ -66,6 +66,12 @@ public abstract class KafkaFirstNavigationLiveTests(KafkaFixture kafka)
         "/kafka/topic?cluster=live&topic=does-not-exist",
         "/kafka/settings",
         "/kafka/settings?cluster=live",
+        "/kafka/search",
+        "/kafka/search?cluster=live&topic=orders.v1",
+        "/kafka/search?cluster=live&topic=orders.v1&topic=does-not-exist&from=2026-11-12T10:00:00Z&to=2026-11-12T11:00:00Z&iso=uncommitted",
+        "/kafka/record?cluster=live&topic=orders.v1&partition=0&offset=0",
+        "/kafka/record?cluster=live&topic=does-not-exist&partition=0&offset=0",
+        "/kafka/record?cluster=live&topic=orders.v1&partition=x&offset=-1",
     ];
 
     /// <summary>Counts the wires the engine creates, which is the engine's first contact with a cluster.</summary>

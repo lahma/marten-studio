@@ -12,7 +12,7 @@ namespace KStudio.Tests.Conventions;
 /// <remarks>
 /// The catalog's records are the engine's API (D-ENGINE 10.4: "the catalog's records only"), and some of their fields are wire value types: a field is a
 /// <c>KafkaField&lt;T&gt;</c> whose error is a <c>WireError</c>, a cluster overview holds a <c>WireClusterDescription</c>, a group overview a
-/// <c>WireGroupDescription</c> and a lag a <c>WirePartition</c>. Those carry metadata, never a record's key, headers or value; everything that could
+/// <c>WireGroupDescription</c> and a lag a <c>WirePartition</c>, and a match says whether its timestamp is <c>CreateTime</c> or <c>LogAppendTime</c> in a <c>WireTimestampType</c> (UI-B draws it). Those carry metadata, never a record's key, headers or value; everything that could
 /// (<c>WireRecord</c>, <c>WireHeader</c>, <c>IKafkaWire</c>, <c>IWireScanReader</c>, <c>WireReadOutcome</c>) is refused.
 /// </remarks>
 public class WireTypesStayInTheEngineTests
@@ -27,6 +27,7 @@ public class WireTypesStayInTheEngineTests
         "KStudio.Core.Wire.WirePartition",
         "KStudio.Core.Wire.KafkaAclOperation",
         "KStudio.Core.Wire.KafkaResourceType",
+        "KStudio.Core.Wire.WireTimestampType",
     ];
 
     [Fact]
