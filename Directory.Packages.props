@@ -175,7 +175,7 @@
 
   <!--
     Wolverine's Kafka transport (KStudio M4, WOLV; AGENTS.md D43; Package budget changes, 2026-11-1x entry "WolverineFx.Kafka 6.61.0").
-    Referenced by src/KStudio.Wolverine, tests/KStudio.Wolverine.Tests, tests/KStudio.Integration.Tests and samples/KStudio.Sample. 6.61.0
+    Referenced by src/KStudio.Wolverine, tests/KStudio.Integration.Tests and samples/KStudio.Sample (tests/KStudio.Wolverine.Tests takes it through its reference to the adapter). 6.61.0
     pins Confluent.Kafka 2.14.0, KStudio.Core's floor, so a Wolverine host is never raised by KStudio. It brings JasperFx 2.99.0, above Marten
     9.57.0's 2.98.0: a project that holds both resolves 2.99.0, as every Marten-plus-Wolverine host does. Unconditional: none of the shipped
     studio packages or KStudio / KStudio.Core reference it (KStudioWolverineFenceTests).

@@ -22,9 +22,24 @@ internal interface IKafkaClusterSource
 }
 
 /// <summary>What a source contributed: clusters, and what it could not list and why.</summary>
-/// <param name="Clusters">The clusters, in the order the source found them.</param>
+/// <param name="Clusters">The clusters, in the order the source found them. A tenant's cluster comes after the cluster it belongs to.</param>
 /// <param name="Notes">What was not listed.</param>
-internal sealed record KafkaClusterContribution(IReadOnlyList<KafkaContributedCluster> Clusters, IReadOnlyList<KafkaSourceNote> Notes);
+/// <param name="Incomplete">
+/// Whether the answer will be fuller later: the registry then asks the source <em>once more</em>, on the first access after
+/// <paramref name="CompleteWhen" /> has fired, and takes from that answer only the tenant clusters it adds. It never changes or removes an entry
+/// already listed, and never asks a third time.
+/// </param>
+/// <param name="CompleteWhen">
+/// The token that fires when the source can complete its answer (Wolverine's <c>ApplicationStarted</c>). The engine cannot see the host's
+/// lifetime, so the source hands it over.
+/// </param>
+/// <param name="IncompleteNote">The sentence the Settings page shows while the answer is incomplete.</param>
+internal sealed record KafkaClusterContribution(
+    IReadOnlyList<KafkaContributedCluster> Clusters,
+    IReadOnlyList<KafkaSourceNote> Notes,
+    bool Incomplete = false,
+    string? IncompleteNote = null,
+    CancellationToken CompleteWhen = default);
 
 /// <summary>
 /// One thing a source did not list. <see cref="Text" /> is for the Settings page and may name an item; <see cref="What" /> and

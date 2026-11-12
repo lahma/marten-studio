@@ -71,7 +71,7 @@ internal sealed class KafkaAuthorization(
 
     /// <summary>The same question for a caller that already holds the principal and names the entry by its parts (the audit gate).</summary>
     /// <param name="user">The visitor.</param>
-    /// <param name="cluster">The cluster entry's key.</param>
+    /// <param name="cluster">The cluster's own key, never <c>{cluster}/{tenant}</c> (<see cref="KafkaClusterEntry.Cluster" />).</param>
     /// <param name="tenantId">The entry's tenant id, or <see langword="null" />.</param>
     /// <param name="topic">The topic, or <see langword="null" /> for a cluster-level question.</param>
     /// <param name="capability">The capability being used, or <see langword="null" /> for a read that needs none.</param>

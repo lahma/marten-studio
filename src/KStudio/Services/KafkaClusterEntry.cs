@@ -37,6 +37,6 @@ internal interface IKafkaClusterEntrySource
 internal sealed class CatalogClusterEntrySource(IKafkaCatalog catalog) : IKafkaClusterEntrySource
 {
     /// <inheritdoc />
-    public IReadOnlyList<KafkaClusterEntry> Entries { get; } =
+    public IReadOnlyList<KafkaClusterEntry> Entries =>
         [.. catalog.Clusters.Select(static x => new KafkaClusterEntry(x.Key, x.TenantId, x.DisplayName, x.Environment) { Cluster = x.BaseKey })];
 }

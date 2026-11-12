@@ -76,7 +76,7 @@ internal static class WolverineTenantProbe
 
             return cache is IEnumerable tenants ? Read(tenants) : ShapeMismatch();
         }
-        catch (Exception e) when (e is not OperationCanceledException)
+        catch (Exception)
         {
             return ShapeMismatch();
         }
@@ -136,15 +136,15 @@ internal static class WolverineTenantProbe
                 {
                     notes.Add(new KafkaSourceNote(
                         "a tenant cluster",
-                        "Wolverine had not connected it yet",
-                        "Tenant " + id + "'s cluster is not listed yet: Wolverine had not connected it when KStudio read its configuration."));
+                        "Wolverine had not connected it",
+                        "Tenant " + id + "'s cluster is not listed: Wolverine had not connected it when KStudio read the configuration after the application started."));
                     continue;
                 }
 
                 ready.Add(new WolverineProbedTenant(id, tenantTransport));
             }
         }
-        catch (Exception e) when (e is not OperationCanceledException)
+        catch (Exception)
         {
             return ShapeMismatch();
         }

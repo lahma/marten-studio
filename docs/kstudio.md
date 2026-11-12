@@ -149,7 +149,12 @@ KStudio never reads Wolverine's message store, never runs Wolverine's builder ca
 adds no redaction rule:** declare rules for every topic that carries personal data.
 
 Wolverine 6.61 keeps its broker-per-tenant registrations internal. KStudio reads them through a guarded probe that lists
-nothing when Wolverine's shape differs, and lists a tenant only once Wolverine has connected it.
+nothing when Wolverine's shape differs. A tenant's cluster has no configuration until Wolverine has connected it, which
+happens as the application starts, so KStudio reads tenants only after the application has started: until then the
+Settings page says "Tenant clusters are listed once the application has started", and the first read after it adds the
+tenants Wolverine has connected. A tenant Wolverine had not connected by then is not listed.
+
+A policy that checks only `Cluster` admits every tenant entry of that cluster: check `TenantId` to tell tenants apart.
 
 ## Audit
 

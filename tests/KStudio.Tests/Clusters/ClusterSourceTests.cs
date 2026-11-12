@@ -79,9 +79,11 @@ public class ClusterSourceTests
 
         KafkaClusterRegistry registry = Registry(options, Contribution(Cluster("wolverine"), Cluster("wolverine", "acme")));
 
-        registry.Clusters.Select(static x => x.Key).Should().Equal("wolverine", "other", "wolverine/acme");
+        registry.Clusters.Select(static x => x.Key).Should().Equal("wolverine", "other");
         registry.Get("wolverine").Source.Should().BeNull("the host's cluster of that key stays the host's");
-        registry.Notes.Should().ContainSingle().Which.Text.Should().Contain("already registered");
+        registry.Notes.Select(static x => x.Text).Should().Equal(
+            "A cluster keyed 'wolverine' is already registered, so the one found was not listed.",
+            "Tenant clusters of 'wolverine' were not listed because that cluster was not.");
     }
 
     [Fact]
@@ -97,6 +99,100 @@ public class ClusterSourceTests
 
         registry.Clusters.Select(static x => x.Key).Should().Equal("good");
         registry.Notes.Should().HaveCount(3).And.OnlyContain(static x => x.Source == "Fake");
+    }
+
+    [Fact]
+    public void A_tenant_is_never_listed_without_the_cluster_it_belongs_to()
+    {
+        KafkaClusterRegistry registry = Registry(
+            new KafkaEngineOptions(),
+            Contribution(
+                new KafkaContributedCluster("broken", null, new ConsumerConfig(), new AdminClientConfig(), new KafkaClusterBuilder(), []),
+                Cluster("broken", "acme"),
+                Cluster("good"),
+                Cluster("good", "acme"),
+                Cluster("orphan", "acme")));
+
+        registry.Clusters.Select(static x => x.Key).Should().Equal("good", "good/acme");
+        registry.Notes.Select(static x => x.Text).Should().Contain(
+        [
+            "Tenant clusters of 'broken' were not listed because that cluster was not.",
+            "Tenant clusters of 'orphan' were not listed because that cluster was not.",
+        ]);
+    }
+
+    [Fact]
+    public void A_source_that_is_cancelled_costs_a_note_and_the_hosts_clusters_stay()
+    {
+        KafkaEngineOptions options = new();
+        options.AddCluster("host", new ClientConfig { BootstrapServers = "host:9092" });
+        options.ClusterSources.Add(static _ => new ThrowingSource(new TaskCanceledException("cancelled")));
+
+        KafkaClusterRegistry registry = new(options, new ServiceCollection().BuildServiceProvider());
+
+        registry.Clusters.Select(static x => x.Key).Should().Equal("host");
+        registry.Notes.Should().ContainSingle().Which.Text.Should().Contain("TaskCanceledException");
+    }
+
+    [Fact]
+    public void An_incomplete_source_is_asked_again_after_its_token_fires_and_only_tenants_are_added()
+    {
+        using CancellationTokenSource started = new();
+        int calls = 0;
+        KafkaEngineOptions options = new();
+        options.AddCluster("host", new ClientConfig { BootstrapServers = "host:9092" });
+        options.ClusterSources.Add(_ => new TwoPhaseSource(() => ++calls, started.Token));
+
+        KafkaClusterRegistry registry = new(options, new ServiceCollection().BuildServiceProvider());
+
+        calls.Should().Be(1);
+        registry.Clusters.Select(static x => x.Key).Should().Equal("host", "wolverine");
+        registry.Notes.Should().ContainSingle().Which.Text.Should().Be("Tenant clusters are listed once the application has started.");
+        KafkaClusterDefinition before = registry.Get("wolverine");
+        IReadOnlyList<KafkaClusterDefinition> listedBefore = registry.Clusters;
+
+        _ = registry.Clusters;
+        calls.Should().Be(1, "the token has not fired, so the source is not asked");
+
+        started.Cancel();
+
+        registry.Clusters.Select(static x => x.Key).Should().Equal("host", "wolverine", "wolverine/acme");
+        registry.Get("wolverine").Should().BeSameAs(before, "an entry already listed is never replaced");
+        registry.Notes.Should().BeEmpty("the sentence goes when the tenants arrive, and the second answer's other clusters add nothing");
+        listedBefore.Should().HaveCount(2, "a snapshot already taken is not changed under its reader");
+        calls.Should().Be(2);
+
+        _ = registry.Clusters;
+        _ = registry.Get("wolverine/acme");
+        calls.Should().Be(2, "a source is never asked a third time");
+    }
+
+    [Fact]
+    public void A_source_built_after_its_token_fired_is_asked_once()
+    {
+        int calls = 0;
+        KafkaEngineOptions options = new();
+        options.ClusterSources.Add(_ => new CompleteSource(() => ++calls));
+
+        KafkaClusterRegistry registry = new(options, new ServiceCollection().BuildServiceProvider());
+
+        registry.Clusters.Select(static x => x.Key).Should().Equal("wolverine", "wolverine/acme");
+        _ = registry.Clusters;
+        calls.Should().Be(1);
+    }
+
+    [Fact]
+    public void A_second_answer_that_throws_costs_a_note_and_nothing_listed_changes()
+    {
+        using CancellationTokenSource started = new();
+        KafkaEngineOptions options = new();
+        options.ClusterSources.Add(_ => new TwoPhaseSource(static () => 0, started.Token, throwOnSecond: true));
+        KafkaClusterRegistry registry = new(options, new ServiceCollection().BuildServiceProvider());
+
+        started.Cancel();
+
+        registry.Clusters.Select(static x => x.Key).Should().Equal("wolverine");
+        registry.Notes.Should().ContainSingle().Which.Text.Should().Contain("asked again");
     }
 
     [Fact]
@@ -310,6 +406,8 @@ public class ClusterSourceTests
     [InlineData("  ", false)]
     [InlineData("a\nb", false)]
     [InlineData("a\0b", false)]
+    [InlineData("a|b", false)]
+    [InlineData("|", false)]
     public void A_tenant_id_is_one_to_128_characters_with_no_control_character(string tenant, bool valid)
     {
         KafkaClusterKey.IsValidTenantId(tenant).Should().Be(valid);
@@ -348,11 +446,45 @@ public class ClusterSourceTests
         public KafkaClusterContribution Contribute() => contribution;
     }
 
-    private sealed class ThrowingSource : IKafkaClusterSource
+    private sealed class ThrowingSource(Exception? exception = null) : IKafkaClusterSource
     {
         public string Name => "Throwing";
 
-        public KafkaClusterContribution Contribute() => throw new InvalidOperationException("boom");
+        public KafkaClusterContribution Contribute() => throw (exception ?? new InvalidOperationException("boom"));
+    }
+
+    /// <summary>Answers with a parent first and, until its token fires, no tenant; the second answer holds the parent again and a tenant.</summary>
+    private sealed class TwoPhaseSource(Func<int> count, CancellationToken started, bool throwOnSecond = false) : IKafkaClusterSource
+    {
+        private int asked;
+
+        public string Name => "TwoPhase";
+
+        public KafkaClusterContribution Contribute()
+        {
+            asked++;
+            _ = count();
+
+            if (asked == 1)
+            {
+                return new KafkaClusterContribution([Cluster()], [], Incomplete: true, IncompleteNote: "Tenant clusters are listed once the application has started.", CompleteWhen: started);
+            }
+
+            return throwOnSecond
+                ? throw new InvalidOperationException("boom")
+                : new KafkaClusterContribution([Cluster(), Cluster("wolverine", "acme")], []);
+        }
+    }
+
+    private sealed class CompleteSource(Func<int> count) : IKafkaClusterSource
+    {
+        public string Name => "Complete";
+
+        public KafkaClusterContribution Contribute()
+        {
+            _ = count();
+            return new KafkaClusterContribution([Cluster(), Cluster("wolverine", "acme")], []);
+        }
     }
 
     private sealed class CountingSource(Action count) : IKafkaClusterSource

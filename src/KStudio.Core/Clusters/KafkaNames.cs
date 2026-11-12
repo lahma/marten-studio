@@ -19,10 +19,10 @@ internal static partial class KafkaClusterKey
     /// <param name="key">The key.</param>
     public static bool IsValid([NotNullWhen(true)] string? key) => key is not null && Pattern().IsMatch(key);
 
-    /// <summary>Whether <paramref name="tenantId" /> can be part of an entry key: 1 to 128 characters, not blank, no control character.</summary>
+    /// <summary>Whether <paramref name="tenantId" /> can be part of an entry key: 1 to 128 characters, not blank, no control character and no <c>|</c>, which the engine's log-once keys use as a separator.</summary>
     /// <param name="tenantId">The tenant id.</param>
     public static bool IsValidTenantId([NotNullWhen(true)] string? tenantId) =>
-        !string.IsNullOrWhiteSpace(tenantId) && tenantId.Length <= MaxTenantIdLength && !tenantId.Any(char.IsControl);
+        !string.IsNullOrWhiteSpace(tenantId) && tenantId.Length <= MaxTenantIdLength && !tenantId.Any(static c => char.IsControl(c) || c == '|');
 
     /// <summary>The entry key of a cluster, or of one of its tenants.</summary>
     /// <param name="baseKey">The cluster's key.</param>

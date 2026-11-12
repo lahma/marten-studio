@@ -1,3 +1,6 @@
+using System.Collections;
+using System.Reflection;
+
 using Confluent.Kafka;
 using Confluent.Kafka.Admin;
 
@@ -31,7 +34,7 @@ public static class WolverineCollections
 }
 
 /// <summary>Both brokers, one fixture each.</summary>
-[CollectionDefinition(WolverineCollections.Pair)]
+[CollectionDefinition(WolverineCollections.Pair, DisableParallelization = true)]
 public sealed class WolverinePairGroup : ICollectionFixture<Kafka39Fixture>, ICollectionFixture<Kafka4Fixture>;
 
 /// <summary>The one message type of the host under test; nothing handles it, and nothing is ever sent to the listener.</summary>
@@ -116,6 +119,7 @@ public sealed class WolverineDiscoveryLiveTests(Kafka39Fixture parent, Kafka4Fix
             await WaitForGroupAsync(tenant, service);
 
             string[] hostBefore = HostConfigurations(transport);
+            hostBefore.Should().Contain(static x => x.StartsWith("tenant acme consumer:", StringComparison.Ordinal), "the premise: the tenants' configurations are in the snapshot");
             string[] groupsBefore = await GroupsAsync(parent);
             string[] tenantGroupsBefore = await GroupsAsync(tenant);
             string[] topicsBefore = Topics(parent);
@@ -194,13 +198,39 @@ public sealed class WolverineDiscoveryLiveTests(Kafka39Fixture parent, Kafka4Fix
         static IEnumerable<string> Pairs(string label, ClientConfig config) =>
             config.OrderBy(static x => x.Key, StringComparer.Ordinal).Select(x => label + ":" + x.Key + "=" + x.Value);
 
+        static string Own(ClientConfig? config) => config is null ? "none" : string.Join(',', config.OrderBy(static x => x.Key, StringComparer.Ordinal).Select(static x => x.Key + "=" + x.Value));
+
+        // Each tenant's child transport: Wolverine's internal cache, read here by reflection (a test may; the adapter reads the same three members).
+        IEnumerable<string> Tenants()
+        {
+            object cache = typeof(KafkaTransport).GetProperty("Tenants", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(transport)!;
+
+            foreach (object tenant in ((IEnumerable) cache).Cast<object>().OrderBy(static x => (string) x.GetType().GetProperty("TenantId")!.GetValue(x)!, StringComparer.Ordinal))
+            {
+                string id = (string) tenant.GetType().GetProperty("TenantId")!.GetValue(tenant)!;
+                KafkaTransport child = (KafkaTransport) tenant.GetType().GetProperty("Transport")!.GetValue(tenant)!;
+
+                foreach (string line in Pairs("tenant " + id + " consumer", child.ConsumerConfig)
+                    .Concat(Pairs("tenant " + id + " producer", child.ProducerConfig))
+                    .Concat(Pairs("tenant " + id + " admin", child.AdminClientConfig)))
+                {
+                    yield return line;
+                }
+            }
+        }
+
         List<string> lines =
         [
             .. Pairs("consumer", transport.ConsumerConfig),
             .. Pairs("producer", transport.ProducerConfig),
             .. Pairs("admin", transport.AdminClientConfig),
+            .. Tenants(),
             .. transport.Topics.OrderBy(static x => x.TopicName, StringComparer.Ordinal)
-                .SelectMany(static topic => new[] { topic.TopicName + "|" + (topic.ConsumerConfig is null ? "none" : string.Join(',', topic.ConsumerConfig.Select(static x => x.Key + "=" + x.Value))) }),
+                .SelectMany(static topic => new[]
+                {
+                    topic.TopicName + "|consumer|" + Own(topic.ConsumerConfig),
+                    topic.TopicName + "|producer|" + Own(topic.ProducerConfig),
+                }),
         ];
 
         return [.. lines];

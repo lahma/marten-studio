@@ -5,6 +5,7 @@ using KStudio.Core.Clusters;
 using KStudio.Internal;
 
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
 using Wolverine;
 using Wolverine.Kafka;
@@ -68,13 +69,18 @@ internal static class WolverineRig
     }
 
     /// <summary>Runs the adapter over <paramref name="options" /> as the registry does.</summary>
-    public static KafkaClusterContribution Contribute(WolverineOptions? options, Action<KafkaWolverineOptions>? configure = null)
+    public static KafkaClusterContribution Contribute(WolverineOptions? options, Action<KafkaWolverineOptions>? configure = null, IHostApplicationLifetime? lifetime = null)
     {
         ServiceCollection services = new();
 
         if (options is not null)
         {
             services.AddSingleton(options);
+        }
+
+        if (lifetime is not null)
+        {
+            services.AddSingleton(lifetime);
         }
 
         KafkaWolverineOptions settings = new();
@@ -84,14 +90,35 @@ internal static class WolverineRig
     }
 
     /// <summary>The registry for <paramref name="options" />, with the adapter as its source, through the public registration.</summary>
-    public static KafkaClusterRegistry Registry(WolverineOptions options, Action<KafkaEngineOptions>? host = null, Action<KafkaWolverineOptions>? configure = null)
+    /// <param name="options">The Wolverine configuration.</param>
+    /// <param name="host">Adds the host's own clusters.</param>
+    /// <param name="configure">The adapter's options.</param>
+    /// <param name="lifetime">The host's lifetime, when the application has one.</param>
+    /// <param name="asked">Counts every time the registry asks the adapter.</param>
+    public static KafkaClusterRegistry Registry(
+        WolverineOptions options,
+        Action<KafkaEngineOptions>? host = null,
+        Action<KafkaWolverineOptions>? configure = null,
+        IHostApplicationLifetime? lifetime = null,
+        Action? asked = null)
     {
         ServiceCollection services = new();
         services.AddSingleton(options);
 
+        if (lifetime is not null)
+        {
+            services.AddSingleton(lifetime);
+        }
+
         KafkaEngineOptions engine = new();
         host?.Invoke(engine);
         engine.UseWolverineKafka(configure);
+
+        if (asked is not null)
+        {
+            Func<IServiceProvider, IKafkaClusterSource> inner = engine.ClusterSources[^1];
+            engine.ClusterSources[^1] = provider => new CountingSource(inner(provider), asked);
+        }
 
         return new KafkaClusterRegistry(engine, services.BuildServiceProvider());
     }
@@ -99,4 +126,37 @@ internal static class WolverineRig
     /// <summary>Every key and value of a configuration, ordinal by key.</summary>
     public static string[] Pairs(ClientConfig config) =>
         [.. config.OrderBy(static x => x.Key, StringComparer.Ordinal).Select(static x => x.Key + "=" + x.Value)];
+}
+
+/// <summary>A host lifetime whose <c>ApplicationStarted</c> a test fires.</summary>
+internal sealed class FakeLifetime : IHostApplicationLifetime, IDisposable
+{
+    private readonly CancellationTokenSource started = new();
+
+    public CancellationToken ApplicationStarted => started.Token;
+
+    public CancellationToken ApplicationStopping => CancellationToken.None;
+
+    public CancellationToken ApplicationStopped => CancellationToken.None;
+
+    /// <summary>The application has started.</summary>
+    public void Start() => started.Cancel();
+
+    public void StopApplication()
+    {
+    }
+
+    public void Dispose() => started.Dispose();
+}
+
+/// <summary>Counts how often the registry asks a source.</summary>
+internal sealed class CountingSource(IKafkaClusterSource inner, Action asked) : IKafkaClusterSource
+{
+    public string Name => inner.Name;
+
+    public KafkaClusterContribution Contribute()
+    {
+        asked();
+        return inner.Contribute();
+    }
 }

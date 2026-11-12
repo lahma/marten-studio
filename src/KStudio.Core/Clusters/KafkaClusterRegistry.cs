@@ -13,9 +13,28 @@ namespace KStudio.Core.Clusters;
 /// The clusters the host registered, validated and split by role (decision 2), and the ones its sources contributed (D43). The host's
 /// configuration was cloned when the cluster was added; nothing here writes to it.
 /// </summary>
+/// <remarks>
+/// <para>
+/// <b>A source runs once, or twice.</b> The registry runs every source when it is built. A source that says its answer is incomplete (its
+/// contribution is <see cref="KafkaClusterContribution.Incomplete" />) is run <em>once more</em>, on the first access of the registry after the
+/// token it gave has fired (for Wolverine, <c>ApplicationStarted</c>): the tenants of a broker-per-tenant registration have no configuration
+/// until Wolverine's runtime has connected them, and a registry first read before then must not list them half-configured. The second answer
+/// can only <em>add</em> tenant entries, atomically, as a new snapshot: an entry already listed is never changed or removed, and a source is
+/// never run a third time.
+/// </para>
+/// </remarks>
 internal sealed class KafkaClusterRegistry
 {
+    private readonly Lock gate = new();
+    private readonly List<KafkaClusterDefinition> clusters = [];
     private readonly Dictionary<string, KafkaClusterDefinition> byKey = new(StringComparer.Ordinal);
+    private readonly List<KafkaRegistryNote> notes = [];
+    private readonly List<PendingSource> pending = [];
+    private readonly KafkaEngineOptions options;
+    private readonly ILogger? logger;
+    private readonly KafkaLogOnce? once;
+    private volatile RegistryState state;
+    private volatile bool hasPending;
 
     /// <summary>
     /// Builds the registry from options that have no cluster source; options the validation refuses never become clusters. A source needs the
@@ -51,7 +70,9 @@ internal sealed class KafkaClusterRegistry
             throw new InvalidOperationException("KStudio's Kafka options are not valid: " + string.Join(" ", problems));
         }
 
-        List<KafkaClusterDefinition> clusters = [];
+        this.options = options;
+        logger = services?.GetService<KStudioLoggers>()?.Catalog;
+        once = services?.GetService<KafkaLogOnce>();
 
         foreach (KafkaEngineOptions.ClusterRegistration registration in options.Clusters)
         {
@@ -60,19 +81,17 @@ internal sealed class KafkaClusterRegistry
             byKey[definition.Key] = definition;
         }
 
-        List<KafkaRegistryNote> notes = [];
-
         if (services is not null)
         {
             foreach (Func<IServiceProvider, IKafkaClusterSource> factory in options.ClusterSources)
             {
-                AddFromSource(factory, services, options, clusters, notes);
+                AddFromSource(factory, services);
             }
         }
 
-        Clusters = clusters;
-        Notes = notes;
         Settings = settings;
+        state = Publish();
+        hasPending = pending.Count > 0;
     }
 
     /// <summary>
@@ -82,60 +101,156 @@ internal sealed class KafkaClusterRegistry
     public KafkaEngineSnapshot Settings { get; }
 
     /// <summary>Every cluster, in the order the host added them, then the clusters of each source in the order the source found them.</summary>
-    public IReadOnlyList<KafkaClusterDefinition> Clusters { get; }
+    public IReadOnlyList<KafkaClusterDefinition> Clusters => Current.Clusters;
 
     /// <summary>What the sources could not list, for the Settings page; the log has the same without the names.</summary>
-    public IReadOnlyList<KafkaRegistryNote> Notes { get; }
+    public IReadOnlyList<KafkaRegistryNote> Notes => Current.Notes;
+
+    private RegistryState Current
+    {
+        get
+        {
+            if (hasPending)
+            {
+                CompletePending();
+            }
+
+            return state;
+        }
+    }
 
     /// <summary>Finds a cluster by its entry key.</summary>
     /// <param name="key">The entry key.</param>
     /// <param name="cluster">The cluster.</param>
-    public bool TryGet(string key, [NotNullWhen(true)] out KafkaClusterDefinition? cluster) => byKey.TryGetValue(key, out cluster);
+    public bool TryGet(string key, [NotNullWhen(true)] out KafkaClusterDefinition? cluster) => Current.ByKey.TryGetValue(key, out cluster);
 
     /// <summary>Finds a cluster by its entry key, or throws.</summary>
     /// <param name="key">The entry key.</param>
     public KafkaClusterDefinition Get(string key) =>
-        byKey.TryGetValue(key, out KafkaClusterDefinition? cluster)
+        Current.ByKey.TryGetValue(key, out KafkaClusterDefinition? cluster)
             ? cluster
             : throw new KeyNotFoundException("No Kafka cluster is registered under that key.");
 
-    private void AddFromSource(
-        Func<IServiceProvider, IKafkaClusterSource> factory,
-        IServiceProvider services,
-        KafkaEngineOptions options,
-        List<KafkaClusterDefinition> clusters,
-        List<KafkaRegistryNote> notes)
+    private RegistryState Publish() =>
+        new([.. clusters], new Dictionary<string, KafkaClusterDefinition>(byKey, StringComparer.Ordinal), [.. notes, .. pending.Select(static x => new KafkaRegistryNote(x.Name, x.Note))]);
+
+    private void AddFromSource(Func<IServiceProvider, IKafkaClusterSource> factory, IServiceProvider services)
     {
-        ILogger? logger = services.GetService<KStudioLoggers>()?.Catalog;
-        KafkaLogOnce? once = services.GetService<KafkaLogOnce>();
         string sourceName = "A cluster source";
+        IKafkaClusterSource source;
         KafkaClusterContribution contribution;
 
+        // Any exception, cancellation included: a source runs inside the registry's construction, and what it throws must cost the host's own
+        // clusters nothing.
         try
         {
-            IKafkaClusterSource source = factory(services);
+            source = factory(services);
             sourceName = source.Name;
             contribution = source.Contribute();
         }
-        catch (Exception e) when (e is not OperationCanceledException)
+        catch (Exception e)
         {
-            // A source must not throw; if it does, the host's own clusters are unaffected and the page says so.
-            Note(logger, once, notes, sourceName, new KafkaSourceNote("clusters", "the source failed (" + e.GetType().Name + ")", "The source failed and listed nothing (" + e.GetType().Name + ")."));
+            AddNote(sourceName, new KafkaSourceNote("clusters", "the source failed (" + e.GetType().Name + ")", "The source failed and listed nothing (" + e.GetType().Name + ")."));
             return;
         }
 
         foreach (KafkaSourceNote note in contribution.Notes)
         {
-            Note(logger, once, notes, sourceName, note);
+            AddNote(sourceName, note);
+        }
+
+        AddClusters(contribution, sourceName, tenantsOnly: false);
+
+        if (contribution.Incomplete)
+        {
+            pending.Add(new PendingSource(source, sourceName, contribution.IncompleteNote ?? "Some clusters are listed once the application has started.", contribution.CompleteWhen));
+        }
+    }
+
+    /// <summary>Runs every pending source whose token has fired, once more, and publishes the result as one new snapshot.</summary>
+    private void CompletePending()
+    {
+        lock (gate)
+        {
+            bool changed = false;
+
+            foreach (PendingSource source in pending.ToArray())
+            {
+                if (!source.When.IsCancellationRequested)
+                {
+                    continue;
+                }
+
+                // Removed first: a source is never run a third time, whatever the second run does.
+                pending.Remove(source);
+                changed = true;
+                Complete(source);
+            }
+
+            if (changed)
+            {
+                state = Publish();
+                hasPending = pending.Count > 0;
+            }
+        }
+    }
+
+    private void Complete(PendingSource source)
+    {
+        KafkaClusterContribution contribution;
+
+        try
+        {
+            contribution = source.Source.Contribute();
+        }
+        catch (Exception e)
+        {
+            AddNote(source.Name, new KafkaSourceNote("tenant clusters", "the source failed (" + e.GetType().Name + ")", "The source failed when it was asked again, so its tenant clusters were not listed (" + e.GetType().Name + ")."));
+            return;
+        }
+
+        // What the first answer already said is not said twice; what is new (a tenant Wolverine had not connected) is.
+        HashSet<string> known = [.. notes.Select(static x => x.Text)];
+
+        foreach (KafkaSourceNote note in contribution.Notes.Where(x => !known.Contains(x.Text)))
+        {
+            AddNote(source.Name, note);
+        }
+
+        AddClusters(contribution, source.Name, tenantsOnly: true);
+    }
+
+    private void AddClusters(KafkaClusterContribution contribution, string sourceName, bool tenantsOnly)
+    {
+        // A tenant is listed only under a parent this source listed: a parent that broke a rule or whose key was taken leaves its tenants out,
+        // because a tenant entry shows under, and is judged by, its cluster.
+        HashSet<string> listedParents = new(StringComparer.Ordinal);
+
+        foreach (KafkaClusterDefinition listed in clusters.Where(x => x.TenantId is null && string.Equals(x.Source, sourceName, StringComparison.Ordinal)))
+        {
+            listedParents.Add(listed.BaseKey);
         }
 
         foreach (KafkaContributedCluster contributed in contribution.Clusters)
         {
+            if (tenantsOnly && contributed.TenantId is null)
+            {
+                continue;
+            }
+
             IReadOnlyList<string> problems = KafkaEngineOptionsValidation.ValidateContributed(contributed);
 
             if (problems.Count > 0)
             {
-                Note(logger, once, notes, sourceName, new KafkaSourceNote("a cluster", "it breaks a rule for clusters", string.Join(" ", problems)));
+                AddNote(sourceName, new KafkaSourceNote("a cluster", "it breaks a rule for clusters", string.Join(" ", problems)));
+                continue;
+            }
+
+            if (contributed.TenantId is not null && !listedParents.Contains(contributed.Key))
+            {
+                AddNote(
+                    sourceName,
+                    new KafkaSourceNote("a tenant cluster", "its cluster was not listed", "Tenant clusters of '" + contributed.Key + "' were not listed because that cluster was not."));
                 continue;
             }
 
@@ -143,7 +258,7 @@ internal sealed class KafkaClusterRegistry
 
             if (byKey.ContainsKey(entryKey))
             {
-                Note(logger, once, notes, sourceName, new KafkaSourceNote("a cluster", "its key is already used", "A cluster keyed '" + entryKey + "' is already registered, so the one found was not listed."));
+                AddNote(sourceName, new KafkaSourceNote("a cluster", "its key is already used", "A cluster keyed '" + entryKey + "' is already registered, so the one found was not listed."));
                 continue;
             }
 
@@ -157,6 +272,11 @@ internal sealed class KafkaClusterRegistry
             KafkaClusterDefinition definition = new(registration, options.Topics, cleaned, sourceName);
             clusters.Add(definition);
             byKey[definition.Key] = definition;
+
+            if (contributed.TenantId is null)
+            {
+                listedParents.Add(contributed.Key);
+            }
         }
     }
 
@@ -182,7 +302,7 @@ internal sealed class KafkaClusterRegistry
         return valid;
     }
 
-    private static void Note(ILogger? logger, KafkaLogOnce? once, List<KafkaRegistryNote> notes, string source, KafkaSourceNote note)
+    private void AddNote(string source, KafkaSourceNote note)
     {
         notes.Add(new KafkaRegistryNote(source, note.Text));
 
@@ -195,6 +315,13 @@ internal sealed class KafkaClusterRegistry
         LogLevel level = KafkaLogOnce.WarningOrDebug(once, source + "|" + note.What + "|" + note.Reason);
         KStudioLog.ClusterSourceItemNotListed(logger, level, note.What, source, note.Reason);
     }
+
+    private sealed record PendingSource(IKafkaClusterSource Source, string Name, string Note, CancellationToken When);
+
+    private sealed record RegistryState(
+        IReadOnlyList<KafkaClusterDefinition> Clusters,
+        IReadOnlyDictionary<string, KafkaClusterDefinition> ByKey,
+        IReadOnlyList<KafkaRegistryNote> Notes);
 }
 
 /// <summary>One thing a source did not list, as the Settings page shows it.</summary>

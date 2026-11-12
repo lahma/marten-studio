@@ -46,7 +46,7 @@ internal sealed class KafkaCatalog(
     KafkaThroughputSamples throughput) : IKafkaCatalog
 {
     /// <inheritdoc />
-    public IReadOnlyList<KafkaClusterInfo> Clusters { get; } =
+    public IReadOnlyList<KafkaClusterInfo> Clusters =>
         [.. registry.Clusters.Select(static x => new KafkaClusterInfo(x.Key, x.DisplayName, x.Environment, x.ConsumerGroups, x.BaseKey, x.TenantId, x.Source))];
 
     /// <inheritdoc />

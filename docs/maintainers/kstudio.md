@@ -610,25 +610,31 @@ consumer into KStudio.Core's baseline.
 host's, so a source cannot write back), a builder, and the topics it found; and notes. A cluster that breaks a rule of the host's own (a key, a
 display name, 50 groups, bootstrap servers, a topic name), or whose key a host cluster holds, is skipped and noted, never thrown: one bad discovery
 must not take down the host's own clusters. A source that throws costs a note. The notes are on the Settings page with their names; the log
-carries them as event 9677 with only general words - `a tenant cluster`, `Wolverine had not connected it yet` - Warning the first time within ten
+carries them as event 9677 with only general words - `a tenant cluster`, `Wolverine had not connected it` - Warning the first time within ten
 minutes for the same source, item and reason and Debug after, and never a tenant id, a topic or a value. Event 9678 (Debug) is for Find in Kafka
 failing to read the clusters.
 
 **Tenant entries (decision 6).** An entry's key is `{cluster}/{tenant}`: the registry's key and the engine's `KafkaScanRequest.Cluster`. A host
 cluster's key still cannot hold a `/`, so the entry key splits at the first one. `KafkaClusterDefinition` gains `BaseKey`, `TenantId` and `Source`;
 `KafkaClusterEntry` keeps `Key` and `TenantId` and gains `Cluster`, the base key. **Every question a policy is asked and every audit scope and
-log carries `Cluster` and `TenantId`, never the entry key** (`KafkaAuthorization`, `KafkaActionLog`, `KafkaAuditGate`): a policy never parses a key,
-and the gate judges an entry by the question its page asked. The address carries the entry key escaped (`?cluster=wolverine%2Facme`), as D9 already
+studio log event carries `Cluster` and `TenantId`, never the entry key** (`KafkaAuthorization`, `KafkaActionLog`, `KafkaAuditGate`): a policy never
+parses a key, and the gate judges an entry by the question its page asked. **The engine's own events (9650 to 9699) carry the entry key**, because
+the engine knows only entries; the studio's events (9600 to 9649) and the Activity entries carry the base key and the tenant. The address carries the entry key escaped (`?cluster=wolverine%2Facme`), as D9 already
 does for any id with a `/`.
 
 **The tenant probe.** Wolverine 6.61 keeps `KafkaTransport.Tenants` and the `KafkaTenant` class internal; the public surface can only write them
 (`AddTenant`). The probe is the only reflection in the adapter and touches exactly three members: `KafkaTransport.Tenants`, `KafkaTenant.TenantId`
 and `KafkaTenant.Transport`. It fails closed. A shape that is not the one read - the property missing, a cache that is not enumerable, an item whose
 type is not `Wolverine.Kafka.Internals.KafkaTenant`, a member of another type, a getter or an enumerator that throws - lists no tenant of that
-transport and says so once; it never lists the parent's cluster in a tenant's place. A tenant whose child transport has no bootstrap servers is "not
-listed yet": Wolverine had not connected it when KStudio read its configuration, and a registry built before then (a host that serves requests
-before Wolverine's runtime has started, or a test) will not list it. A tenant id that is blank, over 128 characters or holds a control character is
-not listed, and its note does not repeat it. Wolverine keeps its tenants in a dictionary, so they are listed ordinal by id, at most 200 a transport.
+transport and says so once; it never lists the parent's cluster in a tenant's place. A tenant whose child transport has no bootstrap servers is not
+listed: Wolverine had not connected it. **Tenants are read only after the host has started.** The source lists the transports' own clusters at once
+and, when `IHostApplicationLifetime` is registered and `ApplicationStarted` has not fired, no tenants: its contribution is marked incomplete (with the
+token it waits on and the Settings page's sentence, "Tenant clusters are listed once the application has started."). The registry runs an incomplete
+source once more, on the first access of the registry after the token has fired, and adds that answer's tenant entries as one new snapshot; it never
+changes or removes an entry already listed and never runs the source a third time. With no host lifetime registered the source behaves as if the host had
+started. A tenant is listed only under a parent cluster the same source listed (a parent that broke a rule, or whose key was taken, takes its tenants
+with it), and two named brokers whose names make one slug list only the first, with its tenants. A tenant id that is blank, over 128 characters, holds a
+control character or a `|` (the engine's log-once keys use it as a separator) is not listed, and its note does not repeat it. Wolverine keeps its tenants in a dictionary, so they are listed ordinal by id, at most 200 a transport.
 `ForbiddenWolverineCallsTests` fails on any `GetProperty`, `GetField` or other member lookup whose name is not one of the three, and on any
 reflection call that invokes or sets. Asking Wolverine for a public, read-only view of a transport's tenants is a decision for the user, not the
 adapter's; until there is one, the probe is the guarded path.

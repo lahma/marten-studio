@@ -5,6 +5,7 @@ using Confluent.Kafka;
 using KStudio.Core.Clusters;
 
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
 using Wolverine;
 using Wolverine.Kafka.Internals;
@@ -74,6 +75,13 @@ internal sealed class WolverineClusterSource(IServiceProvider services, Wolverin
     {
         List<KafkaContributedCluster> clusters = [];
         List<KafkaSourceNote> notes = [];
+        HashSet<string> usedKeys = new(StringComparer.Ordinal);
+
+        // Tenants are read only once the application has started: a broker-per-tenant registration has no configuration until Wolverine's runtime
+        // has connected the parent, and that is part of starting. With no host lifetime registered there is nothing to wait for.
+        IHostApplicationLifetime? lifetime = services.GetService<IHostApplicationLifetime>();
+        bool started = lifetime is null || lifetime.ApplicationStarted.IsCancellationRequested;
+        bool incomplete = settings.IncludeTenants && !started;
 
         try
         {
@@ -88,7 +96,7 @@ internal sealed class WolverineClusterSource(IServiceProvider services, Wolverin
 
             foreach (KafkaTransport transport in wolverine.Transports.OfType<KafkaTransport>().ToArray())
             {
-                AddTransport(clusters, notes, wolverine, transport);
+                AddTransport(clusters, notes, usedKeys, wolverine, transport, listTenants: settings.IncludeTenants && started);
             }
 
             if (clusters.Count == 0 && notes.Count == 0)
@@ -96,16 +104,27 @@ internal sealed class WolverineClusterSource(IServiceProvider services, Wolverin
                 notes.Add(new KafkaSourceNote("clusters", "Wolverine has no Kafka transport", "Wolverine has no Kafka transport in this application, so no cluster was listed."));
             }
         }
-        catch (Exception e) when (e is not OperationCanceledException)
+        catch (Exception e)
         {
-            // Never thrown from a source: the host's own clusters must still list.
+            // Never thrown from a source, cancellation included: the host's own clusters must still list.
             notes.Add(new KafkaSourceNote("clusters", "reading Wolverine's configuration failed (" + e.GetType().Name + ")", "Reading Wolverine's configuration failed (" + e.GetType().Name + "), so some clusters were not listed."));
         }
 
-        return new KafkaClusterContribution(clusters, notes);
+        return incomplete
+            ? new KafkaClusterContribution(clusters, notes, Incomplete: true, IncompleteNote: IncompleteNote, CompleteWhen: lifetime!.ApplicationStarted)
+            : new KafkaClusterContribution(clusters, notes);
     }
 
-    private void AddTransport(List<KafkaContributedCluster> clusters, List<KafkaSourceNote> notes, WolverineOptions wolverine, KafkaTransport transport)
+    /// <summary>The Settings page's sentence while the tenants are not read yet.</summary>
+    internal const string IncompleteNote = "Tenant clusters are listed once the application has started.";
+
+    private void AddTransport(
+        List<KafkaContributedCluster> clusters,
+        List<KafkaSourceNote> notes,
+        HashSet<string> usedKeys,
+        WolverineOptions wolverine,
+        KafkaTransport transport,
+        bool listTenants)
     {
         string? broker = string.Equals(transport.Protocol, DefaultProtocol, StringComparison.Ordinal) ? null : transport.Protocol;
         string? key = KeyFor(broker);
@@ -114,6 +133,13 @@ internal sealed class WolverineClusterSource(IServiceProvider services, Wolverin
         if (key is null)
         {
             notes.Add(new KafkaSourceNote("a cluster", "its broker name makes no cluster key", "The Kafka transport '" + broker + "' was not listed: its name makes no cluster key."));
+            return;
+        }
+
+        // Two named brokers whose names make one slug: the second is not listed, and neither are its tenants, which would otherwise stand under the first's cluster.
+        if (!usedKeys.Add(key))
+        {
+            notes.Add(new KafkaSourceNote("a cluster", "its key is already used", "The Kafka transport '" + broker + "' was not listed: its name makes the cluster key '" + key + "', which another transport has."));
             return;
         }
 
@@ -136,7 +162,7 @@ internal sealed class WolverineClusterSource(IServiceProvider services, Wolverin
 
         clusters.Add(Build(key, tenantId: null, broker, consumer, admin, read, notes));
 
-        if (!settings.IncludeTenants)
+        if (!listTenants)
         {
             return;
         }
@@ -179,7 +205,7 @@ internal sealed class WolverineClusterSource(IServiceProvider services, Wolverin
             {
                 hook(broker, builder);
             }
-            catch (Exception e) when (e is not OperationCanceledException)
+            catch (Exception e)
             {
                 notes.Add(new KafkaSourceNote(
                     "a cluster callback",

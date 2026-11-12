@@ -50,12 +50,12 @@ public class WolverineTenantProbeTests
 
         probe.Tenants.Should().BeEmpty();
         probe.Notes.Should().ContainSingle().Which.Text.Should().Be(
-            "Tenant acme's cluster is not listed yet: Wolverine had not connected it when KStudio read its configuration.");
+            "Tenant acme's cluster is not listed: Wolverine had not connected it when KStudio read the configuration after the application started.");
 
         KafkaClusterContribution contribution = WolverineRig.Contribute(options);
 
         contribution.Clusters.Should().ContainSingle().Which.TenantId.Should().BeNull();
-        contribution.Notes.Should().ContainSingle(static x => x.Reason == "Wolverine had not connected it yet");
+        contribution.Notes.Should().ContainSingle(static x => x.Reason == "Wolverine had not connected it");
     }
 
     [Fact]
