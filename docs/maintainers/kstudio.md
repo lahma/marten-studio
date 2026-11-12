@@ -663,3 +663,59 @@ topic, joined no group, committed no offset, and that Wolverine's own group offs
 (`KStudioWolverineFenceTests`, by project file, restore graph, built references and its test project's output folder). JasperFx arrives through
 WolverineFx, and its source generator is dropped from the adapter's compilation. `KStudio.Tests` does not reference the adapter, so the module's own
 output folder stays free of Wolverine (`KStudioFenceTests`).
+
+## D44
+
+**D44 — Links between a studio and a module are pure, internal and grant nothing.** `IStudioRouteLinks` (MartenStudio implements it: a document
+by type and id, a stream by id or key, in the record's tenant, and only for a store whose tenants share one database) and
+`IStudioRecordSearchLinks` (KStudio implements it: "Find in Kafka") live in PostgresStudio beside `IStudioLinks`, under its rules: no IO, no policy,
+every id escaped, and the page a link opens resolves its own scope and asks its own policies again. Neither module names the other, a masked value
+never enters a URL, a value travels in the fragment, and the destination authorizes again. External links are host templates with no credential,
+opened with `noreferrer`.
+
+**From a record to Marten (decision 7).** `KafkaRecordLinkBuilder` is pure. For each correlation field of the record's topic that names a
+document (`Document(type, store)`) or a stream (`Stream(store)`), it takes the field's values from the record through `CorrelationExtractor` - so a
+masked, cut, absent or over-long value is never an id - and asks the seam: `ToDocument(new StudioLinkScope(store, tenant), type, id)` or `ToStream`.
+The address is the seam's, verbatim; a `null` answer draws the words and a reason ("not a document this studio shows") and no link. Without the
+seam (a Postgres Studio host) nothing is drawn. MartenStudio answers `null` for a store whose tenants live in databases of their own, for a hidden
+document type, for an ambiguous type, and for a multi-tenanted store with no tenant (a link would open the visitor's own tenant and say "not found",
+which is false). **The tenant**, the first that applies: the record's `tenant-id` header when it is a literal; **no Marten link at all when the
+header is present and redacted or cut** - the address would carry the hidden value, and the page says so without it; the cluster entry's own tenant
+(a Wolverine broker-per-tenant cluster); none. The words cut an id at 24 characters, never the address.
+
+**Find in Kafka (decision 8).** `KafkaRecordSearchLinks` is a singleton that reads the registry's declarations (no broker call, no policy). A link
+is offered when some cluster has a declared topic with a correlation field that refers to the record: `Document(type, store)` where `type` equals any of
+the request's names (ordinal, ignoring case) or `Stream(store)`, the field's store being unnamed or the screen's store (ordinal, ignoring case). One
+cluster entry has such topics: it is named. Several: the entry whose tenant is the request's; otherwise no `cluster=`, and the page uses the visitor's
+current cluster. The address is relative to the studio's base, `kafka/related?cluster=…&from=…&to=…#link=document&type=…&store=…&v=…`: every part
+escaped, the window in the query when both ends are known, **the value only in the fragment** (a browser never sends one to a server, so an id that is
+personal data stays out of server logs and referrers), and the type in the link is the matching field's own spelling, so that the timeline's comparison of
+correlation kinds holds. A registry that cannot be built answers `null` and says so once at Debug (event 9678, the exception's type only): a Marten
+page never fails because of the module. **A deviation from B.11.2's wording, recorded:** the reverse link opens the timeline's seed mode and not a
+one-predicate search permalink. A search has one predicate over all its topics, but the fields that refer to a document differ per topic (the key on one,
+`$.orderId` on another); one predicate would read values on every topic or be refused without `ReadPayloads`. Seed mode is still a permalink (the cluster
+and window in the query, the value in the fragment), and it searches each topic by its own fields.
+
+**External links (decision 9).** `o.ExternalLink(label, urlTemplate)`, at most eight. The placeholders are `{traceId}`, `{correlationId}`, `{from}`,
+`{to}`, `{fromMs}` and `{toMs}`; the time forms are the record's timestamp 15 minutes either side, in ISO 8601 UTC with milliseconds and in Unix
+milliseconds. `{traceId}` is the record's trace id only when the header it came from is a literal (the chip rule); `{correlationId}` is the first literal
+`correlation-id` header. Every value is `Uri.EscapeDataString`-escaped wherever the placeholder stands, and **a masked, cut or absent value means no
+link, never a link with a hole.** The options are validated at the first read, which the startup guard makes at host start (F3): a label of 1 to 40
+characters, unique ignoring case; a template of at most 2,000 characters that, once each placeholder is replaced by `x`, is an absolute `http` or
+`https` address; only the six placeholders; **no credential - no user info, and no query (or fragment) parameter named, ignoring case, `access_token`,
+`token`, `api_key`, `apikey`, `x-api-key`, `password`, `passwd`, `pwd`, `secret`, `client_secret`, `signature`, `sig` or `auth`**. The reason is that a
+template is rendered into every visitor's page and kept in their browser history. An error names the label and the rule and never the template, whose
+text can hold what the rules refuse. A link is `<a target="_blank" rel="noopener noreferrer">`, so no referrer carries the studio's address (cluster,
+topic, offset) to the other tool. It is neither gated nor audited: no record is read for it, the values are already on the visitor's screen, and a link
+grants nothing.
+
+**What the module shows of Wolverine (UI-E).** The record detail's **Envelope id**, **Sent at** and **Partition key** lines are Wolverine's `id`,
+`sent-at` and `partition-key` headers as the record shows them (a redacted one reads redacted, a topic without them draws no line). The topic overview's
+discovered facts - role, message types, consumer group, serializer and source - and the Settings page's section on what a source listed and could not
+list are drawn from the registry's declarations and notes. **A note can name a broker, a tenant or a topic its source did not list, so the Settings page
+asks for the notes under the same cluster gate as the settings beside them (`KafkaCatalogService.GetDiscoveryAsync`), and not per topic.**
+
+**The tests.** `KafkaRecordLinkBuilderTests` (tenant rules, masked key, header and tenant, cut value, the store, the bound), `KafkaRecordLinksTests`
+(the section, the compact form, the envelope lines, the external link line), `KafkaRecordSearchLinksTests` (fragment-only value, store rule, cluster
+choice with tenants, a throwing registry), `ExternalLinkTemplateTests` (each rule of the credential check, error text, escaping, both time forms),
+`AddKafkaStudioTests` (the host refused at start), `KafkaDiscoveredFactsTests`, and `PublicApiTest_KStudio`, whose baseline moves by `ExternalLink`.

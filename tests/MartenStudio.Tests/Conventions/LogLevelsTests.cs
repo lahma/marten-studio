@@ -312,6 +312,24 @@ public class LogLevelsTests
         ["src/KStudio/Services/KafkaRecordService.cs : KStudio could not read a record"] = (Verdict.VisitorAction,
             "The engine threw while reading a record the visitor opened; one line per load, the ring records the failure and the page says the same."),
 
+        // ---- KS-UI-D: related records (D42), classified in UI-E where the roster test first ran with them ------
+        ["src/KStudio/Components/Pages/KafkaRelatedBody.razor : The Kafka related-records page failed to read the record"] = (Verdict.VisitorAction,
+            "The anchor read threw rather than returning a status: a fault in a page the visitor opened; one line per load, the page says the same."),
+        ["src/KStudio/Components/Pages/KafkaRelatedBody.razor : The Kafka related-records page failed to prepare its topics"] = (Verdict.VisitorAction,
+            "Listing the topics threw rather than returning a value: a fault in a page the visitor opened; one line per load, the page says the same."),
+        ["src/KStudio/Components/Pages/KafkaRelatedBody.razor : The Kafka related-records page failed to plan a search"] = (Verdict.VisitorAction,
+            "Planning threw, on a click: one line per click, and the page says the search failed."),
+        ["src/KStudio/Components/Pages/KafkaRelatedBody.razor : The Kafka related-records page failed to record a cancelled confirmation"] = (Verdict.VisitorAction,
+            "Writing the 'not confirmed' entry threw, on the visitor's Cancel: one line per click; the dialog is already closed."),
+        ["src/KStudio/Components/Pages/KafkaRelatedBody.razor : The Kafka related-records page failed while reading a search"] = (Verdict.VisitorAction,
+            "The batch loop of a search the visitor started threw (the engine returns every broker failure as a value): one line per search, the page says the same."),
+        ["src/KStudio/Services/KafkaCorrelationService.cs : KStudio's related-records search was not valid for the engine ({Errors} errors)"] = (Verdict.VisitorAction,
+            "A guard: the query builder writes only texts that parse and compile, so this is a fault in the studio met on a click; one line per click, the page says the search failed."),
+        ["src/KStudio/Services/KafkaCorrelationService.cs : KStudio could not plan a related-records search"] = (Verdict.VisitorAction,
+            "The engine threw while planning a search the visitor asked for; one line per click, the ring records the failure and the page says the same."),
+        ["src/KStudio/Services/KafkaCorrelationService.cs : KStudio could not start a related-records search"] = (Verdict.VisitorAction,
+            "The engine threw while starting a search the visitor confirmed; one line per click, the ring records the failure and the page says the same."),
+
         // ---- W5-V1 ------------------------------------------------------------------------------------
         ["src/PostgresStudio.Diagnostics/Services/StudioLog.Maintenance.cs : 9420 BloatMeasureFailed"] = (Verdict.VisitorAction,
             "A bloat measure the visitor pressed failed after its gates and preconditions passed; one line per press, never polled, and the page shows it."),

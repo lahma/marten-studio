@@ -185,6 +185,19 @@ tenants Wolverine has connected. A tenant Wolverine had not connected by then is
 
 A policy that checks only `Cluster` admits every tenant entry of that cluster: check `TenantId` to tell tenants apart.
 
+## Links
+
+In Marten Studio, a correlation field declared with `Document("Order")` or `Stream()` links a record to that document
+or stream, in the tenant of the record's `tenant-id` header. The document and stream pages offer **Find in Kafka**, which
+opens related records for that id. A link grants nothing: the page it opens checks your access again. A record whose
+`tenant-id` is redacted has no Marten links.
+
+A store that keeps each tenant in a database of its own gets no Marten link yet: the studio cannot open a tenant's database from a link without enumerating the tenancy.
+
+`o.ExternalLink("Traces", "https://tempo.example.com/trace/{traceId}")` adds a link to your tracing or log tool, with
+`{traceId}`, `{correlationId}`, `{from}`, `{to}`, `{fromMs}` and `{toMs}`. Never put a credential in a template: it is
+shown to every visitor, and KStudio refuses user info and the usual credential parameters at start.
+
 ## Audit
 
 Every search and every record opened is recorded in the studio's Activity page and in your log (events 9600-9605), with
