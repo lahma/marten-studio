@@ -174,4 +174,40 @@ public class KafkaSearchPagePayloadTests
         page.WaitForAssertion(() => page.FindAll(".ms-k-result-banner button").Should().NotContain(static x => x.TextContent == "Search all partitions"));
         rig.Ring.Count(static x => x.Action == "SearchRecords").Should().Be(2, "a new scan and a new audit entry");
     }
+
+    [Fact]
+    public async Task Continue_on_a_pruned_search_stays_pruned_and_still_offers_Search_all_partitions()
+    {
+        await using KafkaSearchRig rig = new(engine: o =>
+        {
+            o.Limits.MaxRecordsPerScan = 1_000;
+            o.Limits.ConfirmAboveRecords = 1_000;
+            o.Topic("pruned", t => t.Partitioner(KafkaPartitioner.Murmur2));
+        });
+        rig.Topic("pruned", 6);
+
+        for (int i = 0; i < 12_000; i++)
+        {
+            string key = "k-" + i.ToString("D5", System.Globalization.CultureInfo.InvariantCulture);
+            rig.Produce("pruned", KafkaPartitioner.Murmur2.Partition(Encoding.UTF8.GetBytes(key), 6), i / 6, key, new string('x', 50));
+        }
+
+        IRenderedComponent<KafkaSearchPage> page = await OpenAsync(rig, "pruned");
+
+        await SearchForAsync(page, "key = 'k-99999'");
+        page.WaitForAssertion(() => page.FindAll("dialog").Should().HaveCount(1));
+        await page.Find("dialog .ms-confirm-actions button.ms-button-danger").ClickAsync(new MouseEventArgs());
+        page.WaitForAssertion(() => page.FindAll(".ms-k-result-banner button").Should().Contain(static x => x.TextContent == "Continue"));
+        page.Find(".ms-k-caveats").TextContent.Should().Contain("This search read only partition ");
+
+        // The page passes the in-memory cursor of the first scan, which carries its pruning: the continued scan reads the same one partition.
+        await page.FindAll(".ms-k-result-banner button").Single(static x => x.TextContent == "Continue").ClickAsync(new MouseEventArgs());
+        page.WaitForAssertion(() => page.FindAll("dialog").Should().HaveCount(1));
+        await page.Find("dialog .ms-confirm-actions button.ms-button-danger").ClickAsync(new MouseEventArgs());
+
+        page.WaitForAssertion(() => page.Find(".ms-k-result-banner").TextContent.Should().Contain("Continued after offsets read by the previous search"));
+        page.Find(".ms-k-caveats").TextContent.Should().Contain("This search read only partition ").And.Contain(" of 6 of pruned (murmur2, verified on ");
+        page.FindAll("details.ms-k-progress tbody tr").Should().HaveCount(1, "the continued scan reads only the pruned partition");
+        page.FindAll(".ms-k-result-banner button").Should().Contain(static x => x.TextContent == "Search all partitions");
+    }
 }
