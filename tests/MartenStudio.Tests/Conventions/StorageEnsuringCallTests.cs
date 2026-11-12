@@ -279,6 +279,28 @@ public class StorageEnsuringCallTests
             "a third caller would be a third way into MarkEventsAsSkipped, past checks nobody has listed");
     }
 
+    /// <summary>
+    /// D-CORR 7.2: the links a module's page makes into Documents and Streams are a read path - they are drawn on a screen of
+    /// another product - and it makes no storage-ensuring call, in source or in IL: it reads <c>StoreOptions</c> and nothing else.
+    /// The two scans above cover the file because they cover every shipped file; this names it, so that the file cannot be moved
+    /// out of the scan or given an allowed site without this test saying so.
+    /// </summary>
+    [Fact]
+    public void The_route_links_are_scanned_and_have_no_allowed_site()
+    {
+        const string routeLinks = "src/MartenStudio/Services/Links/MartenStudioRouteLinks.cs";
+
+        SourceScanner.ShippedSourceFiles().Select(SourceScanner.Relative).Should().Contain(routeLinks, "it is a shipped source file the scan reads");
+
+        AllowedSites.Select(static x => x.File).Should().NotContain(routeLinks, "a read path never ensures storage");
+        SourceCalls().Keys.Select(static x => x.File).Should().NotContain(routeLinks);
+
+        IlScan.Result scan = IlScan.Scan(typeof(MartenStudioOptions).Assembly, IlScan.EnsuresStorage);
+
+        scan.Unresolved.Should().BeEmpty();
+        scan.Calls.Keys.Select(static x => x.Type).Should().NotContain(typeof(MartenStudio.Services.Links.MartenStudioRouteLinks).FullName);
+    }
+
     /// <summary>The allow-list is a statement about code that exists, not a permanent exemption.</summary>
     [Fact]
     public void Every_allowed_site_is_still_there_so_the_list_cannot_go_stale()
