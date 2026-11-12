@@ -205,14 +205,33 @@ internal enum KafkaScanRefusal
     ProfileForbids,
 }
 
+/// <summary>Whose hourly allowance ran out: the process-wide one every cluster shares, or the one a cluster's profile gave it (D-M5 decision 4.5).</summary>
+internal enum KafkaBudgetScope
+{
+    /// <summary>The process-wide allowance (<c>OwnerBytesPerHour</c> as the host set it).</summary>
+    Process,
+
+    /// <summary>The allowance of this cluster's own, below the process's, because of its profile.</summary>
+    Cluster,
+}
+
+/// <summary>The hourly allowance that has nothing left, so that a sentence can name that one and not the plan's capped value.</summary>
+/// <param name="Scope">Whose allowance it is.</param>
+/// <param name="BytesPerHour">What that allowance is, in bytes per rolling hour.</param>
+internal sealed record KafkaSpentBudget(KafkaBudgetScope Scope, long BytesPerHour);
+
 /// <summary>What <c>Start</c> returns: a handle, or the reason there is none.</summary>
 internal readonly struct KafkaScanStart
 {
-    private KafkaScanStart(KafkaScanHandle? handle, KafkaScanRefusal? refusal)
+    private KafkaScanStart(KafkaScanHandle? handle, KafkaScanRefusal? refusal, KafkaSpentBudget? spentBudget = null)
     {
         Handle = handle;
         Refusal = refusal;
+        SpentBudget = spentBudget;
     }
+
+    /// <summary>For <see cref="KafkaScanRefusal.OwnerBudgetSpent" />: the allowance that is spent.</summary>
+    public KafkaSpentBudget? SpentBudget { get; }
 
     /// <summary>The running (or already complete) scan; <see langword="null" /> when refused.</summary>
     public KafkaScanHandle? Handle { get; }
@@ -229,7 +248,8 @@ internal readonly struct KafkaScanStart
 
     /// <summary>A refusal.</summary>
     /// <param name="refusal">Why.</param>
-    public static KafkaScanStart Refused(KafkaScanRefusal refusal) => new(null, refusal);
+    /// <param name="spentBudget">For <see cref="KafkaScanRefusal.OwnerBudgetSpent" />, the allowance that has nothing left.</param>
+    public static KafkaScanStart Refused(KafkaScanRefusal refusal, KafkaSpentBudget? spentBudget = null) => new(null, refusal, spentBudget);
 }
 
 /// <summary>The engine's estimate before it reads (decision 9.10).</summary>
@@ -439,6 +459,9 @@ internal sealed record KafkaScanResult(
 {
     /// <summary>What each topic's declared partitioner came to for this scan (from the plan); a topic that was pruned was read in some of its partitions only.</summary>
     public IReadOnlyList<KafkaTopicPruning> Pruning { get; init; } = [];
+
+    /// <summary>For <see cref="KafkaScanStopReason.OwnerBudget" />: the allowance that ran out, the process's or the cluster's own.</summary>
+    public KafkaSpentBudget? SpentBudget { get; init; }
 
     /// <summary>One sentence per pruned topic for the result's caveats: "This search read only partition 3 of 6 of orders (murmur2, verified on 1,002 records)".</summary>
     public IEnumerable<string> PruningSentences => Pruning.Where(static x => x.IsPruned).Select(static x => x.Caveat!);

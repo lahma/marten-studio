@@ -18,6 +18,17 @@ internal sealed record KafkaClusterCost(KafkaByteRateGovernor? Governor, OwnerBy
     public long Remaining(string owner, OwnerByteBudget process) =>
         OwnerBudget is { } own ? Math.Min(own.Remaining(owner), process.Remaining(owner)) : process.Remaining(owner);
 
+    /// <summary>
+    /// The allowance that has nothing left, or <see langword="null" /> when both have some: the process's when it is spent (it stops every cluster), otherwise
+    /// the cluster's own. A refusal or stop names this one, because the plan's capped value is the lower of the two whichever ran out.
+    /// </summary>
+    /// <param name="owner">The owner's key.</param>
+    /// <param name="process">The process-wide budget.</param>
+    public KafkaSpentBudget? Spent(string owner, OwnerByteBudget process) =>
+        process.Remaining(owner) <= 0 ? new KafkaSpentBudget(KafkaBudgetScope.Process, process.BytesPerHour)
+        : OwnerBudget is { } own && own.Remaining(owner) <= 0 ? new KafkaSpentBudget(KafkaBudgetScope.Cluster, own.BytesPerHour)
+        : null;
+
     /// <summary>The hourly allowance that is lower: this cluster's own, or the process's.</summary>
     /// <param name="process">The process-wide budget.</param>
     public long BytesPerHour(OwnerByteBudget process) =>

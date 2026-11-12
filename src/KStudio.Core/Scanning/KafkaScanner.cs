@@ -437,7 +437,7 @@ internal sealed partial class KafkaScanner(
 
         if (cost.Remaining(owner.Key, ownerBudget) <= 0)
         {
-            return Refuse(plan, KafkaScanRefusal.OwnerBudgetSpent);
+            return Refuse(plan, KafkaScanRefusal.OwnerBudgetSpent, cost.Spent(owner.Key, ownerBudget));
         }
 
         if (limiter.TryAcquire(owner.Key, out IDisposable? lease) is { } refusal)
@@ -488,12 +488,12 @@ internal sealed partial class KafkaScanner(
         }
     }
 
-    private KafkaScanStart Refuse(KafkaScanPlan plan, KafkaScanRefusal refusal)
+    private KafkaScanStart Refuse(KafkaScanPlan plan, KafkaScanRefusal refusal, KafkaSpentBudget? spentBudget = null)
     {
         string cluster = KafkaLogValue.Cap(plan.Request.Cluster)!;
         string text = refusal.ToString();
         KStudioLog.ScanRefused(loggers.Scans, cluster, text);
-        return KafkaScanStart.Refused(refusal);
+        return KafkaScanStart.Refused(refusal, spentBudget);
     }
 
     /// <summary>"Continue from here" reads exactly the offsets the first scan left: its positions are the starts and its ends the ends, not re-resolved (decision 9.9).</summary>

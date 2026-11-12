@@ -1,5 +1,3 @@
-using KStudio.Core.Export;
-using KStudio.Core.Scanning;
 using KStudio.Services;
 using KStudio.Tests.Support;
 
@@ -150,65 +148,6 @@ public class KafkaExportCapabilityTests
 
         harness.Authorization.AllowKafka(static r => r.Capability != "SearchRecords");
         (await Visible(harness)).Should().BeEmpty("SearchRecords is refused for the cluster");
-    }
-
-    // ---- a profile and the flags never grant
-
-    [Fact]
-    public async Task No_profile_and_none_of_the_sixteen_flag_combinations_lets_an_export_through_that_the_flags_did_not_grant()
-    {
-        foreach (KafkaProfile? profile in new KafkaProfile?[] { null, KafkaProfile.Development, KafkaProfile.Test, KafkaProfile.Production })
-        {
-            await using KafkaSearchRig rig = new(
-                studio: static o => o.Capabilities.SearchRecords = true,
-                profile: profile);
-            rig.Topic("orders");
-            rig.Produce("orders", 0, 10, "k", "{\"n\":1}");
-            KafkaSearchService search = rig.Search();
-            KafkaSearchPlanned planned = ((KafkaSearchPlanResult.Planned) await search.PlanAsync(rig.Input(["orders"]), Ct)).Value;
-            await using KafkaSearchRun run = ((KafkaSearchStartResult.Running) await search.StartAsync(planned, confirmed: true, Ct)).Run;
-            (KafkaScanResult result, List<KafkaMatch> matches) = await KafkaSearchRig.DrainAsync(run);
-            KafkaCapabilityGuard guard = rig.Studio.Context.Services.GetRequiredService<KafkaCapabilityGuard>();
-            KafkaExportService export = rig.Export();
-
-            for (int mask = 0; mask < 16; mask++)
-            {
-                KafkaStudioCapabilities set = new()
-                {
-                    SearchRecords = (mask & 1) != 0,
-                    ReadPayloads = (mask & 2) != 0,
-                    ExportRecords = (mask & 4) != 0,
-                    LiveTail = (mask & 8) != 0,
-                };
-
-                foreach (bool readOnly in new[] { false, true })
-                {
-                    rig.Studio.Options.Capabilities = set;
-                    rig.Studio.Context.Options.ReadOnly = readOnly;
-                    string where = $"profile {profile?.ToString() ?? "none"}, flags {mask}, ReadOnly {readOnly}";
-
-                    KafkaCapability[] usable = [.. KafkaCapabilityGuard.Offered.Where(guard.IsEnabled)];
-                    usable.Should().BeSubsetOf(KafkaCapabilityGuard.ConfiguredIn(set), where);
-
-                    if (readOnly)
-                    {
-                        usable.Should().BeEmpty(where);
-                    }
-
-                    KafkaExportOutcome outcome = await export.ExportAsync(
-                        new KafkaExportInput(rig.Entry, ["orders"], KafkaExportSource.Search, planned.Input.From, planned.Input.To, planned.Plan.AuditText, result.Records, result.Bytes, matches, KafkaExportFormat.JsonLines),
-                        static (_, _, content, _) =>
-                        {
-                            content.Dispose();
-                            return Task.FromResult(true);
-                        },
-                        Ct);
-
-                    bool mayExport = !readOnly && set.SearchRecords && set.ExportRecords && profile != KafkaProfile.Production;
-                    outcome.Delivered.Should().Be(mayExport, where);
-                }
-            }
-        }
     }
 }
 

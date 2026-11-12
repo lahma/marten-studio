@@ -391,7 +391,7 @@ internal sealed class KafkaCorrelationService(
 
             if (start.Handle is not { } handle)
             {
-                string text = KafkaStudioText.Refusal(start.Refusal ?? KafkaScanRefusal.ShuttingDown, plan.Limits);
+                string text = KafkaStudioText.Refusal(start.Refusal ?? KafkaScanRefusal.ShuttingDown, start.SpentBudget);
                 await NotRunAsync(input, text, plan.AuditText).ConfigureAwait(false);
                 return new KafkaRelatedStartResult.Refused(text);
             }

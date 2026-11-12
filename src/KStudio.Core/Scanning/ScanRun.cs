@@ -110,6 +110,7 @@ internal sealed class ScanRun : IDisposable
     private long version;
     private int requestedReason;
     private KafkaScanStopReason? stopReason;
+    private KafkaSpentBudget? spentBudget;
     private bool groupRefusalLogged;
 
     /// <summary>Creates the run; it reads nothing until <see cref="Execute" />.</summary>
@@ -435,6 +436,11 @@ internal sealed class ScanRun : IDisposable
         else if (inputs.OwnerBudget.Remaining(ownerKey) <= 0 || inputs.ClusterOwnerBudget?.Remaining(ownerKey) <= 0)
         {
             stopReason = KafkaScanStopReason.OwnerBudget;
+
+            // The process's allowance when it is spent (it stops every cluster), otherwise the cluster's own: the sentence names that one.
+            spentBudget = inputs.OwnerBudget.Remaining(ownerKey) <= 0
+                ? new KafkaSpentBudget(KafkaBudgetScope.Process, inputs.OwnerBudget.BytesPerHour)
+                : new KafkaSpentBudget(KafkaBudgetScope.Cluster, inputs.ClusterOwnerBudget!.BytesPerHour);
         }
 
         return stopReason is not null;
@@ -850,6 +856,7 @@ internal sealed class ScanRun : IDisposable
                 matchCounters.Copy())
             {
                 Pruning = plan.Pruning,
+                SpentBudget = reason == KafkaScanStopReason.OwnerBudget ? spentBudget : null,
             };
         }
 

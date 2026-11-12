@@ -217,7 +217,7 @@ internal sealed class KafkaSearchService(
 
             if (start.Handle is not { } handle)
             {
-                string text = RefusalText(start.Refusal ?? KafkaScanRefusal.ShuttingDown, plan, owner);
+                string text = KafkaStudioText.Refusal(start.Refusal ?? KafkaScanRefusal.ShuttingDown, start.SpentBudget);
                 await NotRunAsync(input, text, plan.AuditText).ConfigureAwait(false);
                 return new KafkaSearchStartResult.Refused(text);
             }
@@ -302,27 +302,6 @@ internal sealed class KafkaSearchService(
         }
 
         return (null, names, grant);
-    }
-
-    /// <summary>
-    /// The sentence for an engine refusal. When the allowance is what ran out, it names the allowance that did: the cluster's own, when a profile gave it
-    /// one that is spent, and otherwise the process's - never the capped value of a plan whose cluster still has room.
-    /// </summary>
-    private string RefusalText(KafkaScanRefusal refusal, KafkaScanPlan plan, KafkaScanOwner owner)
-    {
-        if (refusal != KafkaScanRefusal.OwnerBudgetSpent)
-        {
-            return KafkaStudioText.Refusal(refusal, plan.Limits);
-        }
-
-        if (registry.TryGet(plan.Request.Cluster, out KafkaClusterDefinition? definition)
-            && clusterCosts.For(definition).OwnerBudget is { } own
-            && own.Remaining(owner.Key) <= 0)
-        {
-            return KafkaStudioText.Refusal(refusal, own.BytesPerHour, onThisCluster: true);
-        }
-
-        return KafkaStudioText.Refusal(refusal, ownerBudget.BytesPerHour, onThisCluster: false);
     }
 
     private static string? Bounds(KafkaSearchInput input, out KafkaTopicName[] names)

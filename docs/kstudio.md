@@ -145,6 +145,9 @@ page says how many. The file travels to your browser over the page's own connect
 export is recorded (event 9606) with the records, the size, the format and the search's predicate, its redacted values replaced
 by `<redacted>`.
 
+A record that carries no timestamp has none in the file: `timestamp` is `null` in JSON Lines and an empty cell in CSV, with
+`timestampType` `NotAvailable` in both (never 1970).
+
 Export asks everything again when you click it: the capability, the cluster's profile (a `Production` cluster never exports,
 and its Export button says so), your cluster and capability policies for every topic of the records, and, for records read
 with values, your right to read them now. A refusal refuses the whole file, never a part of it, and is recorded. At most two

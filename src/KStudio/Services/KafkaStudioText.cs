@@ -233,21 +233,21 @@ internal static class KafkaStudioText
     /// <summary>The sentence for a start the engine refused (D-UI decision 11).</summary>
     /// <param name="refusal">Why.</param>
     /// <param name="limits">The limits the plan ran under.</param>
-    public static string Refusal(KStudio.Core.Scanning.KafkaScanRefusal refusal, KafkaScanLimits limits) => Refusal(refusal, limits.OwnerBytesPerHour, onThisCluster: false);
+    public static string Refusal(KStudio.Core.Scanning.KafkaScanRefusal refusal, KafkaScanLimits limits) => Refusal(refusal, spent: null);
 
     /// <summary>
-    /// The sentence for a start the engine refused, with the allowance that was spent: the process's, or - when <paramref name="onThisCluster" /> - the
-    /// one a profile gave the cluster (D-M5 decision 4.5).
+    /// The sentence for a start the engine refused, with the allowance that was spent: the process's, or the one a profile gave the cluster (D-M5
+    /// decision 4.5). The engine says which (<see cref="KStudio.Core.Scanning.KafkaSpentBudget" />); a refusal that does not says no number, because
+    /// the plan's capped value is the lower of the two whichever ran out.
     /// </summary>
     /// <param name="refusal">Why.</param>
-    /// <param name="ownerBytesPerHour">The hourly allowance that has no bytes left.</param>
-    /// <param name="onThisCluster">Whether that allowance is the cluster's own.</param>
-    public static string Refusal(KStudio.Core.Scanning.KafkaScanRefusal refusal, long ownerBytesPerHour, bool onThisCluster) => refusal switch
+    /// <param name="spent">The allowance that has no bytes left, when the refusal is <c>OwnerBudgetSpent</c>.</param>
+    public static string Refusal(KStudio.Core.Scanning.KafkaScanRefusal refusal, KStudio.Core.Scanning.KafkaSpentBudget? spent) => refusal switch
     {
         KStudio.Core.Scanning.KafkaScanRefusal.ProcessBusy => "Two searches are already running in this application. Try again when one has finished.",
         KStudio.Core.Scanning.KafkaScanRefusal.OwnerBusy => "Another search of yours is running, in this tab or another. Stop it, or wait for it to finish.",
         KStudio.Core.Scanning.KafkaScanRefusal.OwnerBudgetSpent =>
-            $"You have read your hourly allowance{(onThisCluster ? " on this cluster" : string.Empty)} of {KafkaDisplay.Bytes(ownerBytesPerHour)}. It frees up as the hour rolls on.",
+            $"You have read {Allowance(spent)}. It frees up as the hour rolls on.",
         KStudio.Core.Scanning.KafkaScanRefusal.ProfileForbids =>
             "This cluster's profile forbids this: Production forbids export and live tail even when they are granted. The host sets the profile with KafkaClusterBuilder.Profile in AddCluster.",
         KStudio.Core.Scanning.KafkaScanRefusal.NeedsConfirmation => NeedsConfirmation,
@@ -399,6 +399,15 @@ internal static class KafkaStudioText
             _ => "Production: " + caps + "; export and live tail are off.",
         };
     }
+
+    /// <summary>"your hourly allowance of 2 GiB" or "your hourly allowance on this cluster of 512 MiB": the allowance that ran out; with none named, no number.</summary>
+    /// <param name="spent">The allowance that has no bytes left, when the engine said which.</param>
+    public static string Allowance(KStudio.Core.Scanning.KafkaSpentBudget? spent) => spent switch
+    {
+        null => "your hourly allowance",
+        { Scope: KStudio.Core.Scanning.KafkaBudgetScope.Cluster } => $"your hourly allowance on this cluster of {KafkaDisplay.Bytes(spent.BytesPerHour)}",
+        _ => $"your hourly allowance of {KafkaDisplay.Bytes(spent.BytesPerHour)}",
+    };
 
     /// <summary>The Settings page's warning for a cluster with no profile (M5 decisions, OPEN-1).</summary>
     public const string NoProfileWarning =

@@ -119,6 +119,113 @@ public class KafkaProfileAllowanceTests
             .And.NotContain("on this cluster");
     }
 
+    // ---- the engine says which allowance ran out
+
+    [Fact]
+    public async Task The_engines_refusal_carries_the_allowance_that_is_spent_the_clusters_or_the_processs()
+    {
+        await using KafkaSearchRig rig = new(Raised, profile: KafkaProfile.Production);
+        Seed(rig);
+        string owner = await OwnerKeyAsync(rig);
+        KafkaSearchPlanned planned = ((KafkaSearchPlanResult.Planned) await rig.Search().PlanAsync(rig.Input(["orders"], "key = 'k'"), Ct)).Value;
+        IKafkaScanner scanner = rig.Engine.Provider.GetRequiredService<IKafkaScanner>();
+        KafkaScanOwner scanOwner = new(owner);
+        KafkaClusterRegistry registry = rig.Engine.Provider.GetRequiredService<KafkaClusterRegistry>();
+        OwnerByteBudget own = rig.Engine.Provider.GetRequiredService<KafkaClusterCostControls>().For(registry.Get(rig.Entry.Key)).OwnerBudget!;
+        OwnerByteBudget process = rig.Engine.Provider.GetRequiredService<OwnerByteBudget>();
+
+        own.Add(owner, 512 * MiB);
+        KafkaScanStart cluster = scanner.Start(planned.Plan, scanOwner, confirmed: true);
+
+        cluster.Refusal.Should().Be(KafkaScanRefusal.OwnerBudgetSpent);
+        cluster.SpentBudget.Should().Be(new KafkaSpentBudget(KafkaBudgetScope.Cluster, 512 * MiB));
+
+        process.Add(owner, 50 * GiB);
+        KafkaScanStart both = scanner.Start(planned.Plan, scanOwner, confirmed: true);
+
+        both.SpentBudget.Should().Be(new KafkaSpentBudget(KafkaBudgetScope.Process, 50 * GiB), "the process's allowance stops every cluster, so it is the one named");
+    }
+
+    [Fact]
+    public async Task A_record_read_refused_for_the_allowance_names_the_one_that_is_spent()
+    {
+        await using KafkaSearchRig rig = new(Raised, profile: KafkaProfile.Production);
+        Seed(rig);
+        string owner = await OwnerKeyAsync(rig);
+        KafkaClusterRegistry registry = rig.Engine.Provider.GetRequiredService<KafkaClusterRegistry>();
+        OwnerByteBudget own = rig.Engine.Provider.GetRequiredService<KafkaClusterCostControls>().For(registry.Get(rig.Entry.Key)).OwnerBudget!;
+
+        own.Add(owner, 512 * MiB);
+        KafkaRecordPageResult cluster = await rig.Records().ReadAsync(rig.Entry, "orders", 0, 0, Ct);
+
+        cluster.Should().BeOfType<KafkaRecordPageResult.Read>().Which.Value.Text
+            .Should().Be("You have read your hourly allowance on this cluster of 512 MiB. It frees up as the hour rolls on.");
+
+        rig.Engine.Provider.GetRequiredService<OwnerByteBudget>().Add(owner, 50 * GiB);
+        KafkaRecordPageResult process = await rig.Records().ReadAsync(rig.Entry, "orders", 0, 0, Ct);
+
+        process.Should().BeOfType<KafkaRecordPageResult.Read>().Which.Value.Text
+            .Should().Be("You have read your hourly allowance of 50 GiB. It frees up as the hour rolls on.");
+    }
+
+    [Fact]
+    public async Task A_scan_stopped_by_the_process_allowance_says_so_without_naming_the_cluster()
+    {
+        await using KafkaSearchRig rig = new(static o => o.Limits.OwnerBytesPerHour = 2 * MiB);
+        rig.Topic("big");
+        string value = new('x', 60_000);
+
+        for (int i = 0; i < 60; i++)
+        {
+            rig.Produce("big", 0, i, "k" + i, value);
+        }
+
+        KafkaSearchService search = rig.Search();
+        KafkaSearchPlanned planned = ((KafkaSearchPlanResult.Planned) await search.PlanAsync(rig.Input(["big"]), Ct)).Value;
+        await using KafkaSearchRun run = ((KafkaSearchStartResult.Running) await search.StartAsync(planned, confirmed: true, Ct)).Run;
+
+        (KafkaScanResult result, _) = await KafkaSearchRig.DrainAsync(run);
+
+        result.StopReason.Should().Be(KafkaScanStopReason.OwnerBudget);
+        result.SpentBudget.Should().Be(new KafkaSpentBudget(KafkaBudgetScope.Process, 2 * MiB));
+        KafkaSearchText.Stop(result, planned.Plan.Limits).Should().Contain("you have read your hourly allowance of 2 MiB").And.NotContain("on this cluster");
+    }
+
+    [Fact]
+    public async Task A_scan_stopped_by_the_clusters_own_allowance_says_so()
+    {
+        await using KafkaSearchRig rig = new(Raised, profile: KafkaProfile.Production);
+        rig.Topic("big");
+        string value = new('x', 60_000);
+
+        for (int i = 0; i < 60; i++)
+        {
+            rig.Produce("big", 0, i, "k" + i, value);
+        }
+
+        string owner = await OwnerKeyAsync(rig);
+        KafkaClusterRegistry registry = rig.Engine.Provider.GetRequiredService<KafkaClusterRegistry>();
+
+        // 1 MiB left of the cluster's 512 MiB; the process's 50 GiB has plenty.
+        rig.Engine.Provider.GetRequiredService<KafkaClusterCostControls>().For(registry.Get(rig.Entry.Key)).OwnerBudget!.Add(owner, 511 * MiB);
+        KafkaSearchService search = rig.Search();
+        KafkaSearchPlanned planned = ((KafkaSearchPlanResult.Planned) await search.PlanAsync(rig.Input(["big"]), Ct)).Value;
+        await using KafkaSearchRun run = ((KafkaSearchStartResult.Running) await search.StartAsync(planned, confirmed: true, Ct)).Run;
+
+        (KafkaScanResult result, _) = await KafkaSearchRig.DrainAsync(run);
+
+        result.StopReason.Should().Be(KafkaScanStopReason.OwnerBudget);
+        result.SpentBudget.Should().Be(new KafkaSpentBudget(KafkaBudgetScope.Cluster, 512 * MiB));
+        KafkaSearchText.Stop(result, planned.Plan.Limits).Should().Contain("you have read your hourly allowance on this cluster of 512 MiB");
+    }
+
+    [Fact]
+    public void A_refusal_that_does_not_say_which_allowance_names_no_number()
+    {
+        KafkaStudioText.Refusal(KafkaScanRefusal.OwnerBudgetSpent, new KafkaScanLimits())
+            .Should().Be("You have read your hourly allowance. It frees up as the hour rolls on.");
+    }
+
     [Fact]
     public void The_text_for_a_profile_refusal_names_the_setting()
     {

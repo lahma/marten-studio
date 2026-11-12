@@ -786,6 +786,9 @@ two exports in flight at most, a third refused and never queued; the file, built
 delivery; and the audit (`ExportRecords`, capability `ExportRecords`, 9606 written or 9609 not). An interop loss is a file that did not arrive, not a failure.
 The audit carries the source plan's `AuditText`, in which a literal on a redacted field is already `<redacted>`; the visitor's typed text is not an input.
 
+A record with no timestamp (`WireTimestampType.NotAvailable`) is written with `timestamp` `null` in JSON Lines and an empty cell in CSV, `timestampType`
+`NotAvailable` in both, because the epoch the engine keeps in its place would read as 1970.
+
 **Delivery** is a `DotNetStreamReference` to `martenStudio.download.stream` (PostgresStudio's `studio.js`, additive, beside `download.text`), sent in chunks
 over the circuit's own connection, under the circuit's own authentication, with no new route, no token in a URL and no antiforgery question (D23). The
 alternatives: `download.text` with the content as an interop argument is one JSON-escaped string of up to 32 MiB, a full copy on both sides and the circuit
@@ -812,7 +815,11 @@ used to hard-code `ReadPayloads → SearchRecords`, and `RequireOne` is the capa
 profile` as a chip (Production in the danger colour), the Settings page a **Profile** section with the capped numbers and, for a cluster with no profile, the
 warning "This cluster has no profile; its limits are the engine's defaults. Set KafkaClusterBuilder.Profile(...) to cap them." The search form's allowance
 line names the allowance that is lower, the cluster's own or the process's (`KafkaClusterCost.BytesPerHour`), and a refused start names the allowance that ran
-out, not the capped value of a plan whose own cluster still has room.
+out, not the capped value of a plan whose own cluster still has room. The engine says which: `KafkaSpentBudget(Scope, BytesPerHour)` rides on
+`KafkaScanStart` (for `OwnerBudgetSpent`), on `KafkaScanResult` (for the `OwnerBudget` stop) and on `KafkaRecordRead`'s sentence, chosen by
+`KafkaClusterCost.Spent` (the process's allowance when it is spent, since it stops every cluster; otherwise the cluster's own); a refusal that carries none
+says no number. The profile never-grants test (decision 4.7) is `KafkaProfileNeverGrantsTests`: every profile against all sixteen flag combinations, with
+`ReadOnly` on and off, through the real export service.
 
 **Tests.** `KafkaExportServiceTests` (each gate refuses, audits and writes nothing; a grant downgrade refuses whole; a third export is refused; a delivery
 returning false or throwing; one ring entry per call; `<redacted>` and never the typed text; the size limit leaves whole rows out and counts them),
