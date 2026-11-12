@@ -91,7 +91,7 @@ internal sealed record KeyField(int Start, int Length) : FieldNode(Start, Length
 /// <param name="Length">How long it is.</param>
 internal sealed record HeaderField(string Name, int Start, int Length) : FieldNode(Start, Length);
 
-/// <summary>A CloudEvents attribute, <c>[a-z0-9]{1,20}</c>.</summary>
+/// <summary>A CloudEvents attribute, <c>[a-z0-9]{1,64}</c>.</summary>
 /// <param name="Attribute">The attribute's name.</param>
 /// <param name="Start">Where it starts.</param>
 /// <param name="Length">How long it is.</param>
@@ -102,16 +102,16 @@ internal sealed record CloudEventField(string Attribute, int Start, int Length) 
 /// <param name="Length">How long it is.</param>
 internal sealed record AnyField(int Start, int Length) : FieldNode(Start, Length);
 
-/// <summary>The record's value (M3: it needs the payload grant).</summary>
+/// <summary>The record's value, or a CloudEvent's data (it needs the payload grant, except for <c>is null</c>).</summary>
 /// <param name="Start">Where it starts.</param>
 /// <param name="Length">How long it is.</param>
 internal sealed record ValueField(int Start, int Length) : FieldNode(Start, Length);
 
-/// <summary>A JSON path into the value (M3: it needs the payload grant).</summary>
-/// <param name="Path">The path as typed, starting with <c>$</c>.</param>
+/// <summary>A JSON path into the value, or into a CloudEvent's data (it needs the payload grant).</summary>
+/// <param name="Path">The parsed path; its <see cref="JsonPathExpression.Text" /> is the canonical text.</param>
 /// <param name="Start">Where it starts.</param>
 /// <param name="Length">How long it is.</param>
-internal sealed record JsonPathField(string Path, int Start, int Length) : FieldNode(Start, Length);
+internal sealed record JsonPathField(JsonPathExpression Path, int Start, int Length) : FieldNode(Start, Length);
 
 /// <summary>A literal of a clause.</summary>
 /// <param name="Start">Where it starts.</param>
@@ -178,6 +178,22 @@ internal static class PredicateTree
         };
     }
 
+    /// <summary>
+    /// Whether the tree reads record values: a clause on <c>value</c> (except <c>is null</c>, which looks at the record, not at its
+    /// content) or on a JSON path. <c>any</c> does not count, because it reads the value only when the visitor may.
+    /// </summary>
+    /// <param name="node">The tree.</param>
+    public static bool ReadsValues(PredicateNode? node) =>
+        node switch
+        {
+            AndNode and => and.Children.Any(ReadsValues),
+            OrNode or => or.Children.Any(ReadsValues),
+            NotNode not => ReadsValues(not.Operand),
+            ClauseNode clause => clause.Field is JsonPathField
+                || (clause.Field is ValueField && clause.Operator is not (PredicateOperator.IsNull or PredicateOperator.IsNotNull)),
+            _ => false,
+        };
+
     private static bool ListEqual(IReadOnlyList<PredicateNode> left, IReadOnlyList<PredicateNode> right) =>
         left.Count == right.Count && left.Zip(right).All(static x => StructurallyEqual(x.First, x.Second));
 
@@ -189,7 +205,7 @@ internal static class PredicateTree
             (ValueField, ValueField) => true,
             (HeaderField a, HeaderField b) => string.Equals(a.Name, b.Name, StringComparison.Ordinal),
             (CloudEventField a, CloudEventField b) => string.Equals(a.Attribute, b.Attribute, StringComparison.Ordinal),
-            (JsonPathField a, JsonPathField b) => string.Equals(a.Path, b.Path, StringComparison.Ordinal),
+            (JsonPathField a, JsonPathField b) => string.Equals(a.Path.Text, b.Path.Text, StringComparison.Ordinal),
             _ => false,
         };
 

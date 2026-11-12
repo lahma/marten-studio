@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Unicode;
 
+using KStudio.Core.Redaction;
 using KStudio.Core.Wire;
 
 namespace KStudio.Core.Decoding;
@@ -32,12 +33,13 @@ internal enum KafkaValueKind
 }
 
 /// <summary>
-/// A value as the engine understood it. Nothing is ever deserialized into a CLR type: JSON is text (and, transiently, an element) and a host
-/// decoder returns JSON or text that the engine parses itself. Under the envelope grant only the kind, the length, the schema id and the
-/// CloudEvents attributes are filled in; the text and the preview are for a visitor who may read payloads.
+/// A value as a match would keep it before any payload rule: the text cut to the match's budget. Nothing is ever deserialized into a CLR
+/// type: JSON is text (and, transiently, an element) and a host decoder returns JSON or text that the engine parses itself. Under the
+/// envelope grant only the kind, the length, the schema id and the CloudEvents attributes are filled in; the text and the preview are for a
+/// visitor who may read payloads. The engine itself works on <see cref="RecordValue" />, which is whole.
 /// </summary>
 /// <param name="Kind">What it is.</param>
-/// <param name="FormatName">How to name it: <c>JSON</c>, <c>CloudEvents (structured)</c>, a decoder's name.</param>
+/// <param name="FormatName">How to name it: <c>JSON</c>, <c>CloudEvents (structured), data as JSON</c>, a decoder's name.</param>
 /// <param name="Length">Its length in bytes.</param>
 /// <param name="Text">The JSON or text, up to the match cap; only under the payload grant.</param>
 /// <param name="Truncated">Whether <paramref name="Text" /> or <paramref name="Preview" /> was cut.</param>
@@ -62,16 +64,18 @@ internal sealed record KafkaDecodedValue(
 /// <param name="Grant">What the visitor may read.</param>
 /// <param name="Decoder">The topic's declared decoder, resolved; <see langword="null" /> when it declared none.</param>
 /// <param name="MaxDecodeBytes">The largest value parsed.</param>
-/// <param name="MaxMatchBytes">The most text or hex kept.</param>
+/// <param name="MaxMatchBytes">The most text or hex kept by <see cref="ValueDetector.Detect" />.</param>
 /// <param name="Counters">Counts the decodes.</param>
 /// <param name="OnDecoderFailed">Told when a host decoder throws; the exception's type name is all that is logged.</param>
+/// <param name="Redactor">The topic's rules: a host decoder is handed only the headers none of them masks (decision 3.5). The deny-list alone when <see langword="null" />.</param>
 internal sealed record ValueDetection(
     KafkaReadGrant Grant,
     IKafkaRecordDecoder? Decoder,
     int MaxDecodeBytes,
     int MaxMatchBytes,
     DecodeCounters Counters,
-    Action<Exception>? OnDecoderFailed = null);
+    Action<Exception>? OnDecoderFailed = null,
+    IKafkaRedactor? Redactor = null);
 
 /// <summary>What a visitor may read of a record (decision 10.1). KStudio computes it after its own authorization.</summary>
 [Flags]
@@ -92,10 +96,26 @@ internal static class ValueDetector
 {
     private static readonly UTF8Encoding StrictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
 
-    /// <summary>Detects what a record's value is, in the order the design states.</summary>
+    /// <summary>
+    /// Detects what a record's value is and cuts its text to <see cref="ValueDetection.MaxMatchBytes" />: the value as a match would keep it
+    /// before any payload rule.
+    /// </summary>
     /// <param name="record">The record.</param>
     /// <param name="detection">The topic and the scan.</param>
     public static KafkaDecodedValue Detect(WireRecord record, ValueDetection detection)
+    {
+        RecordValue value = DetectValue(record, detection);
+        (string? text, bool truncated) = value.Utf8 is { } bytes ? KeepText(bytes, detection.MaxMatchBytes) : (null, false);
+
+        return new KafkaDecodedValue(
+            value.Kind, value.FormatName, value.Length, text, truncated || value.Cut, value.SchemaId, value.Preview, value.Reason, value.ReasonText, value.CloudEvent);
+    }
+
+    /// <summary>Detects what a record's value is, in the order the design states, and keeps all of it (up to <c>MaxDecodeBytes</c>).</summary>
+    /// <param name="record">The record.</param>
+    /// <param name="detection">The topic and the scan.</param>
+    /// <param name="knownView">The record's CloudEvents attributes when something already read them, so that they are not read twice.</param>
+    public static RecordValue DetectValue(WireRecord record, ValueDetection detection, CloudEventView? knownView = null)
     {
         // 1. A null value is a tombstone and a zero-length one is empty: neither is ever an empty string.
         if (record.Value is null)
@@ -118,31 +138,48 @@ internal static class ValueDetector
         // 2. CloudEvents binary: the value is the event's data, typed by its content-type header.
         if (mode == CloudEventMode.Binary)
         {
-            CloudEventView view = CloudEventReader.Read(record, mode, detection.MaxDecodeBytes, detection.Counters);
+            CloudEventView view = knownView ?? CloudEventReader.Read(record, mode, detection.MaxDecodeBytes, detection.Counters);
             string? contentType = view.Events[0].Attributes.GetValueOrDefault("datacontenttype");
-            KafkaDecodedValue data = DataOf(value, contentType, payload, detection);
-            return data with { FormatName = "CloudEvents (binary), " + data.FormatName, CloudEvent = view };
+            RecordValue data = DataOf(value, contentType, payload, detection);
+            return data with { FormatName = "CloudEvents (binary), " + data.FormatName, CloudEvent = view, IsCloudEventData = true };
         }
 
-        // 3. CloudEvents structured: the attributes are the envelope's members, the value is the envelope.
+        // 3. CloudEvents structured: the attributes are the envelope's members, and under the payload grant the value is the event's data.
         if (mode is CloudEventMode.Structured or CloudEventMode.StructuredBatch)
         {
-            CloudEventView view = CloudEventReader.Read(record, mode, detection.MaxDecodeBytes, detection.Counters);
+            CloudEventView view = knownView ?? CloudEventReader.Read(record, mode, detection.MaxDecodeBytes, detection.Counters);
 
             if (view.Unreadable is { } unreadable)
             {
-                return new KafkaDecodedValue(
-                    KafkaValueKind.Undecodable, "CloudEvents (structured)", value.Length, null, false, null, null, unreadable, null, view);
+                return new RecordValue
+                {
+                    Kind = KafkaValueKind.Undecodable,
+                    FormatName = "CloudEvents (structured)",
+                    Length = value.Length,
+                    Reason = unreadable,
+                    CloudEvent = view,
+                };
             }
 
-            (string? text, bool truncated) = payload ? KeepText(value, detection.MaxMatchBytes) : (null, false);
-            return new KafkaDecodedValue(KafkaValueKind.Json, "CloudEvents (structured)", value.Length, text, truncated, null, null, null, null, view);
+            if (!payload)
+            {
+                return new RecordValue { Kind = KafkaValueKind.Json, FormatName = "CloudEvents (structured)", Length = value.Length, CloudEvent = view };
+            }
+
+            IReadOnlyList<RecordValue> parts = CloudEventReader.ReadData(record, detection.MaxDecodeBytes, detection.Counters);
+
+            if (parts.Count == 0)
+            {
+                return NoData(value.Length) with { CloudEvent = view };
+            }
+
+            return parts[0] with { CloudEvent = view, IsCloudEventData = true, More = [.. parts.Skip(1)] };
         }
 
         // 4. The topic's declared decoder, only for a visitor who may read payloads; a built-in one forces its format.
         if (detection.Decoder is { } decoder && payload)
         {
-            KafkaDecodedValue? decoded = Declared(record, value, decoder, forced, detection);
+            RecordValue? decoded = Declared(record, value, decoder, forced, detection);
 
             if (decoded is not null)
             {
@@ -153,15 +190,32 @@ internal static class ValueDetector
         // 5. The Confluent wire format: never shown as garbage.
         if (ConfluentWireFormat.TryRead(value, out int schemaId))
         {
-            string? preview = payload ? HeaderDecoder.Hex(value.AsSpan(5)) : null;
-            return new KafkaDecodedValue(
-                KafkaValueKind.ConfluentWireFormat, ConfluentWireFormat.Describe(schemaId), value.Length, null, false, schemaId, preview, null, null, null);
+            return new RecordValue
+            {
+                Kind = KafkaValueKind.ConfluentWireFormat,
+                FormatName = ConfluentWireFormat.Describe(schemaId),
+                Length = value.Length,
+                SchemaId = schemaId,
+                Preview = payload ? HeaderDecoder.Hex(value.AsSpan(5)) : null,
+            };
         }
 
         return Generic(value, payload, detection);
     }
 
-    private static KafkaDecodedValue? Declared(WireRecord record, byte[] value, IKafkaRecordDecoder decoder, KafkaBuiltInDecoder? forced, ValueDetection detection)
+    /// <summary>A CloudEvent without data: it has no value, and every clause on the value is false.</summary>
+    /// <param name="length">The envelope's length.</param>
+    internal static RecordValue NoData(int length) =>
+        new()
+        {
+            Kind = KafkaValueKind.Empty,
+            FormatName = "CloudEvents (structured), no data",
+            Length = length,
+            NoData = true,
+            IsCloudEventData = true,
+        };
+
+    private static RecordValue? Declared(WireRecord record, byte[] value, IKafkaRecordDecoder decoder, KafkaBuiltInDecoder? forced, ValueDetection detection)
     {
         switch (forced)
         {
@@ -174,17 +228,23 @@ internal static class ValueDetector
         }
 
         KafkaDecodeResult result;
+        IKafkaRedactor redactor = detection.Redactor ?? KafkaRedactor.DenyListOnly;
 
         try
         {
-            KafkaHeader[] headers = [.. record.Headers.Select(static x => new KafkaHeader(x.Name, x.Value is null ? null : (ReadOnlyMemory<byte>?) x.Value))];
+            // A header a rule masks is never handed over: a decoder that echoed one into its text would put a masked value into a match.
+            KafkaHeader[] headers =
+            [
+                .. record.Headers
+                    .Where(x => redactor.ForHeader(x.Name) is null)
+                    .Select(static x => new KafkaHeader(x.Name, x.Value is null ? null : (ReadOnlyMemory<byte>?) x.Value)),
+            ];
             result = decoder.Decode(new KafkaDecodeContext(record.Topic, record.Partition, record.Offset, value, headers));
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
             detection.OnDecoderFailed?.Invoke(exception);
-            return new KafkaDecodedValue(
-                KafkaValueKind.Undecodable, decoder.Name, value.Length, null, false, null, null, KafkaUndecodableReason.DecoderFailed, null, null);
+            return Undecodable(value.Length, decoder.Name, KafkaUndecodableReason.DecoderFailed);
         }
 
         string name = result.FormatName ?? decoder.Name;
@@ -195,21 +255,22 @@ internal static class ValueDetector
                 return AsJson(result.JsonBytes.ToArray(), name, detection) with { Length = value.Length };
             case KafkaDecodeResultKind.Text:
                 {
-                    (string? text, bool truncated) = KeepText(Encoding.UTF8.GetBytes(result.TextValue!), detection.MaxMatchBytes);
-                    return new KafkaDecodedValue(KafkaValueKind.Text, name, value.Length, text, truncated, null, null, null, null, null);
+                    byte[] bytes = CutBytes(Encoding.UTF8.GetBytes(result.TextValue!), detection.MaxDecodeBytes, out bool cut);
+                    return new RecordValue { Kind = KafkaValueKind.Text, FormatName = name, Length = value.Length, Utf8 = bytes, Cut = cut };
                 }
 
             case KafkaDecodeResultKind.Undecodable:
                 string reason = result.TextValue!.Length > 200 ? result.TextValue[..200] : result.TextValue;
-                return new KafkaDecodedValue(
-                    KafkaValueKind.Undecodable, decoder.Name, value.Length, null, false, null, null, KafkaUndecodableReason.DecoderRefused, reason, null);
+                return Undecodable(value.Length, decoder.Name, KafkaUndecodableReason.DecoderRefused) with { ReasonText = reason };
             default:
                 return null;
         }
     }
 
-    private static KafkaDecodedValue Generic(byte[] value, bool payload, ValueDetection detection)
+    private static RecordValue Generic(byte[] value, bool payload, ValueDetection detection)
     {
+        bool looksLikeJson = false;
+
         // 6. JSON: the first non-whitespace byte starts a JSON value and the whole value parses.
         if (StartsLikeJson(value))
         {
@@ -218,26 +279,42 @@ internal static class ValueDetector
                 return Undecodable(value.Length, "JSON", KafkaUndecodableReason.TooLarge);
             }
 
-            if (ParsesAsJson(value))
+            if (TryParseJson(value, detection.Counters, out JsonElement element))
             {
-                (string? text, bool truncated) = payload ? KeepText(value, detection.MaxMatchBytes) : (null, false);
-                return new KafkaDecodedValue(KafkaValueKind.Json, "JSON", value.Length, text, truncated, null, null, null, null, null);
+                return new RecordValue
+                {
+                    Kind = KafkaValueKind.Json,
+                    FormatName = "JSON",
+                    Length = value.Length,
+                    Utf8 = payload ? value : null,
+                    Json = payload ? element : null,
+                };
             }
+
+            looksLikeJson = true;
         }
 
         // 7. UTF-8 text with no control character other than tab, carriage return and line feed.
         if (IsText(value))
         {
-            (string? text, bool truncated) = payload ? KeepText(value, detection.MaxMatchBytes) : (null, false);
-            return new KafkaDecodedValue(KafkaValueKind.Text, "Text", value.Length, text, truncated, null, null, null, null, null);
+            bool cut = false;
+
+            return new RecordValue
+            {
+                Kind = KafkaValueKind.Text,
+                FormatName = "Text",
+                Length = value.Length,
+                Utf8 = payload ? CutBytes(value, detection.MaxDecodeBytes, out cut) : null,
+                Cut = cut,
+                LooksLikeJson = looksLikeJson,
+            };
         }
 
         // 8. Hex: everything else.
-        return new KafkaDecodedValue(
-            KafkaValueKind.Binary, "Binary", value.Length, null, false, null, payload ? HeaderDecoder.Hex(value) : null, null, null, null);
+        return new RecordValue { Kind = KafkaValueKind.Binary, FormatName = "Binary", Length = value.Length, Preview = payload ? HeaderDecoder.Hex(value) : null };
     }
 
-    private static KafkaDecodedValue DataOf(byte[] value, string? contentType, bool payload, ValueDetection detection)
+    private static RecordValue DataOf(byte[] value, string? contentType, bool payload, ValueDetection detection)
     {
         if (contentType is not null && contentType.Contains("json", StringComparison.OrdinalIgnoreCase))
         {
@@ -250,42 +327,52 @@ internal static class ValueDetector
             return payload ? AsText(value, "Text", detection) : Plain(KafkaValueKind.Text, "Text", value.Length);
         }
 
-        return new KafkaDecodedValue(
-            KafkaValueKind.Binary, "Binary", value.Length, null, false, null, payload ? HeaderDecoder.Hex(value) : null, null, null, null);
+        return new RecordValue { Kind = KafkaValueKind.Binary, FormatName = "Binary", Length = value.Length, Preview = payload ? HeaderDecoder.Hex(value) : null };
     }
 
-    private static KafkaDecodedValue AsJson(byte[] value, string name, ValueDetection detection)
+    /// <summary>JSON bytes read as JSON: parsed under the depth cap, kept whole up to <c>MaxDecodeBytes</c>.</summary>
+    /// <param name="value">The bytes.</param>
+    /// <param name="name">The format's name.</param>
+    /// <param name="detection">The scan.</param>
+    internal static RecordValue AsJson(byte[] value, string name, ValueDetection detection)
     {
         if (value.Length > detection.MaxDecodeBytes)
         {
             return Undecodable(value.Length, name, KafkaUndecodableReason.TooLarge);
         }
 
-        if (!ParsesAsJson(value))
+        if (!TryParseJson(value, detection.Counters, out JsonElement element))
         {
             return Undecodable(value.Length, name, KafkaUndecodableReason.InvalidJson);
         }
 
-        (string? text, bool truncated) = KeepText(value, detection.MaxMatchBytes);
-        return new KafkaDecodedValue(KafkaValueKind.Json, name, value.Length, text, truncated, null, null, null, null, null);
+        return new RecordValue { Kind = KafkaValueKind.Json, FormatName = name, Length = value.Length, Utf8 = value, Json = element };
     }
 
-    private static KafkaDecodedValue AsText(byte[] value, string name, ValueDetection detection)
+    /// <summary>UTF-8 bytes read as text, cut at <c>MaxDecodeBytes</c> between characters.</summary>
+    /// <param name="value">The bytes.</param>
+    /// <param name="name">The format's name.</param>
+    /// <param name="detection">The scan.</param>
+    internal static RecordValue AsText(byte[] value, string name, ValueDetection detection)
     {
         if (!Utf8.IsValid(value))
         {
             return Undecodable(value.Length, name, KafkaUndecodableReason.InvalidUtf8);
         }
 
-        (string? text, bool truncated) = KeepText(value, detection.MaxMatchBytes);
-        return new KafkaDecodedValue(KafkaValueKind.Text, name, value.Length, text, truncated, null, null, null, null, null);
+        byte[] bytes = CutBytes(value, detection.MaxDecodeBytes, out bool cut);
+        return new RecordValue { Kind = KafkaValueKind.Text, FormatName = name, Length = value.Length, Utf8 = bytes, Cut = cut };
     }
 
-    private static KafkaDecodedValue Plain(KafkaValueKind kind, string name, int length) =>
-        new(kind, name, length, null, false, null, null, null, null, null);
+    private static RecordValue Plain(KafkaValueKind kind, string name, int length) =>
+        new() { Kind = kind, FormatName = name, Length = length };
 
-    private static KafkaDecodedValue Undecodable(int length, string name, KafkaUndecodableReason reason) =>
-        new(KafkaValueKind.Undecodable, name, length, null, false, null, null, reason, null, null);
+    /// <summary>A value that could not be decoded, and why.</summary>
+    /// <param name="length">The value's length.</param>
+    /// <param name="name">The format's name.</param>
+    /// <param name="reason">Why.</param>
+    internal static RecordValue Undecodable(int length, string name, KafkaUndecodableReason reason) =>
+        new() { Kind = KafkaValueKind.Undecodable, FormatName = name, Length = length, Reason = reason };
 
     private static bool StartsLikeJson(byte[] value)
     {
@@ -302,15 +389,23 @@ internal static class ValueDetector
         return false;
     }
 
-    private static bool ParsesAsJson(byte[] value)
+    /// <summary>Parses JSON under the depth cap and keeps a standalone copy of the root: no document is held.</summary>
+    /// <param name="value">The bytes.</param>
+    /// <param name="counters">Counts the parse.</param>
+    /// <param name="element">The root, when the bytes are JSON.</param>
+    internal static bool TryParseJson(byte[] value, DecodeCounters counters, out JsonElement element)
     {
+        counters.ValueParsed++;
+
         try
         {
-            using JsonDocument _ = JsonDocument.Parse(value, new JsonDocumentOptions { MaxDepth = 64 });
+            using JsonDocument document = JsonDocument.Parse(value, new JsonDocumentOptions { MaxDepth = 64 });
+            element = document.RootElement.Clone();
             return true;
         }
         catch (JsonException)
         {
+            element = default;
             return false;
         }
     }
@@ -326,6 +421,30 @@ internal static class ValueDetector
         }
 
         return Utf8.IsValid(value);
+    }
+
+    /// <summary>At most <paramref name="max" /> bytes of <paramref name="value" />, not ending inside a multi-byte character; the same array when it fits.</summary>
+    /// <param name="value">The UTF-8 bytes.</param>
+    /// <param name="max">The most bytes kept.</param>
+    /// <param name="cut">Whether anything was left out.</param>
+    internal static byte[] CutBytes(byte[] value, int max, out bool cut)
+    {
+        if (value.Length <= max)
+        {
+            cut = false;
+            return value;
+        }
+
+        int length = max;
+
+        // Do not cut in the middle of a multi-byte character: back up over continuation bytes.
+        while (length > 0 && (value[length] & 0xC0) == 0x80)
+        {
+            length--;
+        }
+
+        cut = true;
+        return value.AsSpan(0, length).ToArray();
     }
 
     /// <summary>Keeps at most <paramref name="max" /> bytes of valid UTF-8 as text, cutting at a character boundary.</summary>

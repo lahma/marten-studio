@@ -133,7 +133,7 @@ internal static partial class PredicateFormatter
             AnyField => "any",
             ValueField => "value",
             CloudEventField ce => "ce." + ce.Attribute,
-            JsonPathField path => path.Path,
+            JsonPathField path => path.Path.Text,
             HeaderField header when SimpleName().IsMatch(header.Name) => "header." + header.Name,
             HeaderField header => "header[" + Quote(header.Name) + "]",
             _ => "?",

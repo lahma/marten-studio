@@ -41,6 +41,9 @@ internal enum KafkaUndecodableReason
 
     /// <summary>A host decoder returned <c>Undecodable</c>.</summary>
     DecoderRefused,
+
+    /// <summary>A CloudEvent's <c>data_base64</c> is not valid base64.</summary>
+    InvalidBase64,
 }
 
 /// <summary>One CloudEvent's attributes: name to text. <c>data</c> and <c>data_base64</c> are never among them.</summary>
@@ -121,6 +124,156 @@ internal static class CloudEventReader
                 return CloudEventView.None;
         }
     }
+
+    /// <summary>
+    /// Reads the data of a structured CloudEvent, or of each event of a batch (decision 4.1 of D-PAYLOAD); only under the payload grant. The
+    /// attributes were read, and the envelope checked against the decode limit, before this is called.
+    /// </summary>
+    /// <param name="record">The record.</param>
+    /// <param name="maxDecodeBytes">The largest value parsed.</param>
+    /// <param name="counters">Counts the parses.</param>
+    /// <returns>One value per event: JSON for <c>data</c> of a JSON content type, text for <c>text/*</c>, or what <c>data_base64</c> holds; an event without data is a value with no data.</returns>
+    public static IReadOnlyList<RecordValue> ReadData(WireRecord record, int maxDecodeBytes, DecodeCounters counters)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+
+        if (record.Value is null)
+        {
+            return [];
+        }
+
+        counters.ValueParsed++;
+
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(record.Value, new JsonDocumentOptions { MaxDepth = 64 });
+            JsonElement root = document.RootElement;
+            List<RecordValue> parts = [];
+
+            if (root.ValueKind == JsonValueKind.Array)
+            {
+                foreach (JsonElement envelope in root.EnumerateArray())
+                {
+                    parts.Add(DataOf(envelope, record.Value.Length, maxDecodeBytes, counters));
+                }
+            }
+            else
+            {
+                parts.Add(DataOf(root, record.Value.Length, maxDecodeBytes, counters));
+            }
+
+            return parts;
+        }
+        catch (JsonException)
+        {
+            return [ValueDetector.Undecodable(record.Value.Length, "CloudEvents (structured)", KafkaUndecodableReason.InvalidJson)];
+        }
+    }
+
+    private static RecordValue DataOf(JsonElement envelope, int length, int maxDecodeBytes, DecodeCounters counters)
+    {
+        string? contentType = envelope.ValueKind == JsonValueKind.Object
+            && envelope.TryGetProperty("datacontenttype", out JsonElement type)
+            && type.ValueKind == JsonValueKind.String
+                ? type.GetString()
+                : null;
+        bool json = contentType is null || contentType.Contains("json", StringComparison.OrdinalIgnoreCase);
+        bool text = contentType is not null && contentType.StartsWith("text/", StringComparison.OrdinalIgnoreCase);
+
+        if (envelope.ValueKind == JsonValueKind.Object && envelope.TryGetProperty("data", out JsonElement data) && data.ValueKind != JsonValueKind.Null)
+        {
+            if (text && data.ValueKind == JsonValueKind.String)
+            {
+                byte[] bytes = ValueDetector.CutBytes(Encoding.UTF8.GetBytes(data.GetString()!), maxDecodeBytes, out bool cut);
+                return new RecordValue
+                {
+                    Kind = KafkaValueKind.Text,
+                    FormatName = "CloudEvents (structured), data as text",
+                    Length = length,
+                    Utf8 = bytes,
+                    Cut = cut,
+                    IsCloudEventData = true,
+                };
+            }
+
+            return new RecordValue
+            {
+                Kind = KafkaValueKind.Json,
+                FormatName = "CloudEvents (structured), data as JSON",
+                Length = length,
+                Utf8 = Encoding.UTF8.GetBytes(data.GetRawText()),
+                Json = data.Clone(),
+                IsCloudEventData = true,
+            };
+        }
+
+        if (envelope.ValueKind == JsonValueKind.Object && envelope.TryGetProperty("data_base64", out JsonElement encoded) && encoded.ValueKind == JsonValueKind.String)
+        {
+            string base64 = encoded.GetString()!;
+            byte[] buffer = new byte[(base64.Length / 4 * 3) + 3];
+
+            if (!Convert.TryFromBase64String(base64, buffer, out int written))
+            {
+                return Failed(length, "data_base64", KafkaUndecodableReason.InvalidBase64);
+            }
+
+            byte[] decoded = buffer.AsSpan(0, written).ToArray();
+
+            if (decoded.Length > maxDecodeBytes)
+            {
+                return Failed(length, "data_base64", KafkaUndecodableReason.TooLarge);
+            }
+
+            if (json && contentType is not null)
+            {
+                if (!ValueDetector.TryParseJson(decoded, counters, out JsonElement element))
+                {
+                    return Failed(length, "data_base64 as JSON", KafkaUndecodableReason.InvalidJson);
+                }
+
+                return new RecordValue
+                {
+                    Kind = KafkaValueKind.Json,
+                    FormatName = "CloudEvents (structured), data_base64 as JSON",
+                    Length = length,
+                    Utf8 = decoded,
+                    Json = element,
+                    IsCloudEventData = true,
+                };
+            }
+
+            if (text)
+            {
+                if (!System.Text.Unicode.Utf8.IsValid(decoded))
+                {
+                    return Failed(length, "data_base64 as text", KafkaUndecodableReason.InvalidUtf8);
+                }
+
+                return new RecordValue
+                {
+                    Kind = KafkaValueKind.Text,
+                    FormatName = "CloudEvents (structured), data_base64 as text",
+                    Length = length,
+                    Utf8 = decoded,
+                    IsCloudEventData = true,
+                };
+            }
+
+            return new RecordValue
+            {
+                Kind = KafkaValueKind.Binary,
+                FormatName = "CloudEvents (structured), data_base64 as binary",
+                Length = length,
+                Preview = HeaderDecoder.Hex(decoded),
+                IsCloudEventData = true,
+            };
+        }
+
+        return ValueDetector.NoData(length);
+    }
+
+    private static RecordValue Failed(int length, string what, KafkaUndecodableReason reason) =>
+        ValueDetector.Undecodable(length, "CloudEvents (structured), " + what, reason) with { IsCloudEventData = true };
 
     private static CloudEventView ReadBinary(WireRecord record)
     {

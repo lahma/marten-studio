@@ -59,6 +59,7 @@ internal static class PredicateCompiler
             KeyField => redactor.ForKey(),
             HeaderField header => redactor.ForHeader(header.Name),
             CloudEventField ce => redactor.ForCloudEvent(ce.Attribute),
+            JsonPathField path => redactor.ForJsonPath(path.Path),
             _ => null,
         };
 
@@ -105,33 +106,44 @@ internal static class PredicateCompiler
     {
         string field = PredicateFormatter.Field(clause.Field);
         int position = clause.Field.Start + 1;
+        bool payload = context.Grant.HasFlag(KafkaReadGrant.Payload);
+        bool isNull = clause.Operator is PredicateOperator.IsNull or PredicateOperator.IsNotNull;
 
-        // M3 fields.
-        if (clause.Field is ValueField or JsonPathField)
+        // `value is null` looks at the record and not at its content (a tombstone has no value), so it needs no payload grant.
+        if (clause.Field is ValueField && isNull)
+        {
+            AddVerdict(verdicts, context, clause, field);
+            return new CompiledValueNullClause(clause.Operator);
+        }
+
+        // The value and a JSON path need the payload grant, which KStudio decides before it compiles; an internal caller with the wrong
+        // grant still gets a refusal and not a silent false.
+        if (clause.Field is ValueField or JsonPathField && !payload)
         {
             errors.Add(new PredicateError(
                 clause.Field.Start,
                 clause.Field.Length,
-                context.Grant.HasFlag(KafkaReadGrant.Payload)
-                    ? string.Create(CultureInfo.InvariantCulture, $"{field} (position {position}) cannot be searched yet: value and JSON path searches are not available in this version.")
-                    : $"{field} reads the record's value, which needs ReadPayloads (KafkaStudioOptions.Capabilities.ReadPayloads)."));
+                $"{field} reads the record's value, which needs ReadPayloads (KafkaStudioOptions.Capabilities.ReadPayloads)."));
             return null;
         }
 
-        if (clause.Operator is PredicateOperator.Less or PredicateOperator.LessOrEqual or PredicateOperator.Greater or PredicateOperator.GreaterOrEqual)
+        if (clause.Operator is PredicateOperator.Less or PredicateOperator.LessOrEqual or PredicateOperator.Greater or PredicateOperator.GreaterOrEqual
+            && clause.Field is not JsonPathField)
         {
             errors.Add(Refuse(clause, field, position, "numbers compare only JSON paths"));
             return null;
         }
 
-        if (clause.Field is AnyField && clause.Operator is PredicateOperator.IsNull or PredicateOperator.IsNotNull)
+        if (clause.Field is AnyField && isNull)
         {
-            errors.Add(Refuse(clause, field, position, "is null applies to key, header.<name> and ce.<attribute>"));
+            errors.Add(Refuse(clause, field, position, "is null applies to key, header.<name>, ce.<attribute> and value"));
             return null;
         }
 
         // Redaction first: the operators a masked field accepts are fixed before anything else is asked of its literals.
-        if (RuleOf(clause.Field, context.Redactor) is { } rule)
+        RedactionRule? rule = RuleOf(clause.Field, context.Redactor);
+
+        if (rule is not null)
         {
             bool exact = clause.Operator is PredicateOperator.Equals or PredicateOperator.In;
 
@@ -147,7 +159,12 @@ internal static class PredicateCompiler
             }
         }
 
-        if (clause.Operator is PredicateOperator.IsNull or PredicateOperator.IsNotNull)
+        if (clause.Field is JsonPathField path)
+        {
+            return BuildPath(clause, path, field, position, rule is not null, context, errors, verdicts);
+        }
+
+        if (isNull)
         {
             AddVerdict(verdicts, context, clause, field);
             return clause.Field switch
@@ -183,7 +200,8 @@ internal static class PredicateCompiler
                 clause.Operator == PredicateOperator.Contains ? [] : [.. texts.Select(TextMatch.Utf8)],
                 texts),
             CloudEventField ce => new CompiledCloudEventClause(ce.Attribute, clause.Operator, texts, context.DeclaresCloudEvents),
-            AnyField => new CompiledAnyClause(clause.Operator, texts, context.Redactor),
+            AnyField => new CompiledAnyClause(clause.Operator, texts, context.Redactor, payload),
+            ValueField => new CompiledValueClause(clause.Operator, texts, context.Redactor),
             _ => null,
         };
 
@@ -193,6 +211,52 @@ internal static class PredicateCompiler
         }
 
         return built;
+    }
+
+    private static CompiledJsonPathClause? BuildPath(
+        ClauseNode clause,
+        JsonPathField path,
+        string field,
+        int position,
+        bool leafRule,
+        PredicateCompileContext context,
+        List<PredicateError> errors,
+        List<ClauseVerdict> verdicts)
+    {
+        if (clause.Operator is PredicateOperator.IsNull or PredicateOperator.IsNotNull)
+        {
+            errors.Add(Refuse(clause, field, position, string.Create(CultureInfo.InvariantCulture, $"write {field} = null for a JSON null")));
+            return null;
+        }
+
+        bool compares = clause.Operator is PredicateOperator.Less or PredicateOperator.LessOrEqual or PredicateOperator.Greater or PredicateOperator.GreaterOrEqual;
+        bool text = clause.Operator is PredicateOperator.Prefix or PredicateOperator.Contains;
+
+        foreach (LiteralNode literal in clause.Literals)
+        {
+            if (compares && literal is not NumberLiteral)
+            {
+                errors.Add(Refuse(
+                    clause,
+                    field,
+                    position,
+                    string.Create(CultureInfo.InvariantCulture, $"it compares numbers, and the value at position {literal.Start + 1} is not one")));
+                return null;
+            }
+
+            if (text && literal is not StringLiteral)
+            {
+                errors.Add(Refuse(
+                    clause,
+                    field,
+                    position,
+                    string.Create(CultureInfo.InvariantCulture, $"it compares text, and the value at position {literal.Start + 1} is not a string")));
+                return null;
+            }
+        }
+
+        AddVerdict(verdicts, context, clause, field, leafRule);
+        return new CompiledJsonPathClause(path.Path, clause.Operator, clause.Literals, leafRule, context.Redactor);
     }
 
     private static CompiledKeyClause? BuildKey(ClauseNode clause, string field, int position, string[] texts, PredicateCompileContext context, List<PredicateError> errors)
@@ -245,9 +309,11 @@ internal static class PredicateCompiler
                 CultureInfo.InvariantCulture,
                 $"'{PredicateFormatter.OperatorText(clause.Operator)}' cannot be used on {field} (position {position}): {reason}."));
 
-    private static void AddVerdict(List<ClauseVerdict> verdicts, PredicateCompileContext context, ClauseNode clause, string field)
+    private static void AddVerdict(List<ClauseVerdict> verdicts, PredicateCompileContext context, ClauseNode clause, string field, bool leafRule = false)
     {
         string assumed = context.KeyFormatDeclared ? string.Empty : ", assumed";
+        string rules = context.Redactor.HasPayloadRules ? "; the topic's redaction rules run on each value" : string.Empty;
+        string events = context.DeclaresCloudEvents ? "each event's data" : "each value";
 
         (ClauseVerdictKind kind, string text) = clause.Field switch
         {
@@ -263,6 +329,14 @@ internal static class PredicateCompiler
                 (ClauseVerdictKind.SlowScan, "slow: each value is parsed as a structured CloudEvent"),
             CloudEventField =>
                 (ClauseVerdictKind.Scan, "read from the ce_ headers; a structured event's value is parsed (slow) only on a record that carries one"),
+            ValueField when clause.Operator is PredicateOperator.IsNull or PredicateOperator.IsNotNull =>
+                (ClauseVerdictKind.Scan, "read from the record: a tombstone has no value, and nothing is decoded"),
+            ValueField => (ClauseVerdictKind.SlowScan, $"slow: {events} is decoded as text{rules}"),
+            JsonPathField when leafRule =>
+                (ClauseVerdictKind.SlowScan, "slow: each value is parsed as JSON; the masked leaf is compared exactly, and never shown"),
+            JsonPathField => (ClauseVerdictKind.SlowScan, $"slow: {events} is parsed as JSON{rules}"),
+            AnyField when context.Grant.HasFlag(KafkaReadGrant.Payload) =>
+                (ClauseVerdictKind.SlowScan, $"slow: it reads the key, every header, every CloudEvents attribute and every text in the value{rules}"),
             _ => (ClauseVerdictKind.SlowScan, "slow: it reads the key, every header and every CloudEvents attribute as text"),
         };
 

@@ -3,7 +3,7 @@ using Microsoft.Extensions.Logging;
 namespace KStudio.Core.Logging;
 
 /// <summary>
-/// The scan engine's log events, 9665 to 9674 (decision 11). They carry cluster keys, topics, partitions, offsets, counts, enum names and
+/// The scan engine's log events, 9665 to 9675 (decision 11; 9675 is the payload rules' in M3). They carry cluster keys, topics, partitions, offsets, counts, enum names and
 /// exception type names, and never a predicate, a literal, a key, a header, a value, an owner or a user: the audit of a scan is KStudio's.
 /// </summary>
 internal static partial class KStudioLog
@@ -38,4 +38,7 @@ internal static partial class KStudioLog
 
     [LoggerMessage(EventId = 9674, Level = LogLevel.Debug, Message = "KStudio could not sample record sizes of {Topic} on {Cluster}: {Kind}")]
     public static partial void SampleFailed(ILogger logger, string topic, string cluster, string kind);
+
+    [LoggerMessage(EventId = 9675, Level = LogLevel.Debug, Message = "KStudio could not apply a {RuleKind} redaction rule to a value of {Topic} on {Cluster}: {Failure}, {ExceptionKind}")]
+    public static partial void PayloadRuleNotApplied(ILogger logger, string ruleKind, string topic, string cluster, string failure, string exceptionKind);
 }

@@ -19,6 +19,10 @@ namespace KStudio.Core.Scanning;
 /// <param name="Neighbours">How many records to read on each side, 0 to 10; KStudio passes 5.</param>
 /// <param name="Grant">What the visitor may read; it must include <see cref="KafkaReadGrant.Envelope" />.</param>
 /// <param name="Isolation">Whether uncommitted records are included.</param>
+/// <param name="FocusValueBytes">
+/// Under the payload grant: how many bytes of value the record asked for may keep (KStudio passes the decode limit), where its neighbours keep
+/// what is left of the match budget. A record read then holds at most 21 matches plus this.
+/// </param>
 internal sealed record KafkaRecordRequest(
     string Cluster,
     KafkaTopicName Topic,
@@ -26,7 +30,8 @@ internal sealed record KafkaRecordRequest(
     long Offset,
     int Neighbours,
     KafkaReadGrant Grant,
-    KafkaIsolation Isolation = KafkaIsolation.Committed);
+    KafkaIsolation Isolation = KafkaIsolation.Committed,
+    int FocusValueBytes = 0);
 
 /// <summary>How a record read ended.</summary>
 internal enum KafkaRecordReadStatus
@@ -349,7 +354,21 @@ internal sealed partial class KafkaScanner
                 string.Empty);
 
             Guid scanId = Guid.NewGuid();
-            ScanRunInputs inputs = new(scanId, plan, owner, wires.For(request.Cluster), settings, governor, ownerBudget, time, loggers, once, observer, MatchEveryRecordInRange: true);
+            ScanRunInputs inputs = new(
+                scanId,
+                plan,
+                owner,
+                wires.For(request.Cluster),
+                settings,
+                governor,
+                ownerBudget,
+                time,
+                loggers,
+                once,
+                observer,
+                MatchEveryRecordInRange: true,
+                FocusOffset: request.Offset,
+                FocusValueBytes: request.Grant.HasFlag(KafkaReadGrant.Payload) ? request.FocusValueBytes : 0);
             ScanRun run = new(inputs);
             string clusterText = KafkaLogValue.Cap(request.Cluster)!;
             string isolationText = request.Isolation.ToString();

@@ -116,6 +116,21 @@ internal sealed class KafkaMatch
 
     /// <summary>The rule that made the engine withhold the value (decision 10.2: fail closed).</summary>
     public string? ValueWithheldBy { get; init; }
+
+    /// <summary>Whether <see cref="ValueText" /> is JSON (written compactly when a rule masked part of it) or text.</summary>
+    public KafkaValueTextKind? ValueTextKind { get; init; }
+
+    /// <summary>The nodes a JSON-path rule masked in the value, at most 64; the text holds the mask in their place.</summary>
+    public IReadOnlyList<KafkaMaskedPath> MaskedPaths { get; init; } = [];
+
+    /// <summary>How many masked nodes are not in <see cref="MaskedPaths" />.</summary>
+    public int MaskedPathsOmitted { get; init; }
+
+    /// <summary>The distinct names of the rules that masked something in the value: a path, <c>pattern phone</c>.</summary>
+    public IReadOnlyList<string> ValueMaskedBy { get; init; } = [];
+
+    /// <summary>Whether the value shown is a CloudEvent's data and not the record's value.</summary>
+    public bool ValueIsCloudEventData { get; init; }
 }
 
 /// <summary>Everything the engine knows about one topic of a scan.</summary>
@@ -187,13 +202,19 @@ internal static class KafkaMatchFactory
     /// <param name="limits">The scan's caps.</param>
     /// <param name="counters">Counts the decodes.</param>
     /// <param name="onDecoderFailed">Told when a host decoder throws.</param>
+    /// <param name="evaluated">The record as the predicate judged it: its value, and the payload rules applied to it, are reused when it read them, so that a host decoder runs once per matching record.</param>
+    /// <param name="focusValueBytes">For the one record a record read was asked for: the value part may hold this many bytes whatever is left of the match's budget.</param>
+    /// <param name="onRedactionFailed">Told when a payload rule could not be applied.</param>
     public static KafkaMatch Create(
         WireRecord record,
         TopicScanContext topic,
         KafkaReadGrant grant,
         KafkaScanLimits limits,
         DecodeCounters counters,
-        Action<Exception>? onDecoderFailed = null)
+        Action<Exception>? onDecoderFailed = null,
+        RecordEvaluationContext? evaluated = null,
+        int focusValueBytes = 0,
+        Action<RedactedValue>? onRedactionFailed = null)
     {
         ArgumentNullException.ThrowIfNull(topic);
         IKafkaRedactor redactor = topic.Redactor;
@@ -243,10 +264,30 @@ internal static class KafkaMatchFactory
             budget -= nameCost + Spent(value);
         }
 
-        // The value: its kind and length always, its CloudEvents attributes, and its text only under the payload grant.
-        KafkaDecodedValue decoded = ValueDetector.Detect(
-            record,
-            new ValueDetection(grant, topic.Decoder, limits.MaxDecodeBytes, Math.Max(0, budget), counters, onDecoderFailed));
+        // The value: its kind and length always, its CloudEvents attributes, and its text only under the payload grant. The value is whole
+        // here; the payload rules see all of it, and only then is it cut to what the match may keep.
+        RecordValue decoded = evaluated?.ComputedValue
+            ?? ValueDetector.DetectValue(
+                record,
+                new ValueDetection(grant, topic.Decoder, limits.MaxDecodeBytes, Math.Max(0, budget), counters, onDecoderFailed, redactor));
+
+        RedactedValue? redacted = null;
+
+        if (grant.HasFlag(KafkaReadGrant.Payload) && redactor.HasPayloadRules
+            && (evaluated is null || !evaluated.TryGetComputedRedaction(decoded, out redacted)))
+        {
+            redacted = PayloadRedactor.Apply(decoded, redactor, PayloadRedactor.Budget);
+
+            if (redacted is not null)
+            {
+                counters.ValueRedacted++;
+
+                if (redacted.WithheldBy is not null)
+                {
+                    onRedactionFailed?.Invoke(redacted);
+                }
+            }
+        }
 
         List<KafkaMatchHeader> attributes = [];
         int attributesOmitted = 0;
@@ -275,34 +316,43 @@ internal static class KafkaMatchFactory
             }
         }
 
-        // The value gets what is left.
-        string? text = decoded.Text;
+        // The value gets what is left, or the focus budget when the record is the one a record read was asked for.
+        string? text = null;
         string? preview = decoded.Preview;
-        bool truncated = decoded.Truncated;
+        bool truncated = decoded.Cut;
         string? withheld = null;
-        int valueBudget = Math.Max(0, budget);
+        KafkaValueTextKind? textKind = null;
+        int valueBudget = Math.Max(Math.Max(0, budget), focusValueBytes);
 
-        if (text is not null && Encoding.UTF8.GetByteCount(text) > valueBudget)
+        if (redacted is { WithheldBy: { } by })
         {
-            text = Cut(text, valueBudget);
-            truncated = true;
+            // A rule that could not be applied withholds the value whole: no text, no preview, no length of any part.
+            withheld = by;
+            preview = null;
+            truncated = false;
+        }
+        else if (redacted is not null)
+        {
+            textKind = redacted.TextKind;
+            text = redacted.Text;
+
+            if (text is not null && Encoding.UTF8.GetByteCount(text) > valueBudget)
+            {
+                text = Cut(text, valueBudget);
+                truncated = true;
+            }
+        }
+        else if (decoded.Utf8 is { } bytes)
+        {
+            textKind = decoded.Kind == KafkaValueKind.Json ? KafkaValueTextKind.Json : KafkaValueTextKind.Text;
+            (text, bool cut) = ValueDetector.KeepText(bytes, valueBudget);
+            truncated |= cut;
         }
 
         if (preview is not null && Encoding.UTF8.GetByteCount(preview) > valueBudget)
         {
             preview = Cut(preview, valueBudget);
             truncated = true;
-        }
-
-        // A structured envelope holds the attributes a rule masks: the value cannot be kept whole, so it is not kept (fail closed).
-        if ((text is not null || preview is not null)
-            && decoded.CloudEvent is { Mode: CloudEventMode.Structured or CloudEventMode.StructuredBatch }
-            && redactor.AnyCloudEventRule() is { } envelopeRule)
-        {
-            text = null;
-            preview = null;
-            truncated = false;
-            withheld = envelopeRule.Name;
         }
 
         return new KafkaMatch
@@ -322,6 +372,11 @@ internal static class KafkaMatchFactory
             ValueLength = decoded.Length,
             SchemaId = decoded.SchemaId,
             UndecodableReason = decoded.Reason,
+            ValueTextKind = textKind,
+            MaskedPaths = redacted?.MaskedPaths ?? [],
+            MaskedPathsOmitted = redacted?.MaskedPathsOmitted ?? 0,
+            ValueMaskedBy = redacted?.MaskedBy ?? [],
+            ValueIsCloudEventData = decoded.IsCloudEventData,
             CloudEventAttributes = attributes,
             CloudEventAttributesOmitted = attributesOmitted,
             CloudEventMode = decoded.CloudEvent?.Mode ?? CloudEventMode.None,

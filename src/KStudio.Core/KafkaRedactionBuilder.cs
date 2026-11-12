@@ -5,7 +5,8 @@ namespace KStudio;
 /// <summary>
 /// The redaction rules of one topic (AGENTS.md D40). A masked field shows "••• (redacted by {rule})" and is never kept: not its text, not
 /// even its length. A rule masks every case variant of its name, and a CloudEvents rule masks the attribute in the structured envelope and
-/// in its binary-mode header (<c>ce_{attribute}</c>, and <c>content-type</c> for <c>datacontenttype</c>) alike.
+/// in its binary-mode header (<c>ce_{attribute}</c>, and <c>content-type</c> for <c>datacontenttype</c>) alike. A JSON-path or pattern rule
+/// masks parts of the value; a value it cannot be applied to is withheld, and searches compare what a visitor would see.
 /// </summary>
 public sealed class KafkaRedactionBuilder
 {
@@ -26,6 +27,27 @@ public sealed class KafkaRedactionBuilder
     /// <param name="attribute">The attribute's name: 1 to 64 lower-case letters and digits, as CloudEvents names them.</param>
     /// <returns>The rule just declared, which can be made searchable.</returns>
     public KafkaRedactionRule CloudEvent(string attribute) => new(rules.CloudEvent(attribute), this);
+
+    /// <summary>
+    /// Masks the leaf, or the whole subtree, at a JSON path (<c>$.a.b</c>, <c>$.a[0]</c>, <c>$.a[*].b</c>) of the value; for a CloudEvent, of
+    /// its data. Member names are compared ignoring case. A value this rule cannot be applied to (one that is not JSON) is withheld whole.
+    /// </summary>
+    /// <param name="path">The path: <c>$</c>, then up to 32 steps, each <c>.name</c>, <c>['name']</c>, <c>[n]</c> or <c>[*]</c>.</param>
+    /// <returns>The rule just declared, which can be made searchable by an exact match.</returns>
+    public KafkaRedactionRule JsonPath(string path) => new(rules.JsonPath(path), this);
+
+    /// <summary>
+    /// Masks every match of a regular expression in the value's text: each JSON string and number, or the whole text of a text value. It is
+    /// never searchable. A value it cannot be applied to is withheld whole.
+    /// </summary>
+    /// <param name="regex">At most 500 characters; it runs without backtracking, so backreferences and lookarounds are refused.</param>
+    /// <param name="name">What a visitor reads in "redacted by pattern {name}": 1 to 64 letters, digits, '-' or '_'; by default the rule's place among the topic's patterns.</param>
+    /// <returns>This builder.</returns>
+    public KafkaRedactionBuilder Pattern(string regex, string? name = null)
+    {
+        rules.Pattern(regex, name);
+        return this;
+    }
 
     /// <summary>
     /// Opts one of the built-in deny-list's headers (<c>authorization</c>, <c>proxy-authorization</c>, <c>cookie</c>, <c>set-cookie</c>,

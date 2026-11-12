@@ -293,6 +293,9 @@ internal sealed class KafkaScanPlan
     /// <summary>Whether <c>Start</c> can succeed (before limits and confirmation).</summary>
     public bool IsValid => Errors.Count == 0;
 
+    /// <summary>Whether judging a record can read its value on any topic: the search is audited as one that reads values.</summary>
+    public bool ReadsValues => Topics.Values.Any(static x => x.Predicate.ReadsValues);
+
     /// <summary>Everything a visitor must be told about the window, the topics and the partitions.</summary>
     public IEnumerable<WindowNote> Notes => Window?.AllNotes ?? [];
 }

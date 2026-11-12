@@ -6,8 +6,8 @@ namespace KStudio.Core.Predicates;
 /// <summary>
 /// The search grammar of decision 7.1, parsed by hand: a lexer and a recursive-descent parser, no package and no expression escape hatch.
 /// Keywords are case-insensitive; precedence is <c>not</c> over <c>and</c> over <c>or</c>; a chain of <c>and</c> or <c>or</c> is one node.
-/// M1 compiles <c>key</c>, <c>header</c>, <c>ce</c> and <c>any</c>; <c>value</c> and JSON paths are parsed here and refused by the compiler
-/// until M3, so the grammar does not change when they arrive.
+/// The fields are <c>key</c>, <c>header</c>, <c>ce</c>, <c>any</c>, <c>value</c> and JSON paths; the last two need the payload grant, which
+/// the compiler asks for, never the parser.
 /// </summary>
 internal static class PredicateParser
 {
@@ -306,9 +306,54 @@ internal static class PredicateParser
             int start = i;
             i++;
 
-            while (i < text.Length && (char.IsAsciiLetterOrDigit(text[i]) || text[i] is '_' or '.' or '[' or ']' or '*'))
+            while (i < text.Length)
             {
+                char c = text[i];
+
+                if (char.IsAsciiLetterOrDigit(c) || c is '_' or '.' or '*' or ']')
+                {
+                    i++;
+                    continue;
+                }
+
+                if (c != '[')
+                {
+                    break;
+                }
+
                 i++;
+
+                if (i < text.Length && text[i] is '\'' or '"')
+                {
+                    // A bracketed member name: any characters, a doubled quote for the quote itself. Without a closing quote the token
+                    // runs to the end, and the path parser says the '[' has no ']'.
+                    char quote = text[i++];
+
+                    while (i < text.Length)
+                    {
+                        if (text[i] == quote)
+                        {
+                            if (i + 1 < text.Length && text[i + 1] == quote)
+                            {
+                                i += 2;
+                                continue;
+                            }
+
+                            i++;
+                            break;
+                        }
+
+                        i++;
+                    }
+                }
+                else
+                {
+                    // An index or [*]; letters, signs and dots are taken too, so that `[x]` and `[-1]` get the index message.
+                    while (i < text.Length && (char.IsAsciiLetterOrDigit(text[i]) || text[i] is '*' or '-' or '+' or '.'))
+                    {
+                        i++;
+                    }
+                }
             }
 
             return new Token(TokenKind.JsonPath, text[start..i], start, i - start);
@@ -317,6 +362,8 @@ internal static class PredicateParser
 
     private sealed class Parser(List<Token> tokens)
     {
+        private const string FieldExpectation = "a field (key, header.<name>, ce.<attribute>, any, value or a $.json.path)";
+
         private int position;
         private int depth;
         private int clauses;
@@ -532,7 +579,7 @@ internal static class PredicateParser
                     last.Start + last.Length - field.Start);
             }
 
-            throw Unexpected("an operator ('=', '^=', '~', 'in' or 'is')");
+            throw Unexpected("an operator ('=', '^=', '~', '<', '<=', '>', '>=', 'in' or 'is')");
         }
 
         private FieldNode ParseField()
@@ -541,13 +588,18 @@ internal static class PredicateParser
 
             if (token.Kind == TokenKind.JsonPath)
             {
+                if (!JsonPathExpression.TryParse(token.Text, token.Start, out JsonPathExpression? path, out PredicateError? problem))
+                {
+                    throw new ParseFailure(problem!);
+                }
+
                 position++;
-                return new JsonPathField(token.Text, token.Start, token.Length);
+                return new JsonPathField(path!, token.Start, token.Length);
             }
 
             if (token.Kind != TokenKind.Word)
             {
-                throw Unexpected("a field (key, header.<name>, ce.<attribute> or any)");
+                throw Unexpected(FieldExpectation);
             }
 
             string word = token.Text;
@@ -613,19 +665,19 @@ internal static class PredicateParser
             // `header` and `ce` on their own are fields that were not finished, so they get the message that lists the fields.
             if (token.IsKeyword && !word.Equals("header", StringComparison.OrdinalIgnoreCase) && !word.Equals("ce", StringComparison.OrdinalIgnoreCase))
             {
-                throw Unexpected("a field (key, header.<name>, ce.<attribute> or any)");
+                throw Unexpected(FieldExpectation);
             }
 
             string shown = word.Length > 64 ? word[..64] : word;
             throw Fail(
                 token.Start,
                 token.Length,
-                string.Create(CultureInfo.InvariantCulture, $"Unknown field '{shown}' at position {token.Start + 1}. Search fields are key, header.<name>, ce.<attribute> and any."));
+                string.Create(CultureInfo.InvariantCulture, $"Unknown field '{shown}' at position {token.Start + 1}. Search fields are key, header.<name>, ce.<attribute>, any, value and $.json.paths."));
         }
 
         private static bool IsAttribute(string text)
         {
-            if (text.Length is < 1 or > 20)
+            if (text.Length is < 1 or > 64)
             {
                 return false;
             }

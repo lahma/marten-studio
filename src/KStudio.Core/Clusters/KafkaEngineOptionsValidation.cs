@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
 
+using KStudio.Core.Predicates;
 using KStudio.Core.Redaction;
 
 namespace KStudio.Core.Clusters;
@@ -13,6 +14,8 @@ namespace KStudio.Core.Clusters;
 internal static partial class KafkaEngineOptionsValidation
 {
     private const int MaxConsumerGroups = 50;
+    private const int MaxPathRules = 32;
+    private const int MaxPatternRules = 8;
 
     /// <summary>The problems with <paramref name="options" />; empty when there are none.</summary>
     /// <param name="options">The options.</param>
@@ -145,9 +148,12 @@ internal static partial class KafkaEngineOptionsValidation
         string label = "KStudio: topic '" + Display(topic) + "'";
         HashSet<string> seenHeaders = new(StringComparer.OrdinalIgnoreCase);
         HashSet<string> seenAttributes = new(StringComparer.OrdinalIgnoreCase);
+        HashSet<string> seenPaths = new(StringComparer.OrdinalIgnoreCase);
         bool seenKey = false;
+        int paths = 0;
+        int patterns = 0;
 
-        foreach ((RedactionTarget target, string field, _, bool searchable) in rules.Declared)
+        foreach ((RedactionTarget target, string field, string ruleName, bool searchable) in rules.Declared)
         {
             switch (target)
             {
@@ -177,6 +183,25 @@ internal static partial class KafkaEngineOptionsValidation
 
                     break;
 
+                case RedactionTarget.JsonPath:
+                    paths++;
+
+                    if (!JsonPathExpression.TryParse(field, 0, out JsonPathExpression? path, out _))
+                    {
+                        problems.Add(label + ": the redaction path '" + Display(field) + "' is not a JSON path the search can read ($.name, $.name[0], $.name[*]).");
+                    }
+                    else if (!seenPaths.Add(path!.Text))
+                    {
+                        problems.Add(label + " declares a redaction rule on '" + Display(path.Text) + "' twice (member names are compared ignoring case).");
+                    }
+
+                    break;
+
+                case RedactionTarget.Pattern:
+                    patterns++;
+                    ValidatePattern(problems, label, ruleName, field);
+                    break;
+
                 default:
                     if (!AttributeNamePattern().IsMatch(field))
                     {
@@ -189,6 +214,46 @@ internal static partial class KafkaEngineOptionsValidation
 
                     break;
             }
+        }
+
+        if (paths > MaxPathRules)
+        {
+            problems.Add(label + " declares " + paths.ToString(CultureInfo.InvariantCulture) + " JSON-path redaction rules; the most is " + MaxPathRules.ToString(CultureInfo.InvariantCulture) + ".");
+        }
+
+        if (patterns > MaxPatternRules)
+        {
+            problems.Add(label + " declares " + patterns.ToString(CultureInfo.InvariantCulture) + " redaction patterns; the most is " + MaxPatternRules.ToString(CultureInfo.InvariantCulture) + ".");
+        }
+    }
+
+    private static void ValidatePattern(List<string> problems, string label, string ruleName, string pattern)
+    {
+        // The rule is named "pattern {name}"; a name the host gave is checked, and so is the number it got otherwise (which always passes).
+        string name = ruleName.StartsWith("pattern ", StringComparison.Ordinal) ? ruleName["pattern ".Length..] : ruleName;
+
+        if (!PatternNamePattern().IsMatch(name))
+        {
+            problems.Add(label + ": a pattern name is 1 to 64 letters, digits, '-' or '_'.");
+            return;
+        }
+
+        string shown = label + ": pattern " + name;
+
+        switch (PayloadPatterns.TryCompile(pattern, out _))
+        {
+            case PayloadPatternProblem.TooLong:
+                problems.Add(shown + " is " + pattern.Length.ToString(CultureInfo.InvariantCulture) + " characters long; the most is " + PayloadPatterns.MaxLength.ToString(CultureInfo.InvariantCulture) + ".");
+                break;
+            case PayloadPatternProblem.NotARegularExpression:
+                problems.Add(shown + " is not a regular expression .NET can read.");
+                break;
+            case PayloadPatternProblem.NeedsBacktracking:
+                problems.Add(shown + " uses a construct that cannot run without backtracking (backreferences, lookarounds, atomic groups and conditionals are refused).");
+                break;
+            case PayloadPatternProblem.MatchesEmpty:
+                problems.Add(shown + " matches an empty text, so it would mask nothing and run on every value.");
+                break;
         }
     }
 
@@ -209,4 +274,7 @@ internal static partial class KafkaEngineOptionsValidation
 
     [GeneratedRegex("^[A-Za-z0-9._-]{0,100}$", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]
     private static partial Regex GroupIdPrefixPattern();
+
+    [GeneratedRegex(@"\A[A-Za-z0-9_-]{1,64}\z", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]
+    private static partial Regex PatternNamePattern();
 }
