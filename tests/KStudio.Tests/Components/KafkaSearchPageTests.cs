@@ -471,6 +471,75 @@ public class KafkaSearchPageTests
     }
 
     [Fact]
+    public async Task A_continue_that_waits_for_its_confirmation_has_not_continued_anything_yet()
+    {
+        // UI-VERIFY pressed Continue, saw "Continued after offsets read by the previous search" over the same rows and took the page for hung: the line was
+        // drawn when the continued scan was planned, while its confirmation dialog - which the scan waits for - was open and the rows were still the first scan's.
+        await using KafkaSearchRig rig = new(engine: o =>
+        {
+            o.Limits.MaxMatches = 2;
+            o.Limits.ConfirmAboveRecords = 1;
+        });
+        rig.Topic("orders", 3);
+
+        for (int partition = 0; partition < 3; partition++)
+        {
+            for (int i = 0; i < 6; i++)
+            {
+                rig.Produce("orders", partition, i, "k" + i, "v");
+            }
+        }
+
+        IRenderedComponent<KafkaSearchPage> page = await OpenAsync(rig, Window);
+        await TypeAsync(page, "key ^= 'k'");
+        await SearchAsync(page);
+        page.WaitForAssertion(() => page.FindAll("dialog").Should().HaveCount(1));
+        await page.Find("dialog .ms-confirm-actions button.ms-button-danger").ClickAsync(new MouseEventArgs());
+        page.WaitForAssertion(() => page.Find(".ms-k-result-banner").TextContent.Should().Contain("Stopped at 2 matches"));
+        string[] first = Rows(page);
+
+        // Partition 0 was started and stopped inside; the others were never reached. Both are the engine's NotReached, and the page tells them apart.
+        string[] states = [.. page.FindAll("details.ms-k-progress tbody tr").Select(static x => x.QuerySelectorAll("td")[7].TextContent.Trim())];
+        states.Should().HaveCount(3).And.OnlyContain(static x => x == "stopped before its end" || x == "not reached");
+        states[0].Should().Be("stopped before its end", "partition 0 was read and the scan stopped inside it");
+        page.Find(".ms-k-caveats").TextContent.Should().Contain("orders/0: stopped before its end");
+
+        await page.Find(".ms-k-result-banner button").ClickAsync(new MouseEventArgs());
+        page.WaitForAssertion(() => page.FindAll("dialog").Should().HaveCount(1));
+
+        page.Markup.Should().NotContain("Continued after", "nothing has continued while the confirmation waits");
+        Rows(page).Should().Equal(first, "the rows are still the first scan's until the continued scan starts");
+
+        await page.Find("dialog .ms-confirm-actions button.ms-button-danger").ClickAsync(new MouseEventArgs());
+
+        page.WaitForAssertion(() => Rows(page).Should().NotIntersectWith(first));
+        page.Markup.Should().Contain("Continued after offsets read by the previous search (2 records).");
+    }
+
+    [Fact]
+    public async Task A_cancelled_continue_leaves_no_continued_line()
+    {
+        await using KafkaSearchRig rig = new(engine: o =>
+        {
+            o.Limits.MaxMatches = 2;
+            o.Limits.ConfirmAboveRecords = 1;
+        });
+        Seed(rig, "orders", 5);
+        IRenderedComponent<KafkaSearchPage> page = await OpenAsync(rig, Window);
+        await SearchAsync(page);
+        page.WaitForAssertion(() => page.FindAll("dialog").Should().HaveCount(1));
+        await page.Find("dialog .ms-confirm-actions button.ms-button-danger").ClickAsync(new MouseEventArgs());
+        page.WaitForAssertion(() => page.Find(".ms-k-result-banner").TextContent.Should().Contain("Stopped at 2 matches"));
+
+        await page.Find(".ms-k-result-banner button").ClickAsync(new MouseEventArgs());
+        page.WaitForAssertion(() => page.FindAll("dialog").Should().HaveCount(1));
+        await page.Find("dialog .ms-confirm-actions button:not(.ms-button-danger)").ClickAsync(new MouseEventArgs());
+        page.WaitForAssertion(() => page.FindAll("dialog").Should().BeEmpty());
+
+        page.Markup.Should().NotContain("Continued after");
+    }
+
+    [Fact]
     public async Task Leaving_the_page_after_a_scan_records_it_once()
     {
         await using KafkaSearchRig rig = new();

@@ -77,6 +77,15 @@ internal static class KafkaSearchText
         return $"{localFrom.ToString(format, c)}–{localTo.ToString(format, c)} {preference.Id} · {from.UtcDateTime.ToString(format, c)}Z–{to.UtcDateTime.ToString(format, c)}Z";
     }
 
+    /// <summary>
+    /// A partition's end state in words, told apart by what was read: a partition the scan stopped inside (a match limit, a budget, a stop) was started and is
+    /// <c>stopped before its end</c>; one the scan never reached is <c>not reached</c>. Both are the engine's <see cref="PartitionEndState.NotReached" />.
+    /// </summary>
+    /// <param name="state">How it ended.</param>
+    /// <param name="recordsRead">The records the scan read from it.</param>
+    public static string State(PartitionEndState state, long recordsRead) =>
+        state == PartitionEndState.NotReached && recordsRead > 0 ? "stopped before its end" : State(state);
+
     /// <summary>A partition's end state in words, for the progress table and the caveats.</summary>
     /// <param name="state">How it ended.</param>
     public static string State(PartitionEndState state) => state switch
@@ -132,7 +141,7 @@ internal static class KafkaSearchText
         foreach (KafkaPartitionResult partition in result.Partitions.Where(static x =>
                      x.State is PartitionEndState.NotAuthorized or PartitionEndState.OffsetGap or PartitionEndState.Stalled or PartitionEndState.NotReached))
         {
-            Add(caveats, $"{partition.Topic}/{partition.Partition}: {State(partition.State)}");
+            Add(caveats, $"{partition.Topic}/{partition.Partition}: {State(partition.State, partition.Records)}");
         }
 
         foreach (KafkaTopicRefusal refusal in result.TopicRefusals)

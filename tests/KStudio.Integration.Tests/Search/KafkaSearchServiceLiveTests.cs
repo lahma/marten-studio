@@ -124,6 +124,81 @@ public abstract class KafkaSearchServiceLiveTests(KafkaFixture fixture)
         union.Should().OnlyHaveUniqueItems();
     }
 
+    /// <summary>
+    /// The sample's shape (UI-VERIFY): six partitions, a match limit that stops the first scan inside partition 0, and an estimate above the confirmation
+    /// threshold. Every step through the service completes within a bound; the continued plan needs its confirmation (a start without it is refused at once,
+    /// never left waiting); and the continued scan reads the next records of partition 0, exactly where the first stopped.
+    /// </summary>
+    [KafkaFact]
+    public async Task Continue_over_six_partitions_plans_and_starts_within_a_bound_and_reads_the_next_records()
+    {
+        TimeSpan bound = TimeSpan.FromSeconds(60);
+        await using LiveContractCluster admin = LiveContractCluster.Open(fixture);
+        string topic = admin.NewTopic("ui-b-six");
+        await admin.CreateTopicAsync(topic, 6);
+
+        for (int partition = 0; partition < 6; partition++)
+        {
+            await admin.ProduceAsync(topic, partition, [.. Enumerable.Range(0, 30).Select(static i => LiveRecords.At(i, "k" + i, "payload-" + i, ("correlation-id", "c-" + i)))]);
+        }
+
+        await using LiveSearchHost host = Host(options =>
+        {
+            options.Limits.MaxMatches = 5;
+            options.Limits.ConfirmAboveRecords = 1;
+        });
+
+        KafkaSearchPlanResult.Planned plan = (KafkaSearchPlanResult.Planned) await host.Search.PlanAsync(Input(host, [topic], "key ^= 'k'"), Token).WaitAsync(bound, Token);
+        plan.Value.Plan.Estimate.NeedsConfirmation.Should().BeTrue();
+        await using KafkaSearchRun run = ((KafkaSearchStartResult.Running) await host.Search.StartAsync(plan.Value, confirmed: true, Token).WaitAsync(bound, Token)).Run;
+        (KafkaScanResult first, List<KafkaMatch> firstMatches) = await Drain(run).WaitAsync(bound, Token);
+
+        first.StopReason.Should().Be(KafkaScanStopReason.MatchLimit);
+        firstMatches.Select(static x => (x.Partition, x.Offset)).Should().Equal((0, 0L), (0, 1L), (0, 2L), (0, 3L), (0, 4L));
+
+        // "All six not reached" after a match-limit stop is the engine's NotReached for every partition the scan stopped inside or never started: partition 0
+        // was read to offset 5 and the others not at all, and the cursor says exactly that.
+        first.Partitions.Select(static x => x.State).Should().OnlyContain(static x => x == PartitionEndState.NotReached);
+        first.Partitions.Single(static x => x.Partition == 0).Should().Match<KafkaPartitionResult>(static x => x.Next == 5 && x.Records == 5);
+        first.Partitions.Where(static x => x.Partition != 0).Should().OnlyContain(static x => x.Records == 0 && x.Next == x.Start);
+        first.Cursor.Positions.Should().HaveCount(6);
+        first.Cursor.Positions.Single(static x => x.Partition == 0).Next.Should().Be(5);
+
+        // The continued plan: bounded, above the threshold, and a start without the confirmation is a refusal, never a wait.
+        KafkaSearchPlanResult.Planned next = (KafkaSearchPlanResult.Planned) await host.Search.PlanAsync(Input(host, [topic], "key ^= 'k'", first.Cursor), Token).WaitAsync(bound, Token);
+        next.Value.Plan.Estimate.NeedsConfirmation.Should().BeTrue();
+        next.Value.Plan.Estimate.Offsets.Should().Be(6 * 30 - 5, "the continued scan reads what the first left");
+
+        KafkaSearchStartResult unconfirmed = await host.Search.StartAsync(next.Value, confirmed: false, Token).WaitAsync(bound, Token);
+        unconfirmed.Should().BeOfType<KafkaSearchStartResult.Refused>().Which.Text.Should().Be(KafkaStudioText.NeedsConfirmation);
+
+        await using KafkaSearchRun continued = ((KafkaSearchStartResult.Running) await host.Search.StartAsync(next.Value, confirmed: true, Token).WaitAsync(bound, Token)).Run;
+        (KafkaScanResult second, List<KafkaMatch> secondMatches) = await Drain(continued).WaitAsync(bound, Token);
+
+        second.StopReason.Should().Be(KafkaScanStopReason.MatchLimit);
+        secondMatches.Select(static x => (x.Partition, x.Offset)).Should().Equal((0, 5L), (0, 6L), (0, 7L), (0, 8L), (0, 9L));
+        host.Ring.Count(static x => x.Action == "SearchRecords" && x.Succeeded).Should().Be(2, "the continued scan is a new audit entry");
+    }
+
+    private static async Task<(KafkaScanResult Result, List<KafkaMatch> Matches)> Drain(KafkaSearchRun run)
+    {
+        List<KafkaMatch> matches = [];
+        KafkaScanResult? result = null;
+
+        await foreach (KafkaScanBatch batch in run.ReadBatchesAsync(Token))
+        {
+            matches.AddRange(batch.NewMatches);
+
+            if (batch.Final is { } final)
+            {
+                result = final;
+                run.Complete(final);
+            }
+        }
+
+        return (result!, matches);
+    }
+
     [KafkaFact]
     public async Task A_masked_header_never_reaches_the_audit()
     {

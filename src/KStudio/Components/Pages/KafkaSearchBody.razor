@@ -278,7 +278,7 @@
                                     <td class="ms-table-cell">@KafkaDisplay.Bytes(partition.Bytes)</td>
                                     <td class="ms-table-cell">@KafkaDisplay.Number(partition.Matches)</td>
                                     <td class="ms-table-cell">@KafkaDisplay.Number(partition.Undecidable)</td>
-                                    <td class="ms-table-cell">@(partition.State is { } state ? KafkaSearchText.State(state) : string.Empty)</td>
+                                    <td class="ms-table-cell">@(partition.State is { } state ? KafkaSearchText.State(state, partition.Records) : string.Empty)</td>
                                 </tr>
                             }
                         </tbody>
@@ -472,6 +472,12 @@
     private int hiddenTopics;
     private int pageNumber = 1;
     private long? continuedAfter;
+
+    /// <summary>
+    /// The records the search being planned continues after, held until it starts. "Continued after ..." says what a scan did, so it is drawn when the continued scan
+    /// starts - not while its confirmation still waits, when the rows on screen are still the previous search's.
+    /// </summary>
+    private long? pendingContinuation;
     private long? allowanceLeft;
     private bool includeUncommitted;
     private bool loadingTopics = true;
@@ -917,7 +923,7 @@
 
             planned = ((KafkaSearchPlanResult.Planned) plan).Value;
             errors = planned.Plan.Errors;
-            continuedAfter = continuing;
+            pendingContinuation = continuing;
 
             if (!planned.Plan.IsValid)
             {
@@ -970,6 +976,7 @@
     private async Task CancelledAsync()
     {
         confirmOpen = false;
+        pendingContinuation = null;
 
         try
         {
@@ -1008,6 +1015,8 @@
             expanded.Clear();
             result = null;
             progress = null;
+            continuedAfter = pendingContinuation;
+            pendingContinuation = null;
             pageNumber = 1;
             await InvokeAsync(StateHasChanged);
 

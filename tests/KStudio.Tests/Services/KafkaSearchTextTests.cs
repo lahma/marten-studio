@@ -104,6 +104,14 @@ public class KafkaSearchTextTests
     }
 
     [Fact]
+    public void A_partition_the_scan_stopped_inside_is_told_from_one_it_never_reached()
+    {
+        KafkaSearchText.State(PartitionEndState.NotReached, 50).Should().Be("stopped before its end");
+        KafkaSearchText.State(PartitionEndState.NotReached, 0).Should().Be("not reached");
+        KafkaSearchText.State(PartitionEndState.EndOfWindow, 50).Should().Be("read to the window's end");
+    }
+
+    [Fact]
     public void A_short_window_shows_times_only()
     {
         TimeZoneInfo helsinki = TimeZoneInfo.FindSystemTimeZoneById("Europe/Helsinki");
