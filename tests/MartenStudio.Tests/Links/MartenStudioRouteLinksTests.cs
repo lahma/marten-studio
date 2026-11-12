@@ -234,18 +234,51 @@ public class MartenStudioRouteLinksTests
         "sharded",
         "one server",
         "static",
+    };
+
+    public static TheoryData<string> TenancyKindsThatPlaceNoTenant => new()
+    {
         "custom",
         "custom that throws",
     };
 
     /// <summary>
-    /// The page a link opens takes the database from the address or the visitor's current one and cannot find a tenant's database
-    /// without enumerating the tenancy, so a store that keeps each tenant in a database of its own gets no link: with a tenant, without
-    /// one, for a document and for a stream.
+    /// A store that keeps each tenant in a database of its own gets a link with the tenant and no <c>db</c> (TENANT-DB): the page a link
+    /// opens looks for the tenant among the databases the visitor may see. With no tenant to name it gets none, for a document and for a
+    /// stream, because the page would open the visitor's own tenant and say "not found" falsely.
     /// </summary>
     [Theory]
     [MemberData(nameof(DatabasePerTenantKinds))]
-    public void A_store_with_a_database_per_tenant_gets_no_link(string kind)
+    public void A_store_with_a_database_per_tenant_gets_a_link_with_the_tenant_and_no_db(string kind)
+    {
+        MartenStudioRouteLinks links = Links(services => services.AddMarten(x =>
+        {
+            x.Schema.For<Order>();
+            x.Events.AddEventType<OrderPlaced>();
+            DatabasePerTenant(x, kind);
+        }));
+
+        string stream = Guid.NewGuid().ToString();
+
+        foreach (string url in (string[])
+        [
+            links.ToDocument(new StudioLinkScope(null, "globex"), "order", "7")!,
+            links.ToStream(new StudioLinkScope(null, "globex"), stream)!,
+        ])
+        {
+            url.Should().NotBeNull(kind);
+            Query(url).Should().Contain(new KeyValuePair<string, string?>("tenant", "globex"), kind);
+            Query(url).Keys.Should().NotContain("db", kind);
+        }
+
+        links.ToDocument(new StudioLinkScope(null, null), "order", "7").Should().BeNull(kind, "a database-per-tenant store needs its tenant");
+        links.ToStream(new StudioLinkScope(null, null), stream).Should().BeNull(kind, "a database-per-tenant store needs its tenant");
+    }
+
+    /// <summary>A tenancy of the application's own, or one that would not say what it is, stays fail-closed: nothing says where its tenants are.</summary>
+    [Theory]
+    [MemberData(nameof(TenancyKindsThatPlaceNoTenant))]
+    public void A_tenancy_the_configuration_cannot_place_gets_no_link(string kind)
     {
         MartenStudioRouteLinks links = Links(services => services.AddMarten(x =>
         {
@@ -279,7 +312,7 @@ public class MartenStudioRouteLinksTests
             });
         });
 
-        links.ToDocument(new StudioLinkScope(null, "acme"), "order", "7").Should().BeNull();
+        links.ToDocument(new StudioLinkScope(null, null), "order", "7").Should().BeNull("the store needs its tenant");
         links.ToDocument(new StudioLinkScope(null, null), "invoice", "7").Should().NotBeNull();
     }
 

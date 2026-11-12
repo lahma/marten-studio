@@ -21,10 +21,9 @@ namespace MartenStudio.Tests.Links;
 /// </summary>
 /// <remarks>
 /// In a single-database store (conjoined tables, the tenants the header lists for that database) the page keeps the tenant and the
-/// database it was already on, so the link works. A store that keeps each tenant in a database of its own gets no link at all
-/// (<see cref="MartenStudioRouteLinksTests" />): <see cref="StudioState.SetScopeAsync" /> takes the database from the address or the
-/// visitor's current one and accepts the tenant only if that database's listing carries it, and nothing looks a tenant up across the
-/// store's databases.
+/// database it was already on, so the link works. A store that keeps each tenant in a database of its own gets the same link
+/// (<see cref="MartenStudioRouteLinksTests" />), and <see cref="StudioState.SetScopeAsync" /> opens the first database, among those the
+/// visitor may see, whose tenant listing carries the tenant (TENANT-DB): the page, not the link, finds the database.
 /// </remarks>
 public class LinkedPageScopeTests
 {
@@ -67,6 +66,41 @@ public class LinkedPageScopeTests
         scope!.TenantId.Should().Be("globex");
         scope.DatabaseId.Should().Be("localhost.marten");
     }
+
+    [Fact]
+    public async Task A_document_page_opened_with_store_and_tenant_and_no_db_opens_the_database_that_holds_the_tenant()
+    {
+        using DocumentsComponentContext context = new();
+        DatabasePerTenant(context);
+        context.Data.Detail = DocumentDetailResult.Ok(Detail());
+
+        await context.State.EnsureInitializedAsync(Xunit.TestContext.Current.CancellationToken);
+        context.State.ActiveScope.Should().Be(new StudioScope("default", "db_a", null), "the premise: the circuit is on the first database");
+        context.Navigate($"marten/documents/customer/doc?store=default&tenant=globex&id={DocumentId}");
+        context.Render<DocumentPage>(parameters => parameters.Add(x => x.Alias, "customer"));
+
+        context.State.ActiveScope.Should().Be(new StudioScope("default", "db_b", "globex"));
+    }
+
+    [Fact]
+    public async Task A_stream_page_opened_with_store_and_tenant_and_no_db_opens_the_database_that_holds_the_tenant()
+    {
+        using StudioComponentContext context = new();
+        DatabasePerTenant(context);
+        context.EventData.StreamStates[StreamId] = Stream("globex");
+
+        await context.State.EnsureInitializedAsync(Xunit.TestContext.Current.CancellationToken);
+        context.Navigate($"marten/events/streams/s?store=default&tenant=globex&id={StreamId}");
+        context.Render<StreamPage>();
+
+        context.State.ActiveScope.Should().Be(new StudioScope("default", "db_b", "globex"));
+    }
+
+    /// <summary>A store of two databases, each listing a tenant of its own, as a master-table or static multi-database store does.</summary>
+    private static void DatabasePerTenant(StudioComponentContext context) => context.Catalog
+        .WithStore("default", "Default", databaseIdentities: ["db_a", "db_b"])
+        .WithDatabaseTenants("default", "db_a", new TenantList(["acme"], IsTruncated: false, TenantListSource.Descriptor))
+        .WithDatabaseTenants("default", "db_b", new TenantList(["globex"], IsTruncated: false, TenantListSource.Descriptor));
 
     private static MartenStudio.Services.Documents.DocumentDetail Detail() => new()
     {

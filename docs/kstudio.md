@@ -194,7 +194,7 @@ or stream, in the tenant of the record's `tenant-id` header. The document and st
 opens related records for that id. A link grants nothing: the page it opens checks your access again. A record whose
 `tenant-id` is redacted has no Marten links.
 
-A store that keeps each tenant in a database of its own gets no Marten link yet: the studio cannot open a tenant's database from a link without enumerating the tenancy.
+In a store that keeps each tenant in a database of its own, the link names the tenant, and the studio opens the database that holds it among those you may see.
 
 `o.ExternalLink("Traces", "https://tempo.example.com/trace/{traceId}")` adds a link to your tracing or log tool, with
 `{traceId}`, `{correlationId}`, `{from}`, `{to}`, `{fromMs}` and `{toMs}`. Never put a credential in a template: it is

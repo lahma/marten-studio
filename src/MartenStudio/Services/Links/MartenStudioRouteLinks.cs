@@ -34,12 +34,13 @@ namespace MartenStudio.Services.Links;
 /// store when it is, else <see langword="null" /> - the link would be a guess.
 /// </para>
 /// <para>
-/// <b>The tenant.</b> A single-database store with conjoined tenants is given the tenant the caller knows; with none the answer is
-/// <see langword="null" />, because the page would open the visitor's current tenant and say "not found" falsely (OPEN-8). A store
-/// with no tenants ignores it. A store that keeps each tenant in a database of its own (master table, sharded, one-server, static) -
-/// or whose tenancy the configuration cannot place in one database - gets no link at all: the page cannot open a tenant's database
-/// from a link without enumerating the tenancy, so the link would open the wrong one. The link carries <c>store</c> and
-/// <c>tenant</c> and never <c>db</c>.
+/// <b>The tenant.</b> A store with tenants is given the tenant the caller knows; with none the answer is <see langword="null" />,
+/// because the page would open the visitor's current tenant and say "not found" falsely (OPEN-8). That holds for conjoined tenants
+/// in one database and for a store that keeps each tenant in a database of its own (master table, sharded, one-server, static): the
+/// page a link opens looks for a tenant named with no database among the databases the visitor may see
+/// (<see cref="PostgresStudio.Services.StudioState.SetScopeAsync" />). A store with no tenants ignores it. A tenancy of the
+/// application's own, or one the configuration cannot place, gets no link. The link carries <c>store</c> and <c>tenant</c> and never
+/// <c>db</c>.
 /// </para>
 /// </remarks>
 internal sealed class MartenStudioRouteLinks : IStudioRouteLinks
@@ -162,10 +163,10 @@ internal sealed class MartenStudioRouteLinks : IStudioRouteLinks
 
     /// <summary>
     /// The tenant the link carries, or whether there is a link at all. A single-database store with no tenants carries none and always
-    /// answers; a single-database store with conjoined tenants answers only when the caller knows one. A store that keeps each tenant in
-    /// a database of its own - and any tenancy the configuration cannot place in one database - never answers: the page a link opens
-    /// takes the database from the address or the visitor's current one, and cannot find a tenant's database without enumerating the
-    /// tenancy, so the link would open the wrong database.
+    /// answers. A store with tenants - conjoined in one database, or each in a database of its own (master table, sharded, one-server,
+    /// static) - answers only when the caller knows one: the page a link opens takes a tenant with no database to the first database
+    /// the visitor may see whose tenant listing carries it, so the link names the tenant and never the database. A tenancy of the
+    /// application's own, or one the configuration would not classify, never answers: nothing says where its tenants are.
     /// </summary>
     private static bool TenantFor(IDocumentStore store, MartenStudioOptions current, string? tenantId, out string? tenant)
     {
@@ -177,7 +178,12 @@ internal sealed class MartenStudioRouteLinks : IStudioRouteLinks
             case StoreTenancyKind.Single:
                 return true;
 
-            case StoreTenancyKind.Conjoined or StoreTenancyKind.ConjoinedPartitioned:
+            case StoreTenancyKind.Conjoined
+                or StoreTenancyKind.ConjoinedPartitioned
+                or StoreTenancyKind.MasterTable
+                or StoreTenancyKind.Sharded
+                or StoreTenancyKind.OneServer
+                or StoreTenancyKind.Static:
                 if (string.IsNullOrWhiteSpace(tenantId))
                 {
                     return false;
@@ -187,7 +193,7 @@ internal sealed class MartenStudioRouteLinks : IStudioRouteLinks
                 return true;
 
             default:
-                // MasterTable, Sharded, OneServer, Static and Custom (which includes a tenancy that would not say): fail closed.
+                // Custom, which includes a tenancy that would not say: fail closed.
                 return false;
         }
     }

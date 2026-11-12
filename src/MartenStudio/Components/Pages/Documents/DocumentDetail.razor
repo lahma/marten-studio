@@ -277,7 +277,9 @@
 
         if (differs)
         {
-            await State.SetScopeAsync(StoreKey ?? active?.StoreKey, DatabaseId ?? active?.DatabaseId, TenantId);
+            // DatabaseId as the address gave it: a tenant named with no database is looked for in the store's databases, and a
+            // database filled in from the scope on screen would hide that the address named none.
+            await State.SetScopeAsync(StoreKey ?? active?.StoreKey, DatabaseId, TenantId);
         }
     }
 
