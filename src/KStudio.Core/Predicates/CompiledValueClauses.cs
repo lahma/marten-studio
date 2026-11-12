@@ -51,6 +51,43 @@ internal static class ValueJudge
         return result;
     }
 
+    /// <summary>
+    /// Reads a JSON number as a <c>decimal</c> when that is exact enough to compare: at most 28 significant digits, and a non-zero number
+    /// that does not round to zero. Anything else is out of range, so that a comparison says "unknown" and never a wrong "equal".
+    /// </summary>
+    /// <param name="raw">The number as written.</param>
+    /// <param name="number">The value, when it can be read.</param>
+    public static bool TryReadNumber(string raw, out decimal number)
+    {
+        if (!decimal.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out number))
+        {
+            return false;
+        }
+
+        int significant = 0;
+        bool leading = true;
+        bool nonZero = false;
+
+        foreach (char c in raw)
+        {
+            if (c is 'e' or 'E')
+            {
+                break;
+            }
+
+            if (!char.IsAsciiDigit(c) || (leading && c == '0'))
+            {
+                continue;
+            }
+
+            leading = false;
+            significant++;
+            nonZero |= c != '0';
+        }
+
+        return significant <= 28 && !(nonZero && number == 0);
+    }
+
     /// <summary>Compares a decimal literal with a number leaf; <see langword="false" /> in <paramref name="inRange" /> when the leaf is too large for a decimal.</summary>
     /// <param name="leaf">The number.</param>
     /// <param name="op">The operator.</param>
@@ -58,7 +95,7 @@ internal static class ValueJudge
     /// <param name="inRange">Whether the leaf could be read.</param>
     public static bool CompareNumber(JsonElement leaf, PredicateOperator op, decimal literal, out bool inRange)
     {
-        inRange = decimal.TryParse(leaf.GetRawText(), NumberStyles.Float, CultureInfo.InvariantCulture, out decimal number);
+        inRange = TryReadNumber(leaf.GetRawText(), out decimal number);
 
         if (!inRange)
         {
@@ -345,7 +382,8 @@ internal sealed class CompiledJsonPathClause : CompiledNode
                         return true;
                     }
 
-                    tooLarge |= !inRange;
+                    // A masked leaf is compared exactly and never hinted at: that a number is out of range would tell a visitor something about it.
+                    tooLarge |= !inRange && !rawLeaf;
                 }
 
                 return false;

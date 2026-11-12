@@ -58,6 +58,16 @@ internal sealed record RecordValue
     /// <summary>The data of the events after the first in a batch; a clause is true if it is true of any of them.</summary>
     public IReadOnlyList<RecordValue> More { get; init; } = [];
 
+    /// <summary>
+    /// A record's ToString writes every member, and this one holds the value (and its text, its parsed element and its hex): a debugger, a
+    /// log of the object or an exception that formats it must never put the content in a sink, so only the kind and the length are written.
+    /// </summary>
+    private bool PrintMembers(StringBuilder builder)
+    {
+        builder.Append("Kind = ").Append(Kind).Append(", Length = ").Append(Length);
+        return true;
+    }
+
     /// <summary>The value's text: the decoded <see cref="Utf8" />.</summary>
     public string Text => text ??= Encoding.UTF8.GetString(Utf8 ?? []);
 

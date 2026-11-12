@@ -43,7 +43,15 @@ internal sealed record RedactionRule(
     bool Searchable,
     bool BuiltIn,
     JsonPathExpression? Path = null,
-    Regex? Pattern = null);
+    Regex? Pattern = null)
+{
+    // A payload rule's field is the host's expression and its compiled form: neither is printed.
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("Target = ").Append(Target).Append(", Name = ").Append(Name);
+        return true;
+    }
+}
 
 /// <summary>
 /// The headers that are masked in every match unless the host opts one out by name (decision 10.3). They ship in M1 because M1's matches

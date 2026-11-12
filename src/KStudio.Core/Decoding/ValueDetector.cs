@@ -32,39 +32,11 @@ internal enum KafkaValueKind
     Undecodable,
 }
 
-/// <summary>
-/// A value as a match would keep it before any payload rule: the text cut to the match's budget. Nothing is ever deserialized into a CLR
-/// type: JSON is text (and, transiently, an element) and a host decoder returns JSON or text that the engine parses itself. Under the
-/// envelope grant only the kind, the length, the schema id and the CloudEvents attributes are filled in; the text and the preview are for a
-/// visitor who may read payloads. The engine itself works on <see cref="RecordValue" />, which is whole.
-/// </summary>
-/// <param name="Kind">What it is.</param>
-/// <param name="FormatName">How to name it: <c>JSON</c>, <c>CloudEvents (structured), data as JSON</c>, a decoder's name.</param>
-/// <param name="Length">Its length in bytes.</param>
-/// <param name="Text">The JSON or text, up to the match cap; only under the payload grant.</param>
-/// <param name="Truncated">Whether <paramref name="Text" /> or <paramref name="Preview" /> was cut.</param>
-/// <param name="SchemaId">The schema id of a wire-format value.</param>
-/// <param name="Preview">Hex of the first bytes of a binary or wire-format value; only under the payload grant.</param>
-/// <param name="Reason">Why the value is undecodable.</param>
-/// <param name="ReasonText">The reason a host decoder gave, when it refused.</param>
-/// <param name="CloudEvent">The record's CloudEvents attributes, when it is one.</param>
-internal sealed record KafkaDecodedValue(
-    KafkaValueKind Kind,
-    string FormatName,
-    int Length,
-    string? Text,
-    bool Truncated,
-    int? SchemaId,
-    string? Preview,
-    KafkaUndecodableReason? Reason,
-    string? ReasonText,
-    CloudEventView? CloudEvent);
-
 /// <summary>Everything the detector needs to know about the topic and the scan.</summary>
 /// <param name="Grant">What the visitor may read.</param>
 /// <param name="Decoder">The topic's declared decoder, resolved; <see langword="null" /> when it declared none.</param>
 /// <param name="MaxDecodeBytes">The largest value parsed.</param>
-/// <param name="MaxMatchBytes">The most text or hex kept by <see cref="ValueDetector.Detect" />.</param>
+/// <param name="MaxMatchBytes">The match's budget; detection itself cuts nothing.</param>
 /// <param name="Counters">Counts the decodes.</param>
 /// <param name="OnDecoderFailed">Told when a host decoder throws; the exception's type name is all that is logged.</param>
 /// <param name="Redactor">The topic's rules: a host decoder is handed only the headers none of them masks (decision 3.5). The deny-list alone when <see langword="null" />.</param>
@@ -95,21 +67,6 @@ internal enum KafkaReadGrant
 internal static class ValueDetector
 {
     private static readonly UTF8Encoding StrictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
-
-    /// <summary>
-    /// Detects what a record's value is and cuts its text to <see cref="ValueDetection.MaxMatchBytes" />: the value as a match would keep it
-    /// before any payload rule.
-    /// </summary>
-    /// <param name="record">The record.</param>
-    /// <param name="detection">The topic and the scan.</param>
-    public static KafkaDecodedValue Detect(WireRecord record, ValueDetection detection)
-    {
-        RecordValue value = DetectValue(record, detection);
-        (string? text, bool truncated) = value.Utf8 is { } bytes ? KeepText(bytes, detection.MaxMatchBytes) : (null, false);
-
-        return new KafkaDecodedValue(
-            value.Kind, value.FormatName, value.Length, text, truncated || value.Cut, value.SchemaId, value.Preview, value.Reason, value.ReasonText, value.CloudEvent);
-    }
 
     /// <summary>Detects what a record's value is, in the order the design states, and keeps all of it (up to <c>MaxDecodeBytes</c>).</summary>
     /// <param name="record">The record.</param>

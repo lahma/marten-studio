@@ -195,6 +195,9 @@ internal static class KafkaMatchFactory
     /// <summary>The most characters of a header's or an attribute's name kept.</summary>
     public const int MaxNameChars = 256;
 
+    /// <summary>The most bytes the paths of masked nodes may take in all; the rest are counted.</summary>
+    public const int MaxMaskedPathBytes = 4_096;
+
     /// <summary>Makes the match of a record that satisfied the predicate.</summary>
     /// <param name="record">The record; it is not kept.</param>
     /// <param name="topic">The topic's context: its redactor, key format and decoder.</param>
@@ -276,7 +279,7 @@ internal static class KafkaMatchFactory
         if (grant.HasFlag(KafkaReadGrant.Payload) && redactor.HasPayloadRules
             && (evaluated is null || !evaluated.TryGetComputedRedaction(decoded, out redacted)))
         {
-            redacted = PayloadRedactor.Apply(decoded, redactor, PayloadRedactor.Budget);
+            redacted = PayloadRedactor.Apply(decoded, redactor, PayloadRedactor.Budget, limits.MaxDecodeBytes);
 
             if (redacted is not null)
             {
@@ -322,6 +325,39 @@ internal static class KafkaMatchFactory
         bool truncated = decoded.Cut;
         string? withheld = null;
         KafkaValueTextKind? textKind = null;
+        // What the masks say (the paths of masked nodes, the names of the rules) is part of what the match keeps: it is counted against the
+        // budget, and the paths are bounded by themselves, the rest being counted.
+        IReadOnlyList<KafkaMaskedPath> maskedPaths = [];
+        IReadOnlyList<string> maskedBy = [];
+        int maskedOmitted = 0;
+
+        if (redacted is not null)
+        {
+            List<KafkaMaskedPath> keptPaths = [];
+            int pathBytes = 0;
+            bool full = false;
+            maskedOmitted = redacted.MaskedPathsOmitted;
+
+            foreach (KafkaMaskedPath masked in redacted.MaskedPaths)
+            {
+                int cost = Encoding.UTF8.GetByteCount(masked.Text) + Encoding.UTF8.GetByteCount(masked.Rule);
+
+                if (full || pathBytes + cost > MaxMaskedPathBytes)
+                {
+                    full = true;
+                    maskedOmitted++;
+                    continue;
+                }
+
+                keptPaths.Add(masked);
+                pathBytes += cost;
+            }
+
+            maskedPaths = keptPaths;
+            maskedBy = redacted.MaskedBy;
+            budget -= pathBytes + redacted.MaskedBy.Sum(static x => Encoding.UTF8.GetByteCount(x));
+        }
+
         int valueBudget = Math.Max(Math.Max(0, budget), focusValueBytes);
 
         if (redacted is { WithheldBy: { } by })
@@ -373,9 +409,9 @@ internal static class KafkaMatchFactory
             SchemaId = decoded.SchemaId,
             UndecodableReason = decoded.Reason,
             ValueTextKind = textKind,
-            MaskedPaths = redacted?.MaskedPaths ?? [],
-            MaskedPathsOmitted = redacted?.MaskedPathsOmitted ?? 0,
-            ValueMaskedBy = redacted?.MaskedBy ?? [],
+            MaskedPaths = maskedPaths,
+            MaskedPathsOmitted = maskedOmitted,
+            ValueMaskedBy = maskedBy,
             ValueIsCloudEventData = decoded.IsCloudEventData,
             CloudEventAttributes = attributes,
             CloudEventAttributesOmitted = attributesOmitted,

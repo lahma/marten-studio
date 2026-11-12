@@ -8,7 +8,11 @@ internal abstract record JsonPathStep;
 
 /// <summary>A member of an object, by name. A search compares names exactly; a redaction rule compares them ignoring case.</summary>
 /// <param name="Name">The member's name.</param>
-internal sealed record JsonMemberStep(string Name) : JsonPathStep;
+internal sealed record JsonMemberStep(string Name) : JsonPathStep
+{
+    // A name from a masked value's path is content: it is never printed.
+    protected override bool PrintMembers(StringBuilder builder) => false;
+}
 
 /// <summary>An element of an array, by position.</summary>
 /// <param name="Index">The position, from 0.</param>

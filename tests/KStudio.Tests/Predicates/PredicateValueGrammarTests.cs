@@ -122,6 +122,18 @@ public class PredicateValueGrammarTests
         Error($"ce.{sixtyFour}a = 'x'").Should().StartWith("Unknown field 'ce.aaaa");
     }
 
+    [Theory]
+    [InlineData("$['a = 'SECRET'")]
+    [InlineData("$['abc and key = 'SECRET'")]
+    [InlineData("key = 'x' and $['a = 'SECRET' and key = 'SECRET2'")]
+    public void A_path_error_never_shows_the_text_after_a_names_closing_quote(string text)
+    {
+        PredicateParseResult result = PredicateParser.Parse(text);
+
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().OnlyContain(static x => !x.Message.Contains("SECRET", StringComparison.Ordinal));
+    }
+
     [Fact]
     public void A_path_error_never_contains_a_literal_of_the_search()
     {

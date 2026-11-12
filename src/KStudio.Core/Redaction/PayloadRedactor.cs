@@ -46,7 +46,15 @@ internal enum PayloadRedactionFailure
 /// <param name="Steps">The steps from the root.</param>
 /// <param name="Text">The path as text.</param>
 /// <param name="Rule">The rule's name.</param>
-internal sealed record KafkaMaskedPath(IReadOnlyList<JsonPathStep> Steps, string Text, string Rule);
+internal sealed record KafkaMaskedPath(IReadOnlyList<JsonPathStep> Steps, string Text, string Rule)
+{
+    // The path holds member names of the value, which are content: a debugger, a log of an object or an exception message prints the rule only.
+    private bool PrintMembers(StringBuilder builder)
+    {
+        builder.Append("Rule = ").Append(Rule);
+        return true;
+    }
+}
 
 /// <summary>
 /// A value with the topic's payload rules applied (decision 3.2): the masked text, which parts were masked and by which rules, or the rule
@@ -115,6 +123,9 @@ internal sealed class RedactedValue
 /// </summary>
 internal static class PayloadRedactor
 {
+    /// <summary>The decode limit a caller that does not know its scan's takes (the engine's default).</summary>
+    public const int DefaultMaxDecodeBytes = 1024 * 1024;
+
     /// <summary>The most masked nodes whose paths are kept.</summary>
     public const int MaxMaskedPaths = 64;
 
@@ -134,8 +145,9 @@ internal static class PayloadRedactor
     /// <param name="value">The value, whole.</param>
     /// <param name="redactor">The topic's rules.</param>
     /// <param name="budget">The time left for the rules on this value.</param>
+    /// <param name="maxDecodeBytes">The decode limit: masking never grows a value past twice this, and a value it would is withheld.</param>
     /// <returns>The value with the rules applied; <see langword="null" /> when the topic has no payload rule or the value has nothing to mask (a tombstone, an empty value, an undecodable one, a CloudEvent without data).</returns>
-    public static RedactedValue? Apply(RecordValue value, IKafkaRedactor redactor, TimeSpan budget)
+    public static RedactedValue? Apply(RecordValue value, IKafkaRedactor redactor, TimeSpan budget, int maxDecodeBytes = DefaultMaxDecodeBytes)
     {
         ArgumentNullException.ThrowIfNull(value);
         ArgumentNullException.ThrowIfNull(redactor);
@@ -161,11 +173,17 @@ internal static class PayloadRedactor
                         return Withheld(pathRule, PayloadRedactionFailure.NotApplicable, null);
                     }
 
-                    return new Run(rules, budget).Text(value.Text);
+                    // A text cut at the decode limit may end inside a match, and what is left of a match is not masked: it is withheld.
+                    if (value.Cut)
+                    {
+                        return Withheld(rules[0], PayloadRedactionFailure.NotApplicable, null);
+                    }
+
+                    return new Run(rules, budget, maxDecodeBytes).Text(value.Text);
                 }
 
             case KafkaValueKind.Json when value.Json is { } json:
-                return new Run(rules, budget).Json(json);
+                return new Run(rules, budget, maxDecodeBytes).Json(json);
 
             default:
                 return null;
@@ -183,11 +201,13 @@ internal static class PayloadRedactor
         private readonly List<JsonPathStep> path = [];
         private readonly List<KafkaMaskedPath> masked = [];
         private readonly List<string> maskedBy = [];
+        private readonly long limit;
         private int omitted;
         private RedactionRule current;
 
-        public Run(IReadOnlyList<RedactionRule> rules, TimeSpan budget)
+        public Run(IReadOnlyList<RedactionRule> rules, TimeSpan budget, int maxDecodeBytes)
         {
+            limit = 2L * maxDecodeBytes;
             pathRules = [.. rules.Where(static x => x.Target == RedactionTarget.JsonPath)];
             patterns = [.. rules.Where(static x => x.Target == RedactionTarget.Pattern)];
             current = rules[0];
@@ -200,6 +220,10 @@ internal static class PayloadRedactor
             {
                 string result = Patterns(text);
                 return Done(result, KafkaValueTextKind.Text);
+            }
+            catch (GrowthException exception)
+            {
+                return Withheld(current, PayloadRedactionFailure.NotApplicable, exception);
             }
             catch (RegexMatchTimeoutException exception)
             {
@@ -236,6 +260,10 @@ internal static class PayloadRedactor
             {
                 return Withheld(current, PayloadRedactionFailure.MemberNameMatched, exception);
             }
+            catch (GrowthException exception)
+            {
+                return Withheld(current, PayloadRedactionFailure.NotApplicable, exception);
+            }
             catch (Exception exception) when (exception is InvalidOperationException or ArgumentException or JsonException)
             {
                 return Withheld(current, PayloadRedactionFailure.WriteFailed, exception);
@@ -249,7 +277,12 @@ internal static class PayloadRedactor
         {
             CheckTime();
 
-            if (pathRules.FirstOrDefault(x => x.Path!.Covers(path)) is { } rule)
+            if (writer.BytesCommitted + writer.BytesPending > limit)
+            {
+                throw new GrowthException();
+            }
+
+            if (CoveringRule() is { } rule)
             {
                 writer.WriteStringValue(MaskText(rule.Name));
                 Note(rule.Name);
@@ -331,6 +364,20 @@ internal static class PayloadRedactor
             }
         }
 
+        /// <summary>The first path rule that covers the node at the current path, or <see langword="null" />.</summary>
+        private RedactionRule? CoveringRule()
+        {
+            for (int i = 0; i < pathRules.Count; i++)
+            {
+                if (pathRules[i].Path!.Covers(path))
+                {
+                    return pathRules[i];
+                }
+            }
+
+            return null;
+        }
+
         private bool MatchesAny(string text)
         {
             foreach (RedactionRule rule in patterns)
@@ -396,6 +443,12 @@ internal static class PayloadRedactor
                 result.Append(text, position, start - position).Append(MaskText(rule.Name));
                 Note(rule.Name);
                 position = end;
+
+                // A pattern that matches single characters would grow a value by the length of a mask for each: bound it.
+                if (result.Length > limit)
+                {
+                    throw new GrowthException();
+                }
             }
 
             result.Append(text, position, text.Length - position);
@@ -420,6 +473,8 @@ internal static class PayloadRedactor
     }
 
     private sealed class OutOfTimeException : Exception;
+
+    private sealed class GrowthException : Exception;
 
     private sealed class MemberNameException : Exception;
 }

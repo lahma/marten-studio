@@ -345,6 +345,13 @@ internal static class PredicateParser
 
                         i++;
                     }
+
+                    // The name's closing quote not followed by `]` ends the token there: what comes after it is the search's own text (a
+                    // literal, say), and a path error must never show it.
+                    if (i >= text.Length || text[i] != ']')
+                    {
+                        return new Token(TokenKind.JsonPath, text[start..i], start, i - start);
+                    }
                 }
                 else
                 {

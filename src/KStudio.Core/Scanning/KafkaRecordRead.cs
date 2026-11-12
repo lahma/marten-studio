@@ -368,7 +368,7 @@ internal sealed partial class KafkaScanner
                 observer,
                 MatchEveryRecordInRange: true,
                 FocusOffset: request.Offset,
-                FocusValueBytes: request.Grant.HasFlag(KafkaReadGrant.Payload) ? request.FocusValueBytes : 0);
+                FocusValueBytes: request.Grant.HasFlag(KafkaReadGrant.Payload) ? Math.Clamp(request.FocusValueBytes, 0, limits.MaxDecodeBytes) : 0);
             ScanRun run = new(inputs);
             string clusterText = KafkaLogValue.Cap(request.Cluster)!;
             string isolationText = request.Isolation.ToString();

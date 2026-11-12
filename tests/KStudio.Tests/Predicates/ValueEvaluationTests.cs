@@ -2,6 +2,7 @@ using System.Text;
 
 using KStudio.Core.Decoding;
 using KStudio.Core.Predicates;
+using KStudio.Core.Redaction;
 using KStudio.Core.Wire;
 
 using static KStudio.Tests.Predicates.ValueHarness;
@@ -254,6 +255,29 @@ public class ValueEvaluationTests
         Check("$.big = 'x'", Document, TriState.False);
         Check("$.nums[*] = 2", Json("""{"nums":[1e400,2]}"""), TriState.True);
         Check("$.nums[*] = 9", Json("""{"nums":[1e400,2]}"""), TriState.Unknown, KafkaUnknownReason.NumberOutOfRange);
+    }
+
+    [Fact]
+    public void Number_edges_are_exact_or_unknown_never_a_wrong_equal()
+    {
+        Check("$.n = 0", Json("""{"n":-0}"""), TriState.True);
+        Check("$.n = 0", Json("""{"n":0.000}"""), TriState.True);
+        Check("$.n = 100", Json("""{"n":1E+2}"""), TriState.True);
+        Check("$.n = 0", Json("""{"n":1e-30}"""), TriState.Unknown, KafkaUnknownReason.NumberOutOfRange);
+        Check("$.n > 0", Json("""{"n":1e-30}"""), TriState.Unknown, KafkaUnknownReason.NumberOutOfRange);
+        Check("$.n = 1", Json("""{"n":12345678901234567890123456789012345}"""), TriState.Unknown, KafkaUnknownReason.NumberOutOfRange);
+        Check("$.n = 1", Json("""{"n":1.2345678901234567890123456789012}"""), TriState.Unknown, KafkaUnknownReason.NumberOutOfRange);
+        Check("$.n = 1.5", Json("""{"n":1.234567890123456789012345678}"""), TriState.False, null);
+    }
+
+    [Fact]
+    public void A_number_out_of_range_in_a_searchable_masked_leaf_is_false_not_a_hint()
+    {
+        KafkaRedactionRules rules = Rules(static r => r.JsonPath("$.customer.email").Searchable());
+        WireRecord record = Json("""{"customer":{"email":1e400},"other":1e400}""");
+
+        Verdict("$.customer.email = 1", record, rules).Should().Be(TriState.False);
+        Verdict("$.other = 1", record, rules).Should().Be(TriState.Unknown);
     }
 
     [Fact]

@@ -375,6 +375,7 @@ so a secret past the cut is masked, never lost and never leaked.
 |---|---|---|
 | JSON (or CloudEvent data that is JSON) | each node a rule covers is written as the string `••• (redacted by {rule})`, whatever its type; its concrete path is kept (at most 64, the rest counted) | each string and number leaf: every match replaced by `••• (redacted by pattern {name})`; **a member name that matches withholds the whole value** |
 | Text | the value is **withheld** (a path cannot be found in text) | every match replaced in the text |
+| Text cut at the decode limit | withheld | withheld (what is left of a match at the cut is not masked) |
 | Binary, Confluent wire format | withheld | withheld |
 | Tombstone, empty, undecodable | nothing is kept anyway | nothing is kept anyway |
 
@@ -441,6 +442,8 @@ consumer is outside $S$ and the governor, so it is small: 1 MiB of queue and 1 M
 at a time per cluster. The live suite allows $1.25 \cdot S(C + 2mc)$ for two scans over records of a 96 KiB value and 64
 headers of 4 KiB, and prints what they actually held. Broker egress is bounded separately: with these limits the broker
 sent at most $Q + F$ more than the engine had read.
+
+A record read keeps one more value: the record asked for may hold up to $F_v$ bytes of value (KStudio passes the decode limit, 1 MiB by default) whatever is left of its match budget, and its neighbours keep $c$, so a record read holds at most $21c + F_v$, twice that in UTF-16, within one scan slot of $S(C + 2mc)$. Masking never grows a value past twice the decode limit; a value it would is withheld.
 
 Before reading, the engine estimates a scan: the offsets in its ranges ("about", since offsets are not records) and the
 bytes, from a small sample of record sizes. Above the confirmation threshold, `Start` refuses unless the visitor's

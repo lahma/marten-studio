@@ -23,7 +23,7 @@ internal sealed class RecordEvaluationContext
     private readonly IKafkaRedactor redactor;
     private readonly Action<Exception>? onDecoderFailed;
     private readonly Action<RedactedValue>? onRedactionFailed;
-    private readonly Dictionary<RecordValue, RedactedValue?> redacted = new(ReferenceEqualityComparer.Instance);
+    private Dictionary<RecordValue, RedactedValue?>? redacted;
     private long redactionTicks;
     private bool keyTextDone;
     private string? keyText;
@@ -37,8 +37,8 @@ internal sealed class RecordEvaluationContext
     /// <param name="maxDecodeBytes">The largest value parsed.</param>
     /// <param name="declaresCloudEvents">Whether the topic declared <c>KafkaDecoders.CloudEvents</c>.</param>
     /// <param name="grant">What the visitor may read; the value is read only under the payload grant.</param>
-    /// <param name="decoder">The topic declared decoder, resolved.</param>
-    /// <param name="redactor">The topic rules; the deny-list alone when <see langword="null" />.</param>
+    /// <param name="decoder">The topic's declared decoder, resolved.</param>
+    /// <param name="redactor">The topic's rules; the deny-list alone when <see langword="null" />.</param>
     /// <param name="onDecoderFailed">Told when a host decoder throws.</param>
     /// <param name="onRedactionFailed">Told when a payload rule could not be applied.</param>
     public RecordEvaluationContext(
@@ -143,7 +143,7 @@ internal sealed class RecordEvaluationContext
     }
 
     /// <summary>
-    /// The record value (a CloudEvent data), read the first time a clause asks: detection under the scan grant and the topic decoder,
+    /// The record's value (a CloudEvent's data), read the first time a clause asks: detection under the scan's grant and the topic's decoder,
     /// whole up to the decode limit. A match made from this record reuses it, so a host decoder runs once per matching record.
     /// </summary>
     public RecordValue Value
@@ -169,23 +169,23 @@ internal sealed class RecordEvaluationContext
     public RecordValue? ComputedValue => value;
 
     /// <summary>
-    /// A value with the topic payload rules applied, computed once and only when a clause needs the masked form. <see langword="null" />
+    /// A value with the topic's payload rules applied, computed once and only when a clause needs the masked form. <see langword="null" />
     /// when the topic has no payload rule or the value has nothing to mask. The time the rules may take is spent across every call on this
     /// record.
     /// </summary>
-    /// <param name="part">The value, or one event data of a batch.</param>
+    /// <param name="part">The value, or one event's data of a batch.</param>
     public RedactedValue? RedactedOf(RecordValue part)
     {
-        if (redacted.TryGetValue(part, out RedactedValue? known))
+        if (redacted is not null && redacted.TryGetValue(part, out RedactedValue? known))
         {
             return known;
         }
 
         long started = Stopwatch.GetTimestamp();
         TimeSpan left = PayloadRedactor.Budget - Stopwatch.GetElapsedTime(0, redactionTicks);
-        RedactedValue? result = PayloadRedactor.Apply(part, redactor, left > TimeSpan.Zero ? left : TimeSpan.Zero);
+        RedactedValue? result = PayloadRedactor.Apply(part, redactor, left > TimeSpan.Zero ? left : TimeSpan.Zero, maxDecodeBytes);
         redactionTicks += Stopwatch.GetTimestamp() - started;
-        redacted[part] = result;
+        (redacted ??= new Dictionary<RecordValue, RedactedValue?>(ReferenceEqualityComparer.Instance))[part] = result;
 
         if (result is not null)
         {
@@ -203,7 +203,11 @@ internal sealed class RecordEvaluationContext
     /// <summary>Whether the payload rules were applied to <paramref name="part" /> already; the result is what <see cref="RedactedOf" /> answered.</summary>
     /// <param name="part">The value.</param>
     /// <param name="result">The masked value, or <see langword="null" />.</param>
-    public bool TryGetComputedRedaction(RecordValue part, out RedactedValue? result) => redacted.TryGetValue(part, out result);
+    public bool TryGetComputedRedaction(RecordValue part, out RedactedValue? result)
+    {
+        result = null;
+        return redacted is not null && redacted.TryGetValue(part, out result);
+    }
 
     private sealed class KafkaKeyFormatReader(KafkaKeyFormat format)
     {
@@ -246,10 +250,10 @@ internal enum KafkaUnknownReason
     /// <summary>A number in the value is too large to compare.</summary>
     NumberOutOfRange,
 
-    /// <summary>The topic decoder threw or refused the value.</summary>
+    /// <summary>The topic's decoder threw or refused the value.</summary>
     DecoderFailed,
 
-    /// <summary>A CloudEvent data_base64 is not valid base64.</summary>
+    /// <summary>A CloudEvent's data_base64 is not valid base64.</summary>
     InvalidBase64,
 
     /// <summary>A redaction rule could not be applied to the value, so it cannot be searched.</summary>
