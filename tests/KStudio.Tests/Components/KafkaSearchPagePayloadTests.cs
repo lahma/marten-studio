@@ -206,6 +206,29 @@ public class KafkaSearchPagePayloadTests
     }
 
     [Fact]
+    public async Task A_value_check_that_is_cancelled_while_the_page_lives_shows_no_value()
+    {
+        await using KafkaSearchRig rig = new(payloads: true);
+        rig.Topic("orders");
+        rig.Produce("orders", 0, 0, "k0", "{\"secret\":\"VALUE-SENTINEL-0\"}");
+
+        IRenderedComponent<KafkaSearchPage> page = await OpenAsync(rig, "orders");
+        await SearchForAsync(page, "key ^= 'k'");
+        page.WaitForAssertion(() => Rows(page).Should().HaveCount(1));
+
+        // A host's policy that gives up (a timeout surfacing as a cancellation) while the visitor is still on the page.
+        TaskCompletionSource<bool> gate = rig.Studio.Authorization.HoldKafka(static r => r.Capability == "ReadPayloads");
+        Task click = page.Find("table.ms-k-matches button.ms-btn-sm").ClickAsync(new MouseEventArgs());
+
+        gate.SetException(new OperationCanceledException("the host policy timed out"));
+        await click;
+
+        page.WaitForAssertion(() => page.Find(".ms-k-match-detail .ms-k-value").TextContent.Trim().Should().Be("The value of this record is not available to you."));
+        page.Markup.Should().NotContain("VALUE-SENTINEL-0");
+        rig.Ring.Should().NotContain(static x => x.Action == "ViewRecord" && x.Succeeded);
+    }
+
+    [Fact]
     public async Task Continue_after_Search_all_partitions_keeps_every_partition()
     {
         await using KafkaSearchRig rig = new(engine: o =>

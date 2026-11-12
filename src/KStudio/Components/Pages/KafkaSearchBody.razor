@@ -1296,6 +1296,8 @@
             }
             catch (OperationCanceledException)
             {
+                // Fail closed: a cancellation (the page leaving, or a host's policy timing out) never lets an unchecked value be drawn.
+                valueRefused.Add(RowKey(match));
                 return;
             }
             catch (Exception e) when (!disposed)
