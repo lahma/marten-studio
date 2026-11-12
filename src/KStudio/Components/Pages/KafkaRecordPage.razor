@@ -1,0 +1,10 @@
+@page "/kafka/record"
+
+<PageTitle>Kafka record</PageTitle>
+
+@* One record by its offset (D-UI decision 14), the permalink: ?cluster=…&topic=…&partition=…&offset=… (D9). The page holds no logic; the body is created
+   below the frame only once reads are released, so prerendering makes no broker call. *@
+
+<KafkaPageFrame>
+    <KafkaRecordBody />
+</KafkaPageFrame>

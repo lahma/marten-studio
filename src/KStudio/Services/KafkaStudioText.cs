@@ -77,4 +77,103 @@ internal static class KafkaStudioText
         + "records of every topic this application's credentials can read. Set KafkaStudioOptions.CapabilityAuthorizationPolicy (asked for each "
         + "capability use, once per topic), or KafkaStudioOptions.ClusterAuthorizationPolicy (asked for every read, once per topic), or turn the "
         + $"capabilities off; {readOnlyOption} = true turns them all off.";
+
+    // ------------------------------------------------------------------------------------------------
+    // Search, the record page and the record detail (UI-B, D-UI decisions 10 to 16)
+    // ------------------------------------------------------------------------------------------------
+
+    /// <summary>What a search says when its request names a topic the visitor may not use: whole, and naming nothing.</summary>
+    public const string SearchNamesRefusedTopic = "This search names a topic that is not available to you.";
+
+    /// <summary>A search with no topic, or more than <see cref="MaxSearchTopics" />.</summary>
+    public const string SearchTopicCount = "A search reads 1 to 20 topics.";
+
+    /// <summary>The most topics one search reads.</summary>
+    public const int MaxSearchTopics = 20;
+
+    /// <summary>The longest search text the page accepts.</summary>
+    public const int MaxPredicateLength = 4_096;
+
+    /// <summary>A search text above <see cref="MaxPredicateLength" />.</summary>
+    public const string PredicateTooLong = "The search text is longer than 4,096 characters.";
+
+    /// <summary>A search whose name is not a topic name.</summary>
+    public const string SearchTopicInvalid = "A topic name in this search is not valid.";
+
+    /// <summary>The line under a plan with errors.</summary>
+    public const string PredicateInvalid = "The search text has errors; see above.";
+
+    /// <summary>A start that needed the confirmation and did not get it.</summary>
+    public const string NeedsConfirmation = "This search needs your confirmation first.";
+
+    /// <summary>The 9601 reason of a dialog the visitor cancelled.</summary>
+    public const string NotConfirmed = "not confirmed";
+
+    /// <summary>The page's line when the search failed outside the engine.</summary>
+    public const string SearchFailed = "The search failed. The application's log has the reason.";
+
+    /// <summary>The record page for a link whose partition, offset or topic is not valid.</summary>
+    public const string RecordLinkInvalid = "This record link is not valid.";
+
+    /// <summary>The line that says why the value is not shown.</summary>
+    public const string ValueNotShown = "The value is not shown: reading values needs ReadPayloads, which arrives in a later release.";
+
+    /// <summary>The row of the neighbours table for an offset with no record.</summary>
+    public const string NoRecordAtThisOffset = "no record at this offset";
+
+    /// <summary>The help line under "Include uncommitted records".</summary>
+    public const string UncommittedHelp = "Includes uncommitted records: a record may belong to a transaction that is later aborted";
+
+    /// <summary>The line beside a "Copy as predicate" the page refuses because the literal would be longer than the parser reads.</summary>
+    public const string CopyLiteralTooLong = "Not copied as a predicate: the value is longer than the 1,000 characters a search literal may have.";
+
+    /// <summary>The kcat line telling the visitor to add their own credentials.</summary>
+    public const string KcatCredentialsHint = "# add your own credentials (-X sasl.username=… -X sasl.password=…)";
+
+    /// <summary>The shell's variable a kcat line names when the bootstrap servers are not shown.</summary>
+    public const string KcatBootstrapVariable = "'$BOOTSTRAP'";
+
+    /// <summary>The notice for topics a pasted link named and the visitor may not search.</summary>
+    /// <param name="count">How many were dropped.</param>
+    public static string LinkTopicsDropped(int count) =>
+        $"This link named {count} topic(s) you cannot search here; the search below leaves them out.";
+
+    /// <summary>The line that says a continued search replaced the matches.</summary>
+    /// <param name="records">Records read by the search it continues.</param>
+    public static string ContinuedAfter(long records) =>
+        $"Continued after offsets read by the previous search ({KafkaDisplay.Number(records)} records).";
+
+    /// <summary>The audit target of a search: <c>orders.v1, payments.v1 · 2026-11-12 10:00Z – 11:00Z</c>.</summary>
+    /// <param name="topics">The topics.</param>
+    /// <param name="from">The window's start (UTC).</param>
+    /// <param name="to">The window's end (UTC).</param>
+    public static string SearchTarget(IReadOnlyList<string> topics, DateTimeOffset from, DateTimeOffset to)
+    {
+        const string Full = "yyyy-MM-dd HH:mm'Z'";
+        System.Globalization.CultureInfo invariant = System.Globalization.CultureInfo.InvariantCulture;
+        DateTimeOffset start = from.ToUniversalTime();
+        DateTimeOffset end = to.ToUniversalTime();
+        string endText = start.Date == end.Date ? end.ToString("HH:mm'Z'", invariant) : end.ToString(Full, invariant);
+
+        return string.Join(", ", topics) + " · " + start.ToString(Full, invariant) + " – " + endText;
+    }
+
+    /// <summary>What the audit says of a search text that did not parse: nobody can know which literal was on a redacted field.</summary>
+    /// <param name="length">The text's length.</param>
+    public static string PredicateDidNotParse(int length) => $"(a predicate that did not parse, {length} characters)";
+
+    /// <summary>The sentence for a start the engine refused (D-UI decision 11).</summary>
+    /// <param name="refusal">Why.</param>
+    /// <param name="limits">The limits the plan ran under.</param>
+    public static string Refusal(KStudio.Core.Scanning.KafkaScanRefusal refusal, KafkaScanLimits limits) => refusal switch
+    {
+        KStudio.Core.Scanning.KafkaScanRefusal.ProcessBusy => "Two searches are already running in this application. Try again when one has finished.",
+        KStudio.Core.Scanning.KafkaScanRefusal.OwnerBusy => "Another search of yours is running, in this tab or another. Stop it, or wait for it to finish.",
+        KStudio.Core.Scanning.KafkaScanRefusal.OwnerBudgetSpent =>
+            $"You have read your hourly allowance of {KafkaDisplay.Bytes(limits.OwnerBytesPerHour)}. It frees up as the hour rolls on.",
+        KStudio.Core.Scanning.KafkaScanRefusal.NeedsConfirmation => NeedsConfirmation,
+        KStudio.Core.Scanning.KafkaScanRefusal.PredicateInvalid => PredicateInvalid,
+        KStudio.Core.Scanning.KafkaScanRefusal.ShuttingDown => "The application is shutting down.",
+        _ => SearchFailed,
+    };
 }

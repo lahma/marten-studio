@@ -168,6 +168,14 @@ internal sealed class KafkaStudioHarness : IDisposable
             services.AddSingleton(Engine.Provider.GetRequiredService<KafkaClusterRegistry>());
             services.AddSingleton(Engine.Provider.GetRequiredService<KafkaSettingsReader>());
             services.AddSingleton<KafkaCatalogService>();
+
+            // Search and the record page (UI-B): the engine's scanner and its owner budget over the same fake broker, and the services around them.
+            services.TryAddSingleton(Engine.Clock);
+            services.AddSingleton(Engine.Provider.GetRequiredService<KStudio.Core.Scanning.IKafkaScanner>());
+            services.AddSingleton(Engine.Provider.GetRequiredService<KStudio.Core.Scanning.OwnerByteBudget>());
+            services.AddSingleton<KafkaOwnerKey>();
+            services.AddSingleton<KafkaSearchService>();
+            services.AddSingleton<KafkaRecordService>();
             extra?.Invoke(services);
         });
     }

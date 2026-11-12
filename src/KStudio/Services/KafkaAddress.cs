@@ -23,8 +23,75 @@ internal static class KafkaAddress
     /// <summary>Search.</summary>
     public const string SearchRoute = "kafka/search";
 
+    /// <summary>A record's page, the permalink (D-UI decision 14).</summary>
+    public const string RecordRoute = "kafka/record";
+
     /// <summary>The query-string name of a topic.</summary>
     public const string TopicParameter = "topic";
+
+    /// <summary>The query-string name of a partition.</summary>
+    public const string PartitionParameter = "partition";
+
+    /// <summary>The query-string name of an offset.</summary>
+    public const string OffsetParameter = "offset";
+
+    /// <summary>The query-string name of a search window's start, <c>yyyy-MM-ddTHH:mm:ssZ</c> (UTC).</summary>
+    public const string FromParameter = "from";
+
+    /// <summary>The query-string name of a search window's end, <c>yyyy-MM-ddTHH:mm:ssZ</c> (UTC).</summary>
+    public const string ToParameter = "to";
+
+    /// <summary>The query-string name of the isolation: <c>uncommitted</c> includes uncommitted records.</summary>
+    public const string IsolationParameter = "iso";
+
+    /// <summary>The value of <see cref="IsolationParameter" /> that includes uncommitted records.</summary>
+    public const string UncommittedValue = "uncommitted";
+
+    /// <summary>The fragment key that holds a search's predicate: <c>#q=…</c>. A browser never sends a fragment to a server (D-UI decision 10).</summary>
+    public const string PredicateFragmentKey = "q";
+
+    /// <summary>The format of <see cref="FromParameter" /> and <see cref="ToParameter" />.</summary>
+    public const string WindowFormat = "yyyy-MM-dd'T'HH:mm:ss'Z'";
+
+    /// <summary>A UTC instant as the address writes it.</summary>
+    /// <param name="value">The instant.</param>
+    public static string FormatWindow(DateTimeOffset value) =>
+        value.ToUniversalTime().ToString(WindowFormat, System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>Reads an address's window time; a value that does not parse is ignored.</summary>
+    /// <param name="text">The text.</param>
+    /// <param name="value">The instant, in UTC.</param>
+    public static bool TryParseWindow(string? text, out DateTimeOffset value) =>
+        DateTimeOffset.TryParseExact(
+            text,
+            WindowFormat,
+            System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal,
+            out value);
+
+    /// <summary>The search text of an address's fragment (<c>#q=…</c>), unescaped and cut at <paramref name="maxLength" />; <see langword="null" /> when there is none.</summary>
+    /// <param name="uri">An absolute address.</param>
+    /// <param name="maxLength">The longest text read.</param>
+    public static string? ReadPredicate(string uri, int maxLength)
+    {
+        int hash = uri.IndexOf('#', StringComparison.Ordinal);
+        if (hash < 0)
+        {
+            return null;
+        }
+
+        string prefix = PredicateFragmentKey + "=";
+        foreach (string part in uri[(hash + 1)..].Split('&'))
+        {
+            if (part.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                string text = Uri.UnescapeDataString(part[prefix.Length..]);
+                return text.Length > maxLength ? text[..maxLength] : text;
+            }
+        }
+
+        return null;
+    }
 
     /// <summary>The first value of the query-string parameter <paramref name="name" /> of an absolute address, or <see langword="null" />.</summary>
     /// <param name="uri">An absolute address.</param>

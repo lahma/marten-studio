@@ -89,6 +89,11 @@ public static class KafkaStudioServiceCollectionExtensions
         services.TryAddScoped<KafkaActionLog>();
         services.TryAddScoped<KafkaCatalogService>();
 
+        // Search and the record page (UI-B): scoped, because a search and its audit are one circuit's, and so is the owner of its scans.
+        services.TryAddScoped<KafkaOwnerKey>();
+        services.TryAddScoped<KafkaSearchService>();
+        services.TryAddScoped<KafkaRecordService>();
+
         // Which of the module's audit entries a visitor may read (D34): its own gate, never the host's store policy.
         services.TryAddEnumerable(ServiceDescriptor.Scoped<IStudioAuditScopeGate, KafkaAuditGate>());
 

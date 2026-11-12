@@ -16971,3 +16971,254 @@ dialog.ms-modal::backdrop {
 .ms-k-settings td {
     overflow-wrap: anywhere;
 }
+
+/* ===== KS-UI-B: search, results, the record detail ===== */
+
+/* The form: topics, window, isolation and the predicate, one under another in a column the width of the page. */
+.ms-k-search-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-md);
+    margin-bottom: var(--ms-space-lg);
+}
+
+.ms-k-search-form fieldset {
+    margin: 0;
+    padding: var(--ms-space-md);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+}
+
+.ms-k-search-form legend {
+    padding: 0 var(--ms-space-sm);
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-k-topics-header,
+.ms-k-presets,
+.ms-k-absolute,
+.ms-k-window-mode {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-sm) var(--ms-space-md);
+    margin-bottom: var(--ms-space-sm);
+}
+
+.ms-k-topic-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+    gap: var(--ms-space-xs) var(--ms-space-md);
+    max-height: 16rem;
+    overflow-y: auto;
+}
+
+.ms-k-topic-option {
+    display: flex;
+    align-items: center;
+    gap: var(--ms-space-sm);
+    overflow-wrap: anywhere;
+}
+
+.ms-k-window-text {
+    margin: var(--ms-space-sm) 0 0;
+    font-variant-numeric: tabular-nums;
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-k-isolation {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-sm);
+}
+
+/* The predicate box is a code box: monospace, no spell-checking, and as wide as the form. */
+.ms-k-predicate-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-xs);
+}
+
+.ms-k-predicate {
+    width: 100%;
+    font-family: var(--ms-font-mono);
+    resize: vertical;
+}
+
+.ms-k-predicate-errors {
+    margin: 0;
+    padding-left: var(--ms-space-lg);
+    color: var(--ms-color-text);
+}
+
+.ms-k-predicate-marks {
+    margin: 0;
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface-alt);
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.ms-k-predicate-marks mark {
+    background: var(--ms-color-warning-bg);
+    color: var(--ms-color-text);
+    text-decoration: underline wavy var(--ms-color-warning);
+}
+
+.ms-k-syntax > summary,
+.ms-k-verdicts > summary,
+.ms-k-progress > summary {
+    cursor: pointer;
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-k-syntax-examples code {
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-k-search-actions {
+    display: flex;
+    gap: var(--ms-space-md);
+}
+
+.ms-k-allowance {
+    margin: 0;
+}
+
+/* The plan, shown before anything is read: how each clause runs on each topic, what the window cannot cover, and the estimate. */
+.ms-k-verdicts {
+    margin-bottom: var(--ms-space-md);
+}
+
+.ms-k-verdicts ul,
+.ms-k-plan-notes ul,
+.ms-k-caveats ul {
+    margin: var(--ms-space-sm) 0 0;
+    padding-left: var(--ms-space-lg);
+}
+
+.ms-k-plan-notes,
+.ms-k-estimate {
+    margin-bottom: var(--ms-space-md);
+}
+
+.ms-k-estimate {
+    font-variant-numeric: tabular-nums;
+}
+
+/* How the search ended, and everything that could make a "no match" untrue, always beside it. */
+.ms-k-result-banner {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--ms-space-md);
+    margin: var(--ms-space-md) 0;
+    padding: var(--ms-space-md);
+    border: 1px solid var(--ms-color-border);
+    border-left-width: 3px;
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface-alt);
+}
+
+.ms-k-result-banner p {
+    margin: 0;
+}
+
+.ms-k-caveats {
+    margin-bottom: var(--ms-space-lg);
+    padding: var(--ms-space-md);
+    border: 1px solid var(--ms-color-warning);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-warning-bg);
+}
+
+.ms-k-caveats .ms-section-title {
+    margin-top: 0;
+}
+
+/* The matches. */
+.ms-k-sort {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-sm);
+    margin-bottom: var(--ms-space-sm);
+}
+
+.ms-k-matches td {
+    vertical-align: top;
+}
+
+.ms-k-chip {
+    margin: 0 var(--ms-space-xs) var(--ms-space-xs) 0;
+    cursor: pointer;
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-k-tombstone {
+    text-transform: lowercase;
+}
+
+/* A masked field and a null one never look like a value. */
+.ms-k-redacted {
+    color: var(--ms-color-text-secondary);
+    font-style: italic;
+}
+
+.ms-k-null {
+    color: var(--ms-color-text-secondary);
+    font-style: italic;
+    font-family: var(--ms-font-mono);
+}
+
+.ms-k-match-detail > td {
+    padding: var(--ms-space-md);
+    background: var(--ms-color-surface-alt);
+}
+
+/* The record detail, inline in the results and on the record page. */
+.ms-k-record-meta {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: var(--ms-space-xs) var(--ms-space-lg);
+    margin: 0 0 var(--ms-space-md);
+}
+
+.ms-k-record-meta dt {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-k-record-meta dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.ms-k-record-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-sm);
+    margin-top: var(--ms-space-md);
+}
+
+.ms-k-copy-note {
+    margin-top: var(--ms-space-sm);
+}
+
+/* The record page's neighbours: the record asked for stands out. */
+.ms-k-neighbours tr[aria-current="true"] td {
+    background: var(--ms-color-surface-alt);
+    font-weight: var(--ms-font-weight-medium);
+}
+
+.ms-k-neighbours td {
+    font-variant-numeric: tabular-nums;
+}
