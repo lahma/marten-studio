@@ -32,7 +32,11 @@ public sealed class HypopgServer : IAsyncLifetime
     public const string Image = "postgres:17.11";
 
     /// <summary>What installs hypopg inside the running container.</summary>
-    public const string Install = "apt-get update -qq && apt-get install -y -qq postgresql-17-hypopg";
+    // Only the extension's package, never the server's: `apt-get install` pulls in a newer postgresql-17 when PGDG has one (17.12 on
+    // 2026-11-12), which replaces plpgsql.so under the running 17.11 server ("undefined symbol: heap_datum_update_type"). hypopg uses
+    // planner hooks that are stable within a major version, so its .deb is installed alone (KS-CI-FIX-6).
+    public const string Install =
+        "apt-get update -qq && cd /tmp && apt-get download -qq postgresql-17-hypopg && dpkg --force-depends -i postgresql-17-hypopg_*.deb";
 
     private static readonly string RunId = Guid.NewGuid().ToString("N")[..8];
 
