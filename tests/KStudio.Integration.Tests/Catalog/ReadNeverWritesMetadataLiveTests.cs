@@ -41,7 +41,7 @@ public abstract class ReadNeverWritesMetadataLiveTests(KafkaFixture fixture)
         using IAdminClient plain = new AdminClientBuilder(fixture.Client("admin")).Build();
         plain.GetMetadata(topic, TimeSpan.FromSeconds(10));
 
-        TopicsExist(fixture, topic).Should().BeTrue("a default admin client's GetMetadata(topic) creates the topic here: the tests below mean something");
+        TopicAppears(fixture, topic).Should().BeTrue("a default admin client's GetMetadata(topic) creates the topic here: the tests below mean something");
         await DeleteAsync(topic);
     }
 
@@ -139,7 +139,7 @@ public abstract class ReadNeverWritesMetadataLiveTests(KafkaFixture fixture)
         listed.Should().NotContain([asked, readerGroup], "neither the asked group nor the reader's own was ever joined");
         listed.Should().NotContain(static x => x.StartsWith("kstudio-", StringComparison.Ordinal) && x.Length == "kstudio-".Length + 32, "no group named for the reader exists");
         LiveGroupOffsets.Committed(fixture, readerGroup, [new TopicPartition(topic, 0)]).Should().BeEmpty("the reader committed nothing");
-        TopicsExist(fixture, topic).Should().BeTrue();
+        TopicAppears(fixture, topic).Should().BeTrue();
     }
 
     [Fact]
@@ -253,6 +253,28 @@ public abstract class ReadNeverWritesMetadataLiveTests(KafkaFixture fixture)
             TaskScheduler.Default);
 
         TopicsExist(fixture, topic).Should().BeFalse("the scan consumer is built with allow.auto.create.topics=false whatever the host's config says");
+    }
+
+    /// <summary>
+    /// Whether the topic exists within 30 s. A broker creates an auto-created topic asynchronously after the metadata request that asked for
+    /// it, so a positive control waits on the condition (never a delay); the negative checks stay immediate.
+    /// </summary>
+    private static bool TopicAppears(KafkaFixture fixture, string topic)
+    {
+        DateTime deadline = DateTime.UtcNow.AddSeconds(30);
+
+        while (true)
+        {
+            if (TopicsExist(fixture, topic))
+            {
+                return true;
+            }
+
+            if (DateTime.UtcNow >= deadline)
+            {
+                return false;
+            }
+        }
     }
 
     private static bool TopicsExist(KafkaFixture fixture, string topic)
