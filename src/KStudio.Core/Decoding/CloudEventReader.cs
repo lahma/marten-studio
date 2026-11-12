@@ -226,7 +226,7 @@ internal static class CloudEventReader
 
             if (json && contentType is not null)
             {
-                if (!ValueDetector.TryParseJson(decoded, counters, out JsonElement element))
+                if (!ValueDetector.TryParseJson(decoded, counters, keep: true, out JsonElement element))
                 {
                     return Failed(length, "data_base64 as JSON", KafkaUndecodableReason.InvalidJson);
                 }

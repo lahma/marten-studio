@@ -279,7 +279,8 @@ internal static class ValueDetector
                 return Undecodable(value.Length, "JSON", KafkaUndecodableReason.TooLarge);
             }
 
-            if (TryParseJson(value, detection.Counters, out JsonElement element))
+            // Under the envelope grant the parse only decides the kind, so no copy of the document is kept.
+            if (TryParseJson(value, detection.Counters, payload, out JsonElement element))
             {
                 return new RecordValue
                 {
@@ -341,7 +342,7 @@ internal static class ValueDetector
             return Undecodable(value.Length, name, KafkaUndecodableReason.TooLarge);
         }
 
-        if (!TryParseJson(value, detection.Counters, out JsonElement element))
+        if (!TryParseJson(value, detection.Counters, keep: true, out JsonElement element))
         {
             return Undecodable(value.Length, name, KafkaUndecodableReason.InvalidJson);
         }
@@ -392,15 +393,16 @@ internal static class ValueDetector
     /// <summary>Parses JSON under the depth cap and keeps a standalone copy of the root: no document is held.</summary>
     /// <param name="value">The bytes.</param>
     /// <param name="counters">Counts the parse.</param>
-    /// <param name="element">The root, when the bytes are JSON.</param>
-    internal static bool TryParseJson(byte[] value, DecodeCounters counters, out JsonElement element)
+    /// <param name="keep">Whether the caller wants the element; when it only wants to know that the bytes are JSON, nothing is copied.</param>
+    /// <param name="element">The root, when the bytes are JSON and <paramref name="keep" />.</param>
+    internal static bool TryParseJson(byte[] value, DecodeCounters counters, bool keep, out JsonElement element)
     {
         counters.ValueParsed++;
 
         try
         {
             using JsonDocument document = JsonDocument.Parse(value, new JsonDocumentOptions { MaxDepth = 64 });
-            element = document.RootElement.Clone();
+            element = keep ? document.RootElement.Clone() : default;
             return true;
         }
         catch (JsonException)

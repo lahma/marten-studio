@@ -147,6 +147,20 @@ public class PayloadRedactionScanTests
         NoSentinel(matches);
     }
 
+    [Fact]
+    public async Task A_plan_says_whether_the_search_reads_values()
+    {
+        await using ScanFixture fixture = ScanFixture.Create();
+        string topic = fixture.Topic("reads-values");
+
+        (await fixture.PlanAsync(ScanFixture.Request([topic], "$.a = 1", grant: Payload))).ReadsValues.Should().BeTrue();
+        (await fixture.PlanAsync(ScanFixture.Request([topic], "key = 'k' and value ~ 'x'", grant: Payload))).ReadsValues.Should().BeTrue();
+        (await fixture.PlanAsync(ScanFixture.Request([topic], "any ~ 'x'", grant: Payload))).ReadsValues.Should().BeTrue();
+        (await fixture.PlanAsync(ScanFixture.Request([topic], "any ~ 'x'"))).ReadsValues.Should().BeFalse("without the grant any does not widen over the value");
+        (await fixture.PlanAsync(ScanFixture.Request([topic], "key = 'k' or value is null", grant: Payload))).ReadsValues.Should().BeFalse();
+        (await fixture.PlanAsync(ScanFixture.Request([topic], null, grant: Payload))).ReadsValues.Should().BeFalse();
+    }
+
     private sealed class HeaderEchoDecoder(List<string> seen) : IKafkaRecordDecoder
     {
         public string Name => "HeaderEcho";

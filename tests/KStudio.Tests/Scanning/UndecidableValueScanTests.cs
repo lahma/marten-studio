@@ -1,5 +1,6 @@
 using System.Text;
 
+using KStudio.Core.Decoding;
 using KStudio.Core.Scanning;
 using KStudio.Core.Wire;
 
@@ -184,6 +185,23 @@ public class UndecidableValueScanTests
         matches.Should().HaveCount(5);
         result.Undecidable.Should().Be(15);
         result.UndecidableSentences.Should().BeEquivalentTo("10 records could not be decoded as JSON", "5 records had a number too large to compare");
+    }
+
+    [Theory]
+    [InlineData(nameof(KafkaUnknownReason.KeyNotText), "had a key that could not be read as text")]
+    [InlineData(nameof(KafkaUnknownReason.HeaderNotText), "had a header value that could not be read as text")]
+    [InlineData(nameof(KafkaUnknownReason.InvalidJson), "could not be decoded as JSON")]
+    [InlineData(nameof(KafkaUnknownReason.TooLarge), "were larger than the decode limit")]
+    [InlineData(nameof(KafkaUnknownReason.NotACloudEvent), "were not CloudEvents although the topic declares them")]
+    [InlineData(nameof(KafkaUnknownReason.ValueNotText), "had a value that could not be read as text")]
+    [InlineData(nameof(KafkaUnknownReason.NumberOutOfRange), "had a number too large to compare")]
+    [InlineData(nameof(KafkaUnknownReason.DecoderFailed), "could not be decoded by the topic's decoder")]
+    [InlineData(nameof(KafkaUnknownReason.InvalidBase64), "had CloudEvents data_base64 that is not valid base64")]
+    [InlineData(nameof(KafkaUnknownReason.RedactionNotApplied), "could not be searched, because a redaction rule could not be applied to their value")]
+    public void Every_reason_has_its_sentence(string reason, string sentence)
+    {
+        KafkaUnknownReasonText.Describe(Enum.Parse<KafkaUnknownReason>(reason)).Should().Be(sentence);
+        Enum.GetValues<KafkaUnknownReason>().Should().HaveCount(10, "a new reason needs its sentence here");
     }
 
     private sealed class ThrowsOnBad : IKafkaRecordDecoder
