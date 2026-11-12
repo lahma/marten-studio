@@ -2,9 +2,11 @@ using JasperFx.Events;
 using JasperFx.MultiTenancy;
 
 using Marten;
+using Marten.Storage;
 
 using MartenStudio.Services;
 using MartenStudio.Services.Links;
+using MartenStudio.Tests.Services;
 
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.DependencyInjection;
@@ -226,21 +228,107 @@ public class MartenStudioRouteLinksTests
         Query(links.ToStream(new StudioLinkScope(null, "acme"), Guid.NewGuid().ToString())!).Keys.Should().NotContain("tenant");
     }
 
+    public static TheoryData<string> DatabasePerTenantKinds => new()
+    {
+        "master table",
+        "sharded",
+        "one server",
+        "static",
+        "custom",
+        "custom that throws",
+    };
+
+    /// <summary>
+    /// The page a link opens takes the database from the address or the visitor's current one and cannot find a tenant's database
+    /// without enumerating the tenancy, so a store that keeps each tenant in a database of its own gets no link: with a tenant, without
+    /// one, for a document and for a stream.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(DatabasePerTenantKinds))]
+    public void A_store_with_a_database_per_tenant_gets_no_link(string kind)
+    {
+        MartenStudioRouteLinks links = Links(services => services.AddMarten(x =>
+        {
+            x.Schema.For<Order>();
+            x.Events.AddEventType<OrderPlaced>();
+            DatabasePerTenant(x, kind);
+        }));
+
+        string stream = Guid.NewGuid().ToString();
+
+        links.ToDocument(new StudioLinkScope(null, "globex"), "order", "7").Should().BeNull(kind);
+        links.ToDocument(new StudioLinkScope(null, null), "order", "7").Should().BeNull(kind);
+        links.ToStream(new StudioLinkScope(null, "globex"), stream).Should().BeNull(kind);
+        links.ToStream(new StudioLinkScope(null, null), stream).Should().BeNull(kind);
+    }
+
     [Fact]
-    public void A_database_per_tenant_store_also_needs_the_tenant()
+    public void A_database_per_tenant_store_does_not_hide_another_stores_link()
+    {
+        MartenStudioRouteLinks links = Links(static services =>
+        {
+            services.AddMarten(x =>
+            {
+                x.Schema.For<Order>();
+                x.MultiTenantedDatabases(t => t.AddMultipleTenantDatabase(Connection, "a").ForTenants("acme"));
+            });
+            services.AddMartenStore<IBillingStore>(x =>
+            {
+                x.Connection(SecondConnection);
+                x.Schema.For<Invoice>();
+            });
+        });
+
+        links.ToDocument(new StudioLinkScope(null, "acme"), "order", "7").Should().BeNull();
+        links.ToDocument(new StudioLinkScope(null, null), "invoice", "7").Should().NotBeNull();
+    }
+
+    [Fact]
+    public void A_conjoined_store_still_gets_a_link_with_its_tenant_and_without_a_database()
     {
         MartenStudioRouteLinks links = Links(static services => services.AddMarten(x =>
         {
-            x.Schema.For<Order>();
-            x.MultiTenantedDatabases(t =>
-            {
-                t.AddMultipleTenantDatabase(Connection, "a").ForTenants("acme");
-                t.AddMultipleTenantDatabase(SecondConnection, "b").ForTenants("globex");
-            });
+            x.Connection(Connection);
+            x.Schema.For<Order>().MultiTenanted();
+            x.Events.AddEventType<OrderPlaced>();
+            x.Events.TenancyStyle = TenancyStyle.Conjoined;
         }));
 
-        links.ToDocument(new StudioLinkScope(null, null), "order", "7").Should().BeNull();
-        Query(links.ToDocument(new StudioLinkScope(null, "globex"), "order", "7")!).Keys.Should().NotContain("db");
+        string document = links.ToDocument(new StudioLinkScope(null, "globex"), "order", "7")!;
+        string stream = links.ToStream(new StudioLinkScope(null, "globex"), Guid.NewGuid().ToString())!;
+
+        foreach (string url in (string[])[document, stream])
+        {
+            Query(url).Should().Contain(new KeyValuePair<string, string?>("tenant", "globex"));
+            Query(url).Keys.Should().NotContain("db");
+        }
+    }
+
+    private static void DatabasePerTenant(StoreOptions options, string kind)
+    {
+        switch (kind)
+        {
+            case "master table":
+                options.MultiTenantedDatabasesWithMasterDatabaseTable(Connection, "tenants");
+                break;
+            case "sharded":
+                options.MultiTenantedWithShardedDatabases(t => t.ConnectionString = Connection);
+                break;
+            case "one server":
+                options.MultiTenantedWithSingleServer(Connection);
+                break;
+            case "static":
+                options.MultiTenantedDatabases(t =>
+                {
+                    t.AddMultipleTenantDatabase(Connection, "a").ForTenants("acme");
+                    t.AddMultipleTenantDatabase(SecondConnection, "b").ForTenants("globex");
+                });
+                break;
+            default:
+                options.MultiTenantedDatabases(t => t.AddMultipleTenantDatabase(Connection, "a").ForTenants("acme"));
+                options.Tenancy = (ITenancy)(object)StoreTenancyTests.CustomTenancy.Over(options.Tenancy, throwsCardinality: kind == "custom that throws");
+                break;
+        }
     }
 
     [Fact]

@@ -4,8 +4,10 @@ using MartenStudio.Internal.Sql;
 using MartenStudio.Services.Documents;
 using MartenStudio.Tests.Components;
 using MartenStudio.Tests.Documents;
+using MartenStudio.Tests.Support;
 
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 using PostgresStudio.Services.Settings;
 
@@ -117,6 +119,29 @@ public class RecordSearchLinkTests
 
         page.FindAll(".ms-record-search-link").Should().BeEmpty();
         page.Markup.Should().Contain("Open in Query");
+    }
+
+    [Fact]
+    public async Task A_module_that_throws_is_logged_at_debug_with_its_exception_type_and_draws_nothing()
+    {
+        CapturingLoggerProvider logs = new();
+        using StudioComponentContext context = await NewContextAsync(services =>
+        {
+            services.AddLogging(builder =>
+            {
+                builder.SetMinimumLevel(Microsoft.Extensions.Logging.LogLevel.Debug);
+                builder.AddProvider(logs);
+            });
+            services.AddSingleton<IStudioRecordSearchLinks>(new FakeSearchLinks("x", throws: true));
+        });
+        context.EventData.StreamStates[StreamId] = Stream();
+
+        IRenderedComponent<StreamPage> page = RenderStream(context);
+
+        page.FindAll(".ms-record-search-link").Should().BeEmpty();
+        page.Markup.Should().Contain("Open in feed");
+        logs.Entries.Should().ContainSingle(static x =>
+            x.Level == Microsoft.Extensions.Logging.LogLevel.Debug && x.Message.Contains(nameof(InvalidOperationException), StringComparison.Ordinal));
     }
 
     [Fact]

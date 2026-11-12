@@ -1,6 +1,8 @@
 @using PostgresStudio.Components.Shared
+@using Microsoft.Extensions.Logging
 @using PostgresStudio.Services.Settings
 @inject IServiceProvider Services
+@inject ILogger<RecordSearchLinkButton> Logger
 
 @*
     The button a record screen draws to search a module for the record it shows (D-CORR 8.2).
@@ -49,7 +51,8 @@
             return;
         }
 
-        // A module that throws is a module without a link: a Marten page never fails because of one.
+        // A module that throws is a module without a link: a Marten page never fails because of one. It is said at Debug, with the
+        // exception's type, so that a button that never appears has a reason somebody can find.
         try
         {
             href = links.ToSearch(request);
@@ -57,6 +60,7 @@
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
+            Logger.LogDebug(exception, "A module's record search link failed ({ExceptionType}); no button is drawn", exception.GetType().FullName);
             href = null;
             label = null;
         }

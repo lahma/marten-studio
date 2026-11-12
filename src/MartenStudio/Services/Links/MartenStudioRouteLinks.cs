@@ -34,10 +34,12 @@ namespace MartenStudio.Services.Links;
 /// store when it is, else <see langword="null" /> - the link would be a guess.
 /// </para>
 /// <para>
-/// <b>The tenant.</b> A store that keeps its tenants apart in any way (conjoined tables, a database per tenant, a tenancy the studio
-/// cannot classify) is given the tenant the caller knows; with none the answer is <see langword="null" />, because the page would
-/// open the visitor's current tenant and say "not found" falsely (OPEN-8). A store with no tenants ignores it. The link carries
-/// <c>store</c> and <c>tenant</c> and never <c>db</c>.
+/// <b>The tenant.</b> A single-database store with conjoined tenants is given the tenant the caller knows; with none the answer is
+/// <see langword="null" />, because the page would open the visitor's current tenant and say "not found" falsely (OPEN-8). A store
+/// with no tenants ignores it. A store that keeps each tenant in a database of its own (master table, sharded, one-server, static) -
+/// or whose tenancy the configuration cannot place in one database - gets no link at all: the page cannot open a tenant's database
+/// from a link without enumerating the tenancy, so the link would open the wrong one. The link carries <c>store</c> and
+/// <c>tenant</c> and never <c>db</c>.
 /// </para>
 /// </remarks>
 internal sealed class MartenStudioRouteLinks : IStudioRouteLinks
@@ -159,25 +161,35 @@ internal sealed class MartenStudioRouteLinks : IStudioRouteLinks
     }
 
     /// <summary>
-    /// The tenant the link carries. A store with no tenants carries none and always answers; a store with tenants answers only
-    /// when the caller knows one.
+    /// The tenant the link carries, or whether there is a link at all. A single-database store with no tenants carries none and always
+    /// answers; a single-database store with conjoined tenants answers only when the caller knows one. A store that keeps each tenant in
+    /// a database of its own - and any tenancy the configuration cannot place in one database - never answers: the page a link opens
+    /// takes the database from the address or the visitor's current one, and cannot find a tenant's database without enumerating the
+    /// tenancy, so the link would open the wrong database.
     /// </summary>
     private static bool TenantFor(IDocumentStore store, MartenStudioOptions current, string? tenantId, out string? tenant)
     {
         tenant = null;
 
-        if (StoreTenancy.Classify(store.Options, current.IsDocumentTypeVisible).Kind == StoreTenancyKind.Single)
+        // Read from the configuration alone: the tenancy's type and its in-memory cardinality, never its databases (hard rule 14).
+        switch (StoreTenancy.Classify(store.Options, current.IsDocumentTypeVisible).Kind)
         {
-            return true;
-        }
+            case StoreTenancyKind.Single:
+                return true;
 
-        if (string.IsNullOrWhiteSpace(tenantId))
-        {
-            return false;
-        }
+            case StoreTenancyKind.Conjoined or StoreTenancyKind.ConjoinedPartitioned:
+                if (string.IsNullOrWhiteSpace(tenantId))
+                {
+                    return false;
+                }
 
-        tenant = tenantId;
-        return true;
+                tenant = tenantId;
+                return true;
+
+            default:
+                // MasterTable, Sharded, OneServer, Static and Custom (which includes a tenancy that would not say): fail closed.
+                return false;
+        }
     }
 
     /// <summary>The alias a name resolves to in one store, by alias, then CLR full name, then CLR name.</summary>
