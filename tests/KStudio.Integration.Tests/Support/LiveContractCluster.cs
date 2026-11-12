@@ -199,27 +199,33 @@ internal sealed class LiveContractCluster : IContractCluster
     /// <param name="topic">The topic.</param>
     /// <param name="partition">The partition.</param>
     /// <param name="offset">The offset to commit.</param>
-    public void CommitGroupOffset(string group, string topic, int partition, long offset)
+    public async Task CommitGroupOffsetAsync(string group, string topic, int partition, long offset)
     {
-        ConsumerConfig config = new(fixture.Client("admin")) { GroupId = group, EnableAutoCommit = false };
-        using IConsumer<byte[], byte[]> consumer = new ConsumerBuilder<byte[], byte[]>(config).Build();
+        // Through the admin client the cluster already has: a consumer that spun on Commit while the group's coordinator was not ready and was then
+        // disposed with a lookup in flight is librdkafka #5347's path (CI run 43212361402). Each retry is one awaited round trip.
+        List<ConsumerGroupTopicPartitionOffsets> request = [new(group, [new TopicPartitionOffset(topic, partition, offset)])];
+        AlterConsumerGroupOffsetsOptions options = new() { RequestTimeout = TimeSpan.FromSeconds(10) };
         DateTime deadline = DateTime.UtcNow.AddSeconds(60);
 
         while (true)
         {
             try
             {
-                consumer.Commit([new TopicPartitionOffset(topic, partition, offset)]);
-                break;
+                await admin.AlterConsumerGroupOffsetsAsync(request, options);
+                return;
+            }
+            catch (AlterConsumerGroupOffsetsException e) when (
+                e.Results.Any(static x => IsCoordinatorNotReady(x.Error.Code) || x.Partitions.Any(static p => IsCoordinatorNotReady(p.Error.Code)))
+                && DateTime.UtcNow < deadline)
+            {
+                // A new group's coordinator is still being elected or loaded on a fresh broker (CI, marten-latest run 43208517391):
+                // the call is retried until the coordinator answers, a poll of a condition, not a delay.
             }
             catch (KafkaException e) when (IsCoordinatorNotReady(e.Error.Code) && DateTime.UtcNow < deadline)
             {
-                // A new group's coordinator is still being elected or loaded on a fresh broker (CI, marten-latest run 43208517391):
-                // the commit is retried until the coordinator answers, a poll of a condition, not a delay.
+                // The same, reported for the whole call.
             }
         }
-
-        consumer.Close();
     }
 
     private static bool IsCoordinatorNotReady(ErrorCode code) =>
@@ -227,29 +233,35 @@ internal sealed class LiveContractCluster : IContractCluster
 
     public async ValueTask DisposeAsync()
     {
-        producer.Dispose();
-
-        string[] created;
-
-        lock (topics)
+        try
         {
-            created = [.. topics];
-        }
+            producer.Dispose();
 
-        if (created.Length > 0)
+            string[] created;
+
+            lock (topics)
+            {
+                created = [.. topics];
+            }
+
+            if (created.Length > 0)
+            {
+                try
+                {
+                    await admin.DeleteTopicsAsync(created);
+                }
+                catch (DeleteTopicsException)
+                {
+                    // A topic already gone is not a failure of the test that used it.
+                }
+            }
+        }
+        finally
         {
-            try
-            {
-                await admin.DeleteTopicsAsync(created);
-            }
-            catch (DeleteTopicsException)
-            {
-                // A topic already gone is not a failure of the test that used it.
-            }
+            // Whatever the delete did, the admin client and the engine are disposed.
+            admin.Dispose();
+            await Engine.DisposeAsync();
         }
-
-        admin.Dispose();
-        await Engine.DisposeAsync();
     }
 
     private static Message<byte[], byte[]> ToMessage(ContractRecord record)

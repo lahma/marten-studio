@@ -169,35 +169,43 @@ internal sealed class ConfluentSeedTarget(ClientConfig config) : IKafkaSeedTarge
     }
 
     /// <inheritdoc />
-    public Task CommitAsync(IReadOnlyList<SeedCommit> commits, CancellationToken cancellationToken)
+    public async Task CommitAsync(IReadOnlyList<SeedCommit> commits, CancellationToken cancellationToken)
     {
+        // The sample application's own consumer group commits what it has handled, as an admin call: it joins no group and starts no consumer,
+        // so no client is torn down with a coordinator lookup in flight (librdkafka #5347). Each retry is one awaited round trip.
+        using IAdminClient admin = new AdminClientBuilder(config).Build();
+        AlterConsumerGroupOffsetsOptions options = new() { RequestTimeout = TimeSpan.FromSeconds(10) };
+
         foreach (IGrouping<string, SeedCommit> group in commits.GroupBy(static x => x.Group, StringComparer.Ordinal))
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            List<ConsumerGroupTopicPartitionOffsets> request =
+            [
+                new(group.Key, [.. group.Select(static x => new TopicPartitionOffset(x.Topic, x.Partition, x.Offset))]),
+            ];
 
-            // The sample application's own consumer group commits what it has handled, without joining the group: an offset commit needs no assignment.
-            using IConsumer<Ignore, Ignore> consumer = new ConsumerBuilder<Ignore, Ignore>(
-                new ConsumerConfig(config) { GroupId = group.Key, EnableAutoCommit = false }).Build();
-
-            TopicPartitionOffset[] offsets = [.. group.Select(static x => new TopicPartitionOffset(x.Topic, x.Partition, x.Offset))];
             DateTime deadline = DateTime.UtcNow.AddSeconds(60);
 
             while (true)
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
                 try
                 {
-                    consumer.Commit(offsets);
+                    await admin.AlterConsumerGroupOffsetsAsync(request, options).ConfigureAwait(false);
                     break;
+                }
+                catch (AlterConsumerGroupOffsetsException e) when (
+                    e.Results.Any(static x => IsCoordinatorNotReady(x.Error.Code) || x.Partitions.Any(static p => IsCoordinatorNotReady(p.Error.Code)))
+                    && DateTime.UtcNow < deadline)
+                {
+                    // On a broker that has just started, the group's coordinator can still be elected or loading: retry until it answers.
                 }
                 catch (KafkaException e) when (IsCoordinatorNotReady(e.Error.Code) && DateTime.UtcNow < deadline)
                 {
-                    // On a broker that has just started, the group's coordinator can still be elected or loading: retry until it answers.
-                    cancellationToken.ThrowIfCancellationRequested();
+                    // The same, reported for the whole call.
                 }
             }
         }
-
-        return Task.CompletedTask;
     }
 
     private static bool IsCoordinatorNotReady(ErrorCode code) =>
