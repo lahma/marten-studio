@@ -23,7 +23,11 @@ public class KafkaAddressTests
         string href = KafkaAddress.Href(settings, KafkaAddress.SearchRoute, key, (KafkaAddress.TopicParameter, "orders.v1"));
         string absolute = "https://host" + (href.StartsWith('/') ? href : "/" + href);
 
-        href.Should().NotContain("cluster=" + key, "a slash in a query value is escaped, so the address does not read as a path");
+        if (key.Contains('/', StringComparison.Ordinal))
+        {
+            href.Should().NotContain("cluster=" + key, "a slash in a query value is escaped, so the address does not read as a path");
+        }
+
         KafkaAddress.Get(absolute, KafkaState.ClusterParameter).Should().Be(key);
         KafkaState.ReadCluster(absolute).Should().Be(key);
         KafkaAddress.Get(absolute, KafkaAddress.TopicParameter).Should().Be("orders.v1");

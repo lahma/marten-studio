@@ -142,7 +142,7 @@ public class KafkaStateTests
         harness.State.ActiveCluster!.Key.Should().Be("wolverine/acme");
         harness.State.ActiveCluster.TenantId.Should().Be("acme");
         harness.State.ActiveCluster.Cluster.Should().Be("wolverine");
-        harness.State.AvailableClusters.Select(static x => x.Label).Should().Equal("wolverine", "wolverine · acme", "wolverine · globex");
+        harness.State.AvailableClusters.Select(static x => x.Key).Should().Equal("wolverine", "wolverine/acme", "wolverine/globex");
     }
 
     [Fact]
