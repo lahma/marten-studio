@@ -57,6 +57,10 @@ samples/PostgresStudio.SampleData/       The demo data with no Marten in it, sha
                                          tests: Quartz.NET's job store (vendored, Apache-2.0), the "legacy" catalog
                                          edge-case schema, studio_sample.app_settings, and the tenant databases with
                                          their directory - all idempotent. References no studio (D17)
+samples/KStudio.Sample/                  The KStudio sample: Marten Studio and KStudio over throwaway Postgres and Kafka (D18)
+samples/KStudio.Sample/Kafka/            Its Kafka container, seeder and judge
+samples/KStudio.Sample/Auth/             Its cookie sign-in, copied from the Marten sample
+samples/KStudio.Sample/Properties/       Its launch profile, port 5212
 samples/PostgresStudio.Sample/           The Postgres Studio sample host (D18), no Marten: an admin database and three
                                          tenant databases through its own IPostgresDatabaseSource - README snippet regions
 samples/PostgresStudio.Sample/Auth/      Cookie auth, the three demo users, the studio policy and the per-capability one
@@ -405,5 +409,6 @@ tests/KStudio.Integration.Tests/Catalog/  The catalog as principals with differe
 tests/KStudio.Integration.Tests/Scanning/  The scan engine on real records: stop reasons, transactions, retention before and during a scan, the
                                          governor, the memory ceiling and that a scan writes nothing
 tests/KStudio.Integration.Tests/Search/  Find the message with this id (the M1 exit), as restricted principals, and the search service against live brokers
+tests/KStudio.Integration.Tests/Sample/  The sample host, started once, and the sample's seed, judge and policies without Docker
 tests/KStudio.Integration.Tests/Shell/   Live Kafka and Postgres: first navigation creates no topic, commits no offset, writes no row, makes no broker call while prerendering
 ```

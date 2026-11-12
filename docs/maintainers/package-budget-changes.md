@@ -686,3 +686,14 @@ Kafka module of the Testcontainers release already budgeted (`Testcontainers.Pos
 (`DependencyInjection.Abstractions`, `Logging.Abstractions`, `Options`, 10.0.0) are no new package: the conditional rows
 of 2026-11-01 are widened to a project that sets `KStudioCorePinsExtensions`, for the reason they were made
 conditional. None of the KStudio projects is packed (plan K8).
+
+**2026-11-12 — No new package: `samples/KStudio.Sample` is a second user of `Testcontainers.Kafka` `4.15.0` and a fourth sample host of
+`Testcontainers.PostgreSql` `4.15.0`, and it takes `Confluent.Kafka` `2.14.0` transitively.** The KStudio sample (M2, D18) starts a
+throwaway `apache/kafka:4.4.0` through `Testcontainers.Kafka`, as the live suite's fixture does, and a throwaway
+`postgres:17-alpine` through `Testcontainers.PostgreSql`, as the Marten and Postgres Studio samples do, so that a
+zero-config `dotnet run` shows the Kafka pages over real data. Nothing in the budget changes version and no `Directory.Packages.props`
+row is added: both packages are already pinned centrally. Its seeder produces records with `Confluent.Kafka`'s producer and
+commits one consumer group's offsets, through the project reference to `src/KStudio` and so to `KStudio.Core`, which carries the
+package; the sample has no `PackageReference` to it. That producer and consumer are the sample's own, never KStudio's, which reads and
+never writes (hard rule 17). The sample is not packed and is not in `postgres-studio.slnf`, because it has Marten.
+

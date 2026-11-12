@@ -33,6 +33,9 @@
     <ProjectReference Include="../../src/KStudio/KStudio.csproj" />
     <!-- Only for KafkaFirstNavigationLiveTests' Marten Studio host case (D-SHELL 12.1): KStudio is a module of either studio. Marten arrives through it. -->
     <ProjectReference Include="../../src/MartenStudio/MartenStudio.csproj" />
+    <!-- Only for SampleSeedTests, SampleHostLiveTests and the sample's live search (SAMPLE): the demo's seed, judge and policies are internal to it
+         (InternalsVisibleTo), and the host is started from its own build output as a child process, as MartenStudio.Integration.Tests starts its sample. -->
+    <ProjectReference Include="../../samples/KStudio.Sample/KStudio.Sample.csproj" />
   </ItemGroup>
 
   <!-- The contract suites run here on real brokers: WireContract and WindowContract are compiled into this assembly from the fast suite's

@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <UserSecretsId>kstudio-sample</UserSecretsId>
+    <IsPackable>false</IsPackable>
+
+    <!--
+      Deliberately NO `RequiresAspNetWebAssets`, as in the Marten sample: the studio's own PackageReference to
+      Microsoft.AspNetCore.App.Internal.Assets brings blazor.web.js here transitively, and the fact that /marten is
+      interactive without the property is the shape a real host has. (Setting it would also be NU1009 under central package
+      management.)
+    -->
+  </PropertyGroup>
+
+  <!-- Confluent.Kafka arrives through KStudio.Core, with no reference of its own: the seeder is the one place this host uses it. -->
+  <ItemGroup>
+    <PackageReference Include="Testcontainers.PostgreSql" />
+    <PackageReference Include="Testcontainers.Kafka" />
+  </ItemGroup>
+
+  <!-- The seed, the judge and the policies are tested; all of them are internal to the demo. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="KStudio.Integration.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/MartenStudio/MartenStudio.csproj" />
+    <ProjectReference Include="../../src/KStudio/KStudio.csproj" />
+    <ProjectReference Include="../MartenStudio.SampleDomain/MartenStudio.SampleDomain.csproj" />
+  </ItemGroup>
+
+</Project>
