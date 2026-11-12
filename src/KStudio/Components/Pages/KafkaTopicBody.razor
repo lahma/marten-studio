@@ -1,0 +1,519 @@
+@implements IAsyncDisposable
+@using System.Globalization
+@using KStudio.Core.Catalog
+@using KStudio.Core.Windows
+@using Microsoft.Extensions.Logging
+@using PostgresStudio.Services
+@using PostgresStudio.Services.Live
+@using PostgresStudio.Services.Settings
+@inject KafkaState State
+@inject KafkaCatalogService Catalog
+@inject KafkaCapabilityGuard Capabilities
+@inject NavigationManager Navigation
+@inject StudioLiveUpdatesFactory LiveFactory
+@inject IStudioSettings Settings
+@inject StudioState Studio
+@inject ILogger<KafkaTopicBody> Logger
+
+@* The body of the topic overview (D-UI decision 8). Missing, invalid and refused all render one notice, and the invalid and the refused make no
+   broker call. Every field the broker may refuse is drawn as a value: a narrow key still sees the rest of the page, with one notice per distinct
+   refusal rather than one per cell. *@
+
+<div class="ms-page ms-k-topic">
+    <nav class="ms-db-breadcrumb" aria-label="Breadcrumb">
+        <a href="@TopicsHref">Topics</a>
+        <span class="ms-db-breadcrumb-sep" aria-hidden="true">/</span>
+        <span>@(topicName ?? "Topic")</span>
+    </nav>
+
+    @if (refreshError is not null)
+    {
+        <p class="ms-muted ms-k-refresh-error" role="status">@refreshError</p>
+    }
+
+    @if (error is not null)
+    {
+        <ErrorAlert Message="@error" />
+    }
+    else if (loading)
+    {
+        <LoadingSpinner />
+    }
+    else if (result is KafkaTopicPageResult.Found found)
+    {
+        KafkaTopicOverview overview = found.Overview;
+        KafkaTopicConfigView? config = overview.Config.IsAvailable ? overview.Config.Value : null;
+        int openTransactions = overview.Partitions.Count(static x => x.OpenTransaction == true);
+
+        <div class="ms-page-header">
+            <h1 class="ms-page-title"><BreakableName Value="@overview.Name" /></h1>
+        </div>
+
+        <div class="ms-k-topic-chips">
+            <span class="ms-chip">@(found.Declared ? "Declared" : "Not declared")</span>
+            @if (overview.IsInternal)
+            {
+                <span class="ms-chip">Internal</span>
+            }
+            <span class="ms-chip">Keys: @KafkaDisplay.KeyFormat(found.KeyFormat, found.KeyFormatDeclared)</span>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(found.Description))
+        {
+            <p class="ms-k-topic-description">@found.Description</p>
+        }
+
+        @if (config is { IsCompacted: true })
+        {
+            <p class="ms-k-note ms-k-note-warning" role="note">@(new WindowNote.CompactedTopic(overview.Name).Text)</p>
+        }
+
+        @if (config is { RemoteStorageEnabled: true })
+        {
+            <p class="ms-k-note ms-k-note-warning" role="note">@(new WindowNote.TieredStorage(overview.Name).Text)</p>
+        }
+
+        @if (openTransactions > 0)
+        {
+            <p class="ms-k-note ms-k-note-warning" role="note">@KafkaStudioText.OpenTransaction(openTransactions)</p>
+        }
+
+        <div class="ms-stat-grid ms-k-stats">
+            <StatCard Title="Partitions" Value="@KafkaDisplay.Number(overview.Partitions.Count)" />
+            <StatCard Title="Offset span" Value="@(overview.OffsetSpan is { } span ? KafkaDisplay.Span(span) : "—")" />
+            <StatCard Title="Offsets per second" Value="@(overview.OffsetsPerSecond is { } rate ? "~" + rate.ToString("0.##", CultureInfo.InvariantCulture) + "/s" : "measuring…")" />
+            <StatCard Title="Retention" Value="@RetentionText(config)" />
+            <StatCard Title="Timestamp type" Value="@(config?.TimestampType ?? "—")" />
+        </div>
+
+        @foreach (string notice in PartitionNotices(overview))
+        {
+            <p class="ms-k-note" role="note">@notice</p>
+        }
+
+        <h2 class="ms-section-title">Partitions</h2>
+        <TableScroll Label="Partitions">
+            <table class="ms-table ms-k-partitions">
+                <thead>
+                    <tr>
+                        <th>Partition</th>
+                        <th>Leader</th>
+                        <th>Replicas</th>
+                        <th>In sync</th>
+                        <th>Low</th>
+                        <th>High</th>
+                        <th>LSO</th>
+                        <th title="@KafkaDisplay.OffsetSpanTitle">Span</th>
+                        <th>First record</th>
+                        <th title="The record with the highest timestamp, which is not always the last record">Highest timestamp</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (KafkaPartitionOverview partition in overview.Partitions)
+                    {
+                        <tr class="ms-table-row" @key="partition.Partition">
+                            <td class="ms-table-cell">@partition.Partition</td>
+                            <td class="ms-table-cell">@(partition.Leader < 0 ? "none" : partition.Leader.ToString(CultureInfo.InvariantCulture))</td>
+                            <td class="ms-table-cell">@string.Join(", ", partition.Replicas)</td>
+                            <td class="ms-table-cell">
+                                @string.Join(", ", partition.InSyncReplicas)
+                                @if (partition.InSyncReplicas.Count < partition.Replicas.Count)
+                                {
+                                    <span class="ms-chip ms-chip-warning ms-k-under-replicated">under-replicated</span>
+                                }
+                            </td>
+                            <td class="ms-table-cell">@OffsetText(partition.LowWatermark)</td>
+                            <td class="ms-table-cell">@OffsetText(partition.HighWatermark)</td>
+                            <td class="ms-table-cell">@LsoText(partition)</td>
+                            <td class="ms-table-cell ms-k-span">@(partition.OffsetSpan is { } partitionSpan ? KafkaDisplay.Span(partitionSpan) : "—")</td>
+                            <td class="ms-table-cell">@TimestampText(partition.FirstTimestamp)</td>
+                            <td class="ms-table-cell">@TimestampText(partition.HighestTimestamp)</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </TableScroll>
+
+        <h2 class="ms-section-title">Configuration</h2>
+        @if (config is not null)
+        {
+            <dl class="ms-k-config">
+                <dt>retention.ms</dt><dd>@ConfigText(config.RetentionMs)</dd>
+                <dt>retention.bytes</dt><dd>@ConfigText(config.RetentionBytes)</dd>
+                <dt>cleanup.policy</dt><dd>@(config.CleanupPolicy ?? "not set")</dd>
+                <dt>message.timestamp.type</dt><dd>@(config.TimestampType ?? "not set")</dd>
+                <dt>remote.storage.enable</dt><dd>@(config.RemoteStorageEnabled ? "true" : "false")</dd>
+                <dt>local.retention.ms</dt><dd>@ConfigText(config.LocalRetentionMs)</dd>
+                <dt>local.retention.bytes</dt><dd>@ConfigText(config.LocalRetentionBytes)</dd>
+                <dt>max.message.bytes</dt><dd>@ConfigText(config.MaxMessageBytes)</dd>
+            </dl>
+        }
+        else
+        {
+            <p class="ms-k-note" role="note">@KafkaAccessText.Describe(overview.Config.Error!)</p>
+        }
+
+        <h2 class="ms-section-title">Consumer groups</h2>
+        @if (overview.Groups.Count == 0)
+        {
+            <p class="ms-muted">@KafkaStudioText.NoConsumerGroups</p>
+        }
+        else
+        {
+            <TableScroll Label="Consumer groups">
+                <table class="ms-table">
+                    <thead>
+                        <tr>
+                            <th>Group</th>
+                            <th>State</th>
+                            <th>Members</th>
+                            <th title="@KafkaDisplay.OffsetSpanTitle">Total lag</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (KafkaGroupOverview group in overview.Groups)
+                        {
+                            <tr class="ms-table-row" @key="group.GroupId">
+                                <td class="ms-table-cell"><code>@group.GroupId</code></td>
+                                @if (group.State.IsAvailable)
+                                {
+                                    <td class="ms-table-cell">@group.State.Value.State</td>
+                                    <td class="ms-table-cell">@group.State.Value.MemberCount</td>
+                                }
+                                else
+                                {
+                                    <td class="ms-table-cell ms-muted" colspan="2">@KafkaAccessText.Describe(group.State.Error!)</td>
+                                }
+                                <td class="ms-table-cell ms-k-span">@TotalLagText(group)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </TableScroll>
+
+            @foreach (KafkaGroupOverview group in overview.Groups.Where(static x => x.Lag.IsAvailable))
+            {
+                <details class="ms-k-group-lag" @key="group.GroupId">
+                    <summary>Lag of <code>@group.GroupId</code> per partition</summary>
+                    <TableScroll Label="@("Lag of " + group.GroupId)">
+                        <table class="ms-table">
+                            <thead>
+                                <tr>
+                                    <th>Partition</th>
+                                    <th>Committed</th>
+                                    <th>Lag</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (KafkaGroupLag lag in group.Lag.Value)
+                                {
+                                    <tr class="ms-table-row" @key="lag.Partition">
+                                        <td class="ms-table-cell">@lag.Partition.Partition</td>
+                                        <td class="ms-table-cell">@CommittedText(lag)</td>
+                                        <td class="ms-table-cell">@(lag.Lag is { } value ? KafkaDisplay.Number(value) : "—")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </TableScroll>
+                </details>
+            }
+        }
+
+        <h2 class="ms-section-title">Search this topic</h2>
+        @if (Capabilities.IsEnabled(KafkaCapability.SearchRecords))
+        {
+            <p><a class="ms-button" href="@SearchHref(overview.Name)">Search this topic</a></p>
+        }
+        else
+        {
+            <KafkaCapabilityDisabled Capability="@nameof(KafkaStudioCapabilities.SearchRecords)" Action="search this topic" />
+        }
+    }
+    else if (result is KafkaTopicPageResult.Withheld withheld)
+    {
+        <div class="ms-page-header">
+            <h1 class="ms-page-title"><BreakableName Value="@topicName" /></h1>
+        </div>
+        <p class="ms-k-note" role="note">@withheld.Text</p>
+    }
+    else
+    {
+        <div class="ms-empty" role="status">
+            <p class="ms-empty-title">Not found</p>
+            <p class="ms-empty-description">@(string.IsNullOrEmpty(topicName) ? KafkaStudioText.TopicMissing : KafkaStudioText.TopicNotAvailable(topicName))</p>
+        </div>
+    }
+</div>
+
+@code {
+    private readonly CancellationTokenSource lifetime = new();
+    private readonly SemaphoreSlim gate = new(1, 1);
+
+    private StudioLiveUpdates? live;
+    private KafkaTopicPageResult? result;
+    private string? topicName;
+    private string? error;
+    private string? refreshError;
+    private bool loading = true;
+    private bool disposed;
+    private bool ready;
+
+    /// <summary>Completed by the frame once the cluster policy passed and the circuit is interactive: a body reads nothing before it.</summary>
+    [CascadingParameter(Name = KafkaPageFrame.ReadyName)]
+    public Task? Ready { get; set; }
+
+    private string TopicsHref => KafkaAddress.Href(Settings, KafkaAddress.TopicsRoute, State.ActiveCluster?.Key);
+
+    private string SearchHref(string topic) =>
+        KafkaAddress.Href(Settings, KafkaAddress.SearchRoute, State.ActiveCluster?.Key, (KafkaAddress.TopicParameter, topic));
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            if (Ready is not null)
+            {
+                await Ready;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        if (disposed)
+        {
+            return;
+        }
+
+        topicName = KafkaAddress.Get(Navigation.Uri, KafkaAddress.TopicParameter);
+        State.ClusterChanged += OnClusterChangedAsync;
+        Navigation.LocationChanged += OnLocationChanged;
+        ready = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || disposed || !ready)
+        {
+            return;
+        }
+
+        await ReloadAsync();
+
+        if (disposed)
+        {
+            return;
+        }
+
+        live = LiveFactory.Create();
+        live.Failed += OnLiveFailedAsync;
+        await live.StartAsync(Settings.RefreshInterval, TickAsync, lifetime.Token);
+    }
+
+    private async Task TickAsync(CancellationToken cancellationToken)
+    {
+        await LoadAsync(cancellationToken);
+        refreshError = null;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OnLiveFailedAsync(Exception exception)
+    {
+        refreshError = KafkaStudioText.CouldNotRefresh;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ReloadAsync()
+    {
+        try
+        {
+            await LoadAsync(default);
+            refreshError = null;
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception e) when (!disposed)
+        {
+            Logger.LogWarning(e, "The Kafka topic page failed to read the catalog");
+            error = KafkaStudioText.ReadFailed;
+            loading = false;
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task LoadAsync(CancellationToken poll)
+    {
+        if (disposed || State.ActiveCluster is not { } active)
+        {
+            return;
+        }
+
+        using CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token, poll);
+        await gate.WaitAsync(linked.Token);
+
+        try
+        {
+            string? asked = topicName;
+            KafkaTopicPageResult read = await Catalog.GetTopicAsync(active, asked, linked.Token);
+
+            // The cluster or the topic changed while this was reading: the answer is about something nobody is looking at.
+            if (disposed || State.ActiveCluster != active || !string.Equals(asked, topicName, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            result = read;
+            error = null;
+            loading = false;
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        _ = InvokeAsync(ApplyAddressAsync);
+    }
+
+    private async Task ApplyAddressAsync()
+    {
+        string? next = KafkaAddress.Get(Navigation.Uri, KafkaAddress.TopicParameter);
+
+        if (disposed || string.Equals(next, topicName, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        topicName = next;
+        result = null;
+        loading = true;
+        await InvokeAsync(StateHasChanged);
+        await ReloadAsync();
+    }
+
+    private async Task OnClusterChangedAsync()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        result = null;
+        loading = true;
+        await InvokeAsync(StateHasChanged);
+        await ReloadAsync();
+    }
+
+    /// <summary>One notice per distinct refusal sentence among the partition fields, so that a narrow key does not repeat "Not available" in every cell.</summary>
+    private static IEnumerable<string> PartitionNotices(KafkaTopicOverview overview)
+    {
+        List<string> notices = [];
+
+        foreach (KafkaPartitionOverview partition in overview.Partitions)
+        {
+            Add(notices, partition.LowWatermark.Error);
+            Add(notices, partition.HighWatermark.Error);
+            Add(notices, partition.LastStableOffset.Error);
+            Add(notices, partition.FirstTimestamp.Error);
+            Add(notices, partition.HighestTimestamp.Error);
+        }
+
+        return notices;
+
+        static void Add(List<string> notices, KStudio.Core.Wire.WireError? refusal)
+        {
+            if (refusal is not null && KafkaAccessText.Describe(refusal) is { } text && !notices.Contains(text, StringComparer.Ordinal))
+            {
+                notices.Add(text);
+            }
+        }
+    }
+
+    private static string OffsetText(KafkaField<long> field) => field.IsAvailable ? KafkaDisplay.Number(field.Value) : "—";
+
+    /// <summary>The last stable offset, only where it is below the high watermark: an open transaction holds offsets back there.</summary>
+    private static string LsoText(KafkaPartitionOverview partition) =>
+        partition.LastStableOffset.IsAvailable && partition.HighWatermark.IsAvailable && partition.LastStableOffset.Value < partition.HighWatermark.Value
+            ? KafkaDisplay.Number(partition.LastStableOffset.Value)
+            : string.Empty;
+
+    private string TimestampText(KafkaField<KafkaTimestampAt?> field)
+    {
+        if (!field.IsAvailable)
+        {
+            return "—";
+        }
+
+        return field.Value is { } at
+            ? KafkaDisplay.Number(at.Offset) + " · " + Studio.FormatInSelectedTimeZone(at.Timestamp, "yyyy-MM-dd HH:mm:ss")
+            : "empty";
+    }
+
+    private static string RetentionText(KafkaTopicConfigView? config)
+    {
+        if (config?.RetentionMs is not { } milliseconds)
+        {
+            return "—";
+        }
+
+        string text = KafkaDisplay.Retention(milliseconds);
+
+        return config.RetentionBytes is { } bytes and not -1 ? text + " · " + KafkaDisplay.Bytes(bytes) : text;
+    }
+
+    private static string ConfigText(long? value) => value is { } number ? (number < 0 ? "-1 (unlimited)" : KafkaDisplay.Number(number)) : "not set";
+
+    private static string TotalLagText(KafkaGroupOverview group)
+    {
+        if (!group.Lag.IsAvailable)
+        {
+            return "—";
+        }
+
+        long[] known = [.. group.Lag.Value.Where(static x => x.Lag is not null).Select(static x => x.Lag!.Value)];
+
+        return known.Length == 0 ? "—" : KafkaDisplay.Span(known.Sum());
+    }
+
+    private static string CommittedText(KafkaGroupLag lag) =>
+        !lag.Committed.IsAvailable ? "—" : lag.Committed.Value is { } committed ? KafkaDisplay.Number(committed) : "none";
+
+    public async ValueTask DisposeAsync()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        disposed = true;
+        State.ClusterChanged -= OnClusterChangedAsync;
+        Navigation.LocationChanged -= OnLocationChanged;
+
+        try
+        {
+            if (live is not null)
+            {
+                live.Failed -= OnLiveFailedAsync;
+                await live.DisposeAsync();
+                live = null;
+            }
+        }
+        finally
+        {
+            await lifetime.CancelAsync();
+            lifetime.Dispose();
+        }
+    }
+}

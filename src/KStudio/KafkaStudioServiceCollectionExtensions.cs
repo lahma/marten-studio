@@ -87,6 +87,7 @@ public static class KafkaStudioServiceCollectionExtensions
         services.TryAddScoped<KafkaState>();
         services.TryAddScoped<KafkaAuthorization>();
         services.TryAddScoped<KafkaActionLog>();
+        services.TryAddScoped<KafkaCatalogService>();
 
         // Which of the module's audit entries a visitor may read (D34): its own gate, never the host's store policy.
         services.TryAddEnumerable(ServiceDescriptor.Scoped<IStudioAuditScopeGate, KafkaAuditGate>());

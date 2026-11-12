@@ -1,0 +1,78 @@
+@implements IDisposable
+
+@* A text filter that shows the value the address carried. The studio's SearchFilter debounces the same way but starts empty and has no way to be
+   given a value, so a reload of ?filter=orders would filter the rows and show an empty box; this one is given the address's text and echoes
+   nothing back to itself: a value that is the text this box just reported is its own echo and is not applied over what the visitor has typed since. *@
+
+<input type="text"
+       class="ms-input ms-search-filter"
+       placeholder="@Placeholder"
+       aria-label="@Placeholder"
+       value="@current"
+       @oninput="OnInputAsync" />
+
+@code {
+    private CancellationTokenSource debounce = new();
+    private string current = string.Empty;
+    private string? lastParameter;
+    private string? reported;
+
+    /// <summary>The text the address carries; applied when it changes to something this box did not report itself.</summary>
+    [Parameter]
+    public string? Value { get; set; }
+
+    /// <summary>What the box says before anything is typed, and its accessible name.</summary>
+    [Parameter]
+    public string Placeholder { get; set; } = "Filter by name";
+
+    /// <summary>How long typing must pause before the filter is reported.</summary>
+    [Parameter]
+    public TimeSpan Debounce { get; set; } = TimeSpan.FromMilliseconds(300);
+
+    /// <summary>Raised with the text after the pause.</summary>
+    [Parameter]
+    public EventCallback<string> OnFilterChanged { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        if (string.Equals(Value, lastParameter, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        lastParameter = Value;
+
+        if (!string.Equals(Value ?? string.Empty, reported ?? string.Empty, StringComparison.Ordinal))
+        {
+            current = Value ?? string.Empty;
+        }
+    }
+
+    private async Task OnInputAsync(ChangeEventArgs args)
+    {
+        current = args.Value?.ToString() ?? string.Empty;
+        string text = current;
+
+        await debounce.CancelAsync();
+        debounce.Dispose();
+        debounce = new CancellationTokenSource();
+        CancellationToken token = debounce.Token;
+
+        try
+        {
+            await Task.Delay(Debounce, token);
+            reported = text;
+            await OnFilterChanged.InvokeAsync(text);
+        }
+        catch (OperationCanceledException)
+        {
+            // Typing went on: the newer input reports instead.
+        }
+    }
+
+    public void Dispose()
+    {
+        debounce.Cancel();
+        debounce.Dispose();
+    }
+}

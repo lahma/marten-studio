@@ -16787,3 +16787,146 @@ dialog.ms-modal::backdrop {
     font-size: var(--ms-font-size-sm);
     font-weight: 600;
 }
+
+/* ===== KS-UI-A: the Kafka catalog (topics, topic overview, cluster settings) ===== */
+
+/* The cluster strip at the top of Topics: the cluster's name, its environment and what the admin client said about it. */
+.ms-k-cluster-strip {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-sm) var(--ms-space-md);
+    margin-bottom: var(--ms-space-lg);
+}
+
+.ms-k-cluster-strip .ms-k-cluster-facts {
+    font-size: var(--ms-font-size-sm);
+}
+
+/* The filter and the topic count above the table. */
+.ms-k-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-md);
+    margin-bottom: var(--ms-space-md);
+}
+
+/* A notice that is an expected state, not an error: a narrow key cannot describe the cluster, or a topic's configuration. */
+.ms-k-note {
+    margin: 0 0 var(--ms-space-md);
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    border: 1px solid var(--ms-color-border);
+    border-left-width: 3px;
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface-alt);
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-k-note-warning {
+    border-color: var(--ms-color-warning);
+    background: var(--ms-color-warning-bg);
+    color: var(--ms-color-text);
+}
+
+/* The topic table's groups: a header row for Declared and for Other topics, and the closed details of internal topics below. */
+.ms-k-topic-group > .ms-k-group-row > th {
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    background: var(--ms-color-surface-alt);
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-xs);
+    font-weight: var(--ms-font-weight-medium);
+    text-align: left;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.ms-k-internal {
+    margin-top: var(--ms-space-lg);
+}
+
+.ms-k-internal > summary {
+    cursor: pointer;
+    margin-bottom: var(--ms-space-sm);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-k-not-listed {
+    display: block;
+    font-size: var(--ms-font-size-xs);
+}
+
+/* An offset span is a number with a tilde: aligned like the numbers beside it, and never mistaken for a count. */
+.ms-k-span {
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.ms-k-refresh-error {
+    margin: 0 0 var(--ms-space-md);
+}
+
+/* The topic overview: chips under the title, the stat cards, the partitions table and the configuration list. */
+.ms-k-topic-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-sm);
+    margin-bottom: var(--ms-space-md);
+}
+
+.ms-k-stats {
+    margin-bottom: var(--ms-space-lg);
+}
+
+.ms-k-partitions .ms-table-cell {
+    font-variant-numeric: tabular-nums;
+}
+
+.ms-k-under-replicated {
+    margin-left: var(--ms-space-xs);
+}
+
+.ms-k-config {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: var(--ms-space-xs) var(--ms-space-lg);
+    margin: 0 0 var(--ms-space-lg);
+}
+
+.ms-k-config dt {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-k-config dd {
+    margin: 0;
+}
+
+.ms-k-group-lag {
+    margin-top: var(--ms-space-md);
+}
+
+.ms-k-group-lag > summary {
+    cursor: pointer;
+    margin-bottom: var(--ms-space-sm);
+}
+
+/* Cluster settings: the exposure chip beside a value that is not shown as the host set it. */
+.ms-k-exposure {
+    margin-left: var(--ms-space-sm);
+    text-transform: lowercase;
+}
+
+.ms-k-exposure-secret,
+.ms-k-exposure-withheld {
+    border-color: var(--ms-color-warning);
+    background: var(--ms-color-warning-bg);
+    color: var(--ms-color-warning);
+}
+
+.ms-k-oauth {
+    margin: var(--ms-space-md) 0 0;
+    color: var(--ms-color-text-secondary);
+}

@@ -18,6 +18,7 @@ internal sealed class KafkaStudioModule(IOptions<KafkaStudioOptions> options) : 
     internal const string PageRoot = "/kafka";
 
     private readonly StudioPageAssembly pages = new(typeof(KafkaStudioModule).Assembly, PageRoot) { KeepsRoot = true };
+    private readonly IReadOnlyList<StudioNavSection> navigation = Rail(options);
 
     /// <inheritdoc />
     public string Key => KafkaStudioText.Key;
@@ -29,12 +30,24 @@ internal sealed class KafkaStudioModule(IOptions<KafkaStudioOptions> options) : 
     public StudioPageAssembly Pages => pages;
 
     /// <inheritdoc />
-    public IReadOnlyList<StudioNavSection> Navigation { get; } =
+    public IReadOnlyList<StudioNavSection> Navigation => navigation;
+
+    /// <summary>
+    /// The rail's one section (D-UI decision 6): Topics, Search and Cluster settings. Search is drawn only while the capability is effectively on -
+    /// read live from the options on every render, and failing closed under the host studio's <c>ReadOnly</c> - so an entry never promises a page that
+    /// would only say it is off. The topic overview and the record page have no entry: links reach them.
+    /// </summary>
+    private static IReadOnlyList<StudioNavSection> Rail(IOptions<KafkaStudioOptions> options) =>
     [
         new StudioNavSection(
             "Kafka",
             [
-                new StudioNavItem("Clusters", "kafka", "broker"),
+                new StudioNavItem("Topics", "kafka", "topics"),
+                new StudioNavItem("Search", "kafka/search", "search")
+                {
+                    IsShown = settings => !settings.ReadOnly && options.Value.Capabilities.SearchRecords,
+                },
+                new StudioNavItem("Cluster settings", "kafka/settings", "cog"),
             ]),
     ];
 

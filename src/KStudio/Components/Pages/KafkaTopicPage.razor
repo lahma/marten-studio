@@ -1,0 +1,10 @@
+@page "/kafka/topic"
+
+<PageTitle>Kafka topic</PageTitle>
+
+@* A topic's overview (D-UI decision 8): the topic is in the address (?cluster=…&topic=…, D9). The page holds no logic; the body is created below the
+   frame only once reads are released. *@
+
+<KafkaPageFrame>
+    <KafkaTopicBody />
+</KafkaPageFrame>
