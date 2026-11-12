@@ -19,9 +19,9 @@ namespace KStudio.Services;
 /// </para>
 /// <para>
 /// <b>What a question asks.</b> A read (no capability) asks <see cref="KafkaStudioOptions.ClusterAuthorizationPolicy" /> with
-/// <see cref="KafkaTopicResource.Capability" /> <see langword="null" />. A capability's use asks both policies when both are set - the cluster
-/// policy still decides which topics the visitor may reach at all - and otherwise the one that is set, with the capability named (the
-/// capability policy falls back to the cluster policy, D5's write-policy fallback). A call that touches three topics asks about each of the
+/// <see cref="KafkaTopicResource.Capability" /> <see langword="null" />. A capability's use asks the cluster policy first, capability unnamed - it
+/// decides which topics the visitor may reach at all - and then <c>CapabilityAuthorizationPolicy ?? ClusterAuthorizationPolicy</c> with the
+/// capability named (the capability policy falls back to the cluster policy, D5's write-policy fallback). A call that touches three topics asks about each of the
 /// three; the visitor comes from the circuit's authentication state, and nothing is remembered beyond one sweep.
 /// </para>
 /// </remarks>
@@ -96,12 +96,11 @@ internal sealed class KafkaAuthorization(
                 || await AskAsync(user, clusterPolicy, new KafkaTopicResource(cluster, tenantId, topic, null), cancellationToken).ConfigureAwait(false);
         }
 
-        // A capability's use. Both policies when both are set: the cluster policy decides which topics the visitor may reach at all, and the
-        // capability policy whether they may use the capability on them. One set: that one, with the capability named.
+        // A capability's use (D-SHELL 5.2). The cluster policy is always asked first, with no capability named: it decides which topics the
+        // visitor may reach at all. Then the capability is asked of the capability policy, which falls back to the cluster policy.
         KafkaTopicResource named = new(cluster, tenantId, topic, capability.Value.ToString());
 
         if (clusterPolicy is not null
-            && capabilityPolicy is not null
             && !await AskAsync(user, clusterPolicy, named with { Capability = null }, cancellationToken).ConfigureAwait(false))
         {
             return false;
@@ -213,7 +212,14 @@ internal sealed class KafkaAuthorization(
         ArgumentNullException.ThrowIfNull(cluster);
         ArgumentNullException.ThrowIfNull(topics);
 
-        if (!await IsAuthorizedAsync(cluster, null, capability, cancellationToken).ConfigureAwait(false))
+        if (!IsEnabled)
+        {
+            return true;
+        }
+
+        ClaimsPrincipal user = await PrincipalAsync().ConfigureAwait(false);
+
+        if (!await IsAuthorizedAsync(user, cluster.Key, cluster.TenantId, null, capability, cancellationToken).ConfigureAwait(false))
         {
             return false;
         }
@@ -222,7 +228,7 @@ internal sealed class KafkaAuthorization(
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (!await IsAuthorizedAsync(cluster, topic, capability, cancellationToken).ConfigureAwait(false))
+            if (!await IsAuthorizedAsync(user, cluster.Key, cluster.TenantId, topic, capability, cancellationToken).ConfigureAwait(false))
             {
                 return false;
             }

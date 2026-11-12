@@ -33,6 +33,41 @@ public class ShellModuleComponentTests
         protected override void OnInitialized() => Count!.Initialized++;
     }
 
+    /// <summary>
+    /// A page body that reads, as every page's first read does, and says whether the frame had not yet released reads at that moment. The naive one
+    /// reads in <c>OnInitializedAsync</c>; the other awaits the frame's cascaded <c>Ready</c> first (D-SHELL 5.5).
+    /// </summary>
+    private sealed class ReadingBody : ComponentBase
+    {
+        [CascadingParameter(Name = KafkaPageFrame.ReadyName)]
+        public Task? Ready { get; set; }
+
+        [Parameter]
+        public bool WaitForReady { get; set; }
+
+        [Parameter]
+        public List<bool>? Reads { get; set; }
+
+        protected override async Task OnInitializedAsync()
+        {
+            if (WaitForReady)
+            {
+                await Ready!;
+            }
+
+            // True: the read started while the frame had not released reads, which is what a prerender is.
+            Reads!.Add(!Ready!.IsCompleted);
+        }
+    }
+
+    private static RenderFragment ReadingBodyFragment(bool waitForReady, List<bool> reads) => builder =>
+    {
+        builder.OpenComponent<ReadingBody>(0);
+        builder.AddAttribute(1, nameof(ReadingBody.WaitForReady), waitForReady);
+        builder.AddAttribute(2, nameof(ReadingBody.Reads), reads);
+        builder.CloseComponent();
+    };
+
     private static RenderFragment ProbeBody(Counter counter) => builder =>
     {
         builder.OpenComponent<Probe>(0);
@@ -155,6 +190,68 @@ public class ShellModuleComponentTests
 
         frame.WaitForAssertion(() => counter.Initialized.Should().Be(1));
         frame.Find(".ms-k-trademark").TextContent.Should().Be(KafkaStudioText.Trademark);
+    }
+
+    [Fact]
+    public void A_body_is_created_only_once_the_frame_has_released_reads_so_neither_way_of_reading_runs_during_a_prerender()
+    {
+        using KafkaStudioHarness harness = new();
+        List<bool> naive = [];
+        List<bool> awaiting = [];
+
+        // The frame releases reads from its first after-render, which a prerender never has, and creates no body before it. So a body that reads
+        // in OnInitializedAsync does not read during a prerender either, and one that awaits the cascaded Ready is released at the same moment: the
+        // list holds "the read began before Ready was complete", which is what a read during a prerender would be.
+        IRenderedComponent<KafkaPageFrame> frame = harness.Context.Render<KafkaPageFrame>(p => p.Add(x => x.ChildContent, ReadingBodyFragment(waitForReady: false, naive)));
+        frame.WaitForAssertion(() => naive.Should().ContainSingle());
+        naive.Should().Equal(false);
+
+        IRenderedComponent<KafkaPageFrame> other = harness.Context.Render<KafkaPageFrame>(p => p.Add(x => x.ChildContent, ReadingBodyFragment(waitForReady: true, awaiting)));
+        other.WaitForAssertion(() => awaiting.Should().ContainSingle());
+        awaiting.Should().Equal(false);
+    }
+
+    [Fact]
+    public void A_frame_with_no_cluster_never_releases_Ready_and_creates_no_body()
+    {
+        using KafkaStudioHarness harness = new();
+        harness.Entries.Entries = [];
+        List<bool> reads = [];
+
+        // No cluster: the policy never passes, so Ready is never released, and the body is never created. Nothing reads, however long it waits.
+        IRenderedComponent<KafkaPageFrame> frame = harness.Context.Render<KafkaPageFrame>(p => p.Add(x => x.ChildContent, ReadingBodyFragment(waitForReady: true, reads)));
+        frame.WaitForAssertion(() => frame.Find(".ms-empty-title").TextContent.Should().Be("No cluster"));
+
+        reads.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task The_frame_applies_the_cluster_its_address_names_on_its_first_render()
+    {
+        using KafkaStudioHarness harness = new(null, KafkaStudioHarness.Primary, KafkaStudioHarness.Secondary);
+        await harness.Context.ReadyAsync();
+        await harness.State.EnsureInitializedAsync(Xunit.TestContext.Current.CancellationToken);
+        harness.State.ActiveCluster.Should().Be(KafkaStudioHarness.Primary, "the premise: the state first loaded from an address that named none");
+
+        // Arriving from a host page, or by Back: the state is the circuit's, so it still holds the cluster it last had.
+        harness.Context.Navigate("/postgres/kafka?cluster=secondary");
+        harness.Context.Render<KafkaPageFrame>(p => p.Add(x => x.ChildContent, ProbeBody(new Counter())));
+
+        harness.State.ActiveCluster.Should().Be(KafkaStudioHarness.Secondary);
+    }
+
+    [Fact]
+    public async Task The_frame_ignores_an_address_cluster_the_listing_does_not_carry()
+    {
+        using KafkaStudioHarness harness = new(static o => o.ClusterAuthorizationPolicy = "kafka-topics", KafkaStudioHarness.Primary, KafkaStudioHarness.Secondary);
+        harness.Authorization.AllowKafka(static r => r.Cluster != "secondary");
+        await harness.Context.ReadyAsync();
+        await harness.State.EnsureInitializedAsync(Xunit.TestContext.Current.CancellationToken);
+
+        harness.Context.Navigate("/postgres/kafka?cluster=secondary");
+        harness.Context.Render<KafkaPageFrame>(p => p.Add(x => x.ChildContent, ProbeBody(new Counter())));
+
+        harness.State.ActiveCluster.Should().Be(KafkaStudioHarness.Primary, "a refused cluster reads as an unknown one");
     }
 
     [Fact]

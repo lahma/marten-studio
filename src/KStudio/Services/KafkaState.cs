@@ -75,6 +75,32 @@ internal sealed class KafkaState(
     }
 
     /// <summary>
+    /// Takes the cluster the circuit's current address names, as every Kafka page does on its first render: a page reached from a host page,
+    /// or by Back, opens the cluster its address names rather than the one the state last held. Only a key in <see cref="AvailableClusters" />
+    /// moves the scope; an address that names none, an unknown key and a refused one change nothing (the unknown ones are logged, as at the
+    /// first load, and the selector then rewrites the address to the cluster in scope).
+    /// </summary>
+    public async Task ApplyAddressAsync()
+    {
+        await EnsureInitializedAsync().ConfigureAwait(false);
+
+        string? requested = ReadCluster(navigation.Uri);
+        if (requested is null)
+        {
+            return;
+        }
+
+        if (AvailableClusters.Any(x => string.Equals(x.Key, requested, StringComparison.Ordinal)))
+        {
+            await SetClusterAsync(requested).ConfigureAwait(false);
+        }
+        else if (ActiveCluster is { } active)
+        {
+            logger.ClusterAddressIgnored(requested, active.Key);
+        }
+    }
+
+    /// <summary>
     /// Moves the scope to the entry keyed <paramref name="key" />, if the visitor may see it. Anything else - a key the listing does not carry,
     /// or the one already in scope - changes nothing.
     /// </summary>

@@ -2,9 +2,9 @@ using Bunit;
 
 using KStudio.Tests.Support;
 
-using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
 
+using PostgresStudio.Components;
 using PostgresStudio.Components.Layout;
 using PostgresStudio.Services;
 using PostgresStudio.Services.Find;
@@ -13,12 +13,11 @@ namespace KStudio.Tests.Components;
 
 /// <summary>
 /// D34: on a module's page the layout draws the module's cluster selector and no Find box, skips the host's scope gate and the host's address
-/// rewrite - keyed on the page the route table matches - and the host's scope waits, untouched, for the way back.
+/// rewrite - keyed on the page the route table matches - and the host's scope waits, untouched, for the way back. Rendered through
+/// <c>StudioRoutes</c>, as the studio renders its pages: the layout learns which page is on screen from the router's render.
 /// </summary>
 public class StudioLayoutModulePageTests
 {
-    private static readonly RenderFragment Body = static builder => builder.AddMarkupContent(0, "<p id=\"page-body\">the page</p>");
-
     /// <summary>A Find contributor that draws the box: the header has a scope and a kind to search.</summary>
     private sealed class AnyFind : IFindContributor
     {
@@ -33,14 +32,20 @@ public class StudioLayoutModulePageTests
     private static KafkaStudioHarness Harness(Action<KafkaStudioOptions>? configure = null) =>
         new(configure, extra: static services => services.AddSingleton<IFindContributor>(new AnyFind()), clusters: [KafkaStudioHarness.Primary, KafkaStudioHarness.Secondary]);
 
-    private static async Task<IRenderedComponent<StudioLayout>> RenderAtAsync(KafkaStudioHarness harness, string path)
+    private static async Task<IRenderedComponent<StudioRoutes>> RenderAtAsync(KafkaStudioHarness harness, string path)
     {
         await harness.Context.ReadyAsync();
         harness.Context.Navigate(path);
 
-        IRenderedComponent<StudioLayout> layout = harness.Context.Render<StudioLayout>(parameters => parameters.Add(x => x.Body, Body));
-        layout.WaitForState(() => layout.Instance.PreferencesLoaded);
-        return layout;
+        IRenderedComponent<StudioRoutes> routes = harness.Context.Render<StudioRoutes>();
+        routes.WaitForState(() => routes.FindComponent<StudioLayout>().Instance.PreferencesLoaded);
+        return routes;
+    }
+
+    private static string Heading(IRenderedComponent<StudioRoutes> routes)
+    {
+        var headings = routes.FindAll("h1");
+        return headings.Count == 0 ? string.Empty : headings[0].TextContent.Trim();
     }
 
     [Fact]
@@ -48,12 +53,12 @@ public class StudioLayoutModulePageTests
     {
         using KafkaStudioHarness harness = Harness();
 
-        IRenderedComponent<StudioLayout> layout = await RenderAtAsync(harness, "/postgres/kafka");
+        IRenderedComponent<StudioRoutes> layout = await RenderAtAsync(harness, "/postgres/kafka");
 
         layout.WaitForAssertion(() => layout.FindAll("#ms-cluster-select option").Select(static x => x.TextContent.Trim()).Should().Equal("Primary", "Secondary"));
         layout.FindAll("#ms-store-select, #ms-database-select").Should().BeEmpty("the host's selector gives way to the module's");
         layout.FindAll(".ms-header-find").Should().BeEmpty("a Find contributor searches the host's scope, which a Kafka page is not about");
-        layout.Find("#page-body").Should().NotBeNull();
+        layout.WaitForAssertion(() => Heading(layout).Should().Be("Kafka clusters"));
     }
 
     [Fact]
@@ -61,7 +66,7 @@ public class StudioLayoutModulePageTests
     {
         using KafkaStudioHarness harness = Harness();
 
-        IRenderedComponent<StudioLayout> layout = await RenderAtAsync(harness, "/postgres/activity");
+        IRenderedComponent<StudioRoutes> layout = await RenderAtAsync(harness, "/postgres/activity");
 
         layout.FindAll(".ms-header-find").Should().NotBeEmpty();
         layout.FindAll("#ms-cluster-select").Should().BeEmpty();
@@ -76,9 +81,9 @@ public class StudioLayoutModulePageTests
         harness.Authorization.AllowHost(static _ => false);
         harness.Authorization.Calls.Clear();
 
-        IRenderedComponent<StudioLayout> layout = await RenderAtAsync(harness, "/postgres/kafka");
+        IRenderedComponent<StudioRoutes> layout = await RenderAtAsync(harness, "/postgres/kafka");
 
-        layout.Find("#page-body").Should().NotBeNull();
+        layout.WaitForAssertion(() => Heading(layout).Should().Be("Kafka clusters"));
         layout.FindAll(".ms-empty-title").Should().BeEmpty();
         harness.Authorization.HostCalls.Should().BeEmpty("the host's gate is not asked on a module's page");
     }
@@ -91,10 +96,10 @@ public class StudioLayoutModulePageTests
         harness.Context.Options.SourceAuthorizationPolicy = "host-source";
         harness.Authorization.AllowHost(static _ => false);
 
-        IRenderedComponent<StudioLayout> layout = await RenderAtAsync(harness, "/postgres/activity");
+        IRenderedComponent<StudioRoutes> layout = await RenderAtAsync(harness, "/postgres/activity");
 
         layout.WaitForAssertion(() => layout.Find(".ms-empty-title").TextContent.Should().Be("Not authorized"));
-        layout.FindAll("#page-body").Should().BeEmpty("the bypass is keyed on the page's assembly, not global");
+        Heading(layout).Should().NotBe("Activity", "the bypass is keyed on the page's assembly, not global");
     }
 
     [Fact]
@@ -102,7 +107,7 @@ public class StudioLayoutModulePageTests
     {
         using KafkaStudioHarness harness = Harness();
 
-        IRenderedComponent<StudioLayout> layout = await RenderAtAsync(harness, "/postgres/kafka");
+        IRenderedComponent<StudioRoutes> layout = await RenderAtAsync(harness, "/postgres/kafka");
 
         layout.WaitForAssertion(() => harness.Context.CurrentUri.Should().Contain("cluster=primary"));
         harness.Context.CurrentUri.Should().NotContain("store=").And.NotContain("db=").And.NotContain("tenant=");
@@ -124,25 +129,28 @@ public class StudioLayoutModulePageTests
     public async Task Leaving_a_kafka_page_restores_the_host_scope_in_the_address_and_asks_the_gate_again()
     {
         using KafkaStudioHarness harness = Harness();
-        IRenderedComponent<StudioLayout> layout = await RenderAtAsync(harness, "/postgres/kafka");
+        await harness.Context.ReadyAsync();
+        harness.Context.Options.SourceAuthorizationPolicy = "host-source";
+        IRenderedComponent<StudioRoutes> layout = await RenderAtAsync(harness, "/postgres/kafka");
         StudioScope? before = harness.Context.State.ActiveScope;
-        harness.Authorization.Calls.Clear();
+        harness.Authorization.HostCalls.Should().BeEmpty("the premise: the host's gate was not asked on the module's page");
 
-        harness.Context.Navigate("/postgres/activity");
+        harness.Navigation.Simulate("postgres/activity", intercepted: true);
 
         layout.WaitForAssertion(() => harness.Context.CurrentUri.Should().Contain("store=default"));
         harness.Context.State.ActiveScope.Should().Be(before, "the host's scope waited in memory");
-        layout.WaitForAssertion(() => layout.Find("#page-body").Should().NotBeNull());
+        layout.WaitForAssertion(() => Heading(layout).Should().Be("Activity"));
+        harness.Authorization.HostCalls.Should().NotBeEmpty("the host's scope gate is asked again on the way back");
     }
 
     [Fact]
     public async Task A_click_from_a_host_page_to_a_kafka_page_does_not_move_the_host_scope()
     {
         using KafkaStudioHarness harness = Harness();
-        IRenderedComponent<StudioLayout> layout = await RenderAtAsync(harness, "/postgres/activity");
+        IRenderedComponent<StudioRoutes> layout = await RenderAtAsync(harness, "/postgres/activity");
         StudioScope? before = harness.Context.State.ActiveScope;
 
-        harness.Context.Navigate("/postgres/kafka?store=elsewhere&tenant=t");
+        harness.Navigation.Simulate("postgres/kafka?store=elsewhere&tenant=t", intercepted: true);
 
         layout.WaitForAssertion(() => layout.FindAll("#ms-cluster-select").Should().NotBeEmpty());
         harness.Context.State.ActiveScope.Should().Be(before);

@@ -7,15 +7,18 @@
    in scope (Topic = null), then the body or a notice: a refused cluster's body never runs its OnInitializedAsync, as the host's ScopeAccess
    rule has it. The frame is a convenience - every KStudio service asks the policy itself (hard rule 5).
 
-   Nothing below the frame starts while the page is prerendered. The body is rendered only after the first render has been delivered to a
-   live circuit (OnAfterRenderAsync is the signal the shell already uses for "this render is interactive": it needs no renderer information
-   a test host may not supply), so a librdkafka connect is not paid twice and no scan can start during a prerender. The prerendered frame
-   draws the spinner and the trademark line. *@
+   Nothing below the frame starts while the page is prerendered (D-SHELL 5.5). The body is created only after the first render has been delivered
+   to a live circuit (OnAfterRenderAsync is the signal the shell already uses for "this render is interactive": it needs no renderer information a
+   test host may not supply), so a librdkafka connect is not paid twice and no scan can start during a prerender. The prerendered frame draws the
+   spinner and the trademark line. The same moment completes the Task cascaded under ReadyName, and a page body's reads start from that - it awaits
+   it - never from its own OnInitializedAsync, so that the rule holds for a body however the frame is arranged around it. *@
 
 <div>
     @if (access is FrameAccess.Granted && interactive)
     {
-        @ChildContent
+        <CascadingValue Name="@ReadyName" Value="@ready.Task" IsFixed="true">
+            @ChildContent
+        </CascadingValue>
     }
     else if (access is FrameAccess.Denied)
     {
@@ -50,16 +53,32 @@
         NoCluster,
     }
 
+    /// <summary>The name the frame cascades its <see cref="Task" /> under: <c>[CascadingParameter(Name = KafkaPageFrame.ReadyName)] public Task? Ready</c>.</summary>
+    public const string ReadyName = "KStudio.PageReady";
+
+    private readonly TaskCompletionSource ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
     private FrameAccess access = FrameAccess.Unknown;
     private bool interactive;
     private bool disposed;
 
-    /// <summary>The page's body: rendered once the cluster policy passed and the circuit is interactive.</summary>
+    /// <summary>The page's body: created once the cluster policy passed. Its reads start from the cascaded <c>Ready</c> task, never from its own <c>OnInitializedAsync</c>.</summary>
     [Parameter]
     public RenderFragment? ChildContent { get; set; }
 
     protected override async Task OnInitializedAsync()
     {
+        try
+        {
+            // Every Kafka page's first render takes the cluster its address names (D-SHELL 4.2). Before the subscription: nothing is listening yet,
+            // and the policy is asked about the cluster that results, below.
+            await State.ApplyAddressAsync();
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            // The listing failed; UpdateAccessAsync asks the same state and closes the page.
+        }
+
         State.ClusterChanged += OnClusterChanged;
         await UpdateAccessAsync();
     }
@@ -72,7 +91,20 @@
         }
 
         interactive = true;
+        CompleteReadyIfGranted();
         await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>
+    /// Releases the body's reads: once the circuit is interactive and the policy has passed the cluster. Never for a refused cluster, whose body
+    /// does not exist.
+    /// </summary>
+    private void CompleteReadyIfGranted()
+    {
+        if (interactive && access is FrameAccess.Granted)
+        {
+            ready.TrySetResult();
+        }
     }
 
     /// <summary>Asks the policy about the cluster in scope. A failure is a refusal: the body is not rendered without the policy's answer.</summary>
@@ -93,6 +125,8 @@
         {
             access = FrameAccess.Denied;
         }
+
+        CompleteReadyIfGranted();
     }
 
     private async Task OnClusterChanged()
@@ -109,5 +143,8 @@
     {
         disposed = true;
         State.ClusterChanged -= OnClusterChanged;
+
+        // A body still waiting for Ready is told the page is gone (a cancelled task is ignored by the component that awaits it).
+        ready.TrySetCanceled();
     }
 }

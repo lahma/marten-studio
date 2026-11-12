@@ -12,6 +12,10 @@ using KStudio.Core.Wire;
 using KStudio.Core.Wire.Confluent;
 using KStudio.Integration.Tests.Support;
 
+using Marten;
+
+using MartenStudio;
+
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
@@ -49,14 +53,14 @@ public abstract class KafkaFirstNavigationLiveTests(KafkaFixture kafka)
 {
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
-    /// <summary>The Kafka pages the shell serves, as a visitor opens them; later packets add theirs.</summary>
+    /// <summary>The Kafka pages the shell serves, below the studio's mount, as a visitor opens them; later packets add theirs.</summary>
     private static readonly string[] Pages =
     [
-        "/postgres/kafka",
-        "/postgres/kafka?cluster=live",
-        "/postgres/kafka?cluster=dark",
-        "/postgres/kafka?cluster=nope",
-        "/postgres/kafka?cluster=live&topic=does-not-exist",
+        "/kafka",
+        "/kafka?cluster=live",
+        "/kafka?cluster=dark",
+        "/kafka?cluster=nope",
+        "/kafka?cluster=live&topic=does-not-exist",
     ];
 
     /// <summary>Counts the wires the engine creates, which is the engine's first contact with a cluster.</summary>
@@ -74,7 +78,37 @@ public abstract class KafkaFirstNavigationLiveTests(KafkaFixture kafka)
     }
 
     [KafkaFact]
-    public async Task Opening_every_kafka_page_creates_no_topic_commits_no_offset_leaves_no_group_writes_no_row_and_calls_no_broker_while_prerendering()
+    public Task Opening_every_kafka_page_creates_no_topic_commits_no_offset_leaves_no_group_writes_no_row_and_calls_no_broker_while_prerendering() =>
+        WalkAsync(
+            "/postgres",
+            static (builder, postgres) =>
+            {
+                builder.Services.AddSingleton(NpgsqlDataSource.Create(postgres.ConnectionString));
+                builder.Services.AddPostgresStudio();
+            },
+            static app => app.MapPostgresStudio().AllowAnonymous());
+
+    /// <summary>
+    /// The same walk on a Marten Studio host (D-SHELL 12.1): a Marten store over the same database, with Marten's own default of
+    /// <c>CreateOrUpdate</c> said by leaving it alone, so a shell that ensured storage on a Kafka page's first navigation would have created
+    /// <c>mt_</c> objects the snapshot compares.
+    /// </summary>
+    [KafkaFact]
+    public Task Opening_every_kafka_page_of_a_marten_studio_host_creates_no_topic_commits_no_offset_leaves_no_group_writes_no_row_and_calls_no_broker_while_prerendering() =>
+        WalkAsync(
+            "/marten",
+            static (builder, postgres) =>
+            {
+                builder.Services.AddMarten(options =>
+                {
+                    options.Connection(postgres.ConnectionString);
+                    options.DatabaseSchemaName = "kshell";
+                });
+                builder.Services.AddMartenStudio();
+            },
+            static app => app.MapMartenStudio().AllowAnonymous());
+
+    private async Task WalkAsync(string mount, Action<WebApplicationBuilder, PostgresContainer> addHostStudio, Func<WebApplication, object> mapStudio)
     {
         await using PostgresContainer postgres = await PostgresContainer.StartAsync(Token);
         await postgres.ExecuteAsync(
@@ -105,8 +139,7 @@ public abstract class KafkaFirstNavigationLiveTests(KafkaFixture kafka)
         WebApplicationBuilder builder = WebApplication.CreateBuilder();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         builder.Logging.ClearProviders();
-        builder.Services.AddSingleton(NpgsqlDataSource.Create(postgres.ConnectionString));
-        builder.Services.AddPostgresStudio();
+        addHostStudio(builder, postgres);
         builder.Services.AddSingleton<IKafkaWireFactory>(provider =>
             counting = new CountingWireFactory(ActivatorUtilities.CreateInstance<ConfluentWireFactory>(provider)));
         builder.Services.AddKafkaStudio(options =>
@@ -116,7 +149,7 @@ public abstract class KafkaFirstNavigationLiveTests(KafkaFixture kafka)
         });
 
         await using WebApplication app = builder.Build();
-        app.MapPostgresStudio().AllowAnonymous();
+        mapStudio(app);
         await app.StartAsync(Token);
 
         try
@@ -124,7 +157,7 @@ public abstract class KafkaFirstNavigationLiveTests(KafkaFixture kafka)
             string address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.First();
             using HttpClient client = new() { BaseAddress = new Uri(address), Timeout = TimeSpan.FromSeconds(30) };
 
-            foreach (string page in Pages)
+            foreach (string page in Pages.Select(x => string.Concat(mount, x)))
             {
                 Stopwatch watch = Stopwatch.StartNew();
                 using HttpResponseMessage response = await client.GetAsync(new Uri(page, UriKind.Relative), Token);
@@ -176,7 +209,7 @@ public abstract class KafkaFirstNavigationLiveTests(KafkaFixture kafka)
     }
 
     /// <summary>A throwaway <c>postgres:17-alpine</c>, started for one test and removed with it, labelled for the packet that started it.</summary>
-    private sealed class PostgresContainer : IAsyncDisposable
+    internal sealed class PostgresContainer : IAsyncDisposable
     {
         private const string Password = "kstudio-live";
 

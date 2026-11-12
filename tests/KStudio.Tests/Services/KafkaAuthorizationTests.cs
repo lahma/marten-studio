@@ -33,7 +33,9 @@ public class KafkaAuthorizationTests
 
         (await harness.KafkaAuthorization.IsAuthorizedAsync(KafkaStudioHarness.Primary, "orders.v1", KafkaCapability.SearchRecords, cancellationToken: Ct)).Should().BeTrue();
 
+        // D-SHELL 5.2: the cluster policy is always asked first with no capability named, then the capability's policy (here the same one).
         harness.Authorization.KafkaCalls.Should().Equal(
+            ("kafka-topics", new KafkaTopicResource("primary", null, "orders.v1", null)),
             ("kafka-topics", new KafkaTopicResource("primary", null, "orders.v1", "SearchRecords")));
     }
 
@@ -159,5 +161,16 @@ public class KafkaAuthorizationTests
         await harness.KafkaAuthorization.FilterTopicsAsync(KafkaStudioHarness.Primary, ["a", "b", "c", "d"], cancellationToken: Ct);
 
         (harness.Visitor.Reads - before).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task A_whole_request_fetches_the_principal_once()
+    {
+        using KafkaStudioHarness harness = new(static o => o.ClusterAuthorizationPolicy = "kafka-topics");
+        int before = harness.Visitor.Reads;
+
+        await harness.KafkaAuthorization.AreAllAuthorizedAsync(KafkaStudioHarness.Primary, ["a", "b", "c"], KafkaCapability.SearchRecords, cancellationToken: Ct);
+
+        (harness.Visitor.Reads - before).Should().Be(1, "the cluster question and each topic's share one principal");
     }
 }

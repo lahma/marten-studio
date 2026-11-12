@@ -5,6 +5,8 @@ using KStudio.Services;
 using MartenStudio.Tests.Support;
 
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
@@ -14,6 +16,7 @@ using PostgresStudio.Services;
 using PostgresStudio.Services.Postgres;
 using PostgresStudio.Services.Settings;
 using PostgresStudio.Tests.Components;
+using PostgresStudio.Tests.Support;
 
 namespace KStudio.Tests.Support;
 
@@ -26,6 +29,7 @@ public sealed class RecordingAuthorizationService : IAuthorizationService
 {
     private Func<KafkaTopicResource, bool> kafka = static _ => true;
     private Func<PostgresStudioResource, bool> host = static _ => true;
+    private TaskCompletionSource<bool>? hostGate;
 
     /// <summary>Every question asked, in order: the policy's name and the resource.</summary>
     public List<(string Policy, object? Resource)> Calls { get; } = [];
@@ -48,8 +52,19 @@ public sealed class RecordingAuthorizationService : IAuthorizationService
     public Task<AuthorizationResult> AuthorizeAsync(ClaimsPrincipal user, object? resource, IEnumerable<IAuthorizationRequirement> requirements) =>
         Task.FromResult(AuthorizationResult.Failed());
 
+    /// <summary>
+    /// Holds every question about the host studio's resource until the returned source is completed - with whether the host's handler then
+    /// allows it - so a test can look at the shell while the host's scope gate is pending.
+    /// </summary>
+    public TaskCompletionSource<bool> BlockHost()
+    {
+        TaskCompletionSource<bool> gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        Volatile.Write(ref hostGate, gate);
+        return gate;
+    }
+
     /// <inheritdoc />
-    public Task<AuthorizationResult> AuthorizeAsync(ClaimsPrincipal user, object? resource, string policyName)
+    public async Task<AuthorizationResult> AuthorizeAsync(ClaimsPrincipal user, object? resource, string policyName)
     {
         lock (Calls)
         {
@@ -59,12 +74,14 @@ public sealed class RecordingAuthorizationService : IAuthorizationService
         bool allowed = resource switch
         {
             KafkaTopicResource topic => kafka(topic),
-            PostgresStudioResource source => host(source),
+            PostgresStudioResource source => host(source) && await HostOpenAsync().ConfigureAwait(false),
             _ => false,
         };
 
-        return Task.FromResult(allowed ? AuthorizationResult.Success() : AuthorizationResult.Failed());
+        return allowed ? AuthorizationResult.Success() : AuthorizationResult.Failed();
     }
+
+    private async Task<bool> HostOpenAsync() => Volatile.Read(ref hostGate) is { } gate ? await gate.Task.Bounded() : true;
 }
 
 /// <summary>The cluster entries a test lists, in place of the engine's catalog.</summary>
@@ -100,9 +117,16 @@ internal sealed class KafkaStudioHarness : IDisposable
 
         Authorization = new RecordingAuthorizationService();
         Entries = new FakeClusterEntries(clusters.Length == 0 ? [Primary] : clusters);
+        Navigation = new RecordingNavigationManager();
 
         Context = new PostgresStudioComponentContext(services =>
         {
+            // The address the circuit is on, and the browser's two navigation services a StudioRoutes render asks for: the tests that render
+            // through the router (as the studio does) say what the browser did with Navigation.Simulate.
+            services.AddSingleton<NavigationManager>(Navigation);
+            services.AddSingleton<INavigationInterception>(new RecordingNavigationInterception());
+            services.AddSingleton<IScrollToLocationHash>(new RecordingScrollToLocationHash());
+
             services.RemoveAll<IAuthorizationService>();
             services.AddSingleton<IAuthorizationService>(Authorization);
 
@@ -127,6 +151,9 @@ internal sealed class KafkaStudioHarness : IDisposable
     public RecordingAuthorizationService Authorization { get; }
 
     public FakeClusterEntries Entries { get; }
+
+    /// <summary>The circuit's address; <see cref="RecordingNavigationManager.Simulate" /> is a link click, Back or Forward.</summary>
+    public RecordingNavigationManager Navigation { get; }
 
     public PostgresStudioComponentContext Context { get; }
 

@@ -108,6 +108,40 @@ public class KafkaEndpointTests
         }
     }
 
+    /// <summary>
+    /// D-SHELL 2.1: at a root mount a Kafka page is served at <c>/kafka</c>. <c>Path = "/"</c> normalizes to the default mount through the public
+    /// options (<c>StudioPath.Of</c> reads a path of slashes only as unset), so no option spells a root mount today; the test reaches the mapper's
+    /// own answer (<c>TrimmedPath</c> empty) as Postgres Studio's root-mount test does, by seeding the options' derived-path cache.
+    /// </summary>
+    [Fact]
+    public async Task A_kafka_page_is_served_at_a_root_mount()
+    {
+        await using WebApplication app = CreateApp(configureStudio: static options =>
+        {
+            options.Path = "/";
+            typeof(PostgresStudioOptions)
+                .GetField("pathCache", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                .SetValue(options, new PostgresStudio.Services.Settings.StudioPath("/", string.Empty, string.Empty, HasCustom: true));
+        });
+        app.MapPostgresStudio().AllowAnonymous();
+
+        RouteEndpoints(app).Where(IsKafkaPage).Select(static x => x.RoutePattern.RawText).Should().Equal(["/kafka"], "the stub page, at the root of the host");
+
+        await app.StartAsync(Token);
+        try
+        {
+            using HttpClient client = app.GetTestClient();
+            using HttpResponseMessage page = await client.GetAsync(new Uri("/kafka", UriKind.Relative), Token);
+
+            page.StatusCode.Should().Be(HttpStatusCode.OK);
+            (await page.Content.ReadAsStringAsync(Token)).Should().Contain("ms-k-trademark");
+        }
+        finally
+        {
+            await app.StopAsync(Token);
+        }
+    }
+
     [Fact]
     public async Task A_host_without_AddKafkaStudio_serves_no_kafka_route()
     {

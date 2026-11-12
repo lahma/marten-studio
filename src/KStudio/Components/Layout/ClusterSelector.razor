@@ -45,6 +45,7 @@
 @code {
     private bool interactive;
     private bool subscribed;
+    private bool addressApplied;
 
     protected override async Task OnInitializedAsync()
     {
@@ -55,11 +56,29 @@
         try
         {
             await State.EnsureInitializedAsync();
+
+            // This selector is drawn when a module's page comes on screen, so its first render is every Kafka page's: the cluster the address
+            // names is taken here, before the address is written (SyncAddress), or arriving from a host page or by Back would rewrite the
+            // address to the cluster the state last held.
+            if (IsKafkaAddress(Navigation.Uri))
+            {
+                await State.ApplyAddressAsync();
+            }
+        }
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
+        {
+            // The circuit went away while the clusters were being listed.
         }
         catch (Exception e) when (e is not OperationCanceledException)
         {
             Logger.LogDebug(e, "KStudio could not list the clusters this visitor may see");
         }
+        finally
+        {
+            addressApplied = true;
+        }
+
+        SyncAddress();
     }
 
     protected override void OnAfterRender(bool firstRender)
@@ -123,11 +142,11 @@
 
     /// <summary>
     /// Writes the cluster on screen into the address, so a link someone pastes reopens the same cluster (D9). Only once interactive and only
-    /// after the address's own cluster was read: a rewrite earlier would strip a pasted ?cluster= or write the first cluster over it.
+    /// after the address's own cluster was applied: a rewrite earlier would strip a pasted ?cluster= or write the first cluster over it.
     /// </summary>
     private void SyncAddress()
     {
-        if (!interactive || !State.AddressRead || State.ActiveCluster is not { } active || !IsKafkaAddress(Navigation.Uri))
+        if (!interactive || !addressApplied || !State.AddressRead || State.ActiveCluster is not { } active || !IsKafkaAddress(Navigation.Uri))
         {
             return;
         }

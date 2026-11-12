@@ -150,6 +150,13 @@
     /// that is not a module's and be treated as one - the host's scope gate is skipped only for a module's own pages.
     /// </summary>
     private IStudioModule? currentModule;
+
+    /// <summary>
+    /// Whether <see cref="OnInitializedAsync" /> has finished loading the catalog, so that the host's scope gate has a scope to ask about. A
+    /// module's page left before then is gated by that method's own last step, never by <see cref="OnParametersSet" />, which would ask a gate
+    /// that has no scope yet and take "nothing to be about" for a grant.
+    /// </summary>
+    private bool initialized;
     private PersistingComponentStateSubscription persistingSubscription;
 
     /// <summary>
@@ -211,8 +218,28 @@
         // From here on a link the visitor clicks may name another scope (1.2, SCOPE-1-FIX).
         Navigation.LocationChanged += OnLocationChanged;
         locationSubscribed = true;
+        initialized = true;
 
         await UpdateAccessAsync();
+    }
+
+    /// <summary>
+    /// Follows the page on screen, on every render the router causes (D34, D-SHELL 4.1): <see cref="StudioRoutes" /> re-renders the page
+    /// before this layout's own <see cref="OnLocationChanged" /> may have run - and for as long as the catalog loads, before it is subscribed
+    /// at all - so the module is found here, from the address the router just matched, never from a handler. On the way from a module's page
+    /// to a host page the host's scope gate goes back to <see cref="ScopeAccess.Unknown" /> in the same render that brings the host's body
+    /// in, so that body is not rendered until the gate has answered.
+    /// </summary>
+    protected override void OnParametersSet()
+    {
+        IStudioModule? previous = currentModule;
+        currentModule = ModuleOfAddress(Navigation.Uri);
+
+        if (previous is not null && currentModule is null && initialized)
+        {
+            access = ScopeAccess.Unknown;
+            _ = InvokeAsync(UpdateAccessAfterLeavingModuleAsync);
+        }
     }
 
     /// <summary>
@@ -243,20 +270,11 @@
     private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
     {
         // A module's page (D34) is rendered and nothing else: no host scope is read from its address, none is applied, and the address is
-        // not rewritten. The host's scope stays in StudioState for the way back, and the rail's host links carry it.
-        IStudioModule? previous = currentModule;
-        currentModule = ModuleOfAddress(e.Location);
-
-        if (currentModule is not null)
+        // not rewritten. The host's scope stays in StudioState for the way back, and the rail's host links carry it. Which module is on
+        // screen, and the host's gate on the way back, are OnParametersSet's; this handler is the scope's alone.
+        if (ModuleOfAddress(e.Location) is not null)
         {
-            _ = InvokeAsync(StateHasChanged);
             return;
-        }
-
-        if (previous is not null)
-        {
-            // Back on a page of the host studio: the host's scope gate, which was not asked while a module's page was on screen.
-            _ = InvokeAsync(UpdateAccessAfterLeavingModuleAsync);
         }
 
         (string? storeKey, string? databaseId, string? tenantId) = StudioScopeQuery.Read(e.Location, Descriptor.SourceQueryParameter);

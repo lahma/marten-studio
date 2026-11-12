@@ -111,7 +111,7 @@ public class ModuleAuditEntryTests
         (await Visible(context)).Should().HaveCount(5);
 
         gate.Sweeps.Should().Be(1);
-        (context.AuthenticationState.Reads - before).Should().BeLessThanOrEqualTo(2, "the principal is fetched once for the sweep, and the audit's own user-name read is a completed task");
+        (context.AuthenticationState.Reads - before).Should().Be(1, "the principal is fetched exactly once for the sweep, whatever the number of entries");
     }
 
     [Fact]
