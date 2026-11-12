@@ -122,7 +122,7 @@ internal static class KafkaStudioText
     public const string NoRecordAtThisOffset = "no record at this offset";
 
     /// <summary>The help line under "Include uncommitted records".</summary>
-    public const string UncommittedHelp = "Includes uncommitted records: a record may belong to a transaction that is later aborted";
+    public static string UncommittedHelp => new KStudio.Core.Windows.WindowNote.IncludesUncommitted().Text;
 
     /// <summary>The line beside a "Copy as predicate" the page refuses because the literal would be longer than the parser reads.</summary>
     public const string CopyLiteralTooLong = "Not copied as a predicate: the value is longer than the 1,000 characters a search literal may have.";
@@ -131,7 +131,7 @@ internal static class KafkaStudioText
     public const string KcatCredentialsHint = "# add your own credentials (-X sasl.username=… -X sasl.password=…)";
 
     /// <summary>The shell's variable a kcat line names when the bootstrap servers are not shown.</summary>
-    public const string KcatBootstrapVariable = "'$BOOTSTRAP'";
+    public const string KcatBootstrapVariable = "\"$BOOTSTRAP\"";
 
     /// <summary>The notice for topics a pasted link named and the visitor may not search.</summary>
     /// <param name="count">How many were dropped.</param>

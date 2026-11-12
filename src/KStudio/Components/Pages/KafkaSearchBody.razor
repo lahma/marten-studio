@@ -104,7 +104,7 @@
                         @foreach ((string label, int minutes) in Presets)
                         {
                             <button type="button"
-                                    class="@("ms-btn ms-btn-sm" + (presetMinutes == minutes ? " ms-btn-active" : string.Empty))"
+                                    class="ms-btn ms-btn-sm"
                                     aria-pressed="@(presetMinutes == minutes ? "true" : "false")"
                                     @onclick="() => SetPreset(minutes)">@label</button>
                         }
@@ -153,7 +153,7 @@
                           placeholder="key = 'order-42' and header.tenant-id = 'acme'"
                           disabled="@busy"
                           value="@predicate"
-                          @oninput="e => predicate = e.Value?.ToString() ?? string.Empty"
+                          @oninput="OnPredicateInput"
                           @onkeydown="OnPredicateKeyAsync"></textarea>
             </div>
 
@@ -319,9 +319,9 @@
         {
             <div class="ms-k-sort" role="group" aria-label="Sort the matches">
                 <span class="ms-muted">Sort</span>
-                <button type="button" class="@("ms-btn ms-btn-sm" + (sort == MatchSort.Arrival ? " ms-btn-active" : string.Empty))" @onclick="() => SetSort(MatchSort.Arrival)">Arrival</button>
-                <button type="button" class="@("ms-btn ms-btn-sm" + (sort == MatchSort.Time ? " ms-btn-active" : string.Empty))" @onclick="() => SetSort(MatchSort.Time)">Time</button>
-                <button type="button" class="@("ms-btn ms-btn-sm" + (sort == MatchSort.Position ? " ms-btn-active" : string.Empty))" @onclick="() => SetSort(MatchSort.Position)">Topic, partition, offset</button>
+                <button type="button" class="ms-btn ms-btn-sm" aria-pressed="@(sort == MatchSort.Arrival ? "true" : "false")" @onclick="() => SetSort(MatchSort.Arrival)">Arrival</button>
+                <button type="button" class="ms-btn ms-btn-sm" aria-pressed="@(sort == MatchSort.Time ? "true" : "false")" @onclick="() => SetSort(MatchSort.Time)">Time</button>
+                <button type="button" class="ms-btn ms-btn-sm" aria-pressed="@(sort == MatchSort.Position ? "true" : "false")" @onclick="() => SetSort(MatchSort.Position)">Topic, partition, offset</button>
             </div>
 
             <TableScroll Label="Matches">
@@ -543,7 +543,7 @@
 
         try
         {
-            KafkaTopicListing? listing = await Catalog.ListTopicsAsync(active, null, lifetime.Token);
+            KafkaTopicListing? listing = await Catalog.ListTopicsAsync(active, null, KafkaCapability.SearchRecords, lifetime.Token);
 
             if (disposed)
             {
@@ -795,6 +795,26 @@
             + $"{from.ToString("HH:mm", CultureInfo.InvariantCulture)}Z–{to.ToString("HH:mm", CultureInfo.InvariantCulture)}Z";
     }
 
+    /// <summary>Set by an input event whose only effect is the text in the box: the browser already shows it, so the whole page is not rendered again for each keystroke.</summary>
+    private bool skipNextRender;
+
+    protected override bool ShouldRender()
+    {
+        if (skipNextRender)
+        {
+            skipNextRender = false;
+            return false;
+        }
+
+        return true;
+    }
+
+    private void OnPredicateInput(ChangeEventArgs e)
+    {
+        predicate = e.Value?.ToString() ?? string.Empty;
+        skipNextRender = true;
+    }
+
     private async Task OnPredicateKeyAsync(KeyboardEventArgs e)
     {
         if (e.CtrlKey && string.Equals(e.Key, "Enter", StringComparison.Ordinal) && CanSearch)
@@ -817,7 +837,8 @@
         }
         else if (!predicate.Contains(chip.Predicate, StringComparison.Ordinal))
         {
-            predicate = predicate.TrimEnd() + " and " + chip.Predicate;
+            // Wrapped, so that an "or" already in the box does not swallow the chip: (what was there) and chip.
+            predicate = "(" + predicate.Trim() + ") and " + chip.Predicate;
         }
     }
 
@@ -1017,9 +1038,9 @@
         {
             // The visitor left the page: the run is disposed below, which records the scan.
         }
-        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
+        catch (Exception e) when (disposed && StudioLiveUpdates.IsInteropUnavailable(e))
         {
-            // The tab went away while drawing: nothing left to draw to.
+            // The tab went away while drawing: nothing left to draw to. A live page logs the failure and says so below.
         }
         catch (Exception e) when (!disposed)
         {

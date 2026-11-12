@@ -211,7 +211,9 @@
             return;
         }
 
-        string key = string.Join('\n', active.Key, topic, partition.ToString(CultureInfo.InvariantCulture), offset.ToString(CultureInfo.InvariantCulture));
+        // What this read is about, captured before it starts: the fields move when the address does.
+        (string? askedTopic, int askedPartition, long askedOffset) = (topic, partition, offset);
+        string key = string.Join('\n', active.Key, askedTopic, askedPartition.ToString(CultureInfo.InvariantCulture), askedOffset.ToString(CultureInfo.InvariantCulture));
 
         try
         {
@@ -228,10 +230,10 @@
                 error = null;
                 await InvokeAsync(StateHasChanged);
 
-                KafkaRecordPageResult read = await Records.ReadAsync(active, topic, partition, offset, lifetime.Token);
+                KafkaRecordPageResult read = await Records.ReadAsync(active, askedTopic, askedPartition, askedOffset, lifetime.Token);
 
                 // The address or the cluster moved while this was reading: the answer is about something nobody is looking at.
-                if (disposed || State.ActiveCluster != active || !string.Equals(topic, KafkaAddress.Get(Navigation.Uri, KafkaAddress.TopicParameter), StringComparison.Ordinal))
+                if (disposed || State.ActiveCluster != active || !string.Equals(topic, askedTopic, StringComparison.Ordinal) || partition != askedPartition || offset != askedOffset)
                 {
                     return;
                 }

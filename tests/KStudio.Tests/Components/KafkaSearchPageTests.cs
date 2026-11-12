@@ -5,13 +5,16 @@ using AngleSharp.Dom;
 using Bunit;
 
 using KStudio.Components.Pages;
+using KStudio.Components.Shared;
 using KStudio.Core.Decoding;
 using KStudio.Core.Scanning;
 using KStudio.Services;
+using KStudio.Tests.Scanning;
 using KStudio.Tests.Support;
 
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace KStudio.Tests.Components;
 
@@ -63,15 +66,23 @@ public class KafkaSearchPageTests
         await using KafkaSearchRig rig = new();
         Seed(rig);
         await rig.Studio.Context.ReadyAsync();
+        await rig.Studio.State.EnsureInitializedAsync(Xunit.TestContext.Current.CancellationToken);
 
         // A prerendering request has no fragment: a browser never sends one.
         KafkaAddress.ReadPredicate("http://localhost/postgres/kafka/search?cluster=test&topic=orders", 4_096).Should().BeNull();
         rig.Studio.Navigation.Simulate("kafka/search?cluster=test&topic=orders#q=" + Uri.EscapeDataString("key = 'k1'"), intercepted: false);
-        rig.BrokerCalls.Should().Be(0, "nothing is read before the frame is Ready");
 
-        IRenderedComponent<KafkaSearchPage> page = rig.Studio.Context.Render<KafkaSearchPage>();
+        // The body is rendered with the frame's Ready still pending: it shows nothing, reads nothing and has not looked at the address.
+        TaskCompletionSource ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        IRenderedComponent<KafkaSearchBody> body = rig.Studio.Context.Render<KafkaSearchBody>(p => p.AddCascadingValue(KafkaPageFrame.ReadyName, (Task) ready.Task));
 
-        page.WaitForAssertion(() => page.Find("textarea.ms-k-predicate").GetAttribute("value").Should().Be("key = 'k1'"));
+        body.FindAll("textarea").Should().BeEmpty("nothing is drawn before Ready");
+        rig.BrokerCalls.Should().Be(0, "nothing is read before Ready");
+
+        ready.SetResult();
+
+        body.WaitForAssertion(() => body.Find("textarea.ms-k-predicate").GetAttribute("value").Should().Be("key = 'k1'"));
+        rig.BrokerCalls.Should().BeGreaterThan(0, "the topic list is read after Ready");
     }
 
     [Fact]
@@ -88,6 +99,7 @@ public class KafkaSearchPageTests
         page.Find("input[type=datetime-local]").GetAttribute("value").Should().Be("2026-11-08T11:00");
         page.Markup.Should().Contain("11:00–13:00 UTC");
         rig.Ring.Should().BeEmpty("a pasted link never spends a budget or a confirmation on the visitor's behalf");
+        rig.ListOffsetCalls.Should().Be(0, "a pasted link makes no plan: planning resolves the window with list-offsets calls");
         page.FindAll("table.ms-k-matches").Should().BeEmpty();
         page.Find(".ms-k-search-actions button").TextContent.Should().Be("Search");
     }
@@ -241,6 +253,86 @@ public class KafkaSearchPageTests
 
         page.Find("textarea.ms-k-predicate").GetAttribute("value").Should().Be("header.correlation-id = 'c-2'");
         rig.Ring.Count.Should().Be(entries, "a chip fills the box; the visitor runs the search");
+
+        // What is already in the box is wrapped, so that its "or" does not swallow the chip.
+        await TypeAsync(page, "key = 'k0' or key = 'k1'");
+        await page.FindAll("button.ms-k-chip").First(static x => x.TextContent.Contains("c-1", StringComparison.Ordinal)).ClickAsync(new MouseEventArgs());
+
+        page.Find("textarea.ms-k-predicate").GetAttribute("value").Should().Be("(key = 'k0' or key = 'k1') and header.correlation-id = 'c-1'");
+    }
+
+    [Fact]
+    public async Task Typing_does_not_render_the_whole_page()
+    {
+        await using KafkaSearchRig rig = new();
+        Seed(rig);
+        IRenderedComponent<KafkaSearchPage> page = await OpenAsync(rig, Window);
+        IRenderedComponent<KafkaSearchBody> body = page.FindComponent<KafkaSearchBody>();
+        int renders = body.RenderCount;
+
+        await TypeAsync(page, "key = 'k");
+        await TypeAsync(page, "key = 'k1'");
+
+        body.RenderCount.Should().Be(renders, "the browser shows what was typed; the page is not rendered again for each keystroke");
+
+        await SearchAsync(page);
+        page.WaitForAssertion(() => Rows(page).Should().ContainSingle());
+    }
+
+    [Fact]
+    public async Task The_topic_list_offers_only_the_topics_the_visitor_may_search()
+    {
+        await using KafkaSearchRig rig = new();
+        rig.Studio.Authorization.AllowKafka(static resource => !(resource.Topic == "readonly.v1" && resource.Capability == "SearchRecords"));
+        Seed(rig, "orders");
+        Seed(rig, "readonly.v1");
+
+        IRenderedComponent<KafkaSearchPage> page = await OpenAsync(rig);
+
+        page.WaitForAssertion(() => page.FindAll("label.ms-k-topic-option").Select(static x => x.TextContent.Trim()).Should().Equal("orders"));
+    }
+
+    [Fact]
+    public async Task The_pressed_buttons_say_so_and_the_uncommitted_help_is_the_engines_sentence()
+    {
+        await using KafkaSearchRig rig = new();
+        Seed(rig);
+        IRenderedComponent<KafkaSearchPage> page = await OpenAsync(rig, Window);
+        await SearchAsync(page);
+        page.WaitForAssertion(() => Rows(page).Should().HaveCount(3));
+
+        page.FindAll(".ms-k-sort button").Select(static x => x.GetAttribute("aria-pressed")).Should().Equal("true", "false", "false");
+        await page.FindAll(".ms-k-sort button")[1].ClickAsync(new MouseEventArgs());
+        page.FindAll(".ms-k-sort button").Select(static x => x.GetAttribute("aria-pressed")).Should().Equal("false", "true", "false");
+        page.Markup.Should().NotContain("ms-btn-active");
+        page.Markup.Should().Contain(new KStudio.Core.Windows.WindowNote.IncludesUncommitted().Text);
+    }
+
+    [Fact]
+    public async Task Leaving_the_page_mid_scan_records_it_once_and_frees_the_owners_slot()
+    {
+        ScriptedReader reader = new();
+        int opened = 0;
+        await using KafkaSearchRig rig = new(wrap: wire => new ScriptedWire(wire, options => Interlocked.Increment(ref opened) == 1 ? wire.OpenReader(options) : reader));
+        Seed(rig);
+        IRenderedComponent<KafkaSearchPage> page = await OpenAsync(rig, Window);
+        page.WaitForAssertion(() => page.FindAll("label.ms-k-topic-option input").Should().HaveCount(1));
+        KafkaScanLimiter limiter = rig.Engine.Provider.GetRequiredService<KafkaScanLimiter>();
+
+        // The scripted reader never answers: the scan runs until it is stopped.
+        Task click = page.Find(".ms-k-search-actions button").ClickAsync(new MouseEventArgs());
+        ScanFixture.Until(() => reader.Reads > 0, "the scan is reading");
+        limiter.Running.Should().Be(1);
+        rig.Ring.Should().BeEmpty("a scan is recorded when it ends");
+
+        await rig.Studio.Context.DisposeComponentsAsync();
+        await click.Bounded();
+
+        rig.Ring.Count(static x => x.Action == "SearchRecords").Should().Be(1, "the disposal records the scan, once");
+        limiter.Running.Should().Be(0);
+        KafkaScanOwner owner = await rig.Studio.Context.Services.GetRequiredService<KafkaOwnerKey>().OwnerAsync();
+        limiter.TryAcquire(owner.Key, out IDisposable? lease).Should().BeNull("the owner's slot is free");
+        lease?.Dispose();
     }
 
     [Fact]

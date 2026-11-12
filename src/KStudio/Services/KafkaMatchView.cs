@@ -23,6 +23,9 @@ internal static class KafkaMatchView
     /// <summary>The headers Wolverine writes, confirmed at <c>V6.61.0</c> in <c>EnvelopeConstants</c>; compared ignoring case.</summary>
     public static readonly IReadOnlyList<string> CorrelationHeaders = ["correlation-id", "conversation-id", "tenant-id", "saga-id"];
 
+    /// <summary>The headers the engine reads a W3C trace context from (<c>HeaderDecoder.FindTrace</c>), compared ignoring case.</summary>
+    private static readonly string[] TraceHeaders = ["traceparent", "ce_traceparent", "parent-id"];
+
     /// <summary>The CloudEvents attributes that become chips.</summary>
     public static readonly IReadOnlyList<string> CorrelationAttributes = ["subject", "id"];
 
@@ -70,10 +73,22 @@ internal static class KafkaMatchView
             }
         }
 
+        // The trace chip names the header the trace came from - traceparent, ce_traceparent or Wolverine's parent-id - and only one that was kept, unmasked
+        // and in full: a chip for a header that is not there would be a search that finds nothing.
         if (match.Trace is { } trace)
         {
-            string value = trace.TraceId;
-            chips.Add(new KafkaChip("trace", value, "trace " + Cut(value, 6), "header.traceparent ^= " + PredicateFormatter.QuoteText("00-" + value)));
+            string prefix = "00-" + trace.TraceId;
+            KafkaMatchHeader? source = match.Headers.FirstOrDefault(x =>
+                TraceHeaders.Contains(x.Name, StringComparer.OrdinalIgnoreCase)
+                && IsLiteral(x.Value)
+                && x.Value.Text!.StartsWith(prefix, StringComparison.Ordinal)
+                && PredicateName(x.Name));
+
+            if (source is not null)
+            {
+                string value = trace.TraceId;
+                chips.Add(new KafkaChip("trace", value, "trace " + Cut(value, 6), "header." + source.Name + " ^= " + PredicateFormatter.QuoteText(prefix)));
+            }
         }
 
         return chips;

@@ -28,11 +28,12 @@ internal sealed class KafkaSearchRig : IAsyncDisposable
     /// <summary>The cluster entry the studio lists.</summary>
     public KafkaClusterEntry Entry { get; }
 
-    public KafkaSearchRig(Action<KafkaEngineOptions>? engine = null, Action<KafkaStudioOptions>? studio = null, bool searchOn = true, bool policies = true)
+    public KafkaSearchRig(Action<KafkaEngineOptions>? engine = null, Action<KafkaStudioOptions>? studio = null, bool searchOn = true, bool policies = true, Func<FakeKafkaWire, KStudio.Core.Wire.IKafkaWire>? wrap = null)
     {
         Entry = new KafkaClusterEntry(EngineHarness.ClusterKey, null, "Test cluster", "production");
         Cluster = new FakeKafkaCluster(TimeProvider.System);
-        Engine = EngineHarness.ForWire(new FakeKafkaWire(Cluster, EngineHarness.ClusterKey), TimeProvider.System, TimeSpan.Zero, engine);
+        FakeKafkaWire wire = new(Cluster, EngineHarness.ClusterKey);
+        Engine = EngineHarness.ForWire(wrap?.Invoke(wire) ?? wire, TimeProvider.System, TimeSpan.Zero, engine);
         Studio = new KafkaStudioHarness(
             options =>
             {
@@ -61,6 +62,9 @@ internal sealed class KafkaSearchRig : IAsyncDisposable
 
     /// <summary>How many calls of any kind reached the fake broker.</summary>
     public int BrokerCalls => Cluster.Calls.Count;
+
+    /// <summary>How many list-offsets calls reached the fake broker: a plan makes them, a topic list does not.</summary>
+    public int ListOffsetCalls => Cluster.Calls.Count(static x => x.Call == KStudio.Core.Wire.WireCall.ListOffsets);
 
     /// <summary>The ring the audit writes into.</summary>
     public IReadOnlyList<StudioActionLogEntry> Ring => Studio.Context.Services.GetRequiredService<StudioActionLogService>().GetLatest();

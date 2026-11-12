@@ -156,11 +156,13 @@ internal sealed class KafkaAuthorization(
     /// <param name="cluster">The cluster entry.</param>
     /// <param name="topics">The topics.</param>
     /// <param name="take">Stop after this many, or <see langword="null" /> for all of them.</param>
+    /// <param name="capability">The capability the topics are wanted for, or <see langword="null" /> for a read that needs none: the list a search offers asks the capability policy too.</param>
     /// <param name="cancellationToken">Checked between topics.</param>
     public async ValueTask<IReadOnlyList<string>> FilterTopicsAsync(
         KafkaClusterEntry cluster,
         IEnumerable<string> topics,
         int? take = null,
+        KafkaCapability? capability = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(cluster);
@@ -185,7 +187,7 @@ internal sealed class KafkaAuthorization(
 
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (await IsAuthorizedAsync(user, cluster.Key, cluster.TenantId, topic, null, cancellationToken).ConfigureAwait(false))
+            if (await IsAuthorizedAsync(user, cluster.Key, cluster.TenantId, topic, capability, cancellationToken).ConfigureAwait(false))
             {
                 allowed.Add(topic);
             }

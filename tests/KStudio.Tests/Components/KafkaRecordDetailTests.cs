@@ -157,7 +157,7 @@ public class KafkaRecordDetailTests
     [Fact]
     public void Without_settings_the_bootstrap_is_a_variable_and_a_quote_is_escaped()
     {
-        KafkaMatchView.Kcat("o'rders", 0, 5, null).Should().Contain("-b '$BOOTSTRAP'").And.Contain("-t 'o'\\''rders'");
+        KafkaMatchView.Kcat("o'rders", 0, 5, null).Should().Contain("-b \"$BOOTSTRAP\"").And.Contain("-t 'o'\\''rders'");
     }
 
     [Fact]
@@ -185,6 +185,53 @@ public class KafkaRecordDetailTests
         chip.Predicate.Should().Be("header.Correlation-Id = '0123456789012345678901234567890123456789'");
         PredicateParser.Parse(chip.Predicate).IsValid.Should().BeTrue();
         chips.Select(static x => x.Predicate).Should().NotContain(static x => x.Contains(Secret, StringComparison.Ordinal));
+    }
+
+    private const string TraceParent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+
+    [Theory]
+    [InlineData("traceparent")]
+    [InlineData("ce_traceparent")]
+    [InlineData("parent-id")]
+    [InlineData("Traceparent")]
+    public async Task The_trace_chip_names_the_header_it_came_from_and_finds_the_record(string header)
+    {
+        await using KafkaSearchRig rig = new();
+        rig.Topic("orders");
+        rig.Produce("orders", 0, 1, "k0", "v", ("correlation-id", "c-0"));
+        rig.Produce("orders", 0, 2, "k1", "v", (header, TraceParent));
+        rig.Produce("orders", 0, 3, "k2", "v", ("traceparent", "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-00f067aa0ba902b7-01"));
+
+        KafkaMatch match = await ReadAsync(rig, "orders", 1);
+        KafkaChip trace = KafkaMatchView.Chips(match).Should().ContainSingle(static x => x.Name == "trace").Subject;
+
+        trace.Predicate.Should().Be($"header.{header} ^= '00-4bf92f3577b34da6a3ce929d0e0e4736'");
+        PredicateParser.Parse(trace.Predicate).IsValid.Should().BeTrue();
+
+        // The chip's own search, run on the broker, finds the record it came from - and not the other trace.
+        KafkaSearchService search = rig.Search();
+        KafkaSearchPlanResult.Planned plan = (KafkaSearchPlanResult.Planned) await search.PlanAsync(rig.Input(["orders"], trace.Predicate), Ct);
+        plan.Value.Plan.IsValid.Should().BeTrue();
+        await using KafkaSearchRun run = ((KafkaSearchStartResult.Running) await search.StartAsync(plan.Value, confirmed: true, Ct)).Run;
+        (_, List<KafkaMatch> found) = await KafkaSearchRig.DrainAsync(run);
+
+        found.Should().ContainSingle().Which.Offset.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task A_trace_whose_header_was_not_kept_has_no_chip()
+    {
+        await using KafkaSearchRig rig = new();
+        rig.Topic("orders");
+
+        // 64 headers are kept; the engine reads the trace from all of them, but the traceparent is the 70th.
+        rig.Produce("orders", 0, 1, "k", "v", [.. Enumerable.Range(0, 69).Select(static i => ("h" + i, (string?) "x")), ("traceparent", (string?) TraceParent)]);
+
+        KafkaMatch match = await ReadAsync(rig, "orders", 0);
+
+        match.Trace.Should().NotBeNull();
+        match.Headers.Should().NotContain(static x => x.Name == "traceparent");
+        KafkaMatchView.Chips(match).Should().NotContain(static x => x.Name == "trace", "a chip for a header that is not there would find nothing");
     }
 
     [Fact]

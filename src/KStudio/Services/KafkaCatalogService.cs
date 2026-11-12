@@ -108,7 +108,15 @@ internal sealed class KafkaCatalogService(
     /// <param name="entry">The cluster entry.</param>
     /// <param name="filter">The filter text, or <see langword="null" /> for none.</param>
     /// <param name="cancellationToken">Abandons the read.</param>
-    public async Task<KafkaTopicListing?> ListTopicsAsync(KafkaClusterEntry entry, string? filter, CancellationToken cancellationToken)
+    public Task<KafkaTopicListing?> ListTopicsAsync(KafkaClusterEntry entry, string? filter, CancellationToken cancellationToken) =>
+        ListTopicsAsync(entry, filter, null, cancellationToken);
+
+    /// <summary>The same, for the topics the visitor may use <paramref name="capability" /> on as well: a search offers only the topics it may search.</summary>
+    /// <param name="entry">The cluster entry.</param>
+    /// <param name="filter">The filter text, or <see langword="null" /> for none.</param>
+    /// <param name="capability">The capability the list is wanted for, or <see langword="null" /> for a plain read.</param>
+    /// <param name="cancellationToken">Abandons the read.</param>
+    public async Task<KafkaTopicListing?> ListTopicsAsync(KafkaClusterEntry entry, string? filter, KafkaCapability? capability, CancellationToken cancellationToken)
     {
         if (!await MayReachClusterAsync(entry, cancellationToken).ConfigureAwait(false))
         {
@@ -135,7 +143,7 @@ internal sealed class KafkaCatalogService(
             .Where(name => Matches(name, filter))
             .Order(StringComparer.Ordinal);
 
-        IReadOnlyList<string> declared = await authorization.FilterTopicsAsync(entry, declaredNames, null, cancellationToken).ConfigureAwait(false);
+        IReadOnlyList<string> declared = await authorization.FilterTopicsAsync(entry, declaredNames, null, capability, cancellationToken).ConfigureAwait(false);
         HashSet<string> declaredSet = new(declared, StringComparer.Ordinal);
 
         IReadOnlyList<string> others = await authorization.FilterTopicsAsync(
@@ -145,6 +153,7 @@ internal sealed class KafkaCatalogService(
                 .Select(static x => x.Name)
                 .Order(StringComparer.Ordinal),
             null,
+            capability,
             cancellationToken).ConfigureAwait(false);
 
         IReadOnlyList<string> internals = await authorization.FilterTopicsAsync(
@@ -154,6 +163,7 @@ internal sealed class KafkaCatalogService(
                 .Select(static x => x.Name)
                 .Order(StringComparer.Ordinal),
             null,
+            capability,
             cancellationToken).ConfigureAwait(false);
 
         List<KafkaTopicRow> rows = [.. declared.Where(declaredSet.Contains).Select(name => Row(definition, byName, name))];
@@ -179,7 +189,7 @@ internal sealed class KafkaCatalogService(
             return null;
         }
 
-        IReadOnlyList<string> allowed = await authorization.FilterTopicsAsync(entry, topics, PageSize, cancellationToken).ConfigureAwait(false);
+        IReadOnlyList<string> allowed = await authorization.FilterTopicsAsync(entry, topics, PageSize, null, cancellationToken).ConfigureAwait(false);
         KafkaTopicName[] names = [.. allowed.Where(static x => KafkaTopicName.IsValid(x)).Select(static x => new KafkaTopicName(x))];
 
         return await catalog.ListTopicSpansAsync(entry.Key, names, cancellationToken).ConfigureAwait(false);

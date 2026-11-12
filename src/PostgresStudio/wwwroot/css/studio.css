@@ -17262,3 +17262,11 @@ dialog.ms-modal::backdrop {
 .ms-k-copy-popover::backdrop {
     background-color: transparent;
 }
+
+/* The pressed state of a toggle button (the relative presets, the sort): the attribute is the state, for the eye and for a screen reader. */
+.ms-k-presets [aria-pressed="true"],
+.ms-k-sort [aria-pressed="true"] {
+    border-color: var(--ms-color-primary);
+    background: var(--ms-color-primary-soft);
+    color: var(--ms-color-primary);
+}

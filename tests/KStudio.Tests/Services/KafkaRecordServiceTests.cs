@@ -88,6 +88,22 @@ public class KafkaRecordServiceTests
     }
 
     [Fact]
+    public async Task A_view_of_an_offset_with_no_record_is_logged_as_9604_too()
+    {
+        await using KafkaSearchRig rig = new();
+        Seed(rig, "orders", 3);
+        long open = rig.Cluster.BeginTransaction();
+        rig.Cluster.Produce("orders", 0, [1], [2], null, KafkaSearchRig.T0.ToUnixTimeMilliseconds() + 10_000, open);
+        rig.Cluster.EndTransaction("orders", 0, open, commit: false);
+
+        KafkaRecordPageResult result = await rig.Records().ReadAsync(rig.Entry, "orders", 0, 3, Ct);
+
+        result.Should().BeOfType<KafkaRecordPageResult.Read>().Which.Value.Status.Should().Be(KafkaRecordReadStatus.NoRecordAtOffset);
+        rig.Logs.Entries.Should().ContainSingle(static x => x.EventId.Id == 9604);
+        rig.Ring.Should().ContainSingle(static x => x.Action == "ViewRecord" && x.Succeeded);
+    }
+
+    [Fact]
     public async Task A_read_that_found_nothing_is_always_recorded()
     {
         await using KafkaSearchRig rig = new();

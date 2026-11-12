@@ -119,9 +119,7 @@ internal sealed class KafkaRecordService(
 
     private void Record(KafkaClusterEntry cluster, string topic, int partition, long offset, string target, string user, KafkaRecordRead read)
     {
-        bool found = read.Status == KafkaRecordReadStatus.Found;
-
-        if (!found && read.Status != KafkaRecordReadStatus.NoRecordAtOffset)
+        if (read.Status is not (KafkaRecordReadStatus.Found or KafkaRecordReadStatus.NoRecordAtOffset))
         {
             actionLog.Record(cluster, [topic], Action, target, succeeded: false, read.Text, KafkaCapability.SearchRecords);
             return;
@@ -149,9 +147,7 @@ internal sealed class KafkaRecordService(
 
         actionLog.Record(cluster, [topic], Action, target, succeeded: true, message, KafkaCapability.SearchRecords);
 
-        if (found)
-        {
-            logger.RecordOpened(user, topic, partition, offset, cluster.Key, cluster.TenantId);
-        }
+        // A view of an offset with no record (a compacted gap, a marker) is a view all the same: the neighbours were read and shown.
+        logger.RecordOpened(user, topic, partition, offset, cluster.Key, cluster.TenantId);
     }
 }

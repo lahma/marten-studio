@@ -36,6 +36,13 @@ public partial class KafkaSearchStylesheetTests
     }
 
     [Fact]
+    public void The_pressed_state_is_styled_by_the_attribute()
+    {
+        Section().Should().Contain("[aria-pressed=\"true\"]");
+        Section().Should().NotContain("ms-btn-active");
+    }
+
+    [Fact]
     public void The_section_holds_only_ms_k_classes()
     {
         string[] selectors = [.. ClassName().Matches(Regex.Replace(Section(), @"/\*.*?\*/", string.Empty, RegexOptions.Singleline, TimeSpan.FromSeconds(5)))
