@@ -198,7 +198,7 @@ public class KafkaProfileAllowanceTests
         rig.Topic("big");
         string value = new('x', 60_000);
 
-        for (int i = 0; i < 60; i++)
+        for (int i = 0; i < 120; i++)
         {
             rig.Produce("big", 0, i, "k" + i, value);
         }
@@ -206,8 +206,8 @@ public class KafkaProfileAllowanceTests
         string owner = await OwnerKeyAsync(rig);
         KafkaClusterRegistry registry = rig.Engine.Provider.GetRequiredService<KafkaClusterRegistry>();
 
-        // 1 MiB left of the cluster's 512 MiB; the process's 50 GiB has plenty.
-        rig.Engine.Provider.GetRequiredService<KafkaClusterCostControls>().For(registry.Get(rig.Entry.Key)).OwnerBudget!.Add(owner, 511 * MiB);
+        // 5 MiB left of the cluster's 512 MiB (the planning reads charge it too, so there is room for them); the process's 50 GiB has plenty.
+        rig.Engine.Provider.GetRequiredService<KafkaClusterCostControls>().For(registry.Get(rig.Entry.Key)).OwnerBudget!.Add(owner, 507 * MiB);
         KafkaSearchService search = rig.Search();
         KafkaSearchPlanned planned = ((KafkaSearchPlanResult.Planned) await search.PlanAsync(rig.Input(["big"]), Ct)).Value;
         await using KafkaSearchRun run = ((KafkaSearchStartResult.Running) await search.StartAsync(planned, confirmed: true, Ct)).Run;
