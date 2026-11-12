@@ -87,6 +87,75 @@ public class KafkaRecordServiceTests
         rig.Logs.Entries.Where(static x => x.EventId.Id == 9604).Should().HaveCount(2);
     }
 
+    private const string ValueSentinel = "S3NT1NEL-9d4e2f";
+
+    [Fact]
+    public async Task A_value_view_is_audited_once_per_circuit_as_9605()
+    {
+        await using KafkaSearchRig rig = new(payloads: true);
+        rig.Topic("orders");
+        for (int i = 0; i < 12; i++)
+        {
+            rig.Produce("orders", 0, i, "k" + i, "{\"v\":" + i + "}");
+        }
+
+        KafkaRecordService records = rig.Records();
+
+        KafkaRecordPageResult.Read first = (KafkaRecordPageResult.Read) await records.ReadAsync(rig.Entry, "orders", 0, 5, Ct);
+        await records.ReadAsync(rig.Entry, "orders", 0, 5, Ct);
+        (await records.RecordValueViewAsync(rig.Entry, first.Value.Record!, Ct)).Should().BeTrue("the page's own view of the value covers the inline one");
+        (await records.RecordValueViewAsync(rig.Entry, first.Value.Before[0], Ct)).Should().BeTrue("a neighbour's value is a view of its own");
+        (await records.RecordValueViewAsync(rig.Entry, first.Value.Before[0], Ct)).Should().BeTrue();
+
+        first.Grant.HasPayload.Should().BeTrue();
+        first.Value.Record!.ValueText.Should().Be("{\"v\":5}");
+        rig.Ring.Where(static x => x.Action == "ViewRecord").Select(static x => x.Target).Should().BeEquivalentTo(["orders/0/5", "orders/0/0"]);
+        rig.Ring.Should().OnlyContain(static x => x.Capability == "ReadPayloads");
+        rig.Ring.Single(static x => x.Target == "orders/0/5").Message.Should().StartWith("key, headers and value (JSON, ");
+        rig.Logs.Entries.Where(static x => x.EventId.Id == 9605).Should().HaveCount(2);
+        rig.Logs.Entries.Should().NotContain(static x => x.EventId.Id == 9604, "a page that shows the value writes 9605 instead of 9604");
+    }
+
+    [Fact]
+    public async Task A_key_view_then_a_value_view_records_both()
+    {
+        await using KafkaSearchRig rig = new(payloads: true);
+        rig.Topic("orders");
+        rig.Produce("orders", 0, 1, "k1", "{\"a\":1}");
+        KafkaRecordService records = rig.Records();
+
+        // The topic's capability policy refuses values: the page opens the record with its key and headers only (9604).
+        rig.Studio.Authorization.AllowKafka(static r => r.Capability != "ReadPayloads");
+        KafkaRecordPageResult.Read key = (KafkaRecordPageResult.Read) await records.ReadAsync(rig.Entry, "orders", 0, 0, Ct);
+        (await records.RecordValueViewAsync(rig.Entry, key.Value.Record!, Ct)).Should().BeFalse("the view is judged where it is recorded");
+        key.Grant.AccessFor("orders").Should().Be(KafkaValueAccess.PolicyRefused);
+
+        // The policy then passes: the same record's value is a different view and records its own entry.
+        rig.Studio.Authorization.AllowKafka(static _ => true);
+        (await records.RecordValueViewAsync(rig.Entry, key.Value.Record!, Ct)).Should().BeTrue();
+
+        rig.Ring.Where(static x => x.Succeeded).Select(static x => x.Capability).Should().BeEquivalentTo(["SearchRecords", "ReadPayloads"]);
+        rig.Logs.Entries.Select(static x => x.EventId.Id).Should().Contain([9604, 9605]);
+    }
+
+    [Fact]
+    public async Task The_9605_entry_holds_no_value()
+    {
+        await using KafkaSearchRig rig = new(payloads: true);
+        rig.Topic("orders");
+        rig.Produce("orders", 0, 1, "k1", "{\"secret\":\"" + ValueSentinel + "\"}");
+        KafkaRecordService records = rig.Records();
+
+        KafkaRecordPageResult.Read read = (KafkaRecordPageResult.Read) await records.ReadAsync(rig.Entry, "orders", 0, 0, Ct);
+        await records.RecordValueViewAsync(rig.Entry, read.Value.Record!, Ct);
+
+        read.Value.Record!.ValueText.Should().Contain(ValueSentinel, "the visitor is shown the value");
+        string everything = string.Join('\n', rig.Ring.Select(static x => string.Join('|', x.User, x.Action, x.Target, x.Message, x.Capability, x.ScopeLabel)))
+            + string.Join('\n', rig.Logs.Entries.Select(static x => x.Message));
+        everything.Should().NotContain(ValueSentinel);
+        rig.Logs.Entries.Should().ContainSingle(static x => x.EventId.Id == 9605);
+    }
+
     [Fact]
     public async Task A_view_of_an_offset_with_no_record_is_logged_as_9604_too()
     {

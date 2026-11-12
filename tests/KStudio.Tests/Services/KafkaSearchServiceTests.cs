@@ -149,6 +149,53 @@ public class KafkaSearchServiceTests
     }
 
     [Fact]
+    public async Task A_value_search_is_recorded_with_ReadPayloads_and_values_read()
+    {
+        await using KafkaSearchRig rig = new(payloads: true);
+        rig.Topic("orders");
+        rig.Produce("orders", 0, 10, "k1", "{\"status\":\"placed\"}");
+        rig.Produce("orders", 0, 20, "k2", "{\"status\":\"shipped\"}");
+        KafkaSearchService search = rig.Search();
+
+        KafkaSearchPlanned value = ((KafkaSearchPlanResult.Planned) await search.PlanAsync(rig.Input(["orders"], "$.status = 'placed'"), Ct)).Value;
+        await using (KafkaSearchRun run = ((KafkaSearchStartResult.Running) await search.StartAsync(value, confirmed: false, Ct)).Run)
+        {
+            (_, List<KafkaMatch> matches) = await KafkaSearchRig.DrainAsync(run);
+            matches.Should().ContainSingle().Which.ValueText.Should().Be("{\"status\":\"placed\"}");
+        }
+
+        // A key search under the same grant reads no value: it is a SearchRecords entry, as before.
+        KafkaSearchPlanned key = ((KafkaSearchPlanResult.Planned) await search.PlanAsync(rig.Input(["orders"], "key = 'k1'"), Ct)).Value;
+        await using (KafkaSearchRun run = ((KafkaSearchStartResult.Running) await search.StartAsync(key, confirmed: false, Ct)).Run)
+        {
+            await KafkaSearchRig.DrainAsync(run);
+        }
+
+        StudioActionLogEntry[] entries = [.. rig.Ring.Where(static x => x.Action == "SearchRecords")];
+        entries.Should().HaveCount(2);
+        StudioActionLogEntry valueEntry = entries.Single(static x => x.Capability == "ReadPayloads");
+        valueEntry.Message.Should().EndWith("; values read").And.Contain("predicate: $.status = 'placed'");
+        StudioActionLogEntry keyEntry = entries.Single(static x => x.Capability == "SearchRecords");
+        keyEntry.Message.Should().NotContain("values read");
+        rig.Logs.Entries.Where(static x => x.EventId.Id == 9600).Should().HaveCount(2);
+    }
+
+    [Fact]
+    public async Task A_value_search_without_ReadPayloads_names_the_option_and_is_recorded_as_refused()
+    {
+        await using KafkaSearchRig rig = new(payloads: false);
+        rig.Topic("orders");
+        int callsBefore = rig.BrokerCalls;
+
+        KafkaSearchPlanResult plan = await rig.Search().PlanAsync(rig.Input(["orders"], "$.status = 'placed'"), Ct);
+
+        plan.Should().BeOfType<KafkaSearchPlanResult.Refused>().Which.Text.Should().Contain("KafkaStudioOptions.Capabilities.ReadPayloads");
+        rig.BrokerCalls.Should().Be(callsBefore);
+        rig.Ring.Should().ContainSingle().Which.Should().Match<StudioActionLogEntry>(static x => !x.Succeeded && x.Capability == "ReadPayloads");
+        rig.Logs.Entries.Should().ContainSingle(static x => x.EventId.Id == 9602);
+    }
+
+    [Fact]
     public async Task A_scan_is_recorded_once_whichever_comes_first()
     {
         await using KafkaSearchRig rig = new();

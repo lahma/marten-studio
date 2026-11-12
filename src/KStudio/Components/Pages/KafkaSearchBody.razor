@@ -358,7 +358,6 @@
                 <table class="ms-table ms-k-matches">
                     <thead>
                         <tr>
-                            <th><span class="ms-sr-only">Compare</span></th>
                             <th>Time</th>
                             <th>Topic</th>
                             <th>Partition / offset</th>
@@ -367,6 +366,7 @@
                             <th>Correlation</th>
                             <th>Size</th>
                             <th><span class="ms-sr-only">Details</span></th>
+                            <th><span class="ms-sr-only">Compare</span></th>
                         </tr>
                     </thead>
                     <tbody>
@@ -374,13 +374,6 @@
                         {
                             string rowKey = RowKey(match);
                             <tr class="ms-table-row" @key="rowKey">
-                                <td class="ms-table-cell">
-                                    <input type="checkbox"
-                                           aria-label="@($"Compare {match.Topic} {match.Partition}/{match.Offset}")"
-                                           checked="@compareKeys.Contains(rowKey)"
-                                           disabled="@(!compareKeys.Contains(rowKey) && compareKeys.Count >= 2)"
-                                           @onchange="e => ToggleCompare(rowKey, e.Value is true)" />
-                                </td>
                                 <td class="ms-table-cell" title="@TimeTitle(match)">@Studio.FormatInSelectedTimeZone(match.Timestamp, "yyyy-MM-dd HH:mm:ss")</td>
                                 <td class="ms-table-cell">@match.Topic</td>
                                 <td class="ms-table-cell"><a href="@RecordHref(match)">@match.Partition / @KafkaDisplay.Number(match.Offset)</a></td>
@@ -413,6 +406,13 @@
                                             class="ms-btn ms-btn-sm"
                                             aria-expanded="@(expanded.Contains(rowKey) ? "true" : "false")"
                                             @onclick="() => ToggleDetailAsync(rowKey)">Details</button>
+                                </td>
+                                <td class="ms-table-cell">
+                                    <input type="checkbox"
+                                           aria-label="@($"Compare {match.Topic} {match.Partition}/{match.Offset}")"
+                                           checked="@compareKeys.Contains(rowKey)"
+                                           disabled="@(!compareKeys.Contains(rowKey) && compareKeys.Count >= 2)"
+                                           @onchange="e => ToggleCompare(rowKey, e.Value is true)" />
                                 </td>
                             </tr>
                             @if (expanded.Contains(rowKey))

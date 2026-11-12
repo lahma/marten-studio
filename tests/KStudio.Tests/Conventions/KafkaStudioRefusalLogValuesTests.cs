@@ -12,7 +12,7 @@ using PostgresStudio.Services;
 namespace KStudio.Tests.Conventions;
 
 /// <summary>
-/// Hard rule 5 for KStudio's events (9600 to 9611): a value a visitor could shape - the address's cluster, a topic, a user's name, a predicate -
+/// Hard rule 5 for KStudio's events (9600 to 9611, 9605 among them): a value a visitor could shape - the address's cluster, a topic, a user's name, a predicate -
 /// reaches the log only through <see cref="StudioLogValue" />. Held three ways: every wrapper writes hostile values escaped and bounded, every
 /// <c>[LoggerMessage]</c> method is private to <c>KafkaStudioLog</c>, and none is called from anywhere else in KStudio.
 /// </summary>
@@ -35,9 +35,10 @@ public partial class KafkaStudioRefusalLogValuesTests
         logger.CapabilityRefused(Hostile, Hostile, Hostile);
         logger.ClusterRefused(Hostile, Hostile, Hostile, Hostile, Hostile);
         logger.RecordOpened(Hostile, Hostile, 3, 4, Hostile, Hostile);
+        logger.RecordValueRead(Hostile, Hostile, 3, 4, Hostile, Hostile);
         logger.ClusterAddressIgnored(Hostile, Hostile);
 
-        captured.Entries.Select(static x => x.EventId.Id).Should().Equal(9600, 9601, 9602, 9603, 9604, 9610);
+        captured.Entries.Select(static x => x.EventId.Id).Should().Equal(9600, 9601, 9602, 9603, 9604, 9605, 9610);
 
         foreach (CapturedLogEntry entry in captured.Entries)
         {
@@ -71,6 +72,7 @@ public partial class KafkaStudioRefusalLogValuesTests
         logger.CapabilityRefused("u", "SearchRecords", "KafkaStudioOptions.Capabilities.SearchRecords");
         logger.ClusterRefused("u", "c", null, "t", "p");
         logger.RecordOpened("u", "t", 0, 0, "c", null);
+        logger.RecordValueRead("u", "t", 0, 0, "c", null);
         logger.ClusterAddressIgnored("a", "b");
         KafkaStudioLog.LiveUpdateHandlerFailed(logger, LogLevel.Debug, new InvalidOperationException("x"));
 
@@ -80,6 +82,7 @@ public partial class KafkaStudioRefusalLogValuesTests
             (9602, LogLevel.Warning),
             (9603, LogLevel.Warning),
             (9604, LogLevel.Information),
+            (9605, LogLevel.Information),
             (9610, LogLevel.Debug),
             (9611, LogLevel.Debug));
     }
@@ -95,7 +98,7 @@ public partial class KafkaStudioRefusalLogValuesTests
 
         string[] generated = [.. GeneratedMethod().Matches(File.ReadAllText(logFile)).Select(static m => m.Groups[1].Value)];
 
-        generated.Should().HaveCountGreaterThanOrEqualTo(7, "scanning nothing would pass for the wrong reason");
+        generated.Should().HaveCountGreaterThanOrEqualTo(8, "scanning nothing would pass for the wrong reason");
         File.ReadAllText(logFile).Should().NotContain("public static partial", "a generated method is private, so a call site cannot skip the wrapper");
         log.Should().NotBeEmpty();
 

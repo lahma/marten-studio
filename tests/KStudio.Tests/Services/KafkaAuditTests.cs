@@ -102,6 +102,27 @@ public class KafkaAuditTests
     }
 
     [Fact]
+    public async Task A_ReadPayloads_entry_needs_ReadPayloads_on_and_its_policy()
+    {
+        using KafkaStudioHarness harness = new(static o => o.CapabilityAuthorizationPolicy = "kafka-search");
+
+        Record(harness, ["orders.v1"], KafkaCapability.ReadPayloads);
+
+        (await Visible(harness)).Should().BeEmpty("the capability is off, so reading the entry would reveal a value read the visitor may not make");
+
+        harness.Options.Capabilities.ReadPayloads = true;
+        (await Visible(harness)).Should().ContainSingle();
+
+        harness.Authorization.AllowKafka(static r => r.Capability != "ReadPayloads");
+        (await Visible(harness)).Should().BeEmpty("the capability policy refuses ReadPayloads for the topic");
+        harness.Authorization.KafkaCalls.Should().Contain(static x => x.Resource.Capability == "ReadPayloads" && x.Resource.Topic == "orders.v1");
+
+        harness.Authorization.AllowKafka(static _ => true);
+        harness.Context.Options.ReadOnly = true;
+        (await Visible(harness)).Should().BeEmpty("the host's master switch turns the capability off");
+    }
+
+    [Fact]
     public async Task Answers_are_kept_for_one_sweep_only()
     {
         using KafkaStudioHarness harness = new(static o => o.ClusterAuthorizationPolicy = "kafka-topics");

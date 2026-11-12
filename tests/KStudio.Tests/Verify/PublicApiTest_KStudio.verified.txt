@@ -4,6 +4,7 @@ namespace KStudio
     public sealed class KafkaStudioCapabilities
     {
         public KafkaStudioCapabilities() { }
+        public bool ReadPayloads { get; set; }
         public bool SearchRecords { get; set; }
         public static KStudio.KafkaStudioCapabilities All() { }
         public static KStudio.KafkaStudioCapabilities None() { }
