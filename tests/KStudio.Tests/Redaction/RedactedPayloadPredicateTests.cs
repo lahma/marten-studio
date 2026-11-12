@@ -180,6 +180,10 @@ public class RedactedPayloadPredicateTests
         named.Reason.Should().Be(KafkaUnknownReason.RedactionNotApplied);
 
         KafkaUnknownReasonText.Describe(KafkaUnknownReason.RedactionNotApplied).Should().Be("could not be searched, because a redaction rule could not be applied to their value");
+        KafkaUnknownReasonText.Describe(KafkaUnknownReason.RedactionNotApplied, one: true).Should().Be("could not be searched, because a redaction rule could not be applied to its value");
+        KafkaUnknownReasonText.Describe(KafkaUnknownReason.NotACloudEvent, one: true).Should().Be("was not a CloudEvent although the topic declares them");
+        KafkaUnknownReasonText.Describe(KafkaUnknownReason.TooLarge, one: true).Should().Be("was larger than the decode limit");
+        KafkaUnknownReasonText.Describe(KafkaUnknownReason.InvalidJson, one: true).Should().Be("could not be decoded as JSON");
     }
 
     [Fact]

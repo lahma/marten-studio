@@ -265,18 +265,25 @@ internal static class KafkaUnknownReasonText
 {
     /// <summary>Completes "{n} records …".</summary>
     /// <param name="reason">The reason.</param>
-    public static string Describe(KafkaUnknownReason reason) =>
+    public static string Describe(KafkaUnknownReason reason) => Describe(reason, one: false);
+
+    /// <summary>Completes "1 record …" when <paramref name="one" />, and "{n} records …" otherwise.</summary>
+    /// <param name="reason">The reason.</param>
+    /// <param name="one">Whether exactly one record is described.</param>
+    public static string Describe(KafkaUnknownReason reason, bool one) =>
         reason switch
         {
             KafkaUnknownReason.KeyNotText => "had a key that could not be read as text",
             KafkaUnknownReason.HeaderNotText => "had a header value that could not be read as text",
             KafkaUnknownReason.InvalidJson => "could not be decoded as JSON",
-            KafkaUnknownReason.TooLarge => "were larger than the decode limit",
-            KafkaUnknownReason.NotACloudEvent => "were not CloudEvents although the topic declares them",
+            KafkaUnknownReason.TooLarge => one ? "was larger than the decode limit" : "were larger than the decode limit",
+            KafkaUnknownReason.NotACloudEvent => one ? "was not a CloudEvent although the topic declares them" : "were not CloudEvents although the topic declares them",
             KafkaUnknownReason.ValueNotText => "had a value that could not be read as text",
             KafkaUnknownReason.NumberOutOfRange => "had a number too large to compare",
             KafkaUnknownReason.DecoderFailed => "could not be decoded by the topic's decoder",
             KafkaUnknownReason.InvalidBase64 => "had CloudEvents data_base64 that is not valid base64",
-            _ => "could not be searched, because a redaction rule could not be applied to their value",
+            _ => one
+                ? "could not be searched, because a redaction rule could not be applied to its value"
+                : "could not be searched, because a redaction rule could not be applied to their value",
         };
 }

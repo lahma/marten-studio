@@ -437,7 +437,7 @@ internal sealed record KafkaScanResult(
 
     /// <summary>Sentences saying what the undecidable records could not be, for the line beside a negative.</summary>
     public IEnumerable<string> UndecidableSentences =>
-        UndecidableByReason.Where(static x => x.Value > 0).Select(static x => string.Create(CultureInfo.InvariantCulture, $"{x.Value:N0} records {KafkaUnknownReasonText.Describe(x.Key)}"));
+        UndecidableByReason.Where(static x => x.Value > 0).Select(static x => string.Create(CultureInfo.InvariantCulture, $"{x.Value:N0} {(x.Value == 1 ? "record" : "records")} {KafkaUnknownReasonText.Describe(x.Key, one: x.Value == 1)}"));
 }
 
 /// <summary>What <see cref="KafkaScanHandle.ReadBatchesAsync" /> yields, at most four times a second (decision 9.7).</summary>
