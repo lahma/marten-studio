@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Text.Json;
 
 using Confluent.Kafka;
 
@@ -111,7 +112,7 @@ public class KafkaSettingsReaderTests
             (row.Exposure, row.Shown).Should().Be((KafkaSettingExposure.Secret, "set"), key);
         }
 
-        view.ToString().Should().NotContain(Sentinel);
+        JsonSerializer.Serialize(view).Should().NotContain(Sentinel);
         view.Host.Select(static x => x.Shown).Should().NotContain(x => x.Contains(Sentinel, StringComparison.Ordinal));
         view.Overrides.Select(static x => x.KStudioValue + x.Why).Should().NotContain(x => x.Contains(Sentinel, StringComparison.Ordinal));
         Row(view, "sasl.username").Shown.Should().Be("svc-account", "a user name is not a secret");
@@ -134,7 +135,7 @@ public class KafkaSettingsReaderTests
         KafkaSettingRow row = Row(view, "some.future.setting");
 
         (row.Exposure, row.Shown).Should().Be((KafkaSettingExposure.Withheld, "value withheld: KStudio does not know this setting"));
-        view.ToString().Should().NotContain(Sentinel);
+        JsonSerializer.Serialize(view).Should().NotContain(Sentinel);
     }
 
     [Theory]
@@ -151,7 +152,7 @@ public class KafkaSettingsReaderTests
         KafkaClusterSettingsView view = Read(config => config.Set(key, Sentinel));
 
         Row(view, key).Exposure.Should().Be(KafkaSettingExposure.Secret);
-        view.ToString().Should().NotContain(Sentinel);
+        JsonSerializer.Serialize(view).Should().NotContain(Sentinel);
     }
 
     [Fact]
@@ -175,6 +176,7 @@ public class KafkaSettingsReaderTests
 
     [Theory]
     [InlineData("https://user:pw@idp.example/oauth/token", "https://•••@idp.example/oauth/token")]
+    [InlineData("https://u:p#ss@idp", "https://•••@idp")]
     [InlineData("https://idp.example/oauth", "https://idp.example/oauth")]
     [InlineData("broker-1:9092,broker-2:9092", "broker-1:9092,broker-2:9092")]
     public void User_info_in_a_url_is_masked(string value, string shown)
@@ -182,7 +184,7 @@ public class KafkaSettingsReaderTests
         KafkaClusterSettingsView view = Read(config => config.Set("client.dns.lookup", value));
 
         Row(view, "client.dns.lookup").Shown.Should().Be(shown);
-        view.ToString().Should().NotContain("pw@");
+        JsonSerializer.Serialize(view).Should().NotContain("pw@").And.NotContain("ss@");
     }
 
     [Fact]

@@ -34,7 +34,7 @@ internal enum KafkaRecordReadStatus
     /// <summary>The record at the offset, with its neighbours.</summary>
     Found,
 
-    /// <summary>The range was read and no record has that offset (compaction, or a transaction marker).</summary>
+    /// <summary>The range was read to its end and no record has that offset (compaction, a transaction marker or an aborted record).</summary>
     NoRecordAtOffset,
 
     /// <summary>The offset is below the log start: retention or <c>DeleteRecords</c> removed it.</summary>
@@ -92,7 +92,7 @@ internal sealed record KafkaRecordRead(
 
     internal static string NoRecord(long offset) => string.Create(
         CultureInfo.InvariantCulture,
-        $"No record at offset {offset}: the topic is compacted, or the offset holds a transaction marker. The nearest records are shown.");
+        $"No record at offset {offset}: the topic is compacted, or the offset holds a transaction marker or an aborted record. The nearest records are shown.");
 
     internal static string Gone(long offset, string topic, int partition, long logStart) => string.Create(
         CultureInfo.InvariantCulture,
@@ -105,6 +105,8 @@ internal sealed record KafkaRecordRead(
     internal static string OpenTransaction(long offset, long lastStable) => string.Create(
         CultureInfo.InvariantCulture,
         $"Offset {offset} is past the last stable offset {lastStable}: an open transaction holds it.");
+
+    internal static string NotAnOffset(long offset) => string.Create(CultureInfo.InvariantCulture, $"Offset {offset} is not an offset.");
 
     internal static string NotFound(int partition, string topic) => string.Create(
         CultureInfo.InvariantCulture,
@@ -174,6 +176,54 @@ internal sealed partial class KafkaScanner
         string topic = request.Topic.Value;
         WirePartition key = new(topic, request.Partition);
 
+        if (request.Offset < 0)
+        {
+            // Not a question for the broker: no offset is negative.
+            return KafkaRecordRead.Without(KafkaRecordReadStatus.PartitionNotFound, KafkaRecordRead.NotAnOffset(request.Offset));
+        }
+
+        KafkaScanLimits limits = settings.Limits;
+
+        // A refusal is decided before the broker is asked anything, and the slot is held from here to the end of the read.
+        if (coordinator.IsShuttingDown)
+        {
+            return Refused(request.Cluster, KafkaScanRefusal.ShuttingDown, limits);
+        }
+
+        if (ownerBudget.Remaining(owner.Key) <= 0)
+        {
+            return Refused(request.Cluster, KafkaScanRefusal.OwnerBudgetSpent, limits);
+        }
+
+        if (limiter.TryAcquire(owner.Key, out IDisposable? acquired) is { } refusal)
+        {
+            return Refused(request.Cluster, refusal, limits);
+        }
+
+        IDisposable? lease = acquired;
+
+        try
+        {
+            return await ReadWithSlotAsync(request, owner, definition, key, limits, lease, handOver: () => lease = null, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            lease?.Dispose();
+        }
+    }
+
+    private async Task<KafkaRecordRead> ReadWithSlotAsync(
+        KafkaRecordRequest request,
+        KafkaScanOwner owner,
+        KafkaClusterDefinition definition,
+        WirePartition key,
+        KafkaScanLimits limits,
+        IDisposable? lease,
+        Action handOver,
+        CancellationToken cancellationToken)
+    {
+        string topic = key.Topic;
+
         // Metadata is the cached read: which topics and partitions exist changes slowly.
         WireResult<WireMetadata> metadata = await reads.MetadataAsync(request.Cluster, cancellationToken).ConfigureAwait(false);
 
@@ -219,12 +269,15 @@ internal sealed partial class KafkaScanner
 
             if (committed)
             {
-                // Under Committed the end is the last stable offset; the high watermark says whether an open transaction is why.
+                // Under Committed the end is the last stable offset; the high watermark says whether an open transaction is why, and
+                // an offset at or past the high watermark is simply not written yet.
                 (long? highWatermark, WireError? highError) = await OffsetAsync(wire, request.Cluster, key, WireOffsetSpec.Latest, WireIsolation.ReadUncommitted, cancellationToken).ConfigureAwait(false);
 
                 if (highError is null && highWatermark > end)
                 {
-                    text = KafkaRecordRead.OpenTransaction(request.Offset, end.Value);
+                    text = request.Offset < highWatermark
+                        ? KafkaRecordRead.OpenTransaction(request.Offset, end.Value)
+                        : KafkaRecordRead.NotWritten(request.Offset, topic, request.Partition, highWatermark.Value);
                 }
             }
 
@@ -234,7 +287,7 @@ internal sealed partial class KafkaScanner
         long first = Math.Max(logStart!.Value, request.Offset - request.Neighbours);
         long stop = Math.Min(end!.Value, request.Offset + request.Neighbours + 1);
 
-        return await RunRecordReadAsync(request, owner, definition, key, new PartitionRange(topic, request.Partition, first, stop, logStart.Value, end.Value, null, []), cancellationToken).ConfigureAwait(false);
+        return await RunRecordReadAsync(request, owner, definition, key, new PartitionRange(topic, request.Partition, first, stop, logStart.Value, end.Value, null, []), limits, lease, handOver, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<KafkaRecordRead> RunRecordReadAsync(
@@ -243,29 +296,16 @@ internal sealed partial class KafkaScanner
         KafkaClusterDefinition definition,
         WirePartition key,
         PartitionRange range,
+        KafkaScanLimits limits,
+        IDisposable? lease,
+        Action handOver,
         CancellationToken cancellationToken)
     {
         string topic = key.Topic;
-        KafkaScanLimits limits = settings.Limits;
 
         // The range is all the read is for: it never stops at the match limit with the last record read, and it never runs as long as a search.
         limits.MaxMatches = checked((int) (range.End - range.Start)) + 1;
         limits.MaxScanDuration = TimeSpan.FromTicks(Math.Min(limits.MaxScanDuration.Ticks, KafkaRecordRead.MaxDuration.Ticks));
-
-        if (coordinator.IsShuttingDown)
-        {
-            return Refused(request.Cluster, KafkaScanRefusal.ShuttingDown, limits);
-        }
-
-        if (ownerBudget.Remaining(owner.Key) <= 0)
-        {
-            return Refused(request.Cluster, KafkaScanRefusal.OwnerBudgetSpent, limits);
-        }
-
-        if (limiter.TryAcquire(owner.Key, out IDisposable? lease) is { } refusal)
-        {
-            return Refused(request.Cluster, refusal, limits);
-        }
 
         KafkaScanHandle? handle = null;
 
@@ -317,7 +357,7 @@ internal sealed partial class KafkaScanner
 
             Task<KafkaScanResult> task;
 
-            // The scan's thread releases the slots; the closure holds its own reference, because this method gives up its own below.
+            // The scan's thread releases the slots once the task exists; until then the caller's finally does.
             IDisposable? slots = lease;
 
             try
@@ -345,7 +385,7 @@ internal sealed partial class KafkaScanner
                 throw;
             }
 
-            lease = null;
+            handOver();
             handle = new KafkaScanHandle(run, task, time);
             coordinator.Register(handle);
 
@@ -362,8 +402,6 @@ internal sealed partial class KafkaScanner
         }
         finally
         {
-            lease?.Dispose();
-
             if (handle is not null)
             {
                 await handle.DisposeAsync().ConfigureAwait(false);
@@ -396,9 +434,43 @@ internal sealed partial class KafkaScanner
                 {
                     KafkaMatch? found = matches.FirstOrDefault(x => x.Offset == request.Offset);
 
-                    return found is not null
-                        ? Make(KafkaRecordReadStatus.Found, string.Empty, found)
-                        : Make(KafkaRecordReadStatus.NoRecordAtOffset, KafkaRecordRead.NoRecord(request.Offset), null);
+                    if (found is not null)
+                    {
+                        return Make(KafkaRecordReadStatus.Found, string.Empty, found);
+                    }
+
+                    // "No record" is said only of a range that was read to its end: a partition that stopped early, or lost the offset
+                    // to retention while it was read, says that instead.
+                    KafkaScanGap? gap = result.Gaps.FirstOrDefault(x => request.Offset >= x.FromOffset && request.Offset <= x.ToOffset);
+
+                    if (gap is not null)
+                    {
+                        long logStart = gap.LogStart ?? gap.ToOffset + 1;
+
+                        return new KafkaRecordRead(
+                            KafkaRecordReadStatus.BelowLogStart,
+                            null,
+                            [.. matches.Where(x => x.Offset < request.Offset)],
+                            [.. matches.Where(x => x.Offset > request.Offset)],
+                            logStart,
+                            range.HighWatermark,
+                            null,
+                            null,
+                            KafkaRecordRead.Gone(request.Offset, topic, request.Partition, logStart),
+                            result.Records,
+                            result.Bytes);
+                    }
+
+                    PartitionEndState? ended = result.Partitions.Count > 0 ? result.Partitions[0].State : null;
+
+                    return ended switch
+                    {
+                        null or PartitionEndState.EndOfWindow or PartitionEndState.EndOfLog or PartitionEndState.StoppedAtLso or PartitionEndState.Empty =>
+                            Make(KafkaRecordReadStatus.NoRecordAtOffset, KafkaRecordRead.NoRecord(request.Offset), null),
+                        PartitionEndState.Stalled or PartitionEndState.OffsetGap =>
+                            Make(KafkaRecordReadStatus.Stopped, KafkaRecordRead.StopText(KafkaScanStopReason.Unavailable, limits.MaxScanDuration), null, KafkaScanStopReason.Unavailable),
+                        _ => Make(KafkaRecordReadStatus.Stopped, KafkaRecordRead.StopText(KafkaScanStopReason.Failed, limits.MaxScanDuration), null, KafkaScanStopReason.Failed),
+                    };
                 }
 
             case KafkaScanStopReason.NotAuthorized:

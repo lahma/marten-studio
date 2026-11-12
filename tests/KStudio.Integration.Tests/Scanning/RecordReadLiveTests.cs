@@ -113,7 +113,7 @@ public abstract class RecordReadLiveTests(KafkaFixture fixture)
         KafkaRecordRead read = await ReadAsync(engine, topic, 0, 3);
 
         read.Status.Should().Be(KafkaRecordReadStatus.NoRecordAtOffset);
-        read.Text.Should().Be("No record at offset 3: the topic is compacted, or the offset holds a transaction marker. The nearest records are shown.");
+        read.Text.Should().Be("No record at offset 3: the topic is compacted, or the offset holds a transaction marker or an aborted record. The nearest records are shown.");
         read.Before.Select(static x => x.Key.Text).Should().Equal("before-0", "before-1", "before-2");
         read.After.Select(static x => x.Key.Text).Should().Equal("after");
 

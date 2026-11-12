@@ -572,7 +572,7 @@ internal sealed class ScanRun : IDisposable
             long lost = Math.Min(resume, p.Range.End) - p.Next;
             lock (gate)
             {
-                gaps.Add(new KafkaScanGap(p.Range.Topic, p.Range.Partition, p.Next, Math.Min(resume, p.Range.End) - 1, lost));
+                gaps.Add(new KafkaScanGap(p.Range.Topic, p.Range.Partition, p.Next, Math.Min(resume, p.Range.End) - 1, lost, logStart));
                 version++;
             }
 

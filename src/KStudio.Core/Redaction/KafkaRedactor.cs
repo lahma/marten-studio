@@ -61,6 +61,20 @@ internal sealed class KafkaRedactionRules
     private readonly List<(RedactionTarget Target, string Field, string Name, bool Searchable)> rules = [];
     private readonly HashSet<string> allowed = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>A copy that later declarations on this object do not reach: the registry's snapshot of what validation approved.</summary>
+    internal KafkaRedactionRules Copy()
+    {
+        KafkaRedactionRules copy = new();
+        copy.rules.AddRange(rules);
+
+        foreach (string name in allowed)
+        {
+            copy.allowed.Add(name);
+        }
+
+        return copy;
+    }
+
     /// <summary>The rules in the order they were declared.</summary>
     internal IReadOnlyList<(RedactionTarget Target, string Field, string Name, bool Searchable)> Declared => rules;
 

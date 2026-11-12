@@ -132,10 +132,10 @@ internal sealed class KafkaSettingsReader(KafkaEngineSnapshot settings)
             return value;
         }
 
+        // Everything up to the last '@' is masked, however the password is spelled: a '/', '?' or '#' in an unescaped password must not end
+        // the user info early and leave its tail on the page. Over-masking a host is the safe side.
         int authorityStart = scheme + 3;
-        int authorityEnd = value.IndexOfAny(['/', '?', '#'], authorityStart);
-        authorityEnd = authorityEnd < 0 ? value.Length : authorityEnd;
-        int at = value.LastIndexOf('@', authorityEnd - 1, authorityEnd - authorityStart);
+        int at = value.LastIndexOf('@');
 
         return at < authorityStart ? value : string.Concat(value.AsSpan(0, authorityStart), UserInfoMask, value.AsSpan(at));
     }

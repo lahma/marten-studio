@@ -165,10 +165,133 @@ public class RecordReadTests
         KafkaRecordRead read = await ReadAsync(fixture, topic, 5);
 
         read.Status.Should().Be(KafkaRecordReadStatus.NoRecordAtOffset);
-        read.Text.Should().Be("No record at offset 5: the topic is compacted, or the offset holds a transaction marker. The nearest records are shown.");
+        read.Text.Should().Be("No record at offset 5: the topic is compacted, or the offset holds a transaction marker or an aborted record. The nearest records are shown.");
         read.Record.Should().BeNull();
         read.Before.Select(static x => x.Offset).Should().Equal(0, 1, 2, 3, 4);
         read.After.Select(static x => x.Offset).Should().Equal(6);
+    }
+
+    [Fact]
+    public async Task A_range_that_stalled_is_Stopped_as_unavailable_never_NoRecordAtOffset()
+    {
+        ScriptedReader reader = new();
+        await using ScanFixture fixture = ScanFixture.Create(wrap: wire => new ScriptedWire(wire, _ => reader));
+        string topic = fixture.Topic("stall");
+        Seed(fixture, topic, 20);
+
+        // The reader returns nothing: the partition makes no progress until the stall timeout ends it.
+        Task<KafkaRecordRead> read = ReadAsync(fixture, topic, 10);
+        ScanFixture.Until(() => reader.Reads > 0, "the scan's thread is reading");
+        fixture.Clock.Advance(TimeSpan.FromSeconds(16));
+
+        KafkaRecordRead result = await read.Bounded();
+
+        result.Status.Should().Be(KafkaRecordReadStatus.Stopped);
+        result.StopReason.Should().Be(KafkaScanStopReason.Unavailable);
+        result.Text.Should().Be("Stopped: the cluster stopped answering.");
+        result.Record.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task An_offset_deleted_during_the_read_is_BelowLogStart_with_the_new_log_start()
+    {
+        ScriptedReader reader = new();
+        await using ScanFixture fixture = ScanFixture.Create(wrap: wire => new ScriptedWire(wire, _ => reader));
+        string topic = fixture.Topic("deleted");
+        Seed(fixture, topic, 60);
+
+        Task<KafkaRecordRead> read = ReadAsync(fixture, topic, 10);
+        ScanFixture.Until(() => reader.Reads > 0, "the scan's thread is reading");
+        fixture.Cluster.DeleteRecords(topic, 0, 50);
+        reader.Enqueue(new WireReadOutcome.Failure(new WireError.OffsetOutOfRange(new WirePartition(topic, 0), null), new WirePartition(topic, 0)));
+
+        KafkaRecordRead result = await read.Bounded();
+
+        result.Status.Should().Be(KafkaRecordReadStatus.BelowLogStart);
+        result.LogStart.Should().Be(50);
+        result.Text.Should().Be($"Offset 10 is gone: the earliest offset {topic}/0 still holds is 50 (retention or DeleteRecords removed the rest).");
+        result.Record.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Past_the_high_watermark_under_an_open_transaction_is_not_written_yet_and_names_the_high_watermark()
+    {
+        await using ScanFixture fixture = ScanFixture.Create();
+        string topic = fixture.Topic("beyond");
+        Seed(fixture, topic, 2);
+        long transaction = fixture.Cluster.BeginTransaction();
+        fixture.Cluster.Produce(topic, 0, [1], [2], null, ScanFixture.T0.ToUnixTimeMilliseconds(), transaction);
+
+        // The last stable offset is 2 and the high watermark 3: offset 5 is past both, and no open transaction holds it.
+        KafkaRecordRead read = await ReadAsync(fixture, topic, 5);
+
+        read.Status.Should().Be(KafkaRecordReadStatus.AboveEnd);
+        read.Text.Should().Be($"Offset 5 has not been written yet: {topic}/0 ends at offset 3.");
+    }
+
+    [Fact]
+    public async Task A_negative_offset_is_not_an_offset_and_asks_the_broker_nothing()
+    {
+        await using ScanFixture fixture = ScanFixture.Create();
+        string topic = fixture.Topic("negative");
+        Seed(fixture, topic, 5);
+        int calls = fixture.Cluster.Calls.Count;
+
+        KafkaRecordRead read = await ReadAsync(fixture, topic, -1);
+
+        read.Status.Should().Be(KafkaRecordReadStatus.PartitionNotFound);
+        read.Text.Should().Be("Offset -1 is not an offset.");
+        fixture.Cluster.Calls.Should().HaveCount(calls);
+        fixture.Provider.GetRequiredService<KafkaScanLimiter>().Running.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task A_refused_read_asks_the_broker_nothing()
+    {
+        ScanEngineTests.ScriptedScan scan = await ScanEngineTests.ScriptedScan.StartAsync();
+        await using ScanEngineTests.ScriptedScan guard = scan;
+        int calls = scan.Fixture.Cluster.Calls.Count;
+
+        KafkaRecordRead busy = await ReadAsync(scan.Fixture, scan.Topic, 10);
+
+        busy.Refusal.Should().Be(KafkaScanRefusal.OwnerBusy);
+        scan.Fixture.Cluster.Calls.Should().HaveCount(calls, "the slot is taken before the first metadata or offsets call");
+
+        await using ScanFixture fixture = ScanFixture.Create();
+        string topic = fixture.Topic("spent");
+        Seed(fixture, topic, 5);
+        OwnerByteBudget budget = fixture.Provider.GetRequiredService<OwnerByteBudget>();
+        budget.Add(fixture.Owner.Key, budget.Remaining(fixture.Owner.Key));
+        int spentCalls = fixture.Cluster.Calls.Count;
+
+        KafkaRecordRead spent = await ReadAsync(fixture, topic, 2);
+
+        spent.Refusal.Should().Be(KafkaScanRefusal.OwnerBudgetSpent);
+        fixture.Cluster.Calls.Should().HaveCount(spentCalls);
+    }
+
+    [Fact]
+    public async Task The_slot_is_held_while_the_offsets_are_read_and_freed_on_every_early_return()
+    {
+        await using ScanFixture fixture = ScanFixture.Create();
+        string topic = fixture.Topic("held");
+        Seed(fixture, topic, 20);
+        fixture.Cluster.DeleteRecords(topic, 0, 8);
+        KafkaScanLimiter limiter = fixture.Provider.GetRequiredService<KafkaScanLimiter>();
+        List<int> running = [];
+        fixture.Cluster.OffsetFault = (_, _, _) =>
+        {
+            running.Add(limiter.Running);
+            return null;
+        };
+
+        (await ReadAsync(fixture, topic, 3)).Status.Should().Be(KafkaRecordReadStatus.BelowLogStart);
+        (await ReadAsync(fixture, topic, 99)).Status.Should().Be(KafkaRecordReadStatus.AboveEnd);
+        (await ReadAsync(fixture, topic, 0, partition: 7)).Status.Should().Be(KafkaRecordReadStatus.PartitionNotFound);
+
+        running.Should().NotBeEmpty().And.OnlyContain(static x => x == 1, "the owner's slot is held across the offset reads");
+        limiter.Running.Should().Be(0, "every early return gives the slot back");
+        (await ReadAsync(fixture, topic, 10)).Status.Should().Be(KafkaRecordReadStatus.Found);
     }
 
     [Fact]

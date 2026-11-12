@@ -56,6 +56,32 @@ public class RedactionBuilderTests
             new KafkaScanLimits(),
             new DecodeCounters());
 
+    [Fact]
+    public void A_rule_declared_after_the_registry_was_built_is_not_seen()
+    {
+        KafkaRedactionBuilder? kept = null;
+        KafkaEngineOptions options = new();
+        options.AddCluster("prod", new ClientConfig { BootstrapServers = "broker:9092" });
+        options.Topic("orders", topic => topic.Redact(rules =>
+        {
+            kept = rules;
+            rules.Header("x-first");
+        }));
+
+        KafkaClusterRegistry registry = new(options);
+        KafkaRedactor before = new(registry.Get("prod").Descriptor("orders").Settings.Rules);
+
+        // The host kept the builder it was handed and adds a rule, and an opt-out, once the registry exists.
+        kept!.Header("x-late");
+        kept.AllowHeader("authorization");
+        KafkaRedactor after = new(registry.Get("prod").Descriptor("orders").Settings.Rules);
+
+        before.ForHeader("x-first").Should().NotBeNull();
+        after.ForHeader("x-first").Should().NotBeNull();
+        after.ForHeader("x-late").Should().BeNull("a rule added after validation is not the rule set that was validated");
+        after.ForHeader("authorization").Should().NotBeNull("an opt-out added later does not lift the deny-list either");
+    }
+
     private static IReadOnlyList<string> Validate(Action<KafkaTopicBuilder> topic)
     {
         KafkaEngineOptions options = new();
