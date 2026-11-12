@@ -132,7 +132,7 @@ internal sealed class KafkaClusterRegistry
             : throw new KeyNotFoundException("No Kafka cluster is registered under that key.");
 
     private RegistryState Publish() =>
-        new([.. clusters], new Dictionary<string, KafkaClusterDefinition>(byKey, StringComparer.Ordinal), [.. notes, .. pending.Select(static x => new KafkaRegistryNote(x.Name, x.Note))]);
+        new([.. clusters], new Dictionary<string, KafkaClusterDefinition>(byKey, StringComparer.Ordinal), [.. notes, .. pending.Select(static x => new KafkaRegistryNote(x.Name, x.Note, "some clusters", "the application had not started"))]);
 
     private void AddFromSource(Func<IServiceProvider, IKafkaClusterSource> factory, IServiceProvider services)
     {
@@ -304,14 +304,14 @@ internal sealed class KafkaClusterRegistry
 
     private void AddNote(string source, KafkaSourceNote note)
     {
-        notes.Add(new KafkaRegistryNote(source, note.Text));
+        notes.Add(new KafkaRegistryNote(source, note.Text, note.What, note.Reason));
 
         if (logger is null || once is null)
         {
             return;
         }
 
-        // The item is the general words, never a name: the sentence with the name is on the Settings page (event 9677).
+        // The item is the general words, never a name (event 9677). The Settings page shows the same general words (KafkaRegistryNote.Generic), not Text.
         LogLevel level = KafkaLogOnce.WarningOrDebug(once, source + "|" + note.What + "|" + note.Reason);
         KStudioLog.ClusterSourceItemNotListed(logger, level, note.What, source, note.Reason);
     }
@@ -324,10 +324,19 @@ internal sealed class KafkaClusterRegistry
         IReadOnlyList<KafkaRegistryNote> Notes);
 }
 
-/// <summary>One thing a source did not list, as the Settings page shows it.</summary>
+/// <summary>One thing a source did not list.</summary>
 /// <param name="Source">The source's name.</param>
-/// <param name="Text">The sentence.</param>
-internal sealed record KafkaRegistryNote(string Source, string Text);
+/// <param name="Text">The sentence the source wrote. It may name a tenant, a topic or a broker, so it is never shown to a visitor (D35): it is for the engine's own tests.</param>
+/// <param name="What">What was not listed, in general terms (no name).</param>
+/// <param name="Reason">Why, in general terms (no name).</param>
+internal sealed record KafkaRegistryNote(string Source, string Text, string What, string Reason)
+{
+    /// <summary>
+    /// The sentence the Settings page shows, built from the general words only: <c>Not listed: a tenant cluster, because Wolverine had not connected it.</c>
+    /// A visitor a tenant's or a topic's policy refuses must not learn that it exists (D35).
+    /// </summary>
+    public string Generic => "Not listed: " + What + ", because " + Reason + ".";
+}
 
 /// <summary>One wire per cluster, created on first use from the factory and kept for the life of the container.</summary>
 internal sealed class KafkaWires(KafkaClusterRegistry registry, IKafkaWireFactory factory)

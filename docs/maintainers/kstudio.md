@@ -609,8 +609,9 @@ consumer into KStudio.Core's baseline.
 **What a source may contribute.** Clusters, each with its consumer and admin configuration (cloned by the registry as `AddCluster` clones the
 host's, so a source cannot write back), a builder, and the topics it found; and notes. A cluster that breaks a rule of the host's own (a key, a
 display name, 50 groups, bootstrap servers, a topic name), or whose key a host cluster holds, is skipped and noted, never thrown: one bad discovery
-must not take down the host's own clusters. A source that throws costs a note. The notes are on the Settings page with their names; the log
-carries them as event 9677 with only general words - `a tenant cluster`, `Wolverine had not connected it` - Warning the first time within ten
+must not take down the host's own clusters. A source that throws costs a note. The Settings page shows each note in its general words only (`What` and `Reason`, built by `KafkaRegistryNote.Generic`), never the note's own sentence,
+which can name a tenant, a topic or a broker a visitor's policy refuses (D35); the log
+carries the same general words as event 9677 - `a tenant cluster`, `Wolverine had not connected it` - Warning the first time within ten
 minutes for the same source, item and reason and Debug after, and never a tenant id, a topic or a value. Event 9678 (Debug) is for Find in Kafka
 failing to read the clusters.
 
@@ -712,8 +713,9 @@ grants nothing.
 **What the module shows of Wolverine (UI-E).** The record detail's **Envelope id**, **Sent at** and **Partition key** lines are Wolverine's `id`,
 `sent-at` and `partition-key` headers as the record shows them (a redacted one reads redacted, a topic without them draws no line). The topic overview's
 discovered facts - role, message types, consumer group, serializer and source - and the Settings page's section on what a source listed and could not
-list are drawn from the registry's declarations and notes. **A note can name a broker, a tenant or a topic its source did not list, so the Settings page
-asks for the notes under the same cluster gate as the settings beside them (`KafkaCatalogService.GetDiscoveryAsync`), and not per topic.**
+list are drawn from the registry's declarations and notes. **A note's own sentence can name a broker, a tenant or a topic its source did not list, and the visitor may be refused that tenant or topic (D35).
+So the Settings page shows each note only in its general words (`Not listed: a tenant cluster, because Wolverine had not connected it.`), under the
+same cluster gate as the settings beside it (`KafkaCatalogService.GetDiscoveryAsync`); `ClusterSourceTests` and `KafkaDiscoveredFactsTests` hold it.**
 
 **The tests.** `KafkaRecordLinkBuilderTests` (tenant rules, masked key, header and tenant, cut value, the store, the bound), `KafkaRecordLinksTests`
 (the section, the compact form, the envelope lines, the external link line), `KafkaRecordSearchLinksTests` (fragment-only value, store rule, cluster

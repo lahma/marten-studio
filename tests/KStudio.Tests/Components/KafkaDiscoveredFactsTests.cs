@@ -88,7 +88,7 @@ public class KafkaDiscoveredFactsTests
     {
         await using KafkaCatalogRig rig = Rig(
             new KafkaSourceNote("a topic", "it is on another cluster", "The topic 'billing' is on another cluster, so it is not listed here."),
-            new KafkaSourceNote("tenant clusters", "not ready", "Tenant clusters are listed once the application has started."));
+            new KafkaSourceNote("a tenant cluster", "Wolverine had not connected it", "Tenant acme's cluster is not listed: Wolverine had not connected it."));
 
         IRenderedComponent<KafkaSettingsPage> page = await OpenSettingsAsync(rig, "wolverine");
 
@@ -96,8 +96,34 @@ public class KafkaDiscoveredFactsTests
         page.Find(".ms-k-discovery h2").TextContent.Should().Be("Discovered from Wolverine");
         page.Find(".ms-k-discovery-listed").TextContent.Should().Be("This cluster was listed from the application's Wolverine configuration.");
         page.FindAll(".ms-k-discovery-notes li").Select(static x => x.TextContent).Should().Equal(
-            "The topic 'billing' is on another cluster, so it is not listed here.",
-            "Tenant clusters are listed once the application has started.");
+            "Not listed: a topic, because it is on another cluster.",
+            "Not listed: a tenant cluster, because Wolverine had not connected it.");
+    }
+
+    [Fact]
+    public async Task A_note_that_names_a_tenant_or_a_topic_renders_without_the_name_for_any_visitor()
+    {
+        await using KafkaCatalogRig rig = Rig(
+            new KafkaSourceNote("a tenant cluster", "Wolverine had not connected it", "Tenant acme's cluster is not listed: Wolverine had not connected it."),
+            new KafkaSourceNote("a topic", "its name is one KStudio cannot address", "The topic 'billing-secret' was not listed: its name is one KStudio cannot address."));
+
+        IRenderedComponent<KafkaSettingsPage> page = await OpenSettingsAsync(rig, "wolverine");
+
+        page.WaitForAssertion(() => page.FindAll(".ms-k-discovery-notes li").Should().HaveCount(2));
+        page.Markup.Should().NotContain("acme").And.NotContain("billing-secret");
+    }
+
+    [Fact]
+    public async Task The_sentence_that_waits_for_the_application_to_start_reads_in_general_words()
+    {
+        await using KafkaCatalogRig rig = new(
+            engine: o => o.ClusterSources.Add(_ => new FakeClusterSource(
+                new KafkaClusterContribution([FakeClusterSource.Cluster("wolverine")], [], Incomplete: true, IncompleteNote: "Tenant clusters are listed once the application has started.", CompleteWhen: new CancellationTokenSource().Token))),
+            cluster: "wolverine");
+
+        IRenderedComponent<KafkaSettingsPage> page = await OpenSettingsAsync(rig, "wolverine");
+
+        page.WaitForAssertion(() => page.FindAll(".ms-k-discovery-notes li").Select(static x => x.TextContent).Should().Equal("Not listed: some clusters, because the application had not started."));
     }
 
     [Fact]

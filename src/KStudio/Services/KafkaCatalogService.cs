@@ -265,8 +265,8 @@ internal sealed class KafkaCatalogService(
 
     /// <summary>
     /// What the cluster sources listed and could not list, for the Settings page, or <see langword="null" /> when the policy refuses the cluster. The
-    /// notes are the registry's, so they are asked for under the same cluster gate as the settings they sit beside: a note can name a broker, a tenant
-    /// or a topic its source did not list.
+    /// notes are the registry's, so they are asked for under the same cluster gate as the settings they sit beside: a note's own sentence can name a broker,
+    /// a tenant or a topic its source did not list, so only its general words (<see cref="KafkaRegistryNote.Generic" />) leave this method's caller.
     /// </summary>
     /// <param name="entry">The cluster entry.</param>
     /// <param name="cancellationToken">Abandons the wait for the policy.</param>
