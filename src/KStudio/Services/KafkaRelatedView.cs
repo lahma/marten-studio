@@ -163,8 +163,9 @@ internal static class KafkaRelatedView
     /// <param name="from">The window's start.</param>
     /// <param name="to">The window's end.</param>
     /// <param name="anchor">The record the search is about, or <see langword="null" />.</param>
+    /// <param name="searched">Whether a search has run: before the first one, the summary says so instead of reporting no records.</param>
     public static KafkaTimelineModel Strip(
-        IReadOnlyList<KafkaTimelineLane> lanes, IReadOnlyList<KafkaMatch> matches, DateTimeOffset from, DateTimeOffset to, KafkaMatch? anchor)
+        IReadOnlyList<KafkaTimelineLane> lanes, IReadOnlyList<KafkaMatch> matches, DateTimeOffset from, DateTimeOffset to, KafkaMatch? anchor, bool searched = true)
     {
         ArgumentNullException.ThrowIfNull(lanes);
         ArgumentNullException.ThrowIfNull(matches);
@@ -189,17 +190,21 @@ internal static class KafkaRelatedView
             }
         }
 
-        return new KafkaTimelineModel([.. lanes.Select(static x => x.Topic)], dots, Summary(lanes, matches));
+        return new KafkaTimelineModel([.. lanes.Select(static x => x.Topic)], dots, Summary(lanes, matches, searched));
     }
+
+    /// <summary>The summary before the first search: nothing has been read, so nothing can have been "not found".</summary>
+    public const string NotSearchedYet = "Nothing searched yet: press Search related records.";
 
     /// <summary>The text beside the strip: <c>23 records on 3 topics from 14:02:11 to 14:09:40</c> (UTC).</summary>
     /// <param name="lanes">The lanes.</param>
     /// <param name="matches">The records found.</param>
-    public static string Summary(IReadOnlyList<KafkaTimelineLane> lanes, IReadOnlyList<KafkaMatch> matches)
+    /// <param name="searched">Whether a search has run.</param>
+    public static string Summary(IReadOnlyList<KafkaTimelineLane> lanes, IReadOnlyList<KafkaMatch> matches, bool searched = true)
     {
         if (matches.Count == 0)
         {
-            return "No related records found.";
+            return searched ? "No related records found." : NotSearchedYet;
         }
 
         int topics = lanes.Count(static x => x.Matches > 0);

@@ -1004,7 +1004,7 @@
         KafkaRelatedView.Lanes(lanes, matches, result, running, planned is not null, anchor?.Topic);
 
     private KafkaTimelineModel Strip() =>
-        KafkaRelatedView.Strip(DrawnLanes(), matches, planned?.Input.From ?? fromUtc, planned?.Input.To ?? toUtc, anchor);
+        KafkaRelatedView.Strip(DrawnLanes(), matches, planned?.Input.From ?? fromUtc, planned?.Input.To ?? toUtc, anchor, searched: planned is not null);
 
     private bool IsAnchor(KafkaMatch match) =>
         anchor is not null && string.Equals(KafkaRelatedView.RowKey(anchor), KafkaRelatedView.RowKey(match), StringComparison.Ordinal);

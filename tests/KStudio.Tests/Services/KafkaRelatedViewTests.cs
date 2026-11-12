@@ -130,4 +130,11 @@ public class KafkaRelatedViewTests
             new KafkaScanCursor([]),
             new DecodeCounters(),
             new DecodeCounters());
+
+    [Fact]
+    public void Before_the_first_search_the_summary_says_nothing_was_searched_rather_than_nothing_found()
+    {
+        KafkaRelatedView.Summary([], [], searched: false).Should().Be(KafkaRelatedView.NotSearchedYet);
+        KafkaRelatedView.Summary([], [], searched: true).Should().Be("No related records found.");
+    }
 }
