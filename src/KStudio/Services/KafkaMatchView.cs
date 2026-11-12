@@ -8,6 +8,7 @@ using KStudio.Core.Decoding;
 using KStudio.Core.Predicates;
 using KStudio.Core.Redaction;
 using KStudio.Core.Scanning;
+using KStudio.Internal;
 
 namespace KStudio.Services;
 
@@ -88,6 +89,54 @@ internal static partial class KafkaMatchView
         }
 
         return chips;
+    }
+
+    /// <summary>
+    /// The record's trace id, only when the header it came from is kept, unmasked and whole (the chip rule): a link must hold only what the visitor sees.
+    /// </summary>
+    /// <param name="match">The match.</param>
+    public static string? LiteralTraceId(KafkaMatch match)
+    {
+        ArgumentNullException.ThrowIfNull(match);
+
+        if (match.Trace is not { } trace)
+        {
+            return null;
+        }
+
+        string prefix = "00-" + trace.TraceId;
+
+        return match.Headers.Any(x =>
+            TraceHeaders.Contains(x.Name, StringComparer.OrdinalIgnoreCase) && x.Value.IsLiteral && x.Value.Text!.StartsWith(prefix, StringComparison.Ordinal))
+            ? trace.TraceId
+            : null;
+    }
+
+    /// <summary>The first <c>correlation-id</c> header that is a literal, or <see langword="null" />.</summary>
+    /// <param name="match">The match.</param>
+    public static string? LiteralCorrelationId(KafkaMatch match)
+    {
+        ArgumentNullException.ThrowIfNull(match);
+
+        return match.Headers.FirstOrDefault(static x => string.Equals(x.Name, "correlation-id", StringComparison.OrdinalIgnoreCase) && x.Value.IsLiteral)?.Value.Text;
+    }
+
+    /// <summary>The host's external links for a match: those whose placeholders all have a value the visitor sees.</summary>
+    /// <param name="registrations">The host's <c>ExternalLink</c> calls.</param>
+    /// <param name="match">The match.</param>
+    public static IReadOnlyList<KafkaExternalLink> ExternalLinks(IReadOnlyList<KafkaExternalLinkRegistration> registrations, KafkaMatch match)
+    {
+        ArgumentNullException.ThrowIfNull(registrations);
+        ArgumentNullException.ThrowIfNull(match);
+
+        if (registrations.Count == 0)
+        {
+            return [];
+        }
+
+        KafkaExternalLinkValues values = new(LiteralTraceId(match), LiteralCorrelationId(match), match.Timestamp);
+
+        return [.. registrations.Select(x => ExternalLinkTemplate.Fill(x, values)).OfType<KafkaExternalLink>()];
     }
 
     /// <summary>The predicate that finds this key, or <see langword="null" /> when copying it would copy a different value (null, masked, cut, not text, too long).</summary>

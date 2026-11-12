@@ -77,6 +77,9 @@ public static class KafkaStudioServiceCollectionExtensions
             optionsBuilder.Configure(configure);
         }
 
+        // The host's external links (D44): refused at the first read of the options, which the startup guard makes at host start.
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IValidateOptions<KafkaStudioOptions>, KafkaExternalLinkOptionsValidator>());
+
         // The engine: the options object answers both seams, as a studio's does (D30).
         KStudioEngineRegistration.Add(
             services,
@@ -100,6 +103,9 @@ public static class KafkaStudioServiceCollectionExtensions
 
         // Related records (UI-D): one audited scan over several topics, each searched by its own fields.
         services.TryAddScoped<KafkaCorrelationService>();
+
+        // Links (UI-E, D44): "Find in Kafka" is offered to a studio's record screens through its internal seam, pure and registered once.
+        services.TryAddSingleton<IStudioRecordSearchLinks, KafkaRecordSearchLinks>();
 
         // Which of the module's audit entries a visitor may read (D34): its own gate, never the host's store policy.
         services.TryAddEnumerable(ServiceDescriptor.Scoped<IStudioAuditScopeGate, KafkaAuditGate>());

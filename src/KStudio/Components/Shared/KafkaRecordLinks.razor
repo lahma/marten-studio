@@ -1,0 +1,105 @@
+@using KStudio.Core.Clusters
+@using KStudio.Core.Scanning
+@using PostgresStudio.Services.Settings
+@inject IServiceProvider Services
+@inject KafkaClusterRegistry Registry
+
+@* Links from a record to the Marten documents and streams its topic's correlation fields name (D44, decision 7.3 of D-CORR). It draws nothing in a
+   host that has no Marten Studio (no IStudioRouteLinks), for a topic with no such field, and for a record that holds no such value. The addresses are
+   the studio's, verbatim: this component builds none, and a link grants nothing, because the page it opens asks the policies again. *@
+
+@if (set is { IsEmpty: false })
+{
+    @if (Compact)
+    {
+        <span class="ms-k-record-links ms-k-record-links-compact">
+            @foreach (KafkaRecordLink link in set.Links)
+            {
+                @LinkItem(link)
+            }
+            @if (set.TenantHidden)
+            {
+                <span class="ms-muted">@KafkaStudioText.LinksTenantHidden</span>
+            }
+        </span>
+    }
+    else
+    {
+        <div class="ms-k-record-links">
+            <h3 class="ms-section-title">Links</h3>
+            <ul class="ms-k-link-list">
+                @foreach (KafkaRecordLink link in set.Links)
+                {
+                    <li>@LinkItem(link)</li>
+                }
+            </ul>
+            @if (set.TenantHidden)
+            {
+                <p class="ms-muted">@KafkaStudioText.LinksTenantHidden</p>
+            }
+        </div>
+    }
+}
+
+@code {
+    private object? answered;
+    private string? answeredCluster;
+    private bool answeredCompact;
+    private KafkaRecordLinkSet? set;
+
+    /// <summary>The record, as a <c>KafkaMatch</c>. Typed <see cref="object" />: the engine's types are internal and a component's parameters are public.</summary>
+    [Parameter]
+    public object? Model { get; set; }
+
+    /// <summary>The cluster entry's key, for the topic's fields and the entry's tenant.</summary>
+    [Parameter]
+    public string? Cluster { get; set; }
+
+    /// <summary>Whether to draw the links inline, for a timeline row, instead of as a section.</summary>
+    [Parameter]
+    public bool Compact { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        if (ReferenceEquals(Model, answered) && string.Equals(Cluster, answeredCluster, StringComparison.Ordinal) && Compact == answeredCompact)
+        {
+            return;
+        }
+
+        answered = Model;
+        answeredCluster = Cluster;
+        answeredCompact = Compact;
+        set = Build();
+    }
+
+    private KafkaRecordLinkSet Build()
+    {
+        if (Model is not KafkaMatch match || Services.GetService(typeof(IStudioRouteLinks)) is not IStudioRouteLinks routes)
+        {
+            return KafkaRecordLinkSet.None;
+        }
+
+        KafkaClusterDefinition? cluster = null;
+        bool found = Cluster is not null && Registry.TryGet(Cluster, out cluster);
+
+        return found ? KafkaRecordLinkBuilder.Build(routes, cluster, match) : KafkaRecordLinkSet.None;
+    }
+
+    private static RenderFragment LinkItem(KafkaRecordLink link) => builder =>
+    {
+        if (link.Href is { } href)
+        {
+            builder.OpenElement(0, "a");
+            builder.AddAttribute(1, "class", "ms-k-marten-link");
+            builder.AddAttribute(2, "href", href);
+            builder.AddContent(3, link.Text);
+            builder.CloseElement();
+            return;
+        }
+
+        builder.OpenElement(4, "span");
+        builder.AddAttribute(5, "class", "ms-k-marten-nolink ms-muted");
+        builder.AddContent(6, link.Text + " (" + link.Reason + ")");
+        builder.CloseElement();
+    };
+}

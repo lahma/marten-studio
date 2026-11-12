@@ -74,6 +74,7 @@
                 Around <a href="@RecordHref(anchored)"><code>@anchored.Topic</code> · partition @anchored.Partition · offset @KafkaDisplay.Number(anchored.Offset)</a>
                 · @Studio.FormatInSelectedTimeZone(anchored.Timestamp, "yyyy-MM-dd HH:mm:ss")
             </p>
+            <KafkaExternalLinks Model="@anchored" />
         }
 
         <section class="ms-k-keys" aria-label="Keys">
@@ -312,6 +313,7 @@
                                         {
                                             <span class="ms-chip ms-k-chip" title="@chip.Value">@chip.Display</span>
                                         }
+                                        <KafkaRecordLinks Model="@match" Cluster="@State.ActiveCluster?.Key" Compact="true" />
                                     </td>
                                 </tr>
                             }

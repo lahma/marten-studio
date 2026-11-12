@@ -324,4 +324,47 @@ internal static class KafkaStudioText
 
     /// <summary>The note on a group compared by its key and value as shown.</summary>
     public const string DuplicatesComparedAsShown = "Compared as shown: a masked part counts as equal to any other mask.";
+
+    /// <summary>The words of the button a Marten Studio record screen draws to look a record up in Kafka (D44). The studio never spells it.</summary>
+    public const string FindInKafka = "Find in Kafka";
+
+    /// <summary>Said instead of Marten links on a record whose <c>tenant-id</c> header is hidden: the address would carry the hidden value.</summary>
+    public const string LinksTenantHidden = "No links to Marten records: this record's tenant-id is redacted or cut, and a link would carry it.";
+
+    /// <summary>The heading of the line that links a record to the host's own tracing or log tool.</summary>
+    public const string OpenIn = "Open in";
+
+    /// <summary>The heading of a topic page's facts from a cluster source.</summary>
+    /// <param name="source">The source's name, for example <c>Wolverine</c>.</param>
+    public static string DiscoveredHeading(string source) => "Discovered from " + source;
+
+    /// <summary>The sentence under the discovered facts: what they are and are not.</summary>
+    public const string DiscoveredLead =
+        "Read from the application's Wolverine configuration when KStudio first needed it. They describe how the application uses the topic, not what it holds.";
+
+    /// <summary>The heading of the Settings page's section on what a cluster source listed and could not list.</summary>
+    /// <param name="sources">The names of the sources, for example <c>Wolverine</c>.</param>
+    public static string DiscoveryHeading(string sources) => "Discovered from " + sources;
+
+    /// <summary>The sentence under the Settings page's discovery section.</summary>
+    public const string DiscoveryLead =
+        "KStudio read the application's configuration once, and started, connected and wrote nothing. Discovery adds no redaction: declare rules for every topic that carries personal data.";
+
+    /// <summary>What the Settings page says of a cluster a source listed.</summary>
+    /// <param name="source">The source's name.</param>
+    public static string DiscoveryListed(string source) => "This cluster was listed from the application's " + source + " configuration.";
+
+    /// <summary>The heading of what a source did not list.</summary>
+    public const string DiscoveryNotesHeading = "Not listed";
+
+    /// <summary>The role a discovered topic has, in words.</summary>
+    /// <param name="role">The role.</param>
+    public static string DiscoveredRole(KStudio.Core.Clusters.KafkaTopicRole role) => role switch
+    {
+        KStudio.Core.Clusters.KafkaTopicRole.Listener => "Listener",
+        KStudio.Core.Clusters.KafkaTopicRole.Sender => "Sender",
+        KStudio.Core.Clusters.KafkaTopicRole.ListenerAndSender => "Listener and sender",
+        KStudio.Core.Clusters.KafkaTopicRole.DeadLetter => "Dead letters",
+        _ => role.ToString(),
+    };
 }

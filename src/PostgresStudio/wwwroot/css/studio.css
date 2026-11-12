@@ -17570,3 +17570,109 @@ dialog.ms-modal::backdrop {
         padding: var(--ms-space-xs) var(--ms-space-sm);
     }
 }
+
+
+/* ===== KS-UI-E: links to Marten records, external links, and what Wolverine told KStudio ===== */
+/* The Links section of a record, and the same links inline in a timeline row. */
+.ms-k-record-links {
+    margin: 0 0 var(--ms-space-md);
+    min-width: 0;
+}
+
+.ms-k-link-list {
+    margin: 0;
+    padding-left: var(--ms-space-lg);
+    overflow-wrap: anywhere;
+}
+
+.ms-k-record-links-compact {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-xs) var(--ms-space-sm);
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.ms-k-marten-link {
+    overflow-wrap: anywhere;
+}
+
+.ms-k-marten-nolink {
+    overflow-wrap: anywhere;
+}
+
+/* The host's own tracing and log links: a line, each link opening in a tab of its own. */
+.ms-k-external-links {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--ms-space-xs) var(--ms-space-sm);
+    margin: 0 0 var(--ms-space-md);
+}
+
+.ms-k-external-link {
+    overflow-wrap: anywhere;
+}
+
+/* Wolverine's envelope lines in the record's definition list. */
+.ms-k-envelope-id,
+.ms-k-sent-at,
+.ms-k-partition-key {
+    overflow-wrap: anywhere;
+}
+
+/* A topic's facts from a cluster source: a definition list like the configuration's. */
+.ms-k-discovered {
+    margin: 0 0 var(--ms-space-lg);
+    min-width: 0;
+}
+
+.ms-k-discovered-facts {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: var(--ms-space-xs) var(--ms-space-lg);
+    margin: 0;
+}
+
+.ms-k-discovered-facts dt {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-k-discovered-facts dd {
+    margin: 0;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.ms-k-discovered-types {
+    margin: 0;
+    padding-left: var(--ms-space-lg);
+}
+
+/* The Settings page's discovery section. */
+.ms-k-discovery {
+    margin: var(--ms-space-lg) 0 0;
+    min-width: 0;
+}
+
+.ms-k-discovery-listed,
+.ms-k-discovery-notes {
+    overflow-wrap: anywhere;
+}
+
+.ms-k-discovery-notes {
+    margin: 0;
+    padding-left: var(--ms-space-lg);
+}
+
+/* On a phone the two-column lists stack, so that a long identifier has the whole line. */
+@media (max-width: 600px) {
+    .ms-k-discovered-facts {
+        grid-template-columns: 1fr;
+    }
+
+    .ms-k-discovered-facts dd {
+        margin-bottom: var(--ms-space-xs);
+    }
+}

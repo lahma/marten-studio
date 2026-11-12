@@ -40,6 +40,18 @@ internal sealed record KafkaTopicListing(string? RefusalText, IReadOnlyList<Kafk
     public int DeclaredCount => Rows.TakeWhile(static x => x.Declared).Count();
 }
 
+/// <summary>What the Settings page says about discovery: the source of this cluster, and what the sources could not list.</summary>
+/// <param name="Source">The name of the source that listed this cluster, or <see langword="null" /> for the host's own registration.</param>
+/// <param name="Notes">What the sources did not list, with the source of each.</param>
+internal sealed record KafkaDiscoveryView(string? Source, IReadOnlyList<KafkaRegistryNote> Notes)
+{
+    /// <summary>Whether there is anything to say.</summary>
+    public bool IsEmpty => Source is null && Notes.Count == 0;
+
+    /// <summary>The sources the section is about: this cluster's, and each note's.</summary>
+    public string SourceNames => string.Join(", ", new string?[] { Source }.Concat(Notes.Select(static x => (string?) x.Source)).OfType<string>().Distinct(StringComparer.Ordinal));
+}
+
 /// <summary>What the topic page gets: the topic, or one value for both "missing" and "refused".</summary>
 internal abstract record KafkaTopicPageResult
 {
@@ -60,12 +72,14 @@ internal abstract record KafkaTopicPageResult
     /// <param name="Description">The declared description.</param>
     /// <param name="KeyFormat">The key format, declared or assumed.</param>
     /// <param name="KeyFormatDeclared">Whether the key format was declared.</param>
+    /// <param name="Discovered">What a cluster source (Wolverine) found out about the topic, or <see langword="null" />.</param>
     public sealed record Found(
         KafkaTopicOverview Overview,
         bool Declared,
         string? Description,
         KafkaKeyFormat KeyFormat,
-        bool KeyFormatDeclared) : KafkaTopicPageResult;
+        bool KeyFormatDeclared,
+        KafkaDiscoveredTopic? Discovered = null) : KafkaTopicPageResult;
 }
 
 /// <summary>
@@ -230,7 +244,7 @@ internal sealed class KafkaCatalogService(
         }
 
         KafkaTopicDescriptor descriptor = registry.Get(entry.Key).Descriptor(name.Value);
-        return new KafkaTopicPageResult.Found(overview.Value, descriptor.Declared, descriptor.Description, descriptor.KeyFormat, descriptor.KeyFormatDeclared);
+        return new KafkaTopicPageResult.Found(overview.Value, descriptor.Declared, descriptor.Description, descriptor.KeyFormat, descriptor.KeyFormatDeclared, descriptor.Discovered);
     }
 
     /// <summary>
@@ -247,6 +261,23 @@ internal sealed class KafkaCatalogService(
         }
 
         return settings.Read(registry.Get(entry.Key));
+    }
+
+    /// <summary>
+    /// What the cluster sources listed and could not list, for the Settings page, or <see langword="null" /> when the policy refuses the cluster. The
+    /// notes are the registry's, so they are asked for under the same cluster gate as the settings they sit beside: a note can name a broker, a tenant
+    /// or a topic its source did not list.
+    /// </summary>
+    /// <param name="entry">The cluster entry.</param>
+    /// <param name="cancellationToken">Abandons the wait for the policy.</param>
+    public async Task<KafkaDiscoveryView?> GetDiscoveryAsync(KafkaClusterEntry entry, CancellationToken cancellationToken)
+    {
+        if (!await MayReachClusterAsync(entry, cancellationToken).ConfigureAwait(false))
+        {
+            return null;
+        }
+
+        return new KafkaDiscoveryView(registry.Get(entry.Key).Source, registry.Notes);
     }
 
     private async Task<bool> MayReachClusterAsync(KafkaClusterEntry entry, CancellationToken cancellationToken)
