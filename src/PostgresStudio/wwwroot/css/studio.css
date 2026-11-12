@@ -16799,6 +16799,10 @@ dialog.ms-modal::backdrop {
     margin-bottom: var(--ms-space-lg);
 }
 
+.ms-k-cluster-strip .ms-k-environment {
+    text-transform: lowercase;
+}
+
 .ms-k-cluster-strip .ms-k-cluster-facts {
     font-size: var(--ms-font-size-sm);
 }
@@ -16879,7 +16883,7 @@ dialog.ms-modal::backdrop {
     margin-bottom: var(--ms-space-lg);
 }
 
-.ms-k-partitions .ms-table-cell {
+.ms-k-partitions td {
     font-variant-numeric: tabular-nums;
 }
 
@@ -16929,4 +16933,41 @@ dialog.ms-modal::backdrop {
 .ms-k-oauth {
     margin: var(--ms-space-md) 0 0;
     color: var(--ms-color-text-secondary);
+}
+
+/* The home: a wide enough filter, the table's description column allowed to wrap, and the two groups told apart by their header rows. */
+.ms-k-filter {
+    min-width: 18rem;
+}
+
+.ms-k-total {
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-k-topics-table td {
+    vertical-align: top;
+}
+
+.ms-k-topics-table td:nth-child(2) {
+    max-width: 36ch;
+    white-space: normal;
+}
+
+.ms-k-topic-group-declared > .ms-k-group-row > th {
+    border-left: 3px solid var(--ms-color-border-strong);
+}
+
+.ms-k-topic-group-other > .ms-k-group-row > th {
+    border-left: 3px solid transparent;
+}
+
+.ms-k-topic-description {
+    margin: 0 0 var(--ms-space-md);
+    color: var(--ms-color-text-secondary);
+}
+
+/* Cluster settings: a setting's key is a long dotted name, and a value (a bootstrap list, a path) may be longer still. */
+.ms-k-settings code,
+.ms-k-settings td {
+    overflow-wrap: anywhere;
 }

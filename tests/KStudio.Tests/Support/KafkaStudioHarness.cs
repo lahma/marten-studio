@@ -1,6 +1,11 @@
 using System.Security.Claims;
 
+using Confluent.Kafka;
+
+using KStudio.Core.Clusters;
 using KStudio.Services;
+using KStudio.Tests.Contract;
+using KStudio.Tests.Support.FakeKafka;
 
 using MartenStudio.Tests.Support;
 
@@ -109,14 +114,30 @@ internal sealed class KafkaStudioHarness : IDisposable
     {
     }
 
-    /// <summary>The same, with <paramref name="extra" /> adding services to the circuit's container (a Find contributor, say).</summary>
-    public KafkaStudioHarness(Action<KafkaStudioOptions>? configure, Action<IServiceCollection>? extra, KafkaClusterEntry[] clusters)
+    /// <summary>
+    /// The same, with <paramref name="extra" /> adding services to the circuit's container (a Find contributor, say). The engine behind the catalog
+    /// service is <paramref name="engine" />, or - for a test that is about the shell and not about what a page reads - an empty fake cluster
+    /// that lists every entry as a registered cluster.
+    /// </summary>
+    public KafkaStudioHarness(Action<KafkaStudioOptions>? configure, Action<IServiceCollection>? extra, KafkaClusterEntry[] clusters, EngineHarness? engine = null)
     {
         Options = new KafkaStudioOptions();
         configure?.Invoke(Options);
+        KafkaClusterEntry[] entries = clusters.Length == 0 ? [Primary] : clusters;
+
+        ownedEngine = engine is null;
+        Engine = engine ?? EngineHarness.ForWire(
+            new FakeKafkaWire(new FakeKafkaCluster(TimeProvider.System), EngineHarness.ClusterKey),
+            configure: options =>
+            {
+                foreach (KafkaClusterEntry entry in entries.Where(static x => x.Key != EngineHarness.ClusterKey))
+                {
+                    options.AddCluster(entry.Key, new ClientConfig { BootstrapServers = "fake:9092" });
+                }
+            });
 
         Authorization = new RecordingAuthorizationService();
-        Entries = new FakeClusterEntries(clusters.Length == 0 ? [Primary] : clusters);
+        Entries = new FakeClusterEntries(entries);
         Navigation = new RecordingNavigationManager();
 
         Context = new PostgresStudioComponentContext(services =>
@@ -142,11 +163,21 @@ internal sealed class KafkaStudioHarness : IDisposable
             services.AddSingleton<KafkaState>();
             services.AddSingleton<KafkaActionLog>();
             services.AddSingleton<IStudioAuditScopeGate, KafkaAuditGate>();
+
+            services.AddSingleton(Engine.Catalog);
+            services.AddSingleton(Engine.Provider.GetRequiredService<KafkaClusterRegistry>());
+            services.AddSingleton(Engine.Provider.GetRequiredService<KafkaSettingsReader>());
+            services.AddSingleton<KafkaCatalogService>();
             extra?.Invoke(services);
         });
     }
 
+    private readonly bool ownedEngine;
+
     public KafkaStudioOptions Options { get; }
+
+    /// <summary>The engine the catalog service reads through.</summary>
+    public EngineHarness Engine { get; }
 
     public RecordingAuthorizationService Authorization { get; }
 
@@ -167,5 +198,13 @@ internal sealed class KafkaStudioHarness : IDisposable
 
     public TestAuthenticationStateProvider Visitor => Context.AuthenticationState;
 
-    public void Dispose() => Context.Dispose();
+    public void Dispose()
+    {
+        Context.Dispose();
+
+        if (ownedEngine)
+        {
+            Engine.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
+    }
 }

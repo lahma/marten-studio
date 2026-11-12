@@ -87,7 +87,26 @@ public class ShellModuleComponentTests
 
         string[] sections = [.. rail.FindAll(".ms-sidebar-section").Select(static x => x.TextContent.Trim())];
         sections.Should().Equal("Data", "Database", "Operations", "Kafka", "System");
-        rail.FindAll(".ms-nav-link-text").Select(static x => x.TextContent.Trim()).Should().Contain("Clusters");
+        rail.FindAll(".ms-nav-link-text").Select(static x => x.TextContent.Trim()).Should().Contain(["Topics", "Cluster settings"]).And.NotContain("Search", "the capability is off");
+    }
+
+    [Fact]
+    public async Task Search_is_on_the_rail_only_while_the_capability_is_effectively_on()
+    {
+        using KafkaStudioHarness off = new();
+        using KafkaStudioHarness on = new(static o => o.Capabilities = KafkaStudioCapabilities.All());
+        using KafkaStudioHarness readOnly = new(static o => o.Capabilities = KafkaStudioCapabilities.All());
+        readOnly.Context.Options.ReadOnly = true;
+        await off.Context.ReadyAsync();
+        await on.Context.ReadyAsync();
+        await readOnly.Context.ReadyAsync();
+
+        static string[] Links(KafkaStudioHarness harness) =>
+            [.. harness.Context.Render<NavMenu>().FindAll(".ms-nav-link-text").Select(static x => x.TextContent.Trim())];
+
+        Links(off).Should().NotContain("Search");
+        Links(on).Should().Contain("Search");
+        Links(readOnly).Should().NotContain("Search", "the host studio's ReadOnly turns every capability off");
     }
 
     [Fact]
@@ -98,7 +117,7 @@ public class ShellModuleComponentTests
 
         IRenderedComponent<NavMenu> rail = harness.Context.Render<NavMenu>();
 
-        string kafka = rail.FindAll("a.ms-nav-link").Single(static x => x.TextContent.Trim() == "Clusters").GetAttribute("href")!;
+        string kafka = rail.FindAll("a.ms-nav-link").Single(static x => x.TextContent.Trim() == "Topics").GetAttribute("href")!;
         kafka.Should().EndWith("kafka").And.NotContain("store=").And.NotContain("db=").And.NotContain("tenant=");
 
         string host = rail.FindAll("a.ms-nav-link").First(static x => x.TextContent.Trim() == "Activity").GetAttribute("href")!;
@@ -347,15 +366,16 @@ public class ShellModuleComponentTests
     }
 
     [Fact]
-    public async Task The_stub_page_lists_the_clusters_the_visitor_may_see()
+    public async Task The_home_opens_the_first_cluster_the_visitor_may_see()
     {
         using KafkaStudioHarness harness = new(static o => o.ClusterAuthorizationPolicy = "kafka-topics", KafkaStudioHarness.Primary, KafkaStudioHarness.Secondary);
-        harness.Authorization.AllowKafka(static r => r.Cluster != "secondary");
+        harness.Authorization.AllowKafka(static r => r.Cluster != "primary");
         await harness.Context.ReadyAsync();
 
         IRenderedComponent<KStudio.Components.Pages.KafkaHome> home = harness.Context.Render<KStudio.Components.Pages.KafkaHome>();
 
-        home.WaitForAssertion(() => home.FindAll("tbody tr").Select(static x => x.QuerySelector("td")!.TextContent.Trim()).Should().Equal("Primary"));
+        home.WaitForAssertion(() => home.Find(".ms-k-cluster-strip .ms-k-cluster-name").TextContent.Trim().Should().Be("Secondary"));
+        home.Markup.Should().NotContain("Primary", "a cluster the policy refuses is not on the page");
     }
 
     /// <summary>Anti-vacuity for the layout rule: a routed component of this assembly is a page, and none declares a layout of its own.</summary>

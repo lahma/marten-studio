@@ -87,7 +87,7 @@ public class KafkaEndpointTests
             app.MapPostgresStudio(mount).AllowAnonymous();
         }
 
-        RouteEndpoints(app).Where(IsKafkaPage).Select(static x => x.RoutePattern.RawText).Should().Equal([expected], "the stub page, and only it");
+        RouteEndpoints(app).Where(IsKafkaPage).Select(static x => x.RoutePattern.RawText).Should().BeEquivalentTo([expected, expected + "/settings", expected + "/topic"], "the home, the settings and the topic overview");
 
         await app.StartAsync(Token);
         try
@@ -100,7 +100,7 @@ public class KafkaEndpointTests
             body.Should().Contain("ms-k-trademark", "the prerendered frame draws the trademark line");
             body.Should().Contain("Apache Kafka is a trademark of the Apache Software Foundation");
             body.Should().Contain("KStudio for Apache Kafka&#xAE;", "the rail names the module");
-            body.Should().NotContain("Kafka clusters</h1>", "the body starts only once the circuit is interactive: a prerender reads nothing");
+            body.Should().NotContain("Kafka topics</h1>", "the body starts only once the circuit is interactive: a prerender reads nothing");
         }
         finally
         {
@@ -125,7 +125,7 @@ public class KafkaEndpointTests
         });
         app.MapPostgresStudio().AllowAnonymous();
 
-        RouteEndpoints(app).Where(IsKafkaPage).Select(static x => x.RoutePattern.RawText).Should().Equal(["/kafka"], "the stub page, at the root of the host");
+        RouteEndpoints(app).Where(IsKafkaPage).Select(static x => x.RoutePattern.RawText).Should().BeEquivalentTo(["/kafka", "/kafka/settings", "/kafka/topic"], "the catalog pages, at the root of the host");
 
         await app.StartAsync(Token);
         try

@@ -58,7 +58,7 @@ public class StudioLayoutModulePageTests
         layout.WaitForAssertion(() => layout.FindAll("#ms-cluster-select option").Select(static x => x.TextContent.Trim()).Should().Equal("Primary", "Secondary"));
         layout.FindAll("#ms-store-select, #ms-database-select").Should().BeEmpty("the host's selector gives way to the module's");
         layout.FindAll(".ms-header-find").Should().BeEmpty("a Find contributor searches the host's scope, which a Kafka page is not about");
-        layout.WaitForAssertion(() => Heading(layout).Should().Be("Kafka clusters"));
+        layout.WaitForAssertion(() => Heading(layout).Should().Be("Kafka topics"));
     }
 
     [Fact]
@@ -83,7 +83,7 @@ public class StudioLayoutModulePageTests
 
         IRenderedComponent<StudioRoutes> layout = await RenderAtAsync(harness, "/postgres/kafka");
 
-        layout.WaitForAssertion(() => Heading(layout).Should().Be("Kafka clusters"));
+        layout.WaitForAssertion(() => Heading(layout).Should().Be("Kafka topics"));
         layout.FindAll(".ms-empty-title").Should().BeEmpty();
         harness.Authorization.HostCalls.Should().BeEmpty("the host's gate is not asked on a module's page");
     }

@@ -99,6 +99,7 @@
     private string? error;
     private bool disposed;
     private bool ready;
+    private bool started;
 
     /// <summary>Completed by the frame once the cluster policy passed and the circuit is interactive: a body reads nothing before it.</summary>
     [CascadingParameter(Name = KafkaPageFrame.ReadyName)]
@@ -131,8 +132,10 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (firstRender && ready && !disposed)
+        // Not keyed on firstRender: a body created before the frame released reads becomes ready after its first render.
+        if (ready && !started && !disposed)
         {
+            started = true;
             await LoadAsync();
         }
     }

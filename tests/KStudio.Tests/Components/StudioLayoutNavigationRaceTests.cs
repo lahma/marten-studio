@@ -84,7 +84,7 @@ public class StudioLayoutNavigationRaceTests
         // subscribed to the location while it waits: it used to see nothing of a click in that time.
         TaskCompletionSource<bool> gate = harness.Authorization.BlockHost();
         IRenderedComponent<StudioRoutes> routes = harness.Context.Render<StudioRoutes>();
-        routes.WaitForAssertion(() => routes.Find("h1").TextContent.Should().Be("Kafka clusters"));
+        routes.WaitForAssertion(() => routes.Find("h1").TextContent.Should().Be("Kafka topics"));
 
         harness.Navigation.Simulate(HostPath, intercepted: true);
         await SettleAsync(routes);
