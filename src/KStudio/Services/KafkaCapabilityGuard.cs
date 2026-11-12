@@ -36,10 +36,37 @@ internal sealed class KafkaCapabilityGuard(IOptions<KafkaStudioOptions> options,
     public static string OptionFor(KafkaCapability capability) =>
         nameof(KafkaStudioOptions) + "." + nameof(KafkaStudioOptions.Capabilities) + "." + capability;
 
-    /// <summary>Throws unless <paramref name="capability" /> is on; the refusal names the option a host would have to set.</summary>
+    /// <summary>The capabilities <paramref name="capability" /> needs on as well: <c>SearchRecords</c> for each of the other three.</summary>
+    /// <param name="capability">The capability.</param>
+    public static IReadOnlyList<KafkaCapability> Prerequisites(KafkaCapability capability) => capability switch
+    {
+        KafkaCapability.SearchRecords => [],
+        _ => [KafkaCapability.SearchRecords],
+    };
+
+    /// <summary>
+    /// Throws unless <paramref name="capability" /> and each of its <see cref="Prerequisites" /> is on, the prerequisites first, so the refusal names the
+    /// first missing option; it names the option a host would have to set.
+    /// </summary>
+    /// <param name="capability">The capability.</param>
+    /// <exception cref="KafkaCapabilityDeniedException">The capability, or one it needs, is off.</exception>
+    public void Require(KafkaCapability capability)
+    {
+        foreach (KafkaCapability prerequisite in Prerequisites(capability))
+        {
+            RequireOne(prerequisite);
+        }
+
+        RequireOne(capability);
+    }
+
+    /// <summary>
+    /// Throws unless <paramref name="capability" /> alone is on: for a caller that has already passed the gate of its prerequisites (a search that went
+    /// through <c>SearchRecords</c> asking whether it may read values), so that the refusal names the capability that is missing.
+    /// </summary>
     /// <param name="capability">The capability.</param>
     /// <exception cref="KafkaCapabilityDeniedException">The capability is off.</exception>
-    public void Require(KafkaCapability capability)
+    public void RequireOne(KafkaCapability capability)
     {
         if (settings.ReadOnly)
         {
@@ -61,6 +88,8 @@ internal sealed class KafkaCapabilityGuard(IOptions<KafkaStudioOptions> options,
     {
         KafkaCapability.SearchRecords => capabilities.SearchRecords,
         KafkaCapability.ReadPayloads => capabilities.ReadPayloads,
+        KafkaCapability.ExportRecords => capabilities.ExportRecords,
+        KafkaCapability.LiveTail => capabilities.LiveTail,
         _ => false,
     };
 }

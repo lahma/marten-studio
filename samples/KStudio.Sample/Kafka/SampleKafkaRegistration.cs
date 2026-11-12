@@ -23,6 +23,8 @@ internal static class SampleKafkaRegistration
         o.AddCluster(ClusterKey, new ClientConfig { BootstrapServers = bootstrapServers }, c => c
             .DisplayName("Sample Kafka")
             .Environment("Development")
+            // A shared test cluster: the Production cluster below is the same broker, so the two profiles' rules can be seen side by side.
+            .Profile(KafkaProfile.Test)
             .ConsumerGroup(KafkaSeedPlan.ConsumerGroup));
 
         // A rule offers only Searchable(), which returns the builder, so the next rule chains from it.
@@ -70,7 +72,7 @@ internal static class SampleKafkaRegistration
     {
         ArgumentNullException.ThrowIfNull(o);
 
-        o.UseWolverineKafka(w => w.Cluster((_, c) => c.DisplayName("Sample Kafka (Wolverine)")));
+        o.UseWolverineKafka(w => w.Cluster((_, c) => c.DisplayName("Sample Kafka (Wolverine)").Profile(KafkaProfile.Production)));
 
         // The key of both topics is the order id, and the order id is the id of a CheckoutOrder in the sample's Marten store: KStudio links the
         // record to the document, and Marten Studio's page for the document back to the records.

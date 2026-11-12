@@ -1,0 +1,214 @@
+@implements IDisposable
+@using KStudio.Core.Export
+@using KStudio.Core.Scanning
+@using Microsoft.Extensions.Logging
+@inject KafkaCapabilityGuard Capabilities
+@inject KafkaExportService Export
+@inject IJSRuntime JsRuntime
+@inject ILogger<KafkaExportMenu> Logger
+
+@* The Export control of a search's results, a live tail and the record page (D-M5 decision 2.8). It saves the records the page already holds, so it
+   reads nothing from Kafka; every gate is the service's, asked again at the click (hard rule 5), and what this draws - the menu, the notice that
+   the capability is off, the sentence that the cluster's profile forbids export - is a convenience. The file travels to the browser as a
+   DotNetStreamReference over the circuit: there is no endpoint and no link to click, so the click is what the service gates and audits. *@
+
+@if (!Capabilities.IsEnabled(KafkaCapability.ExportRecords))
+{
+    <div class="ms-k-export-off">
+        <KafkaCapabilityDisabled Capability="@nameof(KafkaStudioCapabilities.ExportRecords)" Action="@KafkaStudioText.ExportingRecords" />
+    </div>
+}
+else if (CurrentCluster is { } cluster && Export.ForbiddenByProfile(cluster))
+{
+    var forbidden = KafkaStudioText.ProfileForbids(KafkaStudioText.ExportingRecords, cluster);
+
+    <div class="ms-k-export ms-k-export-forbidden">
+        <button type="button" class="ms-btn ms-btn-sm" disabled="disabled" title="@forbidden">Export</button>
+        <span class="ms-muted ms-k-export-reason">@forbidden</span>
+    </div>
+}
+else if (CurrentMatches.Count > 0)
+{
+    <div class="ms-k-export">
+        <MenuButton WrapperClass="ms-k-export-menu"
+                    ButtonClass="ms-btn ms-btn-sm"
+                    PopoverClass="ms-k-export-popover"
+                    Text="Export"
+                    Title="Save these records as a file"
+                    Label="Export these records"
+                    Items="Items()" />
+        @if (busy)
+        {
+            <span class="ms-muted" role="status">Saving…</span>
+        }
+        else if (message is not null)
+        {
+            <span class="@(succeeded ? "ms-muted" : "ms-k-note-warning")" role="@(succeeded ? "status" : "alert")">@message</span>
+        }
+    </div>
+}
+
+@code {
+    private readonly CancellationTokenSource lifetime = new();
+
+    private string? message;
+    private bool succeeded;
+    private bool busy;
+    private bool disposed;
+
+    /// <summary>The cluster entry the records were read from.</summary>
+    [Parameter]
+    public object? Cluster { get; set; }
+
+    /// <summary>The records to save, as a list of <c>KafkaMatch</c>: what the page holds, read when a format is picked.</summary>
+    [Parameter]
+    public object? Matches { get; set; }
+
+    /// <summary>Where the records came from: a <c>KafkaExportSource</c>.</summary>
+    [Parameter]
+    public object? Source { get; set; }
+
+    /// <summary>The source's topics.</summary>
+    [Parameter]
+    public IReadOnlyList<string> Topics { get; set; } = [];
+
+    /// <summary>The search's window start (UTC), for a search.</summary>
+    [Parameter]
+    public DateTimeOffset? From { get; set; }
+
+    /// <summary>The search's window end (UTC), for a search.</summary>
+    [Parameter]
+    public DateTimeOffset? To { get; set; }
+
+    /// <summary>The source plan's audit text: a literal on a redacted field is already <c>&lt;redacted&gt;</c>.</summary>
+    [Parameter]
+    public string? AuditText { get; set; }
+
+    /// <summary>How many records the source read.</summary>
+    [Parameter]
+    public long SourceRecords { get; set; }
+
+    /// <summary>How many bytes the source read.</summary>
+    [Parameter]
+    public long SourceBytes { get; set; }
+
+    /// <summary>The extension (<c>json</c> or <c>txt</c>) of the value when the record page offers to save it alone; <see langword="null" /> offers no such item.</summary>
+    [Parameter]
+    public string? ValueExtension { get; set; }
+
+    private KafkaClusterEntry? CurrentCluster => Cluster as KafkaClusterEntry;
+
+    private IReadOnlyList<KafkaMatch> CurrentMatches => Matches as IReadOnlyList<KafkaMatch> ?? [];
+
+    private KafkaExportSource CurrentSource => Source is KafkaExportSource source ? source : KafkaExportSource.Search;
+
+    private IReadOnlyList<(string Label, string? Detail, Func<Task> OnSelect)> Items()
+    {
+        if (CurrentSource == KafkaExportSource.Record)
+        {
+            List<(string Label, string? Detail, Func<Task> OnSelect)> items =
+            [
+                ("This record (.jsonl)", "The record as shown, one JSON line", () => ExportAsync(KafkaExportFormat.JsonLines)),
+            ];
+
+            if (ValueExtension is { Length: > 0 } extension)
+            {
+                items.Add(("Value (." + extension + ")", "The value alone, masked parts stay masked", () => ExportAsync(KafkaExportFormat.Value)));
+            }
+
+            return items;
+        }
+
+        string shown = KafkaStudioText.ExportAsShown(CurrentMatches.Count);
+
+        return
+        [
+            ("JSON Lines (.jsonl)", shown, () => ExportAsync(KafkaExportFormat.JsonLines)),
+            ("CSV (.csv)", shown, () => ExportAsync(KafkaExportFormat.Csv)),
+        ];
+    }
+
+    private async Task ExportAsync(KafkaExportFormat format)
+    {
+        if (busy || CurrentCluster is not { } cluster)
+        {
+            return;
+        }
+
+        busy = true;
+        message = null;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            KafkaExportInput input = new(
+                cluster,
+                Topics,
+                CurrentSource,
+                From,
+                To,
+                AuditText ?? string.Empty,
+                SourceRecords,
+                SourceBytes,
+                [.. CurrentMatches],
+                format);
+
+            KafkaExportOutcome outcome = await Export.ExportAsync(input, DeliverAsync, lifetime.Token);
+            succeeded = outcome.Delivered;
+            message = outcome.Text;
+        }
+        catch (OperationCanceledException)
+        {
+            // The visitor left the page.
+        }
+        catch (Exception e) when (!disposed)
+        {
+            Logger.LogWarning(e, "The Kafka export menu failed to save records");
+            succeeded = false;
+            message = KafkaStudioText.ExportFailed;
+        }
+        finally
+        {
+            busy = false;
+        }
+
+        if (!disposed)
+        {
+            try
+            {
+                await InvokeAsync(StateHasChanged);
+            }
+            catch (Exception e) when (e is ObjectDisposedException || PostgresStudio.Services.Live.StudioLiveUpdates.IsInteropUnavailable(e))
+            {
+                // The circuit went away while the line was drawn.
+            }
+        }
+    }
+
+    /// <summary>Hands the file to the browser as a stream over the circuit; the browser saves it. Interop loss is a file that did not arrive.</summary>
+    private async Task<bool> DeliverAsync(string fileName, string mime, Stream content, CancellationToken cancellationToken)
+    {
+        using DotNetStreamReference reference = new(content, leaveOpen: false);
+
+        try
+        {
+            return await JsRuntime.InvokeAsync<bool>("martenStudio.download.stream", cancellationToken, fileName, mime, reference);
+        }
+        catch (Exception e) when (PostgresStudio.Services.Live.StudioLiveUpdates.IsInteropUnavailable(e))
+        {
+            return false;
+        }
+    }
+
+    public void Dispose()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        disposed = true;
+        lifetime.Cancel();
+        lifetime.Dispose();
+    }
+}

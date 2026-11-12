@@ -17676,3 +17676,67 @@ dialog.ms-modal::backdrop {
         margin-bottom: var(--ms-space-xs);
     }
 }
+
+/* ===== KS-UI-EXPORT: the Export menu and the cluster's profile chip ===== */
+.ms-k-export {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-sm);
+    min-width: 0;
+}
+
+.ms-k-export-forbidden {
+    max-width: 100%;
+}
+
+.ms-k-export-reason {
+    overflow-wrap: anywhere;
+}
+
+/* The notice that the capability is off sits in the banner's line, so it is a note and not a block of its own. */
+.ms-k-export-off {
+    flex: 1 1 100%;
+    min-width: 0;
+}
+
+.ms-k-export-menu {
+    display: inline-flex;
+}
+
+.ms-k-export-popover {
+    min-width: 16rem;
+    max-width: min(28rem, calc(100vw - 2rem));
+    padding: var(--ms-space-xs);
+    border: 1px solid var(--ms-color-border-strong);
+    border-radius: var(--ms-radius-lg);
+    background-color: var(--ms-color-surface);
+    color: var(--ms-color-text);
+    box-shadow: var(--ms-shadow-lg);
+    font-family: var(--ms-font-family);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-k-export-popover::backdrop {
+    background-color: transparent;
+}
+
+/* The cluster selector's profile chip: Production in the danger colour, as the shell draws an environment; Test in the warning colour. */
+.ms-k-profile-chip {
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
+.ms-k-profile-production {
+    border-color: var(--ms-color-danger);
+    background: var(--ms-color-danger-bg);
+}
+
+.ms-k-profile-test {
+    border-color: var(--ms-color-warning);
+    background: var(--ms-color-warning-bg);
+}
+
+.ms-k-profile {
+    overflow-wrap: anywhere;
+}

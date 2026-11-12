@@ -29,6 +29,12 @@ internal sealed record KafkaSearchInput(
     KafkaScanCursor? ContinueFrom = null,
     bool SearchAllPartitions = false);
 
+/// <summary>What a visitor may still read this hour on a cluster.</summary>
+/// <param name="Left">The bytes left.</param>
+/// <param name="PerHour">The allowance an hour that applies: the smaller of the process's and the cluster's own.</param>
+/// <param name="ClusterProfile">The profile that gave the cluster an allowance lower than the process's, or <see langword="null" /> when the process's applies.</param>
+internal sealed record KafkaAllowance(long Left, long PerHour, KafkaProfile? ClusterProfile);
+
 /// <summary>A plan the visitor has seen: the input it was made from, the engine's plan, and what the visitor may read of the records it finds.</summary>
 /// <param name="Input">What was asked.</param>
 /// <param name="Plan">The engine's plan: verdicts, notes and estimate, or the errors of the text.</param>
@@ -83,6 +89,8 @@ internal abstract record KafkaSearchStartResult
 /// <param name="grants">What a visitor may read of a record: the envelope, or the payload as well.</param>
 /// <param name="scanner">The engine's scanner.</param>
 /// <param name="ownerBudget">The owner's hourly byte allowance.</param>
+/// <param name="registry">The clusters, whose profile may give one an allowance of its own.</param>
+/// <param name="clusterCosts">The byte rate and hourly allowance a profiled cluster has of its own.</param>
 /// <param name="owners">Who the circuit's scans belong to.</param>
 /// <param name="actionLog">The audit.</param>
 /// <param name="logger">Where events 9600 and 9601 go.</param>
@@ -92,21 +100,45 @@ internal sealed class KafkaSearchService(
     KafkaReadGrants grants,
     IKafkaScanner scanner,
     OwnerByteBudget ownerBudget,
+    KafkaClusterRegistry registry,
+    KafkaClusterCostControls clusterCosts,
     KafkaOwnerKey owners,
     KafkaActionLog actionLog,
     ILogger<KafkaSearchService> logger)
 {
     private const string Action = "SearchRecords";
 
-    /// <summary>The bytes the visitor may still read this hour, for the form's line.</summary>
-    public async ValueTask<long> OwnerBytesLeftThisHourAsync()
-    {
-        KafkaScanOwner owner = await owners.OwnerAsync().ConfigureAwait(false);
-        return ownerBudget.Remaining(owner.Key);
-    }
+    /// <summary>
+    /// The bytes the visitor may still read this hour, for the form's line: the process's allowance, or the smaller of that and the one a profile gave
+    /// <paramref name="cluster" />.
+    /// </summary>
+    /// <param name="cluster">The cluster in scope, or <see langword="null" /> for the process's allowance alone.</param>
+    public async ValueTask<long> OwnerBytesLeftThisHourAsync(KafkaClusterEntry? cluster = null) =>
+        (await AllowanceAsync(cluster).ConfigureAwait(false)).Left;
 
     /// <summary>The most a visitor reads in an hour, for the form's line.</summary>
     public long OwnerBytesPerHour => ownerBudget.BytesPerHour;
+
+    /// <summary>
+    /// What the visitor may still read this hour on <paramref name="cluster" /> (D-M5 decision 4.5): the smaller of the process's allowance and the
+    /// cluster's own, and - when the cluster's is the smaller - the profile that gave it.
+    /// </summary>
+    /// <param name="cluster">The cluster in scope, or <see langword="null" /> for the process's allowance alone.</param>
+    public async ValueTask<KafkaAllowance> AllowanceAsync(KafkaClusterEntry? cluster)
+    {
+        KafkaScanOwner owner = await owners.OwnerAsync().ConfigureAwait(false);
+
+        if (cluster is null || !registry.TryGet(cluster.Key, out KafkaClusterDefinition? definition))
+        {
+            return new KafkaAllowance(ownerBudget.Remaining(owner.Key), ownerBudget.BytesPerHour, null);
+        }
+
+        KafkaClusterCost cost = clusterCosts.For(definition);
+        long perHour = cost.BytesPerHour(ownerBudget);
+        KafkaProfile? own = cost.OwnerBudget is { } budget && budget.BytesPerHour < ownerBudget.BytesPerHour ? definition.Profile : null;
+
+        return new KafkaAllowance(cost.Remaining(owner.Key, ownerBudget), perHour, own);
+    }
 
     /// <summary>
     /// Asks the engine for a plan: the verdicts of each clause on each topic, every note about the window, and an estimate - all before anything is
@@ -185,7 +217,7 @@ internal sealed class KafkaSearchService(
 
             if (start.Handle is not { } handle)
             {
-                string text = KafkaStudioText.Refusal(start.Refusal ?? KafkaScanRefusal.ShuttingDown, plan.Limits);
+                string text = RefusalText(start.Refusal ?? KafkaScanRefusal.ShuttingDown, plan, owner);
                 await NotRunAsync(input, text, plan.AuditText).ConfigureAwait(false);
                 return new KafkaSearchStartResult.Refused(text);
             }
@@ -270,6 +302,27 @@ internal sealed class KafkaSearchService(
         }
 
         return (null, names, grant);
+    }
+
+    /// <summary>
+    /// The sentence for an engine refusal. When the allowance is what ran out, it names the allowance that did: the cluster's own, when a profile gave it
+    /// one that is spent, and otherwise the process's - never the capped value of a plan whose cluster still has room.
+    /// </summary>
+    private string RefusalText(KafkaScanRefusal refusal, KafkaScanPlan plan, KafkaScanOwner owner)
+    {
+        if (refusal != KafkaScanRefusal.OwnerBudgetSpent)
+        {
+            return KafkaStudioText.Refusal(refusal, plan.Limits);
+        }
+
+        if (registry.TryGet(plan.Request.Cluster, out KafkaClusterDefinition? definition)
+            && clusterCosts.For(definition).OwnerBudget is { } own
+            && own.Remaining(owner.Key) <= 0)
+        {
+            return KafkaStudioText.Refusal(refusal, own.BytesPerHour, onThisCluster: true);
+        }
+
+        return KafkaStudioText.Refusal(refusal, ownerBudget.BytesPerHour, onThisCluster: false);
     }
 
     private static string? Bounds(KafkaSearchInput input, out KafkaTopicName[] names)

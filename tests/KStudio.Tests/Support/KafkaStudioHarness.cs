@@ -151,7 +151,7 @@ internal sealed class KafkaStudioHarness : IDisposable
                 // A tenant entry ({cluster}/{tenant}, D43) is not a cluster a host registers: the engine's registry would refuse its key.
                 foreach (KafkaClusterEntry entry in entries.Where(static x => x.Key != EngineHarness.ClusterKey && !x.Key.Contains('/', StringComparison.Ordinal)))
                 {
-                    options.AddCluster(entry.Key, new ClientConfig { BootstrapServers = "fake:9092" });
+                    options.AddCluster(entry.Key, new ClientConfig { BootstrapServers = "fake:9092" }, entry.Profile is { } profile ? c => c.Profile(profile) : null);
                 }
             });
 
@@ -192,12 +192,15 @@ internal sealed class KafkaStudioHarness : IDisposable
             services.TryAddSingleton(Engine.Clock);
             services.AddSingleton(Engine.Provider.GetRequiredService<KStudio.Core.Scanning.IKafkaScanner>());
             services.AddSingleton(Engine.Provider.GetRequiredService<KStudio.Core.Scanning.OwnerByteBudget>());
+            services.AddSingleton(Engine.Provider.GetRequiredService<KStudio.Core.Scanning.KafkaClusterCostControls>());
             services.AddSingleton<KafkaOwnerKey>();
             services.AddSingleton(Engine.Provider.GetRequiredService<KStudio.Core.Clusters.KafkaEngineSnapshot>());
             services.AddSingleton<KafkaReadGrants>();
             services.AddSingleton<KafkaSearchService>();
             services.AddSingleton<KafkaRecordService>();
             services.AddSingleton<KafkaCorrelationService>();
+            services.AddSingleton<KafkaExportGate>();
+            services.AddSingleton<KafkaExportService>();
             extra?.Invoke(services);
         });
     }

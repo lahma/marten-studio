@@ -101,6 +101,10 @@ public static class KafkaStudioServiceCollectionExtensions
         services.TryAddScoped<KafkaSearchService>();
         services.TryAddScoped<KafkaRecordService>();
 
+        // Export (UI-EXPORT, D45): a file from the records a page already holds; two exports at a time, process-wide.
+        services.TryAddSingleton<KafkaExportGate>();
+        services.TryAddScoped<KafkaExportService>();
+
         // Related records (UI-D): one audited scan over several topics, each searched by its own fields.
         services.TryAddScoped<KafkaCorrelationService>();
 

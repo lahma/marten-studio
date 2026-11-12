@@ -210,7 +210,7 @@
                 }
             </div>
 
-            <p class="ms-muted ms-k-allowance">Hourly allowance left: @(allowanceLeft is { } left ? KafkaDisplay.Bytes(left) : "—")</p>
+            <p class="ms-muted ms-k-allowance">@AllowanceLine()</p>
 
             @if (refusal is not null)
             {
@@ -318,6 +318,19 @@
                 @if (result.Matches == 0 && result.Pruning.Any(static x => x.IsPruned))
                 {
                     <button type="button" class="ms-button" disabled="@busy" @onclick="SearchAllPartitionsAsync">@KafkaStudioText.SearchAllPartitions</button>
+                }
+                @if (!busy)
+                {
+                    @* The records on screen, saved as a file (D-M5 decision 2.8): nothing is read again, and the service asks every gate at the click. *@
+                    <KafkaExportMenu Cluster="@planned.Input.Cluster"
+                                     Matches="@matches"
+                                     Source="@KafkaExportSource.Search"
+                                     Topics="@planned.Input.Topics"
+                                     From="@planned.Input.From"
+                                     To="@planned.Input.To"
+                                     AuditText="@planned.Plan.AuditText"
+                                     SourceRecords="@result.Records"
+                                     SourceBytes="@result.Bytes" />
                 }
             </div>
 
@@ -542,7 +555,7 @@
     /// starts - not while its confirmation still waits, when the rows on screen are still the previous search's.
     /// </summary>
     private long? pendingContinuation;
-    private long? allowanceLeft;
+    private KafkaAllowance? allowance;
     private bool includeUncommitted;
     private bool loadingTopics = true;
     private bool planning;
@@ -629,7 +642,7 @@
             selected.Clear();
             selected.AddRange(addressTopics.Where(visible.Contains).Distinct(StringComparer.Ordinal).Take(KafkaStudioText.MaxSearchTopics));
             droppedFromLink = addressTopics.Distinct(StringComparer.Ordinal).Count() - selected.Count;
-            allowanceLeft = await Search.OwnerBytesLeftThisHourAsync();
+            allowance = await Search.AllowanceAsync(State.ActiveCluster);
         }
         catch (OperationCanceledException)
         {
@@ -1152,7 +1165,7 @@
         {
             try
             {
-                allowanceLeft = await Search.OwnerBytesLeftThisHourAsync();
+                allowance = await Search.AllowanceAsync(State.ActiveCluster);
                 await InvokeAsync(StateHasChanged);
             }
             catch (Exception e) when (e is OperationCanceledException or ObjectDisposedException || StudioLiveUpdates.IsInteropUnavailable(e))
@@ -1204,6 +1217,17 @@
         }
     }
 
+    /// <summary>
+    /// The allowance line of the form: the process's allowance, or - when a profile gave this cluster a lower one of its own - that one, naming the
+    /// profile (D-M5 decision 4.5).
+    /// </summary>
+    private string AllowanceLine() => allowance switch
+    {
+        null => "Hourly allowance left: —",
+        { ClusterProfile: { } profile } own => KafkaStudioText.ClusterAllowance(own.Left, own.PerHour, profile),
+        { } process => "Hourly allowance left: " + KafkaDisplay.Bytes(process.Left),
+    };
+
     private string ConfirmTitle() =>
         planned is null ? "Confirm" : $"Read about {KafkaDisplay.Count(planned.Plan.Estimate.Offsets, "offset")}?";
 
@@ -1211,7 +1235,7 @@
         planned is null
             ? string.Empty
             : $"About {(planned.Plan.Estimate.Bytes is { } bytes ? KafkaDisplay.Bytes(bytes) : "an unknown number of bytes")} will be read from the cluster, "
-              + $"which counts against your hourly allowance ({(allowanceLeft is { } left ? KafkaDisplay.Bytes(left) : "—")} left) and may cost money on a managed cluster.";
+              + $"which counts against your hourly allowance ({(allowance is { } left ? KafkaDisplay.Bytes(left.Left) : "—")} left) and may cost money on a managed cluster.";
 
     /// <summary>
     /// What the plan says about the window before the search runs. Once a result is drawn, its "what this result does not cover" list carries the same

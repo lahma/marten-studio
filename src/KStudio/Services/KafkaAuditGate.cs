@@ -55,10 +55,14 @@ internal sealed class KafkaAuditGate(KafkaAuthorization authorization, KafkaCapa
                     return false;
                 }
 
-                // ReadPayloads is judged with its prerequisite: its entries are shown only where SearchRecords is on as well.
-                if (parsed == KafkaCapability.ReadPayloads && !capabilities.IsEnabled(KafkaCapability.SearchRecords))
+                // A capability is judged with its prerequisites (SearchRecords for ReadPayloads, ExportRecords and LiveTail): its entries are shown
+                // only where each of them is on as well.
+                foreach (KafkaCapability prerequisite in KafkaCapabilityGuard.Prerequisites(parsed))
                 {
-                    return false;
+                    if (!capabilities.IsEnabled(prerequisite))
+                    {
+                        return false;
+                    }
                 }
 
                 capability = parsed;
@@ -81,16 +85,38 @@ internal sealed class KafkaAuditGate(KafkaAuthorization authorization, KafkaCapa
                     return false;
                 }
 
-                if (capability == KafkaCapability.ReadPayloads && !await AskAsync(scope, topic, KafkaCapability.SearchRecords, cancellationToken).ConfigureAwait(false))
+                if (capability is { } named)
+                {
+                    foreach (KafkaCapability prerequisite in KafkaCapabilityGuard.Prerequisites(named))
+                    {
+                        if (!await AskAsync(scope, topic, prerequisite, cancellationToken).ConfigureAwait(false))
+                        {
+                            return false;
+                        }
+                    }
+                }
+            }
+
+            if (capability is null || scope.Topics.Count > 0)
+            {
+                return true;
+            }
+
+            // An entry that names no topic is judged at cluster level for the capability and each of its prerequisites.
+            if (!await AskAsync(scope, topic: null, capability, cancellationToken).ConfigureAwait(false))
+            {
+                return false;
+            }
+
+            foreach (KafkaCapability prerequisite in KafkaCapabilityGuard.Prerequisites(capability.Value))
+            {
+                if (!await AskAsync(scope, topic: null, prerequisite, cancellationToken).ConfigureAwait(false))
                 {
                     return false;
                 }
             }
 
-            return capability is null
-                || scope.Topics.Count > 0
-                || (await AskAsync(scope, topic: null, capability, cancellationToken).ConfigureAwait(false)
-                    && (capability != KafkaCapability.ReadPayloads || await AskAsync(scope, topic: null, KafkaCapability.SearchRecords, cancellationToken).ConfigureAwait(false)));
+            return true;
         }
 
         private async ValueTask<bool> AskAsync(KafkaAuditScope scope, string? topic, KafkaCapability? capability, CancellationToken cancellationToken)

@@ -312,6 +312,12 @@ public class LogLevelsTests
         ["src/KStudio/Services/KafkaRecordService.cs : KStudio could not read a record"] = (Verdict.VisitorAction,
             "The engine threw while reading a record the visitor opened; one line per load, the ring records the failure and the page says the same."),
 
+        // ---- KS-UI-EXPORT: the export service and its menu (D45) --------------------------------------
+        ["src/KStudio/Services/KafkaExportService.cs : KStudio could not export records"] = (Verdict.VisitorAction,
+            "Writing or sending the file threw (the writer is pure and the delivery's interop loss is a value), on a click the visitor made; one line per click, the ring records the failure and the page says the same."),
+        ["src/KStudio/Components/Shared/KafkaExportMenu.razor : The Kafka export menu failed to save records"] = (Verdict.VisitorAction,
+            "The export call threw rather than returning a value, on the visitor's click; one line per click, and the menu says the export failed."),
+
         // ---- KS-UI-D: related records (D42), classified in UI-E where the roster test first ran with them ------
         ["src/KStudio/Components/Pages/KafkaRelatedBody.razor : The Kafka related-records page failed to read the record"] = (Verdict.VisitorAction,
             "The anchor read threw rather than returning a status: a fault in a page the visitor opened; one line per load, the page says the same."),

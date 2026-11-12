@@ -154,9 +154,9 @@ public class ShellModuleComponentTests
         string chipOff = off.Context.Render<CapabilityBanner>().Find(".ms-chip-button").TextContent.Trim();
         string chipOn = on.Context.Render<CapabilityBanner>().Find(".ms-chip-button").TextContent.Trim();
 
-        // KStudio offers two capabilities: SearchRecords and ReadPayloads.
-        chipOff.Should().StartWith($"{host.EnabledCount} / {host.Offered.Count + 2}");
-        chipOn.Should().StartWith($"{host.EnabledCount + 2} / {host.Offered.Count + 2}");
+        // KStudio offers four capabilities: SearchRecords, ReadPayloads, ExportRecords and LiveTail.
+        chipOff.Should().StartWith($"{host.EnabledCount} / {host.Offered.Count + 4}");
+        chipOn.Should().StartWith($"{host.EnabledCount + 4} / {host.Offered.Count + 4}");
     }
 
     [Fact]
@@ -169,11 +169,13 @@ public class ShellModuleComponentTests
 
         IElement group = banner.Find("ul[aria-label='KStudio for Apache Kafka® reads']");
         IElement[] rows = [.. group.QuerySelectorAll("li")];
-        rows.Should().HaveCount(2);
-        rows.Select(static x => x.QuerySelector(".ms-capability-name")!.TextContent).Should().Equal("SearchRecords", "ReadPayloads");
+        rows.Should().HaveCount(4);
+        rows.Select(static x => x.QuerySelector(".ms-capability-name")!.TextContent).Should().Equal("SearchRecords", "ReadPayloads", "ExportRecords", "LiveTail");
         rows.Should().OnlyContain(static x => x.ClassList.Contains("ms-capability-on"));
         rows[0].QuerySelector("code")!.TextContent.Should().Be("KafkaStudioOptions.Capabilities.SearchRecords");
         rows[1].QuerySelector("code")!.TextContent.Should().Be("KafkaStudioOptions.Capabilities.ReadPayloads");
+        rows[2].QuerySelector("code")!.TextContent.Should().Be("KafkaStudioOptions.Capabilities.ExportRecords");
+        rows[3].QuerySelector("code")!.TextContent.Should().Be("KafkaStudioOptions.Capabilities.LiveTail");
     }
 
     [Fact]

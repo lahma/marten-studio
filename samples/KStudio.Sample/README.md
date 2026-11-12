@@ -114,7 +114,7 @@ handler needs it (or pre-generated code) to start. KStudio and KStudio.Wolverine
 KStudio is told about all of this with one line, `UseWolverineKafka()`, which reads Wolverine's configuration and starts nothing:
 
 ```csharp
-k.UseWolverineKafka(w => w.Cluster((broker, c) => c.DisplayName("Sample Kafka (Wolverine)")));
+k.UseWolverineKafka(w => w.Cluster((broker, c) => c.DisplayName("Sample Kafka (Wolverine)").Profile(KafkaProfile.Production)));
 k.Topic("checkout.v1", t => t.Correlation(c => c.Key().Document("CheckoutOrder")));
 ```
 
@@ -122,6 +122,11 @@ The Settings page lists **both** clusters: `Sample Kafka`, which the host declar
 `Sample Kafka (Wolverine)`, which Wolverine's configuration declared. Both point at the same broker; that is a demo's shortcut, and a real host
 declares its cluster once, either way. `Correlation(c => c.Key().Document("CheckoutOrder"))` says that the key of both topics is the id of a
 `CheckoutOrder` in the Marten store, which is what lets the two studios link to one another.
+
+The two clusters carry different **profiles** on purpose: `Sample Kafka` is `Profile(KafkaProfile.Test)` and `Sample Kafka (Wolverine)` is
+`Profile(KafkaProfile.Production)`. Select each and compare: the cluster selector's chip, the **Profile** section of Cluster settings, the allowance line
+of Search (`… of this cluster's 512 MiB an hour left (Production profile)`), and **Export** on a search's results, which saves a file on the Test cluster and
+is a disabled button on the Production one, with the sentence that names `KafkaClusterBuilder.Profile`, although the sample grants every capability.
 
 ### Walk-through
 

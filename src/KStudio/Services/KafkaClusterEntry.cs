@@ -14,7 +14,8 @@ namespace KStudio.Services;
 /// <param name="TenantId">The entry's own tenant id, or <see langword="null" /> for a cluster with none.</param>
 /// <param name="DisplayName">The name the selector shows.</param>
 /// <param name="Environment">The environment label, when the host set one.</param>
-internal sealed record KafkaClusterEntry(string Key, string? TenantId, string DisplayName, string? Environment)
+/// <param name="Profile">The profile the host set on the cluster, or <see langword="null" /> for none (AGENTS.md D47: never inferred).</param>
+internal sealed record KafkaClusterEntry(string Key, string? TenantId, string DisplayName, string? Environment, KafkaProfile? Profile = null)
 {
     /// <summary>
     /// The cluster's own key without a tenant: what <see cref="KafkaTopicResource.Cluster" /> and the audit scope carry, so that a policy never
@@ -38,5 +39,5 @@ internal sealed class CatalogClusterEntrySource(IKafkaCatalog catalog) : IKafkaC
 {
     /// <inheritdoc />
     public IReadOnlyList<KafkaClusterEntry> Entries =>
-        [.. catalog.Clusters.Select(static x => new KafkaClusterEntry(x.Key, x.TenantId, x.DisplayName, x.Environment) { Cluster = x.BaseKey })];
+        [.. catalog.Clusters.Select(static x => new KafkaClusterEntry(x.Key, x.TenantId, x.DisplayName, x.Environment, x.Profile) { Cluster = x.BaseKey })];
 }

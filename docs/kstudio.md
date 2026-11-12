@@ -46,6 +46,8 @@ Reading records does:
 |---|---|---|
 | `SearchRecords` | `false` | Searches by key, header and CloudEvents attribute; the record page; keys, timestamps, headers and attributes. Values need `ReadPayloads`. |
 | `ReadPayloads` | `false` | Record values: the value on the record page and in a search's detail, `value` and JSON-path searches, compare, and copying a value as a search. Needs `SearchRecords`. |
+| `ExportRecords` | `false` | Saving the records a search or a live tail holds, or one record or its value from the record page, as JSON Lines, CSV or the value alone, masked as the page shows them. Values only where `ReadPayloads` allows. Needs `SearchRecords`. Never on a `Production` cluster. |
+| `LiveTail` | `false` | Following topics as records arrive, from the end of each partition. Needs `SearchRecords`. Never on a `Production` cluster. |
 
 `KafkaStudioOptions.ClusterAuthorizationPolicy` is asked about every cluster and every topic a page or a search touches,
 on a `KafkaTopicResource(Cluster, TenantId, Topic, Capability)`; a topic it refuses is absent from every list, and a
@@ -126,6 +128,27 @@ listed. A topic Kafka refuses shows why. Nothing runs until you press **Search r
 Under search results and related records, **Possible duplicates** groups the records found on one topic that carry the
 same identity: the same `id` header, the same CloudEvents source and id, or, when you may read values, the same key and
 value as shown. Only the records found are compared, and nothing more is read.
+
+## Export
+
+With `ExportRecords`, **Export** on a search's results, on a live tail and on the record page saves what the page holds as a
+file: JSON Lines (one record per line, headers and JSON values nested) or CSV (for a spreadsheet: UTF-8 with a byte-order mark,
+and a cell that starts with `=`, `+`, `-`, `@`, a tab or a carriage return gets a leading `'` so the spreadsheet does not run
+it). The record page also saves one record, or its value alone. Nothing is read again: the file holds exactly the records on
+screen, so a value cut at `Limits.MaxMatchBytes` in a search is cut in the file too (`valueTruncated`), and the record page's
+export holds the value whole up to `Limits.MaxDecodeBytes`.
+
+Redaction holds in the file: a masked key, header, attribute or part of a value is written as the page shows it
+(`••• (redacted by header authorization)`), and each row lists what was masked in `redacted`. Values are included only for
+records you could read the value of. A file is at most `Limits.MaxExportBytes` (32 MiB); records past it are left out and the
+page says how many. The file travels to your browser over the page's own connection; KStudio maps no download address. Every
+export is recorded (event 9606) with the records, the size, the format and the search's predicate, its redacted values replaced
+by `<redacted>`.
+
+Export asks everything again when you click it: the capability, the cluster's profile (a `Production` cluster never exports,
+and its Export button says so), your cluster and capability policies for every topic of the records, and, for records read
+with values, your right to read them now. A refusal refuses the whole file, never a part of it, and is recorded. At most two
+exports are written at a time in the application; a third is refused, not queued.
 
 ## Redaction
 
@@ -252,7 +275,7 @@ placeholder goes in the path, the query or the fragment, never in the scheme or 
 
 ## Audit
 
-Every search and every record opened is recorded in the studio's Activity page and in your log (events 9600-9605), with
+Every search, every export and every record opened is recorded in the studio's Activity page and in your log (events 9600-9609), with
 who, the cluster, the topics, the window, the predicate with every redacted value replaced by `<redacted>`, what was read
 and why it stopped. Reading a record's value is recorded separately from the search that found it, once per record per
 session. A visitor sees an entry only if your policies would let them make the same read.

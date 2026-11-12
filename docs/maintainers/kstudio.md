@@ -758,6 +758,68 @@ same cluster gate as the settings beside it (`KafkaCatalogService.GetDiscoveryAs
 choice with tenants, a throwing registry), `ExternalLinkTemplateTests` (each rule of the credential check, error text, escaping, both time forms),
 `AddKafkaStudioTests` (the host refused at start), `KafkaDiscoveredFactsTests`, and `PublicApiTest_KStudio`, whose baseline moves by `ExternalLink`.
 
+## D45
+
+**D45 — KStudio exports what the visitor holds, redacted, through the circuit.** `ExportRecords` (off by default, needs `SearchRecords`) writes the
+matches a search, a live tail or the record page already holds, as JSON Lines, CSV or one value, from `KafkaMatch` alone, so every mask is the engine's and
+nothing is read again. The export is the page's convenience over data the visitor was already given; its gate is the service's, asked again at the click.
+
+**What is exported: the records already in memory.** Every byte was already read under its gates, paced, charged to the owner and audited by the scan that
+read it; the matches are `KafkaMatch` values, which by construction hold only redacted, capped copies (D40), so redaction in a file is the match factory's and
+not a second implementation; memory stays inside D41's statement, since the matches are already counted in $2mc$; and the file is exactly what the visitor saw,
+which is what a support hand-off needs. An export as a scan of its own (whole values, more than `MaxMatches` records, streamed) is a 1.x candidate; so is
+an export from Related records, whose rows come from several topics with per-topic predicates and grants (D42).
+
+**The writer** is `KafkaExportWriter` in `KStudio.Core/Export/` (pure; ENG-PROFILE): JSON Lines without a BOM, CSV with a UTF-8 BOM and `\r\n` (a
+spreadsheet opens a BOM-less UTF-8 file as the local code page and mangles every non-ASCII character), a cell that starts with `=`, `+`, `-`, `@`, a tab or
+a carriage return prefixed with `'` (OWASP's CSV injection rule; JSON Lines is never altered), whole rows only up to `MaxExportBytes`, and the file name
+`kstudio-{cluster}-{part}-{yyyyMMdd-HHmmss}Z.{ext}` holding no predicate, key or value.
+
+**The service** is `KafkaExportService` (scoped; `KafkaExportGate` is its singleton). The order is hard rule 5's, and every exit from the profile on is audited
+once: the capability (`Require(ExportRecords)` requires `SearchRecords` first, so the refusal names the first missing option); the cluster's profile, asked of
+the engine's registry and not of the entry the page holds (`Production` never exports, whatever the capability says, recorded as not run: 9609); the input's
+own bounds (1 to 20 topics, every match belongs to one of them, `Value` only for exactly one record and only from the record page); the cluster policy at
+cluster level and then, per topic, the cluster policy and the capability policy for `SearchRecords` and for `ExportRecords`, any refusal refusing the whole
+export (9603); for records read with the payload grant, the grant again (`ForSearchAsync` over the topics that have values), because an export of records
+read with values must not be written as envelope rows after access went down: it is refused whole with "Your access changed since these records were read";
+two exports in flight at most, a third refused and never queued; the file, built in a `MemoryStream` so the audit knows exactly what was written; the
+delivery; and the audit (`ExportRecords`, capability `ExportRecords`, 9606 written or 9609 not). An interop loss is a file that did not arrive, not a failure.
+The audit carries the source plan's `AuditText`, in which a literal on a redacted field is already `<redacted>`; the visitor's typed text is not an input.
+
+**Delivery** is a `DotNetStreamReference` to `martenStudio.download.stream` (PostgresStudio's `studio.js`, additive, beside `download.text`), sent in chunks
+over the circuit's own connection, under the circuit's own authentication, with no new route, no token in a URL and no antiforgery question (D23). The
+alternatives: `download.text` with the content as an interop argument is one JSON-escaped string of up to 32 MiB, a full copy on both sides and the circuit
+blocked while it serializes, right for a snapshot of kilobytes and wrong here; a one-time endpoint would be a new HTTP surface outside the circuit, needing the
+studio's `AuthorizationPolicy` re-applied, a token in history, proxies and logs, a store of pending files with an expiry, and the first data endpoint either
+studio maps (D2, D31).
+
+**`JsonView`'s Download stays off in KStudio** (`AllowDownload="false"` on every `JsonView`; PostgresStudio's `JsonView` is unchanged). Its link is a `data:`
+URL built at render: the click never reaches the server, so it can be neither gated per use nor refused on a `Production` cluster after the page rendered nor
+audited, and an export must be all three. The bytes are no secret (the page shows the value); the point is the gate and the audit. The record page's
+**Export › Value** is the download. `KafkaExportMenuTests` holds that no `data:` link and no `a[download]` is in what the search and record pages draw.
+
+**The control** is `KafkaExportMenu` (public parameters are `object?` where the type is internal, as `KafkaRecordDetail`'s are): a `MenuButton` on a
+search's result banner (JSON Lines, CSV, each with "N records, as shown: masked parts stay masked"), on the record page (`This record (.jsonl)` and, when the
+value has text, `Value (.json|.txt)`), and, from UI-TAIL, on a tail. With the capability off it is the disabled notice naming
+`KafkaStudioOptions.Capabilities.ExportRecords`; on a `Production` cluster it is a disabled button whose title and text are
+`KafkaStudioText.ProfileForbids(...)`, which names `KafkaClusterBuilder.Profile` and says that granting the capability is not enough (D4). Both M5
+capabilities land with this packet so that the guard, the audit gate and the chip are written once: `Prerequisites(capability)` is `SearchRecords` for every
+other capability, `Require` asks the prerequisites first, `KafkaAuditGate` judges an entry with each prerequisite (per topic and at cluster level) where it
+used to hard-code `ReadPayloads → SearchRecords`, and `RequireOne` is the capability alone, for a caller that already passed its prerequisites' gate
+(`KafkaReadGrants` asking whether a search that reads values may).
+
+**The profile in the UI.** The cluster entry carries the cluster's `Profile` (from `KafkaClusterInfo`); the selector draws `Production profile` / `Test
+profile` as a chip (Production in the danger colour), the Settings page a **Profile** section with the capped numbers and, for a cluster with no profile, the
+warning "This cluster has no profile; its limits are the engine's defaults. Set KafkaClusterBuilder.Profile(...) to cap them." The search form's allowance
+line names the allowance that is lower, the cluster's own or the process's (`KafkaClusterCost.BytesPerHour`), and a refused start names the allowance that ran
+out, not the capped value of a plan whose own cluster still has room.
+
+**Tests.** `KafkaExportServiceTests` (each gate refuses, audits and writes nothing; a grant downgrade refuses whole; a third export is refused; a delivery
+returning false or throwing; one ring entry per call; `<redacted>` and never the typed text; the size limit leaves whole rows out and counts them),
+`KafkaExportCapabilityTests` (the flags, the prerequisites, the audit gate, and the sixteen flag combinations against every profile and `ReadOnly`: nothing is
+delivered that the flags did not grant), `KafkaExportMenuTests` (bUnit: the menu, the notices, the record page, Settings, the selector chip, no `data:` link),
+`KafkaProfileAllowanceTests`, and the writer's own `KafkaExportWriterTests`. `PublicApiTest_KStudio` moves by `ExportRecords` and `LiveTail` and nothing else.
+
 ## D47
 
 **D47 — A profile lowers a cluster's limits, only ever lowers, and is set explicitly.** `KafkaClusterBuilder.Profile(KafkaProfile)` says what kind of
