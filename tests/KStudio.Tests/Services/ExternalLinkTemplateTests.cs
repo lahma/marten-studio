@@ -120,6 +120,69 @@ public class ExternalLinkTemplateTests
         Problems(Link("Traces", $"https://tempo.example.com/trace/{{traceId}}?{name}={{correlationId}}")).Should().ContainSingle();
     }
 
+    [Theory]
+    [InlineData("https://kibana.example.com/app#/view?token=abc")]
+    [InlineData("https://kibana.example.com/app#%2Fview%3Ftoken=abc")]
+    [InlineData("https://logs.example.com/?a=1;token=abc")]
+    [InlineData("https://logs.example.com/?a=1%26token=abc")]
+    public void A_credential_parameter_is_seen_in_a_fragment_that_is_a_query_and_after_a_semicolon(string template)
+    {
+        Problems(Link("Traces", template)).Should().ContainSingle().Which.Should().Contain("names a credential");
+    }
+
+    [Theory]
+    [InlineData("https://kibana.example.com/app#/view?tokenizer=x")]
+    [InlineData("https://kibana.example.com/app#/view?author=x&keyword=y")]
+    public void A_fragment_with_a_harmless_parameter_is_allowed(string template)
+    {
+        Problems(Link("Traces", template)).Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("api-key")]
+    [InlineData("access_key")]
+    [InlineData("private_token")]
+    [InlineData("X-Amz-Signature")]
+    [InlineData("X-Amz-Security-Token")]
+    [InlineData("X-Amz-Credential")]
+    [InlineData("code")]
+    [InlineData("key")]
+    [InlineData("db.password")]
+    public void A_name_that_ends_like_a_credential_is_refused_whatever_it_holds(string name)
+    {
+        Problems(Link("Traces", $"https://tempo.example.com/trace/{{traceId}}?{name}=abc")).Should().ContainSingle().Which.Should().Contain("names a credential");
+    }
+
+    [Theory]
+    [InlineData("tokenizer")]
+    [InlineData("author")]
+    [InlineData("keyword")]
+    [InlineData("codec")]
+    public void A_name_that_only_contains_a_credential_word_is_allowed(string name)
+    {
+        Problems(Link("Traces", $"https://tempo.example.com/trace/{{traceId}}?{name}=abc")).Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("https://{correlationId}/x")]
+    [InlineData("https://logs.example.com{correlationId}/")]
+    [InlineData("https://logs.{traceId}.example.com/x")]
+    public void A_placeholder_in_the_host_is_refused_with_the_sentence_and_never_the_template(string template)
+    {
+        string text = string.Join(" ", Problems(Link("Traces", template)));
+
+        text.Should().Contain("A link template puts a placeholder in its host; placeholders go in the path, the query or the fragment.").And.NotContain("example.com");
+    }
+
+    [Theory]
+    [InlineData("https://h/{traceId}")]
+    [InlineData("https://logs.example.com?q={correlationId}")]
+    [InlineData("https://logs.example.com#{correlationId}")]
+    public void A_placeholder_after_the_host_is_allowed(string template)
+    {
+        Problems(Link("Traces", template)).Should().BeEmpty();
+    }
+
     [Fact]
     public void A_parameter_that_only_contains_a_credential_word_is_allowed()
     {

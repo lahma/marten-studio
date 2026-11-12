@@ -43,9 +43,11 @@ internal static partial class ExternalLinkTemplate
     /// <summary>The placeholders.</summary>
     public static readonly IReadOnlyList<string> Placeholders = ["traceId", "correlationId", "from", "to", "fromMs", "toMs"];
 
-    /// <summary>Query parameters (or fragment parameters) that name a credential, compared ignoring case.</summary>
-    private static readonly string[] CredentialNames =
-        ["access_token", "token", "api_key", "apikey", "x-api-key", "password", "passwd", "pwd", "secret", "client_secret", "signature", "sig", "auth"];
+    /// <summary>Normalised parameter names (lower case, no <c>-</c>, <c>_</c> or <c>.</c>) that are a credential whole.</summary>
+    private static readonly string[] CredentialNames = ["key", "sig", "auth", "pwd", "passwd", "code"];
+
+    /// <summary>Normalised endings that make a parameter name a credential: <c>access_token</c>, <c>X-Amz-Signature</c>, <c>private_token</c>, <c>x-api-key</c>.</summary>
+    private static readonly string[] CredentialEndings = ["token", "secret", "password", "signature", "apikey", "accesskey", "credential"];
 
     /// <summary>The problems with the host's links; the text names a label and a rule, and never a template.</summary>
     /// <param name="links">The registrations.</param>
@@ -187,9 +189,17 @@ internal static partial class ExternalLinkTemplate
             return "the template holds user info (user:password@), which is a credential every visitor would see.";
         }
 
+        // A placeholder takes the place of a value, so it may stand in the path, the query or the fragment, and never where the host is decided.
+        int first = template.IndexOf('{', StringComparison.Ordinal);
+
+        if (first >= 0 && !EndOfAuthority().IsMatch(template[..first]))
+        {
+            return "A link template puts a placeholder in its host; placeholders go in the path, the query or the fragment.";
+        }
+
         foreach (string name in ParameterNames(uri))
         {
-            if (CredentialNames.Contains(name, StringComparer.OrdinalIgnoreCase))
+            if (IsCredentialName(name))
             {
                 return "the template has a parameter that names a credential (a token, key, password, secret or signature), which every visitor would see.";
             }
@@ -198,22 +208,35 @@ internal static partial class ExternalLinkTemplate
         return null;
     }
 
-    /// <summary>The names of the query's parameters, and of a fragment that is itself a list of parameters.</summary>
+    /// <summary>
+    /// The names of the query's parameters, and of a fragment that is itself a list of parameters (<c>#/view?token=x</c>), split on <c>?</c>, <c>&amp;</c>
+    /// and <c>;</c> after the whole part is unescaped, so that <c>%3F</c> hides nothing.
+    /// </summary>
     private static IEnumerable<string> ParameterNames(Uri uri)
     {
         foreach (string part in new[] { uri.Query, uri.Fragment })
         {
-            string text = part.TrimStart('?', '#');
+            string text = Uri.UnescapeDataString(part.TrimStart('?', '#'));
 
-            foreach (string pair in text.Split('&', StringSplitOptions.RemoveEmptyEntries))
+            foreach (string pair in text.Split(['?', '&', ';'], StringSplitOptions.RemoveEmptyEntries))
             {
                 int equals = pair.IndexOf('=', StringComparison.Ordinal);
-                string name = equals < 0 ? pair : pair[..equals];
 
-                yield return Uri.UnescapeDataString(name);
+                yield return equals < 0 ? pair : pair[..equals];
             }
         }
     }
+
+    private static bool IsCredentialName(string name)
+    {
+        string normal = string.Concat(name.Where(static c => c is not ('-' or '_' or '.'))).ToLowerInvariant();
+
+        return CredentialNames.Contains(normal, StringComparer.Ordinal)
+            || CredentialEndings.Any(ending => normal.EndsWith(ending, StringComparison.Ordinal));
+    }
+
+    [GeneratedRegex(@"^https?://[^/?#{}]+[/?#]", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex EndOfAuthority();
 
     [GeneratedRegex(@"\{([^{}]*)\}", RegexOptions.CultureInvariant)]
     private static partial Regex PlaceholderPattern();

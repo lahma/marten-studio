@@ -240,10 +240,18 @@ public class KafkaRecordLinkBuilderTests
 
         KafkaRecordLinkBuilder.Build(routes, twice, Match(twice, "k", ("order-id", "4711"), ("also-order-id", "4711"))).Links.Should().ContainSingle();
 
-        KafkaClusterDefinition many = Cluster(static t => t.Correlation(c => c.Header("order-id").Document("Order")));
-        KafkaRecordLinkSet set = KafkaRecordLinkBuilder.Build(routes, many, Match(many, "k", [.. Enumerable.Range(0, 20).Select(static i => ("order-id", (string?) ("o" + i)))]));
+        KafkaClusterDefinition many = Cluster(static t => t.Correlation(c =>
+        {
+            c.WithoutDefaults();
 
-        set.Links.Count.Should().BeLessThanOrEqualTo(KafkaRecordLinkBuilder.MaxLinks);
+            for (int i = 0; i < 9; i++)
+            {
+                c.Header("h" + i).Document("Order");
+            }
+        }));
+        KafkaRecordLinkSet set = KafkaRecordLinkBuilder.Build(routes, many, Match(many, "k", [.. Enumerable.Range(0, 9).Select(static i => ("h" + i, (string?) ("o" + i)))]));
+
+        set.Links.Should().HaveCount(KafkaRecordLinkBuilder.MaxLinks);
     }
 
     [Fact]

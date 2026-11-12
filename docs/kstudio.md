@@ -198,7 +198,10 @@ A store that keeps each tenant in a database of its own gets no Marten link yet:
 
 `o.ExternalLink("Traces", "https://tempo.example.com/trace/{traceId}")` adds a link to your tracing or log tool, with
 `{traceId}`, `{correlationId}`, `{from}`, `{to}`, `{fromMs}` and `{toMs}`. Never put a credential in a template: it is
-shown to every visitor, and KStudio refuses user info and the usual credential parameters at start.
+shown to every visitor, and KStudio refuses user info and credential parameters at start: in the query or the fragment, any parameter named
+`key`, `sig`, `auth`, `pwd`, `passwd` or `code`, or ending in `token`, `secret`, `password`, `signature`, `apikey`, `accesskey` or `credential`, whatever
+its case and whatever `-`, `_` or `.` it holds (`api-key`, `X-Amz-Signature` and `private_token` are refused; `tokenizer` and `author` are not). A
+placeholder goes in the path, the query or the fragment, never in the scheme or the host.
 
 ## Audit
 

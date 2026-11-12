@@ -108,6 +108,30 @@ public class KafkaRecordSearchLinksTests
     }
 
     [Fact]
+    public async Task A_field_whose_kind_was_renamed_is_not_the_field_a_document_seed_searches()
+    {
+        await using KafkaSearchRig rig = Rig(static o => o.Topic("orders", static t => t.Correlation(static c => c.Header("order-id").As("order").Document("Order"))));
+
+        Links(rig).ToSearch(Document()).Should().BeNull("the timeline compares the kind, and this field's kind is order and not document:Order");
+    }
+
+    [Fact]
+    public async Task A_field_given_the_documents_kind_by_name_is_found_and_the_type_is_the_kinds()
+    {
+        await using KafkaSearchRig rig = Rig(static o => o.Topic("orders", static t => t.Correlation(static c => c.Header("order-id").As("document:Order"))));
+
+        Links(rig).ToSearch(Document())!.Should().Contain("type=Order&");
+    }
+
+    [Fact]
+    public async Task A_stream_seed_needs_a_field_of_the_stream_kind()
+    {
+        await using KafkaSearchRig rig = Rig(static o => o.Topic("shipments", static t => t.Correlation(static c => c.Header("stream-id").As("shipment").Stream())));
+
+        Links(rig).ToSearch(Stream()).Should().BeNull();
+    }
+
+    [Fact]
     public async Task A_field_that_names_a_store_applies_only_to_a_screen_on_that_store()
     {
         await using KafkaSearchRig rig = Rig(static o => o.Topic("orders", static t => t.Correlation(static c => c.Header("order-id").Document("Order", "billing"))));

@@ -93,6 +93,32 @@ public class KafkaRecordLinksTests
     }
 
     [Fact]
+    public async Task A_timeline_row_with_a_hidden_tenant_says_so_briefly_and_keeps_the_sentence_as_its_title()
+    {
+        FakeRouteLinks routes = new();
+        await using KafkaSearchRig rig = Rig(
+            routes,
+            engine: static o => o.Topic("orders", static t =>
+            {
+                t.Correlation(static c => c.Header("order-id").Document("Order"));
+                t.Redact(static r => r.Header("tenant-id"));
+            }));
+        rig.Topic("orders");
+        rig.Produce("orders", 0, 1, "k", "v", ("order-id", "4711"), ("tenant-id", Secret));
+        KafkaMatch match = await ReadAsync(rig);
+
+        IRenderedComponent<KafkaRecordLinks> links = rig.Studio.Context.Render<KafkaRecordLinks>(p => p
+            .Add(x => x.Model, match)
+            .Add(x => x.Cluster, rig.Entry.Key)
+            .Add(x => x.Compact, true));
+
+        var note = links.Find(".ms-k-record-links-compact .ms-muted");
+        note.TextContent.Should().Be("no links (tenant hidden)");
+        note.GetAttribute("title").Should().Be(KafkaStudioText.LinksTenantHidden);
+        links.Markup.Should().NotContain(Secret);
+    }
+
+    [Fact]
     public async Task A_masked_key_draws_no_document_link()
     {
         FakeRouteLinks routes = new();

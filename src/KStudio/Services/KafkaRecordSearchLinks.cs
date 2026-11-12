@@ -111,7 +111,7 @@ internal sealed class KafkaRecordSearchLinks(IServiceProvider services, IStudioS
         return href + "#" + string.Join('&', fragment);
     }
 
-    /// <summary>The first declared topic of a cluster with a correlation field that refers to the record, and the field's document type (<see langword="null" /> for a stream).</summary>
+    /// <summary>The first declared topic of a cluster with a correlation field that refers to the record, and the document type of the field's kind (<see langword="null" /> for a stream).</summary>
     private static (string Topic, string? DocumentType)? FirstMatch(KafkaClusterDefinition cluster, StudioRecordSearchRequest request, bool isDocument)
     {
         foreach (KafkaTopicDescriptor topic in cluster.Topics.Values.Where(static x => x.Declared).OrderBy(static x => x.Name, StringComparer.Ordinal))
@@ -123,12 +123,17 @@ internal sealed class KafkaRecordSearchLinks(IServiceProvider services, IStudioS
                     continue;
                 }
 
-                if (isDocument && field.DocumentType is { } documentType && request.Reference.TypeNames.Contains(documentType, StringComparer.OrdinalIgnoreCase))
+                // The seed's kind is what the timeline compares (document:{type} or stream), so a field whose kind was renamed with As() is not the
+                // field the seed searches, and the type in the link is the part of the kind after the prefix.
+                if (isDocument
+                    && field.Kind.StartsWith(CorrelationDefaults.DocumentPrefix, StringComparison.Ordinal)
+                    && field.Kind[CorrelationDefaults.DocumentPrefix.Length..] is { Length: > 0 } documentType
+                    && request.Reference.TypeNames.Contains(documentType, StringComparer.OrdinalIgnoreCase))
                 {
                     return (topic.Name, documentType);
                 }
 
-                if (!isDocument && field.IsStream)
+                if (!isDocument && string.Equals(field.Kind, CorrelationDefaults.StreamKind, StringComparison.Ordinal))
                 {
                     return (topic.Name, null);
                 }
