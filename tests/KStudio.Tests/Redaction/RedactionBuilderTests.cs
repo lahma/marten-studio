@@ -161,19 +161,18 @@ public class RedactionBuilderTests
     }
 
     [Fact]
-    public void A_ce_header_rule_withholds_a_structured_envelope_under_Payload()
+    public void A_ce_header_rule_masks_the_attribute_and_the_event_keeps_only_its_data_under_Payload()
     {
         KafkaTopicBuilder topic = Declare(static r => r.Header("ce_subject"));
         string envelope = $$$"""{"specversion":"1.0","type":"t","subject":"{{{Secret}}}","data":{"a":1}}""";
 
         KafkaMatch match = Match(topic, KafkaReadGrant.Envelope | KafkaReadGrant.Payload, envelope, ("content-type", "application/cloudevents+json"));
 
-        match.ValueText.Should().BeNull("fail closed: the header rule names an attribute the envelope holds");
-        match.ValueWithheldBy.Should().Be("header ce_subject");
+        match.ValueText.Should().Be("""{"a":1}""", "the value of a CloudEvent is its data: the envelope that holds the masked attribute is not kept");
+        match.ValueWithheldBy.Should().BeNull();
+        match.ValueIsCloudEventData.Should().BeTrue();
+        match.CloudEventAttributes.Single(static x => x.Name == "subject").Value.IsRedacted.Should().BeTrue();
         JsonSerializer.Serialize(match).Should().NotContain(Secret);
-
-        new KafkaRedactor(Declare(static r => r.Header("content-type")).Rules).AnyCloudEventRule().Should().NotBeNull();
-        new KafkaRedactor(Declare(static r => r.Header("x-email")).Rules).AnyCloudEventRule().Should().BeNull();
     }
 
     [Theory]

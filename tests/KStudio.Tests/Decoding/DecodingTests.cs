@@ -56,7 +56,8 @@ public class DecodingTests
         Detect(Record([0, 0, 0, 0, 7, 1], ("ce_specversion", "1.0"))).FormatName.Should().StartWith("CloudEvents (binary)");
 
         // 3. Structured by content type.
-        Detect(Text("""{"specversion":"1.0","type":"a"}""", ("content-type", "application/cloudevents+json"))).FormatName.Should().Be("CloudEvents (structured)");
+        Detect(Text("""{"specversion":"1.0","type":"a","data":{"x":1}}""", ("content-type", "application/cloudevents+json"))).FormatName.Should().Be("CloudEvents (structured), data as JSON");
+        Detect(Text("""{"specversion":"1.0","type":"a","data":{"x":1}}""", ("content-type", "application/cloudevents+json")), Envelope).FormatName.Should().Be("CloudEvents (structured)");
 
         // 4. The declared decoder wins over the wire format, JSON and text.
         FixedDecoder decoder = new(KafkaDecodeResult.Text("decoded", "Fixed"));
@@ -169,8 +170,9 @@ public class DecodingTests
         Detect(Record([0xff, 0xfe]), decoder: KafkaDecoders.Text).Reason.Should().Be(KafkaUndecodableReason.InvalidUtf8);
         Detect(Text("""{"a":1}"""), decoder: KafkaDecoders.Text).Kind.Should().Be(KafkaValueKind.Text, "forced text is text even when it parses as JSON");
 
-        KafkaDecodedValue ce = Detect(Text("""{"specversion":"1.0","type":"t"}"""), decoder: KafkaDecoders.CloudEvents);
-        ce.FormatName.Should().Be("CloudEvents (structured)");
+        KafkaDecodedValue ce = Detect(Text("""{"specversion":"1.0","type":"t","data":{"a":1}}"""), decoder: KafkaDecoders.CloudEvents);
+        ce.FormatName.Should().Be("CloudEvents (structured), data as JSON");
+        ce.Text.Should().Be("""{"a":1}""", "the value of a CloudEvent is its data");
         ce.CloudEvent!.Events.Single().Attributes["type"].Should().Be("t");
 
         KafkaDecoders.BuiltInKind(new FixedDecoder(KafkaDecodeResult.NotApplicable)).Should().BeNull();

@@ -381,7 +381,7 @@ public class PredicateEvaluationTests
     {
         Compile("key < 'a'").Errors.Single().Message.Should().Be("'<' cannot be used on key (position 1): numbers compare only JSON paths.");
         Compile("header.a >= 'a'").Errors.Single().Message.Should().Be("'>=' cannot be used on header.a (position 1): numbers compare only JSON paths.");
-        Compile("any is null").Errors.Single().Message.Should().Be("'is null' cannot be used on any (position 1): is null applies to key, header.<name> and ce.<attribute>.");
+        Compile("any is null").Errors.Single().Message.Should().Be("'is null' cannot be used on any (position 1): is null applies to key, header.<name>, ce.<attribute> and value.");
         Compile("any is not null").Errors.Single().Message.Should().Contain("'is not null' cannot be used on any");
 
         PredicateError prefix = Compile("key ^= '4'", KafkaKeyFormat.Int64BigEndian).Errors.Single();
@@ -409,12 +409,13 @@ public class PredicateEvaluationTests
     }
 
     [Fact]
-    public void Value_and_json_path_searches_are_refused_until_the_payload_work_lands()
+    public void Value_and_json_path_searches_need_the_payload_grant()
     {
         Compile("value ~ 'x'").Errors.Single().Message.Should().Be("value reads the record's value, which needs ReadPayloads (KafkaStudioOptions.Capabilities.ReadPayloads).");
         Compile("$.a.b = 'x'").Errors.Single().Message.Should().Contain("$.a.b reads the record's value, which needs ReadPayloads");
-        Compile("value ~ 'x'", grant: KafkaReadGrant.Envelope | KafkaReadGrant.Payload).Errors.Single().Message
-            .Should().Contain("cannot be searched yet");
+        Compile("value ~ 'x'", grant: KafkaReadGrant.Envelope | KafkaReadGrant.Payload).Errors.Should().BeEmpty();
+        Compile("$.a.b = 'x'", grant: KafkaReadGrant.Envelope | KafkaReadGrant.Payload).Errors.Should().BeEmpty();
+        Compile("value is null").Errors.Should().BeEmpty("a tombstone is a fact about the record, not about its content");
     }
 
     [Fact]

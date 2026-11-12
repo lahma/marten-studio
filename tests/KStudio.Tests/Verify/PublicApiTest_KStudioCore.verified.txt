@@ -73,7 +73,9 @@ namespace KStudio
         public KStudio.KafkaRedactionBuilder AllowHeader(string name) { }
         public KStudio.KafkaRedactionRule CloudEvent(string attribute) { }
         public KStudio.KafkaRedactionRule Header(string name) { }
+        public KStudio.KafkaRedactionRule JsonPath(string path) { }
         public KStudio.KafkaRedactionRule Key() { }
+        public KStudio.KafkaRedactionBuilder Pattern(string regex, string? name = null) { }
     }
     public sealed class KafkaRedactionRule
     {

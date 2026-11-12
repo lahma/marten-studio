@@ -39,6 +39,6 @@ internal static partial class KStudioLog
     [LoggerMessage(EventId = 9674, Level = LogLevel.Debug, Message = "KStudio could not sample record sizes of {Topic} on {Cluster}: {Kind}")]
     public static partial void SampleFailed(ILogger logger, string topic, string cluster, string kind);
 
-    [LoggerMessage(EventId = 9675, Level = LogLevel.Debug, Message = "KStudio could not apply a {RuleKind} redaction rule to a value of {Topic} on {Cluster}: {Failure}, {ExceptionKind}")]
-    public static partial void PayloadRuleNotApplied(ILogger logger, string ruleKind, string topic, string cluster, string failure, string exceptionKind);
+    [LoggerMessage(EventId = 9675, Level = LogLevel.Debug, Message = "KStudio could not apply a {Kind} redaction rule to a value of {Topic} on {Cluster}: {Reason}, {ExceptionKind}")]
+    public static partial void PayloadRuleNotApplied(ILogger logger, string kind, string topic, string cluster, string reason, string exceptionKind);
 }
