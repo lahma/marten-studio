@@ -51,6 +51,11 @@ internal sealed record StoreScopeFacts(
         new(StudioDatabaseCardinality.Single, ShowTenantSelector: false, TenantList.Unavailable, null);
 }
 
+/// <summary>The database a tenant was found in, and the facts that database's listing was read into.</summary>
+/// <param name="DatabaseId">The database's identity.</param>
+/// <param name="Facts">What <see cref="IStudioScopeCatalog.DescribeAsync" /> would have answered for it.</param>
+internal sealed record TenantDatabaseHit(string DatabaseId, StoreScopeFacts Facts);
+
 /// <summary>
 /// Where <see cref="StudioState" /> gets its authorization-filtered listings.
 /// </summary>
@@ -77,6 +82,52 @@ internal interface IStudioScopeCatalog
 
     /// <summary>The facts the header renders about one source and database.</summary>
     Task<StoreScopeFacts> DescribeAsync(string storeKey, string databaseId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The first of <paramref name="databaseIds" />, in the order given, whose tenant listing carries <paramref name="tenantId" />, with the
+    /// facts that listing was read into; <see langword="null" /> when none does. A database whose tenants cannot be read is skipped.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// What a link that names a tenant and no database asks (<see cref="StudioState.SetScopeAsync" />): the same listing
+    /// <see cref="DescribeAsync" /> gives for each database - the source's tenants, filtered by the policy per tenant - with the source's
+    /// databases enumerated <b>once</b> for the whole search rather than once per database, because that enumeration is the expensive
+    /// call on a dynamic tenancy. Tenant-aware rather than a predicate over each database's facts, so that the membership test is made in
+    /// one place and nothing crosses the seam but ids. The default asks <see cref="DescribeAsync" /> per database.
+    /// </para>
+    /// <para>The caller bounds the list; the catalog trusts the databases it is given exactly as <see cref="DescribeAsync" /> does.</para>
+    /// </remarks>
+    /// <param name="storeKey">The source.</param>
+    /// <param name="databaseIds">The databases to look in, already the ones the visitor may see.</param>
+    /// <param name="tenantId">The tenant, matched exactly.</param>
+    /// <param name="cancellationToken">Cancels the search.</param>
+    async Task<TenantDatabaseHit?> FindTenantDatabaseAsync(
+        string storeKey,
+        IReadOnlyList<string> databaseIds,
+        string tenantId,
+        CancellationToken cancellationToken = default)
+    {
+        foreach (string databaseId in databaseIds)
+        {
+            StoreScopeFacts facts;
+            try
+            {
+                facts = await DescribeAsync(storeKey, databaseId, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                // A database whose listing throws is that database's failure, not the search's.
+                continue;
+            }
+
+            if (facts.Tenants.Ids.Contains(tenantId, StringComparer.Ordinal))
+            {
+                return new TenantDatabaseHit(databaseId, facts);
+            }
+        }
+
+        return null;
+    }
 
     /// <summary>Forgets whatever was cached, for the refresh button.</summary>
     void Invalidate();
@@ -207,6 +258,89 @@ internal sealed class StudioScopeCatalog : IStudioScopeCatalog
             return StoreScopeFacts.Unavailable(availability.Message);
         }
 
+        return await DescribeDatabaseAsync(storeKey, registration, source, shared: null, databaseId, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<TenantDatabaseHit?> FindTenantDatabaseAsync(
+        string storeKey,
+        IReadOnlyList<string> databaseIds,
+        string tenantId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(databaseIds);
+
+        StudioSourceRegistration? registration = sources.Find(storeKey);
+        if (registration is null || databaseIds.Count == 0)
+        {
+            return null;
+        }
+
+        StoreAvailability availability = sources.TryResolve(registration, out IStudioSource? source);
+        if (!availability.IsAvailable || source is null || !source.ShowsTenantSelector)
+        {
+            // Nothing is tenanted per row here: no database lists a tenant.
+            return null;
+        }
+
+        // One enumeration for the whole search, made by the first database's description and shared by the rest; each database then
+        // discovers and filters its own tenants, as DescribeAsync does. A source whose databases cannot be enumerated finds nothing.
+        Enumeration enumeration = new();
+        foreach (string databaseId in databaseIds)
+        {
+            StoreScopeFacts facts = await DescribeDatabaseAsync(storeKey, registration, source, enumeration, databaseId, cancellationToken).ConfigureAwait(false);
+            if (enumeration.Failed)
+            {
+                return null;
+            }
+
+            if (facts.Tenants.Ids.Contains(tenantId, StringComparer.Ordinal))
+            {
+                return new TenantDatabaseHit(databaseId, facts);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>The source's databases, read once for a search and shared by every database it describes.</summary>
+    private sealed class Enumeration
+    {
+        public IReadOnlyList<IStudioDatabase>? Databases { get; set; }
+
+        public bool Failed { get; set; }
+    }
+
+    private void LogTenantDiscoveryFailed(string storeKey, Exception exception)
+    {
+        // Warning the first time in a window, Debug after: the header asks this on every scope change
+        // in every circuit, so one unreachable database would otherwise be a Warning per click.
+        LogLevel level = StudioLogThrottle.LevelOrWarning(
+            throttle, "Store.Tenants", storeKey, null, StudioLogThrottle.KindOf(exception));
+
+        if (product == StudioProduct.PostgresStudio)
+        {
+            logger.PostgresStudioTenantDiscoveryFailed(level, exception, storeKey);
+        }
+        else
+        {
+            logger.TenantDiscoveryFailed(level, exception, storeKey);
+        }
+    }
+
+    /// <summary>
+    /// The facts of one database: its source's tenants, discovered and filtered by the policy. <paramref name="shared" /> holds the
+    /// source's databases enumeration when the caller describes several databases in one search (read here by the first, reused by the
+    /// rest); without it the enumeration is made for this database alone.
+    /// </summary>
+    private async Task<StoreScopeFacts> DescribeDatabaseAsync(
+        string storeKey,
+        StudioSourceRegistration registration,
+        IStudioSource source,
+        Enumeration? shared,
+        string databaseId,
+        CancellationToken cancellationToken)
+    {
         StudioDatabaseCardinality cardinality = source.Cardinality;
         bool showTenants = source.ShowsTenantSelector;
         if (!showTenants || string.IsNullOrEmpty(databaseId))
@@ -219,7 +353,9 @@ internal sealed class StudioScopeCatalog : IStudioScopeCatalog
 
         try
         {
-            IReadOnlyList<IStudioDatabase> databases = await source.DatabasesAsync(cancellationToken).ConfigureAwait(false);
+            // The one enumeration site: made here, and kept on the shared holder for the rest of a search.
+            IReadOnlyList<IStudioDatabase> databases = shared?.Databases ?? await source.DatabasesAsync(cancellationToken).ConfigureAwait(false);
+            shared?.Databases = databases;
             IStudioDatabase? database = null;
             foreach (IStudioDatabase candidate in databases)
             {
@@ -242,19 +378,13 @@ internal sealed class StudioScopeCatalog : IStudioScopeCatalog
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            // Warning the first time in a window, Debug after: the header asks this on every scope change
-            // in every circuit, so one unreachable database would otherwise be a Warning per click.
-            LogLevel level = StudioLogThrottle.LevelOrWarning(
-                throttle, "Store.Tenants", storeKey, null, StudioLogThrottle.KindOf(exception));
+            if (shared is { Databases: null })
+            {
+                // The enumeration itself failed: the rest of a search has nothing to look in.
+                shared.Failed = true;
+            }
 
-            if (product == StudioProduct.PostgresStudio)
-            {
-                logger.PostgresStudioTenantDiscoveryFailed(level, exception, storeKey);
-            }
-            else
-            {
-                logger.TenantDiscoveryFailed(level, exception, storeKey);
-            }
+            LogTenantDiscoveryFailed(storeKey, exception);
 
             return new StoreScopeFacts(cardinality, showTenants, TenantList.Unavailable, null);
         }

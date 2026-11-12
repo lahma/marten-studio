@@ -236,6 +236,14 @@ public class MartenStudioRouteLinksTests
         "static",
     };
 
+    /// <summary>The tenancies that leave documents and events single-tenanted unless the configuration says otherwise.</summary>
+    public static TheoryData<string> DatabasePerTenantKindsWithSingleTenantedDefaults => new()
+    {
+        "master table",
+        "one server",
+        "static",
+    };
+
     public static TheoryData<string> TenancyKindsThatPlaceNoTenant => new()
     {
         "custom",
@@ -243,17 +251,18 @@ public class MartenStudioRouteLinksTests
     };
 
     /// <summary>
-    /// A store that keeps each tenant in a database of its own gets a link with the tenant and no <c>db</c> (TENANT-DB): the page a link
-    /// opens looks for the tenant among the databases the visitor may see. With no tenant to name it gets none, for a document and for a
-    /// stream, because the page would open the visitor's own tenant and say "not found" falsely.
+    /// A store that keeps each tenant in a database of its own and keeps its rows per tenant gets a link with the tenant and no <c>db</c>
+    /// (TENANT-DB): the page a link opens looks for the tenant among the databases the visitor may see, and those databases list tenants
+    /// because rows are tenanted. With no tenant to name it gets none, for a document and for a stream, because the page would open the
+    /// visitor's own tenant and say "not found" falsely.
     /// </summary>
     [Theory]
     [MemberData(nameof(DatabasePerTenantKinds))]
-    public void A_store_with_a_database_per_tenant_gets_a_link_with_the_tenant_and_no_db(string kind)
+    public void A_store_with_a_database_per_tenant_and_tenanted_rows_gets_a_link_with_the_tenant_and_no_db(string kind)
     {
         MartenStudioRouteLinks links = Links(services => services.AddMarten(x =>
         {
-            x.Schema.For<Order>();
+            x.Schema.For<Order>().MultiTenanted();
             x.Events.AddEventType<OrderPlaced>();
             DatabasePerTenant(x, kind);
         }));
@@ -273,6 +282,57 @@ public class MartenStudioRouteLinksTests
 
         links.ToDocument(new StudioLinkScope(null, null), "order", "7").Should().BeNull(kind, "a database-per-tenant store needs its tenant");
         links.ToStream(new StudioLinkScope(null, null), stream).Should().BeNull(kind, "a database-per-tenant store needs its tenant");
+    }
+
+    /// <summary>
+    /// In Marten 9.57.0 these tenancies leave documents and events single-tenanted: no database lists a tenant, the search finds none,
+    /// and a link would reopen the same id in the database on screen - another tenant's record. So no link.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(DatabasePerTenantKindsWithSingleTenantedDefaults))]
+    public void A_store_with_a_database_per_tenant_and_single_tenanted_rows_gets_no_link(string kind)
+    {
+        MartenStudioRouteLinks links = Links(services => services.AddMarten(x =>
+        {
+            x.Schema.For<Order>();
+            x.Events.AddEventType<OrderPlaced>();
+            DatabasePerTenant(x, kind);
+        }));
+
+        links.ToDocument(new StudioLinkScope(null, "globex"), "order", "7").Should().BeNull(kind);
+        links.ToStream(new StudioLinkScope(null, "globex"), Guid.NewGuid().ToString()).Should().BeNull(kind);
+    }
+
+    /// <summary>Marten's sharded tenancy makes every document and the event store conjoined itself, so its rows are tenanted whatever the type says.</summary>
+    [Fact]
+    public void A_sharded_store_keeps_its_rows_per_tenant_whatever_the_type_says_and_gets_a_link()
+    {
+        MartenStudioRouteLinks links = Links(services => services.AddMarten(x =>
+        {
+            x.Schema.For<Order>();
+            x.Events.AddEventType<OrderPlaced>();
+            DatabasePerTenant(x, "sharded");
+        }));
+
+        links.ToDocument(new StudioLinkScope(null, "globex"), "order", "7").Should().NotBeNull();
+    }
+
+    /// <summary>The host's <c>KnownTenantIds</c> make every database list every tenant, so they say nothing about where one is.</summary>
+    [Theory]
+    [MemberData(nameof(DatabasePerTenantKinds))]
+    public void Known_tenant_ids_give_a_database_per_tenant_store_no_link(string kind)
+    {
+        MartenStudioRouteLinks links = Links(
+            services => services.AddMarten(x =>
+            {
+                x.Schema.For<Order>().MultiTenanted();
+                x.Events.AddEventType<OrderPlaced>();
+                DatabasePerTenant(x, kind);
+            }),
+            options => options.KnownTenantIds.Add("globex"));
+
+        links.ToDocument(new StudioLinkScope(null, "globex"), "order", "7").Should().BeNull(kind);
+        links.ToStream(new StudioLinkScope(null, "globex"), Guid.NewGuid().ToString()).Should().BeNull(kind);
     }
 
     /// <summary>A tenancy of the application's own, or one that would not say what it is, stays fail-closed: nothing says where its tenants are.</summary>
@@ -302,7 +362,7 @@ public class MartenStudioRouteLinksTests
         {
             services.AddMarten(x =>
             {
-                x.Schema.For<Order>();
+                x.Schema.For<Order>().MultiTenanted();
                 x.MultiTenantedDatabases(t => t.AddMultipleTenantDatabase(Connection, "a").ForTenants("acme"));
             });
             services.AddMartenStore<IBillingStore>(x =>

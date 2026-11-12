@@ -35,6 +35,16 @@ internal sealed class FakeStudioSourceProvider : IStudioSourceProvider
         return this;
     }
 
+    /// <summary>The tenants each database of a source lists (<see cref="WithTenants" />), by source key and database identity.</summary>
+    public Dictionary<(string Key, string DatabaseId), string[]> Tenants { get; } = new();
+
+    /// <summary>Says which tenants one database lists; a database not named lists none.</summary>
+    public FakeStudioSourceProvider WithTenants(string key, string databaseId, params string[] tenantIds)
+    {
+        Tenants[(key, databaseId)] = tenantIds;
+        return this;
+    }
+
     /// <summary>How many times a source was asked for its databases - what a resolution costs past the policy.</summary>
     public int DatabaseListings => sources.Sum(static x => x.Listings);
 
@@ -89,7 +99,10 @@ internal sealed class FakeStudioSourceProvider : IStudioSourceProvider
         }
 
         public ValueTask<TenantList> DiscoverTenantsAsync(IStudioDatabase database, IReadOnlyList<IStudioDatabase> all, CancellationToken cancellationToken) =>
-            ValueTask.FromResult(TenantList.Unavailable);
+            ValueTask.FromResult(
+                owner.Tenants.TryGetValue((Registration.Key, database.Identity), out string[]? ids)
+                    ? new TenantList(ids, IsTruncated: false, TenantListSource.Descriptor)
+                    : TenantList.Unavailable);
 
         public ValueTask<ResolvedSource> CompleteAsync(
             StudioScope scope,

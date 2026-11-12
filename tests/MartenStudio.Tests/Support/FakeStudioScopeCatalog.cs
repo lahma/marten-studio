@@ -33,6 +33,9 @@ internal sealed class FakeStudioScopeCatalog : IStudioScopeCatalog
     /// <summary>Every <see cref="DescribeAsync" /> call, in order: the store and the database it was asked about.</summary>
     public List<(string StoreKey, string DatabaseId)> DescribeCalls { get; } = [];
 
+    /// <summary>A gate held shut on one database's <see cref="DescribeAsync" />, by store key and database identity, which holds only that one.</summary>
+    public Dictionary<(string StoreKey, string DatabaseId), TaskCompletionSource> DescribeGates { get; } = new();
+
     /// <summary>The databases whose <see cref="DescribeAsync" /> throws, by store key and database identity.</summary>
     public HashSet<(string StoreKey, string DatabaseId)> DescribeThrows { get; } = new();
 
@@ -127,6 +130,11 @@ internal sealed class FakeStudioScopeCatalog : IStudioScopeCatalog
         }
 
         DescribeCalls.Add((storeKey, databaseId));
+
+        if (DescribeGates.TryGetValue((storeKey, databaseId), out TaskCompletionSource? own))
+        {
+            await own.Task.Bounded();
+        }
 
         if (DescribeThrows.Contains((storeKey, databaseId)))
         {

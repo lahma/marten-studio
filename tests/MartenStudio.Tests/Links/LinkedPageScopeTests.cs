@@ -22,7 +22,7 @@ namespace MartenStudio.Tests.Links;
 /// <remarks>
 /// In a single-database store (conjoined tables, the tenants the header lists for that database) the page keeps the tenant and the
 /// database it was already on, so the link works. A store that keeps each tenant in a database of its own gets the same link
-/// (<see cref="MartenStudioRouteLinksTests" />), and <see cref="StudioState.SetScopeAsync" /> opens the first database, among those the
+/// when it keeps its rows per tenant (<see cref="MartenStudioRouteLinksTests" />), and <see cref="StudioState.SetScopeAsync" /> opens the first database, among those the
 /// visitor may see, whose tenant listing carries the tenant (TENANT-DB): the page, not the link, finds the database.
 /// </remarks>
 public class LinkedPageScopeTests
@@ -96,7 +96,11 @@ public class LinkedPageScopeTests
         context.State.ActiveScope.Should().Be(new StudioScope("default", "db_b", "globex"));
     }
 
-    /// <summary>A store of two databases, each listing a tenant of its own, as a master-table or static multi-database store does.</summary>
+    /// <summary>
+    /// A store of two databases, each listing a tenant of its own, as a multi-database store whose documents are conjoined
+    /// (<c>MultiTenanted()</c>) does: only where rows are tenanted is the tenant selector on and a tenant listed per database. With
+    /// single-tenanted rows every listing is unavailable and no link is given (<see cref="MartenStudioRouteLinksTests" />).
+    /// </summary>
     private static void DatabasePerTenant(StudioComponentContext context) => context.Catalog
         .WithStore("default", "Default", databaseIdentities: ["db_a", "db_b"])
         .WithDatabaseTenants("default", "db_a", new TenantList(["acme"], IsTruncated: false, TenantListSource.Descriptor))

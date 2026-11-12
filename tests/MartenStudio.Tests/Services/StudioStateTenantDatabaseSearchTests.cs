@@ -69,12 +69,77 @@ public class StudioStateTenantDatabaseSearchTests
     {
         (StudioState state, FakeStudioScopeCatalog catalog) = await OnAcmeAsync();
 
-        // db_b holds globex, but the policy lets this visitor address only initech there: its listing is filtered, and so truncated.
+        // As the real catalog answers under a policy, every listing is marked truncated: db_a's too, so a truncated list would accept a
+        // typed tenant as free text. db_b holds globex, but the policy lets this visitor address only initech there.
+        catalog.WithDatabaseTenants("s", "db_a", new TenantList(["acme"], IsTruncated: true, TenantListSource.Descriptor));
         catalog.WithDatabaseTenants("s", "db_b", new TenantList(["initech"], IsTruncated: true, TenantListSource.Descriptor));
+        await state.RefreshScopeListingsAsync(Token);
+        catalog.DescribeCalls.Clear();
 
         await state.SetScopeAsync("s", null, "globex", Token);
 
-        state.ActiveScope.Should().Be(new StudioScope("s", "db_a", null), "the search takes the listing's word, not a free-text acceptance");
+        // The database is the usual one. The tenant is dropped, not taken as free text (the resolver would refuse globex in db_a).
+        state.ActiveScope.Should().Be(new StudioScope("s", "db_a", null), "the search takes the listings' word, and a miss is all tenants");
+    }
+
+    [Fact]
+    public async Task A_tenant_found_nowhere_resolves_to_all_tenants_not_the_previous_tenant()
+    {
+        (StudioState state, FakeStudioScopeCatalog catalog) = await OnAcmeAsync();
+        await state.SetScopeAsync("s", "db_a", "acme", Token);
+        state.ActiveScope.Should().Be(new StudioScope("s", "db_a", "acme"), "the premise: the circuit is on acme");
+        catalog.DescribeCalls.Clear();
+
+        await state.SetScopeAsync("s", null, "umbrella", Token);
+
+        state.ActiveScope.Should().Be(new StudioScope("s", "db_a", null), "a link that named a tenant never named acme");
+    }
+
+    [Fact]
+    public async Task Without_a_search_a_tenant_the_listing_does_not_carry_keeps_the_previous_tenant()
+    {
+        (StudioState state, _) = await OnAcmeAsync();
+        await state.SetScopeAsync("s", "db_a", "acme", Token);
+
+        // The scope selector names the current database: no search, and today's fallback.
+        await state.SetScopeAsync("s", "db_a", "umbrella", Token);
+
+        state.ActiveScope.Should().Be(new StudioScope("s", "db_a", "acme"));
+    }
+
+    [Fact]
+    public async Task A_single_database_store_has_nothing_to_search_and_keeps_accepting_a_truncated_listings_tenant()
+    {
+        FakeStudioScopeCatalog catalog = new FakeStudioScopeCatalog()
+            .WithStore("s", "Store S", databaseIdentities: ["db_a"])
+            .WithDatabaseTenants("s", "db_a", new TenantList(["acme"], IsTruncated: true, TenantListSource.Queried));
+        StudioState state = new(catalog, NullLogger<StudioState>.Instance, new HttpContextAccessor());
+        await state.EnsureInitializedAsync(Token);
+
+        await state.SetScopeAsync("s", null, "tenant-250", Token);
+
+        state.ActiveScope.Should().Be(new StudioScope("s", "db_a", "tenant-250"), "no other database to look in: the listing's free-text rule stands");
+    }
+
+    [Fact]
+    public async Task A_scope_change_that_completes_while_the_search_waits_is_not_undone_by_it()
+    {
+        (StudioState state, FakeStudioScopeCatalog catalog) = await OnAcmeAsync();
+
+        TaskCompletionSource gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        catalog.DescribeGates[("s", "db_b")] = gate;
+        Task searching = state.SetScopeAsync("s", null, "globex", Token);
+
+        // Meanwhile the header changes database, and that change completes.
+        await state.SetScopeAsync("s", "db_c", "initech", Token);
+        state.ActiveScope.Should().Be(new StudioScope("s", "db_c", "initech"));
+
+        gate.SetResult();
+        await searching;
+
+        state.ActiveScope.Should().Be(new StudioScope("s", "db_c", "initech"), "the header's choice stands");
+        state.AvailableTenants.Ids.Should().BeEquivalentTo(["initech"], "and so does its listing: the search's db_b facts were never applied");
+        state.LinkScope.Should().Be(new StudioScope("s", "db_c", "initech"));
     }
 
     [Fact]

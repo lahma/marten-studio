@@ -5,6 +5,7 @@ using MartenStudio.Services;
 using Microsoft.Extensions.DependencyInjection;
 
 using PostgresStudio.Services;
+using PostgresStudio.Services.Settings;
 
 namespace MartenStudio.Integration.Tests.Tenancy;
 
@@ -99,15 +100,47 @@ public class TenantDatabaseSearchLiveTests(PostgresFixture postgres)
         // The page that opens it resolves the scope, as every data call does.
         _ = await resolver.ResolveAsync(state.ActiveScope, null, Token);
 
-        // A tenant no database holds changes nothing: the scope stays where it was, as a tenant no listing carries always did.
+        // A tenant no database holds: the database stays where it was and the scope is all tenants, not the tenant the circuit was on.
         await state.SetScopeAsync(MartenStoreRegistry.DefaultStoreKey, null, "umbrella", Token);
-        state.ActiveScope.Should().Be(new StudioScope(MartenStoreRegistry.DefaultStoreKey, foreignDatabase, foreign));
+        state.ActiveScope.Should().Be(new StudioScope(MartenStoreRegistry.DefaultStoreKey, foreignDatabase, null));
 
         // An address that names both is reopened exactly: the named database lacks the tenant, so the tenant is dropped.
         await state.SetScopeAsync(MartenStoreRegistry.DefaultStoreKey, usual, foreign, Token);
         state.ActiveScope.Should().Be(new StudioScope(MartenStoreRegistry.DefaultStoreKey, usual, null));
 
+        // The link that leads here: this store keeps its rows per tenant, so it names the tenant (and no database).
+        var links = studio.Services.GetRequiredService<IStudioRouteLinks>();
+        string url = links.ToDocument(new StudioLinkScope(null, foreign), "tenancynote", Guid.NewGuid().ToString())!;
+        url.Should().Contain("tenant=" + foreign).And.NotContain("db=");
+
         before.ShouldBeUnchangedIn(await ServerSnapshot.ReadAsync(owned.ConnectionStrings, Prefix, null, Token));
+    }
+
+    /// <summary>
+    /// In Marten 9.57.0 a static multi-database store leaves single-tenanted documents single-tenanted: no database lists a tenant, the page
+    /// could not find one, and a link would reopen the id in the database on screen. So it gets no link.
+    /// </summary>
+    [PostgresFact]
+    public async Task A_database_per_tenant_store_with_single_tenanted_documents_gets_no_link()
+    {
+        await using OwnedDatabases owned = await OwnedDatabases.CreateAsync(postgres, [Prefix + "single_a", Prefix + "single_b"], Token);
+        string first = owned[0];
+        string second = owned[1];
+
+        await using TenancyStudio studio = TenancyStudio.Start(options =>
+        {
+            options.MultiTenantedDatabases(tenancy =>
+            {
+                tenancy.AddMultipleTenantDatabase(first, "f8d3-tenantdb-single-a").ForTenants(Acme);
+                tenancy.AddMultipleTenantDatabase(second, "f8d3-tenantdb-single-b").ForTenants(Initech);
+            });
+
+            options.Schema.For<TenancyNote>();
+        });
+
+        var links = studio.Services.GetRequiredService<IStudioRouteLinks>();
+
+        links.ToDocument(new StudioLinkScope(null, Initech), "tenancynote", Guid.NewGuid().ToString()).Should().BeNull();
     }
 
     /// <summary>The identity of the database whose tenant listing carries <paramref name="tenant" />, read as the scope picker reads it.</summary>

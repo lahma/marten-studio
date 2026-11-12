@@ -668,7 +668,7 @@ output folder stays free of Wolverine (`KStudioFenceTests`).
 ## D44
 
 **D44 — Links between a studio and a module are pure, internal and grant nothing.** `IStudioRouteLinks` (MartenStudio implements it: a document
-by type and id, a stream by id or key, in the record's tenant) and
+by type and id, a stream by id or key, in the record's tenant; for a store with a database per tenant only when the store keeps its rows per tenant and the host listed no `KnownTenantIds`) and
 `IStudioRecordSearchLinks` (KStudio implements it: "Find in Kafka") live in PostgresStudio beside `IStudioLinks`, under its rules: no IO, no policy,
 every id escaped, and the page a link opens resolves its own scope and asks its own policies again. Neither module names the other, a masked value
 never enters a URL, a value travels in the fragment, and the destination authorizes again. External links are host templates with no credential,
@@ -681,8 +681,11 @@ The address is the seam's, verbatim; a `null` answer draws the words and a reaso
 seam (a Postgres Studio host) nothing is drawn. MartenStudio answers `null` for a hidden
 document type, for an ambiguous type, for a tenancy of the application's own (nothing says where its tenants are), and for a multi-tenanted store
 with no tenant, whether its tenants share a database or each has one (a link would open the visitor's own tenant and say "not found", which is false).
-A store that keeps each tenant in a database of its own gets a link with the tenant and no `db`: `StudioState.SetScopeAsync` opens the first database,
-among those the visitor may see, whose tenant listing carries that tenant (at most 32 searched, TENANT-DB). **The tenant**, the first that applies: the record's `tenant-id` header when it is a literal; **no Marten link at all when the
+A store that keeps each tenant in a database of its own gets a link with the tenant and no `db` only when it keeps its rows per tenant
+(`StoreTenancy.KeepsRowsPerTenant`, the test behind its tenant selector) and the host listed no `KnownTenantIds`: `StudioState.SetScopeAsync` opens the
+first database, among those the visitor may see, whose tenant listing carries that tenant (at most 32 searched, TENANT-DB), and no database lists tenants
+where documents and events are single-tenanted (master table, one-server and static tenancies in Marten 9.57.0), so there the link would reopen the id
+in the database on screen; such a store gets no link yet. **The tenant**, the first that applies: the record's `tenant-id` header when it is a literal; **no Marten link at all when the
 header is present and redacted or cut** - the address would carry the hidden value, and the page says so without it; the cluster entry's own tenant
 (a Wolverine broker-per-tenant cluster); none. The words cut an id at 24 characters, never the address.
 
