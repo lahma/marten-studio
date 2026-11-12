@@ -620,7 +620,7 @@ public class KafkaSearchPageTests
             _ => throw new InvalidOperationException(reason.ToString()),
         };
 
-        foreach (KafkaScanStopReason reason in Enum.GetValues<KafkaScanStopReason>().Where(static x => x != KafkaScanStopReason.CallerGone))
+        foreach (KafkaScanStopReason reason in Enum.GetValues<KafkaScanStopReason>().Where(static x => x is not (KafkaScanStopReason.CallerGone or KafkaScanStopReason.Paused)))
         {
             KafkaScanResult result = new(
                 Guid.Empty,

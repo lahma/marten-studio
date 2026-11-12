@@ -46,6 +46,24 @@ internal interface IKafkaScanner
     Task<KafkaRecordRead> ReadRecordAsync(KafkaRecordRequest request, KafkaScanOwner owner, CancellationToken cancellationToken);
 
     /// <summary>
+    /// Plans a live tail (D-M5 decision 3.1): compiles the search per topic exactly as <see cref="PlanAsync" /> does and fixes where each partition
+    /// is read from, which is its end (the last stable offset under <see cref="KafkaIsolation.Committed" />) or a paused tail's cursor. It reads
+    /// the metadata, the configs and the offsets, and nothing else.
+    /// </summary>
+    /// <param name="request">What to tail.</param>
+    /// <param name="owner">Whose tail it is.</param>
+    /// <param name="cancellationToken">Abandons the planning.</param>
+    Task<KafkaScanPlan> PlanTailAsync(KafkaTailRequest request, KafkaScanOwner owner, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Starts a planned tail, or refuses: the cluster's profile may forbid it, and it holds a scan slot while it reads, exactly like a scan. It never
+    /// queues. A scan's plan is a defect here, as a tail's is for <see cref="Start" />.
+    /// </summary>
+    /// <param name="plan">The tail plan.</param>
+    /// <param name="owner">Whose tail it is.</param>
+    KafkaScanStart StartTail(KafkaScanPlan plan, KafkaScanOwner owner);
+
+    /// <summary>
     /// The limits that apply on one cluster: the host's, capped by the cluster's profile when it has one (AGENTS.md D47). A new copy on every call.
     /// A plan's <c>Limits</c> are these with the request's lowering applied; the export reads <c>MaxExportBytes</c> here.
     /// </summary>
@@ -152,7 +170,52 @@ internal sealed partial class KafkaScanner(
             .ResolveAsync(request.Cluster, topics, request.Window, request.Isolation, request.CreateTimeMargin, cancellationToken)
             .ConfigureAwait(false);
 
-        // Compile once per topic: key formats and redaction differ per topic.
+        Compiled search = Compile(definition, topics, perTopic, shared, request.Grant, searches);
+        Dictionary<string, TopicScanContext> contexts = search.Contexts;
+        List<PredicateError> errors = search.Errors;
+        List<ClauseVerdict> verdicts = search.Verdicts;
+        IKafkaRedactor[] redactors = search.Redactors;
+
+        // A literal is shown only where no topic of the scan redacts the field it is on: one that is plain here and masked there is
+        // <redacted> everywhere in the entry.
+        string audit = perTopic ? PerTopicAudit(topics, searches, redactors) : PredicateFormatter.Format(shared.Tree, clause => redactors.Any(x => PredicateCompiler.IsRedacted(clause.Field, x)));
+
+        IReadOnlyList<PartitionRange> ranges = Continue(window.Ranges, request.ContinueFrom);
+
+        if (errors.Count > 0)
+        {
+            return new KafkaScanPlan(request, window, ranges, contexts, errors, verdicts, Unknown(ranges.Sum(static x => Math.Max(0, x.End - x.Start)), ranges.Count(static x => !x.IsEmpty)), limits, audit);
+        }
+
+        // A key search may read fewer partitions, but only after sampling the window has proved the topic's declared partitioner
+        // (D-PAYLOAD decision 7): the ranges, the estimate and the cursor then cover exactly what is read.
+        IReadOnlyList<KafkaTopicPruning> pruning = await PruneAsync(request, shared.Tree, perTopic ? searches : null, topics, contexts, window, ranges, verdicts, owner, cost, cancellationToken).ConfigureAwait(false);
+        ranges = Pruned(ranges, pruning);
+        verdicts = ApplyPruning(verdicts, pruning);
+
+        KafkaScanEstimate estimate = await EstimateAsync(request, ranges, owner, cost, limits, cancellationToken).ConfigureAwait(false);
+        return new KafkaScanPlan(request, window, ranges, contexts, [], verdicts, estimate, limits, audit, pruning);
+    }
+
+    /// <summary>What <see cref="Compile" /> made of a request's search: a context for each topic that compiled, and what is wrong with the rest.</summary>
+    private sealed record Compiled(
+        Dictionary<string, TopicScanContext> Contexts,
+        List<PredicateError> Errors,
+        List<ClauseVerdict> Verdicts,
+        IKafkaRedactor[] Redactors);
+
+    /// <summary>
+    /// Compiles the search once per topic, because key formats, redaction, decoders and grants differ per topic. A scan, a tail and a
+    /// correlation scan (a search for each topic, D42) all go through here, so a tail judges a record exactly as a search does.
+    /// </summary>
+    private Compiled Compile(
+        KafkaClusterDefinition definition,
+        KafkaTopicName[] topics,
+        bool perTopic,
+        PredicateParseResult shared,
+        KafkaReadGrant sharedGrant,
+        Dictionary<string, (PredicateParseResult Parsed, KafkaReadGrant Grant)> searches)
+    {
         Dictionary<string, TopicScanContext> contexts = new(StringComparer.Ordinal);
         List<PredicateError> errors = [];
         List<ClauseVerdict> verdicts = [];
@@ -166,7 +229,7 @@ internal sealed partial class KafkaScanner(
             KafkaTopicName topic = topics[index];
             KafkaTopicDescriptor descriptor = definition.Descriptor(topic.Value);
             IKafkaRedactor redactor = redactors[index];
-            (PredicateParseResult parsed, KafkaReadGrant grant) = perTopic ? searches[topic.Value] : (shared, request.Grant);
+            (PredicateParseResult parsed, KafkaReadGrant grant) = perTopic ? searches[topic.Value] : (shared, sharedGrant);
 
             // A host decoder runs only for a visitor who may read payloads (decision 8.6): under Envelope it is not even created. The
             // built-in kinds (CloudEvents among them) are instances the host handed over, never made by its factory, so they still count.
@@ -197,25 +260,107 @@ internal sealed partial class KafkaScanner(
             }
         }
 
-        // A literal is shown only where no topic of the scan redacts the field it is on: one that is plain here and masked there is
-        // <redacted> everywhere in the entry.
-        string audit = perTopic ? PerTopicAudit(topics, searches, redactors) : PredicateFormatter.Format(shared.Tree, clause => redactors.Any(x => PredicateCompiler.IsRedacted(clause.Field, x)));
+        return new Compiled(contexts, errors, verdicts, redactors);
+    }
 
-        IReadOnlyList<PartitionRange> ranges = Continue(window.Ranges, request.ContinueFrom);
+    /// <inheritdoc />
+    public async Task<KafkaScanPlan> PlanTailAsync(KafkaTailRequest request, KafkaScanOwner owner, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(owner);
 
-        if (errors.Count > 0)
+        if (!request.Grant.HasFlag(KafkaReadGrant.Envelope))
         {
-            return new KafkaScanPlan(request, window, ranges, contexts, errors, verdicts, Unknown(ranges.Sum(static x => Math.Max(0, x.End - x.Start)), ranges.Count(static x => !x.IsEmpty)), limits, audit);
+            throw new ArgumentException("A tail needs at least the Envelope grant (the SearchRecords capability).", nameof(request));
         }
 
-        // A key search may read fewer partitions, but only after sampling the window has proved the topic's declared partitioner
-        // (D-PAYLOAD decision 7): the ranges, the estimate and the cursor then cover exactly what is read.
-        IReadOnlyList<KafkaTopicPruning> pruning = await PruneAsync(request, shared.Tree, perTopic ? searches : null, topics, contexts, window, ranges, verdicts, owner, cost, cancellationToken).ConfigureAwait(false);
-        ranges = Pruned(ranges, pruning);
-        verdicts = ApplyPruning(verdicts, pruning);
+        if (request.Topics.Count == 0)
+        {
+            throw new ArgumentException("A tail needs at least one topic.", nameof(request));
+        }
 
-        KafkaScanEstimate estimate = await EstimateAsync(request, ranges, owner, cost, limits, cancellationToken).ConfigureAwait(false);
-        return new KafkaScanPlan(request, window, ranges, contexts, [], verdicts, estimate, limits, audit, pruning);
+        KafkaClusterDefinition definition = registry.Get(request.Cluster);
+
+        // The cluster's profile caps the host's limits in the engine, as for a scan; a tail has no lowering of its own.
+        KafkaScanLimits limits = KafkaProfileCeilings.Cap(definition.Profile, settings.Limits);
+        DateTimeOffset now = time.GetUtcNow();
+
+        // The scan machinery's view of the tail: the cluster, topics, search, grant and isolation are the request's, and nothing reads the window.
+        KafkaScanRequest image = new(
+            request.Cluster,
+            request.Topics,
+            new KafkaWindow(now, now.AddMilliseconds(1)),
+            request.PredicateText,
+            request.Grant,
+            request.Isolation);
+
+        PredicateParseResult shared = PredicateParser.Parse(request.PredicateText);
+
+        if (!shared.IsValid)
+        {
+            return new KafkaScanPlan(image, null, [], new Dictionary<string, TopicScanContext>(), shared.Errors, [], TailEstimate(0), limits, string.Empty, tail: request);
+        }
+
+        KafkaTopicName[] topics = [.. request.Topics.DistinctBy(static x => x.Value)];
+
+        // One read of the offsets: the window resolver's own read of the log start, the high watermark and (read_committed) the last stable offset.
+        // The window it is asked for is a placeholder at the planning time; only its offsets, refusals and notes are used.
+        ResolvedWindow window = await resolver
+            .ResolveAsync(request.Cluster, topics, image.Window, request.Isolation, TimeSpan.Zero, cancellationToken)
+            .ConfigureAwait(false);
+
+        Compiled compiled = Compile(definition, topics, perTopic: false, shared, request.Grant, new Dictionary<string, (PredicateParseResult Parsed, KafkaReadGrant Grant)>());
+        string audit = PredicateFormatter.Format(shared.Tree, clause => compiled.Redactors.Any(x => PredicateCompiler.IsRedacted(clause.Field, x)));
+        (IReadOnlyList<PartitionRange> ranges, List<KafkaScanGap> gaps) = TailRanges(window.Ranges, request.ResumeFrom, request.Isolation);
+
+        return new KafkaScanPlan(image, window, ranges, compiled.Contexts, compiled.Errors, compiled.Verdicts, TailEstimate(ranges.Count), limits, audit, tail: request, gaps: gaps);
+    }
+
+    private static KafkaScanEstimate TailEstimate(int partitions) => new(0, null, null, partitions, false, "A live tail reads what arrives.");
+
+    /// <summary>
+    /// Where each partition of a tail is read from (D-M5 decision 3.1): its end, which is the last stable offset under <c>read_committed</c> (a
+    /// transaction open now holds records below the high watermark that commit later, and starting at the high watermark would skip them without
+    /// a word) and the high watermark otherwise; or, for a partition the cursor of a paused tail names, where that stopped. A cursor below the log start
+    /// is moved to it and the records in between are a gap; a partition the cursor does not name was added since and is read from its end.
+    /// </summary>
+    private static (IReadOnlyList<PartitionRange> Ranges, List<KafkaScanGap> Gaps) TailRanges(IReadOnlyList<PartitionRange> resolved, KafkaScanCursor? resume, KafkaIsolation isolation)
+    {
+        Dictionary<(string, int), KafkaCursorPosition>? positions = resume?.Positions.ToDictionary(static x => (x.Topic, x.Partition));
+        List<PartitionRange> ranges = [];
+        List<KafkaScanGap> gaps = [];
+
+        foreach (PartitionRange range in resolved)
+        {
+            long end = isolation == KafkaIsolation.Committed ? Math.Min(range.Lso ?? range.HighWatermark, range.HighWatermark) : range.HighWatermark;
+            long start = end;
+            List<WindowNote> notes = [];
+
+            if (positions is not null)
+            {
+                if (positions.TryGetValue((range.Topic, range.Partition), out KafkaCursorPosition? position))
+                {
+                    if (position.Next < range.LogStart)
+                    {
+                        gaps.Add(new KafkaScanGap(range.Topic, range.Partition, position.Next, range.LogStart - 1, range.LogStart - position.Next, range.LogStart));
+                        start = range.LogStart;
+                    }
+                    else
+                    {
+                        // A position past the end belongs to a partition that was recreated; there is nothing to say about what it skipped.
+                        start = Math.Min(position.Next, range.HighWatermark);
+                    }
+                }
+                else
+                {
+                    notes.Add(new WindowNote.PartitionAddedToTail(range.Topic, range.Partition));
+                }
+            }
+
+            ranges.Add(range with { Start = start, End = KafkaScanCursor.OpenEnd, Notes = notes });
+        }
+
+        return (ranges, gaps);
     }
 
     /// <summary>The rules of a request with a search for each topic (D42); every violation is a caller's bug and throws.</summary>
@@ -392,6 +537,11 @@ internal sealed partial class KafkaScanner(
         ArgumentNullException.ThrowIfNull(plan);
         ArgumentNullException.ThrowIfNull(owner);
 
+        if (plan.IsTail)
+        {
+            throw new ArgumentException("A live tail's plan is started with StartTail, not Start.", nameof(plan));
+        }
+
         if (coordinator.IsShuttingDown)
         {
             return Refuse(plan, KafkaScanRefusal.ShuttingDown);
@@ -445,8 +595,88 @@ internal sealed partial class KafkaScanner(
             return Refuse(plan, refusal);
         }
 
-        // From here the scan holds both slots. Until the thread that releases them has started, a failure must release them here, or the
-        // slots are gone for the life of the process.
+        return Launch(plan, inputs, lease, offsets, isolation);
+    }
+
+    /// <inheritdoc />
+    public KafkaScanStart StartTail(KafkaScanPlan plan, KafkaScanOwner owner)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        ArgumentNullException.ThrowIfNull(owner);
+
+        if (!plan.IsTail)
+        {
+            throw new ArgumentException("A scan's plan is started with Start, not StartTail.", nameof(plan));
+        }
+
+        if (coordinator.IsShuttingDown)
+        {
+            return Refuse(plan, KafkaScanRefusal.ShuttingDown);
+        }
+
+        if (!plan.IsValid)
+        {
+            return Refuse(plan, KafkaScanRefusal.PredicateInvalid);
+        }
+
+        // The profile forbids before anything is spent or taken: a Production cluster is never tailed, whatever the capability says (D47).
+        KafkaClusterDefinition definition = registry.Get(plan.Request.Cluster);
+
+        if (KafkaProfileCeilings.ForbidsTail(definition.Profile))
+        {
+            return Refuse(plan, KafkaScanRefusal.ProfileForbids);
+        }
+
+        Guid scanId = Guid.NewGuid();
+        KafkaClusterCost cost = clusterCosts.For(definition);
+        ScanRunInputs inputs = new(
+            scanId,
+            plan,
+            owner,
+            wires.For(plan.Request.Cluster),
+            settings,
+            governor,
+            ownerBudget,
+            time,
+            loggers,
+            once,
+            observer,
+            ClusterGovernor: cost.Governor,
+            ClusterOwnerBudget: cost.OwnerBudget,
+            Tail: true);
+        string isolation = plan.Request.Isolation.ToString();
+
+        // A plan with no partition to follow (every topic refused) starts no consumer and takes no slot; the run says why it ended.
+        if (plan.Ranges.Count == 0)
+        {
+            ScanRun empty = new(inputs);
+            KafkaScanResult result = empty.Execute();
+            empty.Dispose();
+            return KafkaScanStart.Of(new KafkaScanHandle(empty, Task.FromResult(result), time));
+        }
+
+        if (cost.Remaining(owner.Key, ownerBudget) <= 0)
+        {
+            return Refuse(plan, KafkaScanRefusal.OwnerBudgetSpent);
+        }
+
+        // A tail holds one of MaxConcurrentScans and one of MaxConcurrentScansPerOwner while it reads (a tail is no heavier than a scan: its ring
+        // is at most MaxMatches), and releases both when its segment ends.
+        if (limiter.TryAcquire(owner.Key, out IDisposable? lease) is { } refusal)
+        {
+            return Refuse(plan, refusal);
+        }
+
+        return Launch(plan, inputs, lease, 0, isolation);
+    }
+
+    /// <summary>
+    /// Runs a scan or a tail on a thread of its own. From here the run holds both slots; until the thread that releases them has started, a
+    /// failure must release them here, or the slots are gone for the life of the process.
+    /// </summary>
+    private KafkaScanStart Launch(KafkaScanPlan plan, ScanRunInputs inputs, IDisposable? lease, long offsets, string isolation)
+    {
+        Guid scanId = inputs.ScanId;
         ScanRun? run = null;
 
         try

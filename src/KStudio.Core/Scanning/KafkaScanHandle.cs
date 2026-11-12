@@ -120,7 +120,10 @@ internal sealed class KafkaScanHandle : IAsyncDisposable
     private async Task BatchLoopAsync(PeriodicTimer timer)
     {
         long sentVersion = -1;
-        int sentMatches = 0;
+
+        // The sequence of the next match the page has not been given. A scan's store never evicts, so this is the count it has been given; a
+        // tail's ring (D-M5 decision 3.4) may have evicted matches the page never saw, and says how many.
+        long sentSequence = 0;
 
         try
         {
@@ -128,22 +131,22 @@ internal sealed class KafkaScanHandle : IAsyncDisposable
             {
                 bool finished = scanTask.IsCompleted;
                 KafkaScanProgress progress = run.Snapshot();
-                IReadOnlyList<KafkaMatch> fresh = run.Store.From(sentMatches);
+                IReadOnlyList<KafkaMatch> fresh = run.Store.From(sentSequence, out long skipped);
 
                 if (finished)
                 {
                     KafkaScanResult result = await scanTask.ConfigureAwait(false);
                     progress = run.Snapshot();
-                    fresh = run.Store.From(sentMatches);
-                    await channel.Writer.WriteAsync(new KafkaScanBatch(fresh, progress, result), batcherStop.Token).ConfigureAwait(false);
+                    fresh = run.Store.From(sentSequence, out skipped);
+                    await channel.Writer.WriteAsync(new KafkaScanBatch(fresh, progress, result, skipped), batcherStop.Token).ConfigureAwait(false);
                     return;
                 }
 
-                if (progress.Version != sentVersion || fresh.Count > 0)
+                if (progress.Version != sentVersion || fresh.Count > 0 || skipped > 0)
                 {
                     sentVersion = progress.Version;
-                    sentMatches += fresh.Count;
-                    await channel.Writer.WriteAsync(new KafkaScanBatch(fresh, progress, null), batcherStop.Token).ConfigureAwait(false);
+                    sentSequence += skipped + fresh.Count;
+                    await channel.Writer.WriteAsync(new KafkaScanBatch(fresh, progress, null, skipped), batcherStop.Token).ConfigureAwait(false);
                 }
             }
         }

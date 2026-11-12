@@ -43,6 +43,10 @@ internal interface IScanObserver
 /// <param name="FocusValueBytes">For a record read: the bytes of value the record asked for may keep, whatever is left of the match's budget; 0 for none.</param>
 /// <param name="ClusterGovernor">The byte rate of this cluster's own, when its profile lowers the host's (D47): the scan is paced by the slower of the two.</param>
 /// <param name="ClusterOwnerBudget">The hourly allowance of this cluster's own, when its profile lowers the host's: the scan stops when either is spent.</param>
+/// <param name="Tail">
+/// Set only by <c>StartTail</c> (D-M5 decision 3.3): the run has no window and no end, keeps its matches in a ring, ends a segment after
+/// <c>TailPauseAfter</c> instead of <c>MaxScanDuration</c>, never finishes a partition at its end and never stops for <c>MatchLimit</c>. It must equal the plan's <c>IsTail</c>.
+/// </param>
 internal sealed record ScanRunInputs(
     Guid ScanId,
     KafkaScanPlan Plan,
@@ -59,7 +63,8 @@ internal sealed record ScanRunInputs(
     long FocusOffset = -1,
     int FocusValueBytes = 0,
     KafkaByteRateGovernor? ClusterGovernor = null,
-    OwnerByteBudget? ClusterOwnerBudget = null);
+    OwnerByteBudget? ClusterOwnerBudget = null,
+    bool Tail = false);
 
 /// <summary>
 /// One scan's reader (AGENTS.md D36 and D38, decisions 4.2 and 9.2): a synchronous method run on a thread of its own that builds, assigns,
@@ -97,6 +102,7 @@ internal sealed class ScanRun : IDisposable
     private readonly long toMs;
     private readonly string cluster;
     private readonly string ownerKey;
+    private readonly bool tail;
     private IWireScanReader? reader;
     private DateTimeOffset startedAt;
     private DateTimeOffset lastAnyProgress;
@@ -119,15 +125,25 @@ internal sealed class ScanRun : IDisposable
     {
         this.inputs = inputs;
         plan = inputs.Plan;
+
+        if (inputs.Tail != plan.IsTail)
+        {
+            throw new ArgumentException("A tail run takes a tail plan and a scan run takes a scan plan.", nameof(inputs));
+        }
+
+        tail = inputs.Tail;
         limits = plan.Limits;
         time = inputs.Time;
         cluster = plan.Request.Cluster;
         ownerKey = inputs.Owner.Key;
         fromMs = plan.Request.Window.From.ToUnixTimeMilliseconds();
         toMs = plan.Request.Window.To.ToUnixTimeMilliseconds();
-        Store = new KafkaMatchStore(limits.MaxMatches);
-        deadline = new CancellationTokenSource(limits.MaxScanDuration, time);
+
+        // A tail keeps the newest TailCapacity matches in a ring and reads for TailPauseAfter; a scan keeps the first MaxMatches and reads for MaxScanDuration.
+        Store = tail ? new KafkaMatchStore(limits.TailCapacity, ring: true) : new KafkaMatchStore(limits.MaxMatches);
+        deadline = new CancellationTokenSource(tail ? limits.TailPauseAfter : limits.MaxScanDuration, time);
         either = CancellationTokenSource.CreateLinkedTokenSource(stopRequested.Token, deadline.Token);
+        gaps.AddRange(plan.Gaps);
 
         foreach (PartitionRange range in plan.Ranges)
         {
@@ -205,7 +221,9 @@ internal sealed class ScanRun : IDisposable
                 // not found, and one it may not read as refused), saying "completed" would read as "nothing found".
                 IReadOnlyList<TopicWindow> windowTopics = plan.Window?.Topics ?? [];
                 bool everyTopicRefused = windowTopics.Count > 0 && windowTopics.All(static x => x.Refusal is not null);
-                stopReason = everyTopicRefused ? KafkaScanStopReason.NotAuthorized : KafkaScanStopReason.Completed;
+
+                // A tail never completes: with nothing to follow, the cluster listed no partition to follow.
+                stopReason = everyTopicRefused ? KafkaScanStopReason.NotAuthorized : tail ? KafkaScanStopReason.Unavailable : KafkaScanStopReason.Completed;
             }
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
@@ -278,7 +296,13 @@ internal sealed class ScanRun : IDisposable
             {
                 bool refused = ordered.Any(static x => x.State is PartitionEndState.NotAuthorized)
                     && ordered.All(static x => x.State is PartitionEndState.NotAuthorized or PartitionEndState.Empty);
-                stopReason = refused ? KafkaScanStopReason.NotAuthorized : KafkaScanStopReason.Completed;
+
+                // A tail has no end to reach, so every partition of it finishing means each stalled, was refused or could not go on past deleted offsets.
+                stopReason = refused
+                    ? KafkaScanStopReason.NotAuthorized
+                    : !tail
+                        ? KafkaScanStopReason.Completed
+                        : ordered.Any(static x => x.State is PartitionEndState.Stalled) ? KafkaScanStopReason.Unavailable : KafkaScanStopReason.Failed;
                 return;
             }
 
@@ -336,16 +360,19 @@ internal sealed class ScanRun : IDisposable
             match = KafkaMatchFactory.Create(
                 record, topic, topic.Grant, limits, matchCounters, hook.DecoderFailed, focusValueBytes: focus, onRedactionFailed: hook.RedactionFailed);
         }
-        else if (record.TimestampType == WireTimestampType.NotAvailable)
+        else if (!tail && record.TimestampType == WireTimestampType.NotAvailable)
         {
             withoutTimestamp = true;
         }
-        else if (record.TimestampMs < fromMs || record.TimestampMs >= toMs)
+        else if (!tail && (record.TimestampMs < fromMs || record.TimestampMs >= toMs))
         {
             outside = true;
         }
         else
         {
+            // A tail has no window (D-M5 decision 3.3): every record in range is evaluated, whatever its timestamp, and one with none is still
+            // evaluated and counted.
+            withoutTimestamp = record.TimestampType == WireTimestampType.NotAvailable;
             TopicHooks hook = HooksOf(topic);
             RecordEvaluationContext context = new(
                 record,
@@ -382,6 +409,7 @@ internal sealed class ScanRun : IDisposable
             p.Next = record.Offset + 1;
             p.Repositions = 0;
             p.LastProgress = now;
+            p.CaughtUp = false;
             lastAnyProgress = now;
 
             if (withoutTimestamp)
@@ -420,8 +448,9 @@ internal sealed class ScanRun : IDisposable
             PausePartition(p);
         }
 
-        // A limit is looked at only after the record has been accounted for completely, so the cursor is exact.
-        if (Store.Count >= limits.MaxMatches)
+        // A limit is looked at only after the record has been accounted for completely, so the cursor is exact. A tail's store is a ring: it
+        // is never full and never stops the run.
+        if (!tail && Store.Count >= limits.MaxMatches)
         {
             stopReason = KafkaScanStopReason.MatchLimit;
         }
@@ -498,6 +527,26 @@ internal sealed class ScanRun : IDisposable
     {
         if (!partitions.TryGetValue(end.Partition, out PartitionState? p) || p.State is not null)
         {
+            return false;
+        }
+
+        if (tail)
+        {
+            // A tail's partition never finishes at its end (D-M5 decision 3.3): it is caught up, "live", until the next record arrives.
+            // librdkafka raises the end again only after new records were read to it. The offsets between the last record and the end are
+            // control records and aborted batches, so the cursor goes to the end, as a scan's does. Reaching the end is contact with the
+            // broker, which is progress.
+            DateTimeOffset now = time.GetUtcNow();
+
+            lock (gate)
+            {
+                p.CaughtUp = true;
+                p.Next = Math.Max(p.Next, end.Offset);
+                p.LastProgress = now;
+                lastAnyProgress = now;
+                version++;
+            }
+
             return false;
         }
 
@@ -709,7 +758,8 @@ internal sealed class ScanRun : IDisposable
 
         foreach (PartitionState p in ordered)
         {
-            if (p.State is null && now - p.LastProgress >= limits.PartitionStallTimeout)
+            // A caught-up tail partition (always false for a scan's) is idle, not stalled: only one that is behind can make no progress.
+            if (p.State is null && !p.CaughtUp && now - p.LastProgress >= limits.PartitionStallTimeout)
             {
                 LogStalled(p);
                 Finish(p, PartitionEndState.Stalled);
@@ -842,7 +892,7 @@ internal sealed class ScanRun : IDisposable
                 results,
                 records,
                 bytes,
-                Store.Count,
+                Store.Added,
                 undecidable,
                 outsideWindow,
                 noTimestamp,
@@ -877,15 +927,18 @@ internal sealed class ScanRun : IDisposable
             .. ordered.Select(x =>
             {
                 long span = x.Range.End - x.Range.Start;
-                double percent = span <= 0 ? 100 : Math.Clamp((x.Next - x.Range.Start) * 100.0 / span, 0, 100);
+
+                // A tail has no end to be a percentage of: it is 100 % while it is caught up, "live", and 0 % while it is behind.
+                double percent = tail ? (x.CaughtUp ? 100 : 0) : span <= 0 ? 100 : Math.Clamp((x.Next - x.Range.Start) * 100.0 / span, 0, 100);
                 return new KafkaPartitionProgress(
-                    x.Range.Topic, x.Range.Partition, x.Range.Start, x.Range.End, x.Next, percent, x.Records, x.Bytes, x.Matches, x.Undecidable, x.OutsideWindow, x.State);
+                    x.Range.Topic, x.Range.Partition, x.Range.Start, x.Range.End, x.Next, percent, x.Records, x.Bytes, x.Matches, x.Undecidable, x.OutsideWindow, x.State, x.CaughtUp);
             }),
         ];
 
         double rate = elapsed.TotalSeconds > 0 ? bytes / elapsed.TotalSeconds : 0;
 
-        return new KafkaScanProgress(list, records, bytes, Store.Count, undecidable, outsideWindow, elapsed, rate, stopReason, version);
+        // The matches found, not the matches kept: a tail's ring evicts, and the page says how many it never showed.
+        return new KafkaScanProgress(list, records, bytes, Store.Added, undecidable, outsideWindow, elapsed, rate, stopReason, version);
     }
 
     private sealed class PartitionState
@@ -912,6 +965,9 @@ internal sealed class ScanRun : IDisposable
         public long Undecidable { get; set; }
 
         public long OutsideWindow { get; set; }
+
+        /// <summary>A tail only: the partition reported its end and no record has arrived since.</summary>
+        public bool CaughtUp { get; set; }
 
         public int Repositions { get; set; }
 

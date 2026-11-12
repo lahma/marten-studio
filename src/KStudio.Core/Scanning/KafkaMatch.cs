@@ -569,14 +569,29 @@ internal static class KafkaMatchFactory
     }
 }
 
-/// <summary>The matches a scan kept: append-only, at most <c>MaxMatches</c>, read by index range (decision 9.8).</summary>
-internal sealed class KafkaMatchStore(int capacity)
+/// <summary>
+/// The matches a scan kept: at most <c>MaxMatches</c>, read by index range (decision 9.8). In <b>ring</b> mode (a live tail, D-M5 decision 3.4)
+/// it never refuses: the oldest kept match is evicted to make room, every match has a sequence number from 0 in the order it was added, and a
+/// reader asks for the matches from a sequence on and is told how many it missed. Without the ring the store is append-only and its behaviour is
+/// exactly what a search always had: the sequence of a match is its index, and nothing is ever skipped.
+/// </summary>
+/// <param name="capacity">The most matches kept.</param>
+/// <param name="ring">Whether a full store evicts its oldest match instead of refusing the new one.</param>
+internal sealed class KafkaMatchStore(int capacity, bool ring = false)
 {
     private readonly Lock gate = new();
-    private readonly List<KafkaMatch> matches = [];
+
+    // A circular buffer that grows on demand up to the capacity, so a search with a large MaxMatches that finds three does not hold the array.
+    private KafkaMatch[] buffer = new KafkaMatch[Math.Clamp(capacity, 1, 16)];
+    private int head;
+    private int count;
+    private long added;
 
     /// <summary>The most matches kept.</summary>
     public int Capacity { get; } = capacity;
+
+    /// <summary>Whether a full store evicts its oldest match.</summary>
+    public bool IsRing { get; } = ring;
 
     /// <summary>How many are kept.</summary>
     public int Count
@@ -585,7 +600,31 @@ internal sealed class KafkaMatchStore(int capacity)
         {
             lock (gate)
             {
-                return matches.Count;
+                return count;
+            }
+        }
+    }
+
+    /// <summary>How many matches were ever added, kept or evicted since. The sequence of the next match.</summary>
+    public long Added
+    {
+        get
+        {
+            lock (gate)
+            {
+                return added;
+            }
+        }
+    }
+
+    /// <summary>How many matches were evicted to make room. Always 0 without the ring.</summary>
+    public long Evicted
+    {
+        get
+        {
+            lock (gate)
+            {
+                return added - count;
             }
         }
     }
@@ -593,29 +632,89 @@ internal sealed class KafkaMatchStore(int capacity)
     /// <summary>Whether the store is full.</summary>
     public bool IsFull => Count >= Capacity;
 
-    /// <summary>Appends a match; false when the store is full.</summary>
+    /// <summary>Adds a match: false when the store is full and is not a ring, always true in ring mode.</summary>
     /// <param name="match">The match.</param>
     public bool TryAdd(KafkaMatch match)
     {
         lock (gate)
         {
-            if (matches.Count >= Capacity)
+            if (count >= Capacity)
             {
-                return false;
+                if (!IsRing)
+                {
+                    return false;
+                }
+
+                // The oldest match is overwritten by the newest, and the head moves on.
+                buffer[head] = match;
+                head = (head + 1) % buffer.Length;
+                added++;
+                return true;
             }
 
-            matches.Add(match);
+            if (count == buffer.Length)
+            {
+                Grow();
+            }
+
+            buffer[(head + count) % buffer.Length] = match;
+            count++;
+            added++;
             return true;
         }
     }
 
-    /// <summary>The matches from an index on.</summary>
+    /// <summary>The matches from an index on (a ring's kept matches are numbered from its oldest).</summary>
     /// <param name="from">The first index.</param>
     public IReadOnlyList<KafkaMatch> From(int from)
     {
         lock (gate)
         {
-            return from >= matches.Count ? [] : [.. matches.Skip(from)];
+            return from >= count ? [] : Copy(Math.Max(0, from));
         }
+    }
+
+    /// <summary>
+    /// The kept matches whose sequence is at least <paramref name="sequence" />, oldest first. A ring may already have evicted some of them;
+    /// <paramref name="skipped" /> is how many matches with a sequence at or above the one asked for were evicted before they could be read.
+    /// Without the ring nothing is evicted, <paramref name="skipped" /> is 0 and this is <see cref="From(int)" />. The next call asks for
+    /// <c>sequence + skipped + the result's count</c>.
+    /// </summary>
+    /// <param name="sequence">The first sequence wanted.</param>
+    /// <param name="skipped">How many matches from that sequence on were evicted unread.</param>
+    public IReadOnlyList<KafkaMatch> From(long sequence, out long skipped)
+    {
+        lock (gate)
+        {
+            long firstKept = added - count;
+            skipped = Math.Max(0, firstKept - sequence);
+            long index = Math.Max(0, sequence - firstKept);
+            return index >= count ? [] : Copy((int) index);
+        }
+    }
+
+    private List<KafkaMatch> Copy(int from)
+    {
+        List<KafkaMatch> list = new(count - from);
+
+        for (int i = from; i < count; i++)
+        {
+            list.Add(buffer[(head + i) % buffer.Length]);
+        }
+
+        return list;
+    }
+
+    private void Grow()
+    {
+        KafkaMatch[] bigger = new KafkaMatch[Math.Min(Capacity, buffer.Length * 2)];
+
+        for (int i = 0; i < count; i++)
+        {
+            bigger[i] = buffer[(head + i) % buffer.Length];
+        }
+
+        buffer = bigger;
+        head = 0;
     }
 }

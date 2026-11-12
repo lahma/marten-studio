@@ -827,6 +827,66 @@ returning false or throwing; one ring entry per call; `<redacted>` and never the
 delivered that the flags did not grant), `KafkaExportMenuTests` (bUnit: the menu, the notices, the record page, Settings, the selector chip, no `data:` link),
 `KafkaProfileAllowanceTests`, and the writer's own `KafkaExportWriterTests`. `PublicApiTest_KStudio` moves by `ExportRecords` and `LiveTail` and nothing else.
 
+## D46
+
+**D46 — KStudio's live tail is a scan with no end.** `LiveTail` (off by default, needs `SearchRecords`) starts at each partition's end, keeps the newest
+`MaxTailMatches` in a ring, and holds a scan slot and pays the owner's budget while it reads. This is the engine's half; the page, the capability's gate, the
+audit (9607, 9608, 9609) and the hidden-tab pause are UI-TAIL's and are added to this section with it.
+
+**The plan.** `IKafkaScanner.PlanTailAsync(KafkaTailRequest)` parses and compiles the search per topic through the same `Compile` as `PlanAsync` (one method, so a tail
+judges a record exactly as a search does: the same grammar, verdicts, `AuditText` and `ReadsValues`), applies the cluster's profile (D47) to the limits, and
+resolves the topics once through `WindowResolver` with a placeholder window of one millisecond at the planning time. Only that read's log start, high watermark,
+last stable offset, refusals and notes are used; a tail has no window, no pruning (a key pruning needs a verified sample of a window, D39), no index and no
+confirmation. The plan's `Request` is the tail request's image as a scan request, `Tail` the request itself and `IsTail` true; its `Window` exists to carry the
+topics' refusals and notes and its times mean nothing. Its estimate is `A live tail reads what arrives.`
+
+**Where each partition starts.** At its end: under `read_committed` the last stable offset, otherwise the high watermark. A transaction open when the tail starts
+holds records below the high watermark that commit later, and starting at the high watermark would skip them without a word, which is exactly the untruthful
+gap D38 refuses; under `IncludeUncommitted` the high watermark is the end of what can be read. Every range ends at `long.MaxValue` (`KafkaScanCursor.OpenEnd`, written
+`-` in a cursor's text, which `TryParse` accepts). With `ResumeFrom`, a partition the cursor names starts at its `Next`; one it does not name (added since) starts at
+its end with the note `Partition {p} of {topic} was added after the tail started; it is read from its end.`; a position below the log start moves to it and the records
+between are a `KafkaScanGap` (the plan's `Gaps`, which the run starts its own with), never a reset policy; a position past the high watermark (a recreated
+partition) starts at the high watermark.
+
+**`StartTail`.** The order of `Start`: `ShuttingDown`, `PredicateInvalid`, then `ProfileForbids` (`KafkaProfileCeilings.ForbidsTail`: a `Production` cluster, even when the
+capability is granted; nothing is spent or taken), `OwnerBudgetSpent` (the process's and the cluster's own allowance, `KafkaClusterCostControls.For`, as `Start`), then
+the limiter (`ProcessBusy`, `OwnerBusy`). **A tail holds one of `MaxConcurrentScans` and one of `MaxConcurrentScansPerOwner` while it reads**, on a thread of its own with
+the same `ScanRun`, so D41's memory statement holds with tails counted in $S$ (a tail's ring is at most `MaxMatches`) and "two readers per process" stays true. A scan's
+plan handed to `StartTail`, or a tail's to `Start`, is a defect and throws `ArgumentException`. A plan with no partition to follow (every topic refused) starts no
+consumer and takes no slot; the run ends `NotAuthorized`.
+
+**The run in tail mode** (`ScanRunInputs.Tail`, which must equal the plan's `IsTail`). It evaluates every record in range whatever its timestamp, and a record with
+none is still evaluated and counted in `NoTimestamp`. A partition's end never finishes it: the partition is `CaughtUp` ("live") and its `Next` moves to the end
+(the offsets between its last record and the end are control records and aborted batches); the next record clears `CaughtUp`, and librdkafka raises the end again only
+after new records were read to it. The store is a ring and never stops the run for `MatchLimit`. Stall detection applies only to a partition that is **behind** (one
+that has not reported its end since its last record): a caught-up partition is idle, never stalled, and a tail whose partitions are all caught up is never
+`Unavailable` for silence. When every partition has finished (each stalled, refused or unable to go on past deleted offsets) the tail stops `NotAuthorized` if all
+were refused, `Unavailable` if any stalled, `Failed` otherwise. The wire's `Unavailable` failures stop a tail as they stop a scan. A tail stops for exactly one reason
+(D38): `Paused` (new: the caller paused it, or the tab hid), `Deadline` (the segment ran `TailPauseAfter`), `ByteBudget` or `RecordBudget` (this segment read
+`MaxBytesPerScan` or `MaxRecordsPerScan`), `OwnerBudget`, `Cancelled`, `CallerGone`, `Shutdown`, `NotAuthorized`, `Unavailable` or `Failed`; `Completed` and `MatchLimit`
+never end one, and `MaxScanDuration` does not apply (`TailPauseAfter` replaces it). The cursor is exact as for a scan: a record is accounted for before any limit is looked
+at. The governor, both owner budgets, byte accounting, redaction (the match factory), the decode counters and hard rule 17's overrides are unchanged.
+
+**The ring.** `KafkaMatchStore(capacity, ring: true)` never refuses: it evicts its oldest match, numbers every match from 0 and answers `From(sequence, out skipped)`,
+the kept matches from a sequence on and how many with a sequence at or above it were evicted unread. The batcher tracks a sequence, not an index, and
+`KafkaScanBatch.Skipped` carries what a page never saw between two batches, so a page can say `{n} matches arrived faster than they could be shown`. Without the ring
+the store is the append-only store a search always had. The ring's size is `KafkaScanLimits.TailCapacity`, the smaller of `MaxTailMatches` and `MaxMatches`. A run's and a
+progress's `Matches` is the number found (`Added`), which for a search equals the number kept.
+
+**Pausing releases the slot.** A tail pauses by ending its segment (`Deadline`, a segment's budget, `OwnerBudget`, or `Paused`), not by holding a paused consumer: the slot
+and the consumer's memory ($C \approx 64$ MiB) go to whoever needs them, and the next segment starts from the exact cursor (`ResumeFrom`), paced, budgeted and slotted like any
+segment. Nothing produced while paused is skipped. Jump to now is a new segment without the cursor.
+
+**Hard rule 17.** The tail is the scan consumer (`ConfluentScanReader`) with the same overrides: assigned with explicit offsets, never subscribed, never committing, its own
+group id never joined, `auto.offset.reset=error`. A cursor position deleted by retention while paused is a gap and is read from the log start, never by a reset policy.
+
+**The tests.** Fast, on the fake broker and a manual clock: `TailPlanTests` (the start offsets under both isolations, resume, a partition added since, a gap, the plan's shape, the
+same compilation as a scan, `ProfileForbids`, the cluster's allowance), `TailRunTests` (records after the start only, any timestamp, no timestamp, a partition end that never
+finishes, no `MatchLimit` with three times the ring and `Evicted` and `Skipped` exact, caught-up and behind stalls, every stop reason, pause plus resume reading each offset once,
+the slot held and released, the governor within 10 % of the rate, the consumer's overrides), `KafkaMatchStoreTests` and `KafkaScanCursorTests`. Live, on Kafka 3.9 and 4.x:
+`TailLiveTests` (arrival within two seconds, an open transaction shown when it commits and an aborted one never, uncommitted records, pause and resume) and
+`ReadNeverWritesScanLiveTests`' tail case (a minute with a pause and resume in the middle: no topic created, no offset committed, no group left).
+
 ## D47
 
 **D47 — A profile lowers a cluster's limits, only ever lowers, and is set explicitly.** `KafkaClusterBuilder.Profile(KafkaProfile)` says what kind of

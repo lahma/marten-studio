@@ -150,6 +150,12 @@ internal enum KafkaScanStopReason
 
     /// <summary>A fatal client error or an unexpected exception.</summary>
     Failed,
+
+    /// <summary>
+    /// A live tail's segment was ended on purpose: the caller paused it, or its tab was hidden (D-M5 decision 3.3). The cursor is exact and the
+    /// tail resumes from it. A scan never stops for this reason; a tail never stops for <see cref="Completed" /> or <see cref="MatchLimit" />.
+    /// </summary>
+    Paused,
 }
 
 /// <summary>How a partition's part of a scan ended (decision 9.5).</summary>
@@ -275,6 +281,8 @@ internal sealed class KafkaScanPlan
     /// <param name="limits">The limits this scan runs under.</param>
     /// <param name="auditText">The canonical predicate with redacted literals hidden.</param>
     /// <param name="pruning">What each topic's partitioner claim came to (decision 7.4); empty when pruning was not asked of any topic.</param>
+    /// <param name="tail">The request of a live tail plan (D-M5 decision 3.1); <see langword="null" /> for a scan. <paramref name="request" /> is then its image as a scan request.</param>
+    /// <param name="gaps">Records already lost to retention when the plan was made (a resumed tail whose cursor is below the log start); the run starts its gaps with these.</param>
     public KafkaScanPlan(
         KafkaScanRequest request,
         ResolvedWindow? window,
@@ -285,8 +293,12 @@ internal sealed class KafkaScanPlan
         KafkaScanEstimate estimate,
         KafkaScanLimits limits,
         string auditText,
-        IReadOnlyList<KafkaTopicPruning>? pruning = null)
+        IReadOnlyList<KafkaTopicPruning>? pruning = null,
+        KafkaTailRequest? tail = null,
+        IReadOnlyList<KafkaScanGap>? gaps = null)
     {
+        Tail = tail;
+        Gaps = gaps ?? [];
         Request = request;
         Window = window;
         Ranges = ranges;
@@ -299,10 +311,25 @@ internal sealed class KafkaScanPlan
         Pruning = pruning ?? [];
     }
 
-    /// <summary>The request.</summary>
+    /// <summary>
+    /// The request. For a live tail plan this is the tail request's image (the cluster, the topics, the search, the grant and the isolation) with a
+    /// window of one millisecond at the planning time that nothing reads: a tail has no window.
+    /// </summary>
     public KafkaScanRequest Request { get; }
 
-    /// <summary>The resolved window and its notes; <see langword="null" /> when the text was invalid.</summary>
+    /// <summary>What a live tail plan was made for; <see langword="null" /> for a scan.</summary>
+    public KafkaTailRequest? Tail { get; }
+
+    /// <summary>Whether this is a live tail's plan (<c>StartTail</c> takes it) and not a scan's (<c>Start</c> takes it).</summary>
+    public bool IsTail => Tail is not null;
+
+    /// <summary>Records lost to retention before the run began: a resumed tail whose cursor lay below the log start.</summary>
+    public IReadOnlyList<KafkaScanGap> Gaps { get; }
+
+    /// <summary>
+    /// The resolved window and its notes; <see langword="null" /> when the text was invalid. For a live tail plan it is the resolver's answer for a
+    /// placeholder window: only its topics' refusals and its notes mean anything.
+    /// </summary>
     public ResolvedWindow? Window { get; }
 
     /// <summary>The ranges the scan reads.</summary>
@@ -344,6 +371,24 @@ internal sealed class KafkaScanPlan
             Pruning.Where(static x => x.IsPruned).Select(static x => (WindowNote) new WindowNote.PartitionsPruned(x.Topic, x.Partitions, x.Partitioner!, x.Checked)));
 }
 
+/// <summary>
+/// What to tail (D-M5 decision 3.1): an open-ended read from the end of each partition, or from a paused tail's cursor. There is no window, no
+/// pruning, no confirmation and no lowering: a tail reads what arrives, under the limits of the cluster's profile.
+/// </summary>
+/// <param name="Cluster">The cluster's key.</param>
+/// <param name="Topics">The topics, already authorized by the host studio.</param>
+/// <param name="PredicateText">What the visitor typed; empty for every record.</param>
+/// <param name="Grant">What the visitor may read.</param>
+/// <param name="Isolation">Whether uncommitted records are included: a tail starts at the last stable offset when they are not.</param>
+/// <param name="ResumeFrom">The cursor of a paused segment: this one starts exactly where that one stopped.</param>
+internal sealed record KafkaTailRequest(
+    string Cluster,
+    IReadOnlyList<KafkaTopicName> Topics,
+    string? PredicateText,
+    KafkaReadGrant Grant,
+    KafkaIsolation Isolation = KafkaIsolation.Committed,
+    KafkaScanCursor? ResumeFrom = null);
+
 /// <summary>One partition's progress.</summary>
 /// <param name="Topic">The topic.</param>
 /// <param name="Partition">The partition.</param>
@@ -357,6 +402,7 @@ internal sealed class KafkaScanPlan
 /// <param name="Undecidable">Records the search could not decide.</param>
 /// <param name="OutsideWindow">Records read whose own timestamp is outside the window.</param>
 /// <param name="State">How it ended, when it has.</param>
+/// <param name="CaughtUp">A live tail only: the partition reported its end and no record has arrived since, so it is "live" and not behind. Always <see langword="false" /> for a scan.</param>
 internal sealed record KafkaPartitionProgress(
     string Topic,
     int Partition,
@@ -369,7 +415,8 @@ internal sealed record KafkaPartitionProgress(
     long Matches,
     long Undecidable,
     long OutsideWindow,
-    PartitionEndState? State);
+    PartitionEndState? State,
+    bool CaughtUp = false);
 
 /// <summary>A scan's progress (decision 9.6), copied under the scan thread's lock.</summary>
 /// <param name="Partitions">Per partition.</param>
@@ -478,7 +525,8 @@ internal sealed record KafkaScanResult(
 /// <param name="NewMatches">The matches added since the last batch.</param>
 /// <param name="Progress">A copy of the progress.</param>
 /// <param name="Final">The result, in the last batch.</param>
-internal sealed record KafkaScanBatch(IReadOnlyList<KafkaMatch> NewMatches, KafkaScanProgress Progress, KafkaScanResult? Final);
+/// <param name="Skipped">A live tail only: matches that arrived and were evicted from the ring between two batches, so the page never saw them. Always 0 for a scan.</param>
+internal sealed record KafkaScanBatch(IReadOnlyList<KafkaMatch> NewMatches, KafkaScanProgress Progress, KafkaScanResult? Final, long Skipped = 0);
 
 /// <summary>One partition's place in a cursor.</summary>
 /// <param name="Topic">The topic.</param>
@@ -495,6 +543,9 @@ internal sealed class KafkaScanCursor
 {
     /// <summary>The text form is bounded at 4 KB, for the address.</summary>
     public const int MaxTextLength = 4_096;
+
+    /// <summary>The end of a range that has none: a live tail's (D-M5 decision 3.3). Written as <c>-</c> in the text form.</summary>
+    public const long OpenEnd = long.MaxValue;
 
     private const string Prefix = "v1;";
 
@@ -529,7 +580,9 @@ internal sealed class KafkaScanCursor
                 builder.Append(',');
             }
 
-            builder.Append(CultureInfo.InvariantCulture, $"{p.Topic}:{p.Partition}:{p.Next}:{p.End}");
+            // A live tail's range has no end (D-M5 decision 3.3): `-`. A tail's cursor never travels in an address, but the format stays total.
+            string end = p.End == KafkaScanCursor.OpenEnd ? "-" : p.End.ToString(CultureInfo.InvariantCulture);
+            builder.Append(CultureInfo.InvariantCulture, $"{p.Topic}:{p.Partition}:{p.Next}:{end}");
         }
 
         text = builder.ToString();
@@ -555,11 +608,13 @@ internal sealed class KafkaScanCursor
         {
             string[] fields = part.Split(':');
 
+            long end = OpenEnd;
+
             if (fields.Length != 4
                 || !KafkaTopicName.IsValid(fields[0])
                 || !int.TryParse(fields[1], NumberStyles.None, CultureInfo.InvariantCulture, out int partition)
                 || !long.TryParse(fields[2], NumberStyles.None, CultureInfo.InvariantCulture, out long next)
-                || !long.TryParse(fields[3], NumberStyles.None, CultureInfo.InvariantCulture, out long end)
+                || (fields[3] != "-" && !long.TryParse(fields[3], NumberStyles.None, CultureInfo.InvariantCulture, out end))
                 || next > end
                 || !seen.Add((fields[0], partition)))
             {

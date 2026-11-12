@@ -145,6 +145,18 @@ public class ScanEngineTests
                 scan.Reader.Enqueue(new WireReadOutcome.Failure(new WireError.Failed("Local_Fatal", IsFatal: true), null));
                 return await scan.Handle.Result.Bounded();
             },
+            [KafkaScanStopReason.Paused] = async () =>
+            {
+                // Only a live tail stops for this reason (D-M5 decision 3.3): the caller paused its segment.
+                ScanFixture fixture = ScanFixture.Create();
+                await using ScanFixture guard = fixture;
+                string topic = fixture.Topic("paused");
+                fixture.Produce(topic, 0, 0, "k", "v");
+                await using KafkaScanHandle handle = await fixture.TailAsync(TailRig.Request([topic]));
+                handle.UntilCaughtUp();
+                handle.Stop(KafkaScanStopReason.Paused);
+                return await handle.Result.Bounded();
+            },
         };
 
     private static readonly IReadOnlyDictionary<PartitionEndState, Func<Task<KafkaScanResult>>> EndScenarios =
