@@ -568,6 +568,7 @@ Complete, as of the bootstrap commit. Versions are centrally pinned in `Director
 | `tests/MartenStudio.Integration.Tests`, `tests/PostgresStudio.Integration.Tests` | `Microsoft.Playwright` | `1.62.0` | The browser suites (D19). |
 | `build/` | `Fallout.Common`, `Fallout.Components` | `10.4.0` | The orchestrator; the build project opts out of CPM. |
 | `build/` | `NuGet.Frameworks` | `7.9.0` | Held — see below. |
+| `build/` | `System.Security.Cryptography.Pkcs`, `System.Security.Cryptography.Xml` | `10.0.15` | CVE pins over Fallout's transitive 10.0.10 (GHSA-2fmv-rv2c-59x7, GHSA-846f-f764-76mx, GHSA-7hqp-7c5m-4vq6, GHSA-c399-9853-6jmj, GHSA-r955-8q5j-3h83; fixed in 10.0.13). Build-time only, never shipped. Removed once Fallout's own dependencies bring a fixed version. *Package budget changes* 2026-11-12. |
 
 SourceLink needs no package reference: it is in-SDK on .NET 8 and later.
 
