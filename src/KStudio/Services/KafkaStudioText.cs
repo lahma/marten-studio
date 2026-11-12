@@ -244,4 +244,77 @@ internal static class KafkaStudioText
         KStudio.Core.Scanning.KafkaScanRefusal.ShuttingDown => "The application is shutting down.",
         _ => SearchFailed,
     };
+
+    // ------------------------------------------------------------------------------------------------
+    // Related records and duplicates (UI-D, D42, decisions 3 and 4 of D-CORR)
+    // ------------------------------------------------------------------------------------------------
+
+    /// <summary>The page's lead: what it searches and what it uses.</summary>
+    public const string RelatedLead =
+        "Searches the declared topics you may read on this cluster for records that share a correlation value with this one. "
+        + "Only values this page already shows you are used: a field that is redacted, cut or absent is never a key.";
+
+    /// <summary>The Keys panel when the anchor offers nothing to search for.</summary>
+    public const string RelatedNoKeys =
+        "This record has no correlation value KStudio can use: its correlation fields are absent, redacted or cut.";
+
+    /// <summary>The page for a link that names neither a record nor a value to look for.</summary>
+    public const string RelatedLinkInvalid = "This link names no record or value to look for.";
+
+    /// <summary>The refusal of a value too long to be searched.</summary>
+    public const string RelatedValueTooLong = "The value this link names is longer than the 1,000 characters a search can hold.";
+
+    /// <summary>The refusal of a search in which no topic has a field to compare.</summary>
+    public const string RelatedNothingToSearch = "No topic has a field to compare for these values, so there is nothing to search.";
+
+    /// <summary>The sentence that names the set of topics searched by default.</summary>
+    public const string RelatedScope = "the declared topics you may read on this cluster";
+
+    /// <summary>The 9601 reason of a related search whose lanes all had nothing to compare.</summary>
+    public const string RelatedNothingReason = "no topic had a field to compare";
+
+    /// <summary>The line about the topics a default search left out.</summary>
+    /// <param name="count">How many readable declared topics were not searched.</param>
+    public static string RelatedMoreTopics(int count) =>
+        $"{count} more declared {(count == 1 ? "topic was" : "topics were")} not searched; choose the topics to search.";
+
+    /// <summary>The lane of a topic with no query.</summary>
+    /// <param name="reasons">Why, in words that name no value.</param>
+    public static string RelatedNothingToCompare(IReadOnlyList<string> reasons) =>
+        "Nothing to compare on this topic" + (reasons.Count == 0 ? "." : ": " + string.Join(" ", reasons));
+
+    /// <summary>The state of a lane Kafka refused.</summary>
+    /// <param name="text">The engine's sentence.</param>
+    public static string RelatedNotReadable(string text) => "not readable: " + text;
+
+    /// <summary>The audit target of a related-records scan: <c>records related to orders/2/1042, 3 topics, 2026-11-12 10:00Z – 11:00Z</c>.</summary>
+    /// <param name="subject">What the search is about.</param>
+    /// <param name="topics">How many topics it names.</param>
+    /// <param name="from">The window's start (UTC).</param>
+    /// <param name="to">The window's end (UTC).</param>
+    public static string RelatedTarget(KafkaRelatedSubject subject, int topics, DateTimeOffset from, DateTimeOffset to)
+    {
+        System.Globalization.CultureInfo invariant = System.Globalization.CultureInfo.InvariantCulture;
+        const string Full = "yyyy-MM-dd HH:mm'Z'";
+        string what = subject.SeedLabel is { } seed
+            ? "a " + seed + " value"
+            : string.Create(invariant, $"{subject.AnchorTopic}/{subject.AnchorPartition}/{subject.AnchorOffset}");
+
+        return string.Create(
+            invariant,
+            $"records related to {what}, {topics} {(topics == 1 ? "topic" : "topics")}, {from.ToUniversalTime().ToString(Full, invariant)} – {to.ToUniversalTime().ToString(Full, invariant)}");
+    }
+
+    /// <summary>The heading of the duplicates panel.</summary>
+    /// <param name="groups">How many groups.</param>
+    public static string DuplicatesHeading(int groups) =>
+        $"Possible duplicates: {groups} {(groups == 1 ? "group" : "groups")}";
+
+    /// <summary>The sentence under the duplicates heading.</summary>
+    /// <param name="count">How many records were compared.</param>
+    public static string DuplicatesScope(int count) =>
+        $"Compared among the {KafkaDisplay.Count(count, "record")} found. A copy outside these results is not seen.";
+
+    /// <summary>The note on a group compared by its key and value as shown.</summary>
+    public const string DuplicatesComparedAsShown = "Compared as shown: a masked part counts as equal to any other mask.";
 }

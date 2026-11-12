@@ -98,6 +98,9 @@ public static class KafkaStudioServiceCollectionExtensions
         services.TryAddScoped<KafkaSearchService>();
         services.TryAddScoped<KafkaRecordService>();
 
+        // Related records (UI-D): one audited scan over several topics, each searched by its own fields.
+        services.TryAddScoped<KafkaCorrelationService>();
+
         // Which of the module's audit entries a visitor may read (D34): its own gate, never the host's store policy.
         services.TryAddEnumerable(ServiceDescriptor.Scoped<IStudioAuditScopeGate, KafkaAuditGate>());
 

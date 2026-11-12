@@ -25,7 +25,7 @@ internal sealed record KafkaChip(string Name, string Value, string Display, stri
 internal static partial class KafkaMatchView
 {
     /// <summary>The headers Wolverine writes, confirmed at <c>V6.61.0</c> in <c>EnvelopeConstants</c>; compared ignoring case.</summary>
-    public static readonly IReadOnlyList<string> CorrelationHeaders = ["correlation-id", "conversation-id", "tenant-id", "saga-id"];
+    public static readonly IReadOnlyList<string> CorrelationHeaders = ["correlation-id", "conversation-id", "causation-id", "tenant-id", "saga-id"];
 
     /// <summary>The headers the engine reads a W3C trace context from (<c>HeaderDecoder.FindTrace</c>), compared ignoring case.</summary>
     private static readonly string[] TraceHeaders = ["traceparent", "ce_traceparent", "parent-id"];
@@ -38,13 +38,6 @@ internal static partial class KafkaMatchView
 
     /// <summary>How much of a key the results table shows.</summary>
     public const int KeyCut = 80;
-
-    /// <summary>
-    /// Whether a field's text is a faithful rendering of its bytes as a search literal would compare them: not null, not masked, not cut, and text
-    /// (a binary header is kept as hex, whose length is never its byte length).
-    /// </summary>
-    /// <param name="field">The field.</param>
-    public static bool IsLiteral(KafkaMatchField field) => field.IsLiteral;
 
     /// <summary>Whether a literal this long is read by the parser (<see cref="PredicateParser.MaxLiteralLength" />).</summary>
     /// <param name="text">The literal.</param>
@@ -61,7 +54,7 @@ internal static partial class KafkaMatchView
         foreach (string wanted in CorrelationHeaders)
         {
             KafkaMatchHeader? header = match.Headers.FirstOrDefault(x => string.Equals(x.Name, wanted, StringComparison.OrdinalIgnoreCase));
-            if (header is not null && IsLiteral(header.Value) && FitsLiteral(header.Value.Text!) && PredicateName(header.Name))
+            if (header is not null && header.Value.IsLiteral && FitsLiteral(header.Value.Text!) && PredicateName(header.Name))
             {
                 chips.Add(Chip(header.Name, header.Value.Text!, "header." + header.Name));
             }
@@ -70,7 +63,7 @@ internal static partial class KafkaMatchView
         foreach (string wanted in CorrelationAttributes)
         {
             KafkaMatchHeader? attribute = match.CloudEventAttributes.FirstOrDefault(x => string.Equals(x.Name, wanted, StringComparison.OrdinalIgnoreCase));
-            if (attribute is not null && IsLiteral(attribute.Value) && FitsLiteral(attribute.Value.Text!))
+            if (attribute is not null && attribute.Value.IsLiteral && FitsLiteral(attribute.Value.Text!))
             {
                 chips.Add(Chip(attribute.Name, attribute.Value.Text!, "ce." + attribute.Name));
             }
@@ -83,7 +76,7 @@ internal static partial class KafkaMatchView
             string prefix = "00-" + trace.TraceId;
             KafkaMatchHeader? source = match.Headers.FirstOrDefault(x =>
                 TraceHeaders.Contains(x.Name, StringComparer.OrdinalIgnoreCase)
-                && IsLiteral(x.Value)
+                && x.Value.IsLiteral
                 && x.Value.Text!.StartsWith(prefix, StringComparison.Ordinal)
                 && PredicateName(x.Name));
 
@@ -103,11 +96,11 @@ internal static partial class KafkaMatchView
     {
         ArgumentNullException.ThrowIfNull(match);
 
-        return IsLiteral(match.Key) && FitsLiteral(match.Key.Text!) ? "key = " + PredicateFormatter.QuoteText(match.Key.Text!) : null;
+        return match.Key.IsLiteral && FitsLiteral(match.Key.Text!) ? "key = " + PredicateFormatter.QuoteText(match.Key.Text!) : null;
     }
 
     /// <summary>The text a mask writes in place of a part of a value; a literal containing it is never a faithful copy.</summary>
-    public const string MaskText = "••• (redacted by";
+    public const string MaskText = KafkaMatchMasks.MaskPrefix;
 
     /// <summary>Whether the match holds a value that can be shown or copied: the payload grant read it, and no rule withheld it.</summary>
     /// <param name="match">The match.</param>
@@ -160,7 +153,7 @@ internal static partial class KafkaMatchView
             return null;
         }
 
-        if (segments.Count > JsonPathExpression.MaxSteps || IsMasked(match, segments))
+        if (segments.Count > JsonPathExpression.MaxSteps || KafkaMatchMasks.IsMasked(match, segments))
         {
             return null;
         }
@@ -282,14 +275,9 @@ internal static partial class KafkaMatchView
     [GeneratedRegex(@"^-?[0-9]+(\.[0-9]+)?([eE][+-]?[0-9]+)?$", RegexOptions.CultureInvariant)]
     private static partial Regex NumberShape();
 
-    /// <summary>Whether the node at <paramref name="segments" /> is a masked node or lies under one: a mask replaces the whole subtree.</summary>
-    /// <param name="match">The match.</param>
-    /// <param name="segments">The node's path.</param>
-    public static bool IsMasked(KafkaMatch match, IReadOnlyList<(string? Key, int Index)> segments) => KafkaMatchMasks.IsMasked(match, segments);
-
     /// <summary>Whether the key is a text that is only too long for a search literal: the page says why it does not offer the predicate.</summary>
     /// <param name="match">The match.</param>
-    public static bool KeyTooLongForPredicate(KafkaMatch match) => IsLiteral(match.Key) && !FitsLiteral(match.Key.Text!);
+    public static bool KeyTooLongForPredicate(KafkaMatch match) => match.Key.IsLiteral && !FitsLiteral(match.Key.Text!);
 
     /// <summary>
     /// Whether the key, or a header or attribute a chip would be made of, is a faithful text that is only too long for a search literal: the detail says
@@ -301,8 +289,8 @@ internal static partial class KafkaMatchView
         ArgumentNullException.ThrowIfNull(match);
 
         return KeyTooLongForPredicate(match)
-            || match.Headers.Where(x => CorrelationHeaders.Contains(x.Name, StringComparer.OrdinalIgnoreCase)).Any(static x => IsLiteral(x.Value) && !FitsLiteral(x.Value.Text!))
-            || match.CloudEventAttributes.Where(x => CorrelationAttributes.Contains(x.Name, StringComparer.OrdinalIgnoreCase)).Any(static x => IsLiteral(x.Value) && !FitsLiteral(x.Value.Text!));
+            || match.Headers.Where(x => CorrelationHeaders.Contains(x.Name, StringComparer.OrdinalIgnoreCase)).Any(static x => x.Value.IsLiteral && !FitsLiteral(x.Value.Text!))
+            || match.CloudEventAttributes.Where(x => CorrelationAttributes.Contains(x.Name, StringComparer.OrdinalIgnoreCase)).Any(static x => x.Value.IsLiteral && !FitsLiteral(x.Value.Text!));
     }
 
     /// <summary>The results table's key cell text: <see cref="KafkaMatchField.Display" />, cut at <see cref="KeyCut" /> characters.</summary>

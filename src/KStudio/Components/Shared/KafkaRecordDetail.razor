@@ -132,6 +132,7 @@
                         Label="@($"Copy as, for {match.Topic} {match.Partition}/{match.Offset}")"
                         Items="items" />
             <a class="ms-btn ms-btn-sm ms-k-permalink" href="@PermalinkHref()">Permalink</a>
+            <a class="ms-btn ms-btn-sm ms-k-related-link" href="@RelatedHref()">Related records</a>
         </div>
 
         @if (KafkaMatchView.HasLiteralTooLong(match))
@@ -222,6 +223,16 @@
         KafkaAddress.Href(
             Settings,
             KafkaAddress.RecordRoute,
+            Cluster,
+            (KafkaAddress.TopicParameter, match!.Topic),
+            (KafkaAddress.PartitionParameter, match.Partition.ToString(CultureInfo.InvariantCulture)),
+            (KafkaAddress.OffsetParameter, match.Offset.ToString(CultureInfo.InvariantCulture)));
+
+    /// <summary>Related records around this record: a link, so that opening it is a page of its own and runs nothing until the visitor presses its button.</summary>
+    private string RelatedHref() =>
+        KafkaAddress.Href(
+            Settings,
+            KafkaAddress.RelatedRoute,
             Cluster,
             (KafkaAddress.TopicParameter, match!.Topic),
             (KafkaAddress.PartitionParameter, match.Partition.ToString(CultureInfo.InvariantCulture)),

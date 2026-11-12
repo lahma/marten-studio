@@ -1,6 +1,7 @@
 @implements IAsyncDisposable
 @using System.Globalization
 @using KStudio.Core.Clusters
+@using KStudio.Core.Correlation
 @using KStudio.Core.Predicates
 @using KStudio.Core.Scanning
 @using KStudio.Core.Decoding
@@ -406,6 +407,7 @@
                                             class="ms-btn ms-btn-sm"
                                             aria-expanded="@(expanded.Contains(rowKey) ? "true" : "false")"
                                             @onclick="() => ToggleDetailAsync(rowKey)">Details</button>
+                                    <a class="ms-btn ms-btn-sm ms-k-related-link" href="@RelatedHref(match)" aria-label="@($"Related records of {match.Topic} {match.Partition}/{match.Offset}")">Related</a>
                                 </td>
                                 <td class="ms-table-cell">
                                     <input type="checkbox"
@@ -427,6 +429,8 @@
                     </tbody>
                 </table>
             </TableScroll>
+
+            <KafkaDuplicates Groups="@duplicates" Compared="@matches.Count" Cluster="@State.ActiveCluster?.Key" />
 
             @if (matches.Count > PagingThreshold)
             {
@@ -507,6 +511,7 @@
 
     private IReadOnlyList<string> topicNames = [];
     private IReadOnlyList<PredicateError> errors = [];
+    private IReadOnlyList<KafkaDuplicateGroup> duplicates = [];
     private IReadOnlyList<string> addressTopics = [];
     private KafkaSearchPlanned? planned;
     private KafkaGrantDecision? runGrant;
@@ -708,6 +713,7 @@
         result = null;
         progress = null;
         matches.Clear();
+        duplicates = [];
         compareKeys.Clear();
         compareOpen = false;
         loadingTopics = true;
@@ -1085,6 +1091,7 @@
             started = run = ((KafkaSearchStartResult.Running) start).Run;
             running = true;
             matches.Clear();
+            duplicates = [];
             expanded.Clear();
             compareKeys.Clear();
             valueRefused.Clear();
@@ -1100,6 +1107,7 @@
             await foreach (KafkaScanBatch batch in started.ReadBatchesAsync(lifetime.Token))
             {
                 matches.AddRange(batch.NewMatches);
+                duplicates = KafkaDuplicateFinder.Find(matches);
                 progress = batch.Progress;
 
                 if (batch.Final is { } final)
@@ -1382,6 +1390,15 @@
         KafkaAddress.Href(
             Settings,
             KafkaAddress.RecordRoute,
+            State.ActiveCluster?.Key,
+            (KafkaAddress.TopicParameter, match.Topic),
+            (KafkaAddress.PartitionParameter, match.Partition.ToString(CultureInfo.InvariantCulture)),
+            (KafkaAddress.OffsetParameter, match.Offset.ToString(CultureInfo.InvariantCulture)));
+
+    private string RelatedHref(KafkaMatch match) =>
+        KafkaAddress.Href(
+            Settings,
+            KafkaAddress.RelatedRoute,
             State.ActiveCluster?.Key,
             (KafkaAddress.TopicParameter, match.Topic),
             (KafkaAddress.PartitionParameter, match.Partition.ToString(CultureInfo.InvariantCulture)),

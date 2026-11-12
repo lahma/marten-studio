@@ -1,0 +1,11 @@
+@page "/kafka/related"
+
+<PageTitle>Kafka related records</PageTitle>
+
+@* Related records (D42, decision 3 of D-CORR): ?cluster=…&topic=…&partition=…&offset=… around a record, or ?cluster=…#link=document&type=…&v=… around a
+   value a link names, whose value stays in the fragment. The page holds no logic; the body is created below the frame only once reads are released, and
+   it never runs a search by itself. *@
+
+<KafkaPageFrame>
+    <KafkaRelatedBody />
+</KafkaPageFrame>

@@ -1,0 +1,86 @@
+@using System.Globalization
+@using KStudio.Core.Correlation
+@using KStudio.Core.Scanning
+@using PostgresStudio.Services
+@using PostgresStudio.Services.Settings
+@inject IStudioSettings Settings
+@inject StudioState Studio
+
+@* Possible duplicates (decision 4 of D-CORR): the records already held that look like one message delivered more than once. It is drawn from the
+   matches the page has, reads nothing and records nothing; it is collapsed by default and absent when there is nothing to show. *@
+
+@if (groups.Count > 0)
+{
+    <details class="ms-k-duplicates">
+        <summary>@KafkaStudioText.DuplicatesHeading(groups.Count)</summary>
+        <p class="ms-muted">@KafkaStudioText.DuplicatesScope(Compared)</p>
+        @foreach (KafkaDuplicateGroup group in groups)
+        {
+            <section class="ms-k-duplicate-group" @key="@(group.Topic + "/" + group.Basis + "/" + group.Copies[0].Offset + "/" + group.Copies[0].Partition)">
+                <h3 class="ms-section-title">
+                    @group.Topic · @KafkaDisplay.Count(group.Count, "copy", "copies") · @BasisText(group.Basis)
+                </h3>
+                <p class="ms-muted">
+                    @Studio.FormatInSelectedTimeZone(group.First, "yyyy-MM-dd HH:mm:ss") to @Studio.FormatInSelectedTimeZone(group.Last, "yyyy-MM-dd HH:mm:ss")
+                    @if (group.ComparedAsShown)
+                    {
+                        <span> · @KafkaStudioText.DuplicatesComparedAsShown</span>
+                    }
+                </p>
+                <TableScroll Label="@("Copies on " + group.Topic)">
+                    <table class="ms-table">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Partition / offset</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (KafkaMatch copy in group.Copies)
+                            {
+                                <tr class="ms-table-row" @key="@(copy.Partition + "/" + copy.Offset)">
+                                    <td class="ms-table-cell">@Studio.FormatInSelectedTimeZone(copy.Timestamp, "yyyy-MM-dd HH:mm:ss")</td>
+                                    <td class="ms-table-cell"><a href="@RecordHref(copy)">@copy.Partition / @KafkaDisplay.Number(copy.Offset)</a></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </TableScroll>
+            </section>
+        }
+    </details>
+}
+
+@code {
+    private IReadOnlyList<KafkaDuplicateGroup> groups = [];
+
+    /// <summary>The groups: <c>KafkaDuplicateGroup</c>s, typed <see cref="object" /> because the engine's types are internal and a component's parameters are public.</summary>
+    [Parameter]
+    public object? Groups { get; set; }
+
+    /// <summary>How many records were compared, for the sentence under the heading.</summary>
+    [Parameter]
+    public int Compared { get; set; }
+
+    /// <summary>The cluster entry's key, for the record links.</summary>
+    [Parameter]
+    public string? Cluster { get; set; }
+
+    protected override void OnParametersSet() => groups = Groups as IReadOnlyList<KafkaDuplicateGroup> ?? [];
+
+    private string RecordHref(KafkaMatch match) =>
+        KafkaAddress.Href(
+            Settings,
+            KafkaAddress.RecordRoute,
+            Cluster,
+            (KafkaAddress.TopicParameter, match.Topic),
+            (KafkaAddress.PartitionParameter, match.Partition.ToString(CultureInfo.InvariantCulture)),
+            (KafkaAddress.OffsetParameter, match.Offset.ToString(CultureInfo.InvariantCulture)));
+
+    private static string BasisText(KafkaDuplicateBasis basis) => basis switch
+    {
+        KafkaDuplicateBasis.EnvelopeId => "same id header",
+        KafkaDuplicateBasis.CloudEvent => "same CloudEvents source and id",
+        _ => "same key and value",
+    };
+}

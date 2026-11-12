@@ -1,0 +1,1028 @@
+@implements IAsyncDisposable
+@using System.Globalization
+@using KStudio.Core.Clusters
+@using KStudio.Core.Correlation
+@using KStudio.Core.Scanning
+@using Microsoft.Extensions.Logging
+@using PostgresStudio.Services
+@using PostgresStudio.Services.Live
+@using PostgresStudio.Services.Settings
+@inject KafkaState State
+@inject KafkaCorrelationService Related
+@inject KafkaSearchService Search
+@inject KafkaCapabilityGuard Capabilities
+@inject NavigationManager Navigation
+@inject IStudioSettings Settings
+@inject StudioState Studio
+@inject TimeProvider Time
+@inject ILogger<KafkaRelatedBody> Logger
+
+@* Related records (D42, decision 3 of D-CORR). Like the search page, it never runs a search by itself: opening a link reads the record the visitor asked
+   for (the record page's read, with its gates and its audit) and builds each topic's query without the engine; the scan starts only when the visitor
+   presses the button, after the engine's estimate and, above the thresholds, the confirmation. Everything it needs from a broker is read after the
+   frame's Ready, and the body exists only after it, so prerendering makes no call. A seed's value is read from the address's fragment, which a browser
+   never sends to a server, and so it can only be read once the circuit is interactive. *@
+
+<div class="ms-page ms-k-search ms-k-related">
+    <nav class="ms-db-breadcrumb" aria-label="Breadcrumb">
+        <a href="@TopicsHref">Topics</a>
+        <span class="ms-db-breadcrumb-sep" aria-hidden="true">/</span>
+        <span>Related records</span>
+    </nav>
+
+    <div class="ms-page-header">
+        <h1 class="ms-page-title">Related records</h1>
+    </div>
+
+    @if (!Capabilities.IsEnabled(KafkaCapability.SearchRecords))
+    {
+        <KafkaCapabilityDisabled Capability="@nameof(KafkaStudioCapabilities.SearchRecords)" Action="search related records" />
+    }
+    else if (ready && mode == EntryMode.None)
+    {
+        <div class="ms-empty" role="status">
+            <p class="ms-empty-title">Nothing to look for</p>
+            <p class="ms-empty-description">@KafkaStudioText.RelatedLinkInvalid</p>
+        </div>
+    }
+    else if (error is not null)
+    {
+        <ErrorAlert Message="@error" />
+    }
+    else if (loading)
+    {
+        <LoadingSpinner />
+    }
+    else if (anchorMissing)
+    {
+        <div class="ms-empty" role="status">
+            <p class="ms-empty-title">Not found</p>
+            <p class="ms-empty-description">@KafkaStudioText.TopicNotAvailable(anchorTopic ?? string.Empty)</p>
+        </div>
+    }
+    else if (anchor is null && anchorNote is not null)
+    {
+        <p class="ms-k-note" role="note">@anchorNote</p>
+    }
+    else
+    {
+        <p class="ms-muted ms-k-related-lead">@KafkaStudioText.RelatedLead</p>
+
+        @if (anchor is { } anchored)
+        {
+            <p class="ms-muted ms-k-record-address">
+                Around <a href="@RecordHref(anchored)"><code>@anchored.Topic</code> · partition @anchored.Partition · offset @KafkaDisplay.Number(anchored.Offset)</a>
+                · @Studio.FormatInSelectedTimeZone(anchored.Timestamp, "yyyy-MM-dd HH:mm:ss")
+            </p>
+        }
+
+        <section class="ms-k-keys" aria-label="Keys">
+            <h2 class="ms-section-title">Keys</h2>
+            @if (keys.IsEmpty)
+            {
+                <p class="ms-k-note" role="note">@KafkaStudioText.RelatedNoKeys</p>
+            }
+            else
+            {
+                <TableScroll Label="Keys">
+                    <table class="ms-table">
+                        <thead>
+                            <tr>
+                                <th>Kind</th>
+                                <th>Value</th>
+                                <th>From</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (CorrelationValue value in keys.Values)
+                            {
+                                <tr class="ms-table-row" @key="@(value.Kind + "\n" + value.From + "\n" + value.Value)">
+                                    <td class="ms-table-cell">@value.Kind</td>
+                                    <td class="ms-table-cell" title="@value.Value"><code>@KafkaMatchView.Cut(value.Value, KafkaMatchView.ChipValueCut)</code></td>
+                                    <td class="ms-table-cell"><code>@value.From</code></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </TableScroll>
+
+                @foreach (string note in keys.Notes)
+                {
+                    <p class="ms-muted">@note</p>
+                }
+            }
+        </section>
+
+        @if (!keys.IsEmpty)
+        {
+            <div class="ms-k-search-form" aria-busy="@(busy ? "true" : "false")">
+                <details class="ms-k-related-topics">
+                    <summary>Topics searched (@selected.Count)</summary>
+                    <fieldset class="ms-k-topics" disabled="@busy">
+                        <legend>Topics</legend>
+                        <p class="ms-muted">@KafkaStudioText.RelatedScope</p>
+                        @if (hiddenTopics > 0)
+                        {
+                            <p class="ms-k-note" role="note">@KafkaStudioText.RelatedMoreTopics(hiddenTopics)</p>
+                        }
+                        <div class="ms-k-topic-list">
+                            @foreach (string name in readable)
+                            {
+                                bool isSelected = selected.Contains(name);
+                                <label class="ms-k-topic-option" @key="name">
+                                    <input type="checkbox"
+                                           checked="@isSelected"
+                                           disabled="@(!isSelected && selected.Count >= KafkaStudioText.MaxSearchTopics)"
+                                           @onchange="e => ToggleTopicAsync(name, e.Value is true)" />
+                                    <span>@name</span>
+                                </label>
+                            }
+                        </div>
+                    </fieldset>
+                </details>
+
+                <fieldset class="ms-k-window" disabled="@busy">
+                    <legend>Window</legend>
+                    <div class="ms-k-presets" role="group" aria-label="Window">
+                        @foreach ((string label, int minutes) in Presets())
+                        {
+                            <button type="button"
+                                    class="ms-btn ms-btn-sm"
+                                    aria-pressed="@(presetMinutes == minutes ? "true" : "false")"
+                                    @onclick="() => SetPreset(minutes)">@label</button>
+                        }
+                    </div>
+                    <details class="ms-k-custom-window">
+                        <summary>Custom window (UTC)</summary>
+                        <div class="ms-k-absolute">
+                            <label>From <input type="datetime-local" class="ms-input" value="@customFrom" @onchange="e => SetCustom(e.Value?.ToString(), customTo)" /></label>
+                            <label>To <input type="datetime-local" class="ms-input" value="@customTo" @onchange="e => SetCustom(customFrom, e.Value?.ToString())" /></label>
+                        </div>
+                    </details>
+                    <p class="ms-k-window-text" aria-live="polite">@KafkaSearchText.WindowLine(fromUtc, toUtc, PreferenceZone())</p>
+                    @if (windowProblem is not null)
+                    {
+                        <p class="ms-k-note ms-k-note-warning" role="alert">@windowProblem</p>
+                    }
+                </fieldset>
+
+                <label class="ms-k-isolation">
+                    <input type="checkbox" checked="@includeUncommitted" disabled="@busy" @onchange="e => includeUncommitted = e.Value is true" />
+                    Include uncommitted records
+                    <span class="ms-muted">@KafkaStudioText.UncommittedHelp</span>
+                </label>
+
+                <div class="ms-k-search-actions">
+                    @if (running)
+                    {
+                        <button type="button" class="ms-button" @onclick="StopAsync">Stop</button>
+                    }
+                    else
+                    {
+                        <button type="button" class="ms-button ms-button-primary" disabled="@(!CanSearch)" @onclick="SearchAsync">@(planning ? "Estimating…" : "Search related records")</button>
+                    }
+                </div>
+
+                @if (refusal is not null)
+                {
+                    <p class="ms-k-note ms-k-note-warning" role="alert">@refusal</p>
+                }
+            </div>
+
+            @if (planned is { } shownPlan)
+            {
+                @if (PlanNotes(shownPlan).Count > 0)
+                {
+                    <section class="ms-k-plan-notes" aria-label="Before you search">
+                        <h2 class="ms-section-title">Before you search</h2>
+                        <ul>
+                            @foreach (string note in PlanNotes(shownPlan))
+                            {
+                                <li>@note</li>
+                            }
+                        </ul>
+                    </section>
+                }
+
+                <p class="ms-k-estimate">@EstimateText(shownPlan)</p>
+            }
+
+            @if (progress is not null)
+            {
+                <div class="ms-stat-grid ms-k-stats">
+                    <StatCard Title="Records read" Value="@KafkaDisplay.Number(progress.Records)" />
+                    <StatCard Title="Bytes read" Value="@KafkaDisplay.Bytes(progress.Bytes)" />
+                    <StatCard Title="Matches" Value="@KafkaDisplay.Number(progress.Matches)" />
+                    <StatCard Title="Undecidable" Value="@KafkaDisplay.Number(progress.Undecidable)" />
+                    <StatCard Title="Elapsed" Value="@progress.Elapsed.ToString(@"m\:ss", CultureInfo.InvariantCulture)" />
+                </div>
+            }
+
+            @if (result is not null && planned is not null)
+            {
+                <div class="ms-k-result-banner" role="status">
+                    <p>@KafkaSearchText.Stop(result, planned.Plan.Limits)</p>
+                    @if (continuedAfter is { } previous)
+                    {
+                        <p class="ms-muted">@KafkaStudioText.ContinuedAfter(previous)</p>
+                    }
+                    @if (KafkaSearchText.CanContinue(result.StopReason) && !result.Cursor.IsEmpty)
+                    {
+                        <button type="button" class="ms-button" disabled="@busy" @onclick="ContinueAsync">Continue</button>
+                    }
+                </div>
+
+                @if (KafkaSearchText.Caveats(result) is { Count: > 0 } caveats)
+                {
+                    <section class="ms-k-caveats" aria-label="What this result does not cover">
+                        <h2 class="ms-section-title">What this result does not cover</h2>
+                        <ul>
+                            @foreach (string caveat in caveats)
+                            {
+                                <li>@caveat</li>
+                            }
+                        </ul>
+                    </section>
+                }
+            }
+
+            @if (lanes.Count > 0)
+            {
+                <KafkaTimelineStrip Model="@Strip()" />
+
+                <section class="ms-k-lanes-section" aria-label="Topics">
+                    <h2 class="ms-section-title">Topics</h2>
+                    <ul class="ms-k-lanes">
+                        @foreach (KafkaTimelineLane lane in DrawnLanes())
+                        {
+                            KafkaRelatedLane? prepared = lanes.FirstOrDefault(x => string.Equals(x.Topic.Value, lane.Topic, StringComparison.Ordinal));
+                            <li class="ms-k-lane" @key="lane.Topic">
+                                <div class="ms-k-lane-head">
+                                    <strong><a href="@TopicHref(lane.Topic)">@lane.Topic</a></strong>
+                                    <span class="ms-chip">@KafkaDisplay.Count(lane.Matches, "record")</span>
+                                    <span class="ms-muted ms-k-lane-state">@lane.State</span>
+                                </div>
+                                @if (prepared is { IsScanned: true } scanned)
+                                {
+                                    @foreach (string note in scanned.Query.Notes)
+                                    {
+                                        <p class="ms-muted ms-k-lane-note">@note</p>
+                                    }
+
+                                    @if (scanned.ShownText is { } text)
+                                    {
+                                        <details class="ms-k-lane-query">
+                                            <summary>Show search</summary>
+                                            <pre><code>@text</code></pre>
+                                        </details>
+                                    }
+                                }
+                            </li>
+                        }
+                    </ul>
+                </section>
+            }
+
+            @if (matches.Count > 0)
+            {
+                <TableScroll Label="Related records">
+                    <table class="ms-table ms-k-matches ms-k-related-matches">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Topic</th>
+                                <th>Partition / offset</th>
+                                <th>Type</th>
+                                <th>Matched by</th>
+                                <th>Correlation</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (KafkaMatch match in KafkaRelatedView.InOrder(matches))
+                            {
+                                bool isAnchor = IsAnchor(match);
+                                <tr class="ms-table-row@(isAnchor ? " ms-k-anchor-row" : string.Empty)" @key="@KafkaRelatedView.RowKey(match)" aria-current="@(isAnchor ? "true" : null)">
+                                    <td class="ms-table-cell" title="@TimeTitle(match)">@Studio.FormatInSelectedTimeZone(match.Timestamp, "yyyy-MM-dd HH:mm:ss")</td>
+                                    <td class="ms-table-cell">@match.Topic</td>
+                                    <td class="ms-table-cell"><a href="@RecordHref(match)">@match.Partition / @KafkaDisplay.Number(match.Offset)</a></td>
+                                    <td class="ms-table-cell">@KafkaMatchView.TypeOf(match)</td>
+                                    <td class="ms-table-cell">@(isAnchor ? "this record" : MatchedByText(match))</td>
+                                    <td class="ms-table-cell">
+                                        @foreach (KafkaChip chip in KafkaMatchView.Chips(match))
+                                        {
+                                            <span class="ms-chip ms-k-chip" title="@chip.Value">@chip.Display</span>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </TableScroll>
+
+                <KafkaDuplicates Groups="@duplicates" Compared="@matches.Count" Cluster="@State.ActiveCluster?.Key" />
+            }
+        }
+    }
+
+    <ConfirmDialog IsOpen="@confirmOpen"
+                   Title="@ConfirmTitle()"
+                   Message="@ConfirmMessage()"
+                   ConfirmText="Search"
+                   OnConfirm="ConfirmedAsync"
+                   OnCancel="CancelledAsync" />
+</div>
+
+@code {
+    private enum EntryMode
+    {
+        None,
+        Anchor,
+        Seed,
+    }
+
+    private const string LocalFormat = "yyyy-MM-dd'T'HH:mm";
+
+    private static readonly (string Label, int Minutes)[] AnchorPresets = [("±5 min", 5), ("±30 min", 30), ("±2 h", 120), ("±24 h", 1_440)];
+    private static readonly (string Label, int Minutes)[] SeedPresets = [("Last hour", 60), ("Last 24 h", 1_440), ("Last 7 days", 10_080)];
+
+    private readonly CancellationTokenSource lifetime = new();
+    private readonly List<KafkaMatch> matches = [];
+    private readonly List<string> selected = [];
+    private readonly Dictionary<string, IReadOnlyList<CorrelationField>> fieldsByTopic = new(StringComparer.Ordinal);
+
+    private IReadOnlyList<string> readable = [];
+    private IReadOnlyList<string> addressTopics = [];
+    private IReadOnlyList<KafkaRelatedLane> lanes = [];
+    private IReadOnlyList<KafkaDuplicateGroup> duplicates = [];
+    private CorrelationKeySet keys = CorrelationKeySet.Empty;
+    private KafkaRelatedSeed? seed;
+    private KafkaMatch? anchor;
+    private KafkaRelatedPlanned? planned;
+    private KafkaSearchRun? run;
+    private KafkaScanProgress? progress;
+    private KafkaScanResult? result;
+    private EntryMode mode;
+    private string? anchorTopic;
+    private int anchorPartition;
+    private long anchorOffset;
+    private string? anchorNote;
+    private string? error;
+    private string? refusal;
+    private string? windowProblem;
+    private string customFrom = string.Empty;
+    private string customTo = string.Empty;
+    private DateTimeOffset fromUtc;
+    private DateTimeOffset toUtc;
+    private DateTimeOffset? addressFrom;
+    private DateTimeOffset? addressTo;
+    private int presetMinutes;
+    private int hiddenTopics;
+    private long? continuedAfter;
+    private long? pendingContinuation;
+    private long? allowanceLeft;
+    private bool includeUncommitted;
+    private bool anchorMissing;
+    private bool loading = true;
+    private bool planning;
+    private bool running;
+    private bool confirmOpen;
+    private bool disposed;
+    private bool ready;
+    private bool started;
+
+    /// <summary>Completed by the frame once the cluster policy passed and the circuit is interactive: a body reads nothing before it.</summary>
+    [CascadingParameter(Name = KafkaPageFrame.ReadyName)]
+    public Task? Ready { get; set; }
+
+    // The confirmation dialog counts: while it waits, nothing else may plan or continue and replace the plan it is about to start.
+    private bool busy => planning || running || confirmOpen;
+
+    private bool CanSearch => !busy && selected.Count > 0 && windowProblem is null && lanes.Any(static x => x.IsScanned);
+
+    private string TopicsHref => KafkaAddress.Href(Settings, KafkaAddress.TopicsRoute, State.ActiveCluster?.Key);
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            if (Ready is not null)
+            {
+                await Ready;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        if (disposed)
+        {
+            return;
+        }
+
+        // Read once the frame is Ready: in an interactive circuit NavigationManager.Uri is the browser's own address, fragment included, while the
+        // prerendering request had none (a browser never sends one).
+        ParseAddress();
+        State.ClusterChanged += OnClusterChangedAsync;
+        ready = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Not keyed on firstRender: a body created before the frame released reads becomes ready after its first render.
+        if (disposed || !ready || started)
+        {
+            return;
+        }
+
+        started = true;
+        await LoadAsync();
+    }
+
+    private void ParseAddress()
+    {
+        string uri = Navigation.Uri;
+
+        anchorTopic = KafkaAddress.Get(uri, KafkaAddress.TopicParameter);
+        bool anchored = KafkaTopicName.IsValid(anchorTopic)
+            && int.TryParse(KafkaAddress.Get(uri, KafkaAddress.PartitionParameter), NumberStyles.None, CultureInfo.InvariantCulture, out anchorPartition)
+            && long.TryParse(KafkaAddress.Get(uri, KafkaAddress.OffsetParameter), NumberStyles.None, CultureInfo.InvariantCulture, out anchorOffset);
+
+        seed = anchored ? null : KafkaAddress.ReadSeed(uri, KafkaCorrelationService.MaxSeedValueLength);
+        mode = anchored ? EntryMode.Anchor : seed is not null ? EntryMode.Seed : EntryMode.None;
+
+        addressTopics = [.. (KafkaAddress.Get(uri, KafkaAddress.TopicsParameter) ?? string.Empty)
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.Ordinal)
+            .Take(KafkaStudioText.MaxSearchTopics + 1)];
+
+        includeUncommitted = string.Equals(KafkaAddress.Get(uri, KafkaAddress.IsolationParameter), KafkaAddress.UncommittedValue, StringComparison.Ordinal);
+
+        if (KafkaAddress.TryParseWindow(KafkaAddress.Get(uri, KafkaAddress.FromParameter), out DateTimeOffset from)
+            && KafkaAddress.TryParseWindow(KafkaAddress.Get(uri, KafkaAddress.ToParameter), out DateTimeOffset to)
+            && from < to)
+        {
+            addressFrom = from;
+            addressTo = to;
+        }
+        else
+        {
+            addressFrom = addressTo = null;
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        if (disposed || mode == EntryMode.None || !Capabilities.IsEnabled(KafkaCapability.SearchRecords) || State.ActiveCluster is not { } active)
+        {
+            loading = false;
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        try
+        {
+            anchor = null;
+            anchorNote = null;
+            anchorMissing = false;
+            keys = CorrelationKeySet.Empty;
+
+            if (mode == EntryMode.Anchor)
+            {
+                switch (await Related.OpenAnchorAsync(active, anchorTopic, anchorPartition, anchorOffset, lifetime.Token))
+                {
+                    case KafkaRelatedAnchorResult.Opened opened:
+                        anchor = opened.Match;
+                        keys = opened.Keys;
+                        break;
+                    case KafkaRelatedAnchorResult.Refused refused:
+                        anchorNote = refused.Text;
+                        break;
+                    default:
+                        anchorMissing = true;
+                        break;
+                }
+            }
+            else
+            {
+                keys = seed!.Keys;
+            }
+
+            if (disposed)
+            {
+                return;
+            }
+
+            if (anchorMissing || (mode == EntryMode.Anchor && anchor is null))
+            {
+                // Nothing to search around: the page says why, and draws no form.
+                loading = false;
+                await InvokeAsync(StateHasChanged);
+                return;
+            }
+
+            SetDefaultWindow();
+
+            IReadOnlyList<string>? topics = await Related.ReadableTopicsAsync(active, anchor?.Topic, seed?.CorrelationKind, seed?.Store, lifetime.Token);
+            readable = topics ?? [];
+
+            if (disposed)
+            {
+                return;
+            }
+
+            // The default set is the first 20 of the readable declared topics; a set the address names is checked as a whole when it is planned.
+            selected.Clear();
+            selected.AddRange(addressTopics.Count > 0 ? addressTopics : readable.Take(KafkaStudioText.MaxSearchTopics));
+            hiddenTopics = addressTopics.Count > 0 ? 0 : Math.Max(0, readable.Count - selected.Count);
+            allowanceLeft = await Search.OwnerBytesLeftThisHourAsync();
+
+            await RefreshLanesAsync();
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception e) when (!disposed)
+        {
+            Logger.LogWarning(e, "The Kafka related-records page failed to read the record");
+            error = KafkaStudioText.ReadFailed;
+        }
+        finally
+        {
+            loading = false;
+        }
+
+        if (!disposed)
+        {
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    /// <summary>The window the page opens with: the address's, else 30 minutes either side of the record, else the last 24 hours.</summary>
+    private void SetDefaultWindow()
+    {
+        if (addressFrom is { } from && addressTo is { } to)
+        {
+            fromUtc = from;
+            toUtc = to;
+            presetMinutes = 0;
+            return;
+        }
+
+        if (anchor is not null)
+        {
+            DateTimeOffset center = Truncate(anchor.Timestamp.ToUniversalTime());
+            fromUtc = center - KafkaCorrelationService.DefaultHalfWindow;
+            toUtc = center + KafkaCorrelationService.DefaultHalfWindow + TimeSpan.FromSeconds(1);
+            presetMinutes = (int) KafkaCorrelationService.DefaultHalfWindow.TotalMinutes;
+            return;
+        }
+
+        toUtc = Truncate(Time.GetUtcNow());
+        fromUtc = toUtc.AddHours(-24);
+        presetMinutes = 1_440;
+    }
+
+    private (string Label, int Minutes)[] Presets() => anchor is not null ? AnchorPresets : SeedPresets;
+
+    private void SetPreset(int minutes)
+    {
+        presetMinutes = minutes;
+        windowProblem = null;
+
+        if (anchor is not null)
+        {
+            DateTimeOffset center = Truncate(anchor.Timestamp.ToUniversalTime());
+            fromUtc = center.AddMinutes(-minutes);
+            toUtc = center.AddMinutes(minutes).AddSeconds(1);
+        }
+        else
+        {
+            toUtc = Truncate(Time.GetUtcNow());
+            fromUtc = toUtc.AddMinutes(-minutes);
+        }
+    }
+
+    private void SetCustom(string? from, string? to)
+    {
+        customFrom = from ?? string.Empty;
+        customTo = to ?? string.Empty;
+
+        if (!DateTime.TryParseExact(customFrom, LocalFormat, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out DateTime start)
+            || !DateTime.TryParseExact(customTo, LocalFormat, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out DateTime end))
+        {
+            windowProblem = "Enter both times of the window.";
+            return;
+        }
+
+        DateTimeOffset newFrom = new(DateTime.SpecifyKind(start, DateTimeKind.Utc));
+        DateTimeOffset newTo = new(DateTime.SpecifyKind(end, DateTimeKind.Utc));
+        windowProblem = new KStudio.Core.Windows.KafkaWindow(newFrom, newTo).Problem;
+
+        if (windowProblem is null)
+        {
+            fromUtc = newFrom;
+            toUtc = newTo;
+            presetMinutes = 0;
+        }
+    }
+
+    private TimeZoneInfo PreferenceZone()
+    {
+        try
+        {
+            return TimeZoneInfo.FindSystemTimeZoneById(Studio.SelectedTimeZoneId);
+        }
+        catch (Exception e) when (e is TimeZoneNotFoundException or InvalidTimeZoneException)
+        {
+            return TimeZoneInfo.Local;
+        }
+    }
+
+    private static DateTimeOffset Truncate(DateTimeOffset value) => new(value.UtcTicks - (value.UtcTicks % TimeSpan.TicksPerSecond), TimeSpan.Zero);
+
+    private KafkaRelatedInput InputFor(KafkaClusterEntry active) =>
+        new(
+            active,
+            seed is not null ? seed.Subject : KafkaRelatedSubject.Anchor(anchorTopic ?? string.Empty, anchorPartition, anchorOffset),
+            keys,
+            [.. selected],
+            fromUtc,
+            toUtc,
+            includeUncommitted);
+
+    /// <summary>Builds each topic's query without the engine (every gate runs): what the lanes show before the visitor presses the button.</summary>
+    private async Task RefreshLanesAsync()
+    {
+        if (State.ActiveCluster is not { } active || keys.IsEmpty)
+        {
+            lanes = [];
+            return;
+        }
+
+        KafkaRelatedPrepareResult prepared = await Related.PrepareAsync(InputFor(active), lifetime.Token);
+
+        switch (prepared)
+        {
+            case KafkaRelatedPrepareResult.Refused refused:
+                lanes = [];
+                refusal = refused.Text;
+                break;
+            case KafkaRelatedPrepareResult.Prepared ok:
+                lanes = ok.Value.Lanes;
+                refusal = null;
+                break;
+        }
+    }
+
+    private async Task ToggleTopicAsync(string name, bool on)
+    {
+        if (busy)
+        {
+            return;
+        }
+
+        if (on && !selected.Contains(name, StringComparer.Ordinal) && selected.Count < KafkaStudioText.MaxSearchTopics)
+        {
+            selected.Add(name);
+        }
+        else if (!on)
+        {
+            selected.Remove(name);
+        }
+
+        hiddenTopics = Math.Max(0, readable.Count - selected.Count);
+        planned = null;
+
+        try
+        {
+            await RefreshLanesAsync();
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception e) when (!disposed)
+        {
+            Logger.LogWarning(e, "The Kafka related-records page failed to prepare its topics");
+            refusal = KafkaStudioText.SearchFailed;
+        }
+
+        if (!disposed)
+        {
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task OnClusterChangedAsync()
+    {
+        if (disposed || running)
+        {
+            return;
+        }
+
+        selected.Clear();
+        readable = [];
+        lanes = [];
+        planned = null;
+        result = null;
+        progress = null;
+        matches.Clear();
+        duplicates = [];
+        anchor = null;
+        keys = CorrelationKeySet.Empty;
+        loading = true;
+        await InvokeAsync(StateHasChanged);
+        await LoadAsync();
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // Planning and starting
+    // ------------------------------------------------------------------------------------------------
+
+    private async Task SearchAsync()
+    {
+        if (!CanSearch || State.ActiveCluster is not { } active)
+        {
+            return;
+        }
+
+        await PlanAndStartAsync(InputFor(active) with { SearchAllPartitions = false });
+    }
+
+    private async Task ContinueAsync()
+    {
+        if (busy || result is null || planned is null || result.Cursor.IsEmpty)
+        {
+            return;
+        }
+
+        // The same cluster, topics, window, keys and per-topic searches; the cursor stays in memory and never enters the address.
+        long records = result.Records;
+        await PlanAndStartAsync(planned.Input with { ContinueFrom = result.Cursor }, records);
+    }
+
+    private async Task PlanAndStartAsync(KafkaRelatedInput input, long? continuing = null)
+    {
+        planning = true;
+        refusal = null;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            KafkaRelatedPlanResult plan = await Related.PlanAsync(input, lifetime.Token);
+
+            if (plan is KafkaRelatedPlanResult.Refused refused)
+            {
+                refusal = refused.Text;
+                return;
+            }
+
+            planned = ((KafkaRelatedPlanResult.Planned) plan).Value;
+            lanes = planned.Lanes;
+            pendingContinuation = continuing;
+
+            if (planned.Plan.Estimate.NeedsConfirmation)
+            {
+                confirmOpen = true;
+                return;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception e) when (!disposed)
+        {
+            Logger.LogWarning(e, "The Kafka related-records page failed to plan a search");
+            refusal = KafkaStudioText.SearchFailed;
+            return;
+        }
+        finally
+        {
+            planning = false;
+
+            if (!disposed)
+            {
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+
+        await StartRunAsync(planned, confirmed: false);
+    }
+
+    private async Task ConfirmedAsync(string _)
+    {
+        confirmOpen = false;
+        await InvokeAsync(StateHasChanged);
+
+        if (planned is not null)
+        {
+            await StartRunAsync(planned, confirmed: true);
+        }
+    }
+
+    private async Task CancelledAsync()
+    {
+        confirmOpen = false;
+        pendingContinuation = null;
+
+        try
+        {
+            if (planned is not null)
+            {
+                await Related.NotConfirmedAsync(planned);
+            }
+        }
+        catch (Exception e) when (!disposed && e is not OperationCanceledException)
+        {
+            Logger.LogWarning(e, "The Kafka related-records page failed to record a cancelled confirmation");
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Starts the planned search and reads its batches until it ends. Rendering never paces the reader: the engine's batcher sends at most four a second.</summary>
+    private async Task StartRunAsync(KafkaRelatedPlanned toStart, bool confirmed)
+    {
+        KafkaSearchRun? startedRun = null;
+
+        try
+        {
+            KafkaRelatedStartResult start = await Related.StartAsync(toStart, confirmed, lifetime.Token);
+
+            if (start is KafkaRelatedStartResult.Refused refused)
+            {
+                refusal = refused.Text;
+                await InvokeAsync(StateHasChanged);
+                return;
+            }
+
+            startedRun = run = ((KafkaRelatedStartResult.Running) start).Run;
+            running = true;
+            matches.Clear();
+            duplicates = [];
+            result = null;
+            progress = null;
+            continuedAfter = pendingContinuation;
+            pendingContinuation = null;
+            await InvokeAsync(StateHasChanged);
+
+            await foreach (KafkaScanBatch batch in startedRun.ReadBatchesAsync(lifetime.Token))
+            {
+                matches.AddRange(batch.NewMatches);
+                progress = batch.Progress;
+                duplicates = KafkaDuplicateFinder.Find(matches);
+
+                if (batch.Final is { } final)
+                {
+                    result = final;
+                    startedRun.Complete(final);
+                }
+
+                if (disposed)
+                {
+                    break;
+                }
+
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // The visitor left the page: the run is disposed below, which records the scan.
+        }
+        catch (Exception e) when (disposed && StudioLiveUpdates.IsInteropUnavailable(e))
+        {
+            // The tab went away while drawing: nothing left to draw to. A live page logs the failure and says so below.
+        }
+        catch (Exception e) when (!disposed)
+        {
+            Logger.LogWarning(e, "The Kafka related-records page failed while reading a search");
+            refusal = KafkaStudioText.SearchFailed;
+        }
+        finally
+        {
+            running = false;
+            run = null;
+
+            if (startedRun is not null)
+            {
+                await startedRun.DisposeAsync();
+            }
+        }
+
+        if (!disposed)
+        {
+            try
+            {
+                allowanceLeft = await Search.OwnerBytesLeftThisHourAsync();
+                await InvokeAsync(StateHasChanged);
+            }
+            catch (Exception e) when (e is OperationCanceledException or ObjectDisposedException || StudioLiveUpdates.IsInteropUnavailable(e))
+            {
+                // Gone while the line refreshed.
+            }
+        }
+    }
+
+    private Task StopAsync()
+    {
+        run?.Stop();
+        return Task.CompletedTask;
+    }
+
+    private string ConfirmTitle() =>
+        planned is null ? "Confirm" : $"Read about {KafkaDisplay.Count(planned.Plan.Estimate.Offsets, "offset")}?";
+
+    private string ConfirmMessage() =>
+        planned is null
+            ? string.Empty
+            : $"About {(planned.Plan.Estimate.Bytes is { } bytes ? KafkaDisplay.Bytes(bytes) : "an unknown number of bytes")} will be read from the cluster, "
+              + $"which counts against your hourly allowance ({(allowanceLeft is { } left ? KafkaDisplay.Bytes(left) : "—")} left) and may cost money on a managed cluster.";
+
+    private IReadOnlyList<string> PlanNotes(KafkaRelatedPlanned shown)
+    {
+        IEnumerable<string> drawnBelow = result is null ? [] : KafkaSearchText.Caveats(result);
+
+        return [.. shown.Plan.Notes.Select(static x => x.Text).Distinct(StringComparer.Ordinal).Except(drawnBelow, StringComparer.Ordinal)];
+    }
+
+    private static string EstimateText(KafkaRelatedPlanned shown)
+    {
+        KafkaScanEstimate estimate = shown.Plan.Estimate;
+        string bytes = estimate.Bytes is { } size ? ", about " + KafkaDisplay.Bytes(size) : string.Empty;
+
+        return $"{estimate.Basis} About {KafkaDisplay.Count(estimate.Offsets, "offset")}{bytes} in {KafkaDisplay.Count(estimate.Partitions, "partition")}.";
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // The timeline
+    // ------------------------------------------------------------------------------------------------
+
+    private IReadOnlyList<KafkaTimelineLane> DrawnLanes() =>
+        KafkaRelatedView.Lanes(lanes, matches, result, running, planned is not null, anchor?.Topic);
+
+    private KafkaTimelineModel Strip() =>
+        KafkaRelatedView.Strip(DrawnLanes(), matches, planned?.Input.From ?? fromUtc, planned?.Input.To ?? toUtc, anchor);
+
+    private bool IsAnchor(KafkaMatch match) =>
+        anchor is not null && string.Equals(KafkaRelatedView.RowKey(anchor), KafkaRelatedView.RowKey(match), StringComparison.Ordinal);
+
+    private string MatchedByText(KafkaMatch match)
+    {
+        if (State.ActiveCluster is not { } active)
+        {
+            return string.Empty;
+        }
+
+        if (!fieldsByTopic.TryGetValue(match.Topic, out IReadOnlyList<CorrelationField>? fields))
+        {
+            fields = fieldsByTopic[match.Topic] = Related.FieldsOf(active, match.Topic);
+        }
+
+        return string.Join(", ", KafkaRelatedView.MatchedBy(match, fields, keys));
+    }
+
+    private string RecordHref(KafkaMatch match) =>
+        KafkaAddress.Href(
+            Settings,
+            KafkaAddress.RecordRoute,
+            State.ActiveCluster?.Key,
+            (KafkaAddress.TopicParameter, match.Topic),
+            (KafkaAddress.PartitionParameter, match.Partition.ToString(CultureInfo.InvariantCulture)),
+            (KafkaAddress.OffsetParameter, match.Offset.ToString(CultureInfo.InvariantCulture)));
+
+    private string TopicHref(string topic) =>
+        KafkaAddress.Href(Settings, KafkaAddress.TopicRoute, State.ActiveCluster?.Key, (KafkaAddress.TopicParameter, topic));
+
+    private static string TimeTitle(KafkaMatch match) =>
+        match.Timestamp.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss'Z'", CultureInfo.InvariantCulture) + " (" + match.TimestampType + ")";
+
+    public async ValueTask DisposeAsync()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        disposed = true;
+        State.ClusterChanged -= OnClusterChangedAsync;
+
+        try
+        {
+            await lifetime.CancelAsync();
+
+            // The visitor left mid-scan: stop it and record it, once (the run's own flag holds if the reading loop got there first).
+            if (run is { } current)
+            {
+                await current.DisposeAsync();
+            }
+        }
+        finally
+        {
+            lifetime.Dispose();
+        }
+    }
+}
