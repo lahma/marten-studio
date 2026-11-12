@@ -289,7 +289,7 @@ text: [sql-and-catalog.md](docs/maintainers/sql-and-catalog.md#d13).
 anyway. Every studio-generated grid carries a "Show SQL" disclosure instead, which answers the question people actually
 have.
 
-**D15 — Fallout 10.4.0 stable, CHANGELOG.md as the version authority, all four workflows generated, trusted publishing
+**D15 — Fallout's stable channel (10.5.0), CHANGELOG.md as the version authority, all four workflows generated, trusted publishing
 for nuget.org.** See *Build* and *Release engineering* below. The important half is that the version lives in one file
 that a human edits and no tool rewrites, and that the only credential anywhere in the release path lives for minutes.
 
@@ -566,8 +566,7 @@ Complete, as of the bootstrap commit. Versions are centrally pinned in `Director
 | `tests/MartenStudio.Tests`, `tests/PostgresStudio.Tests`, `tests/KStudio.Tests` | `Microsoft.AspNetCore.TestHost` | `10.0.12` | `UseTestServer()` for the endpoint-metadata and startup-guard tests. TestHost rather than Mvc.Testing: those tests never need a `WebApplicationFactory`. |
 | `tests/MartenStudio.Integration.Tests` | `Microsoft.AspNetCore.Mvc.Testing` | `10.0.12` | `WebApplicationFactory` over the real sample host. |
 | `tests/MartenStudio.Integration.Tests`, `tests/PostgresStudio.Integration.Tests` | `Microsoft.Playwright` | `1.62.0` | The browser suites (D19). |
-| `build/` | `Fallout.Common`, `Fallout.Components` | `10.4.0` | The orchestrator; the build project opts out of CPM. |
-| `build/` | `NuGet.Frameworks` | `7.9.0` | Held — see below. |
+| `build/` | `Fallout.Common`, `Fallout.Components` | `10.5.0` | The orchestrator; the build project opts out of CPM. 10.5.0 brings `NuGet.Packaging` and `NuGet.Frameworks` 7.9.0 and `System.Security.Cryptography.Pkcs`/`.Xml` 10.0.13 itself, so `build/` pins nothing else (*Package budget changes* 2026-11-12). |
 
 SourceLink needs no package reference: it is in-SDK on .NET 8 and later.
 
@@ -575,7 +574,7 @@ SourceLink needs no package reference: it is in-SDK on .NET 8 and later.
 
 Every new package, floor move and latest-tested bump needs a dated entry in `docs/maintainers/package-budget-changes.md`
 first. What those entries settled, and the versions held deliberately (xunit.v3 3.2.2, Verify.XunitV3 32.0.0, Fallout
-10.4.0, NuGet.Frameworks 7.9.0), are in
+10.5.0), are in
 [build-and-release.md](docs/maintainers/build-and-release.md#package-budget-changes). Floors follow the latest releases: at a minor
 release the Marten and Npgsql floors may move to the latest tested versions (user, 2026-11-02). Keep a Marten host on
 Marten's own Npgsql (`NpgsqlVersionTests`). Read a package's entries before changing its row.
@@ -603,12 +602,12 @@ Outside those roots: `.github/workflows/` holds the four **generated** workflow 
 
 ## Build
 
-The orchestrator is [Fallout](https://fallout.build) 10.4.0 (stable channel), the maintained hard fork of NUKE. The CLI
+The orchestrator is [Fallout](https://fallout.build) 10.5.0 (stable channel), the maintained hard fork of NUKE. The CLI
 is pinned in `.config/dotnet-tools.json` as `fallout.globaltool` (command `fallout`) and resolves `build/_build.csproj`
 by folder-name convention.
 
-**10.4.0 is not stale, and 11.0.x is not an upgrade.** Do not "update" Fallout; the edge channel would fail to compile
-(`GitHubActionsAttribute.Env`). Full text: [build-and-release.md](docs/maintainers/build-and-release.md#build).
+**Follow the stable channel (10.x), never 11.0.x.** 11.0.x is the edge channel and sorts higher only as a versioning artifact;
+it would fail to compile (`GitHubActionsAttribute.Env`). Move to a new stable release when it ships. Full text: [build-and-release.md](docs/maintainers/build-and-release.md#build).
 
 ```powershell
 .\build.ps1 Test                           # restore, compile, install browsers if asked, run all four test projects

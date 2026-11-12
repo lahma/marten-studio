@@ -725,3 +725,12 @@ write`), would put generated source into a demo that is started with a plain `do
 `WolverineFx.Kafka` 6.61.0 (one release train); its row is unconditional in `Directory.Packages.props` and no project but the sample has it
 in its graph. **No shipped package references it**, and neither `KStudio`, `KStudio.Core`, `KStudio.Wolverine` nor any test project does
 (the adapter's live test runs in `TypeLoadMode.Static` with no handler). Nothing here is packed.
+
+**2026-11-12 — Fallout 10.4.0 → 10.5.0 (stable channel), and `build/` pins nothing besides Fallout.** What: `Fallout.Common`,
+`Fallout.Components` and the `fallout.globaltool` CLI move to the stable channel's 10.5.0. Why: 10.4.0 brought
+`System.Security.Cryptography.Pkcs` and `.Xml` 10.0.10 through `Microsoft.Build.Tasks.Core` 18.0.2 and `NuGet.Packaging` 6.14.3,
+so `build/_build.csproj` restored with 10 NuGet audit warnings: GHSA-2fmv-rv2c-59x7 (moderate) and GHSA-846f-f764-76mx (high) in
+Pkcs, GHSA-7hqp-7c5m-4vq6, GHSA-c399-9853-6jmj and GHSA-r955-8q5j-3h83 (high) in Xml. 10.5.0 brings both at 10.0.13, where all five
+are fixed, and `NuGet.Packaging`/`NuGet.Frameworks` 7.9.0, which is the exit the `NuGet.Frameworks` 7.9.0 pin was waiting for. So
+the upgrade removes a pin instead of adding two (user, 2026-11-12: "use it and minimize extra package pins"). 11.0.x stays out: it
+is the edge channel. Nothing shipped references any of these packages.

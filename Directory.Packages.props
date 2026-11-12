@@ -77,7 +77,7 @@
   <ItemGroup Label="Test - both projects">
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.10.0" />
     <!--
-      Held at 3.x deliberately: xunit.v3 4.0.0 drops VSTest-mode support, which Fallout 10.4.0's
+      Held at 3.x deliberately: xunit.v3 4.0.0 drops VSTest-mode support, which Fallout's
       ITest depends on (it passes `logger trx;LogFileName=` and parses the TeamTest/2010 TRX).
       See AGENTS.md, *Package budget changes*, for the revisit trigger.
     -->
@@ -92,7 +92,7 @@
       the two are not assembly-version compatible - both test projects failed to compile with
       CS1705 ("Microsoft.Testing.Platform ... uses ... which has a higher version than referenced
       assembly"). 2.4.1 depends only on `Microsoft.TestPlatform.ObjectModel`, which is exactly the
-      VSTest bridge Fallout 10.4.0's ITest drives (`logger trx` + `logger GitHubActions`), so it
+      VSTest bridge Fallout's ITest drives (`logger trx` + `logger GitHubActions`), so it
       is the release that matches the rest of the budget rather than the newest one. Pinning
       `Microsoft.Testing.Platform` forward instead would fight xunit.v3's own resolution and is not
       done. Revisit when xunit.v3 and Fallout's ITest both speak Microsoft.Testing.Platform v2.

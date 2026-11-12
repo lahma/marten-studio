@@ -60,7 +60,7 @@ latest-tested move; read a package's entries before changing its row. What they 
 **Held deliberately, and not stale.**
 
 - `xunit.v3` / `xunit.runner.visualstudio` stay at **3.2.2 / 3.1.5** because xunit.v3 4.0.0 drops
-  VSTest-mode support, which is not incidental to Fallout 10.4.0's `ITest` — it *is* the interface. `ITest`
+  VSTest-mode support, which is not incidental to Fallout's `ITest` — it *is* the interface. `ITest`
   passes `logger trx;LogFileName=`, probes each test project for a `GitHubActionsTestLogger` reference
   before adding `logger GitHubActions`, and parses the resulting TRX against the VSTest `TeamTest/2010`
   schema. Taking 4.x would silently degrade CI reporting to "the run passed or it did not". *Exit:* when
@@ -68,29 +68,29 @@ latest-tested move; read a package's entries before changing its row. What they 
 - `Verify.XunitV3` stays at **32.0.0** because 33.x depends on `xunit.v3.extensibility.core` 4.0.1; 32.0.0
   is the last release that depends on 3.2.2. Moving it forward silently forces xunit.v3 4.x and breaks the
   line above. *Exit:* the same one.
-- `Fallout.Common` / `Fallout.Components` stay at **10.4.0** because 11.0.x is the *edge* channel and sorts
-  higher only as a versioning artifact — see *Build*. *Exit:* when the stable channel moves past 10.4.
-- `NuGet.Frameworks` stays pinned at **7.9.0** in `build/_build.csproj`. Fallout evaluates project files
-  in-process (`ITest` asks each test project whether it references `GitHubActionsTestLogger`), which runs
-  the installed SDK's own targets inside the Fallout process; those targets bind `NuGet.Frameworks` by
-  strong name and SDK 10.0.4xx wants 7.9.0.0, while `Fallout.Components` 10.4.0 resolves 6.14.3
-  transitively through `NuGet.Packaging`. App-local assemblies win, so without the pin every `Test` run
-  dies in `[MSBuild]::GetTargetFrameworkIdentifier(net10.0)` — a build that compiles and packs fine but
-  cannot run a single test. Pinned *forward*, because the runtime binds a higher assembly version than the
-  one requested. *Exit:* when Fallout ships a `NuGet.Packaging` new enough to bring 7.9.0 in on its own.
+- `Fallout.Common` / `Fallout.Components` (and the `fallout.globaltool` CLI) follow the *stable* channel, **10.5.0** since
+  2026-11-12, never 11.0.x, which is the *edge* channel and sorts higher only as a versioning artifact — see *Build*.
+  A new stable release is taken when it ships.
+- `NuGet.Frameworks` **is no longer pinned** (2026-11-12). Fallout evaluates project files in-process (`ITest` asks each test
+  project whether it references `GitHubActionsTestLogger`), which runs the installed SDK's own targets inside the Fallout
+  process; those targets bind `NuGet.Frameworks` by strong name, and SDK 10.0.4xx wants 7.9.0.0. Fallout 10.4.0 brought 6.14.3
+  through `NuGet.Packaging`, which shadowed the SDK's copy and made every `Test` run die in
+  `[MSBuild]::GetTargetFrameworkIdentifier(net10.0)`, so `build/` pinned 7.9.0 forward. Fallout 10.5.0 brings `NuGet.Packaging`
+  and `NuGet.Frameworks` 7.9.0 itself, which was the pin's exit. If a later SDK wants a newer `NuGet.Frameworks` than Fallout
+  brings, the same failure returns, and the fix is the same forward pin.
 
 The trusted-publishing exchange uses `Fallout.Common.Utilities.Net` (`CreateRequest`,
 `WithBearerAuthentication`, `WithJsonContent`, `GetResponse`, `AssertResponse`, `GetBodyAsJsonObject`),
-which arrives with `Fallout.Common` 10.4.0 — no new `PackageReference` anywhere.
+which arrives with `Fallout.Common` — no new `PackageReference` anywhere.
 
 ## Build
 
-**10.4.0 is not stale, and 11.0.x is not an upgrade.** Fallout runs two channels: `11.0.x` is *edge* and
-`10.4.0` is *stable*, which is newer and a feature superset despite sorting lower. The edge CLI ships under
+**Follow the stable channel (10.x), and 11.0.x is not an upgrade.** Fallout runs two channels: `11.0.x` is *edge* and
+`10.x` is *stable* (10.5.0 since 2026-11-12), which is newer and a feature superset despite sorting lower. The edge CLI ships under
 a different package id (`Fallout.Cli`), which is why `fallout.globaltool` has no 11.x and nothing is
 behind. Moving `build/` to 11.0.x would fail to compile — `GitHubActionsAttribute.Env`, which `NUGET_USER`
 depends on, does not exist there — and would regenerate the workflows backwards to older action versions.
-Do not "update" it.
+Do not "update" to it; move to a new stable release when one ships.
 
 **The Marten version is `Directory.Packages.props`'s, and the build only chooses between two.**
 `MartenStudioMartenFloor` (what the package depends on) and `MartenStudioMartenLatest` (the newest 9.x CI
@@ -164,10 +164,9 @@ another commit of the same version: `AddPostgresStudio`'s parameter type derives
 engine fails in the loader when it is first called, with a `FileNotFoundException` that names the engine and the version
 (measured 2026-11-01). `AddPostgresDiagnostics` needs no guard: nothing is below it.
 
-`build/_build.csproj` restores with `NU1902`/`NU1903` warnings for `System.Security.Cryptography.Xml` and
-`System.Security.Cryptography.Pkcs` 10.0.10, which `Fallout.Components` 10.4.0 brings transitively (seen
-2026-10-15). They are warnings in the orchestrator only — it does not inherit `TreatWarningsAsErrors`, and
-none of it ships — and pinning either package forward would be a budget decision this file has not taken.
+`build/_build.csproj` restores with no warnings. Fallout 10.4.0 brought `System.Security.Cryptography.Xml` and `.Pkcs` 10.0.10
+(NU1902/NU1903: GHSA-2fmv-rv2c-59x7, GHSA-846f-f764-76mx, GHSA-7hqp-7c5m-4vq6, GHSA-c399-9853-6jmj, GHSA-r955-8q5j-3h83);
+10.5.0 brings 10.0.13, where all five are fixed, so no pin is needed (*Package budget changes* 2026-11-12).
 
 The build needs at least one commit: `IHasGitRepository` injects `GitRepository` from the working tree and
 fails with `Could not find commit information` on an empty repository.
