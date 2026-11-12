@@ -94,7 +94,24 @@ public class KafkaHomeTests
         rig.Studio.Navigation.Simulate("kafka?cluster=test&page=2", intercepted: false);
 
         page.WaitForAssertion(() => Names(page, ".ms-k-topic-group-other").Should().HaveCount(50).And.Contain("t149"));
-        rig.ListOffsetCalls.Should().BeLessThanOrEqualTo(4, "the second page is one more pair of reads");
+        page.WaitForAssertion(() => page.Find(".ms-k-topic-group-other .ms-k-span").TextContent.Should().Contain("~1"));
+        rig.ListOffsetCalls.Should().Be(4, "the second page is one more pair of reads");
+    }
+
+    [Fact]
+    public async Task Navigating_to_another_kafka_page_does_not_reload_the_home()
+    {
+        await using KafkaCatalogRig rig = new(studio: o => o.ClusterAuthorizationPolicy = "kafka-topics");
+        rig.Topic("orders", 1, 1);
+        IRenderedComponent<KafkaHome> page = await OpenAsync(rig);
+        page.WaitForAssertion(() => page.Find(".ms-k-span").TextContent.Should().Contain("~1"));
+        int calls = rig.Studio.Authorization.KafkaCalls.Count();
+
+        // The router is already taking the visitor to another page: the old page's handler must not read for an address that is not its own.
+        rig.Studio.Navigation.Simulate("kafka/settings?cluster=test&page=2&filter=x", intercepted: false);
+        await page.InvokeAsync(static () => { });
+
+        rig.Studio.Authorization.KafkaCalls.Count().Should().Be(calls, "a reload asks the policy again; this page has nothing to reload for another page's address");
     }
 
     [Fact]

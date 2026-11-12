@@ -93,6 +93,16 @@ internal static class KafkaAddress
         return null;
     }
 
+    /// <summary>
+    /// Whether an absolute address is the page at <paramref name="route" /> (<c>kafka/topic</c>), below any mount. A page's location handler uses it to
+    /// ignore the address of the page the router is already taking the visitor to: its own query parameters are not that page's business.
+    /// </summary>
+    /// <param name="uri">An absolute address.</param>
+    /// <param name="route">The route below the studio root.</param>
+    public static bool IsPage(string uri, string route) =>
+        Uri.TryCreate(uri, UriKind.Absolute, out Uri? parsed)
+        && parsed.AbsolutePath.TrimEnd('/').EndsWith("/" + route, StringComparison.OrdinalIgnoreCase);
+
     /// <summary>The first value of the query-string parameter <paramref name="name" /> of an absolute address, or <see langword="null" />.</summary>
     /// <param name="uri">An absolute address.</param>
     /// <param name="name">The parameter.</param>

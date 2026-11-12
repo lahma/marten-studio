@@ -603,7 +603,7 @@
     private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
     {
         // The page's own rewrite of the address (after a plan) is not a new address.
-        if (disposed || IsOwnWrite(e.Location) || running)
+        if (disposed || !KafkaAddress.IsPage(e.Location, KafkaAddress.SearchRoute) || IsOwnWrite(e.Location) || running)
         {
             return;
         }

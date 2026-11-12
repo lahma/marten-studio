@@ -317,7 +317,7 @@
     /// <summary>Back and Forward, a pasted link: the address changed to a filter or page this body did not write itself.</summary>
     private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
     {
-        if (disposed)
+        if (disposed || !KafkaAddress.IsPage(e.Location, KafkaAddress.TopicsRoute))
         {
             return;
         }

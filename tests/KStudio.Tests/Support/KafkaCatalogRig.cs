@@ -20,13 +20,13 @@ internal sealed class KafkaCatalogRig : IAsyncDisposable
     /// <summary>The cluster entry the studio lists: the engine harness's own cluster, unless a test registers another and names it.</summary>
     public KafkaClusterEntry Entry { get; }
 
-    public KafkaCatalogRig(Action<KafkaEngineOptions>? engine = null, Action<KafkaStudioOptions>? studio = null, string cluster = EngineHarness.ClusterKey)
+    public KafkaCatalogRig(Action<KafkaEngineOptions>? engine = null, Action<KafkaStudioOptions>? studio = null, string cluster = EngineHarness.ClusterKey, Action<Microsoft.Extensions.DependencyInjection.IServiceCollection>? services = null)
     {
         Entry = new KafkaClusterEntry(cluster, null, "Test cluster", "production");
         Clock = new ManualTimeProvider(new DateTimeOffset(2026, 11, 8, 6, 0, 0, TimeSpan.Zero));
         Cluster = new FakeKafkaCluster(Clock);
         Engine = EngineHarness.ForWire(new FakeKafkaWire(Cluster, EngineHarness.ClusterKey), Clock, TimeSpan.FromSeconds(5), engine);
-        Studio = new KafkaStudioHarness(studio, null, [Entry], Engine);
+        Studio = new KafkaStudioHarness(studio, services, [Entry], Engine);
     }
 
     public ManualTimeProvider Clock { get; }

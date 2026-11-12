@@ -8,6 +8,11 @@ using KStudio.Components.Pages;
 using KStudio.Core.Wire;
 using KStudio.Tests.Support;
 
+using MartenStudio.Tests.Support;
+
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+
 namespace KStudio.Tests.Components;
 
 /// <summary>The topic overview (D-UI decision 8), rendered against the real engine over the fake broker.</summary>
@@ -43,6 +48,52 @@ public class KafkaTopicPageTests
         refused.Find(".ms-empty-description").TextContent.Should().Be("Topic secret was not found, or is not available to you.");
         refused.Markup.Should().NotContain("Partitions", "a refused topic shows nothing about itself");
         rig.BrokerCalls.Should().Be(callsAfterMissing, "the policy refused the topic before any broker call was made for it");
+    }
+
+    [Fact]
+    public async Task A_not_available_topic_is_not_polled_and_logs_9603_once()
+    {
+        CapturingLoggerProvider logs = new();
+        await using KafkaCatalogRig rig = new(
+            studio: o => o.ClusterAuthorizationPolicy = "kafka-topics",
+            services: services => services.AddLogging(builder => builder.SetMinimumLevel(LogLevel.Trace).AddProvider(logs)));
+        rig.Studio.Authorization.AllowKafka(static resource => resource.Topic != "secret");
+        rig.Studio.Context.Options.RefreshInterval = TimeSpan.FromMilliseconds(50);
+        rig.Topic("orders", 1, 1);
+
+        // The home polls, and asks the policy about "orders" at every tick: that is the clock. "secret" is not in the cluster, so the home never asks about it.
+        await rig.Studio.Context.ReadyAsync();
+        rig.Studio.Navigation.Simulate("kafka?cluster=test", intercepted: false);
+        IRenderedComponent<KafkaHome> home = rig.Studio.Context.Render<KafkaHome>();
+        home.WaitForAssertion(() => home.Markup.Should().Contain("orders"));
+
+        rig.Studio.Navigation.Simulate("kafka/topic?cluster=test&topic=secret", intercepted: false);
+        IRenderedComponent<KafkaTopicPage> page = rig.Studio.Context.Render<KafkaTopicPage>();
+        page.WaitForAssertion(() => page.FindAll(".ms-empty").Should().HaveCount(1));
+
+        int Asked() => rig.Studio.Authorization.KafkaCalls.Count(static x => x.Resource.Topic == "orders" && x.Resource.Capability is null);
+        int before = Asked();
+        home.WaitForAssertion(() => Asked().Should().BeGreaterThanOrEqualTo(before + 6));
+
+        rig.Studio.Authorization.KafkaCalls.Count(static x => x.Resource.Topic == "secret").Should().Be(1, "a topic that is not available is read again only when the address or the cluster changes");
+        logs.Entries.Count(static x => x.EventId.Id == 9603).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Navigating_to_another_kafka_page_does_not_reload_the_topic()
+    {
+        await using KafkaCatalogRig rig = new(studio: o => o.ClusterAuthorizationPolicy = "kafka-topics");
+        rig.Topic("orders", 1, 1);
+        rig.Topic("other", 1, 1);
+        IRenderedComponent<KafkaTopicPage> page = await OpenAsync(rig, "orders");
+        page.WaitForAssertion(() => page.FindAll("table.ms-k-partitions tbody tr").Should().HaveCount(1));
+        int calls = rig.Studio.Authorization.KafkaCalls.Count();
+
+        rig.Studio.Navigation.Simulate("kafka/settings?cluster=test&topic=other", intercepted: false);
+        await page.InvokeAsync(static () => { });
+
+        rig.Studio.Authorization.KafkaCalls.Count().Should().Be(calls, "the topic in an address that is not this page's is nobody's business here");
+        page.Markup.Should().Contain("orders");
     }
 
     [Fact]

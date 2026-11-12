@@ -28,6 +28,33 @@ public class AddKafkaStudioTests
         provider.GetServices<IHostedService>().OfType<KafkaStudioStartupGuard>().Single().StartAsync(Ct);
 
     [Fact]
+    public void The_real_registration_resolves_every_scoped_service_a_page_injects()
+    {
+        using ServiceProvider provider = Build(static services =>
+        {
+            services.AddHttpContextAccessor();
+            services.AddSingleton(Npgsql.NpgsqlDataSource.Create("Host=127.0.0.1;Port=1;Database=none;Username=none;Password=none"));
+            services.AddPostgresStudio();
+            services.AddKafkaStudio(static options => options.AddCluster("primary", new Confluent.Kafka.ClientConfig { BootstrapServers = "127.0.0.1:1" }));
+        });
+        using IServiceScope scope = provider.CreateScope();
+
+        foreach (Type service in new[]
+        {
+            typeof(KStudio.Services.KafkaState),
+            typeof(KStudio.Services.KafkaAuthorization),
+            typeof(KStudio.Services.KafkaActionLog),
+            typeof(KStudio.Services.KafkaCatalogService),
+            typeof(KStudio.Services.KafkaOwnerKey),
+            typeof(KStudio.Services.KafkaSearchService),
+            typeof(KStudio.Services.KafkaRecordService),
+        })
+        {
+            scope.ServiceProvider.GetRequiredService(service).Should().NotBeNull(service.Name);
+        }
+    }
+
+    [Fact]
     public async Task Kafka_without_a_studio_refuses_to_start()
     {
         using ServiceProvider provider = Build(static services => services.AddKafkaStudio());

@@ -318,6 +318,13 @@
 
     private async Task TickAsync(CancellationToken cancellationToken)
     {
+        // A topic that is not available (missing, invalid or refused) is read again only when the address or the cluster changes: every read of a refused
+        // one is a refusal, logged as 9603 at Warning. A withheld one keeps polling - the broker may answer next time.
+        if (result is KafkaTopicPageResult.NotAvailable)
+        {
+            return;
+        }
+
         await LoadAsync(cancellationToken);
         refreshError = null;
         await InvokeAsync(StateHasChanged);
@@ -383,7 +390,7 @@
 
     private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
     {
-        if (disposed)
+        if (disposed || !KafkaAddress.IsPage(e.Location, KafkaAddress.TopicRoute))
         {
             return;
         }

@@ -281,7 +281,7 @@
 
     private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
     {
-        if (disposed)
+        if (disposed || !KafkaAddress.IsPage(e.Location, KafkaAddress.RecordRoute))
         {
             return;
         }
