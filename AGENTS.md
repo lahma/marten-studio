@@ -59,6 +59,7 @@ document for your area before writing code in it. All documents are in `docs/mai
 | Build, packages, versions, CI, release, agent routing | [build-and-release.md](docs/maintainers/build-and-release.md) (D3, D15, D21) and [hard-rules.md](docs/maintainers/hard-rules.md) rules 1, 2, 8, 9 and 16 (D1, D15 and D20 are whole above) |
 | Tests | [testing.md](docs/maintainers/testing.md) (D16, D19) |
 | KStudio: the engine (KStudio.Core), Kafka reads, scans, predicates, decoders, redaction | [kstudio.md](docs/maintainers/kstudio.md) (D36-D41) and [testing.md](docs/maintainers/testing.md) (the KStudio suites) |
+| KStudio: the module seams, Kafka pages, its authorization, capabilities and audit | [kstudio.md](docs/maintainers/kstudio.md) (D34, D35, and the engine's), [architecture.md](docs/maintainers/architecture.md) (D11, D30), [authorization.md](docs/maintainers/authorization.md) (D4, D5), [ui.md](docs/maintainers/ui.md) (D24-D26) and [hard-rules.md](docs/maintainers/hard-rules.md) rules 5, 6, 7 and 16 |
 | The evidence and history behind a rule | [decision-notes.md](docs/maintainers/decision-notes.md); the dated budget entries are in [package-budget-changes.md](docs/maintainers/package-budget-changes.md) |
 
 ## Hard rules
@@ -111,6 +112,8 @@ Each rule's full text, with its lists of events, tests and history, is in
    health-check extension, `PostgresDiagnosticsOptions`, the six inbound types (`IPostgresDatabaseSource`,
    `IPostgresCapacitySource` and their records), the D31 read model and, since 1.0, the connection history's four
    (`AddPostgresConnectionHistory`, its options, `IPostgresConnectionHistoryStore` and `PostgresConnectionSample`).
+   KStudio's is one static class, two classes and one record (`AddKafkaStudio`, `KafkaStudioOptions`,
+   `KafkaStudioCapabilities`, `KafkaTopicResource`), in a baseline of its own; KStudio.Core's is its own too.
    Anything else that appears in any baseline is a mistake, not a feature.
    Never hand-edit a `.verified.txt`: run the test, read the diff deliberately, say in the pull request what moved and
    why, then accept the baseline. The read model is extend-only (D31). **`docs/health/codes.md` is a contract too, and a
@@ -184,7 +187,11 @@ Each rule's full text, with its lists of events, tests and history, is in
     `InternalsVisibleTo`, and is packed with an **exact** dependency on its own PostgresStudio build (`[x.y.z]`, D30),
     which `Pack` asserts in the nuspec and `AddMartenStudio()` checks at startup. A page route belongs to one assembly
     of a studio, below that assembly's own compile-time root (`/postgres`, `/marten`), and the route table refuses a
-    route two pages claim. Full text: hard rule 16.
+    route two pages claim. PostgresStudio, PostgresStudio.Diagnostics and MartenStudio reference no `Confluent.*`,
+    `Wolverine*` or `KStudio*` assembly or package, and their source names no Kafka (`ModuleNeutralityTests`); KStudio
+    references no Marten, JasperFx, Weasel or Wolverine, and its built assembly no `Confluent.*` (the client is
+    KStudio.Core's). A module's pages sit below its own root, which stays a segment under the mount. Full text: hard
+    rule 16.
 
 17. **In KStudio, a read never writes.** No client the engine builds may create a topic, commit or store an offset, join
     or subscribe a group, or run a host's builder delegate; every assign carries explicit offsets, and the wire seam has
@@ -387,7 +394,8 @@ packed with `PostgresStudio.Diagnostics [x.y.z]` and `AddPostgresStudio()` first
 the engine themselves: one registration per container, `AddPostgresDiagnostics()` refused beside either studio. Settings
 split in two seams, `IDiagnosticsSettings` for the engine and `IStudioSettings` for the studio; a studio's one options
 object answers both. PostgresStudio browses the application's own `NpgsqlDataSource` registrations, never a
-connection string, and is asked against its own `PostgresStudioResource`. One studio per process. The public
+connection string, and is asked against its own `PostgresStudioResource`. One studio per process. A module (D34) is not a second studio: it
+joins the registered studio's shell, mount and circuit. The public
 `AddMartenStudio`'s own body stays free of PostgresStudio types (`PostgresStudioVersionGuardTests` scans its IL).
 `PostgresStudioResource` has no tenant and is deliberately unrelated to `MartenStoreResource`: a handler written for one
 must never be handed the other. Shared sentences come from `IStudioSettings.Text` (`StudioText`), so no Marten Studio
@@ -424,8 +432,26 @@ sentinel tests hold all of this. The gate is D29's `Database` (the sessions part
 removes every secret before anything is read and keeps, logs and audits nothing. Full text:
 [architecture.md](docs/maintainers/architecture.md#d33).
 
-**D34 and D35 are reserved** for KStudio's shell seams and its authorization; they land with the shell (KStudio
-M2).
+**D34 — A module joins the registered studio's shell: KStudio is one.** `AddKafkaStudio()` adds a module to the studio the host
+registered, `AddMartenStudio()` or `AddPostgresStudio()`, and refuses to start without one; there is no
+`MapKafkaStudio()`, because the studio's own map call serves the module's pages. A module is an internal
+`IStudioModule` that the shell composes into its descriptor at first resolution, so registration is order-independent
+and a host with no module resolves the very descriptor it did before. A module's pages keep their root as a segment
+under the mount (`{mount}/kafka/…`), its rail section goes before the host's last, and every rail title and label is
+unique. On a module's pages the header draws the module's scope selector and no Find box, the host's scope gate and
+address rewrite are skipped (keyed on the page's assembly, never on a URL), and the host's scope waits in memory; ids
+and scope travel in the query string (D9). A module's audit entries carry a scope kind and are judged only by the
+module's own gate; its words, capabilities and trademark line are its own, and the host's `StudioText` does not move.
+Full text: [kstudio.md](docs/maintainers/kstudio.md#d34).
+
+**D35 — KStudio is authorized on a resource of its own, by policies of its own.** `KafkaTopicResource(Cluster,
+TenantId, Topic, Capability)` is unrelated to `MartenStoreResource` and `PostgresStudioResource`.
+`ClusterAuthorizationPolicy` is asked on every call, once per topic; `CapabilityAuthorizationPolicy` is asked for each
+capability use, once per topic, and falls back to the cluster policy. Neither ever falls back to the host studio's
+policies, which are written for the host's resources. The host studio's `AuthorizationPolicy` decides who gets in, and
+its `ReadOnly` turns every Kafka capability off. `KafkaStudioCapabilities` default to `false`, metadata needs none, and
+a startup guard refuses a capability that no policy answers. A request naming a refused topic is refused whole, never
+silently narrowed. Full text: [kstudio.md](docs/maintainers/kstudio.md#d35).
 
 **D36 — KStudio.Core is the Kafka engine: Confluent.Kafka alone, behind a wire seam that exists for the fake.** It holds
 the catalog, window resolution, the scan engine, predicates, decoders, the governor and redaction, with no ASP.NET Core
@@ -496,10 +522,10 @@ Complete, as of the bootstrap commit. Versions are centrally pinned in `Director
 | all six test projects | `xunit.runner.visualstudio` | `3.1.5` | The VSTest bridge. |
 | all six test projects | `GitHubActionsTestLogger` | `2.4.1` | Held — see below. |
 | all six test projects | `AwesomeAssertions` | `9.6.0` | The MIT fork of FluentAssertions. One assertion library, and **no mocking library**: the data seam is our own set of interfaces, and hand-written fakes are smaller and more auditable than a mocking framework's call-matching DSL. Its namespace is `AwesomeAssertions`, not `FluentAssertions` (verified 2026-09-14); every test project declares it as a global using. |
-| both fast suites (`tests/MartenStudio.Tests`, `tests/PostgresStudio.Tests`) | `bunit` | `2.13.3` | Component tests. |
+| the three fast suites (`tests/MartenStudio.Tests`, `tests/PostgresStudio.Tests`, `tests/KStudio.Tests`) | `bunit` | `2.13.3` | Component tests. |
 | the three fast suites | `Verify.XunitV3` | `32.0.0` | Held — see below. Also the source of each fast suite's `global using Xunit;`, which is why none of them declares one. |
 | the three fast suites | `PublicApiGenerator` | `11.5.4` | The public API snapshots (D20), one per package. |
-| `tests/MartenStudio.Tests`, `tests/PostgresStudio.Tests` | `Microsoft.AspNetCore.TestHost` | `10.0.12` | `UseTestServer()` for the endpoint-metadata and startup-guard tests. TestHost rather than Mvc.Testing: those tests never need a `WebApplicationFactory`. |
+| `tests/MartenStudio.Tests`, `tests/PostgresStudio.Tests`, `tests/KStudio.Tests` | `Microsoft.AspNetCore.TestHost` | `10.0.12` | `UseTestServer()` for the endpoint-metadata and startup-guard tests. TestHost rather than Mvc.Testing: those tests never need a `WebApplicationFactory`. |
 | `tests/MartenStudio.Integration.Tests` | `Microsoft.AspNetCore.Mvc.Testing` | `10.0.12` | `WebApplicationFactory` over the real sample host. |
 | `tests/MartenStudio.Integration.Tests`, `tests/PostgresStudio.Integration.Tests` | `Microsoft.Playwright` | `1.62.0` | The browser suites (D19). |
 | `build/` | `Fallout.Common`, `Fallout.Components` | `10.4.0` | The orchestrator; the build project opts out of CPM. |

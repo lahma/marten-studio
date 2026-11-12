@@ -1,0 +1,113 @@
+@using KStudio.Services
+@implements IDisposable
+@inject KafkaState State
+@inject KafkaAuthorization Authorization
+
+@* Every Kafka page renders its body inside this frame (D34, D35). It draws a spinner until the cluster policy has answered for the cluster
+   in scope (Topic = null), then the body or a notice: a refused cluster's body never runs its OnInitializedAsync, as the host's ScopeAccess
+   rule has it. The frame is a convenience - every KStudio service asks the policy itself (hard rule 5).
+
+   Nothing below the frame starts while the page is prerendered. The body is rendered only after the first render has been delivered to a
+   live circuit (OnAfterRenderAsync is the signal the shell already uses for "this render is interactive": it needs no renderer information
+   a test host may not supply), so a librdkafka connect is not paid twice and no scan can start during a prerender. The prerendered frame
+   draws the spinner and the trademark line. *@
+
+<div>
+    @if (access is FrameAccess.Granted && interactive)
+    {
+        @ChildContent
+    }
+    else if (access is FrameAccess.Denied)
+    {
+        <KafkaClusterNotAuthorized />
+    }
+    else if (access is FrameAccess.NoCluster)
+    {
+        <div class="ms-page">
+            <div class="ms-empty" role="status">
+                <p class="ms-empty-title">No cluster</p>
+                <p class="ms-empty-description">
+                    No Kafka cluster is registered, or none is open to you. A host registers one with
+                    <code>AddKafkaStudio(o => o.AddCluster(...))</code>.
+                </p>
+            </div>
+        </div>
+    }
+    else
+    {
+        <LoadingSpinner />
+    }
+
+    <p class="ms-k-trademark">@KafkaStudioText.Trademark</p>
+</div>
+
+@code {
+    private enum FrameAccess
+    {
+        Unknown,
+        Granted,
+        Denied,
+        NoCluster,
+    }
+
+    private FrameAccess access = FrameAccess.Unknown;
+    private bool interactive;
+    private bool disposed;
+
+    /// <summary>The page's body: rendered once the cluster policy passed and the circuit is interactive.</summary>
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        State.ClusterChanged += OnClusterChanged;
+        await UpdateAccessAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        interactive = true;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Asks the policy about the cluster in scope. A failure is a refusal: the body is not rendered without the policy's answer.</summary>
+    private async Task UpdateAccessAsync()
+    {
+        try
+        {
+            await State.EnsureInitializedAsync();
+
+            KafkaClusterEntry? cluster = State.ActiveCluster;
+            access = cluster is null
+                ? FrameAccess.NoCluster
+                : await Authorization.IsAuthorizedAsync(cluster, topic: null)
+                    ? FrameAccess.Granted
+                    : FrameAccess.Denied;
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            access = FrameAccess.Denied;
+        }
+    }
+
+    private async Task OnClusterChanged()
+    {
+        await UpdateAccessAsync();
+
+        if (!disposed)
+        {
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    public void Dispose()
+    {
+        disposed = true;
+        State.ClusterChanged -= OnClusterChanged;
+    }
+}

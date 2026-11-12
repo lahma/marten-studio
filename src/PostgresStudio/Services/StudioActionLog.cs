@@ -33,24 +33,73 @@ internal sealed class StudioActionLog
     private readonly AuthenticationStateProvider authenticationStateProvider;
     private readonly StudioState state;
     private readonly StudioText text;
+    private readonly IReadOnlyList<IStudioAuditScopeGate> scopeGates;
 
     /// <param name="store">The ring.</param>
     /// <param name="logger">Where events 9200-9203 go.</param>
     /// <param name="authenticationStateProvider">Who is asking.</param>
     /// <param name="state">The circuit's active scope.</param>
     /// <param name="settings">The studio's settings, whose words the events are logged in (<see cref="StudioText.Of" />).</param>
+    /// <param name="scopeGates">The registered modules' audit gates; none in a host with no module.</param>
     public StudioActionLog(
         StudioActionLogService store,
         ILogger<StudioActionLog> logger,
         AuthenticationStateProvider authenticationStateProvider,
         StudioState state,
-        IStudioSettings? settings = null)
+        IStudioSettings? settings = null,
+        IEnumerable<IStudioAuditScopeGate>? scopeGates = null)
     {
         this.store = store;
         this.logger = logger;
         this.authenticationStateProvider = authenticationStateProvider;
         this.state = state;
         text = StudioText.Of(settings);
+        this.scopeGates = scopeGates is null ? [] : [.. scopeGates];
+    }
+
+    /// <summary>
+    /// Placeholder store and database of a module's entry: any code that still judged it by the host's store policy would ask about a
+    /// store no policy recognises, the safe direction.
+    /// </summary>
+    private const string ModulePlaceholder = "(module)";
+
+    /// <summary>
+    /// Records one action of a module into the ring (D34), under the module's own scope rather than the host's. Written on failure as
+    /// well as on success. The ring entry only: the module logs its own event, because the host's templates name a store, a database
+    /// and a tenant.
+    /// </summary>
+    /// <param name="scope">The module's scope: its kind, the label the Activity screen shows and its own value for its gate.</param>
+    /// <param name="action">What was done.</param>
+    /// <param name="target">What it was done to.</param>
+    /// <param name="succeeded">Whether it worked.</param>
+    /// <param name="message">The outcome, or the reason it failed.</param>
+    /// <param name="capability">The capability it required, when it required one.</param>
+    public void RecordModule(
+        StudioModuleAuditScope scope,
+        string action,
+        string target,
+        bool succeeded,
+        string? message = null,
+        string? capability = null)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+
+        store.Record(new StudioActionLogEntry(
+            Timestamp: DateTimeOffset.UtcNow,
+            User: UserName(),
+            StoreKey: ModulePlaceholder,
+            DatabaseId: ModulePlaceholder,
+            TenantId: null,
+            Action: action,
+            Target: target,
+            Succeeded: succeeded,
+            Message: message,
+            Capability: capability)
+        {
+            ScopeKind = scope.Kind,
+            ScopeLabel = scope.Label,
+            ModuleScope = scope.Value,
+        });
     }
 
     /// <summary>
@@ -189,6 +238,7 @@ internal sealed class StudioActionLog
         bool storePolicy = !string.IsNullOrWhiteSpace(authorization.PolicyFor(null));
         System.Security.Claims.ClaimsPrincipal? user = null;
         Dictionary<SweepQuestion, bool> answers = [];
+        Dictionary<string, IStudioAuditSweep?> moduleSweeps = new(StringComparer.Ordinal);
 
         List<StudioActionLogEntry> visible = new(Math.Min(entries.Count, limit));
 
@@ -200,6 +250,30 @@ internal sealed class StudioActionLog
             }
 
             cancellationToken.ThrowIfCancellationRequested();
+
+            // A module's entry (D34) is judged only by its own kind's gate: never by the host's store policy, which is written for the
+            // host's resources, and hidden when no gate answers for its kind (a ring written before a module was removed).
+            if (entry.ScopeKind is not null)
+            {
+                if (!moduleSweeps.TryGetValue(entry.ScopeKind, out IStudioAuditSweep? sweep))
+                {
+                    IStudioAuditScopeGate? gate = scopeGates.FirstOrDefault(x => string.Equals(x.Kind, entry.ScopeKind, StringComparison.Ordinal));
+                    if (gate is not null)
+                    {
+                        user ??= await PrincipalAsync().ConfigureAwait(false);
+                    }
+
+                    sweep = gate?.BeginSweep(user!);
+                    moduleSweeps[entry.ScopeKind] = sweep;
+                }
+
+                if (sweep is not null && await sweep.IsVisibleAsync(entry, cancellationToken).ConfigureAwait(false))
+                {
+                    visible.Add(entry);
+                }
+
+                continue;
+            }
 
             StudioScope scope = new(entry.StoreKey, entry.DatabaseId, entry.TenantId);
 

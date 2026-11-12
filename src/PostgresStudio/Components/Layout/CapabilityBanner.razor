@@ -2,6 +2,7 @@
 @using PostgresStudio.Services.Settings
 @inject StudioCapabilityGuard Capabilities
 @inject IStudioSettings Settings
+@inject StudioDescriptor Descriptor
 
 @if (Capabilities.ReadOnly)
 {
@@ -14,8 +15,8 @@ else
     <button type="button"
             class="ms-chip ms-chip-button"
             popovertarget="ms-capability-popover"
-            aria-label="@($"{Capabilities.EnabledCount} of {Capabilities.Offered.Count} capabilities enabled")">
-        @Capabilities.EnabledCount / @Capabilities.Offered.Count<span class="ms-chip-word"> capabilities</span>
+            aria-label="@($"{EnabledCount} of {OfferedCount} capabilities enabled")">
+        @EnabledCount / @OfferedCount<span class="ms-chip-word"> capabilities</span>
     </button>
 
     @* Native popover: no positioning library, no third-party menu component (AGENTS.md hard rule 3).
@@ -44,6 +45,21 @@ else
                 }
             </ul>
         }
+        @* A module's capabilities (D34): one list each, with the same rows. The host's two lists and its footnote are what they were. *@
+        @foreach (IStudioModule module in Descriptor.Modules.Where(static x => x.Capabilities.Count > 0))
+        {
+            <p class="ms-popover-title" @key="module.Key">@module.CapabilitiesHeading</p>
+            <ul class="ms-capability-list" aria-label="@module.CapabilitiesHeading">
+                @foreach (StudioModuleCapability capability in module.Capabilities)
+                {
+                    <li class="ms-capability @(capability.Configured ? "ms-capability-on" : "ms-capability-off")" @key="capability.Name">
+                        <span class="ms-capability-state" aria-hidden="true">@(capability.Configured ? "on" : "off")</span>
+                        <span class="ms-capability-name">@capability.Name</span>
+                        <code class="ms-capability-option">@OptionParts(capability.Option)</code>
+                    </li>
+                }
+            </ul>
+        }
         <p class="ms-popover-footnote">
             Every one of these is off until the host sets it. <code>@Settings.AllCapabilities()</code>
             turns them all on; <code>@Settings.ReadOnlyOption()</code> turns them all off again.
@@ -52,6 +68,12 @@ else
 }
 
 @code {
+    /// <summary>The capabilities on: the studio's, and each module's that its host switched on (the master switch is off here).</summary>
+    private int EnabledCount => Capabilities.EnabledCount + Descriptor.Modules.Sum(static x => x.Capabilities.Count(static c => c.Configured));
+
+    /// <summary>The capabilities offered: the studio's, and each module's.</summary>
+    private int OfferedCount => Capabilities.Offered.Count + Descriptor.Modules.Sum(static x => x.Capabilities.Count);
+
     private RenderFragment Row(StudioCapability capability) => __builder =>
     {
         bool enabled = Capabilities.IsEnabled(capability);
@@ -67,9 +89,11 @@ else
     /// phone - wraps it between its parts rather than cutting it off or splitting a word. <c>&lt;wbr&gt;</c>
     /// adds no character: the name reads, and copies, exactly as it is written.
     /// </summary>
-    private RenderFragment OptionName(StudioCapability capability) => __builder =>
+    private RenderFragment OptionName(StudioCapability capability) => OptionParts(Capabilities.OptionFor(capability));
+
+    private static RenderFragment OptionParts(string option) => __builder =>
     {
-        string[] parts = Capabilities.OptionFor(capability).Split('.');
+        string[] parts = option.Split('.');
 
         for (int i = 0; i < parts.Length; i++)
         {

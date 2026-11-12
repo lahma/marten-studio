@@ -66,6 +66,14 @@ the reverse; each `Map*Studio()` names the other call to make. Marten Studio's d
 in the store's own databases - a job store, a legacy schema - but a separate plain database of a Marten application
 is not listed.
 
+**KStudio for Apache Kafka®** (preview, unreleased) adds a Kafka section to Marten Studio or Postgres Studio: the
+clusters, topics, partitions and consumer groups your application's own Kafka credentials can describe, and, behind
+capabilities that are off by default, a search for the records you need. Call `AddKafkaStudio()` beside
+`AddMartenStudio()` or `AddPostgresStudio()`; there is no separate map call, and the Kafka pages are served under the
+studio's own path, at `/kafka`. It never creates a topic, never commits an offset, and asks your own policies about every
+cluster and topic it reads. Apache Kafka is a trademark of the Apache Software Foundation. KStudio is not affiliated with
+or endorsed by the Apache Software Foundation.
+
 **Upgrade them together.** The assemblies are one program in several files, so `MartenStudio` depends on exactly its
 own `PostgresStudio` (an exact `[x.y.z]` dependency in the nuspec), and `PostgresStudio` on exactly its own `PostgresStudio.Diagnostics`. A
 central `PackageVersion` for either, if your repository has one, must equal `MartenStudio`'s, or be removed. Under

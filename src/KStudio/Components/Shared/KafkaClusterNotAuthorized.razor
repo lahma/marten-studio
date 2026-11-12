@@ -1,0 +1,13 @@
+@using KStudio.Services
+
+@* What the page frame renders instead of the page when the cluster policy refuses the cluster the visitor is on. Nothing is fetched to draw
+   it, which is the point: the refusal happens before the page body exists, so nothing is read on the visitor's behalf. The cluster is not
+   named - a refusal that described what is behind it would be the leak the policy exists to prevent, and a refused cluster must read like
+   a missing one. *@
+
+<div class="ms-page">
+    <div class="ms-empty" role="alert">
+        <p class="ms-empty-title">Not authorized</p>
+        <p class="ms-empty-description">@KafkaStudioText.ClusterNotAuthorized</p>
+    </div>
+</div>

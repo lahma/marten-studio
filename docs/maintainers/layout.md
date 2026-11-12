@@ -343,6 +343,15 @@ tests/PostgresStudio.Tests/Connection/  The catalogue against the loaded Npgsql,
 src/KStudio.Core/                        KStudio's engine (D36): catalog, window resolution, scan engine, predicates,
                                          decoders, governor and redaction, over Confluent.Kafka behind the internal wire
                                          seam. No ASP.NET Core, no studio, no Npgsql (KStudioCoreFenceTests); not packed (K8)
+src/KStudio/                             The Kafka module's Razor Class Library (D34, D35): AddKafkaStudio(), its options, capabilities
+                                         and resource; no Marten (hard rule 16), no static web assets; not packed (K8)
+src/KStudio/Components/                  The module's components, under _Imports.razor
+src/KStudio/Components/Layout/           The cluster selector the shell draws in its header on Kafka pages
+src/KStudio/Components/Pages/            The Kafka routed pages; each @page must be rooted at /kafka
+src/KStudio/Components/Shared/           The page frame (cluster gate, trademark line) and the disabled-capability notice
+src/KStudio/Internal/                    The version guard and the startup guard
+src/KStudio/Services/                    The module, the cluster scope, authorization, the capability guard, the action log and its gate,
+                                         the log events
 tests/KStudio.Tests/                     KStudio's fast suite: the engine against the hand-written fake broker, the fences
                                          and the public API baseline. No Docker
 src/KStudio.Core/Wire/                   The wire seam (D36): IKafkaWire, the reader, the error values and the neutral records; no
@@ -365,6 +374,12 @@ src/KStudio.Core/Scanning/               The scan engine (D38, D41): plan and es
 src/KStudio.Core/Redaction/              Redaction inside the engine (D40): the built-in header deny-list, the topic's rules and the
                                          redactor every match is made through
 tests/KStudio.Tests/Conventions/         KStudio's fences and convention scans
+tests/KStudio.Tests/Registration/        AddKafkaStudio, the version guard, the startup guard
+tests/KStudio.Tests/Endpoints/           Mounting, endpoint authorization, a host with no data source
+tests/KStudio.Tests/Components/          bUnit: the layout on a Kafka page, the rail, the chip, the frame, Activity
+tests/KStudio.Tests/Services/            Authorization, the capability guard, the cluster scope, the audit gate and action log
+tests/PostgresStudio.Tests/Modules/      The module seam (D34): the composed descriptor, root-keeping routes and a module's audit entries, with fake modules
+tests/MartenStudio.Tests/Settings/       The module seam over Marten Studio's descriptor, with a fake module
 tests/KStudio.Tests/Verify/              KStudio.Core's public API baseline
 tests/KStudio.Tests/Support/             Test helpers the fast suite shares
 tests/KStudio.Tests/Support/FakeKafka/   The hand-written fake broker (D36): topics as logs, transactions, configs, groups and an ACL
@@ -390,4 +405,5 @@ tests/KStudio.Integration.Tests/Catalog/  The catalog as principals with differe
 tests/KStudio.Integration.Tests/Scanning/  The scan engine on real records: stop reasons, transactions, retention before and during a scan, the
                                          governor, the memory ceiling and that a scan writes nothing
 tests/KStudio.Integration.Tests/Search/  Find the message with this id (the M1 exit), as restricted principals
+tests/KStudio.Integration.Tests/Shell/   Live Kafka and Postgres: first navigation creates no topic, commits no offset, writes no row, makes no broker call while prerendering
 ```

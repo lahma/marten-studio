@@ -76,7 +76,9 @@ internal static class StudioCoreRegistration
             marker.RegisteredBy,
             byStudio: true);
 
-        services.TryAddSingleton(descriptor);
+        // The host studio's static descriptor composed with the modules registered beside it, when first resolved (D34): after every
+        // Add*(), so registration is order-independent. With no module that is the very instance registered here.
+        services.TryAddSingleton(provider => StudioModuleComposition.Compose(descriptor, provider.GetServices<IStudioModule>()));
         services.TryAddSingleton(settings);
 
         // Refuses to start an application whose mapped studio nothing authorizes. Registered here rather

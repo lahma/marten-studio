@@ -1,0 +1,37 @@
+@page "/kafka"
+@using KStudio.Services
+@inject KafkaState State
+
+<PageTitle>Kafka clusters</PageTitle>
+
+<KafkaPageFrame>
+    <div class="ms-page">
+        <div class="ms-page-header">
+            <h1 class="ms-page-title">Kafka clusters</h1>
+        </div>
+
+        <p class="ms-muted">
+            The clusters this application's Kafka credentials are registered for. Nothing is connected to until a page asks for it.
+        </p>
+
+        <TableScroll Label="Kafka clusters table">
+            <table class="ms-table">
+                <thead>
+                    <tr>
+                        <th>Cluster</th>
+                        <th>Environment</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (KafkaClusterEntry cluster in State.AvailableClusters)
+                    {
+                        <tr class="ms-table-row" @key="cluster.Key">
+                            <td class="ms-table-cell">@cluster.Label</td>
+                            <td class="ms-table-cell">@(cluster.Environment ?? "-")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </TableScroll>
+    </div>
+</KafkaPageFrame>

@@ -72,7 +72,7 @@ public class StudioRegistrationTests
         (typeof(DiagnosticsRegistrationMarker), ServiceLifetime.Singleton, How.Instance, typeof(DiagnosticsRegistrationMarker)),
         (typeof(DiagnosticsDescriptor), ServiceLifetime.Singleton, How.Instance, typeof(StudioDescriptor)),
         (typeof(IDiagnosticsSettings), ServiceLifetime.Singleton, How.Factory, typeof(IDiagnosticsSettings)),
-        (typeof(StudioDescriptor), ServiceLifetime.Singleton, How.Instance, typeof(StudioDescriptor)),
+        (typeof(StudioDescriptor), ServiceLifetime.Singleton, How.Factory, typeof(StudioDescriptor)),
         (typeof(IStudioSettings), ServiceLifetime.Singleton, How.Factory, typeof(IStudioSettings)),
         (typeof(StudioMappedEndpoints), ServiceLifetime.Singleton, How.Type, typeof(StudioMappedEndpoints)),
         (typeof(IHostedService), ServiceLifetime.Singleton, How.Type, typeof(StudioEndpointAuthorizationGuard)),
@@ -299,6 +299,9 @@ public class StudioRegistrationTests
         [typeof(IStudioSettings)] = typeof(MartenStudioSettings),
         [typeof(StudioLogThrottle)] = typeof(StudioLogThrottle),
         [typeof(IStudioRuntime)] = typeof(MartenStudioRuntime),
+
+        // D34: the shell's descriptor is the host studio's composed with the registered modules when first resolved - the very instance with none.
+        [typeof(StudioDescriptor)] = typeof(StudioDescriptor),
         [typeof(ISqlConsoleService)] = typeof(SqlConsoleService),
         [typeof(HealthMuteKeys)] = typeof(HealthMuteKeys),
 

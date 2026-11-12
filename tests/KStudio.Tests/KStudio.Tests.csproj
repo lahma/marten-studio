@@ -22,6 +22,8 @@
     <PackageReference Include="AwesomeAssertions" />
     <PackageReference Include="Verify.XunitV3" />
     <PackageReference Include="PublicApiGenerator" />
+    <PackageReference Include="bunit" />
+    <PackageReference Include="Microsoft.AspNetCore.TestHost" />
   </ItemGroup>
 
   <!-- Not a package: the shared framework brings the container and logging implementations the engine's real registration is tested
@@ -32,6 +34,8 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/KStudio.Core/KStudio.Core.csproj" />
+    <ProjectReference Include="../../src/KStudio/KStudio.csproj" />
+    <ProjectReference Include="../../src/PostgresStudio/PostgresStudio.csproj" />
     <!-- Only for KafkaLogValueParityTests: StudioLogValue is internal there, and this suite is granted InternalsVisibleTo. -->
     <ProjectReference Include="../../src/PostgresStudio.Diagnostics/PostgresStudio.Diagnostics.csproj" />
   </ItemGroup>
@@ -41,6 +45,25 @@
     <Compile Include="../MartenStudio.Tests/Conventions/SourceScanner.cs" Link="Support/Linked/SourceScanner.cs" />
     <Compile Include="../PostgresStudio.Tests/Support/ManualTimeProvider.cs" Link="Support/Linked/ManualTimeProvider.cs" />
     <Compile Include="../MartenStudio.Tests/Support/CapturingLoggerProvider.cs" Link="Support/Linked/CapturingLoggerProvider.cs" />
+  </ItemGroup>
+
+  <!-- M2: the shell's component context. Postgres Studio's bUnit context and the doubles it is built from are compiled in from the other
+       suites rather than copied (as PostgresStudio.Tests links MartenStudio.Tests'): each names only PostgresStudio's types, so a Kafka page is
+       rendered in a real Postgres Studio shell with KStudio's own services added beside it. -->
+  <ItemGroup>
+    <Compile Include="../PostgresStudio.Tests/Components/PostgresStudioComponentContext.cs" Link="Support/Linked/PostgresStudioComponentContext.cs" />
+    <Compile Include="../PostgresStudio.Tests/Support/PostgresFakes.cs" Link="Support/Linked/PostgresFakes.cs" />
+    <Compile Include="../PostgresStudio.Tests/Support/NoHealthActionService.cs" Link="Support/Linked/NoHealthActionService.cs" />
+    <Compile Include="../MartenStudio.Tests/Support/FakeDatabaseObjectService.cs" Link="Support/Linked/FakeDatabaseObjectService.cs" />
+    <Compile Include="../MartenStudio.Tests/Support/FakeDatabaseObjects.cs" Link="Support/Linked/FakeDatabaseObjects.cs" />
+    <Compile Include="../MartenStudio.Tests/Support/FakeTableRowService.cs" Link="Support/Linked/FakeTableRowService.cs" />
+    <Compile Include="../MartenStudio.Tests/Support/FakeTableRows.cs" Link="Support/Linked/FakeTableRows.cs" />
+    <Compile Include="../MartenStudio.Tests/Support/FakeRelationshipDataService.cs" Link="Support/Linked/FakeRelationshipDataService.cs" />
+    <Compile Include="../MartenStudio.Tests/Support/TestAuthenticationHandler.cs" Link="Support/Linked/TestAuthenticationHandler.cs" />
+    <Compile Include="../MartenStudio.Tests/Support/TestAuthenticationStateProvider.cs" Link="Support/Linked/TestAuthenticationStateProvider.cs" />
+    <Compile Include="../MartenStudio.Tests/Support/TestFileProvider.cs" Link="Support/Linked/TestFileProvider.cs" />
+    <Compile Include="../MartenStudio.Tests/Support/TestPersistentComponentStateStore.cs" Link="Support/Linked/TestPersistentComponentStateStore.cs" />
+    <Compile Include="../MartenStudio.Tests/Health/FakeHealthService.cs" Link="Support/Linked/FakeHealthService.cs" />
   </ItemGroup>
 
 </Project>

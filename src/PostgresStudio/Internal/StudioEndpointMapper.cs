@@ -297,23 +297,26 @@ internal static class StudioEndpointMapper
             return;
         }
 
-        if (RootOf(componentType, pageAssemblies) is not { } root || !IsUnder(rawText, root))
+        if (RootOf(componentType, pageAssemblies) is not { } assembly || !IsUnder(rawText, assembly.CompileTimeRoot))
         {
             return;
         }
 
+        // A module's pages keep their root as a segment under the mount (D34): /orders/list is {mount}/orders/list.
         routeEndpointBuilder.RoutePattern = RoutePatternFactory.Parse(
-            string.Concat(studioPath, rawText.AsSpan(root.Length)));
+            assembly.KeepsRoot
+                ? string.Concat(studioPath, rawText)
+                : string.Concat(studioPath, rawText.AsSpan(assembly.CompileTimeRoot.Length)));
     }
 
-    /// <summary>The compile-time root of <paramref name="componentType" />'s assembly, or <see langword="null" /> when it is not a page assembly.</summary>
-    private static string? RootOf(Type componentType, IReadOnlyList<StudioPageAssembly> pageAssemblies)
+    /// <summary>The page assembly of <paramref name="componentType" />, or <see langword="null" /> when it is not a page assembly.</summary>
+    private static StudioPageAssembly? RootOf(Type componentType, IReadOnlyList<StudioPageAssembly> pageAssemblies)
     {
         foreach (StudioPageAssembly pageAssembly in pageAssemblies)
         {
             if (componentType.Assembly == pageAssembly.Assembly)
             {
-                return pageAssembly.CompileTimeRoot;
+                return pageAssembly;
             }
         }
 

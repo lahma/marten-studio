@@ -23,6 +23,7 @@
     <Project Path="src/PostgresStudio.Diagnostics/PostgresStudio.Diagnostics.csproj" />
     <Project Path="src/PostgresStudio/PostgresStudio.csproj" />
     <Project Path="src/KStudio.Core/KStudio.Core.csproj" />
+    <Project Path="src/KStudio/KStudio.csproj" />
   </Folder>
   <Folder Name="/samples/">
     <Project Path="samples/MartenStudio.SampleDomain/MartenStudio.SampleDomain.csproj" />

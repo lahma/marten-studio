@@ -274,6 +274,14 @@ public class LogLevelsTests
         ["src/PostgresStudio.Diagnostics/Services/PostgresStudioLog.HealthActions.cs : 9223 PostgresStudioHealthActionFailed"] = (Verdict.VisitorAction,
             "9223 in Postgres Studio's words: a finding's action the visitor pressed failed after its gates passed; one line per press."),
 
+        // ---- KS-SHELL: KStudio's own events (D34, D35) -------------------------------------------------
+        ["src/KStudio/Services/KafkaStudioLog.cs : 9602 CapabilityRefusedCore"] = (Verdict.Refusal,
+            "A Kafka capability refusal reaches the service only when a client drives a control the page disabled or hid."),
+        ["src/KStudio/Services/KafkaStudioLog.cs : 9603 ClusterRefusedCore"] = (Verdict.Refusal,
+            "A policy refusal of a cluster or topic on a request that names it; listings are filtered and log nothing."),
+        ["src/KStudio/Services/KafkaStudioLog.cs : 9611 LiveUpdateHandlerFailedCore"] = (Verdict.Throttled,
+            "9220's twin: a Kafka page's own refresh-failure handler threw, on a loop that runs every RefreshInterval; the level comes from the throttle."),
+
         // ---- W5-V1 ------------------------------------------------------------------------------------
         ["src/PostgresStudio.Diagnostics/Services/StudioLog.Maintenance.cs : 9420 BloatMeasureFailed"] = (Verdict.VisitorAction,
             "A bloat measure the visitor pressed failed after its gates and preconditions passed; one line per press, never polled, and the page shows it."),

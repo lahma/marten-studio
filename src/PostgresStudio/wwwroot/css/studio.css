@@ -16770,3 +16770,20 @@ dialog.ms-modal::backdrop {
     font-weight: 400;
     font-size: var(--ms-font-size-xs);
 }
+
+/* ===== KS-SHELL: the module seams (cluster selector, the Kafka capability group, the trademark line) ===== */
+
+/* The Kafka pages end with the Apache Software Foundation disclaimer, small and muted, set apart from the body above it. */
+.ms-k-trademark {
+    margin: var(--ms-space-xl) 0 0;
+    padding-top: var(--ms-space-md);
+    border-top: 1px solid var(--ms-color-border);
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-secondary);
+}
+
+/* The cluster selector reuses .ms-scope-selector for its look; a single cluster is plain text beside its label. */
+.ms-k-cluster-name {
+    font-size: var(--ms-font-size-sm);
+    font-weight: 600;
+}

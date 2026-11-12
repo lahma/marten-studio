@@ -30,6 +30,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/KStudio.Core/KStudio.Core.csproj" />
+    <ProjectReference Include="../../src/KStudio/KStudio.csproj" />
   </ItemGroup>
 
   <!-- The contract suites run here on real brokers: WireContract and WindowContract are compiled into this assembly from the fast suite's
