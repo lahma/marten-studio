@@ -25,21 +25,40 @@ public class DecodingTests
     private static WireRecord Text(string? value, params (string Name, string? Value)[] headers) =>
         Record(value is null ? null : Encoding.UTF8.GetBytes(value), headers);
 
-    private static KafkaDecodedValue Detect(
+    /// <summary>What a match would keep of a value before any rule: the whole value cut to a budget, as the tests below read it.</summary>
+    private sealed record Decoded(
+        KafkaValueKind Kind,
+        string FormatName,
+        int Length,
+        string? Text,
+        bool Truncated,
+        int? SchemaId,
+        string? Preview,
+        KafkaUndecodableReason? Reason,
+        string? ReasonText,
+        CloudEventView? CloudEvent);
+
+    private static Decoded Detect(
         WireRecord record,
         KafkaReadGrant grant = Payload,
         IKafkaRecordDecoder? decoder = null,
         int maxDecode = 1024 * 1024,
         int maxMatch = 64 * 1024,
         Action<Exception>? failed = null,
-        DecodeCounters? counters = null) =>
-        ValueDetector.Detect(record, new ValueDetection(grant, decoder, maxDecode, maxMatch, counters ?? new DecodeCounters(), failed));
+        DecodeCounters? counters = null)
+    {
+        RecordValue value = ValueDetector.DetectValue(record, new ValueDetection(grant, decoder, maxDecode, maxMatch, counters ?? new DecodeCounters(), failed));
+        (string? text, bool truncated) = value.Utf8 is { } bytes ? ValueDetector.KeepText(bytes, maxMatch) : (null, false);
+
+        return new Decoded(
+            value.Kind, value.FormatName, value.Length, text, truncated || value.Cut, value.SchemaId, value.Preview, value.Reason, value.ReasonText, value.CloudEvent);
+    }
 
     [Fact]
     public void A_null_value_is_a_tombstone_and_a_zero_length_value_is_empty_never_an_empty_string()
     {
-        KafkaDecodedValue tombstone = Detect(Text(null));
-        KafkaDecodedValue empty = Detect(Text(string.Empty));
+        Decoded tombstone = Detect(Text(null));
+        Decoded empty = Detect(Text(string.Empty));
 
         tombstone.Kind.Should().Be(KafkaValueKind.Tombstone);
         tombstone.Text.Should().BeNull();
@@ -56,16 +75,17 @@ public class DecodingTests
         Detect(Record([0, 0, 0, 0, 7, 1], ("ce_specversion", "1.0"))).FormatName.Should().StartWith("CloudEvents (binary)");
 
         // 3. Structured by content type.
-        Detect(Text("""{"specversion":"1.0","type":"a"}""", ("content-type", "application/cloudevents+json"))).FormatName.Should().Be("CloudEvents (structured)");
+        Detect(Text("""{"specversion":"1.0","type":"a","data":{"x":1}}""", ("content-type", "application/cloudevents+json"))).FormatName.Should().Be("CloudEvents (structured), data as JSON");
+        Detect(Text("""{"specversion":"1.0","type":"a","data":{"x":1}}""", ("content-type", "application/cloudevents+json")), Envelope).FormatName.Should().Be("CloudEvents (structured)");
 
         // 4. The declared decoder wins over the wire format, JSON and text.
         FixedDecoder decoder = new(KafkaDecodeResult.Text("decoded", "Fixed"));
-        KafkaDecodedValue declared = Detect(Text("""{"a":1}"""), decoder: decoder);
+        Decoded declared = Detect(Text("""{"a":1}"""), decoder: decoder);
         declared.FormatName.Should().Be("Fixed");
         declared.Text.Should().Be("decoded");
 
         // 5. The wire format.
-        KafkaDecodedValue wire = Detect(Record([0, 0, 0, 0, 42, 0xde, 0xad]));
+        Decoded wire = Detect(Record([0, 0, 0, 0, 42, 0xde, 0xad]));
         wire.Kind.Should().Be(KafkaValueKind.ConfluentWireFormat);
         wire.SchemaId.Should().Be(42);
         wire.FormatName.Should().Be("Confluent wire format, schema id 42");
@@ -78,7 +98,7 @@ public class DecodingTests
         Detect(Text("true")).Kind.Should().Be(KafkaValueKind.Json);
         Detect(Text("plain words, not json")).Kind.Should().Be(KafkaValueKind.Text);
         Detect(Text("{ broken json")).Kind.Should().Be(KafkaValueKind.Text, "it does not parse, but it is text");
-        KafkaDecodedValue binary = Detect(Record([0xff, 0xfe, 0x01, 0x02]));
+        Decoded binary = Detect(Record([0xff, 0xfe, 0x01, 0x02]));
         binary.Kind.Should().Be(KafkaValueKind.Binary);
         binary.Preview.Should().Be("0xfffe0102");
     }
@@ -99,7 +119,7 @@ public class DecodingTests
     [Fact]
     public void Under_the_envelope_grant_only_the_kind_and_length_are_kept_never_the_text_or_the_preview()
     {
-        KafkaDecodedValue json = Detect(Text("""{"password":"s3cr3t"}"""), Envelope);
+        Decoded json = Detect(Text("""{"password":"s3cr3t"}"""), Envelope);
         json.Kind.Should().Be(KafkaValueKind.Json);
         json.Length.Should().Be(21);
         json.Text.Should().BeNull();
@@ -108,7 +128,7 @@ public class DecodingTests
         Detect(Text("words"), Envelope).Text.Should().BeNull();
         Detect(Record([0xff, 0xfe]), Envelope).Preview.Should().BeNull();
 
-        KafkaDecodedValue wire = Detect(Record([0, 0, 0, 0, 9, 1, 2, 3]), Envelope);
+        Decoded wire = Detect(Record([0, 0, 0, 0, 9, 1, 2, 3]), Envelope);
         wire.SchemaId.Should().Be(9);
         wire.Preview.Should().BeNull();
     }
@@ -127,7 +147,7 @@ public class DecodingTests
     public void The_declared_decoder_gets_the_record_and_its_json_or_text_is_parsed_by_the_engine_under_its_caps()
     {
         FixedDecoder json = new(KafkaDecodeResult.Json(Encoding.UTF8.GetBytes("""{"decoded":true}"""), "Avro (acme)"));
-        KafkaDecodedValue result = Detect(Record([1, 2, 3], ("h", "v")), decoder: json);
+        Decoded result = Detect(Record([1, 2, 3], ("h", "v")), decoder: json);
 
         result.Kind.Should().Be(KafkaValueKind.Json);
         result.FormatName.Should().Be("Avro (acme)");
@@ -136,7 +156,7 @@ public class DecodingTests
         json.Last!.Headers.Should().ContainSingle().Which.Name.Should().Be("h");
         json.Last.Value.ToArray().Should().Equal(1, 2, 3);
 
-        KafkaDecodedValue notJson = Detect(Text("x"), decoder: new FixedDecoder(KafkaDecodeResult.Json(Encoding.UTF8.GetBytes("{ nope"))));
+        Decoded notJson = Detect(Text("x"), decoder: new FixedDecoder(KafkaDecodeResult.Json(Encoding.UTF8.GetBytes("{ nope"))));
         notJson.Kind.Should().Be(KafkaValueKind.Undecodable);
         notJson.Reason.Should().Be(KafkaUndecodableReason.InvalidJson);
 
@@ -147,13 +167,13 @@ public class DecodingTests
     public void A_decoder_that_throws_or_refuses_is_undecodable_and_never_takes_the_scan_down()
     {
         List<Exception> failures = [];
-        KafkaDecodedValue thrown = Detect(Text("x"), decoder: new ThrowingDecoder(), failed: failures.Add);
+        Decoded thrown = Detect(Text("x"), decoder: new ThrowingDecoder(), failed: failures.Add);
 
         thrown.Kind.Should().Be(KafkaValueKind.Undecodable);
         thrown.Reason.Should().Be(KafkaUndecodableReason.DecoderFailed);
         failures.Should().ContainSingle().Which.Should().BeOfType<InvalidOperationException>();
 
-        KafkaDecodedValue refused = Detect(Text("x"), decoder: new FixedDecoder(KafkaDecodeResult.Undecodable("unknown schema 7")));
+        Decoded refused = Detect(Text("x"), decoder: new FixedDecoder(KafkaDecodeResult.Undecodable("unknown schema 7")));
         refused.Reason.Should().Be(KafkaUndecodableReason.DecoderRefused);
         refused.ReasonText.Should().Be("unknown schema 7");
 
@@ -169,8 +189,9 @@ public class DecodingTests
         Detect(Record([0xff, 0xfe]), decoder: KafkaDecoders.Text).Reason.Should().Be(KafkaUndecodableReason.InvalidUtf8);
         Detect(Text("""{"a":1}"""), decoder: KafkaDecoders.Text).Kind.Should().Be(KafkaValueKind.Text, "forced text is text even when it parses as JSON");
 
-        KafkaDecodedValue ce = Detect(Text("""{"specversion":"1.0","type":"t"}"""), decoder: KafkaDecoders.CloudEvents);
-        ce.FormatName.Should().Be("CloudEvents (structured)");
+        Decoded ce = Detect(Text("""{"specversion":"1.0","type":"t","data":{"a":1}}"""), decoder: KafkaDecoders.CloudEvents);
+        ce.FormatName.Should().Be("CloudEvents (structured), data as JSON");
+        ce.Text.Should().Be("""{"a":1}""", "the value of a CloudEvent is its data");
         ce.CloudEvent!.Events.Single().Attributes["type"].Should().Be("t");
 
         KafkaDecoders.BuiltInKind(new FixedDecoder(KafkaDecodeResult.NotApplicable)).Should().BeNull();
@@ -179,7 +200,7 @@ public class DecodingTests
     [Fact]
     public void A_declared_cloudevents_topic_whose_value_has_no_specversion_is_undecodable_as_not_a_cloudevent()
     {
-        KafkaDecodedValue notEvent = Detect(Text("""{"hello":"world"}"""), decoder: KafkaDecoders.CloudEvents);
+        Decoded notEvent = Detect(Text("""{"hello":"world"}"""), decoder: KafkaDecoders.CloudEvents);
 
         notEvent.Kind.Should().Be(KafkaValueKind.Undecodable);
         notEvent.Reason.Should().Be(KafkaUndecodableReason.NotACloudEvent);
@@ -214,7 +235,7 @@ public class DecodingTests
 
         Detect(Text(big), maxDecode: 1_000).Reason.Should().Be(KafkaUndecodableReason.TooLarge);
 
-        KafkaDecodedValue cut = Detect(Text(big), maxMatch: 1_024);
+        Decoded cut = Detect(Text(big), maxMatch: 1_024);
         cut.Kind.Should().Be(KafkaValueKind.Json);
         cut.Truncated.Should().BeTrue();
         Encoding.UTF8.GetByteCount(cut.Text!).Should().BeLessThanOrEqualTo(1_024);
@@ -226,7 +247,7 @@ public class DecodingTests
     {
         string text = new string('é', 600);
 
-        KafkaDecodedValue cut = Detect(Text(text), maxMatch: 1_001);
+        Decoded cut = Detect(Text(text), maxMatch: 1_001);
 
         cut.Truncated.Should().BeTrue();
         cut.Text.Should().NotContain("�");

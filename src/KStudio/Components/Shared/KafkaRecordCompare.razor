@@ -1,0 +1,155 @@
+@using System.Globalization
+@using KStudio.Core.Decoding
+@using KStudio.Core.Scanning
+@using PostgresStudio.Components.Json
+@using PostgresStudio.Services
+@inject StudioState Studio
+
+@* Two records side by side (D-PAYLOAD decision 5), from the two in-memory matches: it reads nothing. Each match was read by a scan or a record read that
+   had passed every gate for its own topic, so its value is present only if that read had the payload grant. A masked header or part of a value is
+   listed as masked and never called the same or changed. *@
+
+@if (left is not null && right is not null)
+{
+    string leftLabel = KafkaCompare.Label(left, right);
+    string rightLabel = KafkaCompare.Label(right, left);
+
+    <section class="ms-k-compare" aria-label="@KafkaStudioText.CompareHeading @leftLabel and @rightLabel">
+        <div class="ms-k-compare-header">
+            <h2 class="ms-section-title">@KafkaStudioText.CompareHeading</h2>
+            <button type="button" class="ms-btn ms-btn-sm" @onclick="OnClose">Close</button>
+        </div>
+
+        <h3 class="ms-section-title">Record</h3>
+        <TableScroll Label="Compared records">
+            <table class="ms-table ms-k-compare-table">
+                <thead>
+                    <tr><th>Field</th><th>@leftLabel</th><th>@rightLabel</th></tr>
+                </thead>
+                <tbody>
+                    <tr class="ms-table-row"><td class="ms-table-cell">Topic</td><td class="ms-table-cell">@left.Topic</td><td class="ms-table-cell">@right.Topic</td></tr>
+                    <tr class="ms-table-row"><td class="ms-table-cell">Partition / offset</td><td class="ms-table-cell">@left.Partition / @KafkaDisplay.Number(left.Offset)</td><td class="ms-table-cell">@right.Partition / @KafkaDisplay.Number(right.Offset)</td></tr>
+                    <tr class="ms-table-row"><td class="ms-table-cell">Timestamp</td><td class="ms-table-cell">@Time(left)</td><td class="ms-table-cell">@Time(right)</td></tr>
+                    <tr class="ms-table-row"><td class="ms-table-cell">Key</td><td class="ms-table-cell"><span class="@KeyClass(left)">@KafkaMatchView.KeyDisplay(left.Key)</span></td><td class="ms-table-cell"><span class="@KeyClass(right)">@KafkaMatchView.KeyDisplay(right.Key)</span></td></tr>
+                    <tr class="ms-table-row"><td class="ms-table-cell">Value kind</td><td class="ms-table-cell">@left.ValueKind</td><td class="ms-table-cell">@right.ValueKind</td></tr>
+                    <tr class="ms-table-row"><td class="ms-table-cell">Value format</td><td class="ms-table-cell">@left.ValueFormat</td><td class="ms-table-cell">@right.ValueFormat</td></tr>
+                    <tr class="ms-table-row"><td class="ms-table-cell">Value length</td><td class="ms-table-cell">@KafkaDisplay.Bytes(left.ValueLength)</td><td class="ms-table-cell">@KafkaDisplay.Bytes(right.ValueLength)</td></tr>
+                </tbody>
+            </table>
+        </TableScroll>
+
+        <h3 class="ms-section-title">Headers</h3>
+        @FieldsTable((KafkaCompare.Fields(left.Headers, right.Headers, leftLabel, rightLabel), "Compared headers", leftLabel, rightLabel))
+
+        @if (left.CloudEventMode != CloudEventMode.None || right.CloudEventMode != CloudEventMode.None)
+        {
+            <h3 class="ms-section-title">CloudEvents attributes</h3>
+            @FieldsTable((KafkaCompare.Fields(left.CloudEventAttributes, right.CloudEventAttributes, leftLabel, rightLabel), "Compared CloudEvents attributes", leftLabel, rightLabel))
+        }
+
+        <h3 class="ms-section-title">Value</h3>
+        @if (comparison is not null)
+        {
+            @foreach (string line in comparison.Lines)
+            {
+                <p class="@(line.StartsWith("Not compared, masked", StringComparison.Ordinal) ? "ms-k-compare-masked" : "ms-k-note")" role="note">@line</p>
+            }
+
+            @if (comparison.Kind == KafkaValueComparisonKind.Json)
+            {
+                <JsonDiff Before="@comparison.LeftJson"
+                          After="@comparison.RightJson"
+                          RemovedTitle="@($"Only in {leftLabel}")"
+                          AddedTitle="@($"Only in {rightLabel}")"
+                          ChangedTitle="Different"
+                          EmptyText="The values are the same." />
+            }
+            else if (comparison.Kind == KafkaValueComparisonKind.Text)
+            {
+                <div class="ms-k-compare-sides">
+                    <div>
+                        <h4>@leftLabel</h4>
+                        <pre class="ms-k-value-text" tabindex="0">@comparison.LeftText</pre>
+                    </div>
+                    <div>
+                        <h4>@rightLabel</h4>
+                        <pre class="ms-k-value-text" tabindex="0">@comparison.RightText</pre>
+                    </div>
+                </div>
+            }
+        }
+    </section>
+}
+
+@code {
+    private KafkaMatch? left;
+    private KafkaMatch? right;
+    private KafkaValueComparison? comparison;
+
+    /// <summary>The first record, as a <c>KafkaMatch</c>. Typed <see cref="object" />: the engine's types are internal.</summary>
+    [Parameter]
+    public object? Left { get; set; }
+
+    /// <summary>The second record, as a <c>KafkaMatch</c>.</summary>
+    [Parameter]
+    public object? Right { get; set; }
+
+    /// <summary>How the first record's value reads to this visitor: a <c>KafkaValueAccess</c>.</summary>
+    [Parameter]
+    public object? LeftAccess { get; set; }
+
+    /// <summary>How the second record's value reads to this visitor: a <c>KafkaValueAccess</c>.</summary>
+    [Parameter]
+    public object? RightAccess { get; set; }
+
+    /// <summary>Raised by Close.</summary>
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        left = Left as KafkaMatch;
+        right = Right as KafkaMatch;
+        comparison = left is null || right is null
+            ? null
+            : KafkaCompare.Value(
+                left,
+                right,
+                LeftAccess is KafkaValueAccess a ? a : KafkaValueAccess.CapabilityOff,
+                RightAccess is KafkaValueAccess b ? b : KafkaValueAccess.CapabilityOff);
+    }
+
+    private string Time(KafkaMatch match) =>
+        Studio.FormatInSelectedTimeZone(match.Timestamp, "yyyy-MM-dd HH:mm:ss") + " (" + match.TimestampType + ")";
+
+    private static string KeyClass(KafkaMatch match) => match.Key.IsRedacted ? "ms-k-redacted" : match.Key.IsNull ? "ms-k-null" : string.Empty;
+
+    private RenderFragment<(IReadOnlyList<KafkaFieldComparison> Rows, string Label, string LeftLabel, string RightLabel)> FieldsTable => data =>
+        @<text>
+            @if (data.Rows.Count == 0)
+            {
+                <p class="ms-muted">Neither record has any.</p>
+            }
+            else
+            {
+                <TableScroll Label="@data.Label">
+                    <table class="ms-table ms-k-compare-table">
+                        <thead>
+                            <tr><th>Name</th><th>Status</th><th>@data.LeftLabel</th><th>@data.RightLabel</th></tr>
+                        </thead>
+                        <tbody>
+                            @foreach (KafkaFieldComparison row in data.Rows)
+                            {
+                                <tr class="@(row.Status.StartsWith("masked", StringComparison.Ordinal) ? "ms-table-row ms-k-compare-masked" : "ms-table-row")">
+                                    <td class="ms-table-cell">@row.Name</td>
+                                    <td class="ms-table-cell">@row.Status</td>
+                                    <td class="ms-table-cell">@(row.Left ?? "—")</td>
+                                    <td class="ms-table-cell">@(row.Right ?? "—")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </TableScroll>
+            }
+        </text>;
+}

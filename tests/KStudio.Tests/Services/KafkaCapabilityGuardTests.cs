@@ -16,8 +16,11 @@ public class KafkaCapabilityGuardTests
         KafkaStudioCapabilities none = new();
 
         none.SearchRecords.Should().BeFalse();
+        none.ReadPayloads.Should().BeFalse();
         KafkaStudioCapabilities.None().SearchRecords.Should().BeFalse();
+        KafkaStudioCapabilities.None().ReadPayloads.Should().BeFalse();
         new KafkaStudioOptions().Capabilities.SearchRecords.Should().BeFalse();
+        new KafkaStudioOptions().Capabilities.ReadPayloads.Should().BeFalse();
     }
 
     [Fact]
@@ -82,6 +85,39 @@ public class KafkaCapabilityGuardTests
         Action require = () => harness.Context.Services.GetRequiredService<KafkaCapabilityGuard>().Require(KafkaCapability.SearchRecords);
 
         require.Should().NotThrow();
+    }
+
+    public static TheoryData<string> Offered => new(Enum.GetNames<KafkaCapability>());
+
+    [Theory]
+    [MemberData(nameof(Offered))]
+    public void Every_offered_capability_maps_to_its_flag(string name)
+    {
+        KafkaCapability capability = Enum.Parse<KafkaCapability>(name);
+        KafkaStudioCapabilities only = new();
+        typeof(KafkaStudioCapabilities).GetProperty(capability.ToString())!.SetValue(only, true);
+
+        // Setting only that flag enables only that capability: a member the guard's switch forgot would read as off forever.
+        KafkaCapabilityGuard.ConfiguredIn(only).Should().Equal(capability);
+    }
+
+    [Fact]
+    public void ReadPayloads_without_SearchRecords_is_refused_at_validation()
+    {
+        ServiceCollection services = new();
+        services.AddKafkaStudio(static o => o.Capabilities.ReadPayloads = true);
+        using ServiceProvider provider = services.BuildServiceProvider();
+
+        Action read = () => _ = provider.GetRequiredService<IOptions<KafkaStudioOptions>>().Value;
+
+        read.Should().Throw<OptionsValidationException>().WithMessage(
+            "*KafkaStudioOptions.Capabilities.ReadPayloads needs KafkaStudioOptions.Capabilities.SearchRecords: a value is read only as part of a record a search or a permalink opened*");
+
+        ServiceCollection fine = new();
+        fine.AddKafkaStudio(static o => o.Capabilities = KafkaStudioCapabilities.All());
+        using ServiceProvider ok = fine.BuildServiceProvider();
+        Action readOk = () => _ = ok.GetRequiredService<IOptions<KafkaStudioOptions>>().Value;
+        readOk.Should().NotThrow();
     }
 
     [Fact]

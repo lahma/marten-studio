@@ -32,7 +32,7 @@ public class PublicApiTest
 
     /// <summary>
     /// The engine's public types by name, so an extra one fails with its name rather than a diff. ENG-A's (decision 1.5): the options, the
-    /// two builders and the key formats; ENG-B adds the decoder extension point.
+    /// two builders and the key formats; ENG-B adds the decoder extension point; ENG-E the partitioner.
     /// </summary>
     [Fact]
     public void The_public_types_are_the_registration_types_and_the_extension_points()
@@ -46,6 +46,7 @@ public class PublicApiTest
             "KStudio.KafkaEngineOptions",
             "KStudio.KafkaHeader",
             "KStudio.KafkaKeyFormat",
+            "KStudio.KafkaPartitioner",
             "KStudio.KafkaRedactionBuilder",
             "KStudio.KafkaRedactionRule",
             "KStudio.KafkaScanLimits",

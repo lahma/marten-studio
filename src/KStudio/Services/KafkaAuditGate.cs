@@ -55,6 +55,12 @@ internal sealed class KafkaAuditGate(KafkaAuthorization authorization, KafkaCapa
                     return false;
                 }
 
+                // ReadPayloads is judged with its prerequisite: its entries are shown only where SearchRecords is on as well.
+                if (parsed == KafkaCapability.ReadPayloads && !capabilities.IsEnabled(KafkaCapability.SearchRecords))
+                {
+                    return false;
+                }
+
                 capability = parsed;
             }
 
@@ -74,11 +80,17 @@ internal sealed class KafkaAuditGate(KafkaAuthorization authorization, KafkaCapa
                 {
                     return false;
                 }
+
+                if (capability == KafkaCapability.ReadPayloads && !await AskAsync(scope, topic, KafkaCapability.SearchRecords, cancellationToken).ConfigureAwait(false))
+                {
+                    return false;
+                }
             }
 
             return capability is null
                 || scope.Topics.Count > 0
-                || await AskAsync(scope, topic: null, capability, cancellationToken).ConfigureAwait(false);
+                || (await AskAsync(scope, topic: null, capability, cancellationToken).ConfigureAwait(false)
+                    && (capability != KafkaCapability.ReadPayloads || await AskAsync(scope, topic: null, KafkaCapability.SearchRecords, cancellationToken).ConfigureAwait(false)));
         }
 
         private async ValueTask<bool> AskAsync(KafkaAuditScope scope, string? topic, KafkaCapability? capability, CancellationToken cancellationToken)

@@ -118,6 +118,12 @@ internal static class KafkaSearchText
             Add(caveats, note.Text);
         }
 
+        // What a pruned search did not read: a "no match" is only about the partitions the key maps to (D-PAYLOAD decision 7.6).
+        foreach (string sentence in result.PruningSentences)
+        {
+            Add(caveats, sentence);
+        }
+
         foreach (KafkaScanGap gap in result.Gaps)
         {
             Add(caveats, string.Create(c, $"{KafkaDisplay.Count(gap.Lost, "offset")} of {gap.Topic}/{gap.Partition} ({gap.FromOffset}–{gap.ToOffset}) {KafkaDisplay.Agree(gap.Lost, "was", "were")} removed by retention while the search read them."));

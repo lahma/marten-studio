@@ -28,7 +28,7 @@ internal sealed class KafkaSearchRig : IAsyncDisposable
     /// <summary>The cluster entry the studio lists.</summary>
     public KafkaClusterEntry Entry { get; }
 
-    public KafkaSearchRig(Action<KafkaEngineOptions>? engine = null, Action<KafkaStudioOptions>? studio = null, bool searchOn = true, bool policies = true, Func<FakeKafkaWire, KStudio.Core.Wire.IKafkaWire>? wrap = null)
+    public KafkaSearchRig(Action<KafkaEngineOptions>? engine = null, Action<KafkaStudioOptions>? studio = null, bool searchOn = true, bool policies = true, Func<FakeKafkaWire, KStudio.Core.Wire.IKafkaWire>? wrap = null, bool payloads = false, bool traceCircuit = false)
     {
         Entry = new KafkaClusterEntry(EngineHarness.ClusterKey, null, "Test cluster", "production");
         Cluster = new FakeKafkaCluster(TimeProvider.System);
@@ -38,6 +38,7 @@ internal sealed class KafkaSearchRig : IAsyncDisposable
             options =>
             {
                 options.Capabilities.SearchRecords = searchOn;
+                options.Capabilities.ReadPayloads = payloads;
 
                 if (policies)
                 {
@@ -46,7 +47,7 @@ internal sealed class KafkaSearchRig : IAsyncDisposable
 
                 studio?.Invoke(options);
             },
-            null,
+            traceCircuit ? services => services.AddLogging(builder => builder.SetMinimumLevel(LogLevel.Trace).AddProvider(CircuitLogs)) : null,
             [Entry],
             Engine);
     }
@@ -59,6 +60,9 @@ internal sealed class KafkaSearchRig : IAsyncDisposable
 
     /// <summary>Everything the services this rig builds by hand logged.</summary>
     public CapturingLoggerProvider Logs { get; } = new();
+
+    /// <summary>Everything the circuit's own services logged, at Trace, when the rig was built with <c>traceCircuit</c>.</summary>
+    public CapturingLoggerProvider CircuitLogs { get; } = new();
 
     /// <summary>How many calls of any kind reached the fake broker.</summary>
     public int BrokerCalls => Cluster.Calls.Count;
@@ -84,6 +88,7 @@ internal sealed class KafkaSearchRig : IAsyncDisposable
         return new KafkaSearchService(
             services.GetRequiredService<KafkaCapabilityGuard>(),
             Studio.KafkaAuthorization,
+            services.GetRequiredService<KafkaReadGrants>(),
             Engine.Provider.GetRequiredService<IKafkaScanner>(),
             Engine.Provider.GetRequiredService<OwnerByteBudget>(),
             new KafkaOwnerKey(Studio.Visitor),
@@ -103,6 +108,8 @@ internal sealed class KafkaSearchRig : IAsyncDisposable
         return new KafkaRecordService(
             services.GetRequiredService<KafkaCapabilityGuard>(),
             Studio.KafkaAuthorization,
+            services.GetRequiredService<KafkaReadGrants>(),
+            Engine.Provider.GetRequiredService<KStudio.Core.Clusters.KafkaEngineSnapshot>(),
             Engine.Provider.GetRequiredService<IKafkaScanner>(),
             new KafkaOwnerKey(Studio.Visitor),
             actionLog,

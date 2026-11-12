@@ -262,7 +262,7 @@ two scans read exactly what one would have.
 The grammar is the engine's own parser - no package, and no expression language behind it (spec open decision 6):
 conditions on `key`, `header.<name>` (or `header['…']`), `ce.<attribute>` and `any`, with `=`, `^=` (prefix), `~`
 (contains, ignoring case; slow), `in (…)` and `is [not] null`, joined by `and`, `or`, `not` and parentheses. M3 adds
-`value` and JSON paths (`$.a.b`, `$.a[0]`, `$.a[*].b`) with `<`, `<=`, `>` and `>=` on numbers, behind `ReadPayloads`.
+`value` and JSON paths (`$.a.b`, `$.a[0]`, `$.a[*].b`) with `<`, `<=`, `>` and `>=` on numbers, behind `ReadPayloads` (see *Values and JSON paths* below).
 Strings are quoted with `'` or `"`, a quote doubled inside; there are no backslash escapes. The text form is canonical
 and round-trips, and KStudio carries it in the URL's fragment.
 
@@ -293,6 +293,121 @@ or hex, in that order. Nothing is deserialized into a CLR type: JSON is a `JsonE
 or text that the engine parses under its own caps. Under `SearchRecords` the engine reads the value's kind, its length
 and its CloudEvents attributes, and nothing else of it.
 
+### Values and JSON paths
+
+`value` and JSON paths need `ReadPayloads` (the engine's `Payload` grant); a search that names one without it does not
+compile. `value is null` and `value is not null` look at the record, not at its content (true of a tombstone only; an empty
+value is not null), cost nothing and need only `SearchRecords`.
+
+**The value is a CloudEvent's data** when the record is one: in binary mode the record's value; in structured mode the
+`data` member (its raw JSON when `datacontenttype` is absent or contains `json`, a JSON string's text when it is `text/*`),
+or `data_base64` decoded and typed by `datacontenttype`; in a batch each event's data, a clause being true if it is true of
+any event. A CloudEvent without data has no value, and every value clause is false. Attributes keep their own `ce.` field.
+
+**A JSON path** is `$`, then up to 32 steps: `.name` (letters, digits and underscores, starting with a letter or an
+underscore, at most 128 characters), `['name']` (any name, a quote doubled; this is how `$['customer-email']` and
+`$['$type']` are written), `[n]` (0 to 999,999,999, no sign, no leading zero) or `[*]` (any element of an array; on an
+object it selects nothing). There are no filters and no recursive descent: a path selects by structure, never by content,
+so a redaction rule can say exactly which paths it covers. A bad path fails the parse with a sentence that names its
+position and says what to write. Member names are compared exactly by a search and ignoring case by a rule.
+
+| Field | `=` and `in` | `^=` | `~` | `<` `<=` `>` `>=` | `is [not] null` |
+|---|---|---|---|---|---|
+| `value` | the decoded text equals a string literal (ordinal) | prefix (ordinal) | contains, ordinal ignoring case | refused: `numbers compare only JSON paths` | `is null` only (above) |
+| `$…` | a selected leaf equals a literal of its own type: a string (ordinal), a number (as `decimal`: `1.5 = 1.50`), `true`, `false`, `null` (a JSON null; an absent member is not null) | a string leaf has the string literal's prefix | a string leaf contains the literal, ignoring case | a number leaf compares with a number literal | refused: write `$.a = null` |
+| `any` (with `ReadPayloads`) | the M1 fields, then every string leaf of a JSON value (member names excluded) or the whole text of a text value | as `=` | as `=` | refused | refused |
+
+A selection is existential: `$.items[*].sku = 'A'` is true when any element's `sku` is `'A'`, and `not` negates the
+whole clause. A value of another type never matches (`'42'` against `42` is false).
+
+| The value | `value` `=` `^=` | `value` `~` | `$…` | `any`, value part |
+|---|---|---|---|---|
+| JSON (or CloudEvent data that is JSON) | the UTF-8 text of the bytes, never reformatted | the same | the path's selection; none: false | its string leaves |
+| Text | the text | the same | false | the text |
+| Empty (0 bytes) | the text `""` | `""` | false | nothing |
+| Tombstone, or an event without data | false | false | false | nothing |
+| Binary, Confluent wire format | false | **unknown** (`ValueNotText`) | false | nothing |
+| Starts like JSON and does not parse | the text | the same | **unknown** (`InvalidJson`) | its text |
+| Undecodable, a text over the decode limit, a decoder that failed, rules that could not be applied | **unknown**, with its reason | the same | the same | the same |
+
+Cost classes, cheapest first: 0 key bytes and `key is null`; 1 header bytes; 2 binary CloudEvents attributes; 3 `~` on a
+key or header; 4 structured CloudEvents attributes; 5 `any` without `ReadPayloads`; **6 `value`; 7 JSON path; 8 `any` with
+`ReadPayloads`**. A record's value is detected and parsed once however many clauses read it, and a match made from the
+record reuses it, so a host decoder runs once per matching record; counters prove both.
+
+A number is read with `decimal.TryParse` (invariant culture); a leaf outside `decimal`'s range makes the clause unknown
+(`NumberOutOfRange`) unless another selected leaf decides it. The reasons a record is counted as undecidable beside a "no
+match" are, with the sentence the page completes as "{n} records …": `could not be decoded as JSON`, `were larger than the
+decode limit`, `had a value that could not be read as text`, `had a number too large to compare`, `could not be decoded by
+the topic's decoder`, `had CloudEvents data_base64 that is not valid base64`, `could not be searched, because a redaction
+rule could not be applied to their value` (and the M2 reasons for keys, headers and CloudEvents).
+
+### Partition pruning
+
+A key search may read fewer partitions, but only when the host declared how its producers choose one
+(`topic.Partitioner(KafkaPartitioner.Murmur2)`) and sampling the window proves the claim. A declared partitioner is a
+claim, not a fact: records produced with an explicit partition, a different partitioner or a different key serializer,
+and partitions added later, all show up as a mismatch when the sample reaches them; the sample reads the start and the end of
+each partition's range, so a change in the middle of a window that is undone before its end can go unseen. One mismatch
+turns pruning off for the topic.
+
+| Partitioner | Hash | Partition | Deterministic for | Known answers (source) |
+|---|---|---|---|---|
+| `Murmur2` | MurmurHash2, seed `0x9747b28c`, `m = 0x5bd1e995`, `r = 24`, `h = seed ^ length`, four-byte little-endian words, the tail, then `h ^= h >> 13; h *= m; h ^= h >> 15` | `(h & 0x7fffffff) % n` | every non-null key, an empty one included (`murmur2_random` randomises only a null key) | librdkafka `v2.14.0`, `src/rdmurmur2.c`, `unittest_murmur2` (the Java client's results for eleven keys); Apache Kafka `3.9.0`, `UtilsTest.testMurmur2` |
+| `Crc32` | CRC-32/ISO-HDLC (zlib's): reflected polynomial `0xEDB88320`, initial and final xor `0xFFFFFFFF` | `crc % n` (`rd_kafka_msg_partitioner_consistent`) | a non-empty key (`consistent_random` randomises an empty key as well as a null one) | librdkafka `src/rdcrc32.c` (its table); the CRC catalogue's check value for `"123456789"`, `0xCBF43926` |
+| `Fnv1a` | FNV-1a 32-bit, taken as a signed value and made positive by negation (`int.MinValue` stays itself), as librdkafka does to match Sarama | `h % n`, unsigned | every non-null key | librdkafka `v2.14.0`, `src/rdfnv1a.c`, `unittest_fnv1a` ("acquired via Go's hash/fnv") |
+
+The hashes are hand-written (`System.IO.Hashing` is not in the budget, hard rule 1). A null key is never deterministic:
+the producer picks its partition at random, stickily or in turn. A host may subclass `KafkaPartitioner`; its claim is
+verified in the same way.
+
+**When the engine prunes**, per topic, all of these: the request does not ask for every partition (`DisablePruning`); the
+topic declared a partitioner; the search **fixes the key** (a key `=` or `in` clause gives its literals; an `and` gives
+the smallest set among its children that have one; an `or` gives the union only when every child has one; `not` and
+every other clause give none); the key's byte forms are **complete** for the format (every built-in format and a host's
+own are, except `JsonString`, which is pruned only when every literal is ASCII letters, digits, space or one of `-_.:@`,
+because other characters are escaped differently by different serializers); every form is deterministic for the
+partitioner; the keys do not map to every partition (a key set that reaches all of them has nothing to skip, and is not
+sampled); the topic's window holds at least 400 offsets (below that, reading it whole is cheaper than proving the
+claim); and verification passed. The partitions read are the union of `Partition(form, n)` over every form of every
+literal, with $n$ the topic's partition count when the window was resolved.
+
+**Verification** reads, inside the plan and before the estimate, a target of $S = \min(1000, \lfloor o / 4 \rfloor)$ keyed
+records ($o$ the topic's offsets in the window, so verification never reads more than a quarter of what it may save),
+spread over the $r$ non-empty ranges at $\lceil S / r \rceil$ records each (at least 4). It reads half of each range's
+quota from its **start**, where records produced before a partition-count change sit, and the other half from its **end**
+(the consumer moves with `Reposition` to the greater of the next offset and the range's end less half the quota), where a
+change made late in the window sits, with a short consumer like the size sampler's (1 MiB queue and fetch, explicit
+offsets, the scan's isolation), at most 4 MiB (or what is left of the owner's budget, if less) and 5 seconds in all. The
+bytes count against the owner's budget, and an owner with none left gets no verification. A range stops at its quota, so a fast partition cannot use up the sample, and records past a
+range's end are ignored. Each record whose key the partitioner calls deterministic must be in the partition the
+partitioner maps it to; null keys and non-deterministic keys are skipped.
+
+| Outcome | When | Pruning |
+|---|---|---|
+| `Verified(checked)` | at least 100 keyed records checked, at least one from every non-empty range, no mismatch | on |
+| `Mismatch(partition, offset, expected)` | the first record that disagrees; the read stops there | off for the topic; the answer is kept for 10 minutes per (cluster, topic, partitioner name, partition count) |
+| `TooFewKeys(checked)` | fewer than 100 | off |
+| `RangeWithoutKeys(partition)` | a non-empty range gave no keyed record | off |
+| `NotReadable` | `READ` refused, a reader failure, a host partitioner that threw, or the time or the bytes ran out before a pass | off; logged at Debug by kind (event 9676) |
+
+**No positive cache.** Each pruned plan proves the claim on its own window: partitions added since an earlier window, or
+a producer that changed, would make an earlier proof wrong. The one exception is **Continue**: a scan's cursor carries the
+pruned entries its scan proved, and a continued scan over the same search keeps them (same partitions, same verdict,
+same caveat and audit text) without sampling again, whatever is left to read. A cursor read back from its text form carries
+positions alone, so its plan decides for itself.
+
+**What a visitor sees.** The plan's ranges keep only the pruned partitions of a pruned topic, so the estimate, the read
+and the cursor cover exactly what is read, and Continue reads only those partitions. The key clause's verdict says what
+was proved (`PointLookup`: "one partition: murmur2 maps the key to partition 3 of 6 (verified on 1,002 records)";
+`PartitionPruned`: "pruned to partitions 1, 3 and 4 of 6 (…)") or why not (appended: "; not pruned: …", for a topic that
+declares none, a search that does not fix the key, the JSON-string characters, an empty key, a window of fewer than 400
+offsets, keys that map to every partition, the first record that disagrees, too few keyed records, a partition without one, an unreadable sample, or a
+visitor who asked for every partition). The plan's notes and the result's caveats say which partitions were read, and
+the audit message adds "; pruned to partition 3 of orders" (on a topic whose key is masked, "; pruned to 1 of 6 partitions of
+orders": a count, never a partition). A mismatch names the record's partition and offset and never
+its key; on a topic whose key a redaction rule masks, it does not say which partition the key maps to either.
+
 ## D40
 
 **KStudio redacts inside the engine, before any sink.**
@@ -300,8 +415,8 @@ and its CloudEvents attributes, and nothing else of it.
 A record leaves KStudio.Core only as a `KafkaMatch`, and `KafkaMatchFactory` is the only way to make one. The factory
 runs the topic's rules and the built-in deny-list - the headers `authorization`, `proxy-authorization`, `cookie`,
 `set-cookie` and `x-api-key`, masked unless the host opts one out by name - before the match exists, and the match keeps
-no unredacted copy: a masked field is `••• (redacted by rule)`. Header and key rules arrive in M2, JSON-path and pattern
-rules in M3, each with the first surface it protects. A rule that cannot be applied, to an undecodable value for example,
+no unredacted copy: a masked field is `••• (redacted by rule)`. Header, key and CloudEvents rules arrived in M2, JSON-path and
+pattern rules in M3, each with the first surface it protects. A rule that cannot be applied, to an undecodable value for example,
 withholds the whole value. The wire record never leaves the engine, and a test reads KStudio's compiled references to
 prove it, so the view, facets, chips, "copy as", exports and every later sink are built from redacted matches.
 
@@ -314,6 +429,49 @@ Redaction rule names are compared ignoring case. A CloudEvents attribute rule al
 `datacontenttype` masks `content-type`), and a header rule on the carrier masks the attribute. A header on the
 built-in deny-list can never be searchable; the options validation refuses it. The trace context is read only from
 unmasked headers.
+
+### Payload rules
+
+`JsonPath(path)` masks the leaf, or the whole subtree, at a JSON path of the value (of a CloudEvent's data); `Pattern(regex,
+name)` masks every match of a regular expression in the value's text. The masking runs in the match factory and where a
+clause needs the masked form, only under the `Payload` grant and always **before** the value is cut to what a match keeps,
+so a secret past the cut is masked, never lost and never leaked.
+
+| The value | JSON-path rules | Pattern rules |
+|---|---|---|
+| JSON (or CloudEvent data that is JSON) | each node a rule covers is written as the string `••• (redacted by {rule})`, whatever its type; its concrete path is kept (at most 64, the rest counted) | each string and number leaf: every match replaced by `••• (redacted by pattern {name})`; **a member name that matches withholds the whole value** |
+| Text | the value is **withheld** (a path cannot be found in text) | every match replaced in the text |
+| Text cut at the decode limit | withheld | withheld (what is left of a match at the cut is not masked) |
+| Binary, Confluent wire format | withheld | withheld |
+| Tombstone, empty, undecodable | nothing is kept anyway | nothing is kept anyway |
+
+The masked JSON is written compactly, for display and copying (so on a topic with payload rules `value` compares that
+compact form, not the producer's spacing). A pattern runs without backtracking, under a timeout of its own: backreferences,
+lookarounds, atomic groups and conditionals are refused when the options are validated, as are a pattern over 500
+characters, one that matches the empty text, more than 8 patterns or 32 paths on a topic, and a path declared twice.
+
+**Fail closed.** A pattern that times out, a value whose rules use more than 250 ms in all, a member name a pattern matches,
+and a path or pattern rule that cannot be applied to the kind of value withhold the value whole: the match keeps no text and
+no preview, names the rule in `ValueWithheldBy`, and every value clause on that record is unknown
+(`RedactionNotApplied`). The engine logs it once per cluster, topic and rule per ten minutes at Debug (event 9675), with
+the rule's kind and the exception's type name and nothing else.
+
+**What a search can do with a masked payload.**
+
+- A clause whose path a rule **covers** (the rule's path, or an ancestor of it, with member names ignoring case; a `[*]` in
+  the clause is covered only by a `[*]` in the rule) is a redacted field: only `=` and `in`, and only when the rule is
+  `Searchable()`. It compares the **raw** leaf, an exact match only, so no character is ever read at a time, and its literal
+  is `<redacted>` in the audit text and in a link. Where several rules cover a path, one that is not searchable wins.
+- A clause on an **ancestor** of a masked node is allowed: it can only compare a container with a scalar, and `[*]` never
+  selects an object's members, so no clause reaches the masked leaf through it.
+- `value`, `any` and every other path compare **what the visitor would see**, masks included. A pattern is never
+  searchable, so no exact match on pattern-masked content exists.
+
+**A host decoder is handed only the headers no rule masks**, the built-in deny-list included: a decoder that echoed a header
+into its text would otherwise put a masked value into a match.
+
+**Redaction hides content, not size.** A value's byte length stays visible (it is envelope metadata the results show under
+`SearchRecords`), so the length of a masked leaf can be bounded from the rest.
 
 ## D41
 
@@ -350,6 +508,8 @@ consumer is outside $S$ and the governor, so it is small: 1 MiB of queue and 1 M
 at a time per cluster. The live suite allows $1.25 \cdot S(C + 2mc)$ for two scans over records of a 96 KiB value and 64
 headers of 4 KiB, and prints what they actually held. Broker egress is bounded separately: with these limits the broker
 sent at most $Q + F$ more than the engine had read.
+
+A record read keeps one more value: the record asked for may hold up to $F_v$ bytes of value (KStudio passes the decode limit, 1 MiB by default) whatever is left of its match budget, and its neighbours keep $c$, so a record read holds at most $21c + F_v$, twice that in UTF-16, within one scan slot of $S(C + 2mc)$. Masking never grows a value past twice the decode limit; a value it would is withheld.
 
 Before reading, the engine estimates a scan: the offsets in its ranges ("about", since offsets are not records) and the
 bytes, from a small sample of record sizes. Above the confirmation threshold, `Start` refuses unless the visitor's

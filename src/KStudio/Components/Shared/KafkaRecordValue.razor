@@ -1,0 +1,220 @@
+@using System.Globalization
+@using KStudio.Core.Decoding
+@using KStudio.Core.Redaction
+@using KStudio.Core.Scanning
+@using PostgresStudio.Components.Json
+@using PostgresStudio.Services.Settings
+
+@* A record's value (D-PAYLOAD decision 4.3), drawn from an in-memory KafkaMatch: every part of it was masked inside the engine before it got here, and
+   the value is in the match only if the scan or the read had the payload grant. This component reads nothing and records nothing; the handler that
+   shows it records the view (9605). It never draws an empty string for a null or empty value: those are sentences (B.7.6). *@
+
+@if (match is not null)
+{
+    <section class="ms-k-value" aria-label="Value of @(match.Topic + "/" + match.Partition + "/" + match.Offset)" data-ms-k-value="@access">
+        @switch (access)
+        {
+            case KafkaValueAccess.CapabilityOff:
+                <KafkaCapabilityDisabled Capability="@nameof(KafkaStudioCapabilities.ReadPayloads)" Action="Reading values" />
+                break;
+            case KafkaValueAccess.PolicyRefused:
+                <p class="ms-k-note" role="note">@KafkaStudioText.ValueNotAvailable</p>
+                break;
+            case KafkaValueAccess.SearchWithoutValues:
+                <p class="ms-k-note" role="note">@KafkaStudioText.ValueNotReadBySearch</p>
+                break;
+            default:
+                @Body()
+                break;
+        }
+    </section>
+}
+
+@code {
+    private KafkaMatch? match;
+    private KafkaValueAccess access = KafkaValueAccess.CapabilityOff;
+
+    /// <summary>The record, as a <c>KafkaMatch</c>. Typed <see cref="object" />: the engine's types are internal and a component's parameters are public.</summary>
+    [Parameter]
+    public object? Model { get; set; }
+
+    /// <summary>How the value reads to this visitor: a <c>KafkaValueAccess</c>. Anything else reads as off, so that a wrong value shows no value.</summary>
+    [Parameter]
+    public object? Access { get; set; }
+
+    /// <summary>Whether this is the record page, which reads a value whole up to the decode limit; a search's detail links there for the rest.</summary>
+    [Parameter]
+    public bool OnRecordPage { get; set; }
+
+    /// <summary>The record page's address, for the line under a cut value in a search's detail.</summary>
+    [Parameter]
+    public string? RecordHref { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        match = Model as KafkaMatch;
+        access = Access is KafkaValueAccess given ? given : KafkaValueAccess.CapabilityOff;
+    }
+
+    private RenderFragment Body() => builder =>
+    {
+        KafkaMatch record = match!;
+        int sequence = 0;
+
+        void Note(string text, string? css = null)
+        {
+            builder.OpenElement(sequence++, "p");
+            builder.AddAttribute(sequence++, "class", css ?? "ms-k-note");
+            builder.AddAttribute(sequence++, "role", "note");
+            builder.AddContent(sequence++, text);
+            builder.CloseElement();
+        }
+
+        if (record.ValueKind == KafkaValueKind.Tombstone)
+        {
+            Note(KafkaStudioText.ValueTombstone);
+            return;
+        }
+
+        if (record.ValueKind == KafkaValueKind.Empty)
+        {
+            Note(record.ValueIsCloudEventData ? "This CloudEvent has no data." : KafkaStudioText.ValueEmpty);
+            return;
+        }
+
+        if (record.ValueWithheldBy is { } rule)
+        {
+            Note(KafkaStudioText.ValueWithheld(rule));
+            return;
+        }
+
+        if (record.ValueKind == KafkaValueKind.Undecodable)
+        {
+            Note(KafkaStudioText.ValueUndecodable(record.UndecodableReason is { } reason ? KafkaStudioText.UndecodableReason(reason) : "the reason is not known"));
+            return;
+        }
+
+        if (record.ValueIsCloudEventData)
+        {
+            Note(KafkaStudioText.ValueCloudEventData, "ms-k-value-lead");
+        }
+
+        foreach (string maskedNote in MaskedNotes(record))
+        {
+            Note(maskedNote, "ms-k-masked-note");
+        }
+
+        builder.AddContent(sequence++, Shown(record));
+    };
+
+    private RenderFragment Shown(KafkaMatch record) => builder =>
+    {
+        int sequence = 0;
+
+        if (record.ValueText is { } text)
+        {
+            if (record.ValueTextKind == KafkaValueTextKind.Json && !record.ValueTruncated)
+            {
+                builder.OpenComponent<JsonView>(sequence++);
+                builder.AddComponentParameter(sequence++, nameof(JsonView.Json), text);
+                builder.AddComponentParameter(sequence++, nameof(JsonView.Label), "Record value");
+                builder.AddComponentParameter(sequence++, nameof(JsonView.AllowDownload), false);
+                builder.AddComponentParameter(sequence++, nameof(JsonView.ShowPostgresCopyItems), false);
+                builder.AddComponentParameter(sequence++, nameof(JsonView.CopyAsSearch), (Func<IReadOnlyList<(string? Key, int Index)>, string, string?>) CopyAsSearch);
+                builder.CloseComponent();
+                return;
+            }
+
+            // Text, or JSON that was cut and so cannot be a tree: the kept text, at most 256 KiB of characters in the markup.
+            bool clipped = text.Length > KafkaMatchView.MaxTextChars;
+            string drawn = clipped ? text[..KafkaMatchView.MaxTextChars] : text;
+            int drawnBytes = KafkaMatchView.Utf8Length(drawn);
+
+            builder.OpenElement(sequence++, "pre");
+            builder.AddAttribute(sequence++, "class", "ms-k-value-text");
+            builder.AddAttribute(sequence++, "tabindex", "0");
+            builder.AddContent(sequence++, drawn);
+            builder.CloseElement();
+
+            if (record.ValueTruncated || clipped)
+            {
+                builder.OpenElement(sequence++, "p");
+                builder.AddAttribute(sequence++, "class", "ms-muted ms-k-value-cut");
+                builder.AddContent(sequence++, $"Shown {KafkaDisplay.Bytes(drawnBytes)} of {KafkaDisplay.Bytes(record.ValueLength)}. ");
+
+                if (OnRecordPage)
+                {
+                    builder.AddContent(sequence++, KafkaStudioText.ValueCutOnRecordPage);
+                }
+                else if (RecordHref is { Length: > 0 } href)
+                {
+                    builder.OpenElement(sequence++, "a");
+                    builder.AddAttribute(sequence++, "href", href);
+                    builder.AddContent(sequence++, KafkaStudioText.ValueCutOpenRecordPage);
+                    builder.CloseElement();
+                }
+                else
+                {
+                    builder.AddContent(sequence++, KafkaStudioText.ValueCutOpenRecordPage);
+                }
+
+                builder.CloseElement();
+            }
+
+            return;
+        }
+
+        if (record.ValuePreview is { } preview)
+        {
+            if (record.ValueKind == KafkaValueKind.ConfluentWireFormat && record.SchemaId is { } schema)
+            {
+                builder.OpenElement(sequence++, "p");
+                builder.AddAttribute(sequence++, "class", "ms-muted");
+                builder.AddContent(sequence++, $"Confluent wire format, schema id {schema.ToString(CultureInfo.InvariantCulture)}");
+                builder.CloseElement();
+            }
+
+            string dump = KafkaMatchView.HexDump(preview, out int shownBytes);
+
+            builder.OpenElement(sequence++, "pre");
+            builder.AddAttribute(sequence++, "class", "ms-k-value-hex");
+            builder.AddAttribute(sequence++, "tabindex", "0");
+            builder.AddContent(sequence++, dump);
+            builder.CloseElement();
+
+            if (record.ValueTruncated || shownBytes < record.ValueLength)
+            {
+                builder.OpenElement(sequence++, "p");
+                builder.AddAttribute(sequence++, "class", "ms-muted ms-k-value-cut");
+                builder.AddContent(sequence++, $"Shown {KafkaDisplay.Bytes(shownBytes)} of {KafkaDisplay.Bytes(record.ValueLength)}.");
+                builder.CloseElement();
+            }
+        }
+    };
+
+    private string? CopyAsSearch(IReadOnlyList<(string? Key, int Index)> segments, string valueJson) =>
+        match is null ? null : KafkaMatchView.LeafPredicate(match, segments, valueJson);
+
+    /// <summary>The lines above a view that say what was masked in it (D-PAYLOAD decision 3.3), never what the masked part held.</summary>
+    internal static IReadOnlyList<string> MaskedNotes(KafkaMatch record)
+    {
+        List<string> notes = [];
+        int paths = record.MaskedPaths.Count + record.MaskedPathsOmitted;
+
+        if (paths > 0)
+        {
+            string[] listed = [.. record.MaskedPaths.Take(5).Select(static x => x.Text)];
+            int more = paths - listed.Length;
+            string names = string.Join(", ", listed) + (more > 0 ? $" and {KafkaDisplay.Number(more)} more" : string.Empty);
+
+            notes.Add($"{KafkaDisplay.Count(paths, "part")} of this value {KafkaDisplay.Agree(paths, "is", "are")} masked: {names}.");
+        }
+
+        foreach (string rule in record.ValueMaskedBy.Where(static x => x.StartsWith("pattern ", StringComparison.Ordinal)))
+        {
+            notes.Add($"Text matching {rule} is masked.");
+        }
+
+        return notes;
+    }
+}

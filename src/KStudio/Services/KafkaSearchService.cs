@@ -2,6 +2,7 @@ using System.Globalization;
 
 using KStudio.Core.Clusters;
 using KStudio.Core.Decoding;
+using KStudio.Core.Predicates;
 using KStudio.Core.Scanning;
 using KStudio.Core.Windows;
 
@@ -17,6 +18,7 @@ namespace KStudio.Services;
 /// <param name="PredicateText">The visitor's typed text; it is parsed by the engine and never recorded.</param>
 /// <param name="IncludeUncommitted">Whether uncommitted records are included.</param>
 /// <param name="ContinueFrom">The cursor of the search this one continues, or <see langword="null" />.</param>
+/// <param name="SearchAllPartitions">Whether to read every partition even where a verified partitioner would allow reading fewer.</param>
 internal sealed record KafkaSearchInput(
     KafkaClusterEntry Cluster,
     IReadOnlyList<string> Topics,
@@ -24,12 +26,14 @@ internal sealed record KafkaSearchInput(
     DateTimeOffset To,
     string? PredicateText,
     bool IncludeUncommitted,
-    KafkaScanCursor? ContinueFrom = null);
+    KafkaScanCursor? ContinueFrom = null,
+    bool SearchAllPartitions = false);
 
-/// <summary>A plan the visitor has seen: the input it was made from, and the engine's plan.</summary>
+/// <summary>A plan the visitor has seen: the input it was made from, the engine's plan, and what the visitor may read of the records it finds.</summary>
 /// <param name="Input">What was asked.</param>
 /// <param name="Plan">The engine's plan: verdicts, notes and estimate, or the errors of the text.</param>
-internal sealed record KafkaSearchPlanned(KafkaSearchInput Input, KafkaScanPlan Plan);
+/// <param name="Grant">What the search will read: the envelope, or the payload as well (D-PAYLOAD decision 1.2).</param>
+internal sealed record KafkaSearchPlanned(KafkaSearchInput Input, KafkaScanPlan Plan, KafkaGrantDecision Grant);
 
 /// <summary>What <see cref="KafkaSearchService.PlanAsync" /> returns: a refusal sentence, or a plan.</summary>
 internal abstract record KafkaSearchPlanResult
@@ -76,6 +80,7 @@ internal abstract record KafkaSearchStartResult
 /// </remarks>
 /// <param name="capabilities">The capability switch.</param>
 /// <param name="authorization">The cluster and capability policies.</param>
+/// <param name="grants">What a visitor may read of a record: the envelope, or the payload as well.</param>
 /// <param name="scanner">The engine's scanner.</param>
 /// <param name="ownerBudget">The owner's hourly byte allowance.</param>
 /// <param name="owners">Who the circuit's scans belong to.</param>
@@ -84,6 +89,7 @@ internal abstract record KafkaSearchStartResult
 internal sealed class KafkaSearchService(
     KafkaCapabilityGuard capabilities,
     KafkaAuthorization authorization,
+    KafkaReadGrants grants,
     IKafkaScanner scanner,
     OwnerByteBudget ownerBudget,
     KafkaOwnerKey owners,
@@ -112,7 +118,7 @@ internal sealed class KafkaSearchService(
     {
         ArgumentNullException.ThrowIfNull(input);
 
-        (string? refusal, KafkaTopicName[] names) = await GateAsync(input, cancellationToken).ConfigureAwait(false);
+        (string? refusal, KafkaTopicName[] names, KafkaGrantDecision grant) = await GateAsync(input, cancellationToken).ConfigureAwait(false);
         if (refusal is not null)
         {
             return new KafkaSearchPlanResult.Refused(refusal);
@@ -121,14 +127,14 @@ internal sealed class KafkaSearchService(
         try
         {
             KafkaScanOwner owner = await owners.OwnerAsync().ConfigureAwait(false);
-            KafkaScanPlan plan = await scanner.PlanAsync(RequestFor(input, names), owner, cancellationToken).ConfigureAwait(false);
+            KafkaScanPlan plan = await scanner.PlanAsync(RequestFor(input, names, grant.Grant), owner, cancellationToken).ConfigureAwait(false);
 
             if (!plan.IsValid)
             {
                 await NotRunAsync(input, KafkaStudioText.PredicateInvalid, KafkaStudioText.PredicateDidNotParse(input.PredicateText?.Length ?? 0)).ConfigureAwait(false);
             }
 
-            return new KafkaSearchPlanResult.Planned(new KafkaSearchPlanned(input, plan));
+            return new KafkaSearchPlanResult.Planned(new KafkaSearchPlanned(input, plan, grant));
         }
         catch (Exception e) when (e is not OperationCanceledException)
         {
@@ -150,10 +156,17 @@ internal sealed class KafkaSearchService(
         ArgumentNullException.ThrowIfNull(planned);
 
         KafkaSearchInput input = planned.Input;
-        (string? refusal, _) = await GateAsync(input, cancellationToken).ConfigureAwait(false);
+        (string? refusal, _, KafkaGrantDecision grant) = await GateAsync(input, cancellationToken).ConfigureAwait(false);
         if (refusal is not null)
         {
             return new KafkaSearchStartResult.Refused(refusal);
+        }
+
+        // A grant lower than the one the visitor was planned under refuses the start; a higher one starts the planned (lower) grant.
+        if (!grant.AtLeast(planned.Grant))
+        {
+            await NotRunAsync(input, KafkaStudioText.GrantChanged, planned.Plan.IsValid ? planned.Plan.AuditText : KafkaStudioText.PredicateDidNotParse(input.PredicateText?.Length ?? 0)).ConfigureAwait(false);
+            return new KafkaSearchStartResult.Refused(KafkaStudioText.GrantChanged);
         }
 
         KafkaScanPlan plan = planned.Plan;
@@ -198,7 +211,7 @@ internal sealed class KafkaSearchService(
     }
 
     /// <summary>Everything that does not need the engine: the capability, the bounds and the policies. Returns the sentence of the first refusal, or <see langword="null" />.</summary>
-    private async Task<(string? Refusal, KafkaTopicName[] Names)> GateAsync(KafkaSearchInput input, CancellationToken cancellationToken)
+    private async Task<(string? Refusal, KafkaTopicName[] Names, KafkaGrantDecision Grant)> GateAsync(KafkaSearchInput input, CancellationToken cancellationToken)
     {
         KafkaClusterEntry cluster = input.Cluster;
         IReadOnlyList<string> topics = input.Topics;
@@ -212,7 +225,7 @@ internal sealed class KafkaSearchService(
         catch (KafkaCapabilityDeniedException denial)
         {
             actionLog.RecordCapabilityDenied(cluster, topics, denial, Action, target);
-            return (denial.Message, []);
+            return (denial.Message, [], KafkaGrantDecision.EnvelopeOnly);
         }
 
         // 2. The input's own bounds.
@@ -220,14 +233,14 @@ internal sealed class KafkaSearchService(
         if (bounds is not null)
         {
             await NotRunAsync(input, bounds, PredicateNotRecorded(input)).ConfigureAwait(false);
-            return (bounds, []);
+            return (bounds, [], KafkaGrantDecision.EnvelopeOnly);
         }
 
         // 3. The cluster policy, then both policies for every topic: any refusal refuses the whole request and names nothing.
         if (!await authorization.IsAuthorizedAsync(cluster, null, null, cancellationToken).ConfigureAwait(false))
         {
             actionLog.RecordClusterDenied(cluster, null, topics, authorization.PolicyFor(null) ?? "(none)", Action, target, KafkaCapability.SearchRecords);
-            return (KafkaStudioText.SearchNamesRefusedTopic, []);
+            return (KafkaStudioText.SearchNamesRefusedTopic, [], KafkaGrantDecision.EnvelopeOnly);
         }
 
         foreach (KafkaTopicName name in names)
@@ -236,11 +249,27 @@ internal sealed class KafkaSearchService(
                 || !await authorization.IsAuthorizedAsync(cluster, name.Value, KafkaCapability.SearchRecords, cancellationToken).ConfigureAwait(false))
             {
                 actionLog.RecordClusterDenied(cluster, name.Value, topics, authorization.PolicyFor(KafkaCapability.SearchRecords) ?? "(none)", Action, target, KafkaCapability.SearchRecords);
-                return (KafkaStudioText.SearchNamesRefusedTopic, []);
+                return (KafkaStudioText.SearchNamesRefusedTopic, [], KafkaGrantDecision.EnvelopeOnly);
             }
         }
 
-        return (null, names);
+        // 4. What the visitor may read of the records the search finds (D-PAYLOAD decision 1.2): only a search that reads values is refused for it.
+        bool readsValues = PredicateTree.ReadsValues(PredicateParser.Parse(input.PredicateText).Tree);
+        KafkaGrantDecision grant = await grants.ForSearchAsync(cluster, names, readsValues, cancellationToken).ConfigureAwait(false);
+
+        if (grant.Denied is { } denied)
+        {
+            actionLog.RecordCapabilityDenied(cluster, topics, denied, Action, target);
+            return (denied.Message, [], grant);
+        }
+
+        if (grant.Refusal is not null)
+        {
+            actionLog.RecordClusterDenied(cluster, grant.RefusedTopic, topics, authorization.PolicyFor(KafkaCapability.ReadPayloads) ?? "(none)", Action, target, KafkaCapability.ReadPayloads);
+            return (grant.Refusal, [], grant);
+        }
+
+        return (null, names, grant);
     }
 
     private static string? Bounds(KafkaSearchInput input, out KafkaTopicName[] names)
@@ -280,15 +309,16 @@ internal sealed class KafkaSearchService(
         return null;
     }
 
-    private static KafkaScanRequest RequestFor(KafkaSearchInput input, KafkaTopicName[] names) =>
+    private static KafkaScanRequest RequestFor(KafkaSearchInput input, KafkaTopicName[] names, KafkaReadGrant grant) =>
         new(
             input.Cluster.Key,
             names,
             new KafkaWindow(input.From, input.To),
             input.PredicateText,
-            KafkaReadGrant.Envelope,
+            grant,
             input.IncludeUncommitted ? KafkaIsolation.IncludeUncommitted : KafkaIsolation.Committed,
-            ContinueFrom: input.ContinueFrom);
+            ContinueFrom: input.ContinueFrom,
+            DisablePruning: input.SearchAllPartitions);
 
     private static string PredicateNotRecorded(KafkaSearchInput input) =>
         string.Create(CultureInfo.InvariantCulture, $"(the search text is not recorded, {input.PredicateText?.Length ?? 0} characters)");
@@ -317,11 +347,12 @@ internal sealed class KafkaSearchService(
         }
 
         bool succeeded = result.StopReason is not (KafkaScanStopReason.Failed or KafkaScanStopReason.Unavailable or KafkaScanStopReason.NotAuthorized);
+        bool readValues = plan.ReadsValues && plan.Request.Grant.HasFlag(KafkaReadGrant.Payload);
         string message = string.Create(
             CultureInfo.InvariantCulture,
-            $"{KafkaDisplay.Count(result.Records, "record")} and {KafkaDisplay.Bytes(result.Bytes)} read; stopped by {result.StopReason}; predicate: {plan.AuditText}");
+            $"{KafkaDisplay.Count(result.Records, "record")} and {KafkaDisplay.Bytes(result.Bytes)} read; stopped by {result.StopReason}{result.PruningAuditText}; predicate: {plan.AuditText}{(readValues ? "; values read" : string.Empty)}");
 
-        actionLog.Record(input.Cluster, input.Topics, Action, target, succeeded, message, KafkaCapability.SearchRecords);
+        actionLog.Record(input.Cluster, input.Topics, Action, target, succeeded, message, readValues ? KafkaCapability.ReadPayloads : KafkaCapability.SearchRecords);
         logger.SearchRan(
             user,
             string.Join(", ", input.Topics),

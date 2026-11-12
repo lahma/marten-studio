@@ -154,8 +154,9 @@ public class ShellModuleComponentTests
         string chipOff = off.Context.Render<CapabilityBanner>().Find(".ms-chip-button").TextContent.Trim();
         string chipOn = on.Context.Render<CapabilityBanner>().Find(".ms-chip-button").TextContent.Trim();
 
-        chipOff.Should().StartWith($"{host.EnabledCount} / {host.Offered.Count + 1}");
-        chipOn.Should().StartWith($"{host.EnabledCount + 1} / {host.Offered.Count + 1}");
+        // KStudio offers two capabilities: SearchRecords and ReadPayloads.
+        chipOff.Should().StartWith($"{host.EnabledCount} / {host.Offered.Count + 2}");
+        chipOn.Should().StartWith($"{host.EnabledCount + 2} / {host.Offered.Count + 2}");
     }
 
     [Fact]
@@ -167,10 +168,12 @@ public class ShellModuleComponentTests
         IRenderedComponent<CapabilityBanner> banner = harness.Context.Render<CapabilityBanner>();
 
         IElement group = banner.Find("ul[aria-label='KStudio for Apache Kafka® reads']");
-        IElement row = group.QuerySelectorAll("li").Should().ContainSingle().Which;
-        row.ClassList.Should().Contain("ms-capability-on");
-        row.QuerySelector(".ms-capability-name")!.TextContent.Should().Be("SearchRecords");
-        row.QuerySelector("code")!.TextContent.Should().Be("KafkaStudioOptions.Capabilities.SearchRecords");
+        IElement[] rows = [.. group.QuerySelectorAll("li")];
+        rows.Should().HaveCount(2);
+        rows.Select(static x => x.QuerySelector(".ms-capability-name")!.TextContent).Should().Equal("SearchRecords", "ReadPayloads");
+        rows.Should().OnlyContain(static x => x.ClassList.Contains("ms-capability-on"));
+        rows[0].QuerySelector("code")!.TextContent.Should().Be("KafkaStudioOptions.Capabilities.SearchRecords");
+        rows[1].QuerySelector("code")!.TextContent.Should().Be("KafkaStudioOptions.Capabilities.ReadPayloads");
     }
 
     [Fact]
@@ -181,7 +184,7 @@ public class ShellModuleComponentTests
 
         IRenderedComponent<CapabilityBanner> banner = harness.Context.Render<CapabilityBanner>();
 
-        banner.Find("ul[aria-label='KStudio for Apache Kafka® reads'] li").ClassList.Should().Contain("ms-capability-off");
+        banner.FindAll("ul[aria-label='KStudio for Apache Kafka® reads'] li").Should().OnlyContain(static x => x.ClassList.Contains("ms-capability-off"));
     }
 
     [Fact]

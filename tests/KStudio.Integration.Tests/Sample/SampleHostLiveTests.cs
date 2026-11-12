@@ -62,20 +62,26 @@ public class SampleHostLiveTests(SampleHostFixture fixture) : IClassFixture<Samp
                 ["customers.v1"] = 1,
                 ["orders.v1.dlq"] = 1,
                 ["secrets.v1"] = 1,
-                ["kstudio-sample.seed-v1"] = 1,
+                ["kstudio-sample.seed-v2"] = 1,
             });
 
         SampleKafkaJudge.Judge(metadata.Topics.Select(static x => x.Topic)).Verdict.Should().Be(SampleKafkaVerdict.AlreadySeeded);
 
-        // 1,000 records in each partition of orders.v1, written up to the marker's own offset.
+        // About 1,000 records in each partition of orders.v1 (where murmur2 puts the keys), 6,000 in all, written up to the marker's own offset.
         using IConsumer<Ignore, Ignore> consumer = new ConsumerBuilder<Ignore, Ignore>(
             new ConsumerConfig { BootstrapServers = fixture.Host.KafkaBootstrap, GroupId = "sample-live-test-probe", EnableAutoCommit = false }).Build();
+
+        long total = 0;
 
         for (int partition = 0; partition < 6; partition++)
         {
             WatermarkOffsets marks = consumer.QueryWatermarkOffsets(new TopicPartition("orders.v1", partition), TimeSpan.FromSeconds(30));
-            (marks.High.Value - marks.Low.Value).Should().Be(1000, $"orders.v1 partition {partition}");
+            long records = marks.High.Value - marks.Low.Value;
+            records.Should().BeGreaterThanOrEqualTo(900, $"orders.v1 partition {partition}");
+            total += records;
         }
+
+        total.Should().Be(6000);
     }
 
     [KafkaFact]

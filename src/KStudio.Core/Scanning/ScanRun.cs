@@ -5,6 +5,7 @@ using KStudio.Core.Clusters;
 using KStudio.Core.Decoding;
 using KStudio.Core.Logging;
 using KStudio.Core.Predicates;
+using KStudio.Core.Redaction;
 using KStudio.Core.Wire;
 using KStudio.Core.Windows;
 
@@ -38,6 +39,8 @@ internal interface IScanObserver
 /// Set only by a record read (D-UI decision 1): every record in the range is a match, whatever its timestamp, because a permalink names an
 /// offset and not a time. The window filter and the predicate are skipped.
 /// </param>
+/// <param name="FocusOffset">For a record read: the offset of the record asked for, whose value part may hold <paramref name="FocusValueBytes" />.</param>
+/// <param name="FocusValueBytes">For a record read: the bytes of value the record asked for may keep, whatever is left of the match's budget; 0 for none.</param>
 internal sealed record ScanRunInputs(
     Guid ScanId,
     KafkaScanPlan Plan,
@@ -50,7 +53,9 @@ internal sealed record ScanRunInputs(
     KStudioLoggers Loggers,
     KafkaLogOnce Once,
     IScanObserver? Observer,
-    bool MatchEveryRecordInRange = false);
+    bool MatchEveryRecordInRange = false,
+    long FocusOffset = -1,
+    int FocusValueBytes = 0);
 
 /// <summary>
 /// One scan's reader (AGENTS.md D36 and D38, decisions 4.2 and 9.2): a synchronous method run on a thread of its own that builds, assigns,
@@ -81,6 +86,7 @@ internal sealed class ScanRun : IDisposable
     private readonly CancellationTokenSource either;
     private readonly DecodeCounters counters = new();
     private readonly DecodeCounters matchCounters = new();
+    private readonly Dictionary<string, TopicHooks> hooks = new(StringComparer.Ordinal);
     private readonly Dictionary<KafkaUnknownReason, long> unknownByReason = [];
     private readonly List<KafkaScanGap> gaps = [];
     private readonly long fromMs;
@@ -311,7 +317,10 @@ internal sealed class ScanRun : IDisposable
 
         if (inputs.MatchEveryRecordInRange)
         {
-            match = KafkaMatchFactory.Create(record, topic, plan.Request.Grant, limits, matchCounters, exception => OnDecoderFailed(topic, exception));
+            int focus = inputs.FocusValueBytes > 0 && record.Offset == inputs.FocusOffset ? inputs.FocusValueBytes : 0;
+            TopicHooks hook = HooksOf(topic);
+            match = KafkaMatchFactory.Create(
+                record, topic, plan.Request.Grant, limits, matchCounters, hook.DecoderFailed, focusValueBytes: focus, onRedactionFailed: hook.RedactionFailed);
         }
         else if (record.TimestampType == WireTimestampType.NotAvailable)
         {
@@ -323,12 +332,24 @@ internal sealed class ScanRun : IDisposable
         }
         else
         {
-            RecordEvaluationContext context = new(record, topic.Descriptor.KeyFormat, counters, limits.MaxDecodeBytes, topic.DeclaresCloudEvents);
+            TopicHooks hook = HooksOf(topic);
+            RecordEvaluationContext context = new(
+                record,
+                topic.Descriptor.KeyFormat,
+                counters,
+                limits.MaxDecodeBytes,
+                topic.DeclaresCloudEvents,
+                plan.Request.Grant,
+                topic.Decoder,
+                topic.Redactor,
+                hook.DecoderFailed,
+                hook.RedactionFailed);
 
             switch (topic.Predicate.Evaluate(context))
             {
                 case TriState.True:
-                    match = KafkaMatchFactory.Create(record, topic, plan.Request.Grant, limits, matchCounters, exception => OnDecoderFailed(topic, exception));
+                    match = KafkaMatchFactory.Create(
+                        record, topic, plan.Request.Grant, limits, matchCounters, hook.DecoderFailed, context, onRedactionFailed: hook.RedactionFailed);
                     break;
                 case TriState.Unknown:
                     unknown = context.UnknownReason ?? KafkaUnknownReason.InvalidJson;
@@ -403,6 +424,41 @@ internal sealed class ScanRun : IDisposable
         }
 
         return stopReason is not null;
+    }
+
+    private sealed class TopicHooks(Action<Exception> decoderFailed, Action<RedactedValue> redactionFailed)
+    {
+        public Action<Exception> DecoderFailed { get; } = decoderFailed;
+
+        public Action<RedactedValue> RedactionFailed { get; } = redactionFailed;
+    }
+
+    /// <summary>The two callbacks of a topic, made once: a record must not allocate them.</summary>
+    private TopicHooks HooksOf(TopicScanContext topic)
+    {
+        if (!hooks.TryGetValue(topic.Topic, out TopicHooks? known))
+        {
+            known = new TopicHooks(exception => OnDecoderFailed(topic, exception), redacted => OnPayloadRuleFailed(topic, redacted));
+            hooks[topic.Topic] = known;
+        }
+
+        return known;
+    }
+
+    /// <summary>A payload rule could not be applied: the rule's kind and the exception's type name, once per cluster, topic and rule per window.</summary>
+    private void OnPayloadRuleFailed(TopicScanContext topic, RedactedValue redacted)
+    {
+        string rule = redacted.WithheldBy ?? string.Empty;
+        string topicText = KafkaLogValue.Cap(topic.Topic)!;
+        string clusterText = KafkaLogValue.Cap(cluster)!;
+
+        if (inputs.Once.ShouldLog($"payload|{clusterText}|{topicText}|{rule}"))
+        {
+            string kind = rule.StartsWith('$') ? "JsonPath" : "Pattern";
+            string failure = redacted.Failure.ToString();
+            string exceptionKind = redacted.ExceptionKind ?? "none";
+            KStudioLog.PayloadRuleNotApplied(inputs.Loggers.Scans, kind, topicText, clusterText, failure, exceptionKind);
+        }
     }
 
     private void OnDecoderFailed(TopicScanContext topic, Exception exception)
@@ -749,7 +805,10 @@ internal sealed class ScanRun : IDisposable
             KafkaScanCursor cursor = new(
             [
                 .. ordered.Where(static x => x.Next < x.Range.End).Select(static x => new KafkaCursorPosition(x.Range.Topic, x.Range.Partition, x.Next, x.Range.End)),
-            ]);
+            ])
+            {
+                Pruning = [.. plan.Pruning.Where(static x => x.IsPruned)],
+            };
 
             List<KafkaTopicRefusal> refusals =
             [
@@ -774,7 +833,10 @@ internal sealed class ScanRun : IDisposable
                 refusals,
                 cursor,
                 counters.Copy(),
-                matchCounters.Copy());
+                matchCounters.Copy())
+            {
+                Pruning = plan.Pruning,
+            };
         }
 
         string clusterText = KafkaLogValue.Cap(cluster)!;

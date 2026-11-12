@@ -1,3 +1,6 @@
+using System.Diagnostics;
+
+using KStudio.Core.Redaction;
 using KStudio.Core.Wire;
 
 namespace KStudio.Core.Decoding;
@@ -15,9 +18,17 @@ internal sealed class RecordEvaluationContext
     private readonly bool declaresCloudEvents;
     private readonly string?[] headerText;
     private readonly bool[] headerTextDone;
+    private readonly KafkaReadGrant grant;
+    private readonly IKafkaRecordDecoder? decoder;
+    private readonly IKafkaRedactor redactor;
+    private readonly Action<Exception>? onDecoderFailed;
+    private readonly Action<RedactedValue>? onRedactionFailed;
+    private Dictionary<RecordValue, RedactedValue?>? redacted;
+    private long redactionTicks;
     private bool keyTextDone;
     private string? keyText;
     private CloudEventView? cloudEvent;
+    private RecordValue? value;
 
     /// <summary>Creates the context of one record.</summary>
     /// <param name="record">The record.</param>
@@ -25,13 +36,33 @@ internal sealed class RecordEvaluationContext
     /// <param name="counters">Counts the decodes.</param>
     /// <param name="maxDecodeBytes">The largest value parsed.</param>
     /// <param name="declaresCloudEvents">Whether the topic declared <c>KafkaDecoders.CloudEvents</c>.</param>
-    public RecordEvaluationContext(WireRecord record, KafkaKeyFormat keyFormat, DecodeCounters counters, int maxDecodeBytes, bool declaresCloudEvents)
+    /// <param name="grant">What the visitor may read; the value is read only under the payload grant.</param>
+    /// <param name="decoder">The topic's declared decoder, resolved.</param>
+    /// <param name="redactor">The topic's rules; the deny-list alone when <see langword="null" />.</param>
+    /// <param name="onDecoderFailed">Told when a host decoder throws.</param>
+    /// <param name="onRedactionFailed">Told when a payload rule could not be applied.</param>
+    public RecordEvaluationContext(
+        WireRecord record,
+        KafkaKeyFormat keyFormat,
+        DecodeCounters counters,
+        int maxDecodeBytes,
+        bool declaresCloudEvents,
+        KafkaReadGrant grant = KafkaReadGrant.Envelope,
+        IKafkaRecordDecoder? decoder = null,
+        IKafkaRedactor? redactor = null,
+        Action<Exception>? onDecoderFailed = null,
+        Action<RedactedValue>? onRedactionFailed = null)
     {
         Record = record;
         this.keyFormat = new KafkaKeyFormatReader(keyFormat);
         this.counters = counters;
         this.maxDecodeBytes = maxDecodeBytes;
         this.declaresCloudEvents = declaresCloudEvents;
+        this.grant = grant;
+        this.decoder = decoder;
+        this.redactor = redactor ?? KafkaRedactor.DenyListOnly;
+        this.onDecoderFailed = onDecoderFailed;
+        this.onRedactionFailed = onRedactionFailed;
         headerText = new string?[record.Headers.Length];
         headerTextDone = new bool[record.Headers.Length];
     }
@@ -111,6 +142,73 @@ internal sealed class RecordEvaluationContext
         }
     }
 
+    /// <summary>
+    /// The record's value (a CloudEvent's data), read the first time a clause asks: detection under the scan's grant and the topic's decoder,
+    /// whole up to the decode limit. A match made from this record reuses it, so a host decoder runs once per matching record.
+    /// </summary>
+    public RecordValue Value
+    {
+        get
+        {
+            if (value is null)
+            {
+                value = ValueDetector.DetectValue(
+                    Record,
+                    new ValueDetection(grant, decoder, maxDecodeBytes, maxDecodeBytes, counters, onDecoderFailed, redactor),
+                    cloudEvent);
+
+                // The attributes are the same ones a ce. clause would read: a record carries them once.
+                cloudEvent ??= value.CloudEvent;
+            }
+
+            return value;
+        }
+    }
+
+    /// <summary>The value, when a clause already read it; <see langword="null" /> when none did.</summary>
+    public RecordValue? ComputedValue => value;
+
+    /// <summary>
+    /// A value with the topic's payload rules applied, computed once and only when a clause needs the masked form. <see langword="null" />
+    /// when the topic has no payload rule or the value has nothing to mask. The time the rules may take is spent across every call on this
+    /// record.
+    /// </summary>
+    /// <param name="part">The value, or one event's data of a batch.</param>
+    public RedactedValue? RedactedOf(RecordValue part)
+    {
+        if (redacted is not null && redacted.TryGetValue(part, out RedactedValue? known))
+        {
+            return known;
+        }
+
+        long started = Stopwatch.GetTimestamp();
+        TimeSpan left = PayloadRedactor.Budget - Stopwatch.GetElapsedTime(0, redactionTicks);
+        RedactedValue? result = PayloadRedactor.Apply(part, redactor, left > TimeSpan.Zero ? left : TimeSpan.Zero, maxDecodeBytes);
+        redactionTicks += Stopwatch.GetTimestamp() - started;
+        (redacted ??= new Dictionary<RecordValue, RedactedValue?>(ReferenceEqualityComparer.Instance))[part] = result;
+
+        if (result is not null)
+        {
+            counters.ValueRedacted++;
+
+            if (result.WithheldBy is not null)
+            {
+                onRedactionFailed?.Invoke(result);
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>Whether the payload rules were applied to <paramref name="part" /> already; the result is what <see cref="RedactedOf" /> answered.</summary>
+    /// <param name="part">The value.</param>
+    /// <param name="result">The masked value, or <see langword="null" />.</param>
+    public bool TryGetComputedRedaction(RecordValue part, out RedactedValue? result)
+    {
+        result = null;
+        return redacted is not null && redacted.TryGetValue(part, out result);
+    }
+
     private sealed class KafkaKeyFormatReader(KafkaKeyFormat format)
     {
         public string? TryFormat(byte[] key)
@@ -145,6 +243,21 @@ internal enum KafkaUnknownReason
 
     /// <summary>The topic declared CloudEvents but the value is not one.</summary>
     NotACloudEvent,
+
+    /// <summary>A value clause needed the value as text and it is binary or in the wire format.</summary>
+    ValueNotText,
+
+    /// <summary>A number in the value is too large to compare.</summary>
+    NumberOutOfRange,
+
+    /// <summary>The topic's decoder threw or refused the value.</summary>
+    DecoderFailed,
+
+    /// <summary>A CloudEvent's data_base64 is not valid base64.</summary>
+    InvalidBase64,
+
+    /// <summary>A redaction rule could not be applied to the value, so it cannot be searched.</summary>
+    RedactionNotApplied,
 }
 
 /// <summary>The words for the reasons, as "N records could not be …".</summary>
@@ -152,13 +265,25 @@ internal static class KafkaUnknownReasonText
 {
     /// <summary>Completes "{n} records …".</summary>
     /// <param name="reason">The reason.</param>
-    public static string Describe(KafkaUnknownReason reason) =>
+    public static string Describe(KafkaUnknownReason reason) => Describe(reason, one: false);
+
+    /// <summary>Completes "1 record …" when <paramref name="one" />, and "{n} records …" otherwise.</summary>
+    /// <param name="reason">The reason.</param>
+    /// <param name="one">Whether exactly one record is described.</param>
+    public static string Describe(KafkaUnknownReason reason, bool one) =>
         reason switch
         {
             KafkaUnknownReason.KeyNotText => "had a key that could not be read as text",
             KafkaUnknownReason.HeaderNotText => "had a header value that could not be read as text",
             KafkaUnknownReason.InvalidJson => "could not be decoded as JSON",
-            KafkaUnknownReason.TooLarge => "were larger than the decode limit",
-            _ => "were not CloudEvents although the topic declares them",
+            KafkaUnknownReason.TooLarge => one ? "was larger than the decode limit" : "were larger than the decode limit",
+            KafkaUnknownReason.NotACloudEvent => one ? "was not a CloudEvent although the topic declares them" : "were not CloudEvents although the topic declares them",
+            KafkaUnknownReason.ValueNotText => "had a value that could not be read as text",
+            KafkaUnknownReason.NumberOutOfRange => "had a number too large to compare",
+            KafkaUnknownReason.DecoderFailed => "could not be decoded by the topic's decoder",
+            KafkaUnknownReason.InvalidBase64 => "had CloudEvents data_base64 that is not valid base64",
+            _ => one
+                ? "could not be searched, because a redaction rule could not be applied to its value"
+                : "could not be searched, because a redaction rule could not be applied to their value",
         };
 }

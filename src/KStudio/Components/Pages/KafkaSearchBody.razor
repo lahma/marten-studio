@@ -10,6 +10,7 @@
 @using PostgresStudio.Services.Settings
 @inject KafkaState State
 @inject KafkaSearchService Search
+@inject KafkaRecordService Records
 @inject KafkaCatalogService Catalog
 @inject KafkaCapabilityGuard Capabilities
 @inject NavigationManager Navigation
@@ -181,6 +182,20 @@
                         <li><code>@example</code></li>
                     }
                 </ul>
+                @if (Capabilities.IsEnabled(KafkaCapability.ReadPayloads))
+                {
+                    <p>@KafkaStudioText.SearchSyntaxValues</p>
+                    <ul class="ms-k-syntax-examples">
+                        @foreach (string example in ValueSyntaxExamples)
+                        {
+                            <li><code>@example</code></li>
+                        }
+                    </ul>
+                }
+                else
+                {
+                    <p class="ms-muted">@KafkaStudioText.SearchSyntaxNeedsReadPayloads</p>
+                }
             </details>
 
             <div class="ms-k-search-actions">
@@ -215,7 +230,7 @@
                     <ul>
                         @foreach (ClauseVerdict verdict in shownPlan.Plan.Verdicts)
                         {
-                            <li>@verdict.Topic · @verdict.Field: @verdict.Description</li>
+                            <li class="@(verdict.Kind is ClauseVerdictKind.PartitionPruned or ClauseVerdictKind.PointLookup ? "ms-k-pruned" : null)">@verdict.Topic · @verdict.Field: @verdict.Description</li>
                         }
                     </ul>
                 }
@@ -299,6 +314,10 @@
                 {
                     <button type="button" class="ms-button" disabled="@busy" @onclick="ContinueAsync">Continue</button>
                 }
+                @if (result.Matches == 0 && result.Pruning.Any(static x => x.IsPruned))
+                {
+                    <button type="button" class="ms-button" disabled="@busy" @onclick="SearchAllPartitionsAsync">@KafkaStudioText.SearchAllPartitions</button>
+                }
             </div>
 
             @if (KafkaSearchText.Caveats(result) is { Count: > 0 } caveats)
@@ -324,6 +343,17 @@
                 <button type="button" class="ms-btn ms-btn-sm" aria-pressed="@(sort == MatchSort.Position ? "true" : "false")" @onclick="() => SetSort(MatchSort.Position)">Topic, partition, offset</button>
             </div>
 
+            @if (compareKeys.Count > 0)
+            {
+                <div class="ms-k-compare-bar" role="group" aria-label="Compare records">
+                    <button type="button" class="ms-btn ms-btn-sm" disabled="@(compareKeys.Count != 2 || busy)" @onclick="OpenCompareAsync">Compare 2 records</button>
+                    @if (compareKeys.Count < 2)
+                    {
+                        <span class="ms-muted">Check a second record to compare.</span>
+                    }
+                </div>
+            }
+
             <TableScroll Label="Matches">
                 <table class="ms-table ms-k-matches">
                     <thead>
@@ -336,6 +366,7 @@
                             <th>Correlation</th>
                             <th>Size</th>
                             <th><span class="ms-sr-only">Details</span></th>
+                            <th><span class="ms-sr-only">Compare</span></th>
                         </tr>
                     </thead>
                     <tbody>
@@ -376,12 +407,19 @@
                                             aria-expanded="@(expanded.Contains(rowKey) ? "true" : "false")"
                                             @onclick="() => ToggleDetailAsync(rowKey)">Details</button>
                                 </td>
+                                <td class="ms-table-cell">
+                                    <input type="checkbox"
+                                           aria-label="@($"Compare {match.Topic} {match.Partition}/{match.Offset}")"
+                                           checked="@compareKeys.Contains(rowKey)"
+                                           disabled="@(!compareKeys.Contains(rowKey) && compareKeys.Count >= 2)"
+                                           @onchange="e => ToggleCompare(rowKey, e.Value is true)" />
+                                </td>
                             </tr>
                             @if (expanded.Contains(rowKey))
                             {
                                 <tr class="ms-k-match-detail" @key="@(rowKey + "#detail")">
-                                    <td colspan="8">
-                                        <KafkaRecordDetail Model="@match" Cluster="@State.ActiveCluster?.Key" Kcat="@KcatFor(match)" />
+                                    <td colspan="9">
+                                        <KafkaRecordDetail Model="@match" Cluster="@State.ActiveCluster?.Key" Kcat="@KcatFor(match)" Access="@AccessOf(match)" />
                                     </td>
                                 </tr>
                             }
@@ -393,6 +431,15 @@
             @if (matches.Count > PagingThreshold)
             {
                 <Pagination TotalItems="@matches.Count" PageSize="@PageRows" CurrentPage="@pageNumber" OnPageChanged="OnPageAsync" />
+            }
+
+            @if (compareOpen && ComparedPair() is { } pair)
+            {
+                <KafkaRecordCompare Left="@pair.Left"
+                                    Right="@pair.Right"
+                                    LeftAccess="@AccessOf(pair.Left)"
+                                    RightAccess="@AccessOf(pair.Right)"
+                                    OnClose="CloseCompareAsync" />
             }
         }
     }
@@ -435,6 +482,15 @@
         "any ~ 'ORD-2026-'",
     ];
 
+    /// <summary>The examples of the value syntax, shown with <c>ReadPayloads</c>; <c>SearchHelpExamplesTests</c> parses each one as well.</summary>
+    internal static readonly IReadOnlyList<string> ValueSyntaxExamples =
+    [
+        "value ~ 'refund'",
+        "$.customer.id = 'customer-042'",
+        "$.items[*].sku in ('A-1', 'B-2')",
+        "$.total >= 100",
+    ];
+
     private static readonly (string Label, int Minutes)[] Presets = [("15 min", 15), ("1 h", 60), ("6 h", 360), ("24 h", 1_440), ("7 days", 10_080)];
 
     private const int MaxListedTopics = 200;
@@ -446,11 +502,14 @@
     private readonly List<KafkaMatch> matches = [];
     private readonly List<string> selected = [];
     private readonly HashSet<string> expanded = new(StringComparer.Ordinal);
+    private readonly List<string> compareKeys = [];
+    private readonly HashSet<string> valueRefused = new(StringComparer.Ordinal);
 
     private IReadOnlyList<string> topicNames = [];
     private IReadOnlyList<PredicateError> errors = [];
     private IReadOnlyList<string> addressTopics = [];
     private KafkaSearchPlanned? planned;
+    private KafkaGrantDecision? runGrant;
     private KafkaSearchRun? run;
     private KafkaScanProgress? progress;
     private KafkaScanResult? result;
@@ -484,6 +543,7 @@
     private bool planning;
     private bool running;
     private bool confirmOpen;
+    private bool compareOpen;
     private bool disposed;
     private bool ready;
     private bool started;
@@ -648,6 +708,8 @@
         result = null;
         progress = null;
         matches.Clear();
+        compareKeys.Clear();
+        compareOpen = false;
         loadingTopics = true;
         await InvokeAsync(StateHasChanged);
         await LoadTopicsAsync();
@@ -904,6 +966,17 @@
         await PlanAndStartAsync(planned.Input with { ContinueFrom = result.Cursor }, records);
     }
 
+    private async Task SearchAllPartitionsAsync()
+    {
+        if (busy || planned is null)
+        {
+            return;
+        }
+
+        // The same search with pruning off: verdicts, estimate and confirmation again, a new scan and a new audit entry.
+        await PlanAndStartAsync(planned.Input with { ContinueFrom = null, SearchAllPartitions = true });
+    }
+
     private async Task PlanAndStartAsync(KafkaSearchInput input, long? continuing = null)
     {
         planning = true;
@@ -1013,6 +1086,10 @@
             running = true;
             matches.Clear();
             expanded.Clear();
+            compareKeys.Clear();
+            valueRefused.Clear();
+            compareOpen = false;
+            runGrant = toStart.Grant;
             result = null;
             progress = null;
             continuedAfter = pendingContinuation;
@@ -1177,11 +1254,108 @@
 
     private async Task ToggleDetailAsync(string rowKey)
     {
-        if (!expanded.Remove(rowKey))
+        if (expanded.Remove(rowKey))
         {
-            expanded.Add(rowKey);
-            await EnsureSettingsAsync();
+            return;
         }
+
+        await EnsureSettingsAsync();
+
+        // Showing a value is a view of it, checked and recorded here and never during a render (D-PAYLOAD decision 1.4): the detail is drawn only
+        // after the check has answered, so that a refusal is the first thing the visitor sees and the value is never in the markup before it.
+        KafkaMatch? shown = matches.FirstOrDefault(x => string.Equals(RowKey(x), rowKey, StringComparison.Ordinal));
+        if (shown is not null)
+        {
+            await RecordValueViewsAsync(shown);
+        }
+
+        expanded.Add(rowKey);
+    }
+
+    /// <summary>Records the view of each value about to be shown; a refusal marks the record as not the visitor's to read.</summary>
+    private async Task RecordValueViewsAsync(params KafkaMatch[] shown)
+    {
+        if (State.ActiveCluster is not { } active)
+        {
+            return;
+        }
+
+        foreach (KafkaMatch match in shown)
+        {
+            if (runGrant is not { HasPayload: true })
+            {
+                continue;
+            }
+
+            try
+            {
+                if (!await Records.RecordValueViewAsync(active, match, lifetime.Token))
+                {
+                    valueRefused.Add(RowKey(match));
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Fail closed: a cancellation (the page leaving, or a host's policy timing out) never lets an unchecked value be drawn.
+                valueRefused.Add(RowKey(match));
+                return;
+            }
+            catch (Exception e) when (!disposed)
+            {
+                Logger.LogWarning(e, "The Kafka search page failed to record a value view");
+                valueRefused.Add(RowKey(match));
+            }
+        }
+    }
+
+    /// <summary>How a match's value reads to this visitor: the search's grant, then a refusal of the view itself.</summary>
+    private KafkaValueAccess AccessOf(KafkaMatch match) =>
+        valueRefused.Contains(RowKey(match))
+            ? KafkaValueAccess.PolicyRefused
+            : (runGrant ?? KafkaGrantDecision.EnvelopeOnly).AccessFor(match.Topic);
+
+    private void ToggleCompare(string rowKey, bool on)
+    {
+        if (on && !compareKeys.Contains(rowKey, StringComparer.Ordinal) && compareKeys.Count < 2)
+        {
+            compareKeys.Add(rowKey);
+        }
+        else if (!on)
+        {
+            compareKeys.Remove(rowKey);
+            compareOpen = false;
+        }
+    }
+
+    private (KafkaMatch Left, KafkaMatch Right)? ComparedPair()
+    {
+        if (compareKeys.Count != 2)
+        {
+            return null;
+        }
+
+        KafkaMatch? left = matches.FirstOrDefault(x => string.Equals(RowKey(x), compareKeys[0], StringComparison.Ordinal));
+        KafkaMatch? right = matches.FirstOrDefault(x => string.Equals(RowKey(x), compareKeys[1], StringComparison.Ordinal));
+
+        return left is null || right is null ? null : (left, right);
+    }
+
+    private async Task OpenCompareAsync()
+    {
+        if (ComparedPair() is not { } pair)
+        {
+            return;
+        }
+
+        // Compare reads nothing; showing both values is a view of each, recorded once per record in this circuit.
+        await RecordValueViewsAsync(pair.Left, pair.Right);
+        compareOpen = true;
+    }
+
+    private Task CloseCompareAsync()
+    {
+        compareOpen = false;
+        return InvokeAsync(StateHasChanged);
     }
 
     /// <summary>Reads the cluster's settings once, for the kcat line of an opened record.</summary>

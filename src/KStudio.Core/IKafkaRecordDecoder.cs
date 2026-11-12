@@ -45,7 +45,7 @@ public sealed class KafkaDecodeContext
     /// <summary>The value's bytes. Never a tombstone; possibly empty.</summary>
     public ReadOnlyMemory<byte> Value { get; }
 
-    /// <summary>The headers, in wire order.</summary>
+    /// <summary>The record's headers, in wire order, without those a redaction rule masks (the built-in deny-list included).</summary>
     public IReadOnlyList<KafkaHeader> Headers { get; }
 }
 

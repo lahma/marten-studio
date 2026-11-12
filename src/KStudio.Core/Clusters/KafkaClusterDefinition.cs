@@ -34,6 +34,9 @@ internal sealed class KafkaTopicDescriptor
 
     /// <summary>The key format: the declared one, or UTF-8 text.</summary>
     public KafkaKeyFormat KeyFormat => Settings.KeyFormat ?? KafkaKeyFormat.Utf8String;
+
+    /// <summary>The partitioner the host declared, when it declared one: a claim the engine verifies before it prunes.</summary>
+    public KafkaPartitioner? Partitioner => Settings.PartitionerValue;
 }
 
 /// <summary>

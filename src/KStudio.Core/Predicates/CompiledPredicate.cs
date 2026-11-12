@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 
 using KStudio.Core.Decoding;
 using KStudio.Core.Redaction;
@@ -27,6 +28,12 @@ internal enum ClauseVerdictKind
 
     /// <summary>Needs a decode of every record it reaches: slow.</summary>
     SlowScan,
+
+    /// <summary>A key search that reads several, but not all, of a topic's partitions, after sampling proved the topic's partitioner (decision 7.5).</summary>
+    PartitionPruned,
+
+    /// <summary>A key search that reads exactly one partition, after sampling proved the topic's partitioner.</summary>
+    PointLookup,
 }
 
 /// <summary>What the engine says about one clause on one topic before it reads anything.</summary>
@@ -34,13 +41,17 @@ internal enum ClauseVerdictKind
 /// <param name="Field">The clause's field, without its literals.</param>
 /// <param name="Kind">How it runs.</param>
 /// <param name="Description">The sentence.</param>
-internal sealed record ClauseVerdict(string Topic, string Field, ClauseVerdictKind Kind, string Description);
+/// <param name="Operator">The clause's operator, so that a verdict about a key's <c>=</c> or <c>in</c> can be told from one about <c>~</c>; <see langword="null" /> when not recorded.</param>
+internal sealed record ClauseVerdict(string Topic, string Field, ClauseVerdictKind Kind, string Description, PredicateOperator? Operator = null);
 
 /// <summary>A node of the compiled tree.</summary>
 internal abstract class CompiledNode
 {
     /// <summary>The cost class of the costliest clause in the subtree (decision 7.5): the order children are tried in.</summary>
     public abstract int Cost { get; }
+
+    /// <summary>Whether judging this subtree can read a record's value (a clause on the value or a JSON path, or <c>any</c> under the payload grant).</summary>
+    public virtual bool ReadsValues => false;
 
     /// <summary>Judges a record.</summary>
     /// <param name="context">The record.</param>
@@ -77,6 +88,9 @@ internal sealed class CompiledPredicate
     /// <summary>Whether the predicate has no condition and so matches every record.</summary>
     public bool MatchesEverything => root is null;
 
+    /// <summary>Whether judging a record can read its value: the search is audited as one that reads values.</summary>
+    public bool ReadsValues => root?.ReadsValues == true;
+
     /// <summary>Judges a record: only <see cref="TriState.True" /> is a match.</summary>
     /// <param name="context">The record.</param>
     public TriState Evaluate(RecordEvaluationContext context) => root is null ? TriState.True : root.Evaluate(context);
@@ -88,6 +102,8 @@ internal sealed class CompiledAnd(IReadOnlyList<CompiledNode> children) : Compil
     private readonly CompiledNode[] ordered = [.. children.OrderBy(static x => x.Cost)];
 
     public override int Cost { get; } = children.Max(static x => x.Cost);
+
+    public override bool ReadsValues => ordered.Any(static x => x.ReadsValues);
 
     public override TriState Evaluate(RecordEvaluationContext context)
     {
@@ -122,6 +138,8 @@ internal sealed class CompiledOr(IReadOnlyList<CompiledNode> children) : Compile
 
     public override int Cost { get; } = children.Max(static x => x.Cost);
 
+    public override bool ReadsValues => ordered.Any(static x => x.ReadsValues);
+
     public override TriState Evaluate(RecordEvaluationContext context)
     {
         TriState result = TriState.False;
@@ -151,6 +169,8 @@ internal sealed class CompiledOr(IReadOnlyList<CompiledNode> children) : Compile
 internal sealed class CompiledNot(CompiledNode operand) : CompiledNode
 {
     public override int Cost => operand.Cost;
+
+    public override bool ReadsValues => operand.ReadsValues;
 
     public override TriState Evaluate(RecordEvaluationContext context) =>
         operand.Evaluate(context) switch
@@ -359,10 +379,15 @@ internal sealed class CompiledCloudEventClause(string attribute, PredicateOperat
     }
 }
 
-/// <summary><c>any</c>: the key's text, every header's text and every CloudEvents attribute, except the fields redaction masks (decision 10.6).</summary>
-internal sealed class CompiledAnyClause(PredicateOperator op, string[] texts, IKafkaRedactor redactor) : CompiledNode
+/// <summary>
+/// <c>any</c>: the key's text, every header's text and every CloudEvents attribute, except the fields redaction masks (decision 10.6); under
+/// the payload grant also every text in the value, as the visitor would see it (cost 8, otherwise 5).
+/// </summary>
+internal sealed class CompiledAnyClause(PredicateOperator op, string[] texts, IKafkaRedactor redactor, bool payload = false) : CompiledNode
 {
-    public override int Cost => 5;
+    public override int Cost => payload ? 8 : 5;
+
+    public override bool ReadsValues => payload;
 
     public override TriState Evaluate(RecordEvaluationContext context)
     {
@@ -435,6 +460,21 @@ internal sealed class CompiledAnyClause(PredicateOperator op, string[] texts, IK
             }
         }
 
+        if (payload)
+        {
+            foreach (RecordValue part in context.Value.All())
+            {
+                switch (ValuePart(context, part, out KafkaUnknownReason? partReason))
+                {
+                    case TriState.True:
+                        return TriState.True;
+                    case TriState.Unknown:
+                        unknown ??= partReason;
+                        break;
+                }
+            }
+        }
+
         if (unknown is { } why)
         {
             context.MarkUnknown(why);
@@ -442,6 +482,90 @@ internal sealed class CompiledAnyClause(PredicateOperator op, string[] texts, IK
         }
 
         return TriState.False;
+    }
+
+    /// <summary>Every string leaf of a JSON value (member names excluded), or the whole text of a text value.</summary>
+    private TriState ValuePart(RecordEvaluationContext context, RecordValue part, out KafkaUnknownReason? reason)
+    {
+        reason = null;
+
+        if (ValueJudge.IsAbsent(part))
+        {
+            return TriState.False;
+        }
+
+        switch (part.Kind)
+        {
+            case KafkaValueKind.Undecodable:
+                reason = ValueJudge.UnknownFor(part.Reason);
+                return TriState.Unknown;
+
+            case KafkaValueKind.Json or KafkaValueKind.Text when part.Utf8 is not null:
+                {
+                    if (part.Cut)
+                    {
+                        reason = KafkaUnknownReason.TooLarge;
+                        return TriState.Unknown;
+                    }
+
+                    RedactedValue? masked = ValueJudge.Masked(context, part, redactor, out bool withheld);
+
+                    if (withheld)
+                    {
+                        reason = KafkaUnknownReason.RedactionNotApplied;
+                        return TriState.Unknown;
+                    }
+
+                    if (part.Kind == KafkaValueKind.Text)
+                    {
+                        return TextMatch.Any(op, masked?.Text ?? part.Text, texts) ? TriState.True : TriState.False;
+                    }
+
+                    JsonElement root = part.Json!.Value;
+
+                    if (masked is not null && !masked.TryGetJson(out root))
+                    {
+                        reason = KafkaUnknownReason.RedactionNotApplied;
+                        return TriState.Unknown;
+                    }
+
+                    return AnyString(root) ? TriState.True : TriState.False;
+                }
+
+            default:
+                return TriState.False;
+        }
+    }
+
+    private bool AnyString(JsonElement element)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.String:
+                return TextMatch.Any(op, element.GetString() ?? string.Empty, texts);
+            case JsonValueKind.Object:
+                foreach (JsonProperty property in element.EnumerateObject())
+                {
+                    if (AnyString(property.Value))
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            case JsonValueKind.Array:
+                foreach (JsonElement item in element.EnumerateArray())
+                {
+                    if (AnyString(item))
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            default:
+                return false;
+        }
     }
 }
 

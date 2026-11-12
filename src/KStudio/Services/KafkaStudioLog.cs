@@ -13,7 +13,7 @@ namespace KStudio.Services;
 /// <remarks>
 /// <para>
 /// 9600 and 9601 (a search ran, or did not), 9602 and 9603 (a capability or a cluster, topic refused), 9604 (a record opened) are the audit
-/// events; 9605 is reserved for a record's value read (<c>ReadPayloads</c>, M3) and 9606 and 9607 for export and live tail (M5). 9610 is the
+/// events; 9605 is a record's value shown (<c>ReadPayloads</c>), and 9606 and 9607 are reserved for export and live tail (M5). 9610 is the
 /// address naming a cluster the visitor may not open (Debug), and 9611 the twin of the studios' 9220. 9612 to 9649 are held for the shell side.
 /// The module never logs 9200 or 9201: their templates name a store, a database and a tenant.
 /// </para>
@@ -84,6 +84,15 @@ internal static partial class KafkaStudioLog
         RecordOpenedCore(logger, user, topic, partition, offset, cluster, tenant);
     }
 
+    /// <summary>9605: a record's value was shown.</summary>
+    public static void RecordValueRead(this ILogger logger, string user, string topic, int partition, long offset, string cluster, string? tenantId)
+    {
+        string tenant = StudioLogValue.Cap(tenantId ?? NoTenant)!;
+        (user, topic, cluster) = (StudioLogValue.Cap(user)!, StudioLogValue.Cap(topic)!, StudioLogValue.Cap(cluster)!);
+
+        RecordValueReadCore(logger, user, topic, partition, offset, cluster, tenant);
+    }
+
     /// <summary>9610: the address named a cluster that is unknown or refused, and another was opened.</summary>
     public static void ClusterAddressIgnored(this ILogger logger, string cluster, string opened)
     {
@@ -136,6 +145,12 @@ internal static partial class KafkaStudioLog
         Level = LogLevel.Information,
         Message = "KStudio user {User} opened record {Topic}/{Partition}/{Offset} of cluster {Cluster}, tenant {TenantId}")]
     private static partial void RecordOpenedCore(ILogger logger, string user, string topic, int partition, long offset, string cluster, string tenantId);
+
+    [LoggerMessage(
+        EventId = 9605,
+        Level = LogLevel.Information,
+        Message = "KStudio user {User} read the value of record {Topic}/{Partition}/{Offset} of cluster {Cluster}, tenant {TenantId}")]
+    private static partial void RecordValueReadCore(ILogger logger, string user, string topic, int partition, long offset, string cluster, string tenantId);
 
     [LoggerMessage(
         EventId = 9610,

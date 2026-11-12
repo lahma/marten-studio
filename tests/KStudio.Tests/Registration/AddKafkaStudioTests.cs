@@ -151,7 +151,9 @@ public class AddKafkaStudioTests
         module.Pages.KeepsRoot.Should().BeTrue();
         module.Pages.CompileTimeRoot.Should().Be("/kafka");
         module.ProductName.Should().Be("KStudio for Apache Kafka®");
-        module.Capabilities.Should().Equal(new StudioModuleCapability("SearchRecords", "KafkaStudioOptions.Capabilities.SearchRecords", Configured: true));
+        module.Capabilities.Should().Equal(
+            new StudioModuleCapability("SearchRecords", "KafkaStudioOptions.Capabilities.SearchRecords", Configured: true),
+            new StudioModuleCapability("ReadPayloads", "KafkaStudioOptions.Capabilities.ReadPayloads", Configured: false));
         module.Navigation.Should().ContainSingle().Which.Items.Select(static x => x.Label).Should().Equal("Topics", "Search", "Cluster settings");
     }
 }

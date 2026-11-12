@@ -59,7 +59,11 @@
 
     <div class="ms-toolbar-group">
         <button type="button" class="ms-btn ms-btn-sm" @onclick="OnCopyDocument">Copy JSON</button>
-        @if (DownloadHref is { Length: > 0 })
+        @if (!AllowDownload)
+        {
+            @* Not offered at all: downloading a value is exporting it, and the host did not allow that. *@
+        }
+        else if (DownloadHref is { Length: > 0 })
         {
             <a class="ms-btn ms-btn-sm" href="@DownloadHref" download="@DownloadFileName">Download</a>
         }
@@ -124,6 +128,10 @@
     /// <summary>Raised by "Collapse all".</summary>
     [Parameter]
     public EventCallback OnCollapseAll { get; set; }
+
+    /// <summary>Whether a download is offered at all; <see langword="false" /> hides the link and its disabled twin.</summary>
+    [Parameter]
+    public bool AllowDownload { get; set; } = true;
 
     /// <summary>The <c>data:</c> URL the download anchor points at, or empty when the document is too large for one.</summary>
     [Parameter]

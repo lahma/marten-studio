@@ -8,4 +8,7 @@ internal enum KafkaCapability
 {
     /// <summary>Run scans, and read keys, timestamps, headers and CloudEvents attributes.</summary>
     SearchRecords,
+
+    /// <summary>Read record values: the value in the detail and on the record page, value and JSON-path searches, compare and copy-as.</summary>
+    ReadPayloads,
 }

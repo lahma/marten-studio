@@ -75,6 +75,7 @@ internal sealed partial class KafkaScanner(
     KafkaWireReads reads,
     WindowResolver resolver,
     RecordSizeSampler sampler,
+    PartitionerVerifier verifier,
     KafkaDecoderResolver decoders,
     KafkaScanLimiter limiter,
     OwnerByteBudget ownerBudget,
@@ -168,8 +169,118 @@ internal sealed partial class KafkaScanner(
             return new KafkaScanPlan(request, window, ranges, contexts, errors, verdicts, Unknown(ranges.Sum(static x => Math.Max(0, x.End - x.Start)), ranges.Count(static x => !x.IsEmpty)), limits, audit);
         }
 
+        // A key search may read fewer partitions, but only after sampling the window has proved the topic's declared partitioner
+        // (D-PAYLOAD decision 7): the ranges, the estimate and the cursor then cover exactly what is read.
+        IReadOnlyList<KafkaTopicPruning> pruning = await PruneAsync(request, parsed.Tree, topics, contexts, window, ranges, verdicts, owner, cancellationToken).ConfigureAwait(false);
+        ranges = Pruned(ranges, pruning);
+        verdicts = ApplyPruning(verdicts, pruning);
+
         KafkaScanEstimate estimate = await EstimateAsync(request, ranges, owner, limits, cancellationToken).ConfigureAwait(false);
-        return new KafkaScanPlan(request, window, ranges, contexts, [], verdicts, estimate, limits, audit);
+        return new KafkaScanPlan(request, window, ranges, contexts, [], verdicts, estimate, limits, audit, pruning);
+    }
+
+    /// <summary>
+    /// Asks the verifier about every topic that has a key clause to explain: a topic that declared a partitioner, or one whose search fixes
+    /// the key (its verdict then says why it is not pruned). A topic with neither says nothing.
+    /// </summary>
+    private async Task<IReadOnlyList<KafkaTopicPruning>> PruneAsync(
+        KafkaScanRequest request,
+        PredicateNode? tree,
+        KafkaTopicName[] topics,
+        Dictionary<string, TopicScanContext> contexts,
+        ResolvedWindow window,
+        IReadOnlyList<PartitionRange> ranges,
+        List<ClauseVerdict> verdicts,
+        KafkaScanOwner owner,
+        CancellationToken cancellationToken)
+    {
+        IReadOnlyList<string>? keySet = KeyPruning.KeySet(tree);
+        WireIsolation isolation = request.Isolation == KafkaIsolation.Committed ? WireIsolation.ReadCommitted : WireIsolation.ReadUncommitted;
+        List<KafkaTopicPruning> pruning = [];
+
+        foreach (KafkaTopicName topic in topics)
+        {
+            if (!contexts.TryGetValue(topic.Value, out TopicScanContext? context)
+                || !verdicts.Any(x => x.Topic == topic.Value && x.Field == "key"))
+            {
+                continue;
+            }
+
+            bool declared = context.Descriptor.Partitioner is not null;
+
+            if (!declared && keySet is null)
+            {
+                continue;
+            }
+
+            int partitionCount = window.Ranges.Count(x => x.Topic == topic.Value);
+            PruneRequest ask = new(
+                request.Cluster,
+                topic.Value,
+                context.Descriptor,
+                keySet,
+                context.Redactor.ForKey() is not null,
+                request.DisablePruning,
+                partitionCount,
+                [.. ranges.Where(x => x.Topic == topic.Value)],
+                isolation,
+                request.ContinueFrom?.Pruning.FirstOrDefault(x => x.Topic == topic.Value && x.IsPruned));
+
+            pruning.Add(await verifier.DecideAsync(ask, owner, cancellationToken).ConfigureAwait(false));
+        }
+
+        return pruning;
+    }
+
+    /// <summary>The ranges a scan reads: a pruned topic keeps only its pruned partitions.</summary>
+    private static IReadOnlyList<PartitionRange> Pruned(IReadOnlyList<PartitionRange> ranges, IReadOnlyList<KafkaTopicPruning> pruning)
+    {
+        if (!pruning.Any(static x => x.IsPruned))
+        {
+            return ranges;
+        }
+
+        Dictionary<string, IReadOnlyList<int>> keep = pruning.Where(static x => x.IsPruned).ToDictionary(static x => x.Topic, static x => x.Partitions, StringComparer.Ordinal);
+        return [.. ranges.Where(x => !keep.TryGetValue(x.Topic, out IReadOnlyList<int>? partitions) || partitions.Contains(x.Partition))];
+    }
+
+    /// <summary>Replaces the verdict of a key <c>=</c> or <c>in</c> with the pruning's, or says on it why the topic is not pruned (decision 7.5).</summary>
+    private static List<ClauseVerdict> ApplyPruning(List<ClauseVerdict> verdicts, IReadOnlyList<KafkaTopicPruning> pruning)
+    {
+        if (pruning.Count == 0)
+        {
+            return verdicts;
+        }
+
+        Dictionary<string, KafkaTopicPruning> byTopic = pruning.ToDictionary(static x => x.Topic, StringComparer.Ordinal);
+        List<ClauseVerdict> result = [];
+
+        foreach (ClauseVerdict verdict in verdicts)
+        {
+            if (verdict.Field != "key" || !byTopic.TryGetValue(verdict.Topic, out KafkaTopicPruning? topic))
+            {
+                result.Add(verdict);
+                continue;
+            }
+
+            bool fixesKey = verdict.Operator is PredicateOperator.Equals or PredicateOperator.In;
+
+            if (topic.IsPruned)
+            {
+                // Only the clause that fixes the key is pruned; a `~` beside it is still a scan of what is read.
+                result.Add(fixesKey ? verdict with { Kind = topic.VerdictKind, Description = topic.VerdictText! } : verdict);
+            }
+            else if (fixesKey || topic.NotPrunedReason == "the search does not fix the key with = or in")
+            {
+                result.Add(verdict with { Description = verdict.Description + "; not pruned: " + topic.NotPrunedReason });
+            }
+            else
+            {
+                result.Add(verdict);
+            }
+        }
+
+        return result;
     }
 
     /// <inheritdoc />
@@ -426,6 +537,7 @@ internal static class ScanningRegistration
         services.TryAddSingleton(static provider => new KafkaScanLimiter(provider.GetRequiredService<KafkaEngineSnapshot>()));
         services.TryAddSingleton(static provider => new OwnerByteBudget(provider.GetRequiredService<KafkaEngineSnapshot>(), provider.GetRequiredService<TimeProvider>()));
         services.TryAddSingleton<RecordSizeSampler>();
+        services.TryAddSingleton<PartitionerVerifier>();
         services.TryAddSingleton<KafkaDecoderResolver>();
         services.TryAddSingleton<KafkaScanCoordinator>();
         services.TryAddSingleton<IKafkaScanner, KafkaScanner>();

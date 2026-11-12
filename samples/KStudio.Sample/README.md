@@ -32,8 +32,8 @@ Open `http://localhost:5212`, sign in at `/login` as `admin` or `support` (the p
 
 | User | Studio | Kafka |
 |---|---|---|
-| `admin` | opens it, and may change things in the Marten screens | every topic, and Search |
-| `support` | opens it, read-only | the cluster and the topics starting `orders.`, and Search over them; `payments.v1`, `customers.v1` and `secrets.v1` are absent from every list and a search that names one is refused whole |
+| `admin` | opens it, and may change things in the Marten screens | every topic, Search and record values (`ReadPayloads`) |
+| `support` | opens it, read-only | the cluster and the topics starting `orders.`, and Search over them by key, header and attribute; **not** record values: they read `The value of this record is not available to you.`, and a search on a value is refused. `payments.v1`, `customers.v1` and `secrets.v1` are absent from every list and a search that names one is refused whole |
 
 ## What is seeded
 
@@ -41,14 +41,14 @@ Every timestamp is in the past, within the last six hours of when the sample sta
 
 | Topic | Partitions | What it shows |
 |---|---|---|
-| `orders.v1` | 6 | 6,000 orders as structured CloudEvents, with Wolverine-style headers; `customer-email` is masked and still searchable by `=` and `in` |
-| `payments.v1` | 3 | 1,500 payments as binary-mode CloudEvents; the `subject` attribute is masked in both bindings |
-| `customers.v1` | 1 | a compacted topic: 500 customers, then 50 tombstones |
+| `orders.v1` | 6 | 6,000 orders as structured CloudEvents, with Wolverine-style headers, placed by murmur2 (the topic declares `KafkaPartitioner.Murmur2`, so a key search reads one partition); `customer-email` and the data's `$.customer.email` are masked and still searchable by `=` and `in` |
+| `payments.v1` | 3 | 1,500 payments as binary-mode CloudEvents, placed round-robin; the `subject` attribute is masked in both bindings. The topic declares `crc32` on purpose: the page shows a verification that fails, and why |
+| `customers.v1` | 1 | a compacted topic: 500 customers with a phone number (masked by the `phone` pattern, in `phone` and in `note`), then 50 tombstones |
 | `orders.v1.dlq` | 1 | 20 dead letters, with Wolverine's retry headers |
 | `secrets.v1` | 1 | headers `x-api-key` and `authorization`, which the built-in deny-list always masks |
-| `kstudio-sample.seed-v1` | 1 | the marker: the sample seeded this cluster |
+| `kstudio-sample.seed-v2` | 1 | the marker: the sample seeded this cluster (a cluster with `seed-v1` was seeded by an earlier sample and must be deleted) |
 
-The sample application's own consumer group, `sample-orders-handler`, has committed 800 of the 1,000 records in each partition of
+The sample application's own consumer group, `sample-orders-handler`, has committed 800 of the about 1,000 records in each partition of
 `orders.v1`, so the topic page shows a lag. That consumer is the sample's, not KStudio's: KStudio reads and never writes.
 
 ## Find a record from a ticket
@@ -64,6 +64,27 @@ The page shows how the clause runs on the topic and an estimate; the window is a
 asks you to confirm. One record matches: `order-0042`. Open it for its metadata, headers (with `customer-email` masked), CloudEvents attributes
 and the records around it. Its payment in `payments.v1` has the same correlation id - but support cannot see that topic; sign in as `admin` to
 find both.
+
+## Read a value
+
+Sign in as `admin` (the value is the payload gate's, and `support` does not pass it). Search `orders.v1` over the last 6 hours for:
+
+```
+$.customer.id = 'customer-042'
+```
+
+One order matches. Open **Details**: the CloudEvent's data is shown in the JSON view, with `$.customer.email` as
+`••• (redacted by $.customer.email)` and the line `1 part of this value is masked: $.customer.email.` above it. The node menu offers
+**Copy as search** on `$.customer.id`, no download and no Postgres items. Compare two matches to see a masked path listed and not diffed.
+
+| Predicate | Shows |
+|---|---|
+| `$.customer.email = 'customer42@example.com'` | one match: an exact `=` on a searchable JSON-path rule; the Activity entry reads `<redacted>` |
+| `$.customer.email ~ 'customer'` | refused: only `=` and `in` can search a masked leaf |
+| `key = 'order-0042'` | `one partition: murmur2 maps the key to partition … of 6 (verified on 1,002 records)`; one partition is read |
+| `key = 'order-9999'` | no match, with the caveat that only one partition was read; **Search all partitions** reads the other five |
+| `payments.v1`, `key = 'pay-0001'` | `not pruned: record …` — the declared `crc32` is not what the round-robin producer did |
+| `customers.v1`, `any ~ '+358'` | no phone: pattern-masked text can never be searched |
 
 Other things to try:
 

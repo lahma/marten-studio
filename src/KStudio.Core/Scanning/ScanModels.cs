@@ -91,6 +91,7 @@ internal sealed record KafkaScanLowering
 /// <param name="CreateTimeMargin">The margin past the window's end for <c>CreateTime</c> topics; the engine's default when <see langword="null" />.</param>
 /// <param name="ContinueFrom">The cursor of an earlier scan: this one reads exactly the offsets that one left.</param>
 /// <param name="Lower">Limits lowered for this scan.</param>
+/// <param name="DisablePruning">Read every partition even where a verified partitioner would allow reading fewer ("Search all partitions", D-PAYLOAD decision 7.6).</param>
 internal sealed record KafkaScanRequest(
     string Cluster,
     IReadOnlyList<KafkaTopicName> Topics,
@@ -100,7 +101,8 @@ internal sealed record KafkaScanRequest(
     KafkaIsolation Isolation = KafkaIsolation.Committed,
     TimeSpan? CreateTimeMargin = null,
     KafkaScanCursor? ContinueFrom = null,
-    KafkaScanLowering? Lower = null);
+    KafkaScanLowering? Lower = null,
+    bool DisablePruning = false);
 
 /// <summary>Why a scan stopped (decision 9.5): exactly one.</summary>
 internal enum KafkaScanStopReason
@@ -241,6 +243,7 @@ internal sealed class KafkaScanPlan
     /// <param name="estimate">The estimate.</param>
     /// <param name="limits">The limits this scan runs under.</param>
     /// <param name="auditText">The canonical predicate with redacted literals hidden.</param>
+    /// <param name="pruning">What each topic's partitioner claim came to (decision 7.4); empty when pruning was not asked of any topic.</param>
     public KafkaScanPlan(
         KafkaScanRequest request,
         ResolvedWindow? window,
@@ -250,7 +253,8 @@ internal sealed class KafkaScanPlan
         IReadOnlyList<ClauseVerdict> verdicts,
         KafkaScanEstimate estimate,
         KafkaScanLimits limits,
-        string auditText)
+        string auditText,
+        IReadOnlyList<KafkaTopicPruning>? pruning = null)
     {
         Request = request;
         Window = window;
@@ -261,6 +265,7 @@ internal sealed class KafkaScanPlan
         Estimate = estimate;
         Limits = limits;
         AuditText = auditText;
+        Pruning = pruning ?? [];
     }
 
     /// <summary>The request.</summary>
@@ -293,8 +298,19 @@ internal sealed class KafkaScanPlan
     /// <summary>Whether <c>Start</c> can succeed (before limits and confirmation).</summary>
     public bool IsValid => Errors.Count == 0;
 
-    /// <summary>Everything a visitor must be told about the window, the topics and the partitions.</summary>
-    public IEnumerable<WindowNote> Notes => Window?.AllNotes ?? [];
+    /// <summary>Whether judging a record can read its value on any topic: the search is audited as one that reads values.</summary>
+    public bool ReadsValues => Topics.Values.Any(static x => x.Predicate.ReadsValues);
+
+    /// <summary>
+    /// What each topic's declared partitioner came to, for the topics it was asked of: pruned (and to which partitions), or why not. The
+    /// plan's <see cref="Ranges" /> keep only the pruned partitions of a pruned topic.
+    /// </summary>
+    public IReadOnlyList<KafkaTopicPruning> Pruning { get; }
+
+    /// <summary>Everything a visitor must be told about the window, the topics and the partitions, the pruned partitions included.</summary>
+    public IEnumerable<WindowNote> Notes =>
+        (Window?.AllNotes ?? []).Concat(
+            Pruning.Where(static x => x.IsPruned).Select(static x => (WindowNote) new WindowNote.PartitionsPruned(x.Topic, x.Partitions, x.Partitioner!, x.Checked)));
 }
 
 /// <summary>One partition's progress.</summary>
@@ -410,9 +426,18 @@ internal sealed record KafkaScanResult(
     DecodeCounters Decodes,
     DecodeCounters MatchDecodes)
 {
+    /// <summary>What each topic's declared partitioner came to for this scan (from the plan); a topic that was pruned was read in some of its partitions only.</summary>
+    public IReadOnlyList<KafkaTopicPruning> Pruning { get; init; } = [];
+
+    /// <summary>One sentence per pruned topic for the result's caveats: "This search read only partition 3 of 6 of orders (murmur2, verified on 1,002 records)".</summary>
+    public IEnumerable<string> PruningSentences => Pruning.Where(static x => x.IsPruned).Select(static x => x.Caveat!);
+
+    /// <summary>The audit message's suffix for the topics that were pruned (<c>; pruned to partition 3 of orders</c>); empty when none were.</summary>
+    public string PruningAuditText => string.Concat(Pruning.Where(static x => x.IsPruned).Select(static x => x.AuditSuffix));
+
     /// <summary>Sentences saying what the undecidable records could not be, for the line beside a negative.</summary>
     public IEnumerable<string> UndecidableSentences =>
-        UndecidableByReason.Where(static x => x.Value > 0).Select(static x => string.Create(CultureInfo.InvariantCulture, $"{x.Value:N0} records {KafkaUnknownReasonText.Describe(x.Key)}"));
+        UndecidableByReason.Where(static x => x.Value > 0).Select(static x => string.Create(CultureInfo.InvariantCulture, $"{x.Value:N0} {(x.Value == 1 ? "record" : "records")} {KafkaUnknownReasonText.Describe(x.Key, one: x.Value == 1)}"));
 }
 
 /// <summary>What <see cref="KafkaScanHandle.ReadBatchesAsync" /> yields, at most four times a second (decision 9.7).</summary>
@@ -445,6 +470,12 @@ internal sealed class KafkaScanCursor
 
     /// <summary>The partitions that have more to read.</summary>
     public IReadOnlyList<KafkaCursorPosition> Positions { get; }
+
+    /// <summary>
+    /// What the scan that made this cursor proved about its pruned topics (D-PAYLOAD decision 7): a continued scan keeps the claim and does not
+    /// sample again. Held in memory only; the text form carries positions alone, so a cursor read back from text has none.
+    /// </summary>
+    public IReadOnlyList<KafkaTopicPruning> Pruning { get; init; } = [];
 
     /// <summary>Whether nothing is left to read.</summary>
     public bool IsEmpty => Positions.Count == 0;

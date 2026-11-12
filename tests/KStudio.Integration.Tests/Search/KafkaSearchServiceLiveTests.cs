@@ -1,3 +1,5 @@
+using System.Text;
+
 using KStudio.Core.Scanning;
 using KStudio.Integration.Tests.Support;
 using KStudio.Services;
@@ -77,6 +79,73 @@ public abstract class KafkaSearchServiceLiveTests(KafkaFixture fixture)
         entry.Message.Should().Contain("stopped by Completed").And.Contain("predicate: header.correlation-id = 'odd-7'");
         entry.Target.Should().StartWith(topic);
         host.Logs.Entries.Should().ContainSingle(static x => x.EventId.Id == 9600);
+    }
+
+    [KafkaFact]
+    public async Task A_value_search_finds_the_record_and_audits_ReadPayloads()
+    {
+        await using LiveContractCluster admin = LiveContractCluster.Open(fixture);
+        string topic = admin.NewTopic("m3-value");
+        await admin.CreateTopicAsync(topic, 1);
+        await admin.ProduceAsync(
+            topic,
+            0,
+            [.. Enumerable.Range(0, Records).Select(static i => LiveRecords.At(i, "k" + i, "{\"n\":" + i + ",\"customer\":{\"id\":\"customer-" + i + "\"}}"))]);
+        await using LiveSearchHost host = Host(options => options.Capabilities.ReadPayloads = true);
+
+        (KafkaScanResult result, List<KafkaMatch> matches) = await RunAsync(host, Input(host, [topic], "$.customer.id = 'customer-7'"));
+
+        KafkaMatch found = matches.Should().ContainSingle().Subject;
+        found.Offset.Should().Be(7);
+        found.ValueText.Should().Be("{\"n\":7,\"customer\":{\"id\":\"customer-7\"}}", "the match holds the value because the search had the payload grant");
+        result.StopReason.Should().Be(KafkaScanStopReason.Completed);
+
+        PostgresStudio.Services.StudioActionLogEntry entry = host.Ring.Should().ContainSingle().Subject;
+        entry.Capability.Should().Be("ReadPayloads");
+        entry.Message.Should().Contain("predicate: $.customer.id = 'customer-7'").And.EndWith("; values read");
+        host.Logs.Entries.Should().ContainSingle(static x => x.EventId.Id == 9600);
+
+        // The same search without the capability is refused where the operation is, before anything is read.
+        await using LiveSearchHost without = Host();
+        KafkaSearchPlanResult refused = await without.Search.PlanAsync(Input(without, [topic], "$.customer.id = 'customer-7'"), Token);
+        refused.Should().BeOfType<KafkaSearchPlanResult.Refused>().Which.Text.Should().Contain("KafkaStudioOptions.Capabilities.ReadPayloads");
+        without.Logs.Entries.Should().Contain(static x => x.EventId.Id == 9602);
+    }
+
+    [KafkaFact]
+    public async Task A_pruned_search_reads_one_partition()
+    {
+        const int Partitions = 3;
+        await using LiveContractCluster admin = LiveContractCluster.Open(fixture);
+        string topic = admin.NewTopic("m3-pruned");
+        await admin.CreateTopicAsync(topic, Partitions);
+
+        // The records go where a murmur2 producer puts them (the parity of the engine's function with librdkafka's is PartitionerParityLiveTests').
+        for (int partition = 0; partition < Partitions; partition++)
+        {
+            int mine = partition;
+            await admin.ProduceAsync(
+                topic,
+                mine,
+                [.. Enumerable.Range(0, 600)
+                    .Where(i => KafkaPartitioner.Murmur2.Partition(Encoding.UTF8.GetBytes("k-" + i.ToString("D4", System.Globalization.CultureInfo.InvariantCulture)), Partitions) == mine)
+                    .Select(static i => LiveRecords.At(i, "k-" + i.ToString("D4", System.Globalization.CultureInfo.InvariantCulture), "v"))]);
+        }
+
+        await using LiveSearchHost host = Host(options => options.Topic(topic, t => t.Partitioner(KafkaPartitioner.Murmur2)));
+
+        (KafkaScanResult result, List<KafkaMatch> matches) = await RunAsync(host, Input(host, [topic], "key = 'k-0042'"));
+
+        int expected = KafkaPartitioner.Murmur2.Partition(Encoding.UTF8.GetBytes("k-0042"), Partitions);
+        result.Partitions.Should().ContainSingle("only the partition the key maps to is read").Which.Partition.Should().Be(expected);
+        matches.Should().ContainSingle().Which.Partition.Should().Be(expected);
+        result.PruningSentences.Should().ContainSingle().Which.Should().StartWith($"This search read only partition {expected} of {Partitions} of {topic} (murmur2, verified on ");
+        host.Ring.Should().ContainSingle().Which.Message.Should().Contain($"; pruned to partition {expected} of {topic}");
+
+        // "Search all partitions" is a new scan that reads every partition and finds the same record.
+        (KafkaScanResult all, List<KafkaMatch> allMatches) = await RunAsync(host, Input(host, [topic], "key = 'k-0042'") with { SearchAllPartitions = true });
+        all.Partitions.Should().HaveCount(Partitions);
+        allMatches.Should().ContainSingle().Which.Partition.Should().Be(expected);
     }
 
     [KafkaFact]

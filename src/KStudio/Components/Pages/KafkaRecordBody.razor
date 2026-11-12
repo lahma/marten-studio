@@ -65,7 +65,7 @@
 
         @if (read.Record is { } record)
         {
-            <KafkaRecordDetail Model="@record" Cluster="@State.ActiveCluster?.Key" Kcat="@kcat" />
+            <KafkaRecordDetail Model="@record" Cluster="@State.ActiveCluster?.Key" Kcat="@kcat" Access="@AccessOf(read, record)" OnRecordPage="true" />
         }
 
         @if (Neighbours(read) is { Count: > 0 } rows)
@@ -80,6 +80,7 @@
                             <th>Key</th>
                             <th>Type</th>
                             <th>Size</th>
+                            <th><span class="ms-sr-only">Compare</span></th>
                         </tr>
                     </thead>
                     <tbody>
@@ -89,7 +90,7 @@
                                 <td class="ms-table-cell"><a href="@RecordHref(rowOffset)">@KafkaDisplay.Number(rowOffset)</a></td>
                                 @if (match is null)
                                 {
-                                    <td class="ms-table-cell ms-muted" colspan="4">@KafkaStudioText.NoRecordAtThisOffset</td>
+                                    <td class="ms-table-cell ms-muted" colspan="5">@KafkaStudioText.NoRecordAtThisOffset</td>
                                 }
                                 else
                                 {
@@ -106,12 +107,31 @@
                                             @KafkaDisplay.Bytes(match.ValueLength)
                                         }
                                     </td>
+                                    <td class="ms-table-cell">
+                                        @if (read.Record is not null && rowOffset != offset)
+                                        {
+                                            <button type="button"
+                                                    class="ms-btn ms-btn-sm"
+                                                    disabled="@comparingBusy"
+                                                    aria-label="@($"Compare with record {match.Partition}/{match.Offset}")"
+                                                    @onclick="() => CompareAsync(read, match)">Compare with this record</button>
+                                        }
+                                    </td>
                                 }
                             </tr>
                         }
                     </tbody>
                 </table>
             </TableScroll>
+        }
+
+        @if (compared is { } pair)
+        {
+            <KafkaRecordCompare Left="@pair.Left"
+                                Right="@pair.Right"
+                                LeftAccess="@AccessOf(read, pair.Left)"
+                                RightAccess="@AccessOf(read, pair.Right)"
+                                OnClose="CloseCompareAsync" />
         }
 
         @if (SearchAroundHref(read) is { } around)
@@ -143,6 +163,9 @@
     private bool disposed;
     private bool ready;
     private bool started;
+    private bool comparingBusy;
+    private (KafkaMatch Left, KafkaMatch Right)? compared;
+    private readonly HashSet<string> valueRefused = new(StringComparer.Ordinal);
     private string? loadedKey;
 
     /// <summary>Completed by the frame once the cluster policy passed and the circuit is interactive: a body reads nothing before it.</summary>
@@ -299,6 +322,8 @@
         }
 
         result = null;
+        compared = null;
+        valueRefused.Clear();
         loading = true;
         ParseAddress();
         await InvokeAsync(StateHasChanged);
@@ -314,6 +339,8 @@
 
         loadedKey = null;
         result = null;
+        compared = null;
+        valueRefused.Clear();
         loading = true;
         await InvokeAsync(StateHasChanged);
         await ReloadAsync();
@@ -368,6 +395,58 @@
             (KafkaAddress.TopicParameter, topic),
             (KafkaAddress.FromParameter, KafkaAddress.FormatWindow(from)),
             (KafkaAddress.ToParameter, KafkaAddress.FormatWindow(to)));
+    }
+
+    /// <summary>How a record's value reads to this visitor: the read's grant, then a refusal of the view of a neighbour's value.</summary>
+    private KafkaValueAccess AccessOf(KafkaRecordRead read, KafkaMatch match) =>
+        valueRefused.Contains(match.Topic + "/" + match.Partition + "/" + match.Offset)
+            ? KafkaValueAccess.PolicyRefused
+            : (result as KafkaRecordPageResult.Read)?.Grant.AccessFor(match.Topic) ?? KafkaValueAccess.CapabilityOff;
+
+    /// <summary>Compares the record with a neighbour: showing the neighbour's value is a view of it, recorded here.</summary>
+    private async Task CompareAsync(KafkaRecordRead read, KafkaMatch neighbour)
+    {
+        if (read.Record is not { } record || State.ActiveCluster is not { } active || comparingBusy)
+        {
+            return;
+        }
+
+        comparingBusy = true;
+
+        try
+        {
+            if ((result as KafkaRecordPageResult.Read)?.Grant.HasPayload == true
+                && !await Records.RecordValueViewAsync(active, neighbour, lifetime.Token))
+            {
+                valueRefused.Add(neighbour.Topic + "/" + neighbour.Partition + "/" + neighbour.Offset);
+            }
+
+            compared = (record, neighbour);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception e) when (!disposed)
+        {
+            Logger.LogWarning(e, "The Kafka record page failed to compare two records");
+            error = KafkaStudioText.ReadFailed;
+        }
+        finally
+        {
+            comparingBusy = false;
+        }
+
+        if (!disposed)
+        {
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private Task CloseCompareAsync()
+    {
+        compared = null;
+        return InvokeAsync(StateHasChanged);
     }
 
     private static string KeyClass(KafkaMatch match) => match.Key.IsRedacted ? "ms-k-redacted" : match.Key.IsNull ? "ms-k-null" : string.Empty;

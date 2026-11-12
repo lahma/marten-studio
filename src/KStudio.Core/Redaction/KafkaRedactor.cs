@@ -1,3 +1,9 @@
+using System.Collections.Concurrent;
+using System.Globalization;
+using System.Text.RegularExpressions;
+
+using KStudio.Core.Predicates;
+
 namespace KStudio.Core.Redaction;
 
 /// <summary>What a rule masks (decision 10).</summary>
@@ -11,6 +17,12 @@ internal enum RedactionTarget
 
     /// <summary>A CloudEvents attribute, by name.</summary>
     CloudEvent,
+
+    /// <summary>A leaf or subtree of the value (a CloudEvent's data), by JSON path (decision 3 of D-PAYLOAD).</summary>
+    JsonPath,
+
+    /// <summary>Every match of a regular expression in the value's text; never searchable.</summary>
+    Pattern,
 }
 
 /// <summary>
@@ -18,11 +30,28 @@ internal enum RedactionTarget
 /// (OPEN-4, decided: a per-rule flag, off by default, never for the built-in deny-list).
 /// </summary>
 /// <param name="Target">What is masked.</param>
-/// <param name="Field">The header's or attribute's name; empty for the key.</param>
-/// <param name="Name">The rule's name, as shown.</param>
+/// <param name="Field">The header's or attribute's name; the path or the expression as declared for a payload rule; empty for the key.</param>
+/// <param name="Name">The rule's name, as shown: <c>$.customer.email</c>, <c>pattern phone</c>.</param>
 /// <param name="Searchable">Whether <c>=</c> and <c>in</c> may search the field.</param>
 /// <param name="BuiltIn">Whether this is the built-in deny-list.</param>
-internal sealed record RedactionRule(RedactionTarget Target, string Field, string Name, bool Searchable, bool BuiltIn);
+/// <param name="Path">The parsed path of a <see cref="RedactionTarget.JsonPath" /> rule.</param>
+/// <param name="Pattern">The compiled expression of a <see cref="RedactionTarget.Pattern" /> rule.</param>
+internal sealed record RedactionRule(
+    RedactionTarget Target,
+    string Field,
+    string Name,
+    bool Searchable,
+    bool BuiltIn,
+    JsonPathExpression? Path = null,
+    Regex? Pattern = null)
+{
+    // A payload rule's field is the host's expression and its compiled form: neither is printed.
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("Target = ").Append(Target).Append(", Name = ").Append(Name);
+        return true;
+    }
+}
 
 /// <summary>
 /// The headers that are masked in every match unless the host opts one out by name (decision 10.3). They ship in M1 because M1's matches
@@ -52,9 +81,92 @@ internal static class HeaderDenyList
     }
 }
 
+/// <summary>Why a pattern cannot be a redaction rule (decision 3.1 of D-PAYLOAD).</summary>
+internal enum PayloadPatternProblem
+{
+    /// <summary>It can.</summary>
+    None,
+
+    /// <summary>It is longer than <see cref="PayloadPatterns.MaxLength" /> characters.</summary>
+    TooLong,
+
+    /// <summary>.NET cannot read it as a regular expression.</summary>
+    NotARegularExpression,
+
+    /// <summary>It uses a construct that cannot run without backtracking: backreferences, lookarounds, atomic groups, conditionals.</summary>
+    NeedsBacktracking,
+
+    /// <summary>It matches an empty text, so it would mask nothing and run on every value.</summary>
+    MatchesEmpty,
+}
+
+/// <summary>
+/// The patterns of redaction rules, compiled once for the process: each runs without backtracking (so a hostile value cannot make it
+/// run for ever) and under a timeout, and the compiled expression is immutable and shared by every scan.
+/// </summary>
+internal static class PayloadPatterns
+{
+    /// <summary>The longest pattern, in characters.</summary>
+    public const int MaxLength = 500;
+
+    /// <summary>The longest one call of a pattern may run.</summary>
+    public static readonly TimeSpan MatchTimeout = TimeSpan.FromMilliseconds(100);
+
+    private static readonly ConcurrentDictionary<string, Regex> Compiled = new(StringComparer.Ordinal);
+
+    /// <summary>Compiles a pattern, or says why it cannot be one.</summary>
+    /// <param name="pattern">The expression.</param>
+    /// <param name="regex">The compiled expression, when there is no problem.</param>
+    public static PayloadPatternProblem TryCompile(string pattern, out Regex? regex)
+    {
+        regex = null;
+
+        if (pattern.Length > MaxLength)
+        {
+            return PayloadPatternProblem.TooLong;
+        }
+
+        if (Compiled.TryGetValue(pattern, out Regex? known))
+        {
+            regex = known;
+            return PayloadPatternProblem.None;
+        }
+
+        Regex made;
+
+        try
+        {
+            made = new Regex(pattern, RegexOptions.NonBacktracking | RegexOptions.CultureInvariant, MatchTimeout);
+        }
+        catch (NotSupportedException)
+        {
+            return PayloadPatternProblem.NeedsBacktracking;
+        }
+        catch (ArgumentException)
+        {
+            return PayloadPatternProblem.NotARegularExpression;
+        }
+
+        try
+        {
+            if (made.IsMatch(string.Empty))
+            {
+                return PayloadPatternProblem.MatchesEmpty;
+            }
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            return PayloadPatternProblem.NotARegularExpression;
+        }
+
+        regex = Compiled.GetOrAdd(pattern, made);
+        return PayloadPatternProblem.None;
+    }
+}
+
 /// <summary>
 /// The rules a topic declares, before they become a redactor. M1 builds them internally (the deny-list's opt-out, header, key and
-/// CloudEvents rules with their <c>Searchable</c> flag); M2's public builder wraps this and adds nothing the engine does not already do.
+/// CloudEvents rules with their <c>Searchable</c> flag); M2's public builder wraps this and M3 adds the payload rules.
 /// </summary>
 internal sealed class KafkaRedactionRules
 {
@@ -106,6 +218,29 @@ internal sealed class KafkaRedactionRules
         return new RuleHandle(this, rules.Count - 1);
     }
 
+    /// <summary>Masks a leaf or subtree of the value, by JSON path.</summary>
+    /// <param name="path">The path as the host wrote it; validation parses it.</param>
+    public RuleHandle JsonPath(string path)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+
+        // The rule is named by its canonical path; one that does not parse keeps what was written, and validation refuses it.
+        string name = JsonPathExpression.TryParse(path, 0, out JsonPathExpression? parsed, out _) ? parsed!.Text : path;
+        rules.Add((RedactionTarget.JsonPath, path, name, false));
+        return new RuleHandle(this, rules.Count - 1);
+    }
+
+    /// <summary>Masks every match of a regular expression in the value's text.</summary>
+    /// <param name="regex">The expression.</param>
+    /// <param name="name">What a visitor reads in "redacted by pattern {name}"; the pattern's place among the topic's patterns when <see langword="null" />.</param>
+    public void Pattern(string regex, string? name)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(regex);
+
+        int ordinal = rules.Count(static x => x.Target == RedactionTarget.Pattern) + 1;
+        rules.Add((RedactionTarget.Pattern, regex, "pattern " + (name ?? ordinal.ToString(CultureInfo.InvariantCulture)), false));
+    }
+
     /// <summary>Opts a deny-listed header out of masking, by name.</summary>
     /// <param name="name">The header's name, ignoring case.</param>
     public KafkaRedactionRules AllowHeader(string name)
@@ -154,8 +289,18 @@ internal interface IKafkaRedactor
     /// <param name="attribute">The attribute's name.</param>
     RedactionRule? ForCloudEvent(string attribute);
 
-    /// <summary>The rule that makes a structured CloudEvent's value unsafe to keep whole (its envelope holds the masked attribute), or <see langword="null" />.</summary>
-    RedactionRule? AnyCloudEventRule();
+    /// <summary>The JSON-path and pattern rules, in the order they were declared.</summary>
+    IReadOnlyList<RedactionRule> PayloadRules { get; }
+
+    /// <summary>Whether the topic declared a JSON-path or a pattern rule: its values go through <c>PayloadRedactor</c>.</summary>
+    bool HasPayloadRules { get; }
+
+    /// <summary>
+    /// The rule that covers every node a clause's path can select, or <see langword="null" />. Where several cover it, a rule that cannot
+    /// be searched comes first: a clause on a field any rule hides for good must not be searchable because another rule allows it.
+    /// </summary>
+    /// <param name="clause">The clause's path.</param>
+    RedactionRule? ForJsonPath(JsonPathExpression clause);
 }
 
 /// <summary>
@@ -173,6 +318,7 @@ internal sealed class KafkaRedactor : IKafkaRedactor
     private readonly Dictionary<string, RedactionRule> headers = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, RedactionRule> denyListed = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, RedactionRule> attributes = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<RedactionRule> payload = [];
     private readonly RedactionRule? key;
 
     /// <summary>The redactor of a topic that declared no rules: the deny-list only.</summary>
@@ -207,12 +353,33 @@ internal sealed class KafkaRedactor : IKafkaRedactor
                 case RedactionTarget.Key:
                     key = rule;
                     break;
+                case RedactionTarget.JsonPath:
+                    // A path that does not parse is a declaration validation refuses; without validation it masks nothing it could name.
+                    if (JsonPathExpression.TryParse(field, 0, out JsonPathExpression? path, out _))
+                    {
+                        payload.Add(rule with { Path = path });
+                    }
+
+                    break;
+                case RedactionTarget.Pattern:
+                    if (PayloadPatterns.TryCompile(field, out Regex? regex) == PayloadPatternProblem.None)
+                    {
+                        payload.Add(rule with { Pattern = regex, Searchable = false });
+                    }
+
+                    break;
                 default:
                     attributes[field] = rule;
                     break;
             }
         }
     }
+
+    /// <inheritdoc />
+    public IReadOnlyList<RedactionRule> PayloadRules => payload;
+
+    /// <inheritdoc />
+    public bool HasPayloadRules => payload.Count > 0;
 
     /// <inheritdoc />
     public RedactionRule? ForHeader(string name)
@@ -262,15 +429,26 @@ internal sealed class KafkaRedactor : IKafkaRedactor
     }
 
     /// <inheritdoc />
-    public RedactionRule? AnyCloudEventRule()
+    public RedactionRule? ForJsonPath(JsonPathExpression clause)
     {
-        if (attributes.Values.FirstOrDefault() is { } attribute)
+        ArgumentNullException.ThrowIfNull(clause);
+        RedactionRule? first = null;
+
+        foreach (RedactionRule rule in payload)
         {
-            return attribute;
+            if (rule.Path is null || !rule.Path.CoversClause(clause))
+            {
+                continue;
+            }
+
+            if (!rule.Searchable)
+            {
+                return rule;
+            }
+
+            first ??= rule;
         }
 
-        // A structured envelope holds every attribute, so a header rule on any binary-mode carrier makes the envelope unsafe to keep whole.
-        return headers.Values.FirstOrDefault(static x =>
-            x.Field.StartsWith(BinaryPrefix, StringComparison.OrdinalIgnoreCase) || string.Equals(x.Field, ContentTypeHeader, StringComparison.OrdinalIgnoreCase));
+        return first;
     }
 }

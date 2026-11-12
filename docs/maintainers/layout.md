@@ -83,6 +83,8 @@ src/PostgresStudio/Services/Postgres/    PostgresStudio's own: the studio's sett
 tests/PostgresStudio.Tests/              PostgresStudio's fast suite: no Docker, and no Marten anywhere in its graph
 tests/PostgresStudio.Tests/Components/   bUnit: PostgresStudioComponentContext and the core pages' smoke tests, the plan view
                                          and the console's Explain buttons
+tests/PostgresStudio.Tests/Components/Json/  The JSON viewer's parameters a host that is not a Postgres studio sets (KStudio): no download, no
+                                         Postgres copy items, and a host's "Copy as search"
 tests/PostgresStudio.Tests/Conventions/  The assembly fence: no Marten family in the assembly, the restore or the output folder
 tests/PostgresStudio.Tests/Endpoints/    An API-only host with one NpgsqlDataSource; the two registration guards
 tests/PostgresStudio.Tests/Sources/      The source provider over DI descriptors and host database sources
@@ -374,7 +376,8 @@ src/KStudio.Core/Predicates/             The search grammar (D39): lexer, parser
 src/KStudio.Core/Decoding/               Value and header decoding (D39): the detection order, CloudEvents, the Confluent wire format,
                                          trace contexts, the decode counters and the per-record evaluation context
 src/KStudio.Core/Scanning/               The scan engine (D38, D41): plan and estimate, the scan's thread, the governor, the limiter and
-                                         the owner budget, batches, the match store and the one factory that makes a match
+                                         the owner budget, batches, the match store and the one factory that makes a match; the key
+                                         set and the partitioner verification that let a key search read fewer partitions (D39)
 src/KStudio.Core/Redaction/              Redaction inside the engine (D40): the built-in header deny-list, the topic's rules and the
                                          redactor every match is made through
 tests/KStudio.Tests/Conventions/         KStudio's fences and convention scans
@@ -400,6 +403,7 @@ tests/KStudio.Tests/Decoding/            The detection order, the caps, headers,
 tests/KStudio.Tests/Redaction/           The deny-list, the topic's rules, the match caps and the one place a match is made
 tests/KStudio.Tests/Scanning/            The scan engine on the fake: every stop reason and end state, the cursor, the governor, the
                                          limits, the estimate, batching and the lifecycle
+tests/KStudio.Tests/Partitioning/        The partitioners' known answers, the key set, the verification by sampling and the pruned scan
 tests/KStudio.Integration.Tests/         KStudio's live suite: apache/kafka 3.9 and 4.x with SASL and ACLs, through
                                          Testcontainers.Kafka; needs Docker
 tests/KStudio.Integration.Tests/Support/  The broker fixtures, one per image, the live contract cluster and the harness tests
@@ -408,6 +412,8 @@ tests/KStudio.Integration.Tests/Windows/  WindowContract on real brokers
 tests/KStudio.Integration.Tests/Catalog/  The catalog as principals with different ACLs, and metadata that creates nothing
 tests/KStudio.Integration.Tests/Scanning/  The scan engine on real records: stop reasons, transactions, retention before and during a scan, the
                                          governor, the memory ceiling and that a scan writes nothing
+tests/KStudio.Integration.Tests/Partitioning/ Each partitioner against a real producer's on two partition counts, and a pruned scan on real brokers
+tests/KStudio.Integration.Tests/Redaction/ Payload redaction on real brokers: a scan, a record read, the logs and the exact match, with no masked value in any sink
 tests/KStudio.Integration.Tests/Search/  Find the message with this id (the M1 exit), as restricted principals, and the search service against live brokers
 tests/KStudio.Integration.Tests/Sample/  The sample host, started once, and the sample's seed, judge and policies without Docker
 tests/KStudio.Integration.Tests/Shell/   Live Kafka and Postgres: first navigation creates no topic, commits no offset, writes no row, makes no broker call while prerendering

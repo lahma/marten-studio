@@ -60,6 +60,7 @@ internal sealed class KafkaCapabilityGuard(IOptions<KafkaStudioOptions> options,
     private static bool IsConfigured(KafkaStudioCapabilities capabilities, KafkaCapability capability) => capability switch
     {
         KafkaCapability.SearchRecords => capabilities.SearchRecords,
+        KafkaCapability.ReadPayloads => capabilities.ReadPayloads,
         _ => false,
     };
 }

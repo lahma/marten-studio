@@ -25,8 +25,14 @@ internal sealed class DecodeCounters
     /// <summary>Values parsed or inspected to find their kind (only for matches).</summary>
     public long ValueDetected { get; set; }
 
+    /// <summary>JSON documents parsed (a value, a CloudEvent's envelope, its base64 data).</summary>
+    public long ValueParsed { get; set; }
+
+    /// <summary>Values the payload rules were applied to.</summary>
+    public long ValueRedacted { get; set; }
+
     /// <summary>The sum of every kind.</summary>
-    public long Total => KeyText + HeaderText + CloudEventBinary + CloudEventStructured + ValueDetected;
+    public long Total => KeyText + HeaderText + CloudEventBinary + CloudEventStructured + ValueDetected + ValueParsed + ValueRedacted;
 
     /// <summary>A copy, for a result.</summary>
     public DecodeCounters Copy() => (DecodeCounters) MemberwiseClone();

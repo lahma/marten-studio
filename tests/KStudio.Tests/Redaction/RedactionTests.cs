@@ -136,7 +136,7 @@ public class RedactionTests
     }
 
     [Fact]
-    public void A_structured_cloudevent_whose_attribute_is_masked_is_not_kept_whole_under_the_payload_grant()
+    public void A_structured_cloudevent_keeps_only_its_data_so_a_masked_attribute_is_not_in_the_value()
     {
         KafkaRedactionRules rules = new();
         rules.CloudEvent("subject");
@@ -147,8 +147,9 @@ public class RedactionTests
             Topic(rules),
             KafkaReadGrant.Envelope | KafkaReadGrant.Payload);
 
-        withheld.ValueText.Should().BeNull("fail closed: the rule cannot be applied to the envelope's text");
-        withheld.ValueWithheldBy.Should().Be("ce.subject");
+        withheld.ValueText.Should().Be("""{"a":1}""", "the value of a CloudEvent is its data: the envelope that holds the masked attribute is not kept");
+        withheld.ValueWithheldBy.Should().BeNull();
+        withheld.CloudEventAttributes.Single(static x => x.Name == "subject").Value.IsRedacted.Should().BeTrue();
         JsonSerializer.Serialize(withheld).Should().NotContain(Secret);
 
         KafkaMatch unmasked = Match(
@@ -156,7 +157,7 @@ public class RedactionTests
             Topic(),
             KafkaReadGrant.Envelope | KafkaReadGrant.Payload);
 
-        unmasked.ValueText.Should().Contain(Secret, "with no rule on the envelope there is nothing to withhold");
+        unmasked.ValueText.Should().Be("""{"a":1}""");
         unmasked.ValueWithheldBy.Should().BeNull();
     }
 

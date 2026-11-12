@@ -35,6 +35,8 @@ public sealed class RecordingAuthorizationService : IAuthorizationService
     private Func<KafkaTopicResource, bool> kafka = static _ => true;
     private Func<PostgresStudioResource, bool> host = static _ => true;
     private TaskCompletionSource<bool>? hostGate;
+    private TaskCompletionSource<bool>? kafkaGate;
+    private Func<KafkaTopicResource, bool> kafkaHeld = static _ => false;
 
     /// <summary>Every question asked, in order: the policy's name and the resource.</summary>
     public List<(string Policy, object? Resource)> Calls { get; } = [];
@@ -49,6 +51,19 @@ public sealed class RecordingAuthorizationService : IAuthorizationService
 
     /// <summary>What KStudio's policies allow; everything by default.</summary>
     public void AllowKafka(Func<KafkaTopicResource, bool> predicate) => kafka = predicate;
+
+    /// <summary>
+    /// Holds every question about KStudio's resource that <paramref name="held" /> picks until the returned source is completed - with whether the
+    /// handler then allows it - so a test can look at a page while a check is pending.
+    /// </summary>
+    /// <param name="held">Which questions wait.</param>
+    public TaskCompletionSource<bool> HoldKafka(Func<KafkaTopicResource, bool> held)
+    {
+        TaskCompletionSource<bool> gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        kafkaHeld = held;
+        Volatile.Write(ref kafkaGate, gate);
+        return gate;
+    }
 
     /// <summary>What the host studio's policies allow; everything by default.</summary>
     public void AllowHost(Func<PostgresStudioResource, bool> predicate) => host = predicate;
@@ -78,13 +93,16 @@ public sealed class RecordingAuthorizationService : IAuthorizationService
 
         bool allowed = resource switch
         {
-            KafkaTopicResource topic => kafka(topic),
+            KafkaTopicResource topic => kafka(topic) && await KafkaOpenAsync(topic).ConfigureAwait(false),
             PostgresStudioResource source => host(source) && await HostOpenAsync().ConfigureAwait(false),
             _ => false,
         };
 
         return allowed ? AuthorizationResult.Success() : AuthorizationResult.Failed();
     }
+
+    private async Task<bool> KafkaOpenAsync(KafkaTopicResource topic) =>
+        Volatile.Read(ref kafkaGate) is { } gate && kafkaHeld(topic) ? await gate.Task.Bounded() : true;
 
     private async Task<bool> HostOpenAsync() => Volatile.Read(ref hostGate) is { } gate ? await gate.Task.Bounded() : true;
 }
@@ -174,6 +192,8 @@ internal sealed class KafkaStudioHarness : IDisposable
             services.AddSingleton(Engine.Provider.GetRequiredService<KStudio.Core.Scanning.IKafkaScanner>());
             services.AddSingleton(Engine.Provider.GetRequiredService<KStudio.Core.Scanning.OwnerByteBudget>());
             services.AddSingleton<KafkaOwnerKey>();
+            services.AddSingleton(Engine.Provider.GetRequiredService<KStudio.Core.Clusters.KafkaEngineSnapshot>());
+            services.AddSingleton<KafkaReadGrants>();
             services.AddSingleton<KafkaSearchService>();
             services.AddSingleton<KafkaRecordService>();
             extra?.Invoke(services);

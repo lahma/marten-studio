@@ -10,8 +10,8 @@
 @inject IJSRuntime JsRuntime
 
 @* One record as a definition list and two tables (D-UI decision 14), drawn from an in-memory KafkaMatch: every field in it was masked inside the
-   engine before it got here (D40), so this component can only show what is safe. It reads nothing and records no audit entry: the scan's entry already
-   covers the matches it read and showed. The value is not read in M2. *@
+   engine before it got here (D40), so this component can only show what is safe. It reads nothing and records no audit entry itself: the scan's entry
+   covers the matches it read, and the handler that shows a value records that view (9605, ReadPayloads). *@
 
 @if (match is not null)
 {
@@ -119,7 +119,8 @@
             <p class="ms-k-trace">trace <code>@trace.TraceId</code> · span <code>@trace.SpanId</code></p>
         }
 
-        <p class="ms-muted ms-k-value-note">@KafkaStudioText.ValueNotShown</p>
+        <h3 class="ms-section-title">Value</h3>
+        <KafkaRecordValue Model="@match" Access="@Access" OnRecordPage="@OnRecordPage" RecordHref="@PermalinkHref()" />
 
         <div class="ms-k-record-actions">
             <MenuButton ElementId="@elementId"
@@ -160,6 +161,14 @@
     [Parameter]
     public string? Kcat { get; set; }
 
+    /// <summary>How the value reads to this visitor: a <c>KafkaValueAccess</c> (typed <see cref="object" /> because the enum is internal).</summary>
+    [Parameter]
+    public object? Access { get; set; }
+
+    /// <summary>Whether this is the record page, which reads a value whole up to the decode limit.</summary>
+    [Parameter]
+    public bool OnRecordPage { get; set; }
+
     protected override void OnParametersSet()
     {
         match = Model as KafkaMatch;
@@ -173,6 +182,12 @@
         if (KafkaMatchView.KeyPredicate(record) is { } key)
         {
             list.Add(("Predicate for this key", key, () => CopyAsync(key, "predicate")));
+        }
+
+        // Only a value the visitor was shown, and only a text one: an exact match on a whole JSON text depends on its spacing.
+        if (Access is KafkaValueAccess.Granted && KafkaMatchView.ValuePredicate(record) is { } value)
+        {
+            list.Add(("Predicate for this value", value, () => CopyAsync(value, "predicate")));
         }
 
         foreach (KafkaChip chip in KafkaMatchView.Chips(record))
@@ -245,6 +260,7 @@
         KafkaUndecodableReason.TooLarge => "the value is larger than the engine decodes",
         KafkaUndecodableReason.InvalidUtf8 => "the value is not valid UTF-8",
         KafkaUndecodableReason.NotACloudEvent => "the value is not a CloudEvent",
+        KafkaUndecodableReason.InvalidBase64 => "the data_base64 is not valid base64",
         KafkaUndecodableReason.DecoderFailed => "the topic's decoder failed",
         KafkaUndecodableReason.DecoderRefused => "the topic's decoder refused it",
         _ => reason.ToString(),
