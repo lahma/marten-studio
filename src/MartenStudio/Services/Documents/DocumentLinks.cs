@@ -69,6 +69,34 @@ internal static class DocumentLinks
     }
 
     /// <summary>
+    /// The link to one document's detail page from a caller that knows a store and a tenant and no database (D-CORR 7.2): it
+    /// carries <c>store</c> and <c>tenant</c> and never <c>db</c>, and the page resolves the rest and authorizes it again.
+    /// </summary>
+    /// <param name="options">The studio's options.</param>
+    /// <param name="storeKey">The store, or <see langword="null" /> for the visitor's current one.</param>
+    /// <param name="tenantId">The tenant, or <see langword="null" /> for none.</param>
+    /// <param name="alias">The collection's alias.</param>
+    /// <param name="id">The document id.</param>
+    public static string ToDocument(MartenStudioOptions options, string? storeKey, string? tenantId, string alias, string id)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        var url = StudioLink.To(options, Root + "/" + Uri.EscapeDataString(alias) + "/doc");
+
+        if (!string.IsNullOrEmpty(storeKey))
+        {
+            url = QueryHelpers.AddQueryString(url, "store", storeKey);
+        }
+
+        if (!string.IsNullOrEmpty(tenantId))
+        {
+            url = QueryHelpers.AddQueryString(url, "tenant", tenantId);
+        }
+
+        return QueryHelpers.AddQueryString(url, "id", id);
+    }
+
+    /// <summary>
     /// The link to the query page for this collection and filter.
     /// </summary>
     /// <remarks>

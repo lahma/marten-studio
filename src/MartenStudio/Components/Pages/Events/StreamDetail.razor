@@ -5,6 +5,8 @@
 @using MartenStudio.Services.Events
 @using PostgresStudio.Components.Shared
 @using PostgresStudio.Services
+@using MartenStudio.Components.Shared
+@using PostgresStudio.Services.Settings
 @implements IAsyncDisposable
 @inject IEventDataService Events
 @inject StudioState State
@@ -68,6 +70,8 @@
                 <span class="ms-event-flag">tenant @stream.TenantId</span>
             }
             <span class="ms-event-card-spacer"></span>
+            @* D-CORR 8.2: a module's search over this stream, when one is registered and knows a reference to it. *@
+            <RecordSearchLinkButton Request="SearchRequest" />
             <a class="ms-button" href="@FeedHref">Open in feed</a>
         </div>
 
@@ -469,6 +473,38 @@
     private string StreamsHref => EventLinks.To(Options.Value, EventLinks.StreamsRoute, State.ActiveScope);
 
     private string FeedHref => EventLinks.ToFeedForStream(Options.Value, State.ActiveScope, Id ?? string.Empty);
+
+    private StreamState? searchRequestFor;
+    private StudioRecordSearchRequest? searchRequest;
+
+    /// <summary>
+    /// What a module is asked to search for (D-CORR 8.2): this stream, in the page's scope, from five minutes before its first event
+    /// to five minutes after its last - the two times the header shows. One instance per stream read, so the button asks once.
+    /// </summary>
+    private StudioRecordSearchRequest? SearchRequest
+    {
+        get
+        {
+            if (!ReferenceEquals(searchRequestFor, stream))
+            {
+                searchRequestFor = stream;
+                searchRequest = stream is { Exists: true } && State.ActiveScope is { } scope
+                    ? SearchRequestFor(scope, stream)
+                    : null;
+            }
+
+            return searchRequest;
+        }
+    }
+
+    /// <summary>The request for a stream the page has read.</summary>
+    internal static StudioRecordSearchRequest SearchRequestFor(StudioScope scope, StreamState stream) =>
+        new(
+            scope.StoreKey,
+            scope.TenantId,
+            new StudioRecordReference(StudioRecordKind.Stream, [], stream.Id),
+            stream.Created?.AddMinutes(-5),
+            stream.LastEvent?.AddMinutes(5));
 
     /// <summary>The stepper (M1) on this stream, in the aggregate type picked, at the version on the panel.</summary>
     private string? StepHref => string.IsNullOrWhiteSpace(SelectedAggregate)

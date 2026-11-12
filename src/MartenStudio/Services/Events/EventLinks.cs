@@ -102,6 +102,17 @@ internal static class EventLinks
         To(options, StreamDetailRoute, scope, [new("id", streamId)]);
 
     /// <summary>
+    /// A link to one stream's detail page from a caller that knows a store and a tenant and no database (D-CORR 7.2): it carries
+    /// <c>store</c> and <c>tenant</c> and never <c>db</c>, and the page resolves the rest and authorizes it again.
+    /// </summary>
+    /// <param name="options">The studio's options.</param>
+    /// <param name="storeKey">The store, or <see langword="null" /> for the visitor's current one.</param>
+    /// <param name="tenantId">The tenant, or <see langword="null" /> for none.</param>
+    /// <param name="streamId">The stream's id or key.</param>
+    public static string ToStream(MartenStudioOptions options, string? storeKey, string? tenantId, string streamId) =>
+        To(options, StreamDetailRoute, null, [new("id", streamId), new(StoreKey, storeKey), new(TenantKey, tenantId)]);
+
+    /// <summary>
     /// A link to one stream's detail page at one of its events (1.2, Find by id): <c>events/streams/s?id=&amp;v=</c>, which the page
     /// selects and scrolls to. The version is the event's own within the stream.
     /// </summary>

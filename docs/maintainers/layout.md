@@ -122,6 +122,7 @@ samples/MartenStudio.SampleDomain/Documents/  The demo document types
 samples/MartenStudio.Sample/Auth/        Cookie auth, the three demo users, the two policies
 samples/MartenStudio.Sample/Properties/  launchSettings.json, fixed at http://localhost:5210
 tests/MartenStudio.Tests/Endpoints/      Authorization matrix, sub-path re-rooting, the startup guard
+tests/MartenStudio.Tests/Links/          MartenStudioRouteLinks, the record search button and the pages' scope from a link - no database
 tests/MartenStudio.Tests/Services/       Registry, scope resolver, audit log, tenant discovery
 tests/MartenStudio.Tests/Components/     bUnit: StudioComponentContext, StudioMarkup and the page tests
 tests/MartenStudio.Tests/Support/        Test doubles shared by the tiers - never a mocking library
@@ -143,6 +144,8 @@ tests/MartenStudio.Tests/Documents/       Document service unit tests - no datab
 tests/MartenStudio.Integration.Tests/Documents/ Live Postgres: the document write path end to end
 src/MartenStudio/Services/Tenants/        The Tenants overview's service (TenantOverviewService), its models and TenantBoundText:
                                          read-only, statistics only, activity-gated
+src/MartenStudio/Services/Links/          The links a module's page makes into Documents and Streams (D-CORR 7): MartenStudioRouteLinks, by type
+                                         name and id, with a store and a tenant and never a database; pure, reads StoreOptions only
 src/MartenStudio/Services/Find/           Find by id's Marten kinds (1.2-SCOPE-3): the document, stream and natural-key, and event-sequence
                                          contributors, each asking the data service of the page its hit opens, and the helper (FindScopes)
                                          that reads the event store's shape once per Find and decides the tenant restriction (FindTenants:
@@ -191,6 +194,7 @@ src/MartenStudio/Services/Connection/     Database > Connection's Marten half (1
 tests/MartenStudio.Tests/Connection/      The Marten connection section, its hint notes, the redaction sentinel and the page - no database
 tests/MartenStudio.Integration.Tests/Connection/  Live Postgres: UseNpgsqlDataSource() versus Connection(string), and the hosted
                                          daemon's connections
+src/MartenStudio/Components/Shared/       MartenStudio's building blocks: RecordSearchLinkButton (D-CORR 8), the module's search from a record screen
 src/MartenStudio/Components/Pages/Documents/  The documents browser: collections rail, list, detail
 src/MartenStudio/Components/Pages/Query/  The Marten query body: the mode switch and LINQ mode
 src/PostgresStudio/Components/Pages/Query/  The shared query parts: editor, result grid, stats, saved queries,
