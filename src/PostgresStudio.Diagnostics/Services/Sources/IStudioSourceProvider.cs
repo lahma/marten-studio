@@ -57,6 +57,25 @@ internal interface IStudioSource
     bool ShowsTenantSelector { get; }
 
     /// <summary>
+    /// Whether the source's configuration says which tenants each of its databases serves (a Marten static multi-database tenancy
+    /// declares it in memory), so that a tenant can be placed in its database without reading any listing of tenants. Read from
+    /// configuration: no IO. The default is <see langword="false" />: a tenant is then placed only by the databases' tenant listings
+    /// (<see cref="DiscoverTenantsAsync" />), which exist only where <see cref="ShowsTenantSelector" /> is <see langword="true" />.
+    /// </summary>
+    bool DeclaresTenants => false;
+
+    /// <summary>
+    /// The tenants the source's configuration places in <paramref name="database" />, unfiltered by policy; only asked when
+    /// <see cref="DeclaresTenants" /> is <see langword="true" />. Answers from memory: it opens no connection, enumerates no tenancy
+    /// and provisions nothing. The default declares none.
+    /// </summary>
+    /// <param name="database">The database, as matched in <paramref name="all" />.</param>
+    /// <param name="all">What <see cref="DatabasesAsync" /> has just answered, so same-identity twins answer for their tenants.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    ValueTask<TenantList> DeclaredTenantsAsync(IStudioDatabase database, IReadOnlyList<IStudioDatabase> all, CancellationToken cancellationToken) =>
+        ValueTask.FromResult(TenantList.Unavailable);
+
+    /// <summary>
     /// Every database instance the source holds, in the source's own order - two instances may share one
     /// <see cref="IStudioDatabase.Identity" />, and the first of them is the one a scope without a tenant resolves to.
     /// </summary>

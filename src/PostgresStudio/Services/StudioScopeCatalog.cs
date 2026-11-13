@@ -277,9 +277,21 @@ internal sealed class StudioScopeCatalog : IStudioScopeCatalog
         }
 
         StoreAvailability availability = sources.TryResolve(registration, out IStudioSource? source);
-        if (!availability.IsAvailable || source is null || !source.ShowsTenantSelector)
+        if (!availability.IsAvailable || source is null)
         {
-            // Nothing is tenanted per row here: no database lists a tenant.
+            return null;
+        }
+
+        if (source.DeclaresTenants)
+        {
+            // A source whose configuration says where each tenant is (a static multi-database tenancy) is asked that, whether or not anything
+            // is tenanted per row: no listing of tenants is needed, and a host's KnownTenantIds (which every database "lists") say nothing.
+            return await FindDeclaredTenantDatabaseAsync(storeKey, registration, source, databaseIds, tenantId, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (!source.ShowsTenantSelector)
+        {
+            // Nothing is tenanted per row here, and the source declares nothing: no database lists a tenant.
             return null;
         }
 
@@ -301,6 +313,107 @@ internal sealed class StudioScopeCatalog : IStudioScopeCatalog
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// The first of <paramref name="databaseIds" /> that the source's configuration places <paramref name="tenantId" /> in (ZW38), with the
+    /// facts <see cref="DescribeAsync" /> gives for it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The databases are the ones the caller passed - the visitor's own listing, already the store policy's answer per database - and the
+    /// matched one is put to the policy once more, as <c>(source, database, no tenant)</c>, so a catalog asked with an id the visitor may
+    /// not see still finds nothing. The source's databases are enumerated once, at the site <see cref="DescribeDatabaseAsync" /> uses; the
+    /// declaration is read from memory (<see cref="IStudioSource.DeclaredTenantsAsync" />), so nothing else is asked of the tenancy.
+    /// </para>
+    /// <para>
+    /// Where rows are tenanted too (<see cref="IStudioSource.ShowsTenantSelector" />), the tenant must also be in that database's
+    /// policy-filtered listing: a tenant the policy refuses there is not found. Where they are not, the hit's facts carry no tenant, and
+    /// the scope it opens is the database alone.
+    /// </para>
+    /// </remarks>
+    private async Task<TenantDatabaseHit?> FindDeclaredTenantDatabaseAsync(
+        string storeKey,
+        StudioSourceRegistration registration,
+        IStudioSource source,
+        IReadOnlyList<string> databaseIds,
+        string tenantId,
+        CancellationToken cancellationToken)
+    {
+        Enumeration enumeration = new();
+        IReadOnlyList<IStudioDatabase> databases;
+
+        try
+        {
+            databases = await EnumerateAsync(source, enumeration, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            enumeration.Failed = true;
+            LogTenantDiscoveryFailed(storeKey, exception);
+            return null;
+        }
+
+        foreach (string databaseId in databaseIds)
+        {
+            IStudioDatabase? database = null;
+            foreach (IStudioDatabase candidate in databases)
+            {
+                if (string.Equals(candidate.Identity, databaseId, StringComparison.OrdinalIgnoreCase))
+                {
+                    database = candidate;
+                    break;
+                }
+            }
+
+            if (database is null)
+            {
+                continue;
+            }
+
+            TenantList declared;
+            try
+            {
+                declared = await source.DeclaredTenantsAsync(database, databases, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                // One database's failure, not the search's.
+                LogTenantDiscoveryFailed(storeKey, exception);
+                continue;
+            }
+
+            if (!declared.Ids.Contains(tenantId, StringComparer.Ordinal))
+            {
+                continue;
+            }
+
+            if (!await authorization.IsAuthorizedAsync(new StudioScope(registration.Key, database.Identity, null), null, cancellationToken).ConfigureAwait(false))
+            {
+                continue;
+            }
+
+            StoreScopeFacts facts = await DescribeDatabaseAsync(storeKey, registration, source, enumeration, database.Identity, cancellationToken).ConfigureAwait(false);
+            if (source.ShowsTenantSelector && !facts.Tenants.Ids.Contains(tenantId, StringComparer.Ordinal))
+            {
+                continue;
+            }
+
+            return new TenantDatabaseHit(database.Identity, facts);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The source's databases: the shared holder's when a search already read them, otherwise one read, kept on the holder. The one
+    /// enumeration site of a description or a search.
+    /// </summary>
+    private static async ValueTask<IReadOnlyList<IStudioDatabase>> EnumerateAsync(IStudioSource source, Enumeration? shared, CancellationToken cancellationToken)
+    {
+        IReadOnlyList<IStudioDatabase> databases = shared?.Databases ?? await source.DatabasesAsync(cancellationToken).ConfigureAwait(false);
+        shared?.Databases = databases;
+        return databases;
     }
 
     /// <summary>The source's databases, read once for a search and shared by every database it describes.</summary>
@@ -353,9 +466,8 @@ internal sealed class StudioScopeCatalog : IStudioScopeCatalog
 
         try
         {
-            // The one enumeration site: made here, and kept on the shared holder for the rest of a search.
-            IReadOnlyList<IStudioDatabase> databases = shared?.Databases ?? await source.DatabasesAsync(cancellationToken).ConfigureAwait(false);
-            shared?.Databases = databases;
+            // The one enumeration site (EnumerateAsync): made once, and kept on the shared holder for the rest of a search.
+            IReadOnlyList<IStudioDatabase> databases = await EnumerateAsync(source, shared, cancellationToken).ConfigureAwait(false);
             IStudioDatabase? database = null;
             foreach (IStudioDatabase candidate in databases)
             {

@@ -313,7 +313,11 @@ or stream, in the tenant of the record's `tenant-id` header. The document and st
 opens related records for that id. A link grants nothing: the page it opens checks your access again. A record whose
 `tenant-id` is redacted has no Marten links.
 
-In a store that keeps each tenant in a database of its own, the link names the tenant when the store keeps its rows per tenant, and the studio opens the database that holds it among those you may see; a store whose documents are single-tenanted in each tenant's database gets no Marten link yet.
+In a store that keeps each tenant in a database of its own, the link names the tenant and the studio opens the database that holds it
+among those you may see. A static tenancy (`MultiTenantedDatabases(...)`) always links: the studio reads which database serves each tenant from
+your configuration, whether or not the store's documents are tenanted. A master-table, sharded or one-server tenancy links only when the store
+keeps its rows per tenant and you listed no `KnownTenantIds`; where its documents are single-tenanted it gets no Marten link, because nothing the
+studio may read without enumerating the tenancy says which database holds a tenant.
 
 `o.ExternalLink("Traces", "https://tempo.example.com/trace/{traceId}")` adds a link to your tracing or log tool, with
 `{traceId}`, `{correlationId}`, `{from}`, `{to}`, `{fromMs}` and `{toMs}`. Never put a credential in a template: it is

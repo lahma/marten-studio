@@ -289,7 +289,10 @@ internal sealed class StudioState
     /// <see cref="MaxTenantDatabaseSearch" /> of them: the first whose tenant listing carries it becomes the database. Only the listings
     /// the visitor already sees are asked - <see cref="AvailableDatabases" /> and <see cref="IStudioScopeCatalog.FindTenantDatabaseAsync" />,
     /// which reads the listings <see cref="IStudioScopeCatalog.DescribeAsync" /> reads (already the policy's answer per database and per
-    /// tenant), enumerating the source's databases once - so nothing is revealed and no tenancy is enumerated again. A tenant found nowhere,
+    /// tenant), enumerating the source's databases once - so nothing is revealed and no tenancy is enumerated again. A source whose configuration says where each tenant is (a Marten
+    /// static multi-database tenancy, <c>IStudioSource.DeclaresTenants</c>) is searched by that declaration instead, in memory and in the same
+    /// databases: where documents and events are single-tenanted no database lists a tenant, and the hit opens its database with no tenant, as
+    /// any page of such a store does. A tenant found nowhere,
     /// when at least one other database was looked in, is dropped: the scope is all tenants, not the tenant the visitor was on. (A
     /// single-database store has nothing to look in, and its usual rules stand.) If another scope change begins while the search waits, the
     /// search applies nothing. An address that names a database is applied exactly (D9).

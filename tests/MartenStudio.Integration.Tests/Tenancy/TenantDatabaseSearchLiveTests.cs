@@ -1,8 +1,11 @@
 using Marten;
 
 using MartenStudio.Services;
+using MartenStudio.Services.Documents;
 
 using Microsoft.Extensions.DependencyInjection;
+
+using Npgsql;
 
 using PostgresStudio.Services;
 using PostgresStudio.Services.Settings;
@@ -117,17 +120,18 @@ public class TenantDatabaseSearchLiveTests(PostgresFixture postgres)
     }
 
     /// <summary>
-    /// In Marten 9.57.0 a static multi-database store leaves single-tenanted documents single-tenanted: no database lists a tenant, the page
-    /// could not find one, and a link would reopen the id in the database on screen. So it gets no link.
+    /// ZW38. In Marten 9.57.0 a static multi-database store leaves single-tenanted documents single-tenanted: no database lists a tenant,
+    /// so the scope search cannot find one from a listing. The configuration says which database serves each tenant, and a link for a tenant
+    /// of the other database opens that tenant's document - not the id in the database on screen - with nothing created or migrated.
     /// </summary>
     [PostgresFact]
-    public async Task A_database_per_tenant_store_with_single_tenanted_documents_gets_no_link()
+    public async Task A_static_store_with_single_tenanted_documents_links_to_the_document_in_the_tenants_own_database()
     {
         await using OwnedDatabases owned = await OwnedDatabases.CreateAsync(postgres, [Prefix + "single_a", Prefix + "single_b"], Token);
         string first = owned[0];
         string second = owned[1];
 
-        await using TenancyStudio studio = TenancyStudio.Start(options =>
+        void Configure(StoreOptions options)
         {
             options.MultiTenantedDatabases(tenancy =>
             {
@@ -135,12 +139,64 @@ public class TenantDatabaseSearchLiveTests(PostgresFixture postgres)
                 tenancy.AddMultipleTenantDatabase(second, "f8d3-tenantdb-single-b").ForTenants(Initech);
             });
 
+            options.DatabaseSchemaName = Schema;
             options.Schema.For<TenancyNote>();
-        });
+        }
 
-        var links = studio.Services.GetRequiredService<IStudioRouteLinks>();
+        // The same id in both databases, as two tenants' records share a surrogate: the link must open the tenant's own.
+        Guid shared = Guid.NewGuid();
+        await using (DocumentStore seed = DocumentStore.For(Configure))
+        {
+            await seed.Storage.ApplyAllConfiguredChangesToDatabaseAsync();
+            foreach (string tenant in (string[])[Acme, Initech])
+            {
+                await using IDocumentSession session = seed.LightweightSession(tenant);
+                session.Store(new TenancyNote { Id = shared, Text = "of " + tenant });
+                await session.SaveChangesAsync(Token);
+            }
+        }
 
-        links.ToDocument(new StudioLinkScope(null, Initech), "tenancynote", Guid.NewGuid().ToString()).Should().BeNull();
+        ServerSnapshot before = await ServerSnapshot.ReadAsync(owned.ConnectionStrings, Prefix, null, Token);
+
+        await using TenancyStudio studio = TenancyStudio.Start(Configure);
+        await using AsyncServiceScope circuit = studio.Services.CreateAsyncScope();
+        IServiceProvider services = circuit.ServiceProvider;
+
+        var state = services.GetRequiredService<StudioState>();
+        var documents = services.GetRequiredService<IDocumentDataService>();
+        var links = services.GetRequiredService<IStudioRouteLinks>();
+
+        await state.EnsureInitializedAsync(Token);
+        state.AvailableDatabases.Should().HaveCount(2, "the premise: a database per tenant");
+        state.ShowTenantSelector.Should().BeFalse("the premise: documents are single-tenanted, so no database lists a tenant");
+
+        // A page whose current database is one tenant's, and a link for the other tenant's document.
+        string firstName = new NpgsqlConnectionStringBuilder(first).Database!;
+        string usualName = state.AvailableDatabases.Single(x => x.Identity == state.ActiveScope!.DatabaseId).Name;
+        string foreign = usualName.Contains(firstName, StringComparison.OrdinalIgnoreCase) ? Initech : Acme;
+
+        string url = links.ToDocument(new StudioLinkScope(null, foreign), "tenancy_note", shared.ToString())!;
+        url.Should().Contain("tenant=" + foreign).And.NotContain("db=", "the link never names a database");
+
+        // The page a link opens applies the scope from the address: a store, a tenant and no database.
+        await state.SetScopeAsync(MartenStoreRegistry.DefaultStoreKey, null, foreign, Token);
+
+        state.ActiveScope!.DatabaseId.Should().NotBe(
+            state.AvailableDatabases.Single(x => x.Name == usualName).Identity,
+            "the tenant's database is not the one the circuit was on");
+        state.ActiveScope.TenantId.Should().BeNull("rows are single-tenanted: the database is the scope");
+
+        DocumentDetailResult opened = await documents.GetDocumentAsync(state.ActiveScope, "tenancy_note", shared.ToString(), Token);
+
+        opened.Found.Should().BeTrue(opened.NotFound?.Message);
+        opened.Detail!.Json.Should().Contain("of " + foreign, "the document of the tenant's own database, not the same id in the one on screen");
+
+        // A tenant nobody declared leaves the circuit where it is, with no tenant.
+        string landed = state.ActiveScope.DatabaseId;
+        await state.SetScopeAsync(MartenStoreRegistry.DefaultStoreKey, null, "umbrella", Token);
+        state.ActiveScope.Should().Be(new StudioScope(MartenStoreRegistry.DefaultStoreKey, landed, null));
+
+        before.ShouldBeUnchangedIn(await ServerSnapshot.ReadAsync(owned.ConnectionStrings, Prefix, null, Token));
     }
 
     /// <summary>The identity of the database whose tenant listing carries <paramref name="tenant" />, read as the scope picker reads it.</summary>
