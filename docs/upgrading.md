@@ -1,4 +1,11 @@
-# Upgrading to 1.2
+# Upgrading to 1.3
+
+## 1.2 → 1.3: the navigation switch is gone
+
+- **`PostgresStudio.DisableNavigationInterception` is removed.** 1.2 introduced it as a temporary AppContext switch that
+  restored 1.1's navigation (an enhanced-navigation fetch per page) and promised to remove it in 1.3. A host that still
+  sets it gets 1.2's default navigation, handled inside the studio's circuit: the setting is read by nothing and is
+  harmless, and the `AppContext.SetSwitch(...)` call can be deleted. No option, type or public API changed.
 
 ## 1.1 → 1.2: what changes without a setting
 
@@ -16,8 +23,8 @@ setting:
 - **Navigation stays inside the circuit.** Links, Back and Forward inside the studio are no longer page fetches, so host
   JavaScript initializers no longer receive `enhancedload` for moves inside it. Back or Forward to an address that names
   another store, database or tenant moves the studio there, as a click does, when the visitor's listings carry it.
-  `AppContext.SetSwitch("PostgresStudio.DisableNavigationInterception", true)` restores 1.1's navigation until 1.3
-  ([stability.md](stability.md)).
+  `AppContext.SetSwitch("PostgresStudio.DisableNavigationInterception", true)` restored 1.1's navigation until 1.3, which
+  removed the switch (see "1.2 → 1.3" above).
 - **`AcceptedChecks` (all three packages) and `ProjectionThresholds` are read once**, when the options are validated at
   startup; a change made to the resolved options afterwards is not seen. 1.1 read `AcceptedChecks` live.
 - **The Overview shows the selected store's card**, and the new Stores page lists every store when you may see two or

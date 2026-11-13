@@ -488,8 +488,7 @@ builds and why not, its tenancy in words, its document types and event store, wh
 each database with a health chip from the last sweep. The page never starts a sweep by being opened; Check runs the one
 a database's Overview would. A link to another store, database or tenant that you click moves the studio to it, and so
 does Back or Forward to such an address when your own listings carry it; Back or Forward to an address that names only
-part of the scope on screen rewrites the address to the scope on screen. With `PostgresStudio.DisableNavigationInterception`
-on, Back and Forward never move it.
+part of the scope on screen rewrites the address to the scope on screen.
 
 **Tenants** (`/marten/tenants`, 1.2, shown for a store with conjoined data) — the tenants you may address, 25 a page:
 where each lives (its own database, its own partition, or shared tables), estimated documents, events and streams from
@@ -896,9 +895,8 @@ tenant, because there is nothing to filter on and hiding it would hide something
   ([dotnet/aspnetcore#69624](https://github.com/dotnet/aspnetcore/issues/69624), open). The studio does not work around
   it; until it is fixed, an anonymous mapping on .NET 11 needs an application without a fail-closed `FallbackPolicy`.
 - **Navigation inside the studio is handled by its circuit (1.2).** A link, Back and a page's own address changes no longer
-  fetch the page from the server. Should a host need 1.1's behaviour back for a release, it calls
-  `AppContext.SetSwitch("PostgresStudio.DisableNavigationInterception", true)` before `app.Run()`; the switch is temporary
-  and goes in 1.3.
+  fetch the page from the server. The `PostgresStudio.DisableNavigationInterception` switch that restored 1.1's behaviour
+  for a release is gone (1.3).
 - **Behind a reverse proxy**, forward the studio prefix and it works: the studio's plumbing is all under
   its own path. If the proxy strips a prefix, give the application the same prefix with
   `app.UsePathBase("/…")` so that the routes and the `<base href>` agree; mounting at

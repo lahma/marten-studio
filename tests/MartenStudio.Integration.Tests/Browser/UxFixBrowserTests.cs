@@ -226,9 +226,7 @@ public class UxFixBrowserTests(BrowserSuiteFixture fixture)
 
     /// <summary>
     /// A clicked link to a tenant moves the picker to it; Back then returns to an address that names no tenant. The address follows the
-    /// scope on screen again, instead of being left naming none while the picker still shows the tenant (the sweep's D13). With
-    /// <c>PostgresStudio.DisableNavigationInterception</c> on (<see cref="StudioPage.InterceptionOffVariable" />) the shell writes nothing
-    /// on a Back (1.2-FINAL-FIX), so there the address stays as the entry Back returned to.
+    /// scope on screen again, instead of being left naming none while the picker still shows the tenant (the sweep's D13).
     /// </summary>
     [BrowserFact]
     public Task Back_after_a_link_to_a_tenant_rewrites_the_address_to_name_the_tenant_the_picker_shows() =>
@@ -246,16 +244,6 @@ public class UxFixBrowserTests(BrowserSuiteFixture fixture)
 
             await page.EvaluateAsync("() => history.back()");
             await studio.WaitForLocationAsync("location.pathname.endsWith('/tenants')");
-
-            if (StudioPage.InterceptionIsOff)
-            {
-                // With the switch on (1.1's navigation) the shell writes nothing on a Back (1.2-FINAL-FIX): the address is the entry Back
-                // returned to, and the pages that follow their address are the ones that act on it. The picker did not move.
-                (await page.EvaluateAsync<string>("() => document.querySelector('#ms-tenant-select').value")).Should().Be("acme", "the picker did not move");
-                (await page.EvaluateAsync<bool>("() => location.search.includes('tenant=acme')")).Should().BeFalse("the shell did not rewrite the address");
-                studio.AssertClean("following a link to a tenant and moving Back, with navigation interception off");
-                return;
-            }
 
             // The entry Back returned to named no tenant. The scope on screen is still acme, so the address is written to say so.
             await studio.WaitForLocationAsync("location.pathname.endsWith('/tenants') && location.search.includes('tenant=acme')");

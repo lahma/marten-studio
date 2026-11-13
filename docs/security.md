@@ -52,10 +52,7 @@ provided `StoreAuthorizationPolicy` (`SourceAuthorizationPolicy` in Postgres Stu
 studio authorized by `AuthorizationPolicy` alone asks no policy per call. A link the visitor clicks that names another
 store, database or tenant, and a Back or Forward to such an address (the browser reports both the same way), moves the
 studio to it only when the visitor's own listings carry it, as the store policy decided them; a page's own navigation never
-moves the scope. With `PostgresStudio.DisableNavigationInterception` on (1.1's navigation), the shell writes nothing into
-the address on a Back or Forward, and the pages that follow their own address (Documents, a document, the database
-browser's objects and rows) apply the scope it names, as in 1.1: only to a scope the visitor's own listings carry, as the
-store policy decided them. A confirmation dialog is closed when the scope moves, and confirms only against the scope it
+moves the scope. A confirmation dialog is closed when the scope moves, and confirms only against the scope it
 was opened under.
 
 Find (1.2), the header box, runs each probe through the service of the page it opens, under that page's gates, and audits

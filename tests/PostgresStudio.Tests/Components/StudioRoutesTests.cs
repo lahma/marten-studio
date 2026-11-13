@@ -10,20 +10,11 @@ using PostgresStudio.Tests.Support;
 
 namespace PostgresStudio.Tests.Components;
 
-/// <summary>Tests that touch the process-wide <c>PostgresStudio.DisableNavigationInterception</c> switch: nothing else runs beside them.</summary>
-[CollectionDefinition(Name, DisableParallelization = true)]
-public sealed class StudioNavigationSwitchTests
-{
-    /// <summary>The collection's name.</summary>
-    public const string Name = "StudioNavigation";
-}
-
 /// <summary>
 /// 1.2-NAV (D-NAV N1, N2, N3, N12): <c>StudioRoutes</c> asks for navigation interception once, in its first interactive render; an
 /// intercepted address no studio page matches is loaded by the browser, and nothing else is; a change of path or fragment scrolls to
-/// the fragment as the built-in Router does; and the AppContext switch turns the ask off.
+/// the fragment as the built-in Router does.
 /// </summary>
-[Collection(StudioNavigationSwitchTests.Name)]
 public sealed class StudioRoutesTests
 {
     private const string Start = "http://localhost/postgres/database/connection";
@@ -195,7 +186,7 @@ public sealed class StudioRoutesTests
     }
 
     /// <summary>
-    /// With interception off - the host's switch, or an ask that failed - 1.1's enhanced navigation is in charge: it reports a link
+    /// With interception off - an ask that failed - the enhanced navigation is in charge: it reports a link
     /// click as intercepted and scrolls to a fragment itself, so the studio's force-load (which would abort its fetch) and its
     /// own fragment scroll (the page would scroll twice) must not run.
     /// </summary>
@@ -254,38 +245,5 @@ public sealed class StudioRoutesTests
         routes.WaitForAssertion(() => rig.Scroll.Refreshed.Should().ContainSingle());
         await SettleAsync(routes);
         routes.Find("h1").TextContent.Should().Be("Connection");
-    }
-
-    [Fact]
-    public async Task With_the_switch_set_interception_is_never_asked_and_with_it_cleared_it_is()
-    {
-        AppContext.SetSwitch(StudioNavigationSwitch.Name, true);
-
-        try
-        {
-            Rig rig = await NewRigAsync();
-            await using PostgresStudioComponentContext context = rig.Context;
-            StudioNavigationSwitch.InterceptionEnabled.Should().BeFalse();
-
-            var routes = context.Render<StudioRoutes>();
-            await SettleAsync(routes);
-            rig.Navigation.Simulate("postgres/health", intercepted: true);
-            await SettleAsync(routes);
-
-            rig.Interception.Calls.Should().Be(0, "the host turned the 1.1 behaviour back on");
-            await AssertEnhancedNavigationBehaviourAsync(rig, routes);
-        }
-        finally
-        {
-            AppContext.SetSwitch(StudioNavigationSwitch.Name, false);
-        }
-
-        StudioNavigationSwitch.InterceptionEnabled.Should().BeTrue("a switch set to false is no switch");
-
-        Rig enabled = await NewRigAsync();
-        await using PostgresStudioComponentContext enabledContext = enabled.Context;
-        var enabledRoutes = enabledContext.Render<StudioRoutes>();
-
-        enabledRoutes.WaitForAssertion(() => enabled.Interception.Calls.Should().Be(1));
     }
 }

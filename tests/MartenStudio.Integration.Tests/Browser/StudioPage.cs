@@ -62,18 +62,6 @@ internal sealed class StudioPage : IAsyncDisposable
         page.Request += OnRequest;
     }
 
-    /// <summary>The environment variable that makes this run's sample hosts start with navigation interception switched off.</summary>
-    /// <remarks>
-    /// <c>SampleHost</c> reads the same name: it starts the sample with a copy of its <c>runtimeconfig.json</c> that sets the
-    /// <c>PostgresStudio.DisableNavigationInterception</c> AppContext switch, which is 1.1's navigation (a fetch of the whole page
-    /// for every move). The suite must still pass in that mode, with <see cref="AssertNoPageFetch" /> relaxed to 1.1's assertion.
-    /// </remarks>
-    internal const string InterceptionOffVariable = "MARTENSTUDIO_TEST_NAV_INTERCEPTION_OFF";
-
-    /// <summary>Whether this run is the one with navigation interception switched off (<see cref="InterceptionOffVariable" />).</summary>
-    internal static bool InterceptionIsOff =>
-        string.Equals(Environment.GetEnvironmentVariable(InterceptionOffVariable), "true", StringComparison.OrdinalIgnoreCase);
-
     /// <summary>
     /// Every request that was an enhanced navigation - the studio asking the server for a whole page because the visitor moved
     /// (<c>accept: text/html; blazor-enhanced-nav=on</c>) - as <c>METHOD url</c>. Since 1.2 the studio intercepts its own
@@ -96,22 +84,8 @@ internal sealed class StudioPage : IAsyncDisposable
     /// <c>net::ERR_ABORTED</c> either.
     /// </summary>
     /// <param name="because">What the scenario was doing, for the failure message.</param>
-    /// <remarks>
-    /// In the run with interception switched off (<see cref="InterceptionIsOff" />) the studio navigates as 1.1 did: a page fetch
-    /// is expected, and the one tolerated failure is 1.1's - a <c>GET</c> of a page under the mount that the next navigation
-    /// cancelled (<c>net::ERR_ABORTED</c>). Any other failed request still fails there.
-    /// </remarks>
     public void AssertNoPageFetch(string because)
     {
-        if (InterceptionIsOff)
-        {
-            string prefix = "GET " + Host.Url(Host.StudioPath.TrimStart('/'));
-            string[] other = [.. FailedRequests.Where(failed => !(failed.StartsWith(prefix, StringComparison.Ordinal) && failed.EndsWith(" net::ERR_ABORTED", StringComparison.Ordinal)))];
-
-            other.Should().BeEmpty("with navigation interception off, only a cancelled GET of a studio page may fail (1.1) (" + because + "): " + string.Join(" | ", other));
-            return;
-        }
-
         EnhancedNavigations.Should().BeEmpty(
             "navigation inside the studio is rendered by the circuit and fetches no page, while " + because + "; these were fetched: "
             + string.Join(" | ", EnhancedNavigations));
@@ -336,8 +310,7 @@ internal sealed class StudioPage : IAsyncDisposable
     /// carries the marker, so the attribute in the page means a click now is rendered by the circuit. It is the one signal that
     /// does not depend on whether the address needed a rewrite (<see cref="WaitForScopeInUrlAsync" /> returns at once for an
     /// address that already carries <c>store=</c>, before the circuit has rendered anything), and it removes the one race left
-    /// in a scenario: a click before interception is on is still an enhanced navigation. With interception switched off the
-    /// marker is still rendered.
+    /// in a scenario: a click before interception is on is still an enhanced navigation.
     /// </remarks>
     public Task WaitForInteractiveAsync() =>
         Page.WaitForFunctionAsync(

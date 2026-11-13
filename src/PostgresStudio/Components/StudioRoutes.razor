@@ -36,9 +36,9 @@ else
     private bool interceptionRequested;
 
     /// <summary>
-    /// Whether interception is on in this document: set when it was asked for, cleared if the ask failed. With it off (the host's
-    /// switch, or another renderer holding it) the enhanced navigation of 1.1 handles links, which reports a click as intercepted
-    /// and scrolls to fragments itself, so neither the force-load nor the fragment scroll below may run.
+    /// Whether interception is on in this document: set when it was asked for, cleared if the ask failed. With it off (another
+    /// renderer holding it, or a circuit that closed) the enhanced navigation handles links and scrolls to fragments itself, so
+    /// neither the force-load nor the fragment scroll below may run.
     /// </summary>
     private bool interceptionOn;
 
@@ -114,7 +114,7 @@ else
         // The first interactive render of the root component, which runs before the shell's own (the render queue is first in, first
         // out from the root), so the shell's first rewrite of the address is already a client-side history write, with nothing awaited in
         // front of it. A prerender has no after-render, so nothing is asked of a static document.
-        if (firstRender && !interceptionRequested && StudioNavigationSwitch.InterceptionEnabled)
+        if (firstRender && !interceptionRequested)
         {
             interceptionRequested = true;
             interceptionOn = true;
@@ -126,7 +126,7 @@ else
             catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
             {
                 // A circuit that closed, or another renderer already holding interception in this document (a JSException): the
-                // enhanced navigation of 1.1 stays, and works, and nothing of the interception's own (force-load, fragment scroll) runs.
+                // enhanced navigation stays, and works, and nothing of the interception's own (force-load, fragment scroll) runs.
                 interceptionOn = false;
             }
         }

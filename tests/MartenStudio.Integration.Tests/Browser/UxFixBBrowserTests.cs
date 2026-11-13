@@ -128,10 +128,7 @@ public class UxFixBBrowserTests(BrowserSuiteFixture fixture)
             writes.Distinct().Should().ContainSingle("the predicate reached the address in one address, not one before the run and one for it: " + string.Join(" | ", writes));
             writes[0].Should().Contain("orderby=Sequence", "that one address carries the ordering too");
 
-            if (!StudioPage.InterceptionIsOff)
-            {
-                writes.Should().ContainSingle("the address is written once per Run: " + string.Join(" | ", writes));
-            }
+            writes.Should().ContainSingle("the address is written once per Run: " + string.Join(" | ", writes));
 
             studio.AssertNoPageFetch("editing a predicate and running from the Order-by box");
             studio.AssertClean("editing a predicate and running from the Order-by box");
@@ -185,10 +182,7 @@ public class UxFixBBrowserTests(BrowserSuiteFixture fixture)
                 null,
                 new PageWaitForFunctionOptions { Timeout = 30_000 });
 
-            if (!StudioPage.InterceptionIsOff)
-            {
-                Volatile.Read(ref pageRequests).Should().Be(0, "an address the page writes is a history update, not a request for the page");
-            }
+            Volatile.Read(ref pageRequests).Should().Be(0, "an address the page writes is a history update, not a request for the page");
 
             studio.AssertNoPageFetch("two Runs in a row");
             studio.AssertClean("two Runs in a row");
