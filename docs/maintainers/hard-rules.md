@@ -47,7 +47,7 @@ This is the full text of hard rules 1 to 16, moved word for word from AGENTS.md 
    `WriteAuthorizationPolicy`) → the operation → `audit.Record`, written on failure as well as on success.
    A value a visitor could shape reaches the log only through `StudioLogValue`: escaped, a backslash doubled, a name
    bounded at 256 characters and other text at 4,000. That holds in these events: 9200–9205, 9223, 9224, 9235, 9236,
-   9245 and 9452 (the per-product dispatchers); 9600–9605 (KStudio's audit and refusal events, through `KafkaStudioLog`'s
+   9245 and 9452 (the per-product dispatchers); 9600–9609 (KStudio's audit and refusal events, through `KafkaStudioLog`'s
    wrappers, `KafkaStudioRefusalLogValuesTests`); 9206, 9207, 9209, 9225, 9226 and 9265 (MartenLog's wrappers); 9260–9263
    (LINQ mode's `Logged*` values); and every Warning that carries a typed route value. `RefusalLogValuesTests` also
    holds every `[LoggerMessage]` template's call sites, at any level, to it. The one exception is 9204's executed
