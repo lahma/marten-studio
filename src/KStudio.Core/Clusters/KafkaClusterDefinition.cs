@@ -128,10 +128,11 @@ internal sealed class KafkaClusterDefinition
         Environment = registration.Builder.EnvironmentText;
         Profile = registration.Builder.ProfileValue;
         TokenRefresh = registration.Builder.TokenRefresh;
-        ConsumerGroups = [.. registration.Builder.ConsumerGroups];
+        DeclaredConsumerGroups = [.. registration.Builder.ConsumerGroups];
 
         ConsumerSettings = ConfluentPropertyScopes.ForConsumer(registration.Consumer);
         AdminSettings = ConfluentPropertyScopes.ForAdmin(registration.Admin);
+        ServersKey = ServersKeyOf(ConsumerSettings, AdminSettings);
 
         topics = new Dictionary<string, KafkaTopicDescriptor>(StringComparer.Ordinal);
 
@@ -155,8 +156,26 @@ internal sealed class KafkaClusterDefinition
                 KafkaTopicBuilder? host = HostBuilder(discovered.Name, globalTopics, registration.Builder.Topics);
                 topics[discovered.Name] = new KafkaTopicDescriptor(discovered.Name, host, discovered);
             }
+
+            // The groups a source's listeners use are paired with their topics, not declared for the cluster (#73): each is read for the topic that
+            // names it, and the cluster-wide list holds them only for the Settings page and the host's code.
+            DiscoveredConsumerGroups =
+            [
+                .. contributed.Topics
+                    .Select(static x => x.ConsumerGroup)
+                    .Where(static x => !string.IsNullOrWhiteSpace(x))
+                    .Select(static x => x!)
+                    .Distinct(StringComparer.Ordinal)
+                    .Order(StringComparer.Ordinal)
+                    .Take(MaxDiscoveredConsumerGroups),
+            ];
         }
+
+        ConsumerGroups = [.. DeclaredConsumerGroups.Concat(DiscoveredConsumerGroups).Distinct(StringComparer.Ordinal)];
     }
+
+    /// <summary>The most consumer groups a source's listeners may add to a cluster, the first by name: what a host may declare for one.</summary>
+    public const int MaxDiscoveredConsumerGroups = 50;
 
     /// <summary>
     /// The cluster's entry key, the engine's key for it: the cluster's own key, or <c>{base}/{tenant}</c> for one tenant of a broker-per-tenant
@@ -185,8 +204,72 @@ internal sealed class KafkaClusterDefinition
     /// <summary>The OAuth token refresh hook, when one was set.</summary>
     public Action<IClient, string>? TokenRefresh { get; }
 
-    /// <summary>The groups the host's own consumers use.</summary>
+    /// <summary>The groups the host declared for the whole cluster with <c>KafkaClusterBuilder.ConsumerGroup</c>: read on every topic's page.</summary>
+    public IReadOnlyList<string> DeclaredConsumerGroups { get; }
+
+    /// <summary>The groups a source found its listeners using (at most <see cref="MaxDiscoveredConsumerGroups" />): each is read only for the topics that name it.</summary>
+    public IReadOnlyList<string> DiscoveredConsumerGroups { get; private set; } = [];
+
+    /// <summary>Every group of the cluster, the declared ones first.</summary>
     public IReadOnlyList<string> ConsumerGroups { get; }
+
+    /// <summary>
+    /// The cluster's bootstrap servers as a set: trimmed, lower-cased, empty entries dropped, ordinal-sorted and joined, or <see langword="null" /> when the
+    /// configuration names none. A key to compare clusters by, built from configuration alone - never shown, and nothing connects for it.
+    /// </summary>
+    public string? ServersKey { get; }
+
+    /// <summary>
+    /// The groups to read on a topic's page: the groups the host declared for the cluster, and the group a source paired with the topic's listener
+    /// (when it is among the cluster's first <see cref="MaxDiscoveredConsumerGroups" />). One read per group and topic, never one per group of the cluster.
+    /// </summary>
+    /// <param name="topic">The topic's name.</param>
+    /// <returns>The groups, each with whether it is cluster-wide (declared by the host, with nothing saying it reads this topic).</returns>
+    public IReadOnlyList<(string Group, bool ClusterWide)> GroupsOf(string topic)
+    {
+        string? paired = Descriptor(topic).Discovered?.ConsumerGroup;
+
+        if (paired is not null && !DiscoveredConsumerGroups.Contains(paired, StringComparer.Ordinal))
+        {
+            paired = null;
+        }
+
+        List<(string Group, bool ClusterWide)> groups = [];
+
+        foreach (string group in DeclaredConsumerGroups.Distinct(StringComparer.Ordinal))
+        {
+            groups.Add((group, paired is null || !string.Equals(group, paired, StringComparison.Ordinal)));
+        }
+
+        if (paired is not null && !DeclaredConsumerGroups.Contains(paired, StringComparer.Ordinal))
+        {
+            groups.Add((paired, false));
+        }
+
+        return groups;
+    }
+
+    private static string? ServersKeyOf(IReadOnlyDictionary<string, string> consumer, IReadOnlyDictionary<string, string> admin)
+    {
+        string? servers = consumer.TryGetValue("bootstrap.servers", out string? own) && !string.IsNullOrWhiteSpace(own)
+            ? own
+            : admin.TryGetValue("bootstrap.servers", out string? other) ? other : null;
+
+        if (string.IsNullOrWhiteSpace(servers))
+        {
+            return null;
+        }
+
+        string[] parts =
+        [
+            .. servers.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+                .Select(static x => string.Concat(x.Where(static c => !char.IsWhiteSpace(c))).ToLowerInvariant())
+                .Distinct(StringComparer.Ordinal)
+                .Order(StringComparer.Ordinal),
+        ];
+
+        return parts.Length == 0 ? null : string.Join(',', parts);
+    }
 
     /// <summary>The scan consumer's configuration: the clone minus producer-only keys. Never mutated.</summary>
     public IReadOnlyDictionary<string, string> ConsumerSettings { get; }

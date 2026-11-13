@@ -28,7 +28,7 @@
                 {
                     @* `selected` as well as the select's `value`: during static server-side rendering `value` on a <select> is ignored. *@
                     <option value="@cluster.Key"
-                            selected="@(cluster.Key == State.ActiveCluster?.Key)">@cluster.Label</option>
+                            selected="@(cluster.Key == State.ActiveCluster?.Key)">@KafkaStudioText.ClusterOptionText(cluster.Label, cluster.SameServersNames(State.AvailableClusters))</option>
                 }
             </select>
         </div>

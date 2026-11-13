@@ -58,6 +58,23 @@ internal static class KafkaStudioText
     public const string NoConsumerGroups =
         "No consumer groups are declared for this cluster: add KafkaClusterBuilder.ConsumerGroup(\"…\") to show their lag here.";
 
+    /// <summary>The cluster selector's option text: the label, and - where another cluster the visitor may see has the same bootstrap servers - which (#72).</summary>
+    /// <param name="label">The cluster's label.</param>
+    /// <param name="sameServersAs">The labels of the other clusters with the same bootstrap servers that the visitor may see.</param>
+    public static string ClusterOptionText(string label, IReadOnlyList<string> sameServersAs) =>
+        sameServersAs.Count == 0 ? label : label + " (same servers as " + string.Join(", ", sameServersAs) + ")";
+
+    /// <summary>The Settings page's line for a cluster that shares its bootstrap servers with others (#72). The servers themselves are in the table above it.</summary>
+    /// <param name="sameServersAs">The labels of the other clusters with the same bootstrap servers that the visitor may see.</param>
+    public static string SameServersLine(IReadOnlyList<string> sameServersAs) =>
+        "Same bootstrap servers as " + string.Join(", ", sameServersAs) + ": probably one cluster registered twice. "
+        + "KafkaWolverineOptions.ExcludeBroker leaves one out.";
+
+    /// <summary>The topic page's line for declared groups with no committed offset on the topic (#73).</summary>
+    /// <param name="groups">The group ids.</param>
+    public static string GroupsWithoutOffsets(IEnumerable<string> groups) =>
+        "Groups with no committed offset on this topic: " + string.Join(", ", groups);
+
     /// <summary>The lead paragraph of the cluster settings page.</summary>
     public const string SettingsLead =
         "The settings this application handed KStudio for this cluster, one by one. A secret shows only whether it is set; a path is shown and the "

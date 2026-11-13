@@ -10,6 +10,10 @@ namespace KStudio
         public KafkaWolverineOptions() { }
         public string ClusterKey { get; set; }
         public bool IncludeTenants { get; set; }
+        public KStudio.KafkaWolverineOptions CloudEventsSerializer(System.Type serializerType) { }
+        public KStudio.KafkaWolverineOptions CloudEventsSerializer<TSerializer>()
+            where TSerializer :  class { }
         public KStudio.KafkaWolverineOptions Cluster(System.Action<string?, KStudio.KafkaClusterBuilder> configure) { }
+        public KStudio.KafkaWolverineOptions ExcludeBroker(string brokerName) { }
     }
 }

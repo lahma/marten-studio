@@ -187,12 +187,18 @@
         }
 
         <h2 class="ms-section-title">Consumer groups</h2>
+        @* A group the host declared for the whole cluster that has no committed offset on this topic is not drawn with a lag of "—" among the groups that
+           read it: it is named on one muted line (#73). A group a source paired with this topic's listener is always in the table. *@
+        IReadOnlyList<KafkaGroupOverview> readingGroups = [.. overview.Groups.Where(static x => !x.HasNoCommittedOffset)];
+        IReadOnlyList<KafkaGroupOverview> idleGroups = [.. overview.Groups.Where(static x => x.HasNoCommittedOffset)];
         @if (overview.Groups.Count == 0)
         {
             <p class="ms-muted">@KafkaStudioText.NoConsumerGroups</p>
         }
         else
         {
+            @if (readingGroups.Count > 0)
+            {
             <TableScroll Label="Consumer groups">
                 <table class="ms-table">
                     <thead>
@@ -204,7 +210,7 @@
                         </tr>
                     </thead>
                     <tbody>
-                        @foreach (KafkaGroupOverview group in overview.Groups)
+                        @foreach (KafkaGroupOverview group in readingGroups)
                         {
                             <tr class="ms-table-row" @key="group.GroupId">
                                 <td class="ms-table-cell"><code>@group.GroupId</code></td>
@@ -223,8 +229,14 @@
                     </tbody>
                 </table>
             </TableScroll>
+            }
 
-            @foreach (KafkaGroupOverview group in overview.Groups.Where(static x => x.Lag.IsAvailable))
+            @if (idleGroups.Count > 0)
+            {
+                <p class="ms-muted ms-k-idle-groups">@KafkaStudioText.GroupsWithoutOffsets(idleGroups.Select(static x => x.GroupId))</p>
+            }
+
+            @foreach (KafkaGroupOverview group in readingGroups.Where(static x => x.Lag.IsAvailable))
             {
                 <details class="ms-k-group-lag" @key="group.GroupId">
                     <summary>Lag of <code>@group.GroupId</code> per partition</summary>
