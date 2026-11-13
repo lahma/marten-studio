@@ -63,7 +63,8 @@ internal sealed class KafkaCatalog(
                     x.TenantId,
                     x.Source,
                     x.Profile,
-                    SameServers(x, all))),
+                    SameServers(x, all),
+                    x.CanBeLeftOut || SameServersDefinitions(x, all).Any(static y => y.CanBeLeftOut))),
             ];
         }
     }
@@ -73,9 +74,12 @@ internal sealed class KafkaCatalog(
     /// The tenants of one broker-per-tenant cluster are not compared with each other or with their parent, which share a registration by design.
     /// </summary>
     private static string[] SameServers(KafkaClusterDefinition cluster, IReadOnlyList<KafkaClusterDefinition> all) =>
+        [.. SameServersDefinitions(cluster, all).Select(static x => x.Key)];
+
+    private static IEnumerable<KafkaClusterDefinition> SameServersDefinitions(KafkaClusterDefinition cluster, IReadOnlyList<KafkaClusterDefinition> all) =>
         cluster.ServersKey is null
             ? []
-            : [.. all.Where(x => x.ServersKey == cluster.ServersKey && !string.Equals(x.BaseKey, cluster.BaseKey, StringComparison.Ordinal)).Select(static x => x.Key)];
+            : all.Where(x => x.ServersKey == cluster.ServersKey && !string.Equals(x.BaseKey, cluster.BaseKey, StringComparison.Ordinal));
 
     /// <inheritdoc />
     public async Task<KafkaField<KafkaTopicList>> ListTopicsAsync(string cluster, CancellationToken cancellationToken)
@@ -257,7 +261,8 @@ internal sealed class KafkaCatalog(
             span,
             open,
             throughput.Rate(cluster, topic.Value),
-            groupOverviews));
+            groupOverviews,
+            definition.ConsumerGroups.Count > 0));
 
         Task<WireResult<IReadOnlyList<WireOffset>>> Offsets(WireOffsetSpec spec, WireIsolation isolation) =>
             reads.OffsetsAsync(cluster, topic.Value, partitions, spec, isolation, cancellationToken);

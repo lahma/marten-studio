@@ -1,3 +1,5 @@
+using Wolverine.Runtime.Serialization;
+
 namespace KStudio;
 
 /// <summary>What <see cref="KafkaWolverineExtensions.UseWolverineKafka" /> may be told about how a Wolverine application's clusters are listed (D43).</summary>
@@ -31,7 +33,7 @@ public sealed class KafkaWolverineOptions
     /// chips). Nothing is guessed from a value: a custom serializer that sets the content type to <c>application/json</c> is only a CloudEvents
     /// writer because the host says so here.
     /// </summary>
-    /// <typeparam name="TSerializer">The serializer type, a class or an interface.</typeparam>
+    /// <typeparam name="TSerializer">The serializer type: a class assignable to Wolverine's <c>IMessageSerializer</c>, or an interface.</typeparam>
     /// <returns>These options.</returns>
     /// <example>
     /// <code>
@@ -46,10 +48,13 @@ public sealed class KafkaWolverineOptions
     /// Declares that endpoints whose serializer is an instance of <paramref name="serializerType" /> (or of a type assignable to it) write structured
     /// CloudEvents. See <see cref="CloudEventsSerializer{TSerializer}" />.
     /// </summary>
-    /// <param name="serializerType">The serializer type, a class or an interface.</param>
+    /// <param name="serializerType">The serializer type: a class assignable to Wolverine's <c>IMessageSerializer</c>, or an interface.</param>
     /// <returns>These options.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="serializerType" /> is <see langword="null" />.</exception>
-    /// <exception cref="ArgumentException"><paramref name="serializerType" /> is an open generic type.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="serializerType" /> is an open generic type, or is neither an interface nor assignable to <c>IMessageSerializer</c>: a type such as
+    /// <see cref="object" /> would mark every endpoint with a serializer as CloudEvents.
+    /// </exception>
     public KafkaWolverineOptions CloudEventsSerializer(Type serializerType)
     {
         ArgumentNullException.ThrowIfNull(serializerType);
@@ -57,6 +62,11 @@ public sealed class KafkaWolverineOptions
         if (serializerType.ContainsGenericParameters)
         {
             throw new ArgumentException("The serializer type must be a closed type.", nameof(serializerType));
+        }
+
+        if (!serializerType.IsInterface && !typeof(IMessageSerializer).IsAssignableFrom(serializerType))
+        {
+            throw new ArgumentException("The serializer type must be an interface or implement Wolverine's IMessageSerializer.", nameof(serializerType));
         }
 
         cloudEventsSerializers.Add(serializerType);
@@ -71,8 +81,8 @@ public sealed class KafkaWolverineOptions
     /// </summary>
     /// <remarks>
     /// The name is the broker's own, as given to <c>AddNamedKafkaBroker</c> and as the <see cref="Cluster" /> callback receives it, compared ordinally.
-    /// A broker's cluster is listed as <c>{ClusterKey}-{name}</c> (the name lower-cased, a character outside letters, digits and hyphens made a hyphen)
-    /// and shown as <c>Wolverine · {name}</c>. The default transport has no name and cannot be left out.
+    /// A broker's cluster is listed as <c>{ClusterKey}-{slug}</c>, where the slug is the name lower-cased, each character outside letters, digits and hyphens
+    /// replaced by a hyphen, runs of hyphens collapsed to one and the ends trimmed; it is shown as <c>Wolverine · {name}</c>. The default transport has no name and cannot be left out.
     /// </remarks>
     /// <param name="brokerName">The broker's name.</param>
     /// <returns>These options.</returns>
@@ -86,9 +96,11 @@ public sealed class KafkaWolverineOptions
     }
 
     /// <summary>
-    /// Applies <paramref name="configure" /> to each discovered cluster's builder, after KStudio gave it its default name and the consumer groups it found:
+    /// Applies <paramref name="configure" /> to each discovered cluster's builder, after KStudio gave it its default name:
     /// a display name or environment, <c>OAuthBearerTokenRefresh</c> (Wolverine's builder delegates are never run, so a host that refreshes tokens there
-    /// must say so here), <c>ConsumerGroup</c> and <c>Topic</c>. A topic declared here is the host's descriptor and so wins over what was discovered
+    /// must say so here), <c>ConsumerGroup</c> and <c>Topic</c>. A listener's consumer group is not added to the builder: it is shown on the topics that
+    /// listener reads, and a <c>ConsumerGroup</c> declared here is the host's, for the whole cluster, shown on every topic (or named on one muted line
+    /// where it has no committed offset). A topic declared here is the host's descriptor and so wins over what was discovered
     /// about it, field by field (D43).
     /// </summary>
     /// <param name="configure">Receives the broker's name - <see langword="null" /> for the default transport - and the cluster's builder.</param>

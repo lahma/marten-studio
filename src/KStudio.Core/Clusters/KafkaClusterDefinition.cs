@@ -123,6 +123,7 @@ internal sealed class KafkaClusterDefinition
         Key = registration.Key;
         BaseKey = contributed?.Key ?? registration.Key;
         TenantId = contributed?.TenantId;
+        CanBeLeftOut = contributed?.CanBeLeftOut == true;
         Source = source;
         DisplayName = registration.Builder.DisplayNameText ?? BaseKey;
         Environment = registration.Builder.EnvironmentText;
@@ -188,6 +189,9 @@ internal sealed class KafkaClusterDefinition
 
     /// <summary>The tenant this entry is a cluster of, or <see langword="null" />.</summary>
     public string? TenantId { get; }
+
+    /// <summary>Whether the source that contributed the cluster lets the host leave it out of discovery.</summary>
+    public bool CanBeLeftOut { get; }
 
     /// <summary>The name of the source that contributed the cluster, or <see langword="null" /> for a host cluster.</summary>
     public string? Source { get; }

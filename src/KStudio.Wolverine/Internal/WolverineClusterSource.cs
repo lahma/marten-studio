@@ -237,7 +237,7 @@ internal sealed class WolverineClusterSource(IServiceProvider services, Wolverin
             }
         }
 
-        return new KafkaContributedCluster(key, tenantId, consumer, admin, builder, read.Topics);
+        return new KafkaContributedCluster(key, tenantId, consumer, admin, builder, read.Topics, CanBeLeftOut: broker is not null);
     }
 
     /// <summary>

@@ -644,6 +644,10 @@ public class WolverineDiscoveryTests
         options.CloudEventsSerializer(MarkedType).Should().BeSameAs(options);
         FluentActions.Invoking(() => options.CloudEventsSerializer(null!)).Should().Throw<ArgumentNullException>();
         FluentActions.Invoking(() => options.CloudEventsSerializer(typeof(List<>))).Should().Throw<ArgumentException>();
+        FluentActions.Invoking(() => options.CloudEventsSerializer(ObjectType)).Should().Throw<ArgumentException>("object would mark every endpoint with a serializer");
+        FluentActions.Invoking(() => options.CloudEventsSerializer<object>()).Should().Throw<ArgumentException>();
+        FluentActions.Invoking(() => options.CloudEventsSerializer<string>()).Should().Throw<ArgumentException>("it is not a serializer");
+        options.CloudEventsSerializer<IMessageSerializer>().Should().BeSameAs(options);
     }
 
     [Fact]
@@ -661,6 +665,16 @@ public class WolverineDiscoveryTests
 
         WolverineRig.Contribute(options, static w => w.ExcludeBroker("besteffort").ExcludeBroker("other")).Clusters.Select(static x => x.Key).Should().Equal("wolverine");
         WolverineRig.Contribute(options, static w => w.ExcludeBroker("BestEffort")).Clusters.Should().HaveCount(3, "the name is matched ordinally");
+    }
+
+    [Fact]
+    public void Only_a_named_brokers_clusters_and_its_tenants_can_be_left_out()
+    {
+        WolverineOptions options = WolverineRig.Options();
+        WolverineRig.Listen(WolverineRig.Default(options), "orders");
+        WolverineRig.Listen(WolverineRig.Named(options, "besteffort", "broker:9092"), "orders");
+
+        WolverineRig.Contribute(options).Clusters.Select(static x => (x.Key, x.CanBeLeftOut)).Should().Equal(("wolverine", false), ("wolverine-besteffort", true));
     }
 
     [Fact]
@@ -717,6 +731,8 @@ public class WolverineDiscoveryTests
     private sealed class StructuredSubclass : StructuredBase;
 
     private static readonly Type MarkedType = typeof(IMarkedCloudEvents);
+
+    private static readonly Type ObjectType = typeof(object);
 
     private interface IMarkedCloudEvents : IMessageSerializer;
 

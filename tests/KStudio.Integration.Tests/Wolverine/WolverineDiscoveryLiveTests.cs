@@ -84,7 +84,7 @@ public sealed class WolverineDiscoveryLiveTests(Kafka39Fixture parent, Kafka4Fix
                 .ConfigureClient(config => WithSasl(config, parent))
                 .AutoProvision()
                 .AddTenant("acme", expression => expression.ConfigureClient(config => config.BootstrapServers = tenant.Bootstrap));
-            options.ListenToKafkaTopic(listen).EnableNativeDeadLetterQueue();
+            options.ListenToKafkaTopic(listen).EnableNativeDeadLetterQueue().DefaultSerializer(new LiveStructuredSerializer());
             options.PublishMessage<WolverineLiveFact>().ToKafkaTopic(send);
             options.Durability.Mode = DurabilityMode.Solo;
 
@@ -94,7 +94,7 @@ public sealed class WolverineDiscoveryLiveTests(Kafka39Fixture parent, Kafka4Fix
             options.CodeGeneration.TypeLoadMode = TypeLoadMode.Static;
         });
         builder.Services.AddPostgresStudio();
-        builder.Services.AddKafkaStudio(kafka => kafka.UseWolverineKafka());
+        builder.Services.AddKafkaStudio(kafka => kafka.UseWolverineKafka(wolverine => wolverine.CloudEventsSerializer<LiveStructuredSerializer>()));
 
         await using WebApplication app = builder.Build();
         await app.StartAsync(Token);
@@ -139,6 +139,8 @@ public sealed class WolverineDiscoveryLiveTests(Kafka39Fixture parent, Kafka4Fix
             // The catalog: the listener with its group, the sender, and the native dead-letter topic.
             KafkaDiscoveredTopic listener = own.Descriptor(listen).Discovered!;
             (listener.Role, listener.ConsumerGroup).Should().Be((KafkaTopicRole.Listener, service));
+            listener.CloudEvents.Should().BeTrue("the host declared its own structured-CloudEvents serializer, which the started host's listener uses (#71)");
+            own.Descriptor(send).Discovered!.CloudEvents.Should().BeFalse();
             own.Descriptor(send).Discovered!.Role.Should().Be(KafkaTopicRole.Sender);
             own.Descriptor("wolverine-dead-letter-queue").Discovered!.Role.Should().Be(KafkaTopicRole.DeadLetter);
             own.ConsumerGroups.Should().Contain(service);
@@ -167,6 +169,20 @@ public sealed class WolverineDiscoveryLiveTests(Kafka39Fixture parent, Kafka4Fix
         {
             await app.StopAsync(Token);
         }
+    }
+
+    /// <summary>A serializer of the host's own that writes structured CloudEvents with the content type application/json; nothing is ever sent through it.</summary>
+    private sealed class LiveStructuredSerializer : global::Wolverine.Runtime.Serialization.IMessageSerializer
+    {
+        public string ContentType => "application/json";
+
+        public byte[] Write(Envelope envelope) => [];
+
+        public object ReadFromData(Type messageType, Envelope envelope) => new();
+
+        public object ReadFromData(byte[] data) => new();
+
+        public byte[] WriteMessage(object message) => [];
     }
 
     private static async Task<string[]> ScanKeysAsync(IKafkaScanner scanner, string cluster, string topic)
