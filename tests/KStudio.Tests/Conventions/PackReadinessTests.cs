@@ -5,9 +5,9 @@ using MartenStudio.Tests.Conventions;
 namespace KStudio.Tests.Conventions;
 
 /// <summary>
-/// What M4 leaves ready for K8 (design D-CORR 10.1): the three KStudio projects carry their package metadata and the exact
-/// pins, stay unpackable until KStudio first ships, and the build does not pack them yet. Read as text, so a package that
-/// is not packed cannot drift unseen.
+/// What K8 ships (design D-CORR 10.1 and 10.2): the three KStudio projects carry their package metadata and the exact pins, are
+/// packable, take their version from the one preview label in Directory.Build.props (no other project does), and the build packs
+/// and pushes them after the family's three. Read as text, so a package cannot drift unseen.
 /// </summary>
 public class PackReadinessTests
 {
@@ -20,6 +20,8 @@ public class PackReadinessTests
         { "KStudio", "kafka;blazor;studio;admin", "KStudioPinsFamilyExactly" },
         { "KStudio.Wolverine", "kafka;blazor;studio;admin;wolverine", "KStudioWolverinePinsCoreExactly" },
     };
+
+    private static readonly string[] Names = ["KStudio.Core", "KStudio", "KStudio.Wolverine"];
 
     private static XElement Load(string project) =>
         XDocument.Load(RepositoryRoot.Combine("src", project, project + ".csproj")).Root!;
@@ -38,7 +40,10 @@ public class PackReadinessTests
         Property(root, "Description").Should().EndWith(AsfLine);
         Property(root, "PackageTags").Should().Be(tags);
         Property(root, "PackageReadmeFile").Should().Be("README.md");
-        Property(root, "IsPackable").Should().Be("false", "nothing KStudio ships is packed before K8");
+        Property(root, "IsPackable").Should().Be("true", "K8: KStudio ships, as a preview");
+        Property(root, "EnablePackageValidation").Should().Be("true");
+        Property(root, "PackageValidationBaselineVersion").Should().BeNullOrEmpty(
+            "the family's baseline (Directory.Build.props) is a release on nuget.org, and these ids have none yet");
 
         root.Descendants().Where(static x => x.Name.LocalName == "None"
                 && ((string?) x.Attribute("Include"))?.Replace('\\', '/') == "../KStudio/README.md")
@@ -79,14 +84,67 @@ public class PackReadinessTests
     }
 
     [Fact]
-    public void The_build_does_not_pack_the_KStudio_projects_yet()
+    public void The_build_packs_and_publishes_the_three_KStudio_projects_after_MartenStudio()
     {
-        foreach (var file in Directory.EnumerateFiles(RepositoryRoot.Combine("build"), "*.cs"))
+        string publish = File.ReadAllText(RepositoryRoot.Combine("build", "Build.Publish.cs"));
+
+        publish.Should().Contain("const string KStudioCorePackageId = \"KStudio.Core\";")
+            .And.Contain("const string KStudioPackageId = \"KStudio\";")
+            .And.Contain("const string KStudioWolverinePackageId = \"KStudio.Wolverine\";");
+
+        // Pack's loop runs the six projects in dependency order, the three KStudio ones after the family's.
+        publish.Should().MatchRegex(@"StudioProject,\s*KStudioCoreProject, KStudioProject, KStudioWolverineProject");
+    }
+
+    /// <summary>The label lives in Directory.Build.props and nowhere else; the three projects derive their version from it.</summary>
+    [Fact]
+    public void The_preview_label_is_one_property_the_three_projects_derive_their_version_from()
+    {
+        XElement props = XDocument.Load(RepositoryRoot.Combine("Directory.Build.props")).Root!;
+        List<XElement> labels = [.. props.Descendants().Where(static x => x.Name.LocalName == "KStudioPrereleaseLabel")];
+
+        labels.Should().ContainSingle("the label has exactly one home").Which.Value.Should().NotBeNullOrWhiteSpace();
+        labels[0].Value.Should().MatchRegex(@"^[0-9A-Za-z]+(\.[0-9A-Za-z]+)*$", "a SemVer prerelease label");
+
+        foreach (string project in Names)
         {
-            File.ReadAllText(file).Should().NotContain("KStudio.Core\"", $"{file}: K8's packet adds the packages to Pack and Publish")
-                .And.NotContain("PackageId = \"KStudio", $"{file}: K8's packet adds the packages to Pack and Publish");
+            string text = File.ReadAllText(RepositoryRoot.Combine("src", project, project + ".csproj"));
+
+            text.Should().Contain("<PackageVersion>$(KStudioBaseVersion)-$(KStudioPrereleaseLabel)</PackageVersion>", $"{project} packs at <version>-<label>")
+                .And.Contain("<InformationalVersion>$(KStudioBaseVersion)-$(KStudioPrereleaseLabel)</InformationalVersion>")
+                .And.Contain("Condition=\"'$(KStudioPrereleaseLabel)' != ''\"", "an empty label packs at the family version")
+                .And.Contain("<KStudioBaseVersion>$(Version)</KStudioBaseVersion>", "the CHANGELOG's version, read and never set")
+                .And.NotContain("<Version>", "Version is a global property that Pack passes");
+            text.Should().NotContain("<AssemblyVersion>").And.NotContain("<FileVersion>", "both stay numeric");
+        }
+    }
+
+    [Fact]
+    public void No_other_project_reads_the_label_or_sets_its_own_package_version()
+    {
+        string[] kstudio = [.. Names];
+        string[] root = [RepositoryRoot.Combine("src"), RepositoryRoot.Combine("samples"), RepositoryRoot.Combine("tests"), RepositoryRoot.Combine("build")];
+
+        foreach (string file in root.Where(Directory.Exists).SelectMany(static x => Directory.EnumerateFiles(x, "*.csproj", SearchOption.AllDirectories))
+                     .Where(static x => !x.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar, StringComparison.Ordinal)))
+        {
+            string name = Path.GetFileNameWithoutExtension(file);
+
+            if (kstudio.Contains(name))
+            {
+                continue;
+            }
+
+            string text = File.ReadAllText(file);
+
+            text.Should().NotContain("KStudioPrereleaseLabel", $"{name}: only the three KStudio projects read the preview label");
+            text.Should().NotContain("<PackageVersion>", $"{name}: the CHANGELOG is the one version authority for every other project");
         }
 
-        File.ReadAllText(RepositoryRoot.Combine("build", "Build.Publish.cs")).Should().NotContain("\"KStudio");
+        foreach (string file in Directory.EnumerateFiles(RepositoryRoot.Combine("build"), "*.cs"))
+        {
+            // The build reads the label to name the packages; it never sets it.
+            File.ReadAllText(file).Should().NotContain("SetProperty(\"KStudioPrereleaseLabel", $"{file}: the label is Directory.Build.props's alone");
+        }
     }
 }

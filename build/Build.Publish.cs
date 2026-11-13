@@ -18,11 +18,12 @@ using Serilog;
 using static Fallout.Common.Tools.DotNet.DotNetTasks;
 
 /// <summary>
-/// The NuGet distribution channel (D17): <c>Pack</c> builds the three packages - PostgresStudio.Diagnostics, the
-/// engine; PostgresStudio, a Razor Class Library which depends on exactly the engine packed beside it; and
-/// MartenStudio, which depends on exactly the PostgresStudio packed beside it - and <c>Publish</c> pushes all three
-/// to nuget.org with one short-lived API key minted from the workflow's GitHub OIDC token (trusted publishing - no
-/// stored NuGet API key anywhere).
+/// The NuGet distribution channel (D17): <c>Pack</c> builds the six packages - PostgresStudio.Diagnostics, the
+/// engine; PostgresStudio, a Razor Class Library which depends on exactly the engine packed beside it; MartenStudio,
+/// which depends on exactly the PostgresStudio packed beside it; and, since K8, KStudio.Core (the Kafka engine), KStudio
+/// (which depends on exactly the PostgresStudio and KStudio.Core packed beside it) and KStudio.Wolverine (exactly the
+/// KStudio.Core) - and <c>Publish</c> pushes all six to nuget.org with one short-lived API key minted from the
+/// workflow's GitHub OIDC token (trusted publishing - no stored NuGet API key anywhere).
 /// </summary>
 /// <remarks>
 /// nuget.org is the <em>only</em> distribution channel. Each package is a Razor Class Library consumed
@@ -64,24 +65,52 @@ partial class Build
     const string DiagnosticsPackageId = "PostgresStudio.Diagnostics";
     const string PostgresStudioPackageId = "PostgresStudio";
     const string MartenStudioPackageId = "MartenStudio";
+    const string KStudioCorePackageId = "KStudio.Core";
+    const string KStudioPackageId = "KStudio";
+    const string KStudioWolverinePackageId = "KStudio.Wolverine";
+
+    AbsolutePath KStudioCoreProject => SourceDirectory / "KStudio.Core" / "KStudio.Core.csproj";
+    AbsolutePath KStudioProject => SourceDirectory / "KStudio" / "KStudio.csproj";
+    AbsolutePath KStudioWolverineProject => SourceDirectory / "KStudio.Wolverine" / "KStudio.Wolverine.csproj";
 
     /// <summary>
-    /// The three packages a release consists of, in the order they are packed and pushed, each below the one that
-    /// depends on exactly it: PostgresStudio.Diagnostics, then PostgresStudio, then MartenStudio. Pushing in this order
-    /// means a failed push stops the run before any package that needs it is uploaded. It does not make the three
-    /// appear together: nuget.org validates and indexes each package on its own, so for a few minutes PostgresStudio
+    /// <c>KStudioPrereleaseLabel</c> from <c>Directory.Build.props</c> (K8), the one place the preview label lives: empty
+    /// when KStudio has graduated. The three KStudio projects pack at <see cref="KStudioVersion"/>; nothing else reads it.
+    /// </summary>
+    string KStudioPrereleaseLabel => XDocument.Load(RootDirectory / "Directory.Build.props").Descendants()
+        .Where(x => x.Name.LocalName == "KStudioPrereleaseLabel")
+        .Select(x => x.Value.Trim())
+        .SingleOrDefault() ?? string.Empty;
+
+    /// <summary>
+    /// The version the three KStudio packages carry: the CHANGELOG's <see cref="Version"/>, plus <c>-&lt;label&gt;</c> while the
+    /// label is set. The same string the projects compute for their <c>PackageVersion</c>, and the one the exact pins
+    /// between them carry (<c>[1.3.0-preview.1]</c>).
+    /// </summary>
+    string KStudioVersion => KStudioPrereleaseLabel.Length == 0 ? Version : $"{Version}-{KStudioPrereleaseLabel}";
+
+    /// <summary>
+    /// The six packages a release consists of, in the order they are packed and pushed, each below the one that
+    /// depends on exactly it: PostgresStudio.Diagnostics, then PostgresStudio, then MartenStudio, then KStudio.Core, then
+    /// KStudio (which needs PostgresStudio and KStudio.Core), then KStudio.Wolverine (which needs KStudio.Core). Pushing in
+    /// this order means a failed push stops the run before any package that needs it is uploaded. It does not make
+    /// the six appear together: nuget.org validates and indexes each package on its own, so for a few minutes PostgresStudio
     /// can be listed while its PostgresStudio.Diagnostics is not yet restorable (and MartenStudio while its
-    /// PostgresStudio is not), and a host restoring in that window gets NU1102 until it is.
+    /// PostgresStudio is not, and KStudio while its KStudio.Core is not), and a host restoring in that window gets NU1102
+    /// until it is. The three KStudio packages carry the preview label (<see cref="KStudioVersion"/>).
     /// </summary>
     AbsolutePath[] ReleasePackages =>
     [
         PackagesDirectory / $"{DiagnosticsPackageId}.{Version}.nupkg",
         PackagesDirectory / $"{PostgresStudioPackageId}.{Version}.nupkg",
         PackagesDirectory / $"{MartenStudioPackageId}.{Version}.nupkg",
+        PackagesDirectory / $"{KStudioCorePackageId}.{KStudioVersion}.nupkg",
+        PackagesDirectory / $"{KStudioPackageId}.{KStudioVersion}.nupkg",
+        PackagesDirectory / $"{KStudioWolverinePackageId}.{KStudioVersion}.nupkg",
     ];
 
     Target Pack => _ => _
-        .Description("Packs the PostgresStudio.Diagnostics, PostgresStudio and MartenStudio NuGet packages into artifacts/packages")
+        .Description("Packs the PostgresStudio.Diagnostics, PostgresStudio, MartenStudio, KStudio.Core, KStudio and KStudio.Wolverine NuGet packages into artifacts/packages")
         .Produces(PackagesDirectory / "*.nupkg")
         .Executes(() =>
         {
@@ -92,13 +121,17 @@ partial class Build
             AssertPackingAtTheConfluentFloor();
 
             // Independent of Compile for the same reason PublishAot is: this is a Release build of
-            // three projects, and `dotnet pack` runs its own build anyway.
+            // six projects, and `dotnet pack` runs its own build anyway.
             PackagesDirectory.CreateOrCleanDirectory();
 
             // One project at a time, the engine first, in a plain loop rather than the combinatorial overload
             // (PLINQ, no order promised): each pack builds the projects below it again through its ProjectReference,
             // and two packs writing one obj/ folder at once is a race.
-            foreach (var project in new[] { DiagnosticsProject, PostgresStudioProject, StudioProject })
+            foreach (var project in new[]
+                     {
+                         DiagnosticsProject, PostgresStudioProject, StudioProject,
+                         KStudioCoreProject, KStudioProject, KStudioWolverineProject,
+                     })
             {
                 DotNetPack(_ => _
                     .SetProject(project)
@@ -166,10 +199,57 @@ partial class Build
                     ["Microsoft.Extensions.Diagnostics.HealthChecks"] = CentralPackageVersion("Microsoft.Extensions.Diagnostics.HealthChecks"),
                 });
 
+            // KStudio.Core depends on Confluent.Kafka at its floor and on the three Microsoft.Extensions.* abstractions it
+            // registers into, logs through and binds options with, at their central floors (KStudioCorePinsExtensions): no
+            // ASP.NET Core and no part of the Marten family.
+            AssertNuspecDependencies(PackagesDirectory / $"{KStudioCorePackageId}.{KStudioVersion}.nupkg",
+                new Dictionary<string, string>
+                {
+                    ["Confluent.Kafka"] = ConfluentFloor,
+                    ["Microsoft.Extensions.DependencyInjection.Abstractions"] = CentralPackageVersion("Microsoft.Extensions.DependencyInjection.Abstractions"),
+                    ["Microsoft.Extensions.Logging.Abstractions"] = CentralPackageVersion("Microsoft.Extensions.Logging.Abstractions"),
+                    ["Microsoft.Extensions.Options"] = CentralPackageVersion("Microsoft.Extensions.Options"),
+                });
+
+            // KStudio depends on exactly its own PostgresStudio (the family version) and exactly its own KStudio.Core (the
+            // preview version): KStudioPinsFamilyExactly in KStudio.csproj, which takes each range from the referenced
+            // project's PackageVersion. Two more lines are CPM's transitive pinning, as MartenStudio's assets line is (measured
+            // by K8): the assets pack that carries blazor.web.js (D22), which reaches KStudio through PostgresStudio, and
+            // Confluent.Kafka at its floor, which reaches it through KStudio.Core. KStudio references neither, and its built
+            // assembly references no Confluent assembly (KStudioFenceTests); the lines only keep a host from lowering them.
+            AssertNuspecDependencies(PackagesDirectory / $"{KStudioPackageId}.{KStudioVersion}.nupkg",
+                new Dictionary<string, string>
+                {
+                    [PostgresStudioPackageId] = $"[{Version}]",
+                    [KStudioCorePackageId] = $"[{KStudioVersion}]",
+                    ["Confluent.Kafka"] = ConfluentFloor,
+                    ["Microsoft.AspNetCore.App.Internal.Assets"] = assetsPack,
+                });
+
+            // KStudio.Wolverine depends on exactly its own KStudio.Core (KStudioWolverinePinsCoreExactly) and on
+            // WolverineFx.Kafka at its central floor, which pins the Confluent.Kafka floor, so a Wolverine host is never raised.
+            // The rest is CPM's transitive pinning (measured by K8), because the project sets KStudioCorePinsExtensions: the
+            // Confluent.Kafka floor and the three abstractions, as KStudio.Core's own, and Microsoft.Extensions.Hosting, which
+            // WolverineFx brings and the same conditional group (Directory.Packages.props) has a row for. All are floors a host
+            // can raise and none is a reference of this project.
+            AssertNuspecDependencies(PackagesDirectory / $"{KStudioWolverinePackageId}.{KStudioVersion}.nupkg",
+                new Dictionary<string, string>
+                {
+                    [KStudioCorePackageId] = $"[{KStudioVersion}]",
+                    ["WolverineFx.Kafka"] = CentralPackageVersion("WolverineFx.Kafka"),
+                    ["Confluent.Kafka"] = ConfluentFloor,
+                    ["Microsoft.Extensions.DependencyInjection.Abstractions"] = CentralPackageVersion("Microsoft.Extensions.DependencyInjection.Abstractions"),
+                    ["Microsoft.Extensions.Logging.Abstractions"] = CentralPackageVersion("Microsoft.Extensions.Logging.Abstractions"),
+                    ["Microsoft.Extensions.Options"] = CentralPackageVersion("Microsoft.Extensions.Options"),
+                    ["Microsoft.Extensions.Hosting"] = CentralPackageVersion("Microsoft.Extensions.Hosting"),
+                });
+
             ReportSummary(_ => _
                 .AddPair("Version", Version)
+                .AddPair("KStudio version", KStudioVersion)
                 .AddPair("Marten floor", MartenFloor)
                 .AddPair("Npgsql floor", NpgsqlFloor)
+                .AddPair("Confluent.Kafka floor", ConfluentFloor)
                 .AddPair("Packages", ReleasePackages.Length.ToString()));
         });
 
@@ -181,20 +261,22 @@ partial class Build
         {
             AssertPublishContext();
 
-            // All three packages or none: a PostgresStudio on nuget.org whose exact PostgresStudio.Diagnostics is not
-            // there, or a MartenStudio whose exact PostgresStudio is not, cannot be restored by anybody. Checked
+            // All six packages or none: a PostgresStudio on nuget.org whose exact PostgresStudio.Diagnostics is not
+            // there, a MartenStudio whose exact PostgresStudio is not, or a KStudio whose exact PostgresStudio or KStudio.Core
+            // is not, cannot be restored by anybody. Checked
             // before the key is minted, so a wrong set wastes nothing that expires.
             AssertTheReleasePackagesAndNothingElse();
             var packages = ReleasePackages;
 
             // Minted here rather than in an earlier target or job: the key lives 15-60 minutes and
-            // one OIDC token mints exactly one key - which pushes all three packages, in ReleasePackages' order.
+            // one OIDC token mints exactly one key - which pushes all six packages, in ReleasePackages' order.
             var apiKey = GetTrustedPublishingApiKey();
 
             // One push per package, in order, and the first failure ends the run: a single DotNetNuGetPush throws
             // on a non-zero exit, so a push that fails never reaches the packages after it: a PostgresStudio.Diagnostics
-            // failure never uploads PostgresStudio, and a PostgresStudio failure never uploads MartenStudio - each of
-            // which would be on nuget.org and nobody could restore it, because it depends on exactly the one before.
+            // failure never uploads PostgresStudio, a PostgresStudio failure never uploads MartenStudio, and a KStudio.Core
+            // failure never uploads KStudio or KStudio.Wolverine - each of which would be on nuget.org and nobody could
+            // restore it, because it depends on exactly the one before.
             // Deliberately not the combinatorial overload: it runs its items through PLINQ, which promises no order
             // even at a degree of parallelism of 1, and with completeOnFailure it pushes the rest after a failure.
             // --skip-duplicate keeps a re-run after a partial failure safe: the package that did land is skipped,
@@ -219,8 +301,9 @@ partial class Build
         });
 
     /// <summary>
-    /// <c>artifacts/packages</c> holds exactly the three release packages at the CHANGELOG version - no fourth
-    /// package, no stale version left behind, none of the three missing.
+    /// <c>artifacts/packages</c> holds exactly the six release packages - the first three at the CHANGELOG version, the
+    /// three KStudio packages at that version with the preview label - no seventh package, no stale version left behind,
+    /// none of the six missing.
     /// </summary>
     void AssertTheReleasePackagesAndNothingElse()
     {
@@ -229,7 +312,8 @@ partial class Build
 
         Assert.True(found.SequenceEqual(expected),
             $"'{PackagesDirectory}' must hold exactly {string.Join(", ", expected)}; it holds " +
-            $"[{string.Join(", ", found)}]. Run Pack, which packs all three at the CHANGELOG version {Version}.");
+            $"[{string.Join(", ", found)}]. Run Pack, which packs all six at the CHANGELOG version {Version} " +
+            $"(the KStudio packages as {KStudioVersion}).");
     }
 
     /// <summary>

@@ -38,11 +38,15 @@ public class KStudioVersionGuardTests
     public void Beside_the_builds_it_was_packed_with_the_guard_passes()
     {
         string required = KStudioVersionGuard.ReleaseVersion(Module);
+        string? label = KStudioVersionGuard.PrereleaseLabel(Module);
+        string? family = KStudioVersionGuard.FamilyVersion(KStudioVersionGuard.InformationalVersion(Module), label);
 
         required.Should().NotBe("?");
-        KStudioVersionGuard.InformationalVersion(Shared).Should().Be(KStudioVersionGuard.InformationalVersion(Module), "one build stamps all four");
-        KStudioVersionGuard.InformationalVersion(Engine).Should().Be(KStudioVersionGuard.InformationalVersion(Module));
-        KStudioVersionGuard.InformationalVersion(Kafka).Should().Be(KStudioVersionGuard.InformationalVersion(Module));
+        label.Should().NotBeNullOrEmpty("the three KStudio projects are stamped with Directory.Build.props' KStudioPrereleaseLabel");
+        KStudioVersionGuard.InformationalVersion(Module).Should().Contain("-" + label, "KStudio packs as a preview");
+        KStudioVersionGuard.InformationalVersion(Shared).Should().Be(family, "the family beside KStudio is at the version without its preview label");
+        KStudioVersionGuard.InformationalVersion(Engine).Should().Be(family);
+        KStudioVersionGuard.InformationalVersion(Kafka).Should().Be(KStudioVersionGuard.InformationalVersion(Module), "KStudio.Core is KStudio's own, label and all");
 
         FluentActions.Invoking(KStudioVersionGuard.Ensure).Should().NotThrow();
         FluentActions.Invoking(() => new ServiceCollection().AddKafkaStudio()).Should().NotThrow();
@@ -55,7 +59,10 @@ public class KStudioVersionGuardTests
     public void A_missing_assembly_is_refused_and_the_central_pin_is_named(string missing, string bringer)
     {
         FileNotFoundException notFound = new("Could not load file or assembly '" + missing + "'.", missing);
-        string required = KStudioVersionGuard.ReleaseVersion(Module);
+        string self = KStudioVersionGuard.ReleaseVersion(Module);
+        string required = missing == "KStudio.Core"
+            ? self
+            : KStudioVersionGuard.ReleaseVersion(KStudioVersionGuard.FamilyVersion(KStudioVersionGuard.InformationalVersion(Module), KStudioVersionGuard.PrereleaseLabel(Module)));
 
         InvalidOperationException refusal = FluentActions
             .Invoking(() => KStudioVersionGuard.Ensure(
@@ -67,7 +74,7 @@ public class KStudioVersionGuardTests
 
         refusal.InnerException.Should().BeSameAs(notFound);
         refusal.Message.Should()
-            .Contain($"KStudio {required} needs {missing} {required} exactly")
+            .Contain($"KStudio {self} needs {missing} {required} exactly")
             .And.Contain("deployed without " + missing)
             .And.Contain("central PackageVersion for " + missing)
             .And.Contain("CentralPackageTransitivePinningEnabled")
@@ -122,6 +129,90 @@ public class KStudioVersionGuardTests
         bool bothRelease = KStudioVersionGuard.IsReleaseBuild(module) && KStudioVersionGuard.IsReleaseBuild(loaded);
 
         KStudioVersionGuard.SameBuild(kStudio, other, bothRelease).Should().Be(passes);
+    }
+
+    /// <summary>A correct preview install: KStudio and KStudio.Core carry the label, PostgresStudio and its engine do not.</summary>
+    [Theory]
+    [InlineData("1.3.0-preview.1", "1.3.0", "1.3.0-preview.1")]
+    [InlineData("1.3.0-preview.1+5f1c2a9d", "1.3.0+5f1c2a9d", "1.3.0-preview.1+5f1c2a9d")]
+    [InlineData("1.3.0-rc.1-preview.1+5f1c2a9d", "1.3.0-rc.1+5f1c2a9d", "1.3.0-rc.1-preview.1+5f1c2a9d")]
+    public void A_correct_preview_install_passes(string kStudio, string family, string core)
+    {
+        AssemblyBuilder module = WithVersion(kStudio, "Release", label: "preview.1");
+
+        FluentActions.Invoking(() => KStudioVersionGuard.Ensure(
+                module,
+                () => WithVersion(family, "Release"),
+                () => WithVersion(family, "Release"),
+                () => WithVersion(core, "Release", label: "preview.1")))
+            .Should().NotThrow();
+    }
+
+    [Theory]
+    [InlineData("PostgresStudio")]
+    [InlineData("PostgresStudio.Diagnostics")]
+    public void A_family_assembly_of_another_version_is_refused_beside_a_preview(string other)
+    {
+        AssemblyBuilder module = WithVersion("1.3.0-preview.1", "Release", label: "preview.1");
+
+        FluentActions.Invoking(() => KStudioVersionGuard.Ensure(
+                module,
+                () => other == "PostgresStudio" ? WithVersion("1.3.1") : WithVersion("1.3.0"),
+                () => other == "PostgresStudio.Diagnostics" ? WithVersion("1.3.1") : WithVersion("1.3.0"),
+                () => module))
+            .Should().Throw<InvalidOperationException>()
+            .Which.Message.Should()
+            .Contain($"KStudio 1.3.0-preview.1 needs {other} 1.3.0 exactly, and found {other} 1.3.1.")
+            .And.Contain($"for {other} must say 1.3.0");
+    }
+
+    /// <summary>A family assembly carrying the preview label is not the family's build: a preview PostgresStudio never ships, so it is a skew.</summary>
+    [Fact]
+    public void A_family_assembly_carrying_the_preview_label_is_refused()
+    {
+        AssemblyBuilder module = WithVersion("1.3.0-preview.1", "Release", label: "preview.1");
+
+        FluentActions.Invoking(() => KStudioVersionGuard.Ensure(module, () => WithVersion("1.3.0-preview.1"), () => WithVersion("1.3.0"), () => module))
+            .Should().Throw<InvalidOperationException>()
+            .Which.Message.Should().Contain("needs PostgresStudio 1.3.0 exactly, and found PostgresStudio 1.3.0-preview.1.");
+    }
+
+    [Theory]
+    [InlineData("1.3.0")]
+    [InlineData("1.3.0-preview.2")]
+    [InlineData("1.3.1-preview.1")]
+    public void A_KStudio_Core_that_is_not_the_previews_own_build_is_refused(string core)
+    {
+        AssemblyBuilder module = WithVersion("1.3.0-preview.1", "Release", label: "preview.1");
+
+        FluentActions.Invoking(() => KStudioVersionGuard.Ensure(module, () => WithVersion("1.3.0"), () => WithVersion("1.3.0"), () => WithVersion(core)))
+            .Should().Throw<InvalidOperationException>()
+            .Which.Message.Should().Contain($"KStudio 1.3.0-preview.1 needs KStudio.Core 1.3.0-preview.1 exactly, and found KStudio.Core {core}.");
+    }
+
+    /// <summary>After graduation (the label emptied) nothing is stamped and nothing is taken off: all four are one version again.</summary>
+    [Fact]
+    public void Without_a_label_all_four_are_one_version()
+    {
+        AssemblyBuilder module = WithVersion("1.3.0");
+
+        FluentActions.Invoking(() => KStudioVersionGuard.Ensure(module, () => WithVersion("1.3.0"), () => WithVersion("1.3.0"), () => WithVersion("1.3.0")))
+            .Should().NotThrow();
+        FluentActions.Invoking(() => KStudioVersionGuard.Ensure(module, () => WithVersion("1.3.0-preview.1"), () => WithVersion("1.3.0"), () => WithVersion("1.3.0")))
+            .Should().Throw<InvalidOperationException>("no label was stamped, so nothing is taken off a family version");
+    }
+
+    [Theory]
+    [InlineData("1.3.0-preview.1", "preview.1", "1.3.0")]
+    [InlineData("1.3.0-preview.1+5f1c2a9d", "preview.1", "1.3.0+5f1c2a9d")]
+    [InlineData("1.3.0-preview.1", "preview.2", "1.3.0-preview.1")]
+    [InlineData("1.3.0", "preview.1", "1.3.0")]
+    [InlineData("1.3.0-preview.1", null, "1.3.0-preview.1")]
+    [InlineData("1.3.0-preview.1", "", "1.3.0-preview.1")]
+    [InlineData(null, "preview.1", null)]
+    public void The_family_version_is_the_informational_version_without_the_label(string? informational, string? label, string? expected)
+    {
+        KStudioVersionGuard.FamilyVersion(informational, label).Should().Be(expected);
     }
 
     [Fact]
@@ -192,12 +283,19 @@ public class KStudioVersionGuardTests
             nameof(KafkaStudioServiceCollectionExtensions.AddKafkaStudio),
             [typeof(IServiceCollection), typeof(Action<KafkaStudioOptions>)])!;
 
-    private static AssemblyBuilder WithVersion(string informationalVersion, string? configuration = "Release")
+    private static AssemblyBuilder WithVersion(string informationalVersion, string? configuration = "Release", string? label = null)
     {
         List<CustomAttributeBuilder> attributes =
         [
             new(typeof(AssemblyInformationalVersionAttribute).GetConstructor([typeof(string)])!, [informationalVersion]),
         ];
+
+        if (label is not null)
+        {
+            attributes.Add(new(
+                typeof(AssemblyMetadataAttribute).GetConstructor([typeof(string), typeof(string)])!,
+                [KStudioVersionGuard.PrereleaseLabelMetadataKey, label]));
+        }
 
         if (configuration is not null)
         {

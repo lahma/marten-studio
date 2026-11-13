@@ -42,13 +42,16 @@ byte-for-byte the application it was.
 
 ## Three packages
 
-The studio is three packages, released together at one version:
+The studio is three packages, released together at one version, and KStudio's three beside them as a preview:
 
 | Package | For | Register and map | Mounted at |
 |---|---|---|---|
 | `MartenStudio` | an application with a Marten `IDocumentStore` | `AddMartenStudio()`, `MapMartenStudio()` | `/marten` |
 | `PostgresStudio` | any application that registers an `NpgsqlDataSource`, and no Marten | `AddPostgresStudio()`, `MapPostgresStudio()` | `/postgres` |
 | `PostgresStudio.Diagnostics` | the findings in your own code, with no UI and no ASP.NET Core: a worker, a job host, a shared library | `AddPostgresDiagnostics()` | nothing: no pages |
+| `KStudio` (preview) | a Kafka section for either studio, over the application's own Kafka credentials | `AddKafkaStudio()`, beside `AddMartenStudio()` or `AddPostgresStudio()`; no map call | `/kafka`, under the studio's own path |
+| `KStudio.Core` (preview) | the Kafka engine `KStudio` is built on, with no ASP.NET Core; brought by `KStudio` | nothing: take `KStudio` | nothing: no pages |
+| `KStudio.Wolverine` (preview) | listing a Wolverine application's Kafka clusters and topics in `KStudio` | `k.UseWolverineKafka()` | nothing: no pages |
 
 **Which to choose.** If the application uses Marten, take `MartenStudio`: it brings `PostgresStudio` with it, at
 exactly its own version, and shows everything Postgres Studio shows for the store's databases - the database browser,
@@ -66,7 +69,7 @@ the reverse; each `Map*Studio()` names the other call to make. Marten Studio's d
 in the store's own databases - a job store, a legacy schema - but a separate plain database of a Marten application
 is not listed.
 
-**KStudio for Apache Kafka®** (preview, unreleased) adds a Kafka section to Marten Studio or Postgres Studio: the
+**KStudio for Apache Kafka®** (a preview: its API and screens may change in a minor release; its packages are versioned `<version>-preview.1`) adds a Kafka section to Marten Studio or Postgres Studio: the
 clusters, topics, partitions and consumer groups your application's own Kafka credentials can describe, and, behind
 capabilities that are off by default, a search for the records you need. Call `AddKafkaStudio()` beside
 `AddMartenStudio()` or `AddPostgresStudio()`; there is no separate map call, and the Kafka pages are served under the

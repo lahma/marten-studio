@@ -2,12 +2,15 @@
 
   <!-- KStudio.Wolverine (AGENTS.md D43): lists the Kafka clusters and topics of a Wolverine application's configuration in KStudio. It reads
        the built WolverineOptions once and starts, connects and writes nothing. It references KStudio.Core and WolverineFx.Kafka only: no
-       studio, no KStudio, no Marten, Weasel or Npgsql (KStudioWolverineFenceTests). Not packed before KStudio's first release (plan K8). -->
+       studio, no KStudio, no Marten, Weasel or Npgsql (KStudioWolverineFenceTests). Ships as a preview with the other two (K8). -->
   <PropertyGroup>
     <AssemblyName>KStudio.Wolverine</AssemblyName>
     <RootNamespace>KStudio</RootNamespace>
     <PackageId>KStudio.Wolverine</PackageId>
-    <IsPackable>false</IsPackable>
+    <IsPackable>true</IsPackable>
+    <!-- No baseline: the package is not on nuget.org yet, so Directory.Build.props' PackageValidationBaselineVersion (the family's) must not apply. -->
+    <EnablePackageValidation>true</EnablePackageValidation>
+    <PackageValidationBaselineVersion></PackageValidationBaselineVersion>
     <PackageTags>kafka;blazor;studio;admin;wolverine</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <Product>KStudio</Product>
@@ -21,8 +24,28 @@
     <IsAotCompatible>false</IsAotCompatible>
   </PropertyGroup>
 
+  <!-- K8: the preview label (Directory.Build.props, KStudioPrereleaseLabel). Only the three KStudio projects read it. The package and the
+       informational version are `<version>-<label>`; AssemblyVersion and FileVersion stay numeric. `Version` is the CHANGELOG's, passed by Pack
+       as a global property, so it is read here and never set. An empty label packs at the family version (the graduation path). The
+       label is also stamped into the assembly, so the version guards can tell the preview suffix from the family's own version. -->
+  <PropertyGroup>
+    <KStudioBaseVersion>$(Version)</KStudioBaseVersion>
+    <KStudioBaseVersion Condition="'$(KStudioBaseVersion)' == ''">$(VersionPrefix)</KStudioBaseVersion>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(KStudioPrereleaseLabel)' != ''">
+    <PackageVersion>$(KStudioBaseVersion)-$(KStudioPrereleaseLabel)</PackageVersion>
+    <InformationalVersion>$(KStudioBaseVersion)-$(KStudioPrereleaseLabel)</InformationalVersion>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(KStudioPrereleaseLabel)' != ''">
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>KStudioPrereleaseLabel</_Parameter1>
+      <_Parameter2>$(KStudioPrereleaseLabel)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
   <ItemGroup>
     <None Include="../KStudio/README.md" Pack="true" PackagePath="/" />
+    <None Include="../../icon.png" Pack="true" PackagePath="/" Visible="false" />
   </ItemGroup>
 
   <ItemGroup>
@@ -49,7 +72,7 @@
   </Target>
 
   <!-- Exactly its own build of what sits below it, as MartenStudio's MartenStudioPinsPostgresStudioExactly does: `KStudio.Core [x.y.z]`
-       in the nuspec, not NuGet's default `>=`. Inert while IsPackable is false (plan K8). -->
+       in the nuspec, not NuGet's default `>=`, and carrying the preview label: the version NuGet reads is KStudio.Core's PackageVersion. -->
   <Target Name="KStudioWolverinePinsCoreExactly" AfterTargets="_GetProjectReferenceVersions">
     <ItemGroup>
       <_ProjectReferencesWithVersions Condition="'%(Filename)' == 'KStudio.Core'">

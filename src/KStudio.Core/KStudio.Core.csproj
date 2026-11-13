@@ -3,9 +3,11 @@
   <PropertyGroup>
     <AssemblyName>KStudio.Core</AssemblyName>
     <RootNamespace>KStudio</RootNamespace>
-    <!-- Plan K8: nothing KStudio ships is packed before M4, and the build's Pack target does not list this project. -->
     <PackageId>KStudio.Core</PackageId>
-    <IsPackable>false</IsPackable>
+    <IsPackable>true</IsPackable>
+    <!-- No baseline: the package is not on nuget.org yet, so Directory.Build.props' PackageValidationBaselineVersion (the family's) must not apply. -->
+    <EnablePackageValidation>true</EnablePackageValidation>
+    <PackageValidationBaselineVersion></PackageValidationBaselineVersion>
     <PackageTags>kafka;blazor;studio;admin</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <Product>KStudio</Product>
@@ -19,9 +21,30 @@
     <IsAotCompatible>false</IsAotCompatible>
   </PropertyGroup>
 
+  <!-- K8: the preview label (Directory.Build.props, KStudioPrereleaseLabel). Only the three KStudio projects read it. The package and the
+       informational version are `<version>-<label>`; AssemblyVersion and FileVersion stay numeric. `Version` is the CHANGELOG's, passed by Pack
+       as a global property, so it is read here and never set. An empty label packs at the family version (the graduation path). The
+       label is also stamped into the assembly, so the version guards can tell the preview suffix from the family's own version. -->
+  <PropertyGroup>
+    <KStudioBaseVersion>$(Version)</KStudioBaseVersion>
+    <KStudioBaseVersion Condition="'$(KStudioBaseVersion)' == ''">$(VersionPrefix)</KStudioBaseVersion>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(KStudioPrereleaseLabel)' != ''">
+    <PackageVersion>$(KStudioBaseVersion)-$(KStudioPrereleaseLabel)</PackageVersion>
+    <InformationalVersion>$(KStudioBaseVersion)-$(KStudioPrereleaseLabel)</InformationalVersion>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(KStudioPrereleaseLabel)' != ''">
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>KStudioPrereleaseLabel</_Parameter1>
+      <_Parameter2>$(KStudioPrereleaseLabel)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
   <!-- No FrameworkReference: the engine has no ASP.NET Core (KStudioCoreFenceTests). -->
+
   <ItemGroup>
     <None Include="../KStudio/README.md" Pack="true" PackagePath="/" />
+    <None Include="../../icon.png" Pack="true" PackagePath="/" Visible="false" />
   </ItemGroup>
 
   <ItemGroup>
