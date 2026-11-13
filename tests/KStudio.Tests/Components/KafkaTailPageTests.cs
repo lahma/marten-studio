@@ -131,7 +131,7 @@ public class KafkaTailPageTests
         IRenderedComponent<KafkaTailPage> page = await OpenAsync(rig);
 
         page.Find(".ms-k-tail-forbidden").TextContent.Should().Be(KafkaStudioText.ProfileForbids(KafkaStudioText.LiveTailAction, rig.Entry));
-        page.Find(".ms-k-tail-forbidden").TextContent.Should().Contain("KafkaClusterBuilder.Profile").And.Contain("even when they are granted");
+        page.Find(".ms-k-tail-forbidden").TextContent.Should().Be("This cluster's profile does not allow live tail.").And.NotContain("KafkaClusterBuilder");
         page.FindAll("textarea").Should().BeEmpty("there is no form: granting the capability is not enough");
     }
 

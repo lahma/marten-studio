@@ -893,7 +893,7 @@
 
         if (chosen.IsInvalidTime(local))
         {
-            problem = $"{local.ToString(LocalFormat, CultureInfo.InvariantCulture)} does not exist in {chosen.Id} (the clocks skip it).";
+            problem = KafkaSearchText.SkippedLocalTime(local.ToString(LocalFormat, CultureInfo.InvariantCulture), local, chosen);
             return false;
         }
 

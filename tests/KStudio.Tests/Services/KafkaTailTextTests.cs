@@ -103,7 +103,7 @@ public class KafkaTailTextTests
         KafkaTailText.Ended(KafkaScanStopReason.NotAuthorized).Should().Be("Nothing was read: every partition refused READ.");
         KafkaTailText.Ended(KafkaScanStopReason.Failed).Should().Be(KafkaStudioText.TailFailed);
         KafkaTailText.Refusal(KafkaScanRefusal.OwnerBusy, null).Should().Contain("search or live tail");
-        KafkaTailText.Refusal(KafkaScanRefusal.ProfileForbids, null).Should().Contain("KafkaClusterBuilder.Profile");
+        KafkaTailText.Refusal(KafkaScanRefusal.ProfileForbids, null).Should().Be("This cluster's profile does not allow this.");
         KafkaStudioText.Refusal(KafkaScanRefusal.OwnerBusy, spent: null).Should().Contain("Pause the tail to search.", "a search refused for a tail says what holds its place");
     }
 

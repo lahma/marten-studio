@@ -63,7 +63,10 @@ internal static class KafkaStudioText
 
     /// <summary>A topic page with no declared consumer group.</summary>
     public const string NoConsumerGroups =
-        "No consumer groups are declared for this cluster: add KafkaClusterBuilder.ConsumerGroup(\"…\") to show their lag here.";
+        "No consumer groups are declared for this cluster.";
+
+    /// <summary>The Settings page's line on how consumer groups are declared (the only page that names a builder method).</summary>
+    public const string ConsumerGroupsHint = "Consumer groups are declared with KafkaClusterBuilder.ConsumerGroup(\"…\") in AddCluster; a topic's page shows their lag.";
 
     /// <summary>The cluster selector's option text: the label, and - where another cluster the visitor may see has the same bootstrap servers - which (#72).</summary>
     /// <param name="label">The cluster's label.</param>
@@ -314,7 +317,7 @@ internal static class KafkaStudioText
         KStudio.Core.Scanning.KafkaScanRefusal.OwnerBudgetSpent =>
             $"You have read {Allowance(spent)}. It frees up as the hour rolls on.",
         KStudio.Core.Scanning.KafkaScanRefusal.ProfileForbids =>
-            "This cluster's profile forbids this: Production forbids export and live tail even when they are granted. The host sets the profile with KafkaClusterBuilder.Profile in AddCluster.",
+            "This cluster's profile does not allow this.",
         KStudio.Core.Scanning.KafkaScanRefusal.NeedsConfirmation => NeedsConfirmation,
         KStudio.Core.Scanning.KafkaScanRefusal.PredicateInvalid => PredicateInvalid,
         KStudio.Core.Scanning.KafkaScanRefusal.ShuttingDown => "The application is shutting down.",
@@ -358,8 +361,8 @@ internal static class KafkaStudioText
         $"{KafkaDisplay.Count(records, "record")}, as shown: masked parts stay masked";
 
     /// <summary>
-    /// What a control says where a cluster's profile forbids an action (D-M5 decision 4.6): one sentence that names the setting a host would change
-    /// and says that granting the capability is not enough.
+    /// What a page says where a cluster's profile forbids an action (D-M5 decision 4.6): one neutral sentence. The setting a host would change is on
+    /// Cluster settings (<see cref="ProfileHint" />), not here (#74).
     /// </summary>
     /// <param name="action">The action in the sentence's first words: <see cref="ExportingRecords" /> or <see cref="LiveTailAction" />.</param>
     /// <param name="entry">The cluster.</param>
@@ -367,9 +370,12 @@ internal static class KafkaStudioText
     {
         ArgumentNullException.ThrowIfNull(entry);
 
-        return $"{action} is off on {entry.DisplayName}: its profile is Production, which forbids export and live tail even when they are granted. "
-            + "The host sets the profile with KafkaClusterBuilder.Profile in AddCluster.";
+        return $"This cluster's profile does not allow {action.ToLowerInvariant()}.";
     }
+
+    /// <summary>The Settings page's line on how a profile is set, and what Production does.</summary>
+    public const string ProfileHint =
+        "The host sets a cluster's profile with KafkaClusterBuilder.Profile in AddCluster. Production forbids export and live tail on that cluster even when they are granted.";
 
     /// <summary>The "predicate" of an export from the record page: it was opened by its place, not found by a search.</summary>
     public const string RecordExportAuditText = "(none: the record page)";

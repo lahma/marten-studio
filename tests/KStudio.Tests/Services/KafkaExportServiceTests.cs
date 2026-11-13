@@ -225,6 +225,7 @@ public class KafkaExportServiceTests
 
         outcome.Text.Should().Be("Searching records is not available here.", "the prerequisite is the first refusal");
         capture.Calls.Should().Be(0);
+        Exports(rig).Should().ContainSingle().Which.Message.Should().Contain("PostgresStudioOptions.ReadOnly", "the audit entry still names the host's option");
     }
 
     [Fact]
@@ -240,7 +241,7 @@ public class KafkaExportServiceTests
 
         outcome.Delivered.Should().BeFalse();
         outcome.Text.Should().Be(KafkaStudioText.ProfileForbids(KafkaStudioText.ExportingRecords, rig.Entry))
-            .And.Contain("KafkaClusterBuilder.Profile").And.Contain("even when they are granted");
+            .And.Be("This cluster's profile does not allow exporting records.").And.NotContain("KafkaClusterBuilder");
         capture.Calls.Should().Be(0, "nothing was written, so nothing was delivered");
         rig.Studio.Authorization.KafkaCalls.Should().BeEmpty("the profile is judged before a policy is asked");
         Exports(rig).Should().ContainSingle().Which.Succeeded.Should().BeFalse();

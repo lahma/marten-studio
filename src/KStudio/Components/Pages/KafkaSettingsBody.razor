@@ -38,6 +38,7 @@
                limits sees its own. A cluster with no profile is told so, because nothing else on the page says that its limits are not capped. *@
             <h2 class="ms-section-title">Profile</h2>
             <p class="ms-k-profile">@KafkaStudioText.ProfileSummary(active.Profile, Scanner.LimitsFor(active.Key))</p>
+            <p class="ms-muted ms-k-profile-hint">@KafkaStudioText.ProfileHint</p>
             @if (active.Profile is null)
             {
                 <p class="ms-k-note ms-k-note-warning" role="note">@KafkaStudioText.NoProfileWarning</p>
@@ -78,6 +79,8 @@
                 </tbody>
             </table>
         </TableScroll>
+
+        <p class="ms-muted ms-k-groups-hint">@KafkaStudioText.ConsumerGroupsHint</p>
 
         <h2 class="ms-section-title">Your settings</h2>
         <TableScroll Label="Your settings">

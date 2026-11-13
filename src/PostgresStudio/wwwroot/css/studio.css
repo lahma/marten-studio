@@ -17686,20 +17686,6 @@ dialog.ms-modal::backdrop {
     min-width: 0;
 }
 
-.ms-k-export-forbidden {
-    max-width: 100%;
-}
-
-.ms-k-export-reason {
-    overflow-wrap: anywhere;
-}
-
-/* The notice that the capability is off sits in the banner's line, so it is a note and not a block of its own. */
-.ms-k-export-off {
-    flex: 1 1 100%;
-    min-width: 0;
-}
-
 .ms-k-export-row {
     margin: 0 0 var(--ms-space-md);
 }
@@ -17864,5 +17850,10 @@ dialog.ms-modal::backdrop {
 }
 
 .ms-k-continued-showing {
+    overflow-wrap: anywhere;
+}
+
+.ms-k-profile-hint,
+.ms-k-groups-hint {
     overflow-wrap: anywhere;
 }
