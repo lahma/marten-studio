@@ -19,7 +19,7 @@ public class PredicateValueGrammarTests
     {
         PredicateParseResult result = PredicateParser.Parse(text);
         result.Errors.Should().ContainSingle();
-        return result.Errors[0].Message;
+        return result.Errors[0].Shown;
     }
 
     [Theory]
@@ -90,11 +90,11 @@ public class PredicateValueGrammarTests
     }
 
     [Theory]
-    [InlineData("key = 'a' and $.a.", "The JSON path '$.a.' at position 18 has an empty step: write $.name, $.name[0] or $.name[*].")]
-    [InlineData("$a = 1", "The JSON path '$a' at position 2 must go on with . or [ after $.")]
-    [InlineData("$.a[x] = 1", "The JSON path '$.a[x]' at position 4 has an index that is not a whole number: write [0], [12] or [*].")]
-    [InlineData("$.1a = 1", "The JSON path '$.1a' at position 2 has a member the search cannot write: write it in brackets, $['1a'].")]
-    [InlineData("$['a b = 1", "The JSON path '$['a b = 1' at position 2 has a '[' with no matching ']'.")]
+    [InlineData("key = 'a' and $.a.", "Position 18: the JSON path '$.a.' has an empty step: write $.name, $.name[0] or $.name[*].")]
+    [InlineData("$a = 1", "Position 2: the JSON path '$a' must go on with . or [ after $.")]
+    [InlineData("$.a[x] = 1", "Position 4: the JSON path '$.a[x]' has an index that is not a whole number: write [0], [12] or [*].")]
+    [InlineData("$.1a = 1", "Position 2: the JSON path '$.1a' has a member the search cannot write: write it in brackets, $['1a'].")]
+    [InlineData("$['a b = 1", "Position 2: the JSON path '$['a b = 1' has a '[' with no matching ']'.")]
     public void A_path_error_comes_from_the_parser_with_its_position_in_the_whole_text(string text, string message)
     {
         Error(text).Should().Be(message);
@@ -102,12 +102,12 @@ public class PredicateValueGrammarTests
     }
 
     [Theory]
-    [InlineData("foo = 'a'", "Unknown field 'foo' at position 1. Search fields are key, header.<name>, ce.<attribute>, any, value and $.json.paths.")]
-    [InlineData("valu = 'a'", "Unknown field 'valu' at position 1. Search fields are key, header.<name>, ce.<attribute>, any, value and $.json.paths.")]
-    [InlineData("key = 'a' and", "Unexpected the end at position 14: expected a field (key, header.<name>, ce.<attribute>, any, value or a $.json.path).")]
-    [InlineData("= 'a'", "Unexpected '=' at position 1: expected a field (key, header.<name>, ce.<attribute>, any, value or a $.json.path).")]
-    [InlineData("key 'a'", "Unexpected a string at position 5: expected an operator ('=', '^=', '~', '<', '<=', '>', '>=', 'in' or 'is').")]
-    [InlineData("$.a 'x'", "Unexpected a string at position 5: expected an operator ('=', '^=', '~', '<', '<=', '>', '>=', 'in' or 'is').")]
+    [InlineData("foo = 'a'", "Position 1: unknown field 'foo'. Search fields are key, header.<name>, ce.<attribute>, any, value and $.json.paths.")]
+    [InlineData("valu = 'a'", "Position 1: unknown field 'valu'. Search fields are key, header.<name>, ce.<attribute>, any, value and $.json.paths.")]
+    [InlineData("key = 'a' and", "Position 14: expected a field (key, header.<name>, ce.<attribute>, any, value or a $.json.path), found the end.")]
+    [InlineData("= 'a'", "Position 1: expected a field (key, header.<name>, ce.<attribute>, any, value or a $.json.path), found '='.")]
+    [InlineData("key 'a'", "Position 5: expected an operator ('=', '^=', '~', '<', '<=', '>', '>=', 'in' or 'is'), found a string.")]
+    [InlineData("$.a 'x'", "Position 5: expected an operator ('=', '^=', '~', '<', '<=', '>', '>=', 'in' or 'is'), found a string.")]
     public void The_replaced_sentences_list_the_new_fields_and_operators(string text, string message)
     {
         Error(text).Should().Be(message);
@@ -119,7 +119,7 @@ public class PredicateValueGrammarTests
         string sixtyFour = new('a', 64);
 
         Parse($"ce.{sixtyFour} = 'x'");
-        Error($"ce.{sixtyFour}a = 'x'").Should().StartWith("Unknown field 'ce.aaaa");
+        Error($"ce.{sixtyFour}a = 'x'").Should().StartWith("Position 1: unknown field 'ce.aaaa");
     }
 
     [Theory]

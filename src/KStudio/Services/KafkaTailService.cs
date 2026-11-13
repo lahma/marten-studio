@@ -111,7 +111,7 @@ internal sealed class KafkaTailService(
 
             if (!plan.IsValid)
             {
-                await NotRunAsync(input, session, KafkaStudioText.PredicateInvalid, KafkaStudioText.PredicateDidNotParse(input.PredicateText?.Length ?? 0)).ConfigureAwait(false);
+                await NotRunAsync(input, session, KafkaStudioText.PredicateDidNotRun(plan.Errors), KafkaStudioText.PredicateDidNotParse(input.PredicateText?.Length ?? 0)).ConfigureAwait(false);
             }
 
             return new KafkaTailPlanResult.Planned(new KafkaTailPlanned(input, plan, grant));
@@ -154,7 +154,7 @@ internal sealed class KafkaTailService(
 
         if (!plan.IsValid)
         {
-            await NotRunAsync(input, session, KafkaStudioText.PredicateInvalid, KafkaStudioText.PredicateDidNotParse(input.PredicateText?.Length ?? 0)).ConfigureAwait(false);
+            await NotRunAsync(input, session, KafkaStudioText.PredicateDidNotRun(plan.Errors), KafkaStudioText.PredicateDidNotParse(input.PredicateText?.Length ?? 0)).ConfigureAwait(false);
             return new KafkaTailStartResult.Refused(KafkaStudioText.PredicateInvalid);
         }
 
@@ -235,8 +235,8 @@ internal sealed class KafkaTailService(
         catch (KafkaCapabilityDeniedException denial)
         {
             actionLog.RecordCapabilityDenied(cluster, topics, denial, KafkaStudioText.TailAction, target);
-            session?.CountRefusedResume(denial.Message);
-            return (denial.Message, [], KafkaGrantDecision.EnvelopeOnly);
+            session?.CountRefusedResume(denial.VisitorText);
+            return (denial.VisitorText, [], KafkaGrantDecision.EnvelopeOnly);
         }
 
         // 2. The cluster's profile: Production never tails, even when the capability is granted.
@@ -282,8 +282,8 @@ internal sealed class KafkaTailService(
         if (grant.Denied is { } denied)
         {
             actionLog.RecordCapabilityDenied(cluster, topics, denied, KafkaStudioText.TailAction, target);
-            session?.CountRefusedResume(denied.Message);
-            return (denied.Message, [], grant);
+            session?.CountRefusedResume(denied.VisitorText);
+            return (denied.VisitorText, [], grant);
         }
 
         if (grant.Refusal is not null)

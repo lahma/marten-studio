@@ -34,6 +34,12 @@ internal interface IStudioModule
 
     /// <summary>The module's keyboard shortcuts for the sheet; empty for a module with none.</summary>
     IReadOnlyList<StudioShortcutGroup> Shortcuts { get; }
+
+    /// <summary>
+    /// The module's durable audit event ids as text (a range such as <c>1000-1009</c>), which the Activity page's footer names beside the studio's own; empty for a
+    /// module with no events of its own. The text comes from the module, because the studio's source names no module's product (<c>ModuleNeutralityTests</c>).
+    /// </summary>
+    string AuditEventIds { get; }
 }
 
 /// <summary>One module capability as the chip lists it. Whether it is on is computed by the shell: not read-only, and configured.</summary>

@@ -132,7 +132,7 @@ public class PredicateTextFormTests
         PredicateParseResult back = PredicateParser.Parse(link);
 
         back.IsValid.Should().BeFalse();
-        back.Errors[0].Message.Should().Be("The link left out a redacted value at position 24: type it in.");
+        back.Errors[0].Message.Should().Be("the link left out a redacted value here: type it in.");
     }
 
     private static readonly string[] Fields = ["key", "header.a", "header.x-request-id", "header['a b']", "ce.type", "ce.subject", "any"];

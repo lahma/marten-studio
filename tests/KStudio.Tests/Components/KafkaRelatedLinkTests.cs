@@ -71,7 +71,7 @@ public class KafkaRelatedLinkTests
 
         page.WaitForAssertion(() => page.FindAll("details.ms-k-duplicates").Should().HaveCount(1));
         page.Find("details.ms-k-duplicates summary").TextContent.Should().Be("Possible duplicates: 1 group");
-        page.Find("details.ms-k-duplicates > p").TextContent.Should().Be("Compared among the 3 records found. A copy outside these results is not seen.");
+        page.Find("details.ms-k-duplicates > p").TextContent.Should().Be("Compared among the 3 matches on this page. A copy outside these results, or in matches an earlier Continue cleared, is not seen.");
         page.FindAll("details.ms-k-duplicates tbody tr").Should().HaveCount(2);
     }
 

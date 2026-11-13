@@ -54,16 +54,16 @@ internal static class KafkaSearchText
                 $"No match in the {KafkaDisplay.Count(result.Records, "record")} read from {KafkaDisplay.Count(result.Partitions.Count, "partition")}."),
             KafkaScanStopReason.MatchLimit => string.Create(
                 CultureInfo.InvariantCulture,
-                $"Stopped at {KafkaDisplay.Count(limits.MaxMatches, "match", "matches")}, the most a search keeps (KafkaStudioOptions.Limits.MaxMatches). Continue reads on from where it stopped."),
+                $"Stopped at {KafkaDisplay.Count(limits.MaxMatches, "match", "matches")}, the most a search keeps here. Continue reads on from where it stopped."),
             KafkaScanStopReason.ByteBudget =>
-                $"Stopped after reading {KafkaDisplay.Bytes(result.Bytes)}, this search's budget (KafkaStudioOptions.Limits.MaxBytesPerScan). Continue reads on from where it stopped.",
+                $"Stopped after reading {KafkaDisplay.Bytes(result.Bytes)}, this search's budget. Continue reads on from where it stopped.",
             KafkaScanStopReason.RecordBudget => string.Create(
                 CultureInfo.InvariantCulture,
-                $"Stopped after {KafkaDisplay.Count(result.Records, "record")}, this search's budget (KafkaStudioOptions.Limits.MaxRecordsPerScan). Continue reads on from where it stopped."),
+                $"Stopped after {KafkaDisplay.Count(result.Records, "record")}, this search's budget. Continue reads on from where it stopped."),
             KafkaScanStopReason.OwnerBudget =>
                 $"Stopped: you have read {KafkaStudioText.Allowance(result.SpentBudget)}. Continue reads on from where it stopped, once the allowance frees up.",
             KafkaScanStopReason.Deadline =>
-                $"Stopped after {WindowNote.Span(limits.MaxScanDuration)}, the longest a search runs (KafkaStudioOptions.Limits.MaxScanDuration). Continue reads on from where it stopped.",
+                $"Stopped after {WindowNote.Span(limits.MaxScanDuration)}, the longest a search runs. Continue reads on from where it stopped.",
             KafkaScanStopReason.Cancelled => "Stopped by you. Continue reads on from where it stopped.",
             KafkaScanStopReason.Shutdown => "Stopped: the application is shutting down.",
             KafkaScanStopReason.NotAuthorized => "Nothing was read: every partition refused READ.",
@@ -90,7 +90,29 @@ internal static class KafkaSearchText
         bool dates = to - from >= TimeSpan.FromDays(1) || localFrom.Date != localTo.Date || from.UtcDateTime.Date != to.UtcDateTime.Date;
         string format = dates ? "yyyy-MM-dd HH:mm" : "HH:mm";
 
-        return $"{localFrom.ToString(format, c)}–{localTo.ToString(format, c)} {preference.Id} · {from.UtcDateTime.ToString(format, c)}Z–{to.UtcDateTime.ToString(format, c)}Z";
+        return $"{localFrom.ToString(format, c)}–{localTo.ToString(format, c)} {ZoneLabel(preference, from)} · {from.UtcDateTime.ToString(format, c)}Z–{to.UtcDateTime.ToString(format, c)}Z";
+    }
+
+    /// <summary>
+    /// How a time zone is named beside a time (#77): an IANA id as it is (<c>Europe/Helsinki</c>), otherwise the UTC offset at <paramref name="at" />
+    /// (<c>UTC+02:00</c>, or <c>UTC</c> at no offset). Never a Windows id such as <c>FLE Standard Time</c>, which reads as a display name it is not.
+    /// </summary>
+    /// <param name="zone">The zone.</param>
+    /// <param name="at">The time the offset is read at.</param>
+    public static string ZoneLabel(TimeZoneInfo zone, DateTimeOffset at)
+    {
+        ArgumentNullException.ThrowIfNull(zone);
+
+        if (zone.Id.Contains('/', StringComparison.Ordinal))
+        {
+            return zone.Id;
+        }
+
+        TimeSpan offset = zone.GetUtcOffset(at);
+
+        return offset == TimeSpan.Zero
+            ? "UTC"
+            : "UTC" + (offset < TimeSpan.Zero ? "-" : "+") + offset.Duration().ToString(@"hh\:mm", CultureInfo.InvariantCulture);
     }
 
     /// <summary>
@@ -147,14 +169,15 @@ internal static class KafkaSearchText
     /// Empty only when nothing was left out - and a "no match" is never drawn without this list beside it.
     /// </summary>
     /// <param name="result">The finished scan.</param>
-    public static IReadOnlyList<string> Caveats(KafkaScanResult result)
+    /// <param name="leaveOutMissingTopics">Leaves out the sentences that only say a topic does not exist, for a page that draws one "Not found" line per topic (#77).</param>
+    public static IReadOnlyList<string> Caveats(KafkaScanResult result, bool leaveOutMissingTopics = false)
     {
         ArgumentNullException.ThrowIfNull(result);
 
         CultureInfo c = CultureInfo.InvariantCulture;
         List<string> caveats = [];
 
-        foreach (WindowNote note in result.Notes)
+        foreach (WindowNote note in result.Notes.Where(note => !(leaveOutMissingTopics && IsMissingTopicNote(note))))
         {
             Add(caveats, note.Text);
         }
@@ -197,7 +220,7 @@ internal static class KafkaSearchText
             Add(caveats, $"{partition.Topic}/{partition.Partition}: {State(partition.State, partition.Records)}");
         }
 
-        foreach (KafkaTopicRefusal refusal in result.TopicRefusals)
+        foreach (KafkaTopicRefusal refusal in result.TopicRefusals.Where(refusal => !(leaveOutMissingTopics && refusal.Missing)))
         {
             Add(caveats, refusal.Text);
         }
@@ -217,4 +240,12 @@ internal static class KafkaSearchText
             }
         }
     }
+
+    /// <summary>
+    /// Whether a window note only repeats that a topic does not exist: the configuration of a missing topic cannot be read, and its note starts with the
+    /// same "Not found" sentence as the topic's refusal. A page that draws one "Not found" line per missing topic leaves these out (#77).
+    /// </summary>
+    /// <param name="note">The note.</param>
+    public static bool IsMissingTopicNote(WindowNote note) =>
+        note is WindowNote.ConfigNotReadable { Error: KStudio.Core.Wire.WireError.NotFound };
 }

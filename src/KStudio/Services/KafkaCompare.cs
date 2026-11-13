@@ -178,7 +178,7 @@ internal static class KafkaCompare
         {
             string? sentence = access switch
             {
-                KafkaValueAccess.CapabilityOff => "Reading values is not enabled.",
+                KafkaValueAccess.CapabilityOff => KafkaStudioText.CapabilityNotAvailable(KafkaCapability.ReadPayloads),
                 KafkaValueAccess.PolicyRefused => KafkaStudioText.ValueNotAvailable,
                 KafkaValueAccess.SearchWithoutValues => KafkaStudioText.ValueNotReadBySearch,
                 _ => null,

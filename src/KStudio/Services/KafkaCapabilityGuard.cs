@@ -112,7 +112,11 @@ internal sealed class KafkaCapabilityDeniedException : InvalidOperationException
         Capability = capability;
         Reason = reason;
         CapabilityOption = KafkaCapabilityGuard.OptionFor(capability);
+        VisitorText = KafkaStudioText.CapabilityNotAvailable(capability);
     }
+
+    /// <summary>What a page shows a visitor: one neutral sentence with no option name (#74). <see cref="Exception.Message" /> is for the audit and the log.</summary>
+    public string VisitorText { get; }
 
     /// <summary>The capability that was refused.</summary>
     public KafkaCapability Capability { get; }

@@ -45,7 +45,7 @@ public class KafkaRecordDetailTests
         detail.Markup.Should().Contain("••• (redacted by header customer-email)").And.NotContain(Secret);
         detail.Find("span.ms-k-redacted").TextContent.Should().Be("••• (redacted by header customer-email)");
         detail.Markup.Should().Contain("c-1");
-        detail.Markup.Should().Contain("Reading values is not enabled").And.Contain("KafkaStudioOptions.Capabilities.ReadPayloads");
+        detail.Markup.Should().Contain("Reading values is not available here.").And.NotContain("KafkaStudioOptions");
     }
 
     [Fact]

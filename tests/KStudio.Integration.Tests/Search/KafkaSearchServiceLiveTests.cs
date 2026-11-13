@@ -108,7 +108,7 @@ public abstract class KafkaSearchServiceLiveTests(KafkaFixture fixture)
         // The same search without the capability is refused where the operation is, before anything is read.
         await using LiveSearchHost without = Host();
         KafkaSearchPlanResult refused = await without.Search.PlanAsync(Input(without, [topic], "$.customer.id = 'customer-7'"), Token);
-        refused.Should().BeOfType<KafkaSearchPlanResult.Refused>().Which.Text.Should().Contain("KafkaStudioOptions.Capabilities.ReadPayloads");
+        refused.Should().BeOfType<KafkaSearchPlanResult.Refused>().Which.Text.Should().Be("Reading values is not available here.");
         without.Logs.Entries.Should().Contain(static x => x.EventId.Id == 9602);
     }
 

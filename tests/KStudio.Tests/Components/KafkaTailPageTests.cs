@@ -98,27 +98,27 @@ public class KafkaTailPageTests
     // ---- the disabled states
 
     [Fact]
-    public async Task Without_the_capability_the_page_names_the_option_and_reads_nothing()
+    public async Task Without_the_capability_the_page_says_one_neutral_sentence_and_reads_nothing()
     {
         await using KafkaSearchRig rig = Rig(tailOn: false);
         Seed(rig);
 
         IRenderedComponent<KafkaTailPage> page = await OpenAsync(rig);
 
-        page.Find(".ms-capability-disabled").TextContent.Should().Contain("Live tail is not enabled").And.Contain("KafkaStudioOptions.Capabilities.LiveTail");
+        page.Find(".ms-capability-disabled").TextContent.Should().Be("Live tail is not available here.");
         page.FindAll("textarea").Should().BeEmpty();
         rig.BrokerCalls.Should().Be(0);
     }
 
     [Fact]
-    public async Task Without_SearchRecords_the_page_names_that_option()
+    public async Task Without_SearchRecords_the_page_says_so_without_an_option_name()
     {
         await using KafkaSearchRig rig = Rig(searchOn: false);
         Seed(rig);
 
         IRenderedComponent<KafkaTailPage> page = await OpenAsync(rig);
 
-        page.Find(".ms-capability-disabled").TextContent.Should().Contain("KafkaStudioOptions.Capabilities.SearchRecords");
+        page.Find(".ms-capability-disabled").TextContent.Should().Be("Searching records is not available here.");
         page.FindAll("textarea").Should().BeEmpty();
     }
 

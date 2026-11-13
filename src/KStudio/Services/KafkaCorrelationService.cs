@@ -432,7 +432,7 @@ internal sealed class KafkaCorrelationService(
         catch (KafkaCapabilityDeniedException denial)
         {
             actionLog.RecordCapabilityDenied(cluster, topics, denial, Action, target);
-            return (denial.Message, null);
+            return (denial.VisitorText, null);
         }
 
         // 2. The input's own bounds.

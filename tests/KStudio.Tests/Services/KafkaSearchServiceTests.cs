@@ -45,7 +45,7 @@ public class KafkaSearchServiceTests
         rig.Studio.Options.Capabilities.SearchRecords = false;
         KafkaSearchStartResult refused = await search.StartAsync(plan.Value, confirmed: false, Ct);
 
-        refused.Should().BeOfType<KafkaSearchStartResult.Refused>().Which.Text.Should().Contain("KafkaStudioOptions.Capabilities.SearchRecords");
+        refused.Should().BeOfType<KafkaSearchStartResult.Refused>().Which.Text.Should().Be("Searching records is not available here.");
         rig.Ring.Should().Contain(static x => !x.Succeeded && x.Capability == "SearchRecords" && x.Action == "SearchRecords");
         rig.Logs.Entries.Should().Contain(static x => x.EventId.Id == 9602);
     }
@@ -102,6 +102,26 @@ public class KafkaSearchServiceTests
     }
 
     [Fact]
+    public async Task A_search_text_that_does_not_parse_is_audited_with_its_first_errors_position_and_a_constant_phrase()
+    {
+        await using KafkaSearchRig rig = new();
+        rig.Topic("orders");
+
+        KafkaSearchPlanResult.Planned planned = (KafkaSearchPlanResult.Planned) await rig.Search().PlanAsync(rig.Input(["orders"], "value ~"), Ct);
+
+        planned.Value.Plan.IsValid.Should().BeFalse();
+        planned.Value.Plan.Errors[0].Shown.Should().Be("Position 8: expected a value after '~', found the end.");
+
+        // The ring says why, without the page's "see above" and without anything the visitor typed.
+        rig.Ring.Should().ContainSingle().Which.Message.Should().Be("position 8, expected a value");
+
+        // The log: one full stop, the cause, and the length of the text.
+        string log = rig.Logs.Entries.Single(static x => x.EventId.Id == 9601).Message;
+        log.Should().EndWith("did not run: position 8, expected a value. Predicate: (a predicate that did not parse, 7 characters)")
+            .And.NotContain("see above").And.NotContain("..");
+    }
+
+    [Fact]
     public async Task A_window_that_ends_before_it_starts_is_refused_with_the_engines_sentence()
     {
         await using KafkaSearchRig rig = new();
@@ -141,10 +161,10 @@ public class KafkaSearchServiceTests
         rig.Ring.Should().NotBeEmpty();
         rig.Ring.Select(All).Should().NotContain(static x => x.Contains(Sentinel, StringComparison.Ordinal), "the ring holds the audit text, never the typed text");
         rig.Ring.Should().Contain(static x => x.Succeeded && x.Message!.Contains("predicate: header.customer-email = <redacted>", StringComparison.Ordinal));
-        rig.Ring.Should().Contain(static x => !x.Succeeded && x.Message == KafkaStudioText.PredicateInvalid);
+        rig.Ring.Should().Contain(static x => !x.Succeeded && x.Message == "position 1, redacted field operator", "the cause is a position and a constant phrase: no header name, no literal");
         rig.Logs.Entries.Select(static x => x.Message).Should().NotContain(static x => x.Contains(Sentinel, StringComparison.Ordinal), "nor does a log line");
         rig.Logs.Entries.Should().Contain(static x => x.EventId.Id == 9600 && x.Message.Contains("<redacted>", StringComparison.Ordinal));
-        rig.Logs.Entries.Should().Contain(static x => x.EventId.Id == 9601 && x.Message.Contains("did not parse", StringComparison.Ordinal));
+        rig.Logs.Entries.Should().Contain(static x => x.EventId.Id == 9601 && x.Message.Contains("did not run: position 1, redacted field operator. Predicate: (a predicate that did not parse,", StringComparison.Ordinal));
         rig.Toasts.Messages.Select(static x => x.Message).Should().NotContain(static x => x.Contains(Sentinel, StringComparison.Ordinal), "nor a toast");
     }
 
@@ -189,7 +209,7 @@ public class KafkaSearchServiceTests
 
         KafkaSearchPlanResult plan = await rig.Search().PlanAsync(rig.Input(["orders"], "$.status = 'placed'"), Ct);
 
-        plan.Should().BeOfType<KafkaSearchPlanResult.Refused>().Which.Text.Should().Contain("KafkaStudioOptions.Capabilities.ReadPayloads");
+        plan.Should().BeOfType<KafkaSearchPlanResult.Refused>().Which.Text.Should().Be("Reading values is not available here.");
         rig.BrokerCalls.Should().Be(callsBefore);
         rig.Ring.Should().ContainSingle().Which.Should().Match<StudioActionLogEntry>(static x => !x.Succeeded && x.Capability == "ReadPayloads");
         rig.Logs.Entries.Should().ContainSingle(static x => x.EventId.Id == 9602);

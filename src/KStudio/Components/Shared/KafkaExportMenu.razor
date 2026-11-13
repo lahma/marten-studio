@@ -2,41 +2,20 @@
 @using KStudio.Core.Export
 @using KStudio.Core.Scanning
 @using Microsoft.Extensions.Logging
-@using PostgresStudio.Services.Settings
-@inject IStudioSettings Settings
 @inject KafkaCapabilityGuard Capabilities
 @inject KafkaExportService Export
 @inject IJSRuntime JsRuntime
 @inject ILogger<KafkaExportMenu> Logger
 
 @* The Export control of a search's results, a live tail and the record page (D-M5 decision 2.8). It saves the records the page already holds, so it
-   reads nothing from Kafka; every gate is the service's, asked again at the click (hard rule 5), and what this draws - the menu, the notice that
-   the capability is off, the sentence that the cluster's profile forbids export - is a convenience. The file travels to the browser as a
+   reads nothing from Kafka; every gate is the service's, asked again at the click (hard rule 5), and what this draws - the menu, or nothing where
+   the capability is off or the cluster's profile forbids export - is a convenience. The file travels to the browser as a
    DotNetStreamReference over the circuit: there is no endpoint and no link to click, so the click is what the service gates and audits. *@
 
-@if (!Capabilities.IsEnabled(KafkaCapability.ExportRecords))
+@if (!Capabilities.IsEnabled(KafkaCapability.ExportRecords) || (CurrentCluster is { } profiled && Export.ForbiddenByProfile(profiled)))
 {
-    @* One line, not the alert block of the other disabled controls (D-M5 decision 2.8): the result already says a lot, and this sits beside it. *@
-    <p class="ms-muted ms-k-export-off">
-        @KafkaStudioText.ExportingRecords is not enabled.
-        @if (Capabilities.ReadOnly)
-        {
-            <code>@Settings.ReadOnlyOption()</code> <text>is</text> <code>true</code><text>, which turns every capability off.</text>
-        }
-        else
-        {
-            <text>Set</text> <code>@KafkaCapabilityGuard.OptionFor(KafkaCapability.ExportRecords)</code> <text>to</text> <code>true</code><text>.</text>
-        }
-    </p>
-}
-else if (CurrentCluster is { } cluster && Export.ForbiddenByProfile(cluster))
-{
-    var forbidden = KafkaStudioText.ProfileForbids(KafkaStudioText.ExportingRecords, cluster);
-
-    <div class="ms-k-export ms-k-export-forbidden">
-        <button type="button" class="ms-btn ms-btn-sm" disabled="disabled" title="@forbidden">Export</button>
-        <span class="ms-muted ms-k-export-reason">@forbidden</span>
-    </div>
+    @* Nothing is drawn (#74): a capability that is off, or that the cluster's profile forbids, leaves its controls out, as the SQL studio's Query and Plan do while
+       RunSql is off. The service refuses regardless, and the option that turns the capability on is on Cluster settings. *@
 }
 else if (CurrentMatches.Count > 0)
 {

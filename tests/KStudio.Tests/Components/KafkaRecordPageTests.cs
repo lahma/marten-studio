@@ -138,9 +138,9 @@ public class KafkaRecordPageTests
 
         IRenderedComponent<KafkaRecordPage> page = await OpenAsync(rig, "topic=orders&partition=0&offset=1");
 
-        page.WaitForAssertion(() => page.Markup.Should().Contain("KafkaStudioOptions.Capabilities.SearchRecords"));
+        page.WaitForAssertion(() => page.Markup.Should().Contain("not available here").And.NotContain("KafkaStudioOptions"));
         rig.BrokerCalls.Should().Be(callsBefore);
-        page.Markup.Should().Contain("open a record is not enabled");
+        page.Markup.Should().Contain("Opening a record is not available here.");
     }
 
     [Fact]

@@ -17838,3 +17838,31 @@ dialog.ms-modal::backdrop {
 .ms-k-same-servers {
     overflow-wrap: anywhere;
 }
+
+/* ===== KS-PUI: the topic filter fits a 390 px window (#77), and the lines of #74-#76 ===== */
+/* The home's wide filter (18rem) is wider than the fieldset it sits in on a phone; inside the topic box it takes the room there is. */
+.ms-k-topics-header .ms-k-filter {
+    flex: 1 1 10rem;
+    min-width: 0;
+    max-width: 100%;
+}
+
+.ms-k-topics-header .ms-k-topic-count {
+    flex: 1 1 12rem;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.ms-k-capabilities td:last-child {
+    overflow-wrap: anywhere;
+}
+
+.ms-k-not-found {
+    margin: var(--ms-space-sm) 0;
+    padding-left: var(--ms-space-lg);
+    overflow-wrap: anywhere;
+}
+
+.ms-k-continued-showing {
+    overflow-wrap: anywhere;
+}

@@ -174,7 +174,7 @@ public class KafkaCorrelationServiceTests
         rig.Studio.Options.Capabilities.SearchRecords = false;
         KafkaRelatedStartResult refused = await related.StartAsync(planned, confirmed: true, Ct);
 
-        refused.Should().BeOfType<KafkaRelatedStartResult.Refused>().Which.Text.Should().Contain("KafkaStudioOptions.Capabilities.SearchRecords");
+        refused.Should().BeOfType<KafkaRelatedStartResult.Refused>().Which.Text.Should().Be("Searching records is not available here.");
         rig.Ring.Should().Contain(static x => !x.Succeeded && x.Capability == "SearchRecords" && x.Action == "SearchRecords");
         rig.Logs.Entries.Should().Contain(static x => x.EventId.Id == 9602);
     }

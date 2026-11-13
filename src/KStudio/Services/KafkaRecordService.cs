@@ -81,7 +81,7 @@ internal sealed class KafkaRecordService(
         catch (KafkaCapabilityDeniedException denial)
         {
             actionLog.RecordCapabilityDenied(cluster, topics, denial, Action, target);
-            return new KafkaRecordPageResult.CapabilityOff(denial.Message);
+            return new KafkaRecordPageResult.CapabilityOff(denial.VisitorText);
         }
 
         if (!KafkaTopicName.TryCreate(topic, out KafkaTopicName name) || partition < 0 || offset < 0)

@@ -78,7 +78,7 @@ public class KafkaTailServiceTests
 
         KafkaTailPlanResult plan = await tail.PlanAsync(rig.TailInput(["orders"]), null, Ct);
 
-        plan.Should().BeOfType<KafkaTailPlanResult.Refused>().Which.Text.Should().Contain("KafkaStudioOptions.Capabilities.LiveTail");
+        plan.Should().BeOfType<KafkaTailPlanResult.Refused>().Which.Text.Should().Be("Live tail is not available here.");
         rig.BrokerCalls.Should().Be(callsBefore, "a refused tail reads nothing");
         rig.Ring.Should().ContainSingle(static x => !x.Succeeded && x.Action == "LiveTail" && x.Capability == "LiveTail");
         rig.Logs.Entries.Should().ContainSingle(static x => x.EventId.Id == 9602);
@@ -88,7 +88,7 @@ public class KafkaTailServiceTests
 
         KafkaTailPlanResult withoutSearch = await tail.PlanAsync(rig.TailInput(["orders"]), null, Ct);
 
-        withoutSearch.Should().BeOfType<KafkaTailPlanResult.Refused>().Which.Text.Should().Contain("KafkaStudioOptions.Capabilities.SearchRecords", "a prerequisite is named before the capability");
+        withoutSearch.Should().BeOfType<KafkaTailPlanResult.Refused>().Which.Text.Should().Be("Searching records is not available here.", "a prerequisite is named before the capability");
     }
 
     [Fact]
@@ -160,7 +160,7 @@ public class KafkaTailServiceTests
 
         KafkaTailPlanResult plan = await rig.Tail().PlanAsync(rig.TailInput(["orders"], "value ~ 'v1'"), null, Ct);
 
-        plan.Should().BeOfType<KafkaTailPlanResult.Refused>().Which.Text.Should().Contain("KafkaStudioOptions.Capabilities.ReadPayloads");
+        plan.Should().BeOfType<KafkaTailPlanResult.Refused>().Which.Text.Should().Be("Reading values is not available here.");
         rig.Ring.Should().ContainSingle(static x => !x.Succeeded);
     }
 
@@ -255,7 +255,7 @@ public class KafkaTailServiceTests
         string all = string.Join('\n', rig.Ring.Select(static x => string.Join('|', x.Target, x.Message, x.Action)))
             + string.Join('\n', rig.Logs.Entries.Select(static x => x.Message));
         all.Should().NotContain(Sentinel);
-        rig.Logs.Entries.Single(static x => x.EventId.Id == 9609).Message.Should().Contain("a predicate that did not parse");
+        rig.Logs.Entries.Single(static x => x.EventId.Id == 9609).Message.Should().Contain("a predicate that did not parse").And.Contain("did not run: position 1, redacted field operator.");
     }
 
     [Fact]
@@ -275,7 +275,7 @@ public class KafkaTailServiceTests
         rig.Studio.Options.Capabilities.LiveTail = false;
         KafkaTailPlanResult refused = await tail.PlanAsync(session.Input with { ResumeFrom = session.Cursor }, session, Ct);
 
-        refused.Should().BeOfType<KafkaTailPlanResult.Refused>().Which.Text.Should().Contain("KafkaStudioOptions.Capabilities.LiveTail");
+        refused.Should().BeOfType<KafkaTailPlanResult.Refused>().Which.Text.Should().Be("Live tail is not available here.");
         session.RefusedResumes.Should().Be(1);
         rig.Logs.Entries.Should().ContainSingle(static x => x.EventId.Id == 9602);
 

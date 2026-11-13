@@ -31,7 +31,7 @@
 
     @if (!Capabilities.IsEnabled(KafkaCapability.SearchRecords))
     {
-        <KafkaCapabilityDisabled Capability="@nameof(KafkaStudioCapabilities.SearchRecords)" Action="open a record" />
+        <KafkaCapabilityDisabled Capability="@nameof(KafkaStudioCapabilities.SearchRecords)" Action="Opening a record" />
     }
     else if (!valid)
     {

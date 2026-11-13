@@ -71,7 +71,7 @@ public class KafkaSearchPagePayloadTests
         IRenderedComponent<KafkaSearchPage> without = await OpenAsync(off, "orders");
 
         withValues.Find("details.ms-k-syntax").TextContent.Should().Contain("$.customer.id = 'customer-042'").And.Contain("$.total >= 100");
-        without.Find("details.ms-k-syntax").TextContent.Should().Contain("value and $.json.paths need KafkaStudioOptions.Capabilities.ReadPayloads.").And.NotContain("$.total >= 100");
+        without.Find("details.ms-k-syntax").TextContent.Should().Contain("value and $.json.paths are not available here.").And.NotContain("$.total >= 100");
     }
 
     [Fact]
@@ -100,7 +100,7 @@ public class KafkaSearchPagePayloadTests
 
         await SearchForAsync(page, "$.status = 'shipped'");
 
-        page.WaitForAssertion(() => page.Find(".ms-k-note-warning").TextContent.Should().Contain("KafkaStudioOptions.Capabilities.ReadPayloads"));
+        page.WaitForAssertion(() => page.Find(".ms-k-note-warning").TextContent.Should().Contain("Reading values is not available here.").And.NotContain("KafkaStudioOptions"));
         page.FindAll("table.ms-k-matches").Should().BeEmpty();
     }
 

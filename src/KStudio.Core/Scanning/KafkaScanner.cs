@@ -454,7 +454,7 @@ internal sealed partial class KafkaScanner(
         return string.Join("; ", topics.GroupBy(x => formatted[x.Value], StringComparer.Ordinal).Select(g => string.Join(", ", g.Select(static x => x.Value)) + ": " + g.Key));
     }
 
-    private static PredicateError OnTopic(string topic, PredicateError error) => error with { Message = "On " + topic + ": " + error.Message };
+    private static PredicateError OnTopic(string topic, PredicateError error) => error with { Message = "on " + topic + ": " + error.Message };
 
     /// <summary>
     /// Asks the verifier about every topic that has a key clause to explain: a topic that declared a partitioner, or one whose search fixes

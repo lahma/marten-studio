@@ -110,6 +110,28 @@ public class ShellModuleComponentTests
     }
 
     [Fact]
+    public async Task Live_tail_is_on_the_rail_only_while_it_and_Search_are_effectively_on()
+    {
+        using KafkaStudioHarness off = new();
+        using KafkaStudioHarness searchOnly = new(static o => o.Capabilities.SearchRecords = true);
+        using KafkaStudioHarness on = new(static o => o.Capabilities = KafkaStudioCapabilities.All());
+        using KafkaStudioHarness readOnly = new(static o => o.Capabilities = KafkaStudioCapabilities.All());
+        readOnly.Context.Options.ReadOnly = true;
+        await off.Context.ReadyAsync();
+        await searchOnly.Context.ReadyAsync();
+        await on.Context.ReadyAsync();
+        await readOnly.Context.ReadyAsync();
+
+        static string[] Links(KafkaStudioHarness harness) =>
+            [.. harness.Context.Render<NavMenu>().FindAll(".ms-nav-link-text").Select(static x => x.TextContent.Trim())];
+
+        Links(off).Should().NotContain("Live tail");
+        Links(searchOnly).Should().Contain("Search").And.NotContain("Live tail", "a capability that is off leaves its entry out (#74)");
+        Links(on).Should().Contain("Live tail");
+        Links(readOnly).Should().NotContain("Live tail");
+    }
+
+    [Fact]
     public async Task A_kafka_link_carries_no_host_scope_and_a_host_link_still_does()
     {
         using KafkaStudioHarness harness = new();
@@ -328,7 +350,7 @@ public class ShellModuleComponentTests
     // ---- the disabled-capability notice
 
     [Fact]
-    public async Task The_disabled_notice_names_the_option_or_the_hosts_ReadOnly()
+    public async Task The_disabled_notice_is_one_neutral_sentence_whatever_turned_the_capability_off()
     {
         using KafkaStudioHarness harness = new();
         await harness.Context.ReadyAsync();
@@ -336,13 +358,13 @@ public class ShellModuleComponentTests
         IRenderedComponent<KafkaCapabilityDisabled> off = harness.Context.Render<KafkaCapabilityDisabled>(
             p => p.Add(x => x.Capability, nameof(KafkaStudioCapabilities.SearchRecords)).Add(x => x.Action, "Searching records"));
 
-        off.Markup.Should().Contain("Searching records is not enabled.").And.Contain("KafkaStudioOptions.Capabilities.SearchRecords");
+        off.Markup.Should().Contain("Searching records is not available here.").And.NotContain("KafkaStudioOptions");
 
         harness.Context.Options.ReadOnly = true;
         IRenderedComponent<KafkaCapabilityDisabled> readOnly = harness.Context.Render<KafkaCapabilityDisabled>(
             p => p.Add(x => x.Capability, nameof(KafkaStudioCapabilities.SearchRecords)));
 
-        readOnly.Markup.Should().Contain("PostgresStudioOptions.ReadOnly");
+        readOnly.Markup.Should().Contain("is not available here.").And.NotContain("ReadOnly").And.NotContain("PostgresStudioOptions");
     }
 
     // ---- every page ends with the trademark line

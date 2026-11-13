@@ -93,7 +93,7 @@ internal sealed class KafkaReadGrants(KafkaCapabilityGuard capabilities, KafkaAu
             }
             catch (KafkaCapabilityDeniedException denial)
             {
-                return new KafkaGrantDecision(KafkaReadGrant.Envelope, denial.Message, denial, new HashSet<string>(StringComparer.Ordinal), CapabilityOff: true);
+                return new KafkaGrantDecision(KafkaReadGrant.Envelope, denial.VisitorText, denial, new HashSet<string>(StringComparer.Ordinal), CapabilityOff: true);
             }
         }
 

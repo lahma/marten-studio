@@ -370,22 +370,22 @@ public class PredicateEvaluationTests
     [Fact]
     public void Number_bool_and_null_literals_are_refused_on_text_fields_with_a_hint_to_quote()
     {
-        Compile("key = 5").Errors.Single().Message.Should().Be("Put the value at position 7 in quotes: key compares as text.");
-        Compile("header.a in ('x', 3)").Errors.Single().Message.Should().Be("Put the value at position 19 in quotes: header.a compares as text.");
-        Compile("ce.type = true").Errors.Single().Message.Should().Be("Put the value at position 11 in quotes: ce.type compares as text.");
-        Compile("any = null").Errors.Single().Message.Should().Be("Put the value at position 7 in quotes: any compares as text.");
+        Compile("key = 5").Errors.Single().Message.Should().Be("put this value in quotes: key compares as text.");
+        Compile("header.a in ('x', 3)").Errors.Single().Message.Should().Be("put this value in quotes: header.a compares as text.");
+        Compile("ce.type = true").Errors.Single().Message.Should().Be("put this value in quotes: ce.type compares as text.");
+        Compile("any = null").Errors.Single().Message.Should().Be("put this value in quotes: any compares as text.");
     }
 
     [Fact]
     public void Ordering_operators_any_is_null_and_prefix_on_a_non_text_format_are_refused_with_their_reasons()
     {
-        Compile("key < 'a'").Errors.Single().Message.Should().Be("'<' cannot be used on key (position 1): numbers compare only JSON paths.");
-        Compile("header.a >= 'a'").Errors.Single().Message.Should().Be("'>=' cannot be used on header.a (position 1): numbers compare only JSON paths.");
-        Compile("any is null").Errors.Single().Message.Should().Be("'is null' cannot be used on any (position 1): is null applies to key, header.<name>, ce.<attribute> and value.");
+        Compile("key < 'a'").Errors.Single().Message.Should().Be("'<' cannot be used on key: numbers compare only JSON paths.");
+        Compile("header.a >= 'a'").Errors.Single().Message.Should().Be("'>=' cannot be used on header.a: numbers compare only JSON paths.");
+        Compile("any is null").Errors.Single().Message.Should().Be("'is null' cannot be used on any: is null applies to key, header.<name>, ce.<attribute> and value.");
         Compile("any is not null").Errors.Single().Message.Should().Contain("'is not null' cannot be used on any");
 
         PredicateError prefix = Compile("key ^= '4'", KafkaKeyFormat.Int64BigEndian).Errors.Single();
-        prefix.Message.Should().Be("'^=' cannot be used on key (position 1): a prefix needs a text key format, and this topic's keys are Int64BigEndian.");
+        prefix.Message.Should().Be("'^=' cannot be used on key: a prefix needs a text key format, and this topic's keys are Int64BigEndian.");
     }
 
     [Fact]
@@ -393,7 +393,7 @@ public class PredicateEvaluationTests
     {
         PredicateError error = Compile("key = 'not-a-number'", KafkaKeyFormat.Int64BigEndian).Errors.Single();
 
-        error.Message.Should().StartWith("The value at position 7 is not a valid Int64BigEndian key: ");
+        error.Message.Should().StartWith("this value is not a valid Int64BigEndian key: ");
         error.Message.Should().NotContain("not-a-number");
 
         Compile("key in ('1', 'oops')", KafkaKeyFormat.Int32BigEndian).Errors.Single().Message.Should().NotContain("oops");
@@ -411,8 +411,8 @@ public class PredicateEvaluationTests
     [Fact]
     public void Value_and_json_path_searches_need_the_payload_grant()
     {
-        Compile("value ~ 'x'").Errors.Single().Message.Should().Be("value reads the record's value, which needs ReadPayloads (KafkaStudioOptions.Capabilities.ReadPayloads).");
-        Compile("$.a.b = 'x'").Errors.Single().Message.Should().Contain("$.a.b reads the record's value, which needs ReadPayloads");
+        Compile("value ~ 'x'").Errors.Single().Message.Should().Be("value reads the record's value, which is not available here.");
+        Compile("$.a.b = 'x'").Errors.Single().Message.Should().Contain("$.a.b reads the record's value, which is not available here");
         Compile("value ~ 'x'", grant: KafkaReadGrant.Envelope | KafkaReadGrant.Payload).Errors.Should().BeEmpty();
         Compile("$.a.b = 'x'", grant: KafkaReadGrant.Envelope | KafkaReadGrant.Payload).Errors.Should().BeEmpty();
         Compile("value is null").Errors.Should().BeEmpty("a tombstone is a fact about the record, not about its content");
@@ -427,7 +427,7 @@ public class PredicateEvaluationTests
             {
                 PredicateError error = Compile($"header.{name} {op}").Errors.Single();
 
-                error.Message.Should().Be($"header.{name} is redacted by the built-in header deny-list (position 1) and cannot be searched.", $"header.{name} {op}");
+                error.Message.Should().Be($"header.{name} is redacted by the built-in header deny-list and cannot be searched.", $"header.{name} {op}");
             }
         }
     }
@@ -450,12 +450,12 @@ public class PredicateEvaluationTests
         rules.Header("x-email").Searchable();
         rules.CloudEvent("subject").Searchable();
 
-        Compile("key = 'a'", rules: rules).Errors.Single().Message.Should().Be("key is redacted by key (position 1) and cannot be searched.");
+        Compile("key = 'a'", rules: rules).Errors.Single().Message.Should().Be("key is redacted by key and cannot be searched.");
         Compile("key in ('a')", rules: rules).Errors.Should().ContainSingle();
 
         Compile("header.x-email = 'a@b.c'", rules: rules).Errors.Should().BeEmpty();
         Compile("header.x-email in ('a@b.c', 'd@e.f')", rules: rules).Errors.Should().BeEmpty();
-        Compile("header.x-email ^= 'a'", rules: rules).Errors.Single().Message.Should().Be("header.x-email is redacted by header x-email (position 1): only = and in can search it.");
+        Compile("header.x-email ^= 'a'", rules: rules).Errors.Single().Message.Should().Be("header.x-email is redacted by header x-email: only = and in can search it.");
         Compile("header.x-email ~ 'a'", rules: rules).Errors.Should().ContainSingle();
         Compile("header.x-email is null", rules: rules).Errors.Should().ContainSingle();
         Compile("ce.subject = 'a'", rules: rules).Errors.Should().BeEmpty();

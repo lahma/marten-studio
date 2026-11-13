@@ -56,6 +56,25 @@ public class KafkaSettingsPageTests
     }
 
     [Fact]
+    public async Task The_capabilities_table_is_the_one_page_that_names_the_option_behind_each_capability()
+    {
+        await using KafkaCatalogRig rig = new(
+            engine: o => o.AddCluster("settings", new ClientConfig { BootstrapServers = "broker-1:9092" }),
+            studio: o => o.Capabilities.SearchRecords = true,
+            cluster: "settings");
+
+        IRenderedComponent<KafkaSettingsPage> page = await OpenAsync(rig);
+
+        page.WaitForAssertion(() => page.FindAll("[aria-label='Capabilities'] tbody tr").Should().HaveCount(4));
+        string[] rows = [.. page.FindAll("[aria-label='Capabilities'] tbody tr").Select(static x => string.Join(" | ", x.QuerySelectorAll("td").Select(static c => c.TextContent.Trim())))];
+        rows.Should().Equal(
+            "SearchRecords | on | KafkaStudioOptions.Capabilities.SearchRecords",
+            "ReadPayloads | off | KafkaStudioOptions.Capabilities.ReadPayloads",
+            "ExportRecords | off | KafkaStudioOptions.Capabilities.ExportRecords",
+            "LiveTail | off | KafkaStudioOptions.Capabilities.LiveTail");
+    }
+
+    [Fact]
     public async Task The_overrides_table_lists_D37()
     {
         await using KafkaCatalogRig rig = Rig(o => o.AddCluster("settings", new ClientConfig { BootstrapServers = "broker-1:9092" }));

@@ -35,8 +35,8 @@ internal sealed class KafkaStudioModule(IOptions<KafkaStudioOptions> options) : 
     /// <summary>
     /// The rail's one section (D-UI decision 6): Topics, Search, Live tail and Cluster settings. Search is drawn only while the capability is effectively on -
     /// read live from the options on every render, and failing closed under the host studio's <c>ReadOnly</c> - so an entry never promises a page that
-    /// would only say it is off. Live tail is drawn whatever the capability (D-M5 decision 3.7): its page says which option turns it on, and why a
-    /// <c>Production</c> cluster has none. The topic overview and the record page have no entry: links reach them.
+    /// would only say it is off. Live tail follows the same rule since 1.3.1 (#74); a page reached by its address says in one neutral sentence that it
+    /// is not available, and Cluster settings names the option that turns it on. The topic overview and the record page have no entry: links reach them.
     /// </summary>
     private static IReadOnlyList<StudioNavSection> Rail(IOptions<KafkaStudioOptions> options) =>
     [
@@ -51,6 +51,7 @@ internal sealed class KafkaStudioModule(IOptions<KafkaStudioOptions> options) : 
                 new StudioNavItem("Live tail", "kafka/tail", "pulse")
                 {
                     Title = "Follow topics as records arrive",
+                    IsShown = settings => !settings.ReadOnly && options.Value.Capabilities.LiveTail && options.Value.Capabilities.SearchRecords,
                 },
                 new StudioNavItem("Cluster settings", "kafka/settings", "cog"),
             ]),
@@ -76,4 +77,7 @@ internal sealed class KafkaStudioModule(IOptions<KafkaStudioOptions> options) : 
 
     /// <inheritdoc />
     public IReadOnlyList<StudioShortcutGroup> Shortcuts { get; } = [];
+
+    /// <inheritdoc />
+    public string AuditEventIds => KafkaStudioText.AuditEventIds;
 }

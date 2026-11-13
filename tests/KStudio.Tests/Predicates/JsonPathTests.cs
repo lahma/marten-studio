@@ -19,7 +19,7 @@ public class JsonPathTests
     {
         JsonPathExpression.TryParse(text, start, out JsonPathExpression? path, out PredicateError? error).Should().BeFalse();
         path.Should().BeNull();
-        return error!.Message;
+        return error!.Shown;
     }
 
     [Theory]
@@ -65,26 +65,26 @@ public class JsonPathTests
     }
 
     [Theory]
-    [InlineData("a.b", "The JSON path 'a.b' at position 1 must start with $.")]
-    [InlineData("", "The JSON path '' at position 1 must start with $.")]
-    [InlineData("$a", "The JSON path '$a' at position 2 must go on with . or [ after $.")]
-    [InlineData("$.", "The JSON path '$.' at position 2 has an empty step: write $.name, $.name[0] or $.name[*].")]
-    [InlineData("$..a", "The JSON path '$..a' at position 2 has an empty step: write $.name, $.name[0] or $.name[*].")]
-    [InlineData("$.a.", "The JSON path '$.a.' at position 4 has an empty step: write $.name, $.name[0] or $.name[*].")]
-    [InlineData("$.a.*", "The JSON path '$.a.*' at position 4 has an empty step: write $.name, $.name[0] or $.name[*].")]
-    [InlineData("$.[0]", "The JSON path '$.[0]' at position 2 has an empty step: write $.name, $.name[0] or $.name[*].")]
-    [InlineData("$.1a", "The JSON path '$.1a' at position 2 has a member the search cannot write: write it in brackets, $['1a'].")]
-    [InlineData("$.a[x]", "The JSON path '$.a[x]' at position 4 has an index that is not a whole number: write [0], [12] or [*].")]
-    [InlineData("$.a[01]", "The JSON path '$.a[01]' at position 4 has an index that is not a whole number: write [0], [12] or [*].")]
-    [InlineData("$.a[-1]", "The JSON path '$.a[-1]' at position 4 has an index that is not a whole number: write [0], [12] or [*].")]
-    [InlineData("$.a[1.5]", "The JSON path '$.a[1.5]' at position 4 has an index that is not a whole number: write [0], [12] or [*].")]
-    [InlineData("$.a[1000000000]", "The JSON path '$.a[1000000000]' at position 4 has an index that is not a whole number: write [0], [12] or [*].")]
-    [InlineData("$.a[]", "The JSON path '$.a[]' at position 4 has an index that is not a whole number: write [0], [12] or [*].")]
-    [InlineData("$.a[0", "The JSON path '$.a[0' at position 4 has a '[' with no matching ']'.")]
-    [InlineData("$.a[", "The JSON path '$.a[' at position 4 has a '[' with no matching ']'.")]
-    [InlineData("$['a'", "The JSON path '$['a'' at position 2 has a '[' with no matching ']'.")]
-    [InlineData("$['a", "The JSON path '$['a' at position 2 has a '[' with no matching ']'.")]
-    [InlineData("$.a]", "The JSON path '$.a]' at position 4 has an empty step: write $.name, $.name[0] or $.name[*].")]
+    [InlineData("a.b", "Position 1: the JSON path 'a.b' must start with $.")]
+    [InlineData("", "Position 1: the JSON path '' must start with $.")]
+    [InlineData("$a", "Position 2: the JSON path '$a' must go on with . or [ after $.")]
+    [InlineData("$.", "Position 2: the JSON path '$.' has an empty step: write $.name, $.name[0] or $.name[*].")]
+    [InlineData("$..a", "Position 2: the JSON path '$..a' has an empty step: write $.name, $.name[0] or $.name[*].")]
+    [InlineData("$.a.", "Position 4: the JSON path '$.a.' has an empty step: write $.name, $.name[0] or $.name[*].")]
+    [InlineData("$.a.*", "Position 4: the JSON path '$.a.*' has an empty step: write $.name, $.name[0] or $.name[*].")]
+    [InlineData("$.[0]", "Position 2: the JSON path '$.[0]' has an empty step: write $.name, $.name[0] or $.name[*].")]
+    [InlineData("$.1a", "Position 2: the JSON path '$.1a' has a member the search cannot write: write it in brackets, $['1a'].")]
+    [InlineData("$.a[x]", "Position 4: the JSON path '$.a[x]' has an index that is not a whole number: write [0], [12] or [*].")]
+    [InlineData("$.a[01]", "Position 4: the JSON path '$.a[01]' has an index that is not a whole number: write [0], [12] or [*].")]
+    [InlineData("$.a[-1]", "Position 4: the JSON path '$.a[-1]' has an index that is not a whole number: write [0], [12] or [*].")]
+    [InlineData("$.a[1.5]", "Position 4: the JSON path '$.a[1.5]' has an index that is not a whole number: write [0], [12] or [*].")]
+    [InlineData("$.a[1000000000]", "Position 4: the JSON path '$.a[1000000000]' has an index that is not a whole number: write [0], [12] or [*].")]
+    [InlineData("$.a[]", "Position 4: the JSON path '$.a[]' has an index that is not a whole number: write [0], [12] or [*].")]
+    [InlineData("$.a[0", "Position 4: the JSON path '$.a[0' has a '[' with no matching ']'.")]
+    [InlineData("$.a[", "Position 4: the JSON path '$.a[' has a '[' with no matching ']'.")]
+    [InlineData("$['a'", "Position 2: the JSON path '$['a'' has a '[' with no matching ']'.")]
+    [InlineData("$['a", "Position 2: the JSON path '$['a' has a '[' with no matching ']'.")]
+    [InlineData("$.a]", "Position 4: the JSON path '$.a]' has an empty step: write $.name, $.name[0] or $.name[*].")]
     public void Every_error_names_its_position_and_says_what_to_write(string text, string message)
     {
         Error(text).Should().Be(message);
@@ -93,7 +93,7 @@ public class JsonPathTests
     [Fact]
     public void Positions_are_counted_in_the_search_text_not_in_the_path()
     {
-        Error("$.a.", start: 20).Should().Be("The JSON path '$.a.' at position 24 has an empty step: write $.name, $.name[0] or $.name[*].");
+        Error("$.a.", start: 20).Should().Be("Position 24: the JSON path '$.a.' has an empty step: write $.name, $.name[0] or $.name[*].");
 
         JsonPathExpression.TryParse("$.a.", 20, out _, out PredicateError? error);
         error!.Start.Should().Be(23, "an error's start is counted from 0");
@@ -102,13 +102,13 @@ public class JsonPathTests
     [Fact]
     public void A_member_over_128_characters_and_a_path_over_32_steps_are_refused()
     {
-        Error("$." + new string('m', 129)).Should().Contain("at position 2 has a member longer than 128 characters.");
+        Error("$." + new string('m', 129)).Should().StartWith("Position 2: the JSON path '$.").And.Contain("has a member longer than 128 characters.");
         Error("$['" + new string('m', 129) + "']").Should().Contain("has a member longer than 128 characters.");
 
         string tooMany = "$" + string.Concat(Enumerable.Repeat(".a", 33));
         string message = Error(tooMany);
 
-        message.Should().Be("The JSON path '" + tooMany[..64] + "' at position 66 has more than 32 steps.");
+        message.Should().Be("Position 66: the JSON path '" + tooMany[..64] + "' has more than 32 steps.");
         message.Length.Should().BeLessThan(130, "the path is shown cut at 64 characters");
     }
 

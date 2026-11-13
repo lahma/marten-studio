@@ -20,7 +20,7 @@ public class PredicateParserTests
         PredicateParseResult result = PredicateParser.Parse(text);
         result.Errors.Should().ContainSingle("'" + text + "' has exactly one error (the parser stops at the first)");
         result.Tree.Should().BeNull();
-        return result.Errors[0].Message;
+        return result.Errors[0].Shown;
     }
 
     [Theory]
@@ -102,29 +102,76 @@ public class PredicateParserTests
     }
 
     [Theory]
-    [InlineData("key =", "Unexpected the end at position 6: expected a value.")]
-    [InlineData("key 'a'", "Unexpected a string at position 5: expected an operator ('=', '^=', '~', '<', '<=', '>', '>=', 'in' or 'is').")]
-    [InlineData("foo = 'a'", "Unknown field 'foo' at position 1. Search fields are key, header.<name>, ce.<attribute>, any, value and $.json.paths.")]
-    [InlineData("key = 'a' and foo = 'b'", "Unknown field 'foo' at position 15. Search fields are key, header.<name>, ce.<attribute>, any, value and $.json.paths.")]
-    [InlineData("ce.Type = 'a'", "Unknown field 'ce.Type' at position 1. Search fields are key, header.<name>, ce.<attribute>, any, value and $.json.paths.")]
-    [InlineData("header = 'a'", "Unknown field 'header' at position 1. Search fields are key, header.<name>, ce.<attribute>, any, value and $.json.paths.")]
-    [InlineData("key = 'abc", "The string starting at position 7 has no closing quote.")]
-    [InlineData("(key = 'a'", "The '(' at position 1 has no matching ')'.")]
-    [InlineData("key = 'a' and", "Unexpected the end at position 14: expected a field (key, header.<name>, ce.<attribute>, any, value or a $.json.path).")]
-    [InlineData("key = 'a' )", "Unexpected ')' at position 11: expected 'and', 'or' or the end.")]
-    [InlineData("key in 'a'", "Unexpected a string at position 8: expected '('.")]
-    [InlineData("key in ('a' 'b')", "Unexpected a string at position 13: expected ',' or ')'.")]
-    [InlineData("key is 'a'", "Unexpected a string at position 8: expected 'null'.")]
-    [InlineData("and key = 'a'", "Unexpected 'and' at position 1: expected a field (key, header.<name>, ce.<attribute>, any, value or a $.json.path).")]
-    [InlineData("key = <redacted>", "The link left out a redacted value at position 7: type it in.")]
-    [InlineData("key in ('a', <redacted>)", "The link left out a redacted value at position 14: type it in.")]
-    [InlineData("key = 'a' & key = 'b'", "Unexpected character at position 11.")]
-    [InlineData("key = 99999999999999999999999999999", "The number at position 7 is out of range.")]
-    [InlineData("header[''] = 'a'", "The header name at position 1 is empty.")]
-    [InlineData("header[a] = 'a'", "Unexpected a name at position 8: expected a string.")]
+    [InlineData("key =", "Position 6: expected a value after '=', found the end.")]
+    [InlineData("key 'a'", "Position 5: expected an operator ('=', '^=', '~', '<', '<=', '>', '>=', 'in' or 'is'), found a string.")]
+    [InlineData("foo = 'a'", "Position 1: unknown field 'foo'. Search fields are key, header.<name>, ce.<attribute>, any, value and $.json.paths.")]
+    [InlineData("key = 'a' and foo = 'b'", "Position 15: unknown field 'foo'. Search fields are key, header.<name>, ce.<attribute>, any, value and $.json.paths.")]
+    [InlineData("ce.Type = 'a'", "Position 1: unknown field 'ce.Type'. Search fields are key, header.<name>, ce.<attribute>, any, value and $.json.paths.")]
+    [InlineData("header = 'a'", "Position 1: unknown field 'header'. Search fields are key, header.<name>, ce.<attribute>, any, value and $.json.paths.")]
+    [InlineData("key = 'abc", "Position 7: this string has no closing quote.")]
+    [InlineData("(key = 'a'", "Position 1: this '(' has no matching ')'.")]
+    [InlineData("key = 'a' and", "Position 14: expected a field (key, header.<name>, ce.<attribute>, any, value or a $.json.path), found the end.")]
+    [InlineData("key = 'a' )", "Position 11: expected 'and', 'or' or the end, found ')'.")]
+    [InlineData("key in 'a'", "Position 8: expected '(', found a string.")]
+    [InlineData("key in ('a' 'b')", "Position 13: expected ',' or ')', found a string.")]
+    [InlineData("key is 'a'", "Position 8: expected 'null', found a string.")]
+    [InlineData("and key = 'a'", "Position 1: expected a field (key, header.<name>, ce.<attribute>, any, value or a $.json.path), found 'and'.")]
+    [InlineData("key = <redacted>", "Position 7: the link left out a redacted value here: type it in.")]
+    [InlineData("key in ('a', <redacted>)", "Position 14: the link left out a redacted value here: type it in.")]
+    [InlineData("key = 'a' & key = 'b'", "Position 11: unexpected character.")]
+    [InlineData("key = 99999999999999999999999999999", "Position 7: this number is out of range.")]
+    [InlineData("header[''] = 'a'", "Position 1: the header name is empty.")]
+    [InlineData("header[a] = 'a'", "Position 8: expected a string, found a name.")]
     public void Every_message_names_its_position_and_says_what_was_expected(string text, string message)
     {
         Error(text).Should().Be(message);
+    }
+
+    [Theory]
+    [InlineData("key == 5 &&", "Position 10: unexpected character.")]
+    [InlineData("value ~", "Position 8: expected a value after '~', found the end.")]
+    [InlineData("foo = 'x'", "Position 1: unknown field 'foo'. Search fields are key, header.<name>, ce.<attribute>, any, value and $.json.paths.")]
+    [InlineData("key ==", "Position 6: expected a value after '=', found '='.")]
+    [InlineData("key in (", "Position 9: expected a value after '(', found the end.")]
+    [InlineData("key in ('a',", "Position 13: expected a value after ',', found the end.")]
+    public void The_four_inputs_of_issue_75_give_one_position_each_in_one_shape(string text, string message)
+    {
+        string shown = Error(text);
+
+        shown.Should().Be(message);
+        shown.Split("osition", StringSplitOptions.None).Should().HaveCount(2, "the position is said once, by the page's prefix");
+    }
+
+    [Fact]
+    public void Every_error_of_every_input_above_has_the_one_shape_and_a_constant_audit_phrase()
+    {
+        string[] texts =
+        [
+            "key =", "key 'a'", "foo = 'a'", "key = 'abc", "(key = 'a'", "key = 'a' and", "key = 'a' )", "key in 'a'", "key is 'a'", "key = <redacted>",
+            "key = 'a' & key = 'b'", "key = 99999999999999999999999999999", "header[''] = 'a'", "header[a] = 'a'", "value ~", "key == 5 &&", "$.a. = 1",
+            "key = '" + new string('a', 1_001) + "'",
+        ];
+
+        foreach (string text in texts)
+        {
+            PredicateError error = PredicateParser.Parse(text).Errors.Should().ContainSingle(text).Which;
+
+            error.Shown.Should().MatchRegex(@"^Position \d+: [a-z]", "'" + text + "' is drawn as 'Position n: message', lower case after the colon");
+            error.Message.Should().NotContainEquivalentOf("position", "'" + text + "'");
+            error.Message.Should().NotMatchRegex("(?i)unexpected the", "'" + text + "' reads as grammar, not as a stack trace");
+            error.AuditPhrase.Should().NotBeNullOrWhiteSpace().And.NotContain("'").And.NotContain("$", "a phrase is a constant: nothing the visitor typed");
+        }
+    }
+
+    [Theory]
+    [InlineData("value ~", "expected a value")]
+    [InlineData("key = 'abc", "unclosed string")]
+    [InlineData("foo = 'a'", "unknown field")]
+    [InlineData("key = 'a' & key = 'b'", "unexpected character")]
+    [InlineData("key 'a'", "unexpected token")]
+    public void The_audit_phrase_is_a_constant_of_the_kind_of_error(string text, string phrase)
+    {
+        PredicateParser.Parse(text).Errors[0].AuditPhrase.Should().Be(phrase);
     }
 
     [Fact]
@@ -161,7 +208,7 @@ public class PredicateParserTests
     {
         string name = new('f', 100);
 
-        Error(name + " = 'a'").Should().Contain($"Unknown field '{new string('f', 64)}' at position 1.").And.NotContain(new string('f', 65));
+        Error(name + " = 'a'").Should().Contain($"Position 1: unknown field '{new string('f', 64)}'.").And.NotContain(new string('f', 65));
     }
 
     [Fact]
@@ -171,7 +218,7 @@ public class PredicateParserTests
         PredicateParser.Parse(ok).IsValid.Should().BeTrue();
 
         string tooLong = "key = 'a'" + new string(' ', 2_000);
-        Error(tooLong).Should().Be("The query is 2,009 characters long; the most is 2,000.");
+        Error(tooLong).Should().Be("Position 1: the search text is 2,009 characters long; the most is 2,000.");
     }
 
     [Fact]
@@ -181,7 +228,7 @@ public class PredicateParserTests
         PredicateParser.Parse(thirtyTwo).IsValid.Should().BeTrue();
 
         string thirtyThree = string.Join(" and ", Enumerable.Range(0, 33).Select(static i => $"key = '{i}'"));
-        Error(thirtyThree).Should().Be("The query has 33 conditions; the most is 32.");
+        Error(thirtyThree).Should().Be("Position 1: the query has 33 conditions; the most is 32.");
     }
 
     [Fact]
@@ -191,7 +238,7 @@ public class PredicateParserTests
         PredicateParser.Parse(hundred).IsValid.Should().BeTrue();
 
         string more = "key in (" + string.Join(", ", Enumerable.Range(0, 101).Select(static i => $"'{i}'")) + ")";
-        Error(more).Should().Be("The list at position 9 has 101 values; the most is 100.");
+        Error(more).Should().Be("Position 9: the list has 101 values; the most is 100.");
     }
 
     [Fact]
@@ -201,7 +248,7 @@ public class PredicateParserTests
         PredicateParser.Parse(sixteen).IsValid.Should().BeTrue();
 
         string seventeen = new string('(', 17) + "key = 'a'" + new string(')', 17);
-        Error(seventeen).Should().Be("The query nests more than 16 levels at position 17.");
+        Error(seventeen).Should().Be("Position 17: the query nests more than 16 levels.");
 
         string nots = string.Concat(Enumerable.Repeat("not ", 17)) + "key = 'a'";
         Error(nots).Should().Contain("nests more than 16 levels");
@@ -212,7 +259,7 @@ public class PredicateParserTests
     {
         PredicateParser.Parse("key = '" + new string('a', 1_000) + "'").IsValid.Should().BeTrue();
 
-        Error("key = '" + new string('a', 1_001) + "'").Should().Be("The value at position 7 is 1,001 characters long; the most is 1,000.");
+        Error("key = '" + new string('a', 1_001) + "'").Should().Be("Position 7: this value is 1,001 characters long; the most is 1,000.");
     }
 
     [Fact]

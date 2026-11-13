@@ -29,7 +29,7 @@ public class RedactedPayloadPredicateTests
     {
         string field = PredicateFormatter.Field(((ClauseNode) PredicateParser.Parse(text).Tree!).Field);
 
-        Refusal(text, SentinelRules()).Should().Be($"{field} is redacted by $.customer.email (position 1): only = and in can search it.");
+        Refusal(text, SentinelRules()).Should().Be($"{field} is redacted by $.customer.email: only = and in can search it.");
     }
 
     [Fact]
@@ -39,7 +39,7 @@ public class RedactedPayloadPredicateTests
 
         foreach (string text in new[] { "$.customer.email = 'x'", "$.customer.email in ('x')", "$.customer.email ~ 'x'" })
         {
-            Refusal(text, rules).Should().Be("$.customer.email is redacted by $.customer.email (position 1) and cannot be searched.");
+            Refusal(text, rules).Should().Be("$.customer.email is redacted by $.customer.email and cannot be searched.");
         }
     }
 
@@ -101,7 +101,7 @@ public class RedactedPayloadPredicateTests
             r.JsonPath("$.a.b");
         });
 
-        Refusal("$.a.b = 'x'", rules).Should().Be("$.a.b is redacted by $.a.b (position 1) and cannot be searched.");
+        Refusal("$.a.b = 'x'", rules).Should().Be("$.a.b is redacted by $.a.b and cannot be searched.");
         Compile("$.a.c = 'x'", rules).Errors.Should().BeEmpty();
     }
 

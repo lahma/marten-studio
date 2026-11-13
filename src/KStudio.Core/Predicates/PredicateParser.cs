@@ -43,7 +43,7 @@ internal static class PredicateParser
 
         if (text.Length > MaxTextLength)
         {
-            return Failure(0, text.Length, string.Create(CultureInfo.InvariantCulture, $"The query is {text.Length:N0} characters long; the most is 2,000."));
+            return Failure(0, text.Length, PredicateErrorKind.TextTooLong, string.Create(CultureInfo.InvariantCulture, $"the search text is {text.Length:N0} characters long; the most is 2,000."));
         }
 
         try
@@ -57,8 +57,8 @@ internal static class PredicateParser
         }
     }
 
-    private static PredicateParseResult Failure(int start, int length, string message) =>
-        new(null, [new PredicateError(start, length, message)]);
+    private static PredicateParseResult Failure(int start, int length, PredicateErrorKind kind, string message) =>
+        new(null, [new PredicateError(start, length, message, kind)]);
 
     private enum TokenKind
     {
@@ -107,7 +107,7 @@ internal static class PredicateParser
         public PredicateError Error { get; } = error;
     }
 
-    private static ParseFailure Fail(int start, int length, string message) => new(new PredicateError(start, length, message));
+    private static ParseFailure Fail(int start, int length, PredicateErrorKind kind, string message) => new(new PredicateError(start, length, message, kind));
 
     private static class Lexer
     {
@@ -207,7 +207,7 @@ internal static class PredicateParser
                     continue;
                 }
 
-                throw Fail(i, 1, string.Create(CultureInfo.InvariantCulture, $"Unexpected character at position {i + 1}."));
+                throw Fail(i, 1, PredicateErrorKind.UnexpectedCharacter, "unexpected character.");
             }
 
             tokens.Add(new Token(TokenKind.End, string.Empty, text.Length, 0));
@@ -224,7 +224,7 @@ internal static class PredicateParser
             {
                 if (i >= text.Length)
                 {
-                    throw Fail(start, text.Length - start, string.Create(CultureInfo.InvariantCulture, $"The string starting at position {start + 1} has no closing quote."));
+                    throw Fail(start, text.Length - start, PredicateErrorKind.UnclosedString, "this string has no closing quote.");
                 }
 
                 char c = text[i];
@@ -248,7 +248,7 @@ internal static class PredicateParser
 
             if (value.Length > MaxLiteralLength)
             {
-                throw Fail(start, i - start, string.Create(CultureInfo.InvariantCulture, $"The value at position {start + 1} is {value.Length:N0} characters long; the most is 1,000."));
+                throw Fail(start, i - start, PredicateErrorKind.ValueTooLong, string.Create(CultureInfo.InvariantCulture, $"this value is {value.Length:N0} characters long; the most is 1,000."));
             }
 
             return new Token(TokenKind.String, string.Empty, start, i - start, value.ToString());
@@ -393,17 +393,19 @@ internal static class PredicateParser
 
             if (clauses > MaxClauses)
             {
-                throw Fail(0, tokens[^1].Start, string.Create(CultureInfo.InvariantCulture, $"The query has {clauses} conditions; the most is 32."));
+                throw Fail(0, tokens[^1].Start, PredicateErrorKind.TooManyConditions, string.Create(CultureInfo.InvariantCulture, $"the query has {clauses} conditions; the most is 32."));
             }
 
             return new PredicateParseResult(tree, []);
         }
 
-        private ParseFailure Unexpected(string expected) =>
+        // One shape (#75): "expected {expected}, found {token}." The page puts "Position {n}: " in front, so the position is said once.
+        private ParseFailure Unexpected(string expected, string? after = null) =>
             Fail(
                 Current.Start,
                 Math.Max(1, Current.Length),
-                string.Create(CultureInfo.InvariantCulture, $"Unexpected {Current.Describe()} at position {Current.Start + 1}: expected {expected}."));
+                expected.StartsWith("a value", StringComparison.Ordinal) ? PredicateErrorKind.Expected : PredicateErrorKind.UnexpectedToken,
+                string.Create(CultureInfo.InvariantCulture, $"expected {expected}{(after is null ? string.Empty : " after " + after)}, found {Current.Describe()}."));
 
         private PredicateNode ParseOr()
         {
@@ -478,7 +480,7 @@ internal static class PredicateParser
 
                 if (Current.Kind != TokenKind.RightParen)
                 {
-                    throw Fail(open.Start, 1, string.Create(CultureInfo.InvariantCulture, $"The '(' at position {open.Start + 1} has no matching ')'."));
+                    throw Fail(open.Start, 1, PredicateErrorKind.UnclosedParenthesis, "this '(' has no matching ')'.");
                 }
 
                 position++;
@@ -495,7 +497,7 @@ internal static class PredicateParser
 
             if (depth > MaxNesting)
             {
-                throw Fail(at.Start, Math.Max(1, at.Length), string.Create(CultureInfo.InvariantCulture, $"The query nests more than 16 levels at position {at.Start + 1}."));
+                throw Fail(at.Start, Math.Max(1, at.Length), PredicateErrorKind.NestedTooDeep, "the query nests more than 16 levels.");
             }
         }
 
@@ -508,7 +510,7 @@ internal static class PredicateParser
             if (next.Kind == TokenKind.Operator)
             {
                 position++;
-                LiteralNode literal = ParseLiteral();
+                LiteralNode literal = ParseLiteral("'" + next.Text + "'");
                 PredicateOperator op = next.Text switch
                 {
                     "=" => PredicateOperator.Equals,
@@ -533,12 +535,12 @@ internal static class PredicateParser
                 }
 
                 position++;
-                List<LiteralNode> literals = [ParseLiteral()];
+                List<LiteralNode> literals = [ParseLiteral("'('")];
 
                 while (Current.Kind == TokenKind.Comma)
                 {
                     position++;
-                    literals.Add(ParseLiteral());
+                    literals.Add(ParseLiteral("','"));
                 }
 
                 if (Current.Kind != TokenKind.RightParen)
@@ -554,7 +556,8 @@ internal static class PredicateParser
                     throw Fail(
                         literals[0].Start,
                         close.Start - literals[0].Start,
-                        string.Create(CultureInfo.InvariantCulture, $"The list at position {literals[0].Start + 1} has {literals.Count} values; the most is 100."));
+                        PredicateErrorKind.TooManyValues,
+                        string.Create(CultureInfo.InvariantCulture, $"the list has {literals.Count} values; the most is 100."));
                 }
 
                 return new ClauseNode(field, PredicateOperator.In, literals, field.Start, close.Start + 1 - field.Start);
@@ -657,7 +660,7 @@ internal static class PredicateParser
 
                 if (name.Length == 0)
                 {
-                    throw Fail(token.Start, close.Start + 1 - token.Start, string.Create(CultureInfo.InvariantCulture, $"The header name at position {token.Start + 1} is empty."));
+                    throw Fail(token.Start, close.Start + 1 - token.Start, PredicateErrorKind.EmptyHeaderName, "the header name is empty.");
                 }
 
                 return new HeaderField(name, token.Start, close.Start + 1 - token.Start);
@@ -679,7 +682,8 @@ internal static class PredicateParser
             throw Fail(
                 token.Start,
                 token.Length,
-                string.Create(CultureInfo.InvariantCulture, $"Unknown field '{shown}' at position {token.Start + 1}. Search fields are key, header.<name>, ce.<attribute>, any, value and $.json.paths."));
+                PredicateErrorKind.UnknownField,
+                string.Create(CultureInfo.InvariantCulture, $"unknown field '{shown}'. Search fields are key, header.<name>, ce.<attribute>, any, value and $.json.paths."));
         }
 
         private static bool IsAttribute(string text)
@@ -700,7 +704,7 @@ internal static class PredicateParser
             return true;
         }
 
-        private LiteralNode ParseLiteral()
+        private LiteralNode ParseLiteral(string after)
         {
             Token token = Current;
 
@@ -715,7 +719,7 @@ internal static class PredicateParser
 
                     if (!decimal.TryParse(token.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out decimal number))
                     {
-                        throw Fail(token.Start, token.Length, string.Create(CultureInfo.InvariantCulture, $"The number at position {token.Start + 1} is out of range."));
+                        throw Fail(token.Start, token.Length, PredicateErrorKind.NumberOutOfRange, "this number is out of range.");
                     }
 
                     return new NumberLiteral(number, token.Start, token.Length);
@@ -724,7 +728,8 @@ internal static class PredicateParser
                     throw Fail(
                         token.Start,
                         token.Length,
-                        string.Create(CultureInfo.InvariantCulture, $"The link left out a redacted value at position {token.Start + 1}: type it in."));
+                        PredicateErrorKind.RedactedValueLeftOut,
+                        "the link left out a redacted value here: type it in.");
 
                 case TokenKind.Word when token.IsWord("null"):
                     position++;
@@ -739,7 +744,7 @@ internal static class PredicateParser
                     return new BoolLiteral(false, token.Start, token.Length);
 
                 default:
-                    throw Unexpected("a value");
+                    throw Unexpected("a value", after);
             }
         }
 

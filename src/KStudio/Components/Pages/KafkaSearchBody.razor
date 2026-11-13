@@ -40,7 +40,7 @@
 
     @if (!Capabilities.IsEnabled(KafkaCapability.SearchRecords))
     {
-        <KafkaCapabilityDisabled Capability="@nameof(KafkaStudioCapabilities.SearchRecords)" Action="search records" />
+        <KafkaCapabilityDisabled Capability="@nameof(KafkaStudioCapabilities.SearchRecords)" Action="Searching records" />
     }
     else if (error is not null)
     {
@@ -67,7 +67,7 @@
                 <legend>Topics</legend>
                 <div class="ms-k-topics-header">
                     <KafkaFilterBox Placeholder="Filter topics" Value="@topicFilter" OnFilterChanged="OnTopicFilterAsync" />
-                    <span class="ms-muted ms-k-topic-count" aria-live="polite">@selected.Count of @KafkaStudioText.MaxSearchTopics</span>
+                    <span class="ms-muted ms-k-topic-count" aria-live="polite">@KafkaStudioText.TopicsSelected(selected.Count)</span>
                 </div>
                 @if (VisibleTopics().ToList() is { Count: > 0 } shown)
                 {
@@ -123,7 +123,7 @@
                             Zone
                             <select class="ms-input" @onchange="e => SetZone(e.Value?.ToString())">
                                 <option value="utc" selected="@(zone == ZoneChoice.Utc)">UTC</option>
-                                <option value="preference" selected="@(zone == ZoneChoice.Preference)">@PreferenceZoneId</option>
+                                <option value="preference" selected="@(zone == ZoneChoice.Preference)">@KafkaSearchText.ZoneLabel(PreferenceZone(), DateTimeOffset.UtcNow)</option>
                             </select>
                         </label>
                     </div>
@@ -158,6 +158,7 @@
             <div class="ms-k-predicate-field">
                 <label for="ms-k-predicate">Search for</label>
                 <textarea id="ms-k-predicate"
+                          @ref="predicateBox"
                           class="ms-input ms-k-predicate"
                           spellcheck="false"
                           autocomplete="off"
@@ -175,7 +176,7 @@
                 <ul class="ms-k-predicate-errors" aria-live="polite">
                     @foreach (PredicateError problem in errors)
                     {
-                        <li>Position @(problem.Start + 1): @problem.Message</li>
+                        <li>@problem.Shown</li>
                     }
                 </ul>
                 <pre class="ms-k-predicate-marks" aria-hidden="true">@MarkedText()</pre>
@@ -323,6 +324,7 @@
                 @if (continuedAfter is { } previous)
                 {
                     <p class="ms-muted">@KafkaStudioText.ContinuedAfter(previous)</p>
+                <p class="ms-muted ms-k-continued-showing">@KafkaStudioText.ContinuedShowing(earlierMatches, result.Matches)</p>
                 }
                 @if (KafkaSearchText.CanContinue(result.StopReason) && !result.Cursor.IsEmpty)
                 {
@@ -575,12 +577,19 @@
     private int hiddenTopics;
     private int pageNumber = 1;
     private long? continuedAfter;
+    private ElementReference predicateBox;
+    private bool predicateFocused;
 
     /// <summary>
     /// The records the search being planned continues after, held until it starts. "Continued after ..." says what a scan did, so it is drawn when the continued scan
     /// starts - not while its confirmation still waits, when the rows on screen are still the previous search's.
     /// </summary>
     private long? pendingContinuation;
+
+    /// <summary>How many matches the runs before this one found, cleared from the page by Continue (#76); 0 for a first run.</summary>
+    private long earlierMatches;
+
+    private long pendingEarlierMatches;
     private KafkaAllowance? allowance;
     private bool includeUncommitted;
     private bool ignoreIndex;
@@ -603,8 +612,6 @@
     private string TopicsHref => KafkaAddress.Href(Settings, KafkaAddress.TopicsRoute, State.ActiveCluster?.Key);
 
     private bool CanSearch => !busy && selected.Count > 0 && windowProblem is null;
-
-    private string PreferenceZoneId => Studio.SelectedTimeZoneId;
 
     protected override async Task OnInitializedAsync()
     {
@@ -635,6 +642,8 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        await FocusPredicateOnceAsync();
+
         // Not keyed on firstRender: a body created before the frame released reads becomes ready after its first render.
         if (disposed || !ready || started)
         {
@@ -643,6 +652,29 @@
 
         started = true;
         await LoadTopicsAsync();
+    }
+
+    /// <summary>
+    /// Puts the focus in the predicate box the first time the form is drawn (#77), so a keyboard visitor does not tab past the whole rail to reach it, and
+    /// never again: later renders, a Continue and a new plan leave the focus where the visitor put it. Losing the interop is not a failure.
+    /// </summary>
+    private async Task FocusPredicateOnceAsync()
+    {
+        if (predicateFocused || disposed || loadingTopics || error is not null || predicateBox.Id is null || !Capabilities.IsEnabled(KafkaCapability.SearchRecords))
+        {
+            return;
+        }
+
+        predicateFocused = true;
+
+        try
+        {
+            await predicateBox.FocusAsync();
+        }
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
+        {
+            // The circuit went away between the render and the call.
+        }
     }
 
     private async Task LoadTopicsAsync()
@@ -1010,7 +1042,8 @@
 
         // The same cluster, topics, window, isolation and predicate as the run on screen; the cursor stays in memory and never enters the address.
         long records = result.Records;
-        await PlanAndStartAsync(shownRun.Input with { ContinueFrom = result.Cursor }, records);
+        long earlier = earlierMatches + result.Matches;
+        await PlanAndStartAsync(shownRun.Input with { ContinueFrom = result.Cursor }, records, earlier);
     }
 
     private async Task SearchAllPartitionsAsync()
@@ -1035,7 +1068,7 @@
         await PlanAndStartAsync(shownRun.Input with { ContinueFrom = null, IgnoreIndex = true });
     }
 
-    private async Task PlanAndStartAsync(KafkaSearchInput input, long? continuing = null)
+    private async Task PlanAndStartAsync(KafkaSearchInput input, long? continuing = null, long continuingMatches = 0)
     {
         planning = true;
         refusal = null;
@@ -1055,6 +1088,7 @@
             planned = ((KafkaSearchPlanResult.Planned) plan).Value;
             errors = planned.Plan.Errors;
             pendingContinuation = continuing;
+            pendingEarlierMatches = continuingMatches;
 
             if (!planned.Plan.IsValid)
             {
@@ -1108,6 +1142,7 @@
     {
         confirmOpen = false;
         pendingContinuation = null;
+        pendingEarlierMatches = 0;
 
         try
         {
@@ -1153,7 +1188,9 @@
             result = null;
             progress = null;
             continuedAfter = pendingContinuation;
+            earlierMatches = pendingContinuation is null ? 0 : pendingEarlierMatches;
             pendingContinuation = null;
+            pendingEarlierMatches = 0;
             pageNumber = 1;
             await InvokeAsync(StateHasChanged);
 

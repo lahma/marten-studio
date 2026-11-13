@@ -109,7 +109,7 @@ public class PerTopicScanTests
             Request(Envelope, (redacting, "header.correlation-id = 'c-1'", Envelope), (plain, "header.correlation-id = 'c-1'", Envelope)));
 
         plan.IsValid.Should().BeFalse();
-        plan.Errors.Should().ContainSingle().Which.Message.Should().StartWith($"On {redacting}: ").And.NotContain("c-1");
+        plan.Errors.Should().ContainSingle().Which.Message.Should().StartWith($"on {redacting}: ").And.NotContain("c-1");
         plan.Topics.Keys.Should().Equal(plain);
     }
 
@@ -124,7 +124,7 @@ public class PerTopicScanTests
 
         plan.IsValid.Should().BeFalse();
         plan.Errors.Should().NotBeEmpty();
-        plan.Errors.Should().OnlyContain(x => x.Message.StartsWith($"On {b}: ", StringComparison.Ordinal));
+        plan.Errors.Should().OnlyContain(x => x.Message.StartsWith($"on {b}: ", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -161,7 +161,7 @@ public class PerTopicScanTests
         KafkaScanPlan plan = await fixture.PlanAsync(Request(Payload, (envelope, "$.a = 1", Envelope), (payload, "$.a = 1", Payload)));
 
         plan.IsValid.Should().BeFalse();
-        plan.Errors.Should().ContainSingle().Which.Message.Should().StartWith($"On {envelope}: ").And.Contain("ReadPayloads");
+        plan.Errors.Should().ContainSingle().Which.Message.Should().StartWith($"on {envelope}: ").And.Contain("not available here");
     }
 
     [Fact]
