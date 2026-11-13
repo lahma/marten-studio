@@ -16,9 +16,10 @@ KStudio.Wolverine are at 1.3.1-preview.1.
   committed offset on a topic is named on one muted line instead of a row with no lag (#73).
 - KStudio: a page leaves out the controls of a capability that is off or that the cluster's profile forbids (Export
   and the Live tail topic link; the Live tail rail entry only while the capability is off), and a page reached by its
-  address says in one sentence that the feature is not available here. No page's own text names an option or a builder method except Cluster settings, which lists each
-  capability with the option that turns it on and says how a profile and consumer groups are declared (the header's
-  capabilities list and the audit entries on Activity still name the options) (#74).
+  address says in one sentence that the feature is not available here. No page's own text names an option or a
+  builder method except Cluster settings, which lists each capability with the option that turns it on and says how a
+  profile and consumer groups are declared (the header's capabilities list and the audit entries on Activity still
+  name the options) (#74).
 - KStudio: every search-text error is drawn as "Position n: message" with the position said once. A search or tail
   that did not parse is recorded (event 9601, and 9609 for a tail) with the first error's position and a constant
   phrase, never what was typed, without "see above" or a doubled full stop (#75).
