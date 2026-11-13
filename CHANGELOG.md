@@ -29,6 +29,8 @@ KStudio.Wolverine are at 1.3.1-preview.1.
   The Activity footer names KStudio's events beside the studio's. A time zone reads as "Europe/Helsinki (UTC+02:00)",
   also when a typed local time does not exist, and never as a Windows id. The topic count says "selected", the topic
   filter fits a 390 px window, and the search page focuses its predicate box (#77).
+- PostgreSQL 19 is tested on its second release candidate (`postgres:19rc2-alpine`) instead of the first. The matrix
+  moves to the released image after its general availability (planned 2026-11-19).
 
 # 1.3.0
 

@@ -124,7 +124,7 @@ public sealed class PostgresVersionMatrix : IAsyncLifetime
         new(16, "postgres:16.15-alpine"),
         new(17, "postgres:17.11-alpine"),
         new(18, "postgres:18.6-alpine"),
-        new(19, "postgres:19rc1-alpine"),
+        new(19, "postgres:19rc2-alpine"),
     ];
 
     /// <summary>The supported majors, 15 to 19 - every leg that is not a preview - for a theory.</summary>

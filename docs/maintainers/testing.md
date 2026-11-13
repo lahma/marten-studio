@@ -89,7 +89,7 @@ graph:
    release whose defaults the studio quotes; an image that cannot be pulled skips the class locally, naming the
    `docker pull` command, and fails on CI (D19's rule). `PostgresVersionMatrix`
    (`tests/PostgresStudio.Integration.Tests/Versions/`, an assembly fixture) starts one never-reused server per major on
-   first use, `postgres:15.19-alpine` to `18.6-alpine` and `19rc1-alpine` (19 is a supported leg that fails a run; `MatrixVersion`
+   first use, `postgres:15.19-alpine` to `18.6-alpine` and `19rc2-alpine` (19 is a supported leg that fails a run; `MatrixVersion`
    says outright whether a leg is a `Preview`, one that reports and never fails - none is today - and a later patch swaps
    19's tag for its GA image; 14 left the matrix in 1.1, its code paths untested), with
    `pg_stat_statements` and B0's `app`/`probe`/`stats`/`mon` roles; `VersionMatrixLiveTests` runs the shared studio's
