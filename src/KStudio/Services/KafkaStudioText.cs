@@ -66,7 +66,8 @@ internal static class KafkaStudioText
         "No consumer groups are declared for this cluster.";
 
     /// <summary>The Settings page's line on how consumer groups are declared (the only page that names a builder method).</summary>
-    public const string ConsumerGroupsHint = "Consumer groups are declared with KafkaClusterBuilder.ConsumerGroup(\"…\") in AddCluster; a topic's page shows their lag.";
+    public const string ConsumerGroupsHint =
+        "Consumer groups are declared for this cluster with KafkaClusterBuilder.ConsumerGroup(\"…\"), in AddCluster or in the cluster callback of UseWolverineKafka; a topic's page shows their lag.";
 
     /// <summary>The cluster selector's option text: the label, and - where another cluster the visitor may see has the same bootstrap servers - which (#72).</summary>
     /// <param name="label">The cluster's label.</param>
@@ -74,7 +75,7 @@ internal static class KafkaStudioText
     public static string ClusterOptionText(string label, IReadOnlyList<string> sameServersAs) =>
         sameServersAs.Count == 0 ? label : label + " (same servers as " + string.Join(", ", sameServersAs) + ")";
 
-    /// <summary>The Settings page's line for a cluster that shares its bootstrap servers with others (#72); the servers themselves are in the table below it.</summary>
+    /// <summary>The Settings page's line for a cluster that shares its bootstrap servers with others (#72); the servers themselves are in the Your settings table.</summary>
     /// <param name="sameServersAs">The labels of the other clusters with the same bootstrap servers that the visitor may see.</param>
     /// <param name="canBeLeftOut">Whether one of the clusters is a named Wolverine broker, which <c>ExcludeBroker</c> can leave out; the default transport and a host's own cluster cannot be.</param>
     public static string SameServersLine(IReadOnlyList<string> sameServersAs, bool canBeLeftOut) =>
@@ -255,14 +256,28 @@ internal static class KafkaStudioText
     /// </summary>
     /// <param name="earlier">How many matches the earlier runs of this search found.</param>
     /// <param name="matches">How many matches this run found.</param>
-    public static string ContinuedShowing(long earlier, long matches) =>
-        (matches switch
+    /// <param name="canExport">Whether the page draws the Export menu: only then does it advise exporting. The related records page never does.</param>
+    public static string ContinuedShowing(long earlier, long matches, bool canExport)
+    {
+        string showing = matches switch
         {
             0 => "No new matches in this run",
             1 => $"Showing match {KafkaDisplay.Number(earlier + 1)} of this search",
             _ => $"Showing matches {KafkaDisplay.Number(earlier + 1)}-{KafkaDisplay.Number(earlier + matches)} of this search",
-        })
-        + $"; the earlier {KafkaDisplay.Number(earlier)} were cleared from the page. Export before Continue to keep them.";
+        };
+
+        // Nothing was cleared when the earlier runs found nothing: no clause, and nothing to export.
+        if (earlier <= 0)
+        {
+            return showing + ".";
+        }
+
+        string cleared = earlier == 1
+            ? "; the earlier match was cleared from the page."
+            : $"; the earlier {KafkaDisplay.Number(earlier)} matches were cleared from the page.";
+
+        return showing + cleared + (canExport ? $" Export before Continue to keep {(matches == 1 ? "it" : "them")}." : string.Empty);
+    }
 
     /// <summary>The audit target of a search: <c>orders.v1, payments.v1 · 2026-11-12 10:00Z – 11:00Z</c>.</summary>
     /// <param name="topics">The topics.</param>
@@ -375,7 +390,7 @@ internal static class KafkaStudioText
 
     /// <summary>The Settings page's line on how a profile is set, and what Production does.</summary>
     public const string ProfileHint =
-        "The host sets a cluster's profile with KafkaClusterBuilder.Profile in AddCluster. Production forbids export and live tail on that cluster even when they are granted.";
+        "The host sets a cluster's profile with KafkaClusterBuilder.Profile, in AddCluster or in the cluster callback of UseWolverineKafka. Production forbids export and live tail on that cluster even when they are granted.";
 
     /// <summary>The "predicate" of an export from the record page: it was opened by its place, not found by a search.</summary>
     public const string RecordExportAuditText = "(none: the record page)";
@@ -512,7 +527,10 @@ internal static class KafkaStudioText
 
     /// <summary>The Settings page's warning for a cluster with no profile (M5 decisions, OPEN-1).</summary>
     public const string NoProfileWarning =
-        "This cluster has no profile; its limits are the engine's defaults. Set KafkaClusterBuilder.Profile(...) to cap them.";
+        "This cluster has no profile; its limits are the engine's defaults. Set KafkaClusterBuilder.Profile(...) for this cluster to cap them.";
+
+    /// <summary>The Capabilities table's state for a capability that is on but that the cluster's Production profile forbids.</summary>
+    public const string CapabilityForbiddenByProfile = "forbidden by the profile";
 
     /// <summary>The allowance line of the search form for a cluster whose own allowance is the lower one.</summary>
     /// <param name="left">What the visitor has left.</param>

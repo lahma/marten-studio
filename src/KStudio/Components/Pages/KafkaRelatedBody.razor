@@ -238,7 +238,7 @@
                     @if (continuedAfter is { } previous)
                     {
                         <p class="ms-muted">@KafkaStudioText.ContinuedAfter(previous)</p>
-                    <p class="ms-muted ms-k-continued-showing">@KafkaStudioText.ContinuedShowing(earlierMatches, result.Matches)</p>
+                        <p class="ms-muted ms-k-continued-showing">@KafkaStudioText.ContinuedShowing(earlierMatches, result.Matches, canExport: false)</p>
                     }
                     @if (KafkaSearchText.CanContinue(result.StopReason) && !result.Cursor.IsEmpty)
                     {

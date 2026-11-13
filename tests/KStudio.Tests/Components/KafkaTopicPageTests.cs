@@ -239,6 +239,24 @@ public class KafkaTopicPageTests
     }
 
     [Fact]
+    public async Task The_live_tail_link_is_left_out_under_a_Production_profile_even_with_LiveTail_on()
+    {
+        await using KafkaCatalogRig production = new(
+            studio: o =>
+            {
+                o.Capabilities = KafkaStudioCapabilities.All();
+                o.CapabilityAuthorizationPolicy = "kafka-search";
+            },
+            profile: KafkaProfile.Production);
+        production.Topic("orders", 1, 1);
+
+        IRenderedComponent<KafkaTopicPage> page = await OpenAsync(production, "orders");
+
+        page.WaitForAssertion(() => page.FindAll("a[href*='kafka/search']").Should().HaveCount(1));
+        page.FindAll("a[href*='kafka/tail']").Should().BeEmpty("the profile forbids a tail: the link is left out, not shown with a reason");
+    }
+
+    [Fact]
     public async Task Search_this_topic_is_a_link_or_the_disabled_notice()
     {
         await using KafkaCatalogRig off = new();

@@ -244,7 +244,7 @@ public class KafkaRelatedPageTests
 
         page.WaitForAssertion(() => rig.Ring.Count(static x => x.Action == "SearchRecords").Should().BeGreaterThanOrEqualTo(2));
         page.Markup.Should().Contain("Continued after offsets read by the previous search");
-        page.Find(".ms-k-continued-showing").TextContent.Should().StartWith("Showing match").And.Contain("of this search; the earlier 1 were cleared from the page. Export before Continue to keep them.");
+        page.Find(".ms-k-continued-showing").TextContent.Should().StartWith("Showing match").And.Contain("of this search; the earlier match was cleared from the page.").And.NotContain("Export", "the related records page has no Export menu");
         rig.Ring.Where(static x => x.Action == "SearchRecords").Should().OnlyContain(static x => x.Message!.Contains("orders.in, orders.out: "), "each scan's entry carries the search of every topic, grouped where it is shared");
     }
 

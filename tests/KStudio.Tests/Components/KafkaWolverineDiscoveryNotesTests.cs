@@ -314,7 +314,7 @@ public class KafkaWolverineDiscoveryNotesTests
     }
 
     [Fact]
-    public async Task A_topic_nothing_reads_on_a_cluster_with_groups_says_no_group_reads_it_and_a_cluster_with_none_says_how_to_declare_one()
+    public async Task A_topic_nothing_reads_on_a_cluster_with_groups_says_no_group_reads_it_and_a_cluster_with_none_says_none_are_declared()
     {
         await using KafkaCatalogRig rig = new(
             engine: o => o.ClusterSources.Add(_ => new FakeClusterSource(new KafkaClusterContribution(

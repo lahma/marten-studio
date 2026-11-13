@@ -14,9 +14,9 @@ KStudio.Wolverine are at 1.3.1-preview.1.
 - KStudio: a Wolverine listener's consumer group is shown on the topics it reads and no longer on every topic of the
   cluster. A topic no group of the application reads says so, and a group declared for the whole cluster with no
   committed offset on a topic is named on one muted line instead of a row with no lag (#73).
-- KStudio: a page leaves out the controls of a capability that is off or that the cluster's profile forbids (Export,
-  the Live tail rail entry and topic link), and a page reached by its address says in one sentence that the feature is
-  not available here. No page's own text names an option or a builder method except Cluster settings, which lists each
+- KStudio: a page leaves out the controls of a capability that is off or that the cluster's profile forbids (Export
+  and the Live tail topic link; the Live tail rail entry only while the capability is off), and a page reached by its
+  address says in one sentence that the feature is not available here. No page's own text names an option or a builder method except Cluster settings, which lists each
   capability with the option that turns it on and says how a profile and consumer groups are declared (the header's
   capabilities list and the audit entries on Activity still name the options) (#74).
 - KStudio: every search-text error is drawn as "Position n: message" with the position said once. A search or tail

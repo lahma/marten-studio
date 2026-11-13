@@ -158,9 +158,19 @@ public class KafkaSearchTextTests
     [Fact]
     public void Continued_says_which_matches_the_page_shows_and_that_the_earlier_ones_were_cleared()
     {
-        KafkaStudioText.ContinuedShowing(500, 500).Should().Be("Showing matches 501-1,000 of this search; the earlier 500 were cleared from the page. Export before Continue to keep them.");
-        KafkaStudioText.ContinuedShowing(4, 1).Should().Be("Showing match 5 of this search; the earlier 4 were cleared from the page. Export before Continue to keep them.");
-        KafkaStudioText.ContinuedShowing(500, 0).Should().Be("No new matches in this run; the earlier 500 were cleared from the page. Export before Continue to keep them.");
+        // N earlier matches, with and without an Export menu on the page.
+        KafkaStudioText.ContinuedShowing(500, 500, canExport: true).Should().Be("Showing matches 501-1,000 of this search; the earlier 500 matches were cleared from the page. Export before Continue to keep them.");
+        KafkaStudioText.ContinuedShowing(500, 500, canExport: false).Should().Be("Showing matches 501-1,000 of this search; the earlier 500 matches were cleared from the page.");
+        KafkaStudioText.ContinuedShowing(4, 1, canExport: true).Should().Be("Showing match 5 of this search; the earlier 4 matches were cleared from the page. Export before Continue to keep it.");
+        KafkaStudioText.ContinuedShowing(500, 0, canExport: true).Should().Be("No new matches in this run; the earlier 500 matches were cleared from the page. Export before Continue to keep them.");
+
+        // One earlier match: singular.
+        KafkaStudioText.ContinuedShowing(1, 3, canExport: false).Should().Be("Showing matches 2-4 of this search; the earlier match was cleared from the page.");
+
+        // No earlier match (a budget stop before any match): nothing was cleared, so no clause and no advice.
+        KafkaStudioText.ContinuedShowing(0, 3, canExport: true).Should().Be("Showing matches 1-3 of this search.");
+        KafkaStudioText.ContinuedShowing(0, 1, canExport: true).Should().Be("Showing match 1 of this search.");
+        KafkaStudioText.ContinuedShowing(0, 0, canExport: true).Should().Be("No new matches in this run.");
     }
 
     [Fact]

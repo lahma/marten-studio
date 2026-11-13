@@ -7,6 +7,8 @@
 @inject KafkaState State
 @inject KafkaCatalogService Catalog
 @inject KafkaCapabilityGuard Capabilities
+@inject KafkaExportService ExportService
+@inject KafkaTailService TailService
 @inject IStudioSettings StudioSettings
 @inject IKafkaScanner Scanner
 @inject KafkaRecordIndexResolver RecordIndex
@@ -72,7 +74,7 @@
                     {
                         <tr class="ms-table-row" @key="capability">
                             <td class="ms-table-cell">@capability</td>
-                            <td class="ms-table-cell">@(Capabilities.IsEnabled(capability) ? "on" : "off")</td>
+                            <td class="ms-table-cell">@CapabilityState(capability)</td>
                             <td class="ms-table-cell"><code>@KafkaCapabilityGuard.OptionFor(capability)</code></td>
                         </tr>
                     }
@@ -185,6 +187,25 @@
     /// <summary>Completed by the frame once the cluster policy passed and the circuit is interactive: a body reads nothing before it.</summary>
     [CascadingParameter(Name = KafkaPageFrame.ReadyName)]
     public Task? Ready { get; set; }
+
+    /// <summary>"on", "off", or - for export and live tail on a cluster whose Production profile forbids them even when granted - "forbidden by the profile".</summary>
+    private string CapabilityState(KafkaCapability capability)
+    {
+        if (!Capabilities.IsEnabled(capability))
+        {
+            return "off";
+        }
+
+        bool forbidden = State.ActiveCluster is { } active
+            && capability switch
+            {
+                KafkaCapability.ExportRecords => ExportService.ForbiddenByProfile(active),
+                KafkaCapability.LiveTail => TailService.ForbiddenByProfile(active),
+                _ => false,
+            };
+
+        return forbidden ? KafkaStudioText.CapabilityForbiddenByProfile : "on";
+    }
 
     private bool ShowRole => view?.Host.Any(static x => x.Role != KafkaSettingRole.Both) == true;
 

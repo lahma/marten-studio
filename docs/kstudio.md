@@ -49,8 +49,8 @@ Reading records does:
 | `ExportRecords` | `false` | Saving the records a search or a live tail holds, or one record or its value from the record page, as JSON Lines, CSV or the value alone, masked as the page shows them. Values only where `ReadPayloads` allows. Needs `SearchRecords`. Never on a `Production` cluster. |
 | `LiveTail` | `false` | Following topics as records arrive, from the end of each partition. Needs `SearchRecords`. Never on a `Production` cluster. |
 
-A page leaves out the controls of a capability that is off, or that the cluster's profile forbids (no Export, no Live tail entry
-or link), and a page reached by its address says in one sentence that the feature is not available here. No page's own text
+A page leaves out the controls of a capability that is off, or that the cluster's profile forbids (no Export, no Live tail topic link
+and, while the capability is off, no Live tail rail entry), and a page reached by its address says in one sentence that the feature is not available here. No page's own text
 names an option or a builder method except **Cluster settings**, which lists each capability with the option that turns it on and
 says how a profile and consumer groups are declared. The header's capabilities list and the audit entries on Activity name the options too: they
 are for the people who run the application.
