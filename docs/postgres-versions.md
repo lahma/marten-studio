@@ -13,7 +13,7 @@ more. The studio reads every server it is pointed at; the floor is what it promi
 | 16 | Supported | 2028-11-09 |
 | 17 | Supported; the default of the live test suite | 2029-11-08 |
 | 18 | Supported | 2030-11-14 |
-| 19 | **Supported, tested on its release candidate** (`19rc1`) until its general availability (planned 2026-11-19), when the matrix moves to the released image | 2031-11-13 (planned) |
+| 19 | **Supported, tested on its release candidate** (`19rc2`) until its general availability (planned 2026-11-19), when the matrix moves to the released image | 2031-11-13 (planned) |
 
 The dates are the community's ([versioning policy](https://www.postgresql.org/support/versioning/), read
 2026-10-26): five years from a major's first release. Health check S01 raises the end of life of the server it is
@@ -23,7 +23,7 @@ says the provider's own schedule may differ ([S01](health/server.md#s01-postgres
 ## How the studio is tested on each version
 
 Every release runs the **version matrix**: one server per major - `postgres:15.19-alpine`, `16.15-alpine`,
-`17.11-alpine`, `18.6-alpine` and `19rc1-alpine`, with `pg_stat_statements` preloaded and `track_io_timing` on - and
+`17.11-alpine`, `18.6-alpine` and `19rc2-alpine`, with `pg_stat_statements` preloaded and `track_io_timing` on - and
 on each one, as the application's own role and as a role with no grant at all:
 
 - a health sweep of the shared studio's checks - the regular ones and the statement checks; it has no deeper ones,
@@ -39,7 +39,7 @@ on each one, as the application's own role and as a role with no grant at all:
   anything;
 - the studio's table of version gates against the server's own catalog.
 
-PostgreSQL 19's release candidate (`postgres:19rc1-alpine`) is a leg like the others: a finding on it fails the run.
+PostgreSQL 19's release candidate (`postgres:19rc2-alpine`) is a leg like the others: a finding on it fails the run.
 (The matrix keeps a *preview* leg for a major whose image is a beta - it reports what it finds and fails nothing - and
 none is in it today.) A later patch swaps the candidate's tag for 19's general-availability image.
 

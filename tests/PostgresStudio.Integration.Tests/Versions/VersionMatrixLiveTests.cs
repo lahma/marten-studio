@@ -246,10 +246,10 @@ public class VersionMatrixLiveTests(PostgresVersionMatrix matrix)
     {
         PostgresVersionMatrix.Versions.Select(static x => x.Major).Should().Equal(15, 16, 17, 18, 19);
         PostgresVersionMatrix.Versions.Should().OnlyContain(static x => !x.Preview, "19's release candidate is a supported leg, not a preview");
-        PostgresVersionMatrix.Versions.Single(static x => x.Major == 19).Tag.Should().Be("19rc1-alpine");
+        PostgresVersionMatrix.Versions.Single(static x => x.Major == 19).Tag.Should().Be("19rc2-alpine");
 
-        new MatrixVersion(19, "postgres:19rc1-alpine").Preview.Should().BeFalse("a release candidate's tag does not make a leg a preview");
-        new MatrixVersion(19, "postgres:19rc1-alpine", Preview: true).Preview.Should().BeTrue("a leg says so itself");
+        new MatrixVersion(19, "postgres:19rc2-alpine").Preview.Should().BeFalse("a release candidate's tag does not make a leg a preview");
+        new MatrixVersion(19, "postgres:19rc2-alpine", Preview: true).Preview.Should().BeTrue("a leg says so itself");
     }
 
     /// <summary>
