@@ -1,7 +1,7 @@
 # Marten Studio
 
 An embeddable Blazor Server admin UI for [MartenDB](https://martendb.io), shipped as an MIT-licensed
-Razor Class Library built on [Postgres Studio](#three-packages). You add `AddMartenStudio()` to your container and
+Razor Class Library built on [Postgres Studio](#six-packages). You add `AddMartenStudio()` to your container and
 `MapMartenStudio()` to your endpoint pipeline, and the studio runs inside your own ASP.NET Core application against *that
 application's own* configured `IDocumentStore` — browsing document collections and their JSON,
 inspecting and steering event streams, projections and the async daemon, running guarded queries and
@@ -40,15 +40,18 @@ byte-for-byte the application it was.
   name or a statement's queryid; one match opens it, several are listed. Each probe is the read its page makes, under the
   same gates; a hidden type never answers.
 
-## Three packages
+## Six packages
 
-The studio is three packages, released together at one version:
+The studio is three packages, released together at one version, with KStudio's three beside them as a preview: six in all.
 
 | Package | For | Register and map | Mounted at |
 |---|---|---|---|
 | `MartenStudio` | an application with a Marten `IDocumentStore` | `AddMartenStudio()`, `MapMartenStudio()` | `/marten` |
 | `PostgresStudio` | any application that registers an `NpgsqlDataSource`, and no Marten | `AddPostgresStudio()`, `MapPostgresStudio()` | `/postgres` |
 | `PostgresStudio.Diagnostics` | the findings in your own code, with no UI and no ASP.NET Core: a worker, a job host, a shared library | `AddPostgresDiagnostics()` | nothing: no pages |
+| `KStudio` (preview) | a Kafka section for either studio, over the application's own Kafka credentials | `AddKafkaStudio()`, beside `AddMartenStudio()` or `AddPostgresStudio()`; no map call | `/kafka`, under the studio's own path |
+| `KStudio.Core` (preview) | the Kafka engine `KStudio` is built on, with no ASP.NET Core; brought by `KStudio` | nothing: take `KStudio` | nothing: no pages |
+| `KStudio.Wolverine` (preview) | listing a Wolverine application's Kafka clusters and topics in `KStudio` | `k.UseWolverineKafka()` | nothing: no pages |
 
 **Which to choose.** If the application uses Marten, take `MartenStudio`: it brings `PostgresStudio` with it, at
 exactly its own version, and shows everything Postgres Studio shows for the store's databases - the database browser,
@@ -66,13 +69,16 @@ the reverse; each `Map*Studio()` names the other call to make. Marten Studio's d
 in the store's own databases - a job store, a legacy schema - but a separate plain database of a Marten application
 is not listed.
 
-**KStudio for Apache Kafka®** (preview, unreleased) adds a Kafka section to Marten Studio or Postgres Studio: the
+**KStudio for Apache Kafka®** (a preview: its API and screens may change in a minor release; its packages are versioned `<version>-preview.1`) adds a Kafka section to Marten Studio or Postgres Studio: the
 clusters, topics, partitions and consumer groups your application's own Kafka credentials can describe, and, behind
 capabilities that are off by default, a search for the records you need. Call `AddKafkaStudio()` beside
 `AddMartenStudio()` or `AddPostgresStudio()`; there is no separate map call, and the Kafka pages are served under the
 studio's own path, at `/kafka`. It never creates a topic, never commits an offset, and asks your own policies about every
 cluster and topic it reads. Apache Kafka is a trademark of the Apache Software Foundation. KStudio is not affiliated with
 or endorsed by the Apache Software Foundation.
+
+Install it with `dotnet add package KStudio --prerelease` (and `dotnet add package KStudio.Wolverine --prerelease` for a
+Wolverine application's clusters and topics); `KStudio.Core`, the engine, comes with it.
 
 #### KStudio in five lines
 

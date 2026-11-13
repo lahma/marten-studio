@@ -65,6 +65,30 @@ public class KStudioWolverineVersionGuardTests
             .And.Contain("upgraded together");
     }
 
+    /// <summary>The adapter and KStudio.Core carry the same preview label (K8), so a correct preview install compares equal as it stands.</summary>
+    [Theory]
+    [InlineData("1.3.0-preview.1", "1.3.0-preview.1")]
+    [InlineData("1.3.0-preview.1+5f1c2a9d", "1.3.0-preview.1+5f1c2a9d")]
+    public void A_correct_preview_install_passes(string adapterVersion, string coreVersion)
+    {
+        AssemblyBuilder adapter = WithVersion(adapterVersion);
+
+        FluentActions.Invoking(() => KStudioWolverineVersionGuard.Ensure(adapter, () => WithVersion(coreVersion))).Should().NotThrow();
+    }
+
+    [Theory]
+    [InlineData("1.3.0")]
+    [InlineData("1.3.0-preview.2")]
+    [InlineData("1.3.1-preview.1")]
+    public void A_KStudio_Core_that_is_not_the_previews_own_build_is_refused(string core)
+    {
+        AssemblyBuilder adapter = WithVersion("1.3.0-preview.1");
+
+        FluentActions.Invoking(() => KStudioWolverineVersionGuard.Ensure(adapter, () => WithVersion(core)))
+            .Should().Throw<InvalidOperationException>()
+            .Which.Message.Should().Contain($"KStudio.Wolverine 1.3.0-preview.1 needs KStudio.Core 1.3.0-preview.1 exactly, and found KStudio.Core {core}.");
+    }
+
     [Fact]
     public void Two_commits_of_one_version_are_named_in_full_between_two_release_builds()
     {

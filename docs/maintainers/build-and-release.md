@@ -135,16 +135,16 @@ host is never raised) and `KStudioConfluentLatest` (2.16.0) are defined there on
 `-p:KStudioConfluentVersion=<resolved>` to Restore, Compile and Test, the floor included, so an environment variable of
 that name cannot change what a run tests. Unlike Npgsql's, the property may go to the whole solution: only the KStudio
 projects reference the package, so MartenStudio and PostgresStudio never read it, and there is no second pass. `Pack`
-refuses anything but the floor (nothing KStudio ships is packed before plan K8, but the guard is there for the first
-package that is). `marten-latest.yml` sets `CONFLUENT_VERSION: latest` beside `MARTEN_VERSION` and `NPGSQL_VERSION`, so
+refuses anything but the floor (K8 packs KStudio, and this is the guard that keeps a latest-leg pack from raising a Wolverine host). `marten-latest.yml` sets `CONFLUENT_VERSION: latest` beside `MARTEN_VERSION` and `NPGSQL_VERSION`, so
 one workflow runs all three latest legs; `build.yml` and `publish.yml` set none of them. Without Fallout: `dotnet test
 tests/KStudio.Tests -p:KStudioConfluentVersion=2.16.0`.
 
-**Three packages, one version.** `Pack` packs `src/PostgresStudio.Diagnostics`, then `src/PostgresStudio`, then
-`src/MartenStudio`, one after the other, all at the CHANGELOG version and all at the floors - it refuses a
-`--marten-version` or `--npgsql-version` that is not the floor, and each csproj refuses a bare `dotnet pack` off its
+**Six packages (K8), three at one version and three as a preview.** `Pack` packs `src/PostgresStudio.Diagnostics`, then
+`src/PostgresStudio`, then `src/MartenStudio`, then `src/KStudio.Core`, then `src/KStudio`, then `src/KStudio.Wolverine`,
+one after the other, all at the CHANGELOG version (the last three with the preview label, below) and all at the floors - it
+refuses a `--marten-version`, `--npgsql-version` or `--confluent-version` that is not the floor, and each csproj refuses a bare `dotnet pack` off its
 floor, by property and by `project.assets.json` (`PostgresStudio.Diagnostics` and `PostgresStudio` for Npgsql, MartenStudio
-for Marten) - and then asserts all three nuspecs, each dependency at exactly the range NuGet wrote. MartenStudio depends on
+for Marten, and `KStudio.Core` for Confluent.Kafka, `KStudioCorePackOnlyAtTheConfluentFloor`) - and then asserts all six nuspecs, each dependency at exactly the range NuGet wrote. MartenStudio depends on
 exactly `PostgresStudio [<version>]`, on `Marten <floor>` and on `Microsoft.AspNetCore.App.Internal.Assets` (written there
 by transitive pinning), and not on the engine, which a host gets through PostgresStudio's pin. PostgresStudio depends on
 exactly `PostgresStudio.Diagnostics [<version>]`, `Npgsql <floor>` (it no longer references Npgsql itself, but it still sets
@@ -163,6 +163,30 @@ first runs `PostgresStudioDiagnosticsVersionGuard`, which does the same for the 
 another commit of the same version: `AddPostgresStudio`'s parameter type derives from an engine type, so a missing or older
 engine fails in the loader when it is first called, with a `FileNotFoundException` that names the engine and the version
 (measured 2026-11-01). `AddPostgresDiagnostics` needs no guard: nothing is below it.
+
+**KStudio's preview label (K8).** KStudio ships as a preview beside the family release, and the version is still one number
+from one file: CHANGELOG.md. The label lives in one place, `Directory.Build.props`' `KStudioPrereleaseLabel`
+(`preview.1`), and only `KStudio.Core`, `KStudio` and `KStudio.Wolverine` read it: each sets `PackageVersion` and
+`InformationalVersion` to `$(Version)-$(KStudioPrereleaseLabel)` while the label is not empty, and leaves them alone when it is
+(`Version` is a global property that `Pack` passes, so the projects read it and never set it; `AssemblyVersion` and
+`FileVersion` stay numeric). At 1.3.0 the six packages are `PostgresStudio.Diagnostics`, `PostgresStudio` and
+`MartenStudio` at `1.3.0`, and `KStudio.Core`, `KStudio` and `KStudio.Wolverine` at `1.3.0-preview.1`.
+`PackReadinessTests` holds that no other project reads the label or sets a `PackageVersion`. The exact pins carry it: `KStudio`
+depends on `PostgresStudio [<version>]` and `KStudio.Core [<version>-<label>]`, and `KStudio.Wolverine` on `KStudio.Core
+[<version>-<label>]`, because `KStudioPinsFamilyExactly` and `KStudioWolverinePinsCoreExactly` take each range from the
+referenced project's `PackageVersion`. The version guards follow: `KStudioWolverineVersionGuard` compares the adapter with
+KStudio.Core as it stands (both carry the label), and `KStudioVersionGuard` compares KStudio.Core with KStudio's own
+informational version and PostgresStudio and PostgresStudio.Diagnostics with the *family version*, KStudio's with the
+`KStudioPrereleaseLabel` assembly metadata (stamped by the three projects) taken off. A different label, or a family assembly
+of another version, is still refused. Package validation runs on the three with no baseline: `PackageValidationBaselineVersion`
+is the family's last release, and these ids have none on nuget.org until the first release. **To graduate** KStudio, empty the
+label in `Directory.Build.props` in the release's pull request: the three then pack at the family version (`PackageVersion` is
+the `Version` `Pack` passes), no `AssemblyMetadata` is stamped, `Pack` names the six files with no label, and the guards compare
+all four assemblies as one version again. `PackReadinessTests` and `KStudioVersionGuardTests` hold both states (the element must
+exist; its value may be empty). The rest of graduation is words, in the same pull request: the "preview" wording in `README.md`
+(the package table and the KStudio paragraph), `src/KStudio/README.md` and the changelog, and the `--prerelease` of the install
+lines. In the release after it, once a KStudio release is on nuget.org, remove the empty `PackageValidationBaselineVersion` element
+from the three projects, so the family's baseline applies (and move `PackReadinessTests`' assertion with it).
 
 `build/_build.csproj` restores with no warnings. Fallout 10.4.0 brought `System.Security.Cryptography.Xml` and `.Pkcs` 10.0.10
 (NU1902/NU1903: GHSA-2fmv-rv2c-59x7, GHSA-846f-f764-76mx, GHSA-7hqp-7c5m-4vq6, GHSA-c399-9853-6jmj, GHSA-r955-8q5j-3h83);
@@ -231,16 +255,17 @@ One job, not several: more jobs would mean more OIDC exchanges racing the one-ke
 the release run.
 
 `Publish` is `.OnlyWhenDynamic(() => ShouldPublish())` and refuses in ordered steps: a non-tag invocation is
-a logged *skip* (there is no preview feed), and once past that gate it asserts, in order, that it is on
+a logged *skip* (there is no feed for untagged builds), and once past that gate it asserts, in order, that it is on
 GitHub Actions, that `NUGET_USER` is set, and that `GITHUB_REF_NAME` matches the changelog version. Only
 then does it mint the key, immediately before pushing — the key lives 15–60 minutes and one OIDC token
 mints exactly one key. Before it mints the key, it asserts that `artifacts/packages` holds exactly
-`PostgresStudio.Diagnostics.<version>.nupkg`, `PostgresStudio.<version>.nupkg` and `MartenStudio.<version>.nupkg`, and it
-pushes them with that one key one at a time, the engine first and MartenStudio last, the first failure ending the run, so a
-push that fails never lets a package that depends on exactly it reach nuget.org. `--skip-duplicate` keeps a re-run after a
+`PostgresStudio.Diagnostics.<version>.nupkg`, `PostgresStudio.<version>.nupkg`, `MartenStudio.<version>.nupkg`,
+`KStudio.Core.<version>-<label>.nupkg`, `KStudio.<version>-<label>.nupkg` and `KStudio.Wolverine.<version>-<label>.nupkg`, and it
+pushes them with that one key one at a time in that order (the engine first, KStudio.Wolverine last), the first failure ending
+the run, so a push that fails never lets a package that depends on exactly it reach nuget.org. `--skip-duplicate` keeps a re-run after a
 partial failure safe. nuget.org still validates and indexes each package on its own, so for a few minutes after a release
-PostgresStudio can be listed while its PostgresStudio.Diagnostics is not yet restorable, and MartenStudio while its
-PostgresStudio is not. `ReleasePushOrderTests` pins the order and the stop.
+PostgresStudio can be listed while its PostgresStudio.Diagnostics is not yet restorable, MartenStudio while its
+PostgresStudio is not, and KStudio while its KStudio.Core is not. `ReleasePushOrderTests` pins the order and the stop.
 
 The whole ladder is exercisable locally, and should be before any tag:
 
@@ -279,8 +304,10 @@ None of these can be done from this repository, and the first tag will fail with
 1. **nuget.org → Trusted Publishing → new policy.** Policy owner `lahma`; Repository Owner `lahma`;
    Repository `marten-studio`; Workflow File `publish.yml` (**filename only** — not `release.yml`, and not
    the `.github/workflows/` path); Environment `nuget`. The policy is not limited to one package id: the key it
-   mints pushes both `MartenStudio` and `PostgresStudio`, including an id that does not exist yet (confirmed by the
-   policy owner, 2026-10-26).
+   mints pushes every id of the repository, including one that does not exist yet (confirmed by the policy owner,
+   2026-10-26); the three KStudio ids (`KStudio.Core`, `KStudio`, `KStudio.Wolverine`) are covered the same way: the three ids
+   are unowned on nuget.org (checked 2026-11-13: no registration for KStudio, KStudio.Core or KStudio.Wolverine), and the trusted
+   publishing policy covers new ids. The user confirms that before the first tag that carries them.
 2. **GitHub → Settings → Environments → `nuget`**, with a deployment branch/tag policy of `v*`. This is the
    second claim the nuget.org policy matches on, and it is what keeps a workflow run from a branch out of
    the publishing path.

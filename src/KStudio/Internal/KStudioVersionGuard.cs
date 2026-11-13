@@ -33,6 +33,13 @@ namespace KStudio.Internal;
 /// Otherwise - a Debug build, where an IDE's incremental build after a commit legitimately leaves the assemblies on different commits - only the
 /// part before the <c>+</c> is compared.
 /// </para>
+/// <para>
+/// <b>The preview label (K8).</b> KStudio, KStudio.Core and KStudio.Wolverine pack at <c>&lt;version&gt;-&lt;label&gt;</c> (<c>1.3.0-preview.1</c>), the
+/// family beside them at <c>&lt;version&gt;</c>. So KStudio.Core is compared with KStudio's own informational version, label and all, and
+/// PostgresStudio and PostgresStudio.Diagnostics with the <em>family version</em>: KStudio's with the label taken off, the label being the
+/// <c>KStudioPrereleaseLabel</c> assembly metadata the three projects stamp. Without that metadata (a build that emptied the label) nothing is
+/// taken off. A different label, or a family assembly of another version, still fails.
+/// </para>
 /// </remarks>
 internal static class KStudioVersionGuard
 {
@@ -44,6 +51,9 @@ internal static class KStudioVersionGuard
 
     /// <summary>KStudio's engine assembly name, checked the same way.</summary>
     internal const string EngineAssemblyName = "KStudio.Core";
+
+    /// <summary>The key of the assembly metadata that names KStudio's preview label (Directory.Build.props' <c>KStudioPrereleaseLabel</c>).</summary>
+    internal const string PrereleaseLabelMetadataKey = "KStudioPrereleaseLabel";
 
     /// <summary>
     /// Throws unless the PostgresStudio, PostgresStudio.Diagnostics and KStudio.Core this process loads are the builds this KStudio was packed
@@ -69,9 +79,9 @@ internal static class KStudioVersionGuard
         Func<Assembly> loadDiagnostics,
         Func<Assembly> loadEngine)
     {
-        EnsureAssembly(PostgresStudioAssemblyName, "KStudio", kStudio, loadPostgresStudio);
-        EnsureAssembly(DiagnosticsAssemblyName, "PostgresStudio", kStudio, loadDiagnostics);
-        EnsureAssembly(EngineAssemblyName, "KStudio", kStudio, loadEngine);
+        EnsureAssembly(PostgresStudioAssemblyName, "KStudio", kStudio, loadPostgresStudio, family: true);
+        EnsureAssembly(DiagnosticsAssemblyName, "PostgresStudio", kStudio, loadDiagnostics, family: true);
+        EnsureAssembly(EngineAssemblyName, "KStudio", kStudio, loadEngine, family: false);
     }
 
     /// <summary>One required assembly: loaded, and the same build as KStudio's own.</summary>
@@ -79,9 +89,11 @@ internal static class KStudioVersionGuard
     /// <param name="bringer">The package whose reference brings it, which a host that removes its pin lets do so.</param>
     /// <param name="kStudio">KStudio's own assembly, whose version is the one required.</param>
     /// <param name="load">Loads the required assembly; may throw <see cref="FileNotFoundException" />.</param>
-    private static void EnsureAssembly(string name, string bringer, Assembly kStudio, Func<Assembly> load)
+    /// <param name="family">Whether the required assembly is the family's, at the version without KStudio's preview label.</param>
+    private static void EnsureAssembly(string name, string bringer, Assembly kStudio, Func<Assembly> load, bool family)
     {
-        string? kStudioVersion = InformationalVersion(kStudio);
+        string? self = InformationalVersion(kStudio);
+        string? kStudioVersion = family ? FamilyVersion(self, PrereleaseLabel(kStudio)) : self;
         string required = ReleaseVersion(kStudioVersion);
         Assembly loaded;
 
@@ -92,7 +104,7 @@ internal static class KStudioVersionGuard
         catch (FileNotFoundException e)
         {
             throw new InvalidOperationException(
-                $"KStudio {required} needs {name} {required} exactly, and this application was deployed " +
+                $"KStudio {ReleaseVersion(self)} needs {name} {required} exactly, and this application was deployed " +
                 $"without {name}. The usual cause is a central PackageVersion for {name} at another " +
                 $"version under CentralPackageTransitivePinningEnabled: NuGet then drops {name} from the graph " +
                 $"without a warning. The packages are released together: pin {name} to {required}, or remove " +
@@ -111,10 +123,11 @@ internal static class KStudioVersionGuard
         // The commits were compared: name them, since the release version may well be the same on both sides.
         bool commits = bothRelease && HasBuildMetadata(kStudioVersion) && HasBuildMetadata(loadedVersion);
         string shownRequired = commits ? kStudioVersion! : required;
+        string shownSelf = commits ? self! : ReleaseVersion(self);
         string shownFound = commits ? loadedVersion! : ReleaseVersion(loadedVersion);
 
         throw new InvalidOperationException(
-            $"KStudio {shownRequired} needs {name} {shownRequired} exactly, and found {name} " +
+            $"KStudio {shownSelf} needs {name} {shownRequired} exactly, and found {name} " +
             $"{shownFound}. The packages are released together and must be upgraded together: a central " +
             $"PackageVersion or a PackageReference for {name} must say {required}, or be removed and let " +
             $"{bringer} bring it.");
@@ -139,6 +152,35 @@ internal static class KStudioVersionGuard
             assembly.GetCustomAttribute<AssemblyConfigurationAttribute>()?.Configuration,
             "Release",
             StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// An informational version without KStudio's preview label: <c>1.3.0-preview.1+5f1c2a9d</c> is <c>1.3.0+5f1c2a9d</c> for the label
+    /// <c>preview.1</c>, which is the version the family packages beside KStudio carry. Unchanged when there is no label, or when the version
+    /// does not end its release part with exactly <c>-&lt;label&gt;</c> (so another label is left to fail the comparison).
+    /// </summary>
+    /// <param name="informationalVersion">KStudio's informational version as the assembly carries it.</param>
+    /// <param name="label">The preview label, or <see langword="null" /> or empty for none.</param>
+    internal static string? FamilyVersion(string? informationalVersion, string? label)
+    {
+        if (string.IsNullOrEmpty(informationalVersion) || string.IsNullOrEmpty(label))
+        {
+            return informationalVersion;
+        }
+
+        int plus = informationalVersion.IndexOf('+', StringComparison.Ordinal);
+        string release = plus < 0 ? informationalVersion : informationalVersion[..plus];
+        string suffix = "-" + label;
+
+        return release.EndsWith(suffix, StringComparison.Ordinal)
+            ? release[..^suffix.Length] + (plus < 0 ? string.Empty : informationalVersion[plus..])
+            : informationalVersion;
+    }
+
+    /// <summary>The preview label an assembly was stamped with (<see cref="PrereleaseLabelMetadataKey" />), or <see langword="null" /> for none.</summary>
+    /// <param name="assembly">The assembly.</param>
+    internal static string? PrereleaseLabel(Assembly assembly) =>
+        assembly.GetCustomAttributes<AssemblyMetadataAttribute>()
+            .FirstOrDefault(static x => x.Key == PrereleaseLabelMetadataKey)?.Value;
 
     /// <summary>An assembly's informational version up to the <c>+</c>, or its assembly version without one.</summary>
     /// <param name="assembly">The assembly.</param>
