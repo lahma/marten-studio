@@ -14,6 +14,7 @@ using Wolverine.Kafka.Internals;
 using Wolverine.Runtime.Handlers;
 using Wolverine.Runtime.Interop;
 using Wolverine.Runtime.Routing;
+using Wolverine.Runtime.Serialization;
 
 namespace KStudioWolverine.Tests.Discovery;
 
@@ -229,7 +230,7 @@ public class WolverineDiscoveryTests
 
         Topic(fromTransport, "a.v1").ConsumerGroup.Should().Be("transport-group");
         Topic(fromTransport, "b.v1").ConsumerGroup.Should().Be("topic-group");
-        fromTransport.Builder.ConsumerGroups.Should().Equal("topic-group", "transport-group");
+        fromTransport.Builder.ConsumerGroups.Should().BeEmpty("a listener's group travels with its topic, not as a group of the whole cluster");
     }
 
     [Fact]
@@ -272,7 +273,7 @@ public class WolverineDiscoveryTests
         dead.Role.Should().Be(KafkaTopicRole.DeadLetter);
         dead.Description.Should().Be("Wolverine dead letters");
         dead.ConsumerGroup.Should().BeNull("Wolverine never consumes it by default");
-        cluster.Builder.ConsumerGroups.Should().Equal("orders-app");
+        Topic(cluster, "checkout.v1").ConsumerGroup.Should().Be("orders-app");
     }
 
     [Fact]
@@ -519,9 +520,11 @@ public class WolverineDiscoveryTests
 
         KafkaClusterContribution contribution = WolverineRig.Contribute(options);
 
-        contribution.Clusters.Single().Builder.ConsumerGroups.Should().HaveCount(50);
+        contribution.Clusters.Single().Topics.Select(static x => x.ConsumerGroup).Distinct().Should().HaveCount(60, "every topic keeps its own group");
         contribution.Notes.Should().ContainSingle().Which.Text.Should().Contain("first 50");
-        WolverineRig.Registry(options).Clusters.Should().ContainSingle("the cluster passes the registry's own rules");
+        KafkaClusterRegistry registry = WolverineRig.Registry(options);
+        registry.Clusters.Should().ContainSingle("the cluster passes the registry's own rules");
+        registry.Get("wolverine").ConsumerGroups.Should().HaveCount(50);
     }
 
     [Fact]
@@ -548,4 +551,176 @@ public class WolverineDiscoveryTests
         {
         }
     }
+
+    [Fact]
+    public void Four_listeners_with_four_groups_pair_each_group_with_its_own_topic_and_declare_none_for_the_cluster()
+    {
+        WolverineOptions options = WolverineRig.Options();
+        KafkaTransport transport = WolverineRig.Default(options);
+
+        for (int i = 1; i <= 4; i++)
+        {
+            WolverineRig.OwnConsumerConfig(WolverineRig.Listen(transport, "t" + i), new ConsumerConfig { GroupId = "g" + i });
+        }
+
+        WolverineRig.Send<OrderPlaced>(transport, "out.v1");
+
+        KafkaContributedCluster cluster = WolverineRig.Contribute(options).Clusters.Single();
+
+        cluster.Topics.Select(static x => (x.Name, x.ConsumerGroup)).Should().Equal(
+            ("out.v1", null), ("t1", "g1"), ("t2", "g2"), ("t3", "g3"), ("t4", "g4"));
+        cluster.Builder.ConsumerGroups.Should().BeEmpty();
+
+        KafkaClusterDefinition definition = WolverineRig.Registry(options).Get("wolverine");
+        definition.DiscoveredConsumerGroups.Should().Equal("g1", "g2", "g3", "g4");
+        definition.GroupsOf("t2").Should().Equal(("g2", false));
+        definition.GroupsOf("out.v1").Should().BeEmpty("a topic it only publishes to shows no group");
+        definition.GroupsOf("unknown").Should().BeEmpty();
+    }
+
+    [Fact]
+    public void A_group_the_host_declares_in_a_callback_is_cluster_wide_and_the_one_a_listener_names_is_not()
+    {
+        WolverineOptions options = WolverineRig.Options();
+        WolverineRig.Listen(WolverineRig.Default(options), "orders");
+
+        KafkaClusterDefinition definition = WolverineRig.Registry(
+            options,
+            configure: static w => w.Cluster(static (_, builder) => builder.ConsumerGroup("audit").ConsumerGroup("orders-app"))).Get("wolverine");
+
+        definition.GroupsOf("orders").Should().Equal(("audit", true), ("orders-app", false));
+        definition.ConsumerGroups.Should().Equal("audit", "orders-app");
+    }
+
+    [Fact]
+    public void A_custom_serializer_the_host_declared_makes_its_topics_CloudEvents_and_so_does_a_subclass_or_an_interface_it_implements()
+    {
+        WolverineOptions options = WolverineRig.Options();
+        KafkaTransport transport = WolverineRig.Default(options);
+        WolverineRig.Listen(transport, "own.v1").DefaultSerializer = new StructuredSerializer();
+        WolverineRig.Listen(transport, "sub.v1").DefaultSerializer = new StructuredSubclass();
+        WolverineRig.Listen(transport, "iface.v1").DefaultSerializer = new OtherSerializer();
+        WolverineRig.Listen(transport, "undeclared.v1").DefaultSerializer = new UndeclaredSerializer();
+        WolverineRig.Listen(transport, "none.v1");
+
+        KafkaContributedCluster declared = WolverineRig.Contribute(
+            options,
+            static w => w.CloudEventsSerializer<StructuredSerializer>().CloudEventsSerializer(MarkedType)).Clusters.Single();
+
+        Topic(declared, "own.v1").CloudEvents.Should().BeTrue();
+        Topic(declared, "iface.v1").CloudEvents.Should().BeTrue("an implementation of a declared interface is assignable to it");
+        Topic(declared, "undeclared.v1").CloudEvents.Should().BeFalse();
+        Topic(declared, "none.v1").CloudEvents.Should().BeFalse();
+
+        KafkaContributedCluster byBase = WolverineRig.Contribute(options, static w => w.CloudEventsSerializer<StructuredBase>()).Clusters.Single();
+
+        Topic(byBase, "sub.v1").CloudEvents.Should().BeTrue("a subclass is assignable to the declared type");
+        Topic(byBase, "own.v1").CloudEvents.Should().BeFalse("StructuredSerializer does not derive from the declared base");
+        Topic(byBase, "undeclared.v1").CloudEvents.Should().BeTrue();
+
+        KafkaContributedCluster nothing = WolverineRig.Contribute(options).Clusters.Single();
+
+        Topic(nothing, "own.v1").CloudEvents.Should().BeFalse("nothing is sniffed: without the declaration the custom serializer is not CloudEvents");
+        Topic(nothing, "own.v1").Serializer.Should().Be(nameof(StructuredSerializer));
+    }
+
+    [Fact]
+    public void A_declared_serializer_makes_the_registry_decode_the_topic_as_CloudEvents()
+    {
+        WolverineOptions options = WolverineRig.Options();
+        WolverineRig.Listen(WolverineRig.Default(options), "own.v1").DefaultSerializer = new StructuredSerializer();
+
+        KafkaClusterRegistry registry = WolverineRig.Registry(options, configure: static w => w.CloudEventsSerializer<StructuredSerializer>());
+
+        KafkaDecoders.BuiltInKind(registry.Get("wolverine").Descriptor("own.v1").Settings.DecoderInstance).Should().Be(KafkaBuiltInDecoder.CloudEvents);
+    }
+
+    [Fact]
+    public void The_CloudEvents_serializer_option_checks_its_argument_and_chains()
+    {
+        KafkaWolverineOptions options = new();
+
+        options.CloudEventsSerializer<StructuredSerializer>().Should().BeSameAs(options);
+        options.CloudEventsSerializer(MarkedType).Should().BeSameAs(options);
+        FluentActions.Invoking(() => options.CloudEventsSerializer(null!)).Should().Throw<ArgumentNullException>();
+        FluentActions.Invoking(() => options.CloudEventsSerializer(typeof(List<>))).Should().Throw<ArgumentException>();
+    }
+
+    [Fact]
+    public void An_excluded_broker_is_not_discovered_at_all_and_the_others_are()
+    {
+        WolverineOptions options = WolverineRig.Options();
+        WolverineRig.Listen(WolverineRig.Default(options), "orders");
+        WolverineRig.Listen(WolverineRig.Named(options, "besteffort", "broker:9092"), "orders");
+        WolverineRig.Listen(WolverineRig.Named(options, "other", "other:9092"), "other");
+
+        KafkaClusterContribution contribution = WolverineRig.Contribute(options, static w => w.ExcludeBroker("besteffort"));
+
+        contribution.Clusters.Select(static x => x.Key).Should().Equal("wolverine", "wolverine-other");
+        contribution.Notes.Should().BeEmpty("a broker the host left out is not a failure");
+
+        WolverineRig.Contribute(options, static w => w.ExcludeBroker("besteffort").ExcludeBroker("other")).Clusters.Select(static x => x.Key).Should().Equal("wolverine");
+        WolverineRig.Contribute(options, static w => w.ExcludeBroker("BestEffort")).Clusters.Should().HaveCount(3, "the name is matched ordinally");
+    }
+
+    [Fact]
+    public void The_exclude_broker_option_checks_its_argument_and_chains()
+    {
+        KafkaWolverineOptions options = new();
+
+        options.ExcludeBroker("besteffort").Should().BeSameAs(options);
+        FluentActions.Invoking(() => options.ExcludeBroker(" ")).Should().Throw<ArgumentException>();
+        FluentActions.Invoking(() => options.ExcludeBroker(null!)).Should().Throw<ArgumentException>();
+    }
+
+    [Fact]
+    public void Two_named_brokers_on_the_same_servers_are_two_clusters_with_the_same_servers_key_whatever_the_order()
+    {
+        WolverineOptions options = WolverineRig.Options();
+        WolverineRig.Listen(WolverineRig.Default(options, "b:9092, a:9092"), "orders");
+        WolverineRig.Listen(WolverineRig.Named(options, "besteffort", " a:9092,b:9092"), "orders");
+        WolverineRig.Named(options, "elsewhere", "c:9092");
+
+        KafkaClusterRegistry registry = WolverineRig.Registry(options);
+
+        registry.Clusters.Select(static x => x.Key).Should().Equal("wolverine", "wolverine-besteffort", "wolverine-elsewhere");
+        registry.Get("wolverine").ServersKey.Should().NotBeNull().And.Be(registry.Get("wolverine-besteffort").ServersKey);
+        registry.Get("wolverine-elsewhere").ServersKey.Should().NotBe(registry.Get("wolverine").ServersKey);
+    }
+
+    private class StructuredBase : IMessageSerializer
+    {
+        public string ContentType => "application/json";
+
+        public byte[] Write(Envelope envelope) => [];
+
+        public object ReadFromData(Type messageType, Envelope envelope) => new();
+
+        public object ReadFromData(byte[] data) => new();
+
+        public byte[] WriteMessage(object message) => [];
+    }
+
+    private sealed class StructuredSerializer : IMessageSerializer
+    {
+        public string ContentType => "application/json";
+
+        public byte[] Write(Envelope envelope) => [];
+
+        public object ReadFromData(Type messageType, Envelope envelope) => new();
+
+        public object ReadFromData(byte[] data) => new();
+
+        public byte[] WriteMessage(object message) => [];
+    }
+
+    private sealed class StructuredSubclass : StructuredBase;
+
+    private static readonly Type MarkedType = typeof(IMarkedCloudEvents);
+
+    private interface IMarkedCloudEvents : IMessageSerializer;
+
+    private sealed class OtherSerializer : StructuredBase, IMarkedCloudEvents;
+
+    private sealed class UndeclaredSerializer : StructuredBase;
 }

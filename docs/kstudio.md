@@ -292,6 +292,35 @@ with `TenantId` set. Listener and sender endpoints become topics with their dire
 consumer group, and the native dead-letter topic is listed. A topic Wolverine serializes as CloudEvents is decoded as
 CloudEvents.
 
+**A serializer of your own.** A custom `IMessageSerializer` that writes structured CloudEvents (with the content type
+`application/json`, say) is not recognised by what it writes: KStudio guesses nothing from a value, because that would
+change what `$.x` means on topics that are not CloudEvents. Declare the serializer, and the topics of every endpoint that
+uses it, or a type derived from it, are decoded as CloudEvents, so `ce.type = '…'` and the `ce.*` chips find their records:
+
+```csharp
+builder.Services.AddKafkaStudio(k => k.UseWolverineKafka(w => w
+    .CloudEventsSerializer<MyStructuredCloudEventsSerializer>()));
+```
+
+**One group per topic.** A listener's consumer group is shown on the topics that listener reads, with its lag, and on no
+other: a topic the application only publishes to lists no group of it. A group you declare for the whole cluster with
+`c.ConsumerGroup("…")` is shown on every topic, and where it has no committed offset on a topic it is named on one muted line
+(*Groups with no committed offset on this topic*) instead of a row with no lag. At most 50 groups are read for a cluster.
+
+**Named brokers on one cluster.** Wolverine can register several named brokers against the same physical Kafka cluster (a
+durable broker and a buffered twin, for example), and each is listed as a cluster of its own, `wolverine-{broker}`: the
+broker's name lower-cased, with every character outside letters, digits and hyphens made a hyphen, shown as
+`Wolverine · {broker}`. KStudio never connects to merge them. Where two listed clusters have the same bootstrap servers
+(compared as a set, from configuration, so order and spaces do not matter), the selector adds *(same servers as …)* to
+their names and the Settings page says so, naming only the clusters you may see. Leave a broker out of discovery by its
+name, and nothing of it is listed (no cluster, topics, groups or tenants):
+
+```csharp
+builder.Services.AddKafkaStudio(k => k.UseWolverineKafka(w => w.ExcludeBroker("besteffort")));
+```
+
+The default transport has no broker name and is always listed.
+
 KStudio never reads Wolverine's message store, never runs Wolverine's builder callbacks (pass a token refresh through
 `w.Cluster((broker, c) => c.OAuthBearerTokenRefresh(…))`), and never consumes with Wolverine's group ids. **Discovery
 adds no redaction rule:** declare rules for every topic that carries personal data.

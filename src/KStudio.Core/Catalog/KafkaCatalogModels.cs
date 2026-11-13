@@ -42,11 +42,15 @@ internal readonly struct KafkaField<T>
 /// <param name="Key">The entry key: the cluster's key, or <c>{key}/{tenant}</c> for one tenant of a broker-per-tenant cluster.</param>
 /// <param name="DisplayName">The name shown.</param>
 /// <param name="Environment">The environment label.</param>
-/// <param name="ConsumerGroups">The groups the host declared.</param>
+/// <param name="ConsumerGroups">The groups the host declared for the cluster, then the groups a source found its listeners using.</param>
 /// <param name="BaseKey">The cluster's key without a tenant.</param>
 /// <param name="TenantId">The tenant this entry is a cluster of, or <see langword="null" />.</param>
 /// <param name="Source">The source that contributed the cluster, or <see langword="null" /> for a host cluster.</param>
 /// <param name="Profile">The profile the host set with <c>KafkaClusterBuilder.Profile</c>, or <see langword="null" /> for none (never inferred: D47).</param>
+/// <param name="SameServersAs">
+/// The entry keys of the other clusters, of another base cluster, whose bootstrap servers are the same set as this cluster's (#72): probably one cluster
+/// registered twice. Compared from configuration alone, never by connecting; the servers themselves are not in the record.
+/// </param>
 internal sealed record KafkaClusterInfo(
     string Key,
     string DisplayName,
@@ -55,7 +59,8 @@ internal sealed record KafkaClusterInfo(
     string BaseKey,
     string? TenantId,
     string? Source,
-    KafkaProfile? Profile = null);
+    KafkaProfile? Profile = null,
+    IReadOnlyList<string>? SameServersAs = null);
 
 /// <summary>A topic in the list.</summary>
 /// <param name="Name">The name.</param>
@@ -157,7 +162,23 @@ internal sealed record KafkaGroupLag(WirePartition Partition, KafkaField<long?> 
 /// <param name="GroupId">The group's id.</param>
 /// <param name="State">The group's state and member count.</param>
 /// <param name="Lag">The lag per partition; the error that withheld the offsets, otherwise.</param>
-internal sealed record KafkaGroupOverview(string GroupId, KafkaField<WireGroupDescription> State, KafkaField<IReadOnlyList<KafkaGroupLag>> Lag);
+/// <param name="ClusterWide">
+/// Whether the host declared the group for the whole cluster, so that nothing says it reads this topic. A group a source paired with this topic's listener
+/// is not cluster-wide (#73).
+/// </param>
+internal sealed record KafkaGroupOverview(
+    string GroupId,
+    KafkaField<WireGroupDescription> State,
+    KafkaField<IReadOnlyList<KafkaGroupLag>> Lag,
+    bool ClusterWide = false)
+{
+    /// <summary>
+    /// Whether this is a cluster-wide group whose offsets are known and none of them is committed on the topic: it does not read this topic as far as
+    /// Kafka says, and a lag of "—" beside the groups that do would be read as "lag unknown".
+    /// </summary>
+    public bool HasNoCommittedOffset =>
+        ClusterWide && Lag.IsAvailable && Lag.Value.All(static x => x.Committed.IsAvailable && x.Committed.Value is null);
+}
 
 /// <summary>A topic overview (decision 5.2). Every field that can be refused is a <see cref="KafkaField{T}" />.</summary>
 /// <param name="Cluster">The cluster's key.</param>

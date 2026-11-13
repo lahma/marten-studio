@@ -15,11 +15,18 @@ namespace KStudio.Internal;
 /// <summary><see cref="KafkaWolverineOptions" /> as <c>UseWolverineKafka</c> found them: a copy, so a later write to the host's object reaches nothing.</summary>
 internal sealed class WolverineSourceSettings
 {
-    private WolverineSourceSettings(string clusterKey, bool includeTenants, IReadOnlyList<Action<string?, KafkaClusterBuilder>> hooks)
+    private WolverineSourceSettings(
+        string clusterKey,
+        bool includeTenants,
+        IReadOnlyList<Action<string?, KafkaClusterBuilder>> hooks,
+        IReadOnlyList<Type> cloudEventsSerializers,
+        IReadOnlySet<string> excludedBrokers)
     {
         ClusterKey = clusterKey;
         IncludeTenants = includeTenants;
         Hooks = hooks;
+        CloudEventsSerializers = cloudEventsSerializers;
+        ExcludedBrokers = excludedBrokers;
     }
 
     /// <summary>The default transport's cluster key.</summary>
@@ -30,6 +37,12 @@ internal sealed class WolverineSourceSettings
 
     /// <summary>The host's callbacks for each cluster's builder.</summary>
     public IReadOnlyList<Action<string?, KafkaClusterBuilder>> Hooks { get; }
+
+    /// <summary>The serializer types the host declared to write structured CloudEvents.</summary>
+    public IReadOnlyList<Type> CloudEventsSerializers { get; }
+
+    /// <summary>The names of the brokers left out of discovery, ordinal.</summary>
+    public IReadOnlySet<string> ExcludedBrokers { get; }
 
     /// <summary>Copies <paramref name="options" />.</summary>
     /// <param name="options">The host's options.</param>
@@ -45,7 +58,12 @@ internal sealed class WolverineSourceSettings
                 nameof(options));
         }
 
-        return new WolverineSourceSettings(options.ClusterKey, options.IncludeTenants, [.. options.Hooks]);
+        return new WolverineSourceSettings(
+            options.ClusterKey,
+            options.IncludeTenants,
+            [.. options.Hooks],
+            [.. options.CloudEventsSerializers],
+            new HashSet<string>(options.ExcludedBrokers, StringComparer.Ordinal));
     }
 }
 
@@ -65,7 +83,8 @@ internal sealed class WolverineClusterSource(IServiceProvider services, Wolverin
     /// <summary>The name Wolverine gives its default Kafka transport (<c>new KafkaTransport()</c>).</summary>
     private const string DefaultProtocol = "kafka";
 
-    private const int MaxConsumerGroups = 50;
+    /// <summary>The most consumer groups a cluster takes from discovery: the engine's own bound.</summary>
+    private const int MaxConsumerGroups = KafkaClusterDefinition.MaxDiscoveredConsumerGroups;
 
     /// <inheritdoc />
     public string Name => SourceName;
@@ -127,6 +146,13 @@ internal sealed class WolverineClusterSource(IServiceProvider services, Wolverin
         bool listTenants)
     {
         string? broker = string.Equals(transport.Protocol, DefaultProtocol, StringComparison.Ordinal) ? null : transport.Protocol;
+
+        // A broker the host left out is not discovered at all (#72): no cluster, topics, groups or tenants, and no note.
+        if (broker is not null && settings.ExcludedBrokers.Contains(broker))
+        {
+            return;
+        }
+
         string? key = KeyFor(broker);
         string label = broker is null ? "the default Kafka transport" : "the Kafka transport '" + broker + "'";
 
@@ -149,7 +175,7 @@ internal sealed class WolverineClusterSource(IServiceProvider services, Wolverin
             return;
         }
 
-        WolverineTopicRead read = WolverineTopicReader.Read(transport, wolverine.ServiceName);
+        WolverineTopicRead read = WolverineTopicReader.Read(transport, wolverine.ServiceName, settings.CloudEventsSerializers);
         notes.AddRange(read.Notes);
 
         if (read.ConsumerGroups.Count > MaxConsumerGroups)
@@ -194,11 +220,8 @@ internal sealed class WolverineClusterSource(IServiceProvider services, Wolverin
         KafkaClusterBuilder builder = new();
         builder.DisplayName(Truncate(broker is null ? "Wolverine" : "Wolverine · " + broker, 100));
 
-        foreach (string group in read.ConsumerGroups.Take(MaxConsumerGroups))
-        {
-            builder.ConsumerGroup(group);
-        }
-
+        // The groups the listeners use are not declared here: each travels with the topic whose listener names it (KafkaDiscoveredTopic.ConsumerGroup),
+        // so a topic's page reads its own group and not every group of the application (#73). A group the host declares in a callback is the host's.
         foreach (Action<string?, KafkaClusterBuilder> hook in settings.Hooks)
         {
             try

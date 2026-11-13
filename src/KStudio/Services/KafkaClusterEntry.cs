@@ -23,6 +23,35 @@ internal sealed record KafkaClusterEntry(string Key, string? TenantId, string Di
     /// </summary>
     public string Cluster { get; init; } = KafkaClusterKey.BaseOf(Key);
 
+    /// <summary>
+    /// The keys of the other clusters, of another base cluster, whose bootstrap servers are the same set as this one's (#72), from configuration alone.
+    /// Keys, not names: a name is drawn only for a cluster the visitor may see (<see cref="SameServersNames" />), so a refused cluster is never described.
+    /// </summary>
+    public IReadOnlyList<string> SameServersAs { get; init; } = [];
+
+    /// <summary>
+    /// The labels of the clusters in <see cref="SameServersAs" /> among <paramref name="visible" />, in the order the visitor's selector lists them.
+    /// A cluster the visitor may not see is left out.
+    /// </summary>
+    /// <param name="visible">The entries this visitor may see.</param>
+    public IReadOnlyList<string> SameServersNames(IEnumerable<KafkaClusterEntry> visible) =>
+        SameServersAs.Count == 0 ? [] : [.. visible.Where(x => SameServersAs.Contains(x.Key, StringComparer.Ordinal)).Select(static x => x.Label)];
+
+    /// <summary>Value equality, as a record's, with the same-servers list compared by its elements: the entries are rebuilt on every read.</summary>
+    /// <param name="other">The other entry.</param>
+    public bool Equals(KafkaClusterEntry? other) =>
+        other is not null
+        && Key == other.Key
+        && TenantId == other.TenantId
+        && DisplayName == other.DisplayName
+        && Environment == other.Environment
+        && Profile == other.Profile
+        && Cluster == other.Cluster
+        && SameServersAs.SequenceEqual(other.SameServersAs, StringComparer.Ordinal);
+
+    /// <inheritdoc />
+    public override int GetHashCode() => HashCode.Combine(Key, TenantId, DisplayName, Environment, Profile, Cluster);
+
     /// <summary>What the selector and the Activity screen's Scope column show: <c>primary</c>, or <c>primary · tenant-a</c>.</summary>
     public string Label => TenantId is null ? DisplayName : DisplayName + " · " + TenantId;
 }
@@ -39,5 +68,5 @@ internal sealed class CatalogClusterEntrySource(IKafkaCatalog catalog) : IKafkaC
 {
     /// <inheritdoc />
     public IReadOnlyList<KafkaClusterEntry> Entries =>
-        [.. catalog.Clusters.Select(static x => new KafkaClusterEntry(x.Key, x.TenantId, x.DisplayName, x.Environment, x.Profile) { Cluster = x.BaseKey })];
+        [.. catalog.Clusters.Select(static x => new KafkaClusterEntry(x.Key, x.TenantId, x.DisplayName, x.Environment, x.Profile) { Cluster = x.BaseKey, SameServersAs = x.SameServersAs ?? [] })];
 }

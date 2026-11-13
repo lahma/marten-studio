@@ -41,9 +41,12 @@ internal static class WolverineTopicReader
     /// <summary>Reads <paramref name="transport" />'s topics.</summary>
     /// <param name="transport">A Kafka transport of the application's Wolverine configuration.</param>
     /// <param name="serviceName">The application's Wolverine service name, the last resort for a listener's consumer group.</param>
-    public static WolverineTopicRead Read(KafkaTransport transport, string? serviceName)
+    /// <param name="cloudEventsSerializers">The serializer types the host declared to write structured CloudEvents (#71).</param>
+    public static WolverineTopicRead Read(KafkaTransport transport, string? serviceName, IReadOnlyList<Type>? cloudEventsSerializers = null)
     {
         ArgumentNullException.ThrowIfNull(transport);
+
+        cloudEventsSerializers ??= [];
 
         Dictionary<string, Accumulator> byName = new(StringComparer.Ordinal);
         List<KafkaSourceNote> notes = [];
@@ -69,12 +72,12 @@ internal static class WolverineTopicReader
             {
                 foreach (string name in group.TopicNames)
                 {
-                    Add(byName, notes, transport, serviceName, group, name);
+                    Add(byName, notes, transport, serviceName, cloudEventsSerializers, group, name);
                 }
             }
             else if (!string.Equals(endpoint.TopicName, KafkaTopic.WolverineTopicsName, StringComparison.Ordinal))
             {
-                Add(byName, notes, transport, serviceName, endpoint, endpoint.TopicName);
+                Add(byName, notes, transport, serviceName, cloudEventsSerializers, endpoint, endpoint.TopicName);
             }
         }
 
@@ -125,6 +128,7 @@ internal static class WolverineTopicReader
         List<KafkaSourceNote> notes,
         KafkaTransport transport,
         string? serviceName,
+        IReadOnlyList<Type> cloudEventsSerializers,
         KafkaTopic endpoint,
         string name)
     {
@@ -167,11 +171,38 @@ internal static class WolverineTopicReader
             accumulator.Serializer = serializer.GetType().Name;
         }
 
-        accumulator.CloudEvents |= endpoint.DefaultSerializer is CloudEventsMapper;
+        accumulator.CloudEvents |= IsCloudEvents(endpoint.DefaultSerializer, cloudEventsSerializers);
         accumulator.CustomMapper |= endpoint.EnvelopeMapper is { } mapper
             && !string.Equals(mapper.GetType().FullName, EnvelopeMapperTypeName, StringComparison.Ordinal);
 
         accumulator.Partitioner ??= PartitionerOf(endpoint.ProducerConfig ?? transport.ProducerConfig);
+    }
+
+    /// <summary>
+    /// Whether an endpoint's serializer writes structured CloudEvents: Wolverine's own mapper, or one of (or assignable to) the types the host declared (#71).
+    /// Nothing is guessed from the serializer's behaviour or a value.
+    /// </summary>
+    private static bool IsCloudEvents(object? serializer, IReadOnlyList<Type> declared)
+    {
+        if (serializer is null)
+        {
+            return false;
+        }
+
+        if (serializer is CloudEventsMapper)
+        {
+            return true;
+        }
+
+        foreach (Type type in declared)
+        {
+            if (type.IsInstanceOfType(serializer))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static Accumulator Get(Dictionary<string, Accumulator> byName, string name)

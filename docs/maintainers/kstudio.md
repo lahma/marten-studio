@@ -629,6 +629,18 @@ version guard). It starts, connects and writes nothing, runs no builder callback
 clusters (`{cluster}/{tenant}`, `TenantId` on the resource) come from a reflection probe of three members that fails closed. A discovered topic
 never replaces a host's descriptor, and discovery adds no redaction.
 
+**Three declarations of 1.3.1 (#71 to #73), none of them a guess.** *CloudEvents:* `KafkaWolverineOptions.CloudEventsSerializer<T>()` (and the
+`Type` overload) marks every endpoint whose `DefaultSerializer` is `CloudEventsMapper` or assignable to a declared type as a CloudEvents topic;
+a value is never sniffed, because the JSON paths of D39 read a CloudEvent's `data` and sniffing would change what `$.x` means on topics that are not
+CloudEvents. *Brokers:* `ExcludeBroker(name)` leaves a named broker out of discovery whole (ordinal match on `Transport.Protocol`, the name the
+`Cluster` callback receives; the default transport cannot be excluded); two clusters are never merged, because the cluster key is what every
+policy is written against and a cluster id needs a connection. Clusters of different base clusters whose bootstrap servers are the same set
+(`KafkaClusterDefinition.ServersKey`: split, trimmed, lower-cased, ordinal-sorted, from configuration alone) get `KafkaClusterInfo.SameServersAs`;
+the selector and the Settings page name only the clusters the visitor may see, and never the servers. *Groups:* a listener's group travels with its
+topic (`KafkaDiscoveredTopic.ConsumerGroup`) and the source declares none for the cluster; `KafkaClusterDefinition.GroupsOf(topic)` is the host's
+cluster-wide groups plus the topic's own, so a topic page asks the broker about those pairs only. The first 50 discovered groups by name are read; a
+host's cluster-wide group with no committed offset on a topic is named on one muted line (`KafkaGroupOverview.HasNoCommittedOffset`).
+
 **The seam, and a reversal of D-ENGINE 1.4.** D-ENGINE 1.4 said the adapter would use the public registration API only. It cannot: the public
 registration is an options delegate, which `KafkaStudioStartupGuard` reads at host start with no service provider, possibly before Wolverine's
 runtime has connected its transports, and a broker-per-tenant registration has no configuration until it has (`KafkaTenant.Compile`, called by

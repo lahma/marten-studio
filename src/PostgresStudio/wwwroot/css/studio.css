@@ -17828,3 +17828,13 @@ dialog.ms-modal::backdrop {
     color: var(--ms-color-text-secondary);
     overflow-wrap: anywhere;
 }
+
+/* ===== KS-PWOLV: the groups no committed offset names, and the clusters that share their servers (#72, #73) ===== */
+.ms-k-idle-groups {
+    margin: var(--ms-space-sm) 0;
+    overflow-wrap: anywhere;
+}
+
+.ms-k-same-servers {
+    overflow-wrap: anywhere;
+}

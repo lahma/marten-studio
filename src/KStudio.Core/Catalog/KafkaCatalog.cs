@@ -46,8 +46,36 @@ internal sealed class KafkaCatalog(
     KafkaThroughputSamples throughput) : IKafkaCatalog
 {
     /// <inheritdoc />
-    public IReadOnlyList<KafkaClusterInfo> Clusters =>
-        [.. registry.Clusters.Select(static x => new KafkaClusterInfo(x.Key, x.DisplayName, x.Environment, x.ConsumerGroups, x.BaseKey, x.TenantId, x.Source, x.Profile))];
+    public IReadOnlyList<KafkaClusterInfo> Clusters
+    {
+        get
+        {
+            IReadOnlyList<KafkaClusterDefinition> all = registry.Clusters;
+
+            return
+            [
+                .. all.Select(x => new KafkaClusterInfo(
+                    x.Key,
+                    x.DisplayName,
+                    x.Environment,
+                    x.ConsumerGroups,
+                    x.BaseKey,
+                    x.TenantId,
+                    x.Source,
+                    x.Profile,
+                    SameServers(x, all))),
+            ];
+        }
+    }
+
+    /// <summary>
+    /// The entry keys of the clusters of another base cluster whose bootstrap servers are the same set (#72): configuration compared, nothing connected.
+    /// The tenants of one broker-per-tenant cluster are not compared with each other or with their parent, which share a registration by design.
+    /// </summary>
+    private static string[] SameServers(KafkaClusterDefinition cluster, IReadOnlyList<KafkaClusterDefinition> all) =>
+        cluster.ServersKey is null
+            ? []
+            : [.. all.Where(x => x.ServersKey == cluster.ServersKey && !string.Equals(x.BaseKey, cluster.BaseKey, StringComparison.Ordinal)).Select(static x => x.Key)];
 
     /// <inheritdoc />
     public async Task<KafkaField<KafkaTopicList>> ListTopicsAsync(string cluster, CancellationToken cancellationToken)
@@ -185,7 +213,8 @@ internal sealed class KafkaCatalog(
         Task<WireResult<IReadOnlyList<WireOffset>>> highest = Offsets(WireOffsetSpec.MaxTimestamp, WireIsolation.ReadUncommitted);
         Task<WireResult<IReadOnlyList<WireTopicDescription>>> operations = reads.TopicOperationsAsync(cluster, topic, cancellationToken);
         Task<WireResult<WireTopicConfig>> config = reads.ConfigAsync(cluster, topic, cancellationToken);
-        Task<KafkaGroupOverview>[] groups = [.. definition.ConsumerGroups.Select(group => GroupAsync(cluster, group, topic.Value, partitions, cancellationToken))];
+        // The groups the host declared for the cluster and the one a source paired with this topic's listener: never every group of the cluster (#73).
+        Task<KafkaGroupOverview>[] groups = [.. definition.GroupsOf(topic.Value).Select(x => GroupAsync(cluster, x.Group, x.ClusterWide, topic.Value, partitions, cancellationToken))];
 
         await Task.WhenAll(earliest, latest, stable, first, highest, operations, config).ConfigureAwait(false);
         KafkaGroupOverview[] groupOverviews = await Task.WhenAll(groups).ConfigureAwait(false);
@@ -247,7 +276,7 @@ internal sealed class KafkaCatalog(
     }
 
     private async Task<KafkaGroupOverview> GroupAsync(
-        string cluster, string group, string topic, IReadOnlyList<WirePartition> partitions, CancellationToken cancellationToken)
+        string cluster, string group, bool clusterWide, string topic, IReadOnlyList<WirePartition> partitions, CancellationToken cancellationToken)
     {
         Task<WireResult<WireGroupDescription>> state = reads.GroupAsync(cluster, group, cancellationToken);
         Task<WireResult<IReadOnlyList<WireGroupOffset>>> committed = reads.GroupOffsetsAsync(cluster, group, topic, partitions, cancellationToken);
@@ -262,7 +291,7 @@ internal sealed class KafkaCatalog(
 
         if (committed.Result.Error is { } error)
         {
-            return new KafkaGroupOverview(group, stateField, KafkaField<IReadOnlyList<KafkaGroupLag>>.Withheld(error));
+            return new KafkaGroupOverview(group, stateField, KafkaField<IReadOnlyList<KafkaGroupLag>>.Withheld(error), clusterWide);
         }
 
         List<KafkaGroupLag> lag = [];
@@ -280,7 +309,7 @@ internal sealed class KafkaCatalog(
             lag.Add(new KafkaGroupLag(offset.Partition, KafkaField<long?>.Of(offset.Committed), behind));
         }
 
-        return new KafkaGroupOverview(group, stateField, KafkaField<IReadOnlyList<KafkaGroupLag>>.Of(lag));
+        return new KafkaGroupOverview(group, stateField, KafkaField<IReadOnlyList<KafkaGroupLag>>.Of(lag), clusterWide);
     }
 
     private static KafkaField<long> Offset(WireResult<IReadOnlyList<WireOffset>> result, WirePartition partition)
