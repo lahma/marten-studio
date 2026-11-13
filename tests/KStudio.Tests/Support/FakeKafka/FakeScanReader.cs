@@ -16,6 +16,7 @@ internal sealed class FakeScanReader(FakeKafkaCluster cluster, WireReaderOptions
     private readonly Dictionary<WirePartition, long> endReported = [];
     private readonly HashSet<WirePartition> refused = [];
     private readonly List<int> threads = [];
+    private readonly ManualResetEventSlim idle = new(false);
     private bool groupRefusalSent;
     private bool anyOutcome;
     private int cursor;
@@ -104,6 +105,14 @@ internal sealed class FakeScanReader(FakeKafkaCluster cluster, WireReaderOptions
 
         WireReadOutcome result = ReadNext();
         anyOutcome |= result != WireReadOutcome.Idle;
+
+        // A consumer that has nothing to return blocks for a while rather than spinning: a live tail that waits for records would otherwise hold
+        // a core at 100 % for as long as a test lets it run. One millisecond keeps every test that waits on a condition prompt.
+        if (result == WireReadOutcome.Idle)
+        {
+            idle.Wait(TimeSpan.FromMilliseconds(1));
+        }
+
         return result;
     }
 

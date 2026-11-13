@@ -2,7 +2,7 @@
 
 KStudio for Apache Kafka® (working name) is the family's Kafka module. Apache Kafka is a trademark of the Apache Software
 Foundation. KStudio is not affiliated with or endorsed by the Apache Software Foundation. AGENTS.md states each rule; this document holds its
-full text and wins where they differ. D34 and D35 are the shell's half, D36 to D41 the engine's.
+full text and wins where they differ. D34 and D35 are the shell's half, D36 to D41 the engine's, D45 to D48 M5's.
 
 ## D34
 
@@ -536,6 +536,15 @@ sent at most $Q + F$ more than the engine had read.
 
 A record read keeps one more value: the record asked for may hold up to $F_v$ bytes of value (KStudio passes the decode limit, 1 MiB by default) whatever is left of its match budget, and its neighbours keep $c$, so a record read holds at most $21c + F_v$, twice that in UTF-16, within one scan slot of $S(C + 2mc)$. Masking never grows a value past twice the decode limit; a value it would is withheld.
 
+**Profiles and the cluster's own buckets (D47).** A cluster's profile caps the limits above in the engine (`min(host, ceiling)`, the table in `docs/kstudio.md`), and a
+profiled cluster whose capped rate or hourly allowance is below the host's gets a token bucket and a rolling-hour budget of its own, beside the process-wide ones:
+the scan is paced by the slower and stops when either allowance is spent. The byte rate and the allowance guard the cluster's quota and egress; concurrency and the
+consumer's sizes guard the process's memory, so they stay the host's. Exports in flight (D45) add $2 \cdot 2 \cdot$ `MaxExportBytes` to the memory statement, 128 MiB at the defaults: the writer keeps each row as it makes it and copies
+them once into a buffer of exactly the file's size, so an export peaks at twice its file (the rows and the buffer; no growing stream holds its old and new arrays
+together), the file is sent from that buffer without another copy, and at most two exports are in flight.
+
+A live tail (D46) is a scan in this statement: it holds a scan slot, and the matches it holds are its ring plus the one batch its batcher may have taken, at most  cdot$ `TailCapacity` (400 at the defaults, within a scan's 500).
+
 Before reading, the engine estimates a scan: the offsets in its ranges ("about", since offsets are not records) and the
 bytes, from a small sample of record sizes. Above the confirmation threshold, `Start` refuses unless the visitor's
 confirmation travels with the call. A profile (M5) or a visitor can lower any limit; nothing raises one above the host's.
@@ -750,3 +759,275 @@ same cluster gate as the settings beside it (`KafkaCatalogService.GetDiscoveryAs
 (the section, the compact form, the envelope lines, the external link line), `KafkaRecordSearchLinksTests` (fragment-only value, store rule, cluster
 choice with tenants, a throwing registry), `ExternalLinkTemplateTests` (each rule of the credential check, error text, escaping, both time forms),
 `AddKafkaStudioTests` (the host refused at start), `KafkaDiscoveredFactsTests`, and `PublicApiTest_KStudio`, whose baseline moves by `ExternalLink`.
+
+## D45
+
+**D45 — KStudio exports what the visitor holds, redacted, through the circuit.** `ExportRecords` (off by default, needs `SearchRecords`) writes the
+matches a search, a live tail or the record page already holds, as JSON Lines, CSV or one value, from `KafkaMatch` alone, so every mask is the engine's and
+nothing is read again. The export is the page's convenience over data the visitor was already given; its gate is the service's, asked again at the click.
+
+**What is exported: the records already in memory.** Every byte was already read under its gates, paced, charged to the owner and audited by the scan that
+read it; the matches are `KafkaMatch` values, which by construction hold only redacted, capped copies (D40), so redaction in a file is the match factory's and
+not a second implementation; memory stays inside D41's statement, since the matches are already counted in $2mc$; and the file is exactly what the visitor saw,
+which is what a support hand-off needs. An export as a scan of its own (whole values, more than `MaxMatches` records, streamed) is a 1.x candidate; so is
+an export from Related records, whose rows come from several topics with per-topic predicates and grants (D42).
+
+**The writer** is `KafkaExportWriter` in `KStudio.Core/Export/` (pure; ENG-PROFILE): JSON Lines without a BOM, CSV with a UTF-8 BOM and `\r\n` (a
+spreadsheet opens a BOM-less UTF-8 file as the local code page and mangles every non-ASCII character), a cell that starts with `=`, `+`, `-`, `@`, a tab or
+a carriage return prefixed with `'` (OWASP's CSV injection rule; JSON Lines is never altered), whole rows only up to `MaxExportBytes`, and the file name
+`kstudio-{cluster}-{part}-{yyyyMMdd-HHmmss}Z.{ext}` holding no predicate, key or value.
+
+**The service** is `KafkaExportService` (scoped; `KafkaExportGate` is its singleton). The order is hard rule 5's, and every exit from the profile on is audited
+once: the capability (`Require(ExportRecords)` requires `SearchRecords` first, so the refusal names the first missing option); the cluster's profile, asked of
+the engine's registry and not of the entry the page holds (`Production` never exports, whatever the capability says, recorded as not run: 9609); the input's
+own bounds (1 to 20 topics, every match belongs to one of them, `Value` only for exactly one record and only from the record page); the cluster policy at
+cluster level and then, per topic, the cluster policy and the capability policy for `SearchRecords` and for `ExportRecords`, any refusal refusing the whole
+export (9603); for records read with the payload grant, the grant again (`ForSearchAsync` over the topics that have values), because an export of records
+read with values must not be written as envelope rows after access went down: it is refused whole with "Your access changed since these records were read";
+two exports in flight at most, a third refused and never queued; the file, built in a `MemoryStream` so the audit knows exactly what was written; the
+delivery; and the audit (`ExportRecords`, capability `ExportRecords`, 9606 written or 9609 not). An interop loss is a file that did not arrive, not a failure.
+The audit carries the source plan's `AuditText`, in which a literal on a redacted field is already `<redacted>`; the visitor's typed text is not an input.
+
+A record with no timestamp (`WireTimestampType.NotAvailable`) is written with `timestamp` `null` in JSON Lines and an empty cell in CSV, `timestampType`
+`NotAvailable` in both, because the epoch the engine keeps in its place would read as 1970.
+
+**Delivery** is a `DotNetStreamReference` to `martenStudio.download.stream` (PostgresStudio's `studio.js`, additive, beside `download.text`), sent in chunks
+over the circuit's own connection, under the circuit's own authentication, with no new route, no token in a URL and no antiforgery question (D23). The
+alternatives: `download.text` with the content as an interop argument is one JSON-escaped string of up to 32 MiB, a full copy on both sides and the circuit
+blocked while it serializes, right for a snapshot of kilobytes and wrong here; a one-time endpoint would be a new HTTP surface outside the circuit, needing the
+studio's `AuthorizationPolicy` re-applied, a token in history, proxies and logs, a store of pending files with an expiry, and the first data endpoint either
+studio maps (D2, D31).
+
+**`JsonView`'s Download stays off in KStudio** (`AllowDownload="false"` on every `JsonView`; PostgresStudio's `JsonView` is unchanged). Its link is a `data:`
+URL built at render: the click never reaches the server, so it can be neither gated per use nor refused on a `Production` cluster after the page rendered nor
+audited, and an export must be all three. The bytes are no secret (the page shows the value); the point is the gate and the audit. The record page's
+**Export › Value** is the download. `KafkaExportMenuTests` holds that no `data:` link and no `a[download]` is in what the search and record pages draw.
+
+**The control** is `KafkaExportMenu` (public parameters are `object?` where the type is internal, as `KafkaRecordDetail`'s are): a `MenuButton` on a
+search's result banner (JSON Lines, CSV, each with "N records, as shown: masked parts stay masked"), on the record page (`This record (.jsonl)` and, when the
+value has text, `Value (.json|.txt)`), and, from UI-TAIL, on a tail. With the capability off it is the disabled notice naming
+`KafkaStudioOptions.Capabilities.ExportRecords`; on a `Production` cluster it is a disabled button whose title and text are
+`KafkaStudioText.ProfileForbids(...)`, which names `KafkaClusterBuilder.Profile` and says that granting the capability is not enough (D4). Both M5
+capabilities land with this packet so that the guard, the audit gate and the chip are written once: `Prerequisites(capability)` is `SearchRecords` for every
+other capability, `Require` asks the prerequisites first, `KafkaAuditGate` judges an entry with each prerequisite (per topic and at cluster level) where it
+used to hard-code `ReadPayloads → SearchRecords`, and `RequireOne` is the capability alone, for a caller that already passed its prerequisites' gate
+(`KafkaReadGrants` asking whether a search that reads values may).
+
+**The profile in the UI.** The cluster entry carries the cluster's `Profile` (from `KafkaClusterInfo`); the selector draws `Production profile` / `Test
+profile` as a chip (Production in the danger colour), the Settings page a **Profile** section with the capped numbers and, for a cluster with no profile, the
+warning "This cluster has no profile; its limits are the engine's defaults. Set KafkaClusterBuilder.Profile(...) to cap them." The search form's allowance
+line names the allowance that is lower, the cluster's own or the process's (`KafkaClusterCost.BytesPerHour`), and a refused start names the allowance that ran
+out, not the capped value of a plan whose own cluster still has room. The engine says which: `KafkaSpentBudget(Scope, BytesPerHour)` rides on
+`KafkaScanStart` (for `OwnerBudgetSpent`), on `KafkaScanResult` (for the `OwnerBudget` stop) and on `KafkaRecordRead`'s sentence, chosen by
+`KafkaClusterCost.Spent` (the process's allowance when it is spent, since it stops every cluster; otherwise the cluster's own); a refusal that carries none
+says no number. The profile never-grants test (decision 4.7) is `KafkaProfileNeverGrantsTests`: every profile against all sixteen flag combinations, with
+`ReadOnly` on and off, through the real export service.
+
+**Tests.** `KafkaExportServiceTests` (each gate refuses, audits and writes nothing; a grant downgrade refuses whole; a third export is refused; a delivery
+returning false or throwing; one ring entry per call; `<redacted>` and never the typed text; the size limit leaves whole rows out and counts them),
+`KafkaExportCapabilityTests` (the flags, the prerequisites, the audit gate, and the sixteen flag combinations against every profile and `ReadOnly`: nothing is
+delivered that the flags did not grant), `KafkaExportMenuTests` (bUnit: the menu, the notices, the record page, Settings, the selector chip, no `data:` link),
+`KafkaProfileAllowanceTests`, and the writer's own `KafkaExportWriterTests`. `PublicApiTest_KStudio` moves by `ExportRecords` and `LiveTail` and nothing else.
+
+## D46
+
+**D46 — KStudio's live tail is a scan with no end.** `LiveTail` (off by default, needs `SearchRecords`) starts at each partition's end, keeps the newest
+`MaxTailMatches` in a ring, and holds a scan slot and pays the owner's budget while it reads. The first part of this section is the engine's half; *The page* at its
+end is UI-TAIL's: the page, the capability's gate, the audit (9607, 9608, 9609) and the hidden-tab pause.
+
+**The plan.** `IKafkaScanner.PlanTailAsync(KafkaTailRequest)` parses and compiles the search per topic through the same `Compile` as `PlanAsync` (one method, so a tail
+judges a record exactly as a search does: the same grammar, verdicts, `AuditText` and `ReadsValues`), applies the cluster's profile (D47) to the limits, and
+resolves the topics once through `WindowResolver` with a placeholder window of one millisecond at the planning time. Only that read's log start, high watermark,
+last stable offset, refusals and notes are used; a tail has no window, no pruning (a key pruning needs a verified sample of a window, D39), no index and no
+confirmation. The plan's `Request` is the tail request's image as a scan request, `Tail` the request itself and `IsTail` true; its `Window` exists to carry the
+topics' refusals and notes and its times mean nothing. Its estimate is `A live tail reads what arrives.`
+
+**Where each partition starts.** At its end: under `read_committed` the last stable offset, otherwise the high watermark. A transaction open when the tail starts
+holds records below the high watermark that commit later, and starting at the high watermark would skip them without a word, which is exactly the untruthful
+gap D38 refuses; under `IncludeUncommitted` the high watermark is the end of what can be read. Every range ends at `long.MaxValue` (`KafkaScanCursor.OpenEnd`, written
+`-` in a cursor's text, which `TryParse` accepts). With `ResumeFrom`, a partition the cursor names starts at its `Next`; one it does not name (added since) starts at
+its end with the note `Partition {p} of {topic} was added after the tail started; it is read from its end.`; a position below the log start moves to it and the records
+between are a `KafkaScanGap` (the plan's `Gaps`, which the run starts its own with), never a reset policy; a position past the high watermark (a recreated or
+truncated partition) starts at the high watermark and the plan says so (`TailPositionPastEnd`: `Partition {p} of {t} is shorter than where the tail paused (recreated or
+truncated); it is read from offset {hw}.`), because what the paused tail had read is not in that partition. A tail's plan carries no note about a window (a margin, a compacted
+topic, a partition list fixed at a time): only `IncludesUncommitted` and an unreadable configuration (`ConfigNotReadable`) stay.
+
+**`StartTail`.** The order of `Start`: `ShuttingDown`, `PredicateInvalid`, then `ProfileForbids` (`KafkaProfileCeilings.ForbidsTail`: a `Production` cluster, even when the
+capability is granted; nothing is spent or taken), `OwnerBudgetSpent` (the process's and the cluster's own allowance, `KafkaClusterCostControls.For`, as `Start`), then
+the limiter (`ProcessBusy`, `OwnerBusy`). **A tail holds one of `MaxConcurrentScans` and one of `MaxConcurrentScansPerOwner` while it reads**, on a thread of its own with
+the same `ScanRun`, so D41's memory statement holds with tails counted in $S$ (a tail holds at most  cdot$ `TailCapacity` matches: the ring and one batch, 400 at the defaults, within the 500 a scan keeps; see *The ring*) and "two readers per process" stays true. A scan's
+plan handed to `StartTail`, or a tail's to `Start`, is a defect and throws `ArgumentException`. A plan with no partition to follow (every topic refused) starts no
+consumer and takes no slot; the run ends `NotAuthorized`.
+
+**The run in tail mode** (`ScanRunInputs.Tail`, which must equal the plan's `IsTail`). It evaluates every record in range whatever its timestamp, and a record with
+none is still evaluated and counted in `NoTimestamp`. A partition's end never finishes it: the partition is `CaughtUp` ("live") and its `Next` moves to the end
+(the offsets between its last record and the end are control records and aborted batches); the next record clears `CaughtUp`, and librdkafka raises the end again only
+after new records were read to it. The store is a ring and never stops the run for `MatchLimit`. Stall detection applies only to a partition that is **behind** (one
+that has not reported its end since its last record): a caught-up partition is idle, never stalled, and a tail whose partitions are all caught up is never
+`Unavailable` for silence. When every partition has finished (each stalled, refused or unable to go on past deleted offsets) the tail stops `NotAuthorized` if all
+were refused, `Unavailable` if any stalled, `Failed` otherwise. The wire's `Unavailable` failures stop a tail as they stop a scan. A tail stops for exactly one reason
+(D38): `Paused` (new: the caller paused it, or the tab hid), `Deadline` (the segment ran `TailPauseAfter`), `ByteBudget` or `RecordBudget` (this segment read
+`MaxBytesPerScan` or `MaxRecordsPerScan`), `OwnerBudget`, `Cancelled`, `CallerGone`, `Shutdown`, `NotAuthorized`, `Unavailable` or `Failed`; `Completed` and `MatchLimit`
+never end one, and `MaxScanDuration` does not apply (`TailPauseAfter` replaces it). The cursor is exact as for a scan: a record is accounted for before any limit is looked
+at. The governor, both owner budgets, byte accounting, redaction (the match factory), the decode counters and hard rule 17's overrides are unchanged.
+
+**The ring.** `KafkaMatchStore(capacity, ring: true)` never refuses: it evicts its oldest match, numbers every match from 0 and answers `From(sequence, out skipped)`,
+the kept matches from a sequence on and how many with a sequence at or above it were evicted unread. The batcher tracks a sequence, not an index, and
+`KafkaScanBatch.Skipped` carries what a page never saw between two batches, so a page can say `{n} matches arrived faster than they could be shown`. Without the ring
+the store is the append-only store a search always had. The ring's size is `KafkaScanLimits.TailCapacity`, the smaller of `MaxTailMatches` and `MaxMatches`. A run's and a
+progress's `Matches` is the number found (`Added`), which for a search equals the number kept. **The batcher takes matches only when the reader has room**
+(`WaitToWriteAsync` on the one-slot channel before `From`): were it to take its batch and then wait, a slow reader would leave it holding a batch beside the ring and the
+next pass taking another. A tail therefore holds at most the ring plus one batch,  cdot$ `TailCapacity` matches, which D41's statement counts; `TailCapacity` is not halved
+for it. A batch is taken from the ring as it is when the reader is ready, so `Skipped` counts the matches that never reached a batch.
+
+**Pausing releases the slot.** A tail pauses by ending its segment (`Deadline`, a segment's budget, `OwnerBudget`, or `Paused`), not by holding a paused consumer: the slot
+and the consumer's memory ($C \approx 64$ MiB) go to whoever needs them, and the next segment starts from the exact cursor (`ResumeFrom`), paced, budgeted and slotted like any
+segment. Nothing produced while paused is skipped. Jump to now is a new segment without the cursor.
+
+**Hard rule 17.** The tail is the scan consumer (`ConfluentScanReader`) with the same overrides: assigned with explicit offsets, never subscribed, never committing, its own
+group id never joined, `auto.offset.reset=error`. A cursor position deleted by retention while paused is a gap and is read from the log start, never by a reset policy.
+
+**The tests.** Fast, on the fake broker and a manual clock: `TailPlanTests` (the start offsets under both isolations, resume, a partition added since, a gap, the plan's shape, the
+same compilation as a scan, `ProfileForbids`, the cluster's allowance), `TailRunTests` (records after the start only, any timestamp, no timestamp, a partition end that never
+finishes, no `MatchLimit` with three times the ring and `Evicted` and `Skipped` exact, caught-up and behind stalls, every stop reason, pause plus resume reading each offset once,
+the slot held and released, the governor within 10 % of the rate, the consumer's overrides), `KafkaMatchStoreTests` and `KafkaScanCursorTests`. Live, on Kafka 3.9 and 4.x:
+`TailLiveTests` (arrival within two seconds, an open transaction shown when it commits and an aborted one never, uncommitted records, pause and resume) and
+`ReadNeverWritesScanLiveTests`' tail case (a minute with a pause and resume in the middle: no topic created, no offset committed, no group left).
+
+**The page** (`/kafka/tail`, `KafkaTailPage` and `KafkaTailBody`, under `/kafka` by hard rule 16; rail entry *Live tail*, drawn whatever the capability so that the page can say
+which option turns it on, and a link beside *Search this topic*). Its address is `?cluster=&topics=a,b&iso=` with the search text in the fragment (`#q=`), as Search's is (D9):
+it fills the form and **never starts a tail**, so a pasted link holds no slot and spends no allowance. A page that can only say why it is off - the capability, `SearchRecords`
+or a `Production` profile (`KafkaStudioText.ProfileForbids`, which names `KafkaClusterBuilder.Profile`) - reads nothing from the cluster.
+
+**A tail is a session of segments.** `KafkaTailSession` is the visitor's one tail from Start to Stop; a segment (`KafkaTailSegment`) is one run of the engine, ended by a
+pause. The session keeps what the segments leave, so that a pause loses nothing: the ring (the newest `TailCapacity` matches, newest first, built from the engine's
+oldest-first batches in one pass), the exact cursor of the last segment, the sums, the gaps, the notes and the caveats. **Resume** plans the next segment with the cursor as
+`ResumeFrom`; **Jump to now** plans without it and counts, over the partitions the tail followed, what was produced since the cursor (`KafkaTailService.SkippedByJumping`: the new
+start minus the cursor's next offset), which the page states (`Skipped {n} offsets produced while paused.`) and the session's entry repeats. A pause is told apart by
+`KafkaTailText.PauseOf`: `Paused` (the visitor, or the hidden tab, whichever the page asked for), `Deadline`, `ByteBudget`, `RecordBudget`, `OwnerBudget` - and **`Unavailable`**,
+because a quiet, caught-up tail can end that way after the stall timeout and its cursor is exact, so Resume is offered after it too (`KafkaSearchText.CanContinue` is Search's
+and does not list `Paused`). Every other reason ends the tail. The allowance sentence names the one that ran out (`KafkaStudioText.Allowance(result.SpentBudget)`: the process's,
+or the profile's on this cluster). The page shows no "behind by N" figure: the engine's progress carries no high watermark, so a partition that is still reading shows
+`{topic}/{p} behind`, and one that has reported its end counts in the `N live` chip.
+
+**The gate** (`KafkaTailService`, scoped) is hard rule 5's order before every plan and **every segment**: `Require(LiveTail)` (with `SearchRecords` first), the cluster's profile,
+the input's bounds, the cluster policy, per topic the cluster policy and the capability policy for `SearchRecords` and for `LiveTail`, then the payload grant (a tail whose
+predicate reads values is refused without `ReadPayloads`). A refused topic refuses the whole tail and names nothing (D35). A resume whose grant is lower than the first
+segment's is refused (`GrantChanged`). A policy that changes mid-segment takes effect at the segment's next pause, at most `TailPauseAfter` later, and the docs say so.
+
+**The audit is one entry per session.** 9607 (Information) is logged when the first segment starts, with no ring entry; **9608 and one ring entry** are written when the session
+ends - Stop, a terminal stop, a new Start, the cluster changing, or the page being left - by `KafkaTailSession.End`, which is idempotent (`Interlocked`) and takes the visitor's
+name captured at the start, so recording needs nothing from a scope that may be disposing. The entry's message carries the segments, the elapsed reading time, the records,
+bytes and matches the segments read, the stop reason, the predicate (`AuditText`: a literal on a redacted field is `<redacted>`; the typed text is never recorded), `; values read`,
+`; jumped to now {n} times, skipping {m} offsets`, and `; {k} resumes refused: {reason}`. A tail whose first segment is refused or fails to start is one entry and **9609** and
+leaves no session; a resume the gate or the engine refuses is counted in the session's entry and writes no 9609. (A capability or policy refusal of a resume still writes its
+9602 or 9603 and the ring entry those events always have: a security refusal is an audit event of its own.) The segment's disposal is one shared task, so a page left
+mid-segment writes the entry only after the segment's result was added.
+
+**The tab.** `StudioLiveUpdates.VisibilityChanged` (`Func<bool, Task>`, raised on the pool, one change at a time in the order the browser sent them, only when the value changed,
+never for the state the watch started in, a throwing handler handed to `Failed`) is how the page hears of it. The page starts a `StudioLiveUpdates` the first time a tail runs, with
+a one-second tick that redraws `KafkaTailStatus`, the live line, and nothing else. Hidden: the running segment is paused and the page remembers why. Shown: a tail paused *for
+the tab* goes on by itself from its cursor; a tail the visitor paused, or any other pause, waits for Resume. The handler never awaits the resumed read (the raise waits for its
+handlers), and the page's reading loop (`DriveAsync`) goes on to the next segment in the same frame, so a tail that pauses every few minutes for a day does not nest a day of calls.
+
+**Rendering.** A batch from the engine (at most four a second, never per record) redraws two child components and not the page: `KafkaTailStatus` (the live line and its chips) and
+`KafkaTailRows` (the matches that arrived faster than they could be shown, what the tail does not cover, and the table with its open details). The page renders itself only when a
+tail starts, pauses or ends, so the form, `VisibleTopics()` and the details the visitor has open are not drawn for a batch. An idle tail sends no batches, and the one-second tick
+redraws only the live line (`KafkaTailBody.Renders` and a test hold both). The rows belong to the session's own cluster - their links, the check of a value's view and the settings
+behind the kcat line - never to `State.ActiveCluster`, which the selector may have moved while the tail reads on.
+
+**Leaving and resuming.** A page left while a tail was being started starts nothing (the service checks its token just before `StartTail`) and, if a segment did start, writes the
+session's entry from the reading loop (`End(CallerGone)`, idempotent). A resume checks the grant it was *planned* under as well as the tail's first: access that fell between the plan and
+the start refuses it. A resume the page makes by itself (the tab shown again) is tried once; if it is refused the page waits for the visitor's Resume. Segments that paused because the
+cluster stopped answering are counted in the session's entry. A failed tick or tab handler is logged: Debug in `StudioLiveUpdates`, and throttled (Warning once per kind per ten minutes) by the page.
+
+**Export** is the existing menu (`KafkaExportService`, D45) over the *session on screen*: its cluster, topics, audit text and ring, never the newest plan, which a refused or
+failed Start replaces. It is offered when the tail is paused or over, not while it runs. The sample's `SampleTicker` writes a heartbeat to `heartbeats.v1` every two seconds, with the
+deny-listed `x-api-key` header and a JSON value under the topic's `$.customer.email` rule, for the tail to follow; it is the sample's producer, never KStudio's.
+
+**The tests** (fast): `KafkaTailServiceTests` (every gate refuses and audits, a refused topic names nothing, a session is one entry however many segments, a resume asks everything
+again, a refused resume is counted, the jump arithmetic, a disposed session writes its entry after its segment), `KafkaTailTextTests`, `KafkaTailPageTests` (the disabled states, a link
+that never starts, newest first, pause and resume without a gap, jump to now, the hidden and shown tab, the line that redraws alone, one entry per session, leaving the page, export
+bound to the session), `KafkaTailStylesheetTests` and the two log events in `KafkaStudioRefusalLogValuesTests`; in `PostgresStudio.Tests`, `StudioLiveUpdatesVisibilityTests`.
+
+## D47
+
+**D47 — A profile lowers a cluster's limits, only ever lowers, and is set explicitly.** `KafkaClusterBuilder.Profile(KafkaProfile)` says what kind of
+cluster this is: `Development` (the host's limits, unchanged), `Test` (every per-scan limit capped at KStudio's defaults) or `Production` (lower caps, a slower
+byte rate and a smaller hourly budget on this cluster, and no export and no live tail even when granted). A cluster with no call has **no profile** and the
+host's limits exactly as before; the profile is never taken from `IHostEnvironment` and never from `Environment(...)`'s free text. ASP.NET Core's
+environment defaults to `Production` when unset and describes the host process, not the cluster (a laptop host reads a production cluster; a production
+host reads its own test cluster), and free text (`prod-eu`, `Prd`) would cap some hosts and silently not others; a host that sets nothing must be the
+application it was. It is an enum with a fixed table, not a host-supplied ceiling set, because the host already has a ceiling set (its own `Limits`)
+and a fixed, documented table is what makes the word mean the same in every host.
+
+**The ceilings** are `KafkaProfileCeilings` (internal, data and one pure function): every limit is `min(host, ceiling)`, the confirmation thresholds are capped again at the
+capped budgets so the result passes `Validate`, and the last row of the table (concurrent scans, the consumer's queue and fetch sizes, the `CreateTimeMargin`
+and the stall timeout) stays the host's: concurrency and the sizes guard the **process's** memory, whatever cluster is read, and the margin and the timeout are
+about correctness, not cost. `MaxExportBytes`, `MaxTailMatches` and `TailPauseAfter` are Test's values for a `Test` cluster; for `Production` the
+export and the tail are forbidden (`KafkaProfileCeilings.ForbidsExport` and `ForbidsTail`, which the services and the engine's `StartTail` ask) and the three
+are capped like Test's, because nothing reads them. The table is in `docs/kstudio.md`, *Profiles*. A test holds the table to the public properties of
+`KafkaScanLimits` by reflection, so a limit added later fails by name until it has a row, and holds for three host settings (the defaults, every limit at its lowest
+bound, every limit at its highest) that no value rises and the result validates.
+
+**Where it applies.** In the engine, so no page can skip it: `PlanAsync` and `ReadRecordAsync` compute `Cap(definition.Profile, settings.Limits)` and only then
+apply the request's `Lower`, which may go below the capped value and throws above it, as above the host's. `IKafkaScanner.LimitsFor(cluster)` hands the capped
+copy to a caller that needs it (the export reads `MaxExportBytes` there). The correlation scan goes through `PlanAsync` and is covered.
+
+**A bucket and an allowance of the cluster's own.** The byte rate protects the broker principal's quota and the egress bill, which are the **cluster's**, so a
+profiled cluster whose capped `BytesPerSecond` is below the host's gets a `KafkaByteRateGovernor` of its own, and one whose capped `OwnerBytesPerHour` is below
+the host's an `OwnerByteBudget` of its own: `KafkaClusterCostControls`, a singleton keyed by the cluster's entry key (`{cluster}/{tenant}` is a cluster with a bucket of its
+own), made on first use and kept, because a rolling hour and a bucket's debt outlive the scan that started them. The scan thread pays both buckets for
+every record, waits on whichever is in the deeper debt, adds to both budgets, and stops with `OwnerBudget` when either is spent; `Start`, `StartTail` and the record
+read refuse `OwnerBudgetSpent` when either has nothing left. A cluster with no profile, or one whose profile lowers neither, has none of this and nothing is allocated.
+
+**A profile never grants.** It has no capability in it: `ForbidsExport` and `ForbidsTail` can only refuse, and the limits above can only fall. `KafkaProfileTests`
+and `ProfileEngineTests` hold the engine's half; the capability half (every profile over every combination of the four capabilities leaves the usable ones a subset
+of those configured, and none under `ReadOnly`) is held where the capabilities live, in the services' tests.
+
+## D48
+
+**D48 — The record index is the host's answer to "where is this key?", and it only ever narrows.** `IKafkaRecordIndex` (public, in `KStudio.Core`, registered
+with `KafkaEngineOptions.RecordIndex<TIndex>()`) lets an application that already knows where its records went (a document that stored the partition and offset
+its producer got back) point a key or correlation search at offset ranges. KStudio ships **no implementation, keeps no index, and the sample has none**: K6 refuses
+a sightings index and any persistent index of ours, and a sample index is the one people copy, so it would be that index one copy away. The docs show twelve lines of
+a host implementing it, and the tests use a hand-written `FakeRecordIndex`, as the family uses no mocking library. One index per engine; a second call replaces the
+first. It is made once, on first use, from the root provider with `ActivatorUtilities.CreateInstance<TIndex>` behind a `Lazy` that is `PublicationOnly`, exactly as a
+topic's `Value<TDecoder>()` is (`KafkaRecordIndexResolver`), so a constructor that throws is tried again on the next plan and never cached as the answer. The options'
+registration is read once into `KafkaEngineSnapshot`, like every other value, so nothing written to the options later reaches the engine.
+
+**When it is asked.** Once per plan, in `PlanAsync`, after parsing, the gates and the partition pruning and before the estimate, when an index is registered and the
+request is a plain search: no cursor (`ContinueFrom`), no search for each topic (`PerTopic`, which is the correlation scan), and `KafkaScanRequest.IgnoreIndex`
+false. A tail and a record read have their own entry points and never reach it. `IndexClauseSelector` takes the search's **top-level conjunction** (an `and`, a
+parenthesised `and` inside it, or a lone clause) and the equalities in it on `key`, `header.<name>` or `ce.<attribute>` with a **string literal**: **one literal per
+question** (OPEN-7), so an `in` list, a prefix, a contains, a range, `any`, `value`, a JSON path, `is null`, and anything under an `or` or a `not` are never asked. The
+first of those in this order is asked: `key`; a header or attribute that is a correlation field (D42, defaults included) on any of the topics; any other; the order typed
+breaks ties. **A field any searched topic redacts is never a candidate, even a `Searchable()` one**: its literal never leaves the engine (D40), and then the next clause
+is. The query carries the cluster's entry key and tenant, the request's topics (every one has passed every gate), the window, the field, the name, the correlation kind
+the topics agree on (none when they disagree), and the literal as typed.
+
+**Narrow, never trust (`IndexNarrower`, pure).** A hint about a topic the search did not name is dropped **before it is counted, logged or shown**, so it cannot even
+use up the cap; so are a hint about a partition the plan does not read and one with an empty or reversed range. At most 64 of the rest are used (the number left
+over is counted and said). Per (topic, partition) the hints become one range, from the least first offset to the greatest end, **intersected with the plan's own
+range** there (the window's offsets, after pruning); an empty intersection drops the partition. The narrowed plan reads that, and every other partition an empty
+range, and the estimate is of the narrowed ranges. The scan reads and judges every record in them as in any scan: **a match is a match the scan found, never a hint
+the index gave**, and a wrong hint finds nothing. If no hint survives the plan is returned as it was, with a note.
+
+**Negatives stay truthful (D38).** `KafkaIndexNarrowing` carries the engine's sentences: the plan note, the caveat beside matches and negatives ("Read only where the
+host's record index pointed (60 of 2,000 offsets); other matches in the window were not looked for."), the narrowed negative, **said only of what this run read** ("No match in the 12 records read from the 2 ranges the host's
+record index named. The rest of the window was not read." - never "no match in the ranges", because a run that continues another reads the rest of them and the
+first may have found matches there), and the audit suffix (`; narrowed by the host's record index to 2 ranges of orders.v1 (60
+offsets)`). The result banner never says "every offset in the window" of a narrowed scan. **Search the whole window** is the same input with `IgnoreIndex`, its own
+plan, estimate, confirmation, scan and audit entry, and is bound to the run on screen (`shownRun`), never to the latest plan. **Continue** from a narrowed scan reads
+the rest of the narrowed ranges: the cursor carries the narrowing in memory (like its pruning claim; the text form carries positions only), the continued plan keeps it
+and never asks again, because its negatives are still about those ranges only.
+
+**What the index cannot do to a search.** It is given the planning token linked with `RequestTimeout`, and the engine does not wait past that for an index that ignores
+its token or blocks its thread before it returns a task: the call runs on the pool (`Task.Run`), so the wait starts at once. It is created once and shared by every
+search, so it takes singletons (an `IDocumentStore`), never a session. At most 64 hints are kept as they come; the rest are only counted. An exception, a timeout, a constructor that throws, or an answer of `None` costs the narrowing and nothing else: the whole window is read, with the note
+`The host's record index did not answer; the whole window is read.` (or `... pointed nowhere in this window ...`). Abandoning the planning is not a failure of the
+index and propagates. Event **9679** (Debug, once per cluster per ten minutes) carries the index's type name, the cluster and the exception's **type** (`Timeout` for a
+timeout): never the query, the literal, the message or a hint. The audit gains the narrowing suffix and nothing else: the call reads no record, so it is no entry of its
+own. `IndexNarrowerTests`, `IndexClauseSelectorTests`, `IndexPlanTests` (with a sentinel literal and exception message that no log line may contain),
+`KafkaSearchIndexTextTests` and `KafkaSearchIndexPageTests` hold all of this; `PublicApiTest_KStudioCore` holds the surface (the interface, `RecordIndex<T>()`, and the four
+types the interface's one method takes and returns).

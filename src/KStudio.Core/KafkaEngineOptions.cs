@@ -2,6 +2,8 @@ using Confluent.Kafka;
 
 using KStudio.Core.Clusters;
 
+using Microsoft.Extensions.DependencyInjection;
+
 namespace KStudio;
 
 /// <summary>
@@ -35,6 +37,36 @@ public class KafkaEngineOptions
 
     /// <summary>The topic descriptors declared for every cluster, in the order declared.</summary>
     internal IReadOnlyList<KeyValuePair<string, KafkaTopicBuilder>> Topics => topics;
+
+    /// <summary>How the engine makes the host's record index (D48), or <see langword="null" /> when none was registered.</summary>
+    internal Func<IServiceProvider, IKafkaRecordIndex>? RecordIndexSource { get; private set; }
+
+    /// <summary>The registered index's type name, for the Settings page and the log; <see langword="null" /> when none was registered.</summary>
+    internal string? RecordIndexName { get; private set; }
+
+    /// <summary>
+    /// Registers the host's record index (AGENTS.md D48): <typeparamref name="TIndex" /> is created once, on first use, from the container (a topic's
+    /// <c>Value&lt;TDecoder&gt;()</c> is made the same way), and is asked once while a search for a key or a correlation value is planned. KStudio ships
+    /// no implementation and keeps no index. There is one index per engine: a second call replaces the first.
+    /// </summary>
+    /// <typeparam name="TIndex">The host's index.</typeparam>
+    /// <returns>These options.</returns>
+    public KafkaEngineOptions RecordIndex<TIndex>()
+        where TIndex : class, IKafkaRecordIndex =>
+        UseRecordIndex(static provider => ActivatorUtilities.CreateInstance<TIndex>(provider), typeof(TIndex).Name);
+
+    /// <summary>The registration behind <see cref="RecordIndex{TIndex}" />: a test hands over an index it built itself.</summary>
+    /// <param name="source">How to make the index.</param>
+    /// <param name="name">The name shown for it.</param>
+    internal KafkaEngineOptions UseRecordIndex(Func<IServiceProvider, IKafkaRecordIndex> source, string name)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(name);
+
+        RecordIndexSource = source;
+        RecordIndexName = name;
+        return this;
+    }
 
     /// <summary>
     /// The sources of further clusters (D43), run once by the registry when it is built. Internal: the one source is KStudio.Wolverine's, granted

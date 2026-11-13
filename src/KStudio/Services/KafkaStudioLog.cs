@@ -13,8 +13,9 @@ namespace KStudio.Services;
 /// <remarks>
 /// <para>
 /// 9600 and 9601 (a search ran, or did not), 9602 and 9603 (a capability or a cluster, topic refused), 9604 (a record opened) are the audit
-/// events; 9605 is a record's value shown (<c>ReadPayloads</c>), and 9606 and 9607 are reserved for export and live tail (M5). 9610 is the
-/// address naming a cluster the visitor may not open (Debug), and 9611 the twin of the studios' 9220. 9612 to 9649 are held for the shell side.
+/// events; 9605 is a record's value shown (<c>ReadPayloads</c>), 9606 an export written, 9607 and 9608 are the live tail's start and end (M5, UI-TAIL) and 9609 an
+/// export or tail that did not run. 9610 is the address naming a cluster the visitor may not open (Debug), and 9611 the twin of the studios'
+/// 9220. 9612 to 9649 are held for the shell side.
 /// The module never logs 9200 or 9201: their templates name a store, a database and a tenant.
 /// </para>
 /// <para>
@@ -93,6 +94,67 @@ internal static partial class KafkaStudioLog
         RecordValueReadCore(logger, user, topic, partition, offset, cluster, tenant);
     }
 
+    /// <summary>9606: records were exported to a file.</summary>
+    public static void RecordsExported(
+        this ILogger logger,
+        string user,
+        long records,
+        string topics,
+        string cluster,
+        string? tenantId,
+        string format,
+        long bytes,
+        bool values,
+        string predicate)
+    {
+        string tenant = StudioLogValue.Cap(tenantId ?? NoTenant)!;
+        (user, topics, cluster, format, predicate) =
+            (StudioLogValue.Cap(user)!, StudioLogValue.Cap(topics)!, StudioLogValue.Cap(cluster)!, StudioLogValue.Cap(format)!, StudioLogValue.CapText(predicate)!);
+
+        RecordsExportedCore(logger, user, records, topics, cluster, tenant, format, bytes, values ? "; values included" : string.Empty, predicate);
+    }
+
+    /// <summary>9607: a live tail started (its first segment). The tail's one audit entry is written when it ends (9608).</summary>
+    public static void TailStarted(this ILogger logger, string user, string topics, string cluster, string? tenantId, string predicate)
+    {
+        string tenant = StudioLogValue.Cap(tenantId ?? NoTenant)!;
+        (user, topics, cluster, predicate) = (StudioLogValue.Cap(user)!, StudioLogValue.Cap(topics)!, StudioLogValue.Cap(cluster)!, StudioLogValue.CapText(predicate)!);
+
+        TailStartedCore(logger, user, topics, cluster, tenant, predicate);
+    }
+
+    /// <summary>9608: a live tail ended, once per tail whatever the number of segments it read in.</summary>
+    public static void TailEnded(
+        this ILogger logger,
+        string user,
+        string topics,
+        string cluster,
+        string? tenantId,
+        string elapsed,
+        int segments,
+        long records,
+        long bytes,
+        long matches,
+        string stopReason,
+        string predicate)
+    {
+        string tenant = StudioLogValue.Cap(tenantId ?? NoTenant)!;
+        (user, topics, cluster, elapsed, stopReason, predicate) =
+            (StudioLogValue.Cap(user)!, StudioLogValue.Cap(topics)!, StudioLogValue.Cap(cluster)!, StudioLogValue.Cap(elapsed)!, StudioLogValue.Cap(stopReason)!, StudioLogValue.CapText(predicate)!);
+
+        TailEndedCore(logger, user, topics, cluster, tenant, elapsed, segments, records, bytes, matches, stopReason, predicate);
+    }
+
+    /// <summary>9609: an export or a live tail did not run.</summary>
+    public static void ActionNotRun(this ILogger logger, string user, string action, string topics, string cluster, string? tenantId, string reason, string predicate)
+    {
+        string tenant = StudioLogValue.Cap(tenantId ?? NoTenant)!;
+        (user, action, topics, cluster, reason, predicate) =
+            (StudioLogValue.Cap(user)!, StudioLogValue.Cap(action)!, StudioLogValue.Cap(topics)!, StudioLogValue.Cap(cluster)!, StudioLogValue.CapText(reason.TrimEnd('.'))!, StudioLogValue.CapText(predicate)!);
+
+        ActionNotRunCore(logger, user, action, topics, cluster, tenant, reason, predicate);
+    }
+
     /// <summary>9610: the address named a cluster that is unknown or refused, and another was opened.</summary>
     public static void ClusterAddressIgnored(this ILogger logger, string cluster, string opened)
     {
@@ -151,6 +213,52 @@ internal static partial class KafkaStudioLog
         Level = LogLevel.Information,
         Message = "KStudio user {User} read the value of record {Topic}/{Partition}/{Offset} of cluster {Cluster}, tenant {TenantId}")]
     private static partial void RecordValueReadCore(ILogger logger, string user, string topic, int partition, long offset, string cluster, string tenantId);
+
+    [LoggerMessage(
+        EventId = 9606,
+        Level = LogLevel.Information,
+        Message = "KStudio user {User} exported {Records} records of topics {Topics} of cluster {Cluster}, tenant {TenantId} as {Format}: {Bytes} bytes{Values}. Predicate: {Predicate}")]
+    private static partial void RecordsExportedCore(
+        ILogger logger,
+        string user,
+        long records,
+        string topics,
+        string cluster,
+        string tenantId,
+        string format,
+        long bytes,
+        string values,
+        string predicate);
+
+    [LoggerMessage(
+        EventId = 9607,
+        Level = LogLevel.Information,
+        Message = "KStudio user {User} started a live tail of topics {Topics} of cluster {Cluster}, tenant {TenantId}. Predicate: {Predicate}")]
+    private static partial void TailStartedCore(ILogger logger, string user, string topics, string cluster, string tenantId, string predicate);
+
+    [LoggerMessage(
+        EventId = 9608,
+        Level = LogLevel.Information,
+        Message = "KStudio user {User} tailed topics {Topics} of cluster {Cluster}, tenant {TenantId} for {Elapsed} in {Segments} segments: {Records} records and {Bytes} bytes read, {Matches} matches, ended by {StopReason}. Predicate: {Predicate}")]
+    private static partial void TailEndedCore(
+        ILogger logger,
+        string user,
+        string topics,
+        string cluster,
+        string tenantId,
+        string elapsed,
+        int segments,
+        long records,
+        long bytes,
+        long matches,
+        string stopReason,
+        string predicate);
+
+    [LoggerMessage(
+        EventId = 9609,
+        Level = LogLevel.Information,
+        Message = "KStudio user {User}'s {Action} of topics {Topics} of cluster {Cluster}, tenant {TenantId} did not run: {Reason}. Predicate: {Predicate}")]
+    private static partial void ActionNotRunCore(ILogger logger, string user, string action, string topics, string cluster, string tenantId, string reason, string predicate);
 
     [LoggerMessage(
         EventId = 9610,

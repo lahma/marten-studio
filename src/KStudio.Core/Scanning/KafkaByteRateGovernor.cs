@@ -28,9 +28,21 @@ internal sealed class KafkaByteRateGovernor
     /// <param name="settings">The options as validated.</param>
     /// <param name="time">The clock.</param>
     public KafkaByteRateGovernor(KafkaEngineSnapshot settings, TimeProvider time)
+        : this(settings.Limits.BytesPerSecond, time)
     {
+    }
+
+    /// <summary>
+    /// Creates a governor at a rate of its own: the bucket of one profiled cluster (D47), on top of the process-wide one, so that a scan of that
+    /// cluster is paced by the slower of the two.
+    /// </summary>
+    /// <param name="bytesPerSecond">The cluster's ceiling, in bytes per second (positive).</param>
+    /// <param name="time">The clock.</param>
+    public KafkaByteRateGovernor(long bytesPerSecond, TimeProvider time)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(bytesPerSecond, 0);
         this.time = time;
-        rate = settings.Limits.BytesPerSecond;
+        rate = bytesPerSecond;
         capacity = rate;
         tokens = capacity;
         lastTicks = time.GetUtcNow().UtcTicks;
@@ -191,15 +203,34 @@ internal sealed class KafkaScanLimiter(KafkaEngineSnapshot settings)
 /// The bytes one owner may read in any rolling hour (AGENTS.md D41, decision 9.11), on the <see cref="TimeProvider" />. Checked when a scan
 /// starts and enforced while it reads; a sampling read for an estimate counts too.
 /// </summary>
-internal sealed class OwnerByteBudget(KafkaEngineSnapshot settings, TimeProvider time)
+internal sealed class OwnerByteBudget
 {
     private const long HourSeconds = 3_600;
     private const long SweepEverySeconds = 60;
 
+    private readonly TimeProvider time;
     private long lastSweepSecond;
     private readonly Lock gate = new();
     private readonly Dictionary<string, List<(long Second, long Bytes)>> reads = new(StringComparer.Ordinal);
-    private readonly long budget = settings.Limits.OwnerBytesPerHour;
+    private readonly long budget;
+
+    /// <summary>Creates the process-wide budget from the engine's validated limits.</summary>
+    /// <param name="settings">The options as validated.</param>
+    /// <param name="time">The clock.</param>
+    public OwnerByteBudget(KafkaEngineSnapshot settings, TimeProvider time)
+        : this(settings.Limits.OwnerBytesPerHour, time)
+    {
+    }
+
+    /// <summary>Creates a budget of its own: the allowance of one profiled cluster (D47), counted beside the process-wide one.</summary>
+    /// <param name="bytesPerHour">The allowance, in bytes per rolling hour (positive).</param>
+    /// <param name="time">The clock.</param>
+    public OwnerByteBudget(long bytesPerHour, TimeProvider time)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(bytesPerHour, 0);
+        this.time = time;
+        budget = bytesPerHour;
+    }
 
     /// <summary>The owner's hourly budget, in bytes.</summary>
     public long BytesPerHour => budget;

@@ -1317,6 +1317,28 @@
         }
     };
 
+    // Beside download.text; additive. A stream from .NET (DotNetStreamReference, sent in chunks over the circuit) saved as a file: for a file
+    // too large to pass as one interop argument. Returning false is a valid answer, never an exception.
+    if (typeof window.martenStudio.download.stream !== "function") {
+        window.martenStudio.download.stream = async function (fileName, mime, streamRef) {
+            try {
+                const buffer = await streamRef.arrayBuffer();
+                const blob = new Blob([buffer], { type: mime || "application/octet-stream" });
+                const url = URL.createObjectURL(blob);
+                const anchor = document.createElement("a");
+                anchor.href = url;
+                anchor.download = fileName;
+                document.body.appendChild(anchor);
+                anchor.click();
+                document.body.removeChild(anchor);
+                setTimeout(function () { URL.revokeObjectURL(url); }, 0);
+                return true;
+            } catch (e) {
+                return false;
+            }
+        };
+    }
+
     window.martenStudio.scroll = window.martenStudio.scroll || {};
 
     if (typeof window.martenStudio.scroll.intoView !== "function") {

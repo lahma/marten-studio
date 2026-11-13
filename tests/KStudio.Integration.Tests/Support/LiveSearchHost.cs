@@ -27,11 +27,12 @@ internal sealed class LiveSearchHost : IAsyncDisposable
     private readonly IServiceScope scope;
     private readonly HashSet<string> refused = new(StringComparer.Ordinal);
 
-    private LiveSearchHost(ServiceProvider provider, CapturingLoggerProvider logs, HashSet<string> refused)
+    private LiveSearchHost(ServiceProvider provider, CapturingLoggerProvider logs, HashSet<string> refused, KafkaProfile? profile)
     {
         this.provider = provider;
         this.refused = refused;
         Logs = logs;
+        Entry = new KafkaClusterEntry("live", null, "Live", null, profile);
         scope = provider.CreateScope();
     }
 
@@ -39,9 +40,15 @@ internal sealed class LiveSearchHost : IAsyncDisposable
     public CapturingLoggerProvider Logs { get; }
 
     /// <summary>The cluster entry the host registered.</summary>
-    public KafkaClusterEntry Entry { get; } = new("live", null, "Live", null);
+    public KafkaClusterEntry Entry { get; }
 
     public KafkaSearchService Search => scope.ServiceProvider.GetRequiredService<KafkaSearchService>();
+
+    /// <summary>The export service (D45).</summary>
+    public KafkaExportService Export => scope.ServiceProvider.GetRequiredService<KafkaExportService>();
+
+    /// <summary>The live tail service (D46).</summary>
+    public KafkaTailService Tail => scope.ServiceProvider.GetRequiredService<KafkaTailService>();
 
     /// <summary>The related-records service (D42).</summary>
     public KafkaCorrelationService Correlation => scope.ServiceProvider.GetRequiredService<KafkaCorrelationService>();
@@ -63,7 +70,8 @@ internal sealed class LiveSearchHost : IAsyncDisposable
     /// <param name="fixture">The broker.</param>
     /// <param name="user">The Kafka principal the engine reads as.</param>
     /// <param name="configure">Sets KStudio's options (topics, limits).</param>
-    public static LiveSearchHost Create(KafkaFixture fixture, string user, Action<KafkaStudioOptions>? configure = null)
+    /// <param name="profile">The cluster's profile, or <see langword="null" /> for none.</param>
+    public static LiveSearchHost Create(KafkaFixture fixture, string user, Action<KafkaStudioOptions>? configure = null, KafkaProfile? profile = null)
     {
         Assert.SkipUnless(DockerAvailability.IsAvailable, DockerAvailability.SkipReason);
         DockerAvailability.ThrowIfMissingOnContinuousIntegration();
@@ -81,7 +89,15 @@ internal sealed class LiveSearchHost : IAsyncDisposable
             policy => policy.RequireAssertion(context => context.Resource is KafkaTopicResource resource && (resource.Topic is null || !refused.Contains(resource.Topic)))));
         services.AddKafkaStudio(options =>
         {
-            options.AddCluster("live", fixture.Client(user), static cluster => cluster.DisplayName("Live"));
+            options.AddCluster("live", fixture.Client(user), cluster =>
+            {
+                cluster.DisplayName("Live");
+
+                if (profile is { } p)
+                {
+                    cluster.Profile(p);
+                }
+            });
             options.Capabilities.SearchRecords = true;
             options.ClusterAuthorizationPolicy = "kafka-topics";
             configure?.Invoke(options);
@@ -90,7 +106,7 @@ internal sealed class LiveSearchHost : IAsyncDisposable
         // After the studio's own: the circuit's visitor, signed in.
         services.AddScoped<AuthenticationStateProvider, SignedIn>();
 
-        return new LiveSearchHost(services.BuildServiceProvider(), logs, refused);
+        return new LiveSearchHost(services.BuildServiceProvider(), logs, refused, profile);
     }
 
     public async ValueTask DisposeAsync()

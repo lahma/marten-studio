@@ -69,8 +69,10 @@ internal sealed class StudioLiveUpdates : IAsyncDisposable
     private CancellationTokenSource? cancellation;
     private Task? loop;
     private Func<CancellationToken, Task>? onTick;
+    private readonly object raiseGate = new();
+    private Task raised = Task.CompletedTask;
     private volatile bool hidden;
-    private bool disposed;
+    private volatile bool disposed;
 
     /// <remarks>
     /// <paramref name="throttle" /> is optional so that a test can build a loop by hand; the factory
@@ -100,6 +102,18 @@ internal sealed class StudioLiveUpdates : IAsyncDisposable
     /// </remarks>
     public event Func<Exception, Task>? Failed;
 
+    /// <summary>
+    /// Raised when the tab hides or shows, after <see cref="IsHidden" /> changed; never for the state the watch started in (that one is the
+    /// watch call's answer, not a change). The argument is whether the tab is now hidden. A page that must stop reading while nobody looks - a module's
+    /// page that follows a stream as it grows - subscribes; everything else keeps polling on the flag and never hears of it.
+    /// </summary>
+    /// <remarks>
+    /// Raised on the thread pool, one change at a time and in the order the browser sent them, and only when the value changed: the same value sent
+    /// twice is not a change. <c>Func&lt;bool, Task&gt;</c> and not an <see cref="EventHandler" /> (hard rule 6), and a handler that throws is handed to
+    /// <see cref="Failed" /> like a tick's failure, so it never reaches the circuit.
+    /// </remarks>
+    public event Func<bool, Task>? VisibilityChanged;
+
     /// <summary>Whether the browser says this tab is hidden. Polling is suspended while it is.</summary>
     public bool IsHidden => hidden;
 
@@ -111,6 +125,18 @@ internal sealed class StudioLiveUpdates : IAsyncDisposable
 
     /// <summary>How many ticks have actually run, for a test and for nothing else.</summary>
     internal int TickCount { get; private set; }
+
+    /// <summary>The raise of the last visibility change, finished or not: what a test waits on to know that every handler has heard of it. For a test and for nothing else.</summary>
+    internal Task VisibilityChangesRaised
+    {
+        get
+        {
+            lock (raiseGate)
+            {
+                return raised;
+            }
+        }
+    }
 
     /// <summary>
     /// Starts polling.
@@ -176,7 +202,23 @@ internal sealed class StudioLiveUpdates : IAsyncDisposable
     /// </remarks>
     /// <param name="isHidden">Whether the tab is now hidden.</param>
     [JSInvokable]
-    public void OnVisibilityChanged(bool isHidden) => hidden = isHidden;
+    public void OnVisibilityChanged(bool isHidden)
+    {
+        bool changed;
+
+        lock (raiseGate)
+        {
+            changed = hidden != isHidden;
+            hidden = isHidden;
+
+            if (changed && !disposed && VisibilityChanged is not null)
+            {
+                // Chained, so that two quick changes reach the handlers in the order they happened; the chain never faults (the raise catches).
+                Task previous = raised;
+                raised = Task.Run(() => RaiseVisibilityChangedAsync(previous, isHidden));
+            }
+        }
+    }
 
     /// <summary>
     /// Runs one tick now, outside the timer. What a Refresh button calls.
@@ -295,30 +337,82 @@ internal sealed class StudioLiveUpdates : IAsyncDisposable
                 logger.LogDebug(exception, "A Marten Studio live update failed");
             }
 
-            Func<Exception, Task>? failed = Failed;
-            if (failed is not null)
+            await ReportFailureAsync(exception).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Hands a failure to <see cref="Failed" />; a handler that throws is a bug in a page and is logged as 9220, never rethrown.</summary>
+    private async Task ReportFailureAsync(Exception exception)
+    {
+        Func<Exception, Task>? failed = Failed;
+        if (failed is not null)
+        {
+            try
+            {
+                await failed(exception).ConfigureAwait(false);
+            }
+            catch (Exception handlerFailure) when (handlerFailure is not OperationCanceledException)
+            {
+                // A bug in a page, on a loop that runs every RefreshInterval while the read keeps
+                // failing: event 9220, a Warning once per kind of failure per window.
+                LogLevel level = StudioLogThrottle.LevelOrWarning(
+                    throttle, "LiveUpdates.FailedHandler", null, null, StudioLogThrottle.KindOf(handlerFailure));
+
+                if (product == StudioProduct.PostgresStudio)
+                {
+                    logger.PostgresStudioLiveUpdateHandlerFailed(level, handlerFailure);
+                }
+                else
+                {
+                    logger.LiveUpdateHandlerFailed(level, handlerFailure);
+                }
+            }
+        }
+    }
+
+    private async Task RaiseVisibilityChangedAsync(Task previous, bool isHidden)
+    {
+        // The previous raise never faults, but a chain must not depend on that.
+        try
+        {
+            await previous.ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // Already reported by the raise that failed.
+        }
+
+        Func<bool, Task>? changed = VisibilityChanged;
+        if (changed is null || disposed)
+        {
+            return;
+        }
+
+        try
+        {
+            // Each subscriber on its own: one that throws must not keep the others from hearing of the change.
+            foreach (Func<bool, Task> handler in changed.GetInvocationList().Cast<Func<bool, Task>>())
             {
                 try
                 {
-                    await failed(exception).ConfigureAwait(false);
+                    await handler(isHidden).ConfigureAwait(false);
                 }
-                catch (Exception handlerFailure) when (handlerFailure is not OperationCanceledException)
+                catch (OperationCanceledException)
                 {
-                    // A bug in a page, on a loop that runs every RefreshInterval while the read keeps
-                    // failing: event 9220, a Warning once per kind of failure per window.
-                    LogLevel level = StudioLogThrottle.LevelOrWarning(
-                        throttle, "LiveUpdates.FailedHandler", null, null, StudioLogThrottle.KindOf(handlerFailure));
-
-                    if (product == StudioProduct.PostgresStudio)
-                    {
-                        logger.PostgresStudioLiveUpdateHandlerFailed(level, handlerFailure);
-                    }
-                    else
-                    {
-                        logger.LiveUpdateHandlerFailed(level, handlerFailure);
-                    }
+                    // The page ended while it handled the change.
+                }
+                catch (Exception exception)
+                {
+                    LastError = exception;
+                    logger.LogDebug(exception, "A live update visibility handler failed");
+                    await ReportFailureAsync(exception).ConfigureAwait(false);
                 }
             }
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // The last resort: nothing here may become an unobserved exception.
+            logger.LogDebug(exception, "A live update visibility handler failed to be reported");
         }
     }
 

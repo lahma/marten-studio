@@ -119,11 +119,14 @@ if (wolverine)
     // After Wolverine's own hosted service, so that its bus is up when the sender publishes.
     builder.Services.AddSingleton(new SampleKafkaAddress(kafka.BootstrapServers));
     builder.Services.AddHostedService<CheckoutSender>();
+
+    // The sample's own heartbeat, one record every two seconds, for the live tail to follow. Written by this host's producer, never by KStudio.
+    builder.Services.AddHostedService<SampleTicker>();
 }
 
 builder.Services.AddKafkaStudio(o =>
 {
-    SampleKafkaRegistration.Configure(o, kafka.BootstrapServers);
+    SampleKafkaRegistration.Configure(o, kafka.BootstrapServers, builder.Configuration);
 
     if (wolverine)
     {

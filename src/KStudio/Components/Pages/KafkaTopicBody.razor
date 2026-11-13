@@ -256,7 +256,10 @@
         <h2 class="ms-section-title">Search this topic</h2>
         @if (Capabilities.IsEnabled(KafkaCapability.SearchRecords))
         {
-            <p><a class="ms-button" href="@SearchHref(overview.Name)">Search this topic</a></p>
+            <p>
+                <a class="ms-button" href="@SearchHref(overview.Name)">Search this topic</a>
+                <a class="ms-button" href="@TailHref(overview.Name)">Live tail</a>
+            </p>
         }
         else
         {
@@ -298,6 +301,9 @@
     public Task? Ready { get; set; }
 
     private string TopicsHref => KafkaAddress.Href(Settings, KafkaAddress.TopicsRoute, State.ActiveCluster?.Key);
+
+    private string TailHref(string topic) =>
+        KafkaAddress.Href(Settings, KafkaAddress.TailRoute, State.ActiveCluster?.Key, (KafkaAddress.TopicsParameter, topic));
 
     private string SearchHref(string topic) =>
         KafkaAddress.Href(Settings, KafkaAddress.SearchRoute, State.ActiveCluster?.Key, (KafkaAddress.TopicParameter, topic));

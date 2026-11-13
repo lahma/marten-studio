@@ -145,6 +145,18 @@ public class ScanEngineTests
                 scan.Reader.Enqueue(new WireReadOutcome.Failure(new WireError.Failed("Local_Fatal", IsFatal: true), null));
                 return await scan.Handle.Result.Bounded();
             },
+            [KafkaScanStopReason.Paused] = async () =>
+            {
+                // Only a live tail stops for this reason (D-M5 decision 3.3): the caller paused its segment.
+                ScanFixture fixture = ScanFixture.Create();
+                await using ScanFixture guard = fixture;
+                string topic = fixture.Topic("paused");
+                fixture.Produce(topic, 0, 0, "k", "v");
+                await using KafkaScanHandle handle = await fixture.TailAsync(TailRig.Request([topic]));
+                handle.UntilCaughtUp();
+                handle.Stop(KafkaScanStopReason.Paused);
+                return await handle.Result.Bounded();
+            },
         };
 
     private static readonly IReadOnlyDictionary<PartitionEndState, Func<Task<KafkaScanResult>>> EndScenarios =
@@ -597,13 +609,13 @@ public class ScanEngineTests
 
         public string Topic { get; }
 
-        public static async Task<ScriptedScan> StartAsync(Action<KafkaEngineOptions>? configure = null, string? predicate = null)
+        public static async Task<ScriptedScan> StartAsync(Action<KafkaEngineOptions>? configure = null, string? predicate = null, Action<KafkaClusterBuilder>? cluster = null)
         {
             ScriptedReader reader = new();
             int opened = 0;
 
             // The first consumer a plan opens is the size sampler's, and reads the fake; the scan's is the second, and reads the script.
-            ScanFixture fixture = ScanFixture.Create(configure, wrap: wire => new ScriptedWire(wire, options => Interlocked.Increment(ref opened) == 1 ? wire.OpenReader(options) : reader));
+            ScanFixture fixture = ScanFixture.Create(configure, wrap: wire => new ScriptedWire(wire, options => Interlocked.Increment(ref opened) == 1 ? wire.OpenReader(options) : reader), cluster: cluster);
             string topic = fixture.Topic("scripted");
 
             for (int i = 0; i < 100; i++)

@@ -1,0 +1,10 @@
+@page "/kafka/tail"
+
+<PageTitle>Kafka live tail</PageTitle>
+
+@* Live tail (D-M5 decision 3.7): the cluster and the topics are in the query string and the search text is in the fragment, as in Search. The page holds
+   no logic; the body is created below the frame only once reads are released, and it never starts a tail by itself. *@
+
+<KafkaPageFrame>
+    <KafkaTailBody />
+</KafkaPageFrame>

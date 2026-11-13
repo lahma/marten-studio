@@ -154,8 +154,11 @@ public class AddKafkaStudioTests
         module.ProductName.Should().Be("KStudio for Apache Kafka®");
         module.Capabilities.Should().Equal(
             new StudioModuleCapability("SearchRecords", "KafkaStudioOptions.Capabilities.SearchRecords", Configured: true),
-            new StudioModuleCapability("ReadPayloads", "KafkaStudioOptions.Capabilities.ReadPayloads", Configured: false));
-        module.Navigation.Should().ContainSingle().Which.Items.Select(static x => x.Label).Should().Equal("Topics", "Search", "Cluster settings");
+            new StudioModuleCapability("ReadPayloads", "KafkaStudioOptions.Capabilities.ReadPayloads", Configured: false),
+            new StudioModuleCapability("ExportRecords", "KafkaStudioOptions.Capabilities.ExportRecords", Configured: false),
+            new StudioModuleCapability("LiveTail", "KafkaStudioOptions.Capabilities.LiveTail", Configured: false));
+        module.Navigation.Should().ContainSingle().Which.Items.Select(static x => x.Label).Should().Equal("Topics", "Search", "Live tail", "Cluster settings");
+        module.Navigation.Single().Items.Single(static x => x.Label == "Live tail").IsShown.Should().BeNull("the entry is drawn whatever the capability: its page says which option turns it on");
     }
 
     [Fact]

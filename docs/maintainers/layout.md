@@ -387,6 +387,10 @@ src/KStudio.Core/Redaction/              Redaction inside the engine (D40): the 
                                          redactor every match is made through
 src/KStudio.Core/Correlation/            Correlation (D42): a topic's declared fields and their kinds, the extractor that reads an
                                          anchor's literal fields, the per-topic query builder and the duplicate finder
+src/KStudio.Core/Export/                 The export writer (D45): rows from redacted matches, JSON Lines, CSV and one value, and the file
+                                         name; pure
+src/KStudio.Core/Index/                  The record-index seam (D48): the host's interface, its query and hints, the narrower and the
+                                         planner that asks it
 tests/KStudio.Tests/Conventions/         KStudio's fences and convention scans
 tests/KStudio.Tests/Registration/        AddKafkaStudio, the version guard, the startup guard
 tests/KStudio.Tests/Endpoints/           Mounting, endpoint authorization, a host with no data source
@@ -411,6 +415,8 @@ tests/KStudio.Tests/Redaction/           The deny-list, the topic's rules, the m
 tests/KStudio.Tests/Correlation/         The declarations and their bounds, the extractor, the per-topic query and the duplicate finder
 tests/KStudio.Tests/Scanning/            The scan engine on the fake: every stop reason and end state, the cursor, the governor, the
                                          limits, the estimate, batching and the lifecycle
+tests/KStudio.Tests/Export/              Export writer, redaction and file name tests (D45)
+tests/KStudio.Tests/Index/               Record-index narrowing, clause choice and planning tests (D48)
 tests/KStudio.Tests/Partitioning/        The partitioners' known answers, the key set, the verification by sampling and the pruned scan
 tests/KStudio.Integration.Tests/         KStudio's live suite: apache/kafka 3.9 and 4.x with SASL and ACLs, through
                                          Testcontainers.Kafka; needs Docker

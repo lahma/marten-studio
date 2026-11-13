@@ -169,8 +169,9 @@ internal sealed class PartitionerVerifier(
     /// <summary>Decides one topic.</summary>
     /// <param name="request">The topic and what the search says about its key.</param>
     /// <param name="owner">Whose scan it is: the sample's bytes count against the owner's budget.</param>
+    /// <param name="cost">The cluster's own allowance (D47): a verification is refused when either allowance is spent, and its bytes count against both.</param>
     /// <param name="cancellationToken">Abandons the sampling.</param>
-    public async Task<KafkaTopicPruning> DecideAsync(PruneRequest request, KafkaScanOwner owner, CancellationToken cancellationToken)
+    public async Task<KafkaTopicPruning> DecideAsync(PruneRequest request, KafkaScanOwner owner, KafkaClusterCost cost, CancellationToken cancellationToken)
     {
         KafkaPartitioner? partitioner = request.Descriptor.Partitioner;
 
@@ -257,7 +258,7 @@ internal sealed class PartitionerVerifier(
             return NotPruned(request, partitioner, null, "the window has fewer than 400 offsets, so it is read whole");
         }
 
-        PartitionerCheck check = await CheckAsync(request, partitioner, owner, cancellationToken).ConfigureAwait(false);
+        PartitionerCheck check = await CheckAsync(request, partitioner, owner, cost, cancellationToken).ConfigureAwait(false);
 
         switch (check)
         {
@@ -324,7 +325,7 @@ internal sealed class PartitionerVerifier(
     private static KafkaTopicPruning NotPruned(PruneRequest request, KafkaPartitioner? partitioner, PartitionerCheck? check, string reason) =>
         new(request.Topic, partitioner?.Name, request.PartitionCount, [], check, reason, request.KeyRedacted);
 
-    private async Task<PartitionerCheck> CheckAsync(PruneRequest request, KafkaPartitioner partitioner, KafkaScanOwner owner, CancellationToken cancellationToken)
+    private async Task<PartitionerCheck> CheckAsync(PruneRequest request, KafkaPartitioner partitioner, KafkaScanOwner owner, KafkaClusterCost cost, CancellationToken cancellationToken)
     {
         string key = string.Create(CultureInfo.InvariantCulture, $"{request.Cluster}|{request.Topic}|{partitioner.Name}|{request.PartitionCount}");
 
@@ -334,7 +335,7 @@ internal sealed class PartitionerVerifier(
         }
 
         // An owner who has read the hour's bytes reads no more, a verification included.
-        if (budget.Remaining(owner.Key) <= 0)
+        if (cost.Remaining(owner.Key, budget) <= 0)
         {
             LogFailure(request, "OwnerBudget");
             return new PartitionerCheck.NotReadable();
@@ -352,7 +353,7 @@ internal sealed class PartitionerVerifier(
             }
 
             PartitionerCheck check = await Task.Factory
-                .StartNew(() => Sample(request, partitioner, owner, cancellationToken), CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default)
+                .StartNew(() => Sample(request, partitioner, owner, cost, cancellationToken), CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default)
                 .ConfigureAwait(false);
 
             if (check is PartitionerCheck.Mismatch mismatch)
@@ -373,7 +374,7 @@ internal sealed class PartitionerVerifier(
             ? known.Mismatch
             : null;
 
-    private PartitionerCheck Sample(PruneRequest request, KafkaPartitioner partitioner, KafkaScanOwner owner, CancellationToken cancellationToken)
+    private PartitionerCheck Sample(PruneRequest request, KafkaPartitioner partitioner, KafkaScanOwner owner, KafkaClusterCost cost, CancellationToken cancellationToken)
     {
         List<PartitionRange> ranges = [.. request.Ranges.Where(static x => !x.IsEmpty)];
         long bytes = 0;
@@ -381,7 +382,7 @@ internal sealed class PartitionerVerifier(
 
         try
         {
-            long byteBound = Math.Min(MaxBytes, Math.Max(0, budget.Remaining(owner.Key)));
+            long byteBound = Math.Min(MaxBytes, Math.Max(0, cost.Remaining(owner.Key, budget)));
             long offsets = ranges.Sum(static x => x.End - x.Start);
             int target = (int) Math.Min(MaxSampleRecords, offsets / 4);
             int quota = Math.Max(MinPerRange, (int) Math.Ceiling(target / (double) ranges.Count));
@@ -537,6 +538,7 @@ internal sealed class PartitionerVerifier(
         finally
         {
             budget.Add(owner.Key, bytes);
+            cost.OwnerBudget?.Add(owner.Key, bytes);
 
             try
             {

@@ -3,7 +3,7 @@ using Microsoft.Extensions.Logging;
 namespace KStudio.Core.Logging;
 
 /// <summary>
-/// The scan engine's log events, 9665 to 9676 (decision 11; 9675 is the payload rules' and 9676 the partitioner verification's in M3). They carry cluster keys, topics, partitions, offsets, counts, enum names and
+/// The scan engine's log events, 9665 to 9676 (decision 11; 9675 is the payload rules' and 9676 the partitioner verification's in M3) and 9679 (the record index, M5). They carry cluster keys, topics, partitions, offsets, counts, enum names and
 /// exception type names, and never a predicate, a literal, a key, a header, a value, an owner or a user: the audit of a scan is KStudio's.
 /// </summary>
 internal static partial class KStudioLog
@@ -44,4 +44,8 @@ internal static partial class KStudioLog
 
     [LoggerMessage(EventId = 9676, Level = LogLevel.Debug, Message = "KStudio could not read a partitioner verification sample of {Topic} on {Cluster}: {Kind}")]
     public static partial void PartitionerSampleFailed(ILogger logger, string topic, string cluster, string kind);
+
+    /// <summary>9679: the host's record index (AGENTS.md D48) threw, timed out or could not be created, so the search read its whole window. The index's type, the cluster and the failure's type only: never the query, the literal or the message. Once per cluster per ten minutes.</summary>
+    [LoggerMessage(EventId = 9679, Level = LogLevel.Debug, Message = "KStudio's record index {Index} did not answer for cluster {Cluster}: {Kind}")]
+    public static partial void RecordIndexNotAnswered(ILogger logger, string index, string cluster, string kind);
 }

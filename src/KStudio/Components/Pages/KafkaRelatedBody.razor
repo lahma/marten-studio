@@ -541,7 +541,7 @@
             selected.Clear();
             selected.AddRange(addressTopics.Count > 0 ? addressTopics : readable.Take(KafkaStudioText.MaxSearchTopics));
             hiddenTopics = addressTopics.Count > 0 ? 0 : Math.Max(0, readable.Count - selected.Count);
-            allowanceLeft = await Search.OwnerBytesLeftThisHourAsync();
+            allowanceLeft = await Search.OwnerBytesLeftThisHourAsync(State.ActiveCluster);
 
             await RefreshLanesAsync();
         }
@@ -956,7 +956,7 @@
         {
             try
             {
-                allowanceLeft = await Search.OwnerBytesLeftThisHourAsync();
+                allowanceLeft = await Search.OwnerBytesLeftThisHourAsync(State.ActiveCluster);
                 await InvokeAsync(StateHasChanged);
             }
             catch (Exception e) when (e is OperationCanceledException or ObjectDisposedException || StudioLiveUpdates.IsInteropUnavailable(e))

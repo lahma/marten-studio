@@ -89,7 +89,7 @@ internal sealed class KafkaReadGrants(KafkaCapabilityGuard capabilities, KafkaAu
 
             try
             {
-                capabilities.Require(KafkaCapability.ReadPayloads);
+                capabilities.RequireOne(KafkaCapability.ReadPayloads);
             }
             catch (KafkaCapabilityDeniedException denial)
             {

@@ -46,6 +46,7 @@ internal readonly struct KafkaField<T>
 /// <param name="BaseKey">The cluster's key without a tenant.</param>
 /// <param name="TenantId">The tenant this entry is a cluster of, or <see langword="null" />.</param>
 /// <param name="Source">The source that contributed the cluster, or <see langword="null" /> for a host cluster.</param>
+/// <param name="Profile">The profile the host set with <c>KafkaClusterBuilder.Profile</c>, or <see langword="null" /> for none (never inferred: D47).</param>
 internal sealed record KafkaClusterInfo(
     string Key,
     string DisplayName,
@@ -53,7 +54,8 @@ internal sealed record KafkaClusterInfo(
     IReadOnlyList<string> ConsumerGroups,
     string BaseKey,
     string? TenantId,
-    string? Source);
+    string? Source,
+    KafkaProfile? Profile = null);
 
 /// <summary>A topic in the list.</summary>
 /// <param name="Name">The name.</param>

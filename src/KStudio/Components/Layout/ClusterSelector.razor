@@ -40,6 +40,13 @@
             <span class="ms-k-cluster-name">@only.Label</span>
         </div>
     }
+
+    @* The cluster's profile, beside its name (D-M5 decision 4.6): a Production cluster is drawn in the danger colour, as the shell draws an environment. *@
+    @if (State.ActiveCluster?.Profile is { } profile)
+    {
+        <span class="ms-chip ms-k-profile-chip ms-k-profile-@profile.ToString().ToLowerInvariant()"
+              title="@KafkaStudioText.ProfileChipTitle(profile)">@profile profile</span>
+    }
 </div>
 
 @code {

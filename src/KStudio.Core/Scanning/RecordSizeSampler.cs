@@ -46,6 +46,7 @@ internal sealed class RecordSizeSampler(
     /// <param name="ranges">The topic's ranges of this scan.</param>
     /// <param name="isolation">The isolation the scan reads under.</param>
     /// <param name="owner">The owner the bytes are counted against.</param>
+    /// <param name="cost">The cluster's own allowance (D47): the sample's bytes count against it as well as against the process's.</param>
     /// <param name="cancellationToken">Abandons the sampling.</param>
     public async Task<long?> MeanRecordBytesAsync(
         string cluster,
@@ -53,6 +54,7 @@ internal sealed class RecordSizeSampler(
         IReadOnlyList<PartitionRange> ranges,
         WireIsolation isolation,
         KafkaScanOwner owner,
+        KafkaClusterCost cost,
         CancellationToken cancellationToken)
     {
         string key = cluster + "|" + topic;
@@ -81,7 +83,7 @@ internal sealed class RecordSizeSampler(
             }
 
             long? mean = await Task.Factory
-                .StartNew(() => Sample(cluster, topic, largest, isolation, owner), CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default)
+                .StartNew(() => Sample(cluster, topic, largest, isolation, owner, cost), CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default)
                 .ConfigureAwait(false);
 
             cache[key] = (time.GetUtcNow(), mean);
@@ -93,7 +95,7 @@ internal sealed class RecordSizeSampler(
         }
     }
 
-    private long? Sample(string cluster, string topic, List<PartitionRange> ranges, WireIsolation isolation, KafkaScanOwner owner)
+    private long? Sample(string cluster, string topic, List<PartitionRange> ranges, WireIsolation isolation, KafkaScanOwner owner, KafkaClusterCost cost)
     {
         long bytes = 0;
         int records = 0;
@@ -159,6 +161,7 @@ internal sealed class RecordSizeSampler(
         finally
         {
             budget.Add(owner.Key, bytes);
+            cost.OwnerBudget?.Add(owner.Key, bytes);
 
             try
             {

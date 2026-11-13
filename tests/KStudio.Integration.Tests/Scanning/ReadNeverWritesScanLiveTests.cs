@@ -59,6 +59,83 @@ public abstract class ReadNeverWritesScanLiveTests(KafkaFixture fixture)
         }
     }
 
+    /// <summary>
+    /// The same rule for a live tail (D-M5 decision 3.10), which runs for much longer than a scan and stops and resumes: records are produced during
+    /// it, and afterwards no topic was created, neither segment committed an offset and no group named for a scan exists. The principal that cannot
+    /// reach a group at all still reads. <c>admin</c> (who could have created a topic or joined a group) tails for a minute; the others for ten seconds.
+    /// </summary>
+    [Theory]
+    [InlineData("admin", 60)]
+    [InlineData("reader", 10)]
+    [InlineData("nogroup", 10)]
+    public async Task A_live_tail_creates_no_topic_commits_no_offset_and_leaves_no_group(string user, int seconds)
+    {
+        await using LiveContractCluster admin = LiveContractCluster.Open(fixture);
+        string topic = admin.NewTopic("tail-never-writes");
+        await admin.CreateTopicAsync(topic, 2);
+
+        for (int partition = 0; partition < 2; partition++)
+        {
+            await admin.ProduceAsync(topic, partition, [.. Enumerable.Range(0, 10).Select(static i => LiveRecords.At(i, "old-" + i, "v"))]);
+        }
+
+        string[] topicsBefore = TopicNames();
+
+        await using LiveScanEngine engine = LiveScanEngine.Create(fixture, user);
+        KafkaScanHandle first = await TailLiveTests.StartAsync(engine, [topic]);
+        await using KafkaScanHandle firstGuard = first;
+        TailLiveTests.UntilCaughtUp(first);
+
+        // Records arrive for the whole of the tail's life, one at a time across both partitions, each after the tail has read the one before.
+        DateTime end = DateTime.UtcNow.AddSeconds(seconds);
+        int produced = 0;
+        KafkaScanResult? paused = null;
+        KafkaScanHandle? second = null;
+
+        while (DateTime.UtcNow < end)
+        {
+            await admin.ProduceAsync(topic, produced % 2, [LiveRecords.At(100 + produced, "live-" + produced, "v")]);
+            produced++;
+
+            // Half-way through, the first segment is paused and a second begins from its cursor: a resume is a new consumer, and commits nothing either.
+            if (paused is null && DateTime.UtcNow > end.AddSeconds(-seconds / 2.0))
+            {
+                first.Stop(KafkaScanStopReason.Paused);
+                paused = await first.Result.WaitAsync(TimeSpan.FromSeconds(30), Token);
+                second = await TailLiveTests.StartAsync(engine, [topic], resume: paused.Cursor);
+            }
+
+            // The producer is paced by the tail itself, not by a delay: the next record is produced when the tail has read this one and reported its
+            // end. The loop runs for the time asked, whatever the pace.
+            KafkaScanHandle current = second ?? first;
+            long expected = produced - (paused?.Records ?? 0);
+            SpinWait.SpinUntil(() => current.Progress.Records == expected && current.Progress.Partitions.All(static x => x.CaughtUp), TimeSpan.FromSeconds(30))
+                .Should().BeTrue($"the tail read record {produced} and reported its end");
+        }
+
+        paused.Should().NotBeNull();
+        await using KafkaScanHandle secondGuard = second!;
+        second!.Stop();
+        KafkaScanResult last = await second.Result.WaitAsync(TimeSpan.FromSeconds(30), Token);
+        (paused!.Matches + last.Matches).Should().Be(produced, "every record produced during the tail was read by one segment or the other, none twice (matches found, not matches kept)");
+
+        TopicNames().Should().BeEquivalentTo(topicsBefore, "a tail creates no topic, as a principal that could have created one");
+
+        string[] tailGroups = [$"kstudio-{paused!.ScanId:N}", $"kstudio-{last.ScanId:N}"];
+
+        using IAdminClient client = new AdminClientBuilder(fixture.Client("admin")).Build();
+        ListConsumerGroupsResult groups = await client.ListConsumerGroupsAsync();
+        IReadOnlyList<string> listed = [.. (groups.Valid ?? []).Select(static x => x.GroupId)];
+        listed.Should().NotContain(tailGroups, "a tail's group id is never joined: the group does not exist");
+        listed.Should().NotContain(static x => x.StartsWith("kstudio-", StringComparison.Ordinal) && x.Length == "kstudio-".Length + 32, "no group named for a scan survives");
+
+        foreach (string group in tailGroups)
+        {
+            LiveGroupOffsets.Committed(fixture, group, [new TopicPartition(topic, 0), new TopicPartition(topic, 1)])
+                .Should().BeEmpty($"group {group} committed nothing");
+        }
+    }
+
     private string[] TopicNames()
     {
         using IAdminClient client = new AdminClientBuilder(new AdminClientConfig(fixture.Client("admin")) { AllowAutoCreateTopics = false }).Build();

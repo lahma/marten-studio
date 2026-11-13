@@ -28,12 +28,12 @@ internal sealed class KafkaSearchRig : IAsyncDisposable
     /// <summary>The cluster entry the studio lists.</summary>
     public KafkaClusterEntry Entry { get; }
 
-    public KafkaSearchRig(Action<KafkaEngineOptions>? engine = null, Action<KafkaStudioOptions>? studio = null, bool searchOn = true, bool policies = true, Func<FakeKafkaWire, KStudio.Core.Wire.IKafkaWire>? wrap = null, bool payloads = false, bool traceCircuit = false, Action<IServiceCollection>? services = null)
+    public KafkaSearchRig(Action<KafkaEngineOptions>? engine = null, Action<KafkaStudioOptions>? studio = null, bool searchOn = true, bool policies = true, Func<FakeKafkaWire, KStudio.Core.Wire.IKafkaWire>? wrap = null, bool payloads = false, bool traceCircuit = false, Action<IServiceCollection>? services = null, KafkaProfile? profile = null, KafkaClusterEntry? other = null)
     {
-        Entry = new KafkaClusterEntry(EngineHarness.ClusterKey, null, "Test cluster", "production");
+        Entry = new KafkaClusterEntry(EngineHarness.ClusterKey, null, "Test cluster", "production", profile);
         Cluster = new FakeKafkaCluster(TimeProvider.System);
         FakeKafkaWire wire = new(Cluster, EngineHarness.ClusterKey);
-        Engine = EngineHarness.ForWire(wrap?.Invoke(wire) ?? wire, TimeProvider.System, TimeSpan.Zero, engine);
+        Engine = EngineHarness.ForWire(wrap?.Invoke(wire) ?? wire, TimeProvider.System, TimeSpan.Zero, engine, profile is { } p ? c => c.Profile(p) : null);
         Studio = new KafkaStudioHarness(
             options =>
             {
@@ -54,7 +54,7 @@ internal sealed class KafkaSearchRig : IAsyncDisposable
                     services?.Invoke(container);
                 }
                 : services,
-            [Entry],
+            other is null ? [Entry] : [Entry, other],
             Engine);
     }
 
@@ -97,10 +97,57 @@ internal sealed class KafkaSearchRig : IAsyncDisposable
             services.GetRequiredService<KafkaReadGrants>(),
             Engine.Provider.GetRequiredService<IKafkaScanner>(),
             Engine.Provider.GetRequiredService<OwnerByteBudget>(),
+            Engine.Provider.GetRequiredService<KStudio.Core.Clusters.KafkaClusterRegistry>(),
+            Engine.Provider.GetRequiredService<KafkaClusterCostControls>(),
             new KafkaOwnerKey(Studio.Visitor),
             actionLog,
             Logs.CreateFactory().CreateLogger<KafkaSearchService>());
     }
+
+    /// <summary>An export service over the engine's registry and scanner whose events land in <see cref="Logs" />; two exports at a time unless <paramref name="gate" /> says otherwise.</summary>
+    public KafkaExportService Export(KafkaExportGate? gate = null)
+    {
+        IServiceProvider services = Studio.Context.Services;
+        KafkaActionLog actionLog = new(
+            Studio.Context.ActionLog,
+            Logs.CreateFactory().CreateLogger<KafkaActionLog>(),
+            Studio.Visitor);
+
+        return new KafkaExportService(
+            services.GetRequiredService<KafkaCapabilityGuard>(),
+            Studio.KafkaAuthorization,
+            services.GetRequiredService<KafkaReadGrants>(),
+            Engine.Provider.GetRequiredService<KStudio.Core.Clusters.KafkaClusterRegistry>(),
+            Engine.Provider.GetRequiredService<IKafkaScanner>(),
+            gate ?? new KafkaExportGate(),
+            actionLog,
+            TimeProvider.System,
+            Logs.CreateFactory().CreateLogger<KafkaExportService>());
+    }
+
+    /// <summary>A live tail service over the engine's scanner and registry whose events land in <see cref="Logs" />.</summary>
+    public KafkaTailService Tail()
+    {
+        IServiceProvider services = Studio.Context.Services;
+        KafkaActionLog actionLog = new(
+            Studio.Context.ActionLog,
+            Logs.CreateFactory().CreateLogger<KafkaActionLog>(),
+            Studio.Visitor);
+
+        return new KafkaTailService(
+            services.GetRequiredService<KafkaCapabilityGuard>(),
+            Studio.KafkaAuthorization,
+            services.GetRequiredService<KafkaReadGrants>(),
+            Engine.Provider.GetRequiredService<IKafkaScanner>(),
+            Engine.Provider.GetRequiredService<KStudio.Core.Clusters.KafkaClusterRegistry>(),
+            new KafkaOwnerKey(Studio.Visitor),
+            actionLog,
+            Logs.CreateFactory().CreateLogger<KafkaTailService>());
+    }
+
+    /// <summary>A tail over <paramref name="topics" />, from the end of each partition.</summary>
+    public KafkaTailInput TailInput(string[] topics, string? predicate = null, bool uncommitted = false, KafkaScanCursor? resumeFrom = null) =>
+        new(Entry, topics, predicate, uncommitted, resumeFrom);
 
     /// <summary>A record service over the engine's scanner whose events land in <see cref="Logs" />.</summary>
     public KafkaRecordService Records()

@@ -68,6 +68,7 @@ public class SampleHostLiveTests(SampleHostFixture fixture) : IClassFixture<Samp
                 ["customers.v1"] = 1,
                 ["orders.v1.dlq"] = 1,
                 ["secrets.v1"] = 1,
+                ["heartbeats.v1"] = 1,
                 ["kstudio-sample.seed-v2"] = 1,
             });
 

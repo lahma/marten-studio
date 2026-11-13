@@ -58,28 +58,30 @@ internal sealed class EngineHarness : IAsyncDisposable
         IKafkaWire wire,
         TimeProvider? clock = null,
         TimeSpan? catalogTimeToLive = null,
-        Action<KafkaEngineOptions>? configure = null) =>
-        Build(new SingleWireFactory(wire), clock, catalogTimeToLive, configure, new ClientConfig { BootstrapServers = "fake:9092" });
+        Action<KafkaEngineOptions>? configure = null,
+        Action<KafkaClusterBuilder>? cluster = null) =>
+        Build(new SingleWireFactory(wire), clock, catalogTimeToLive, configure, new ClientConfig { BootstrapServers = "fake:9092" }, cluster);
 
     /// <summary>The engine over the real Confluent wire, for a live cluster.</summary>
     public static EngineHarness ForClient(
         ClientConfig client,
         TimeSpan? catalogTimeToLive = null,
         Action<KafkaEngineOptions>? configure = null) =>
-        Build(null, null, catalogTimeToLive, configure, client);
+        Build(null, null, catalogTimeToLive, configure, client, null);
 
     private static EngineHarness Build(
         IKafkaWireFactory? factory,
         TimeProvider? clock,
         TimeSpan? catalogTimeToLive,
         Action<KafkaEngineOptions>? configure,
-        ClientConfig client)
+        ClientConfig client,
+        Action<KafkaClusterBuilder>? cluster)
     {
         CapturingLoggerProvider logs = new();
         TimeProvider time = clock ?? TimeProvider.System;
 
         KafkaEngineOptions options = new();
-        options.AddCluster(ClusterKey, client);
+        options.AddCluster(ClusterKey, client, cluster);
         configure?.Invoke(options);
 
         ServiceCollection services = new();

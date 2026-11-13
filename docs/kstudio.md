@@ -46,6 +46,8 @@ Reading records does:
 |---|---|---|
 | `SearchRecords` | `false` | Searches by key, header and CloudEvents attribute; the record page; keys, timestamps, headers and attributes. Values need `ReadPayloads`. |
 | `ReadPayloads` | `false` | Record values: the value on the record page and in a search's detail, `value` and JSON-path searches, compare, and copying a value as a search. Needs `SearchRecords`. |
+| `ExportRecords` | `false` | Saving the records a search or a live tail holds, or one record or its value from the record page, as JSON Lines, CSV or the value alone, masked as the page shows them. Values only where `ReadPayloads` allows. Needs `SearchRecords`. Never on a `Production` cluster. |
+| `LiveTail` | `false` | Following topics as records arrive, from the end of each partition. Needs `SearchRecords`. Never on a `Production` cluster. |
 
 `KafkaStudioOptions.ClusterAuthorizationPolicy` is asked about every cluster and every topic a page or a search touches,
 on a `KafkaTopicResource(Cluster, TenantId, Topic, Capability)`; a topic it refuses is absent from every list, and a
@@ -121,11 +123,81 @@ It is one search: it is estimated before it runs, confirmed above the same thres
 audit with every topic and each topic's predicate, and stopped by the same limits. A topic you may not read is not
 listed. A topic Kafka refuses shows why. Nothing runs until you press **Search related records**.
 
+## Record index
+
+KStudio keeps no index of your topics. If your application already knows where its records went (a document that stored the
+partition and offset its producer got back, say), it can tell a search where to look:
+
+```csharp
+o.RecordIndex<MyRecordIndex>();
+
+sealed class MyRecordIndex(IDocumentStore store) : IKafkaRecordIndex
+{
+    public async ValueTask<KafkaIndexAnswer> FindAsync(KafkaIndexQuery query, CancellationToken cancellationToken)
+    {
+        if (query.Field != KafkaIndexField.Key) return KafkaIndexAnswer.None;
+        await using var session = store.QuerySession();
+        var sent = await session.Query<SentMessage>().Where(x => x.Key == query.Value && query.Topics.Contains(x.Topic))
+            .Take(16).ToListAsync(cancellationToken);
+        return KafkaIndexAnswer.Hints(sent.Select(x => new KafkaIndexHint(x.Topic, x.Partition, x.Offset, x.Offset + 1)));
+    }
+}
+```
+
+A search for `key = '…'`, or `header.<name> = '…'` / `ce.<attribute> = '…'`, asks the index once while it is planned, never for a
+field a rule redacts. The search then reads only the ranges the index named, inside its window, and judges every record there
+as always: a wrong hint finds nothing, never something false. A search narrowed this way says so, its "no match" is said only of
+the records that run read, in the ranges the index named (after **Continue**, only of the rest it read, never of the ranges the
+first run found a match in), and **Search the whole window** reads the rest. An index that throws or does not answer within the
+request timeout is ignored, and the whole window is read, even when it blocks its thread.
+
+The index is created once and shared: take singletons such as `IDocumentStore`, never a session.
+
 ## Duplicates
 
 Under search results and related records, **Possible duplicates** groups the records found on one topic that carry the
 same identity: the same `id` header, the same CloudEvents source and id, or, when you may read values, the same key and
 value as shown. Only the records found are compared, and nothing more is read.
+
+## Export
+
+With `ExportRecords`, **Export** on a search's results, on a live tail and on the record page saves what the page holds as a
+file: JSON Lines (one record per line, headers and JSON values nested) or CSV (for a spreadsheet: UTF-8 with a byte-order mark,
+and a cell that starts with `=`, `+`, `-`, `@`, a tab or a carriage return gets a leading `'` so the spreadsheet does not run
+it). The record page also saves one record, or its value alone. Nothing is read again: the file holds exactly the records on
+screen, so a value cut at `Limits.MaxMatchBytes` in a search is cut in the file too (`valueTruncated`), and the record page's
+export holds the value whole up to `Limits.MaxDecodeBytes`.
+
+Redaction holds in the file: a masked key, header, attribute or part of a value is written as the page shows it
+(`••• (redacted by header authorization)`), and each row lists what was masked in `redacted`. Values are included only for
+records you could read the value of. A file is at most `Limits.MaxExportBytes` (32 MiB); records past it are left out and the
+page says how many. The file travels to your browser over the page's own connection; KStudio maps no download address. Every
+export is recorded (event 9606) with the records, the size, the format and the search's predicate, its redacted values replaced
+by `<redacted>`.
+
+A record that carries no timestamp has none in the file: `timestamp` is `null` in JSON Lines and an empty cell in CSV, with
+`timestampType` `NotAvailable` in both (never 1970).
+
+Export asks everything again when you click it: the capability, the cluster's profile (a `Production` cluster never exports,
+and its Export button says so), your cluster and capability policies for every topic of the records, and, for records read
+with values, your right to read them now. A refusal refuses the whole file, never a part of it, and is recorded. At most two
+exports are written at a time in the application; a third is refused, not queued.
+
+## Live tail
+
+With `LiveTail`, **Live tail** follows topics as records arrive. A tail starts at the end of each partition (its last stable
+offset when uncommitted records are left out), takes the same predicates as Search, and shows the newest
+`Limits.MaxTailMatches` (200) matches, newest first, at most four updates a second. It never starts from an address: only from
+Start.
+
+A tail holds one of the process's `Limits.MaxConcurrentScans` and one of your `Limits.MaxConcurrentScansPerOwner` while it reads,
+is paced by `Limits.BytesPerSecond` and counts against your `Limits.OwnerBytesPerHour`. It pauses itself after
+`Limits.TailPauseAfter` (5 minutes), after `Limits.MaxBytesPerScan` or `Limits.MaxRecordsPerScan` in one stretch, when your
+hourly allowance is spent, and while its tab is hidden (it resumes when you come back). A paused tail frees its slot. **Resume**
+goes on from exactly where it stopped, so nothing produced meanwhile is missed; **Jump to now** starts again from the end and
+says how many offsets it skipped. Every resume asks your policies again, so a change to them takes effect at the next pause.
+Each tail is recorded once, when it ends (event 9608), with how long it read, what it read and why it ended; its start is
+logged as event 9607.
 
 ## Redaction
 
@@ -157,6 +229,53 @@ the audit and error messages. It is masked inside the engine before anything els
 headers `authorization`, `proxy-authorization`, `cookie`, `set-cookie` and `x-api-key` are always masked unless you opt one
 out with `r.AllowHeader(…)`, and can never be searched. A masked field takes only `=` and `in`, so it cannot be read a
 character at a time, and a search link leaves its value out.
+
+## Profiles
+
+A cluster can say what kind of cluster it is, and KStudio lowers its limits there:
+
+```csharp
+o.AddCluster("prod", config, c => c.Profile(KafkaProfile.Production));
+```
+
+A profile only lowers limits and forbids; it never turns a capability on and never raises a limit above yours. A cluster with no
+profile uses your limits as they are; KStudio never guesses one from the host's environment or the cluster's `Environment` text.
+
+| Limit | `Development` | `Test` | `Production` |
+|---|---|---|---|
+| `MaxBytesPerScan` | yours | 256 MiB | 64 MiB |
+| `MaxRecordsPerScan` | yours | 5,000,000 | 1,000,000 |
+| `MaxScanDuration` | yours | 2 min | 1 min |
+| `MaxMatches` | yours | 500 | 500 |
+| `MaxMatchBytes` | yours | 64 KiB | 64 KiB |
+| `MaxDecodeBytes` | yours | 1 MiB | 1 MiB |
+| `ConfirmAboveBytes` | yours | 64 MiB | 16 MiB |
+| `ConfirmAboveRecords` | yours | 1,000,000 | 250,000 |
+| `BytesPerSecond` (this cluster's own bucket) | yours | 10 MiB/s | 5 MiB/s |
+| `OwnerBytesPerHour` (this cluster's own) | yours | 2 GiB | 512 MiB |
+| `MaxExportBytes` | yours | 32 MiB | export forbidden |
+| `MaxTailMatches` | yours | 200 | live tail forbidden |
+| `TailPauseAfter` | yours | 5 min | live tail forbidden |
+| `MaxConcurrentScans`, `MaxConcurrentScansPerOwner`, `QueueKilobytes`, `FetchBytes`, `CreateTimeMargin`, `PartitionStallTimeout` | yours | yours | yours |
+
+Each limit is the smaller of yours and the profile's, so a host that set a limit lower keeps it. The confirmation thresholds are then
+capped at the capped budgets. Concurrency and the consumer's sizes guard the application's memory, whichever cluster is read, and stay
+yours.
+
+`Production` also forbids export and live tail on that cluster even when `ExportRecords` and `LiveTail` are granted, and its byte
+rate and hourly allowance are the cluster's own, on top of the process-wide ones: a scan of a profiled cluster is paced by the slower
+of the two buckets and stops when either allowance is spent. They are made only where the profile's value is below yours. `Production`
+keeps 5 MiB/s and 512 MiB an hour for each visitor; the rate must stay well below your principal's broker quota, and a host
+that bills by egress may want it lower. Lowering your own `BytesPerSecond` or `OwnerBytesPerHour` lowers them for every cluster, not for one.
+
+With Wolverine, a profile is set for each cluster, and for a broker per tenant for each tenant, because each is a broker of its own with its own
+quota:
+
+```csharp
+k.UseWolverineKafka(w => w.Cluster((tenant, c) => c.Profile(KafkaProfile.Production)));
+```
+
+The cluster selector and the Settings page show each cluster's profile and the limits it comes to.
 
 ## Wolverine
 
@@ -205,7 +324,7 @@ placeholder goes in the path, the query or the fragment, never in the scheme or 
 
 ## Audit
 
-Every search and every record opened is recorded in the studio's Activity page and in your log (events 9600-9605), with
+Every search, every export, every live tail and every record opened is recorded in the studio's Activity page and in your log (events 9600-9609), with
 who, the cluster, the topics, the window, the predicate with every redacted value replaced by `<redacted>`, what was read
 and why it stopped. Reading a record's value is recorded separately from the search that found it, once per record per
 session. A visitor sees an entry only if your policies would let them make the same read.

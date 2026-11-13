@@ -1,0 +1,264 @@
+@implements IDisposable
+@using System.Globalization
+@using KStudio.Core.Clusters
+@using KStudio.Core.Decoding
+@using KStudio.Core.Scanning
+@using Microsoft.Extensions.Logging
+@using PostgresStudio.Services
+@using PostgresStudio.Services.Settings
+@inject KafkaRecordService Records
+@inject KafkaCatalogService Catalog
+@inject IStudioSettings Settings
+@inject StudioState Studio
+@inject ILogger<KafkaTailRows> Logger
+
+@* The records of a live tail, newest first, and what is said beside them (D-M5 decision 3.7): the matches that arrived faster than they could be shown, what the
+   tail does not cover, and the table with each row's inline detail. A component of its own so that a batch from the engine redraws these and not the form above
+   them, its topic list or the details the visitor has open: the page calls RefreshAsync for a batch and renders itself only when the tail starts, pauses or ends.
+   Every row belongs to the session's own cluster - its links, the check of a value's view and the settings behind the kcat line - never to the one the selector
+   shows now. *@
+
+@if (Session.Skipped > 0)
+{
+    <p class="ms-k-note" role="note">@KafkaTailText.Faster(Session.Skipped, Session.Plan.Limits.TailCapacity)</p>
+}
+
+@if (KafkaTailText.Caveats(Session) is { Count: > 0 } caveats)
+{
+    <section class="ms-k-caveats" aria-label="What this tail does not cover">
+        <h2 class="ms-section-title">What this tail does not cover</h2>
+        <ul>
+            @foreach (string caveat in caveats)
+            {
+                <li>@caveat</li>
+            }
+        </ul>
+    </section>
+}
+
+@if (Session.Ring.Count > 0)
+{
+    <TableScroll Label="Live tail">
+        <table class="ms-table ms-k-matches ms-k-tail-matches">
+            <thead>
+                <tr>
+                    <th>Time</th>
+                    <th>Topic</th>
+                    <th>Partition / offset</th>
+                    <th>Key</th>
+                    <th>Type</th>
+                    <th>Correlation</th>
+                    <th>Size</th>
+                    <th><span class="ms-sr-only">Details</span></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (KafkaMatch match in Session.Ring)
+                {
+                    string rowKey = RowKey(match);
+                    <tr class="ms-table-row" @key="rowKey">
+                        <td class="ms-table-cell" title="@TimeTitle(match)">@Studio.FormatInSelectedTimeZone(match.Timestamp, "yyyy-MM-dd HH:mm:ss")</td>
+                        <td class="ms-table-cell">@match.Topic</td>
+                        <td class="ms-table-cell"><a href="@RecordHref(match)">@match.Partition / @KafkaDisplay.Number(match.Offset)</a></td>
+                        <td class="ms-table-cell" title="@(match.Key.Text)">
+                            <span class="@KeyClass(match)">@KafkaMatchView.KeyDisplay(match.Key)</span>
+                            @if (match.Key.Truncated)
+                            {
+                                <span class="ms-muted"> (cut)</span>
+                            }
+                        </td>
+                        <td class="ms-table-cell">@KafkaMatchView.TypeOf(match)</td>
+                        <td class="ms-table-cell">
+                            @foreach (KafkaChip chip in KafkaMatchView.Chips(match))
+                            {
+                                <button type="button" class="ms-chip ms-k-chip" title="@chip.Value" @onclick="() => OnChip.InvokeAsync(chip)">@chip.Display</button>
+                            }
+                        </td>
+                        <td class="ms-table-cell">
+                            @if (match.ValueKind == KafkaValueKind.Tombstone)
+                            {
+                                <span class="ms-chip ms-k-tombstone">tombstone</span>
+                            }
+                            else
+                            {
+                                @KafkaDisplay.Bytes(match.ValueLength)
+                            }
+                        </td>
+                        <td class="ms-table-cell">
+                            <button type="button"
+                                    class="ms-btn ms-btn-sm"
+                                    aria-expanded="@(expanded.Contains(rowKey) ? "true" : "false")"
+                                    @onclick="() => ToggleDetailAsync(rowKey)">Details</button>
+                            <a class="ms-btn ms-btn-sm ms-k-related-link" href="@RelatedHref(match)" aria-label="@($"Related records of {match.Topic} {match.Partition}/{match.Offset}")">Related</a>
+                        </td>
+                    </tr>
+                    @if (expanded.Contains(rowKey))
+                    {
+                        <tr class="ms-k-match-detail" @key="@(rowKey + "#detail")">
+                            <td colspan="8">
+                                <KafkaRecordDetail Model="@match" Cluster="@Cluster.Key" Kcat="@KcatFor(match)" Access="@AccessOf(match)" />
+                            </td>
+                        </tr>
+                    }
+                }
+            </tbody>
+        </table>
+    </TableScroll>
+}
+else if (Running)
+{
+    <p class="ms-muted ms-k-tail-waiting">Waiting for records. A tail shows what is produced from now on.</p>
+}
+
+@code {
+    private readonly CancellationTokenSource lifetime = new();
+    private readonly HashSet<string> expanded = new(StringComparer.Ordinal);
+    private readonly HashSet<string> valueRefused = new(StringComparer.Ordinal);
+
+    private KafkaTailSession? shownSession;
+    private KafkaClusterSettingsView? clusterSettings;
+    private bool disposed;
+
+    /// <summary>The tail whose records these are, a <c>KafkaTailSession</c> (the type is the module's own and not public).</summary>
+    [Parameter]
+    [EditorRequired]
+    public object? Value { get; set; }
+
+    /// <summary>Whether a segment is reading now: an empty table then says it waits.</summary>
+    [Parameter]
+    public bool Running { get; set; }
+
+    /// <summary>A correlation chip (a <c>KafkaChip</c>) was clicked: the page puts it in the search box.</summary>
+    [Parameter]
+    public EventCallback<object?> OnChip { get; set; }
+
+    private KafkaTailSession Session => (KafkaTailSession) Value!;
+
+    /// <summary>The cluster the records were read from: the session's own.</summary>
+    private KafkaClusterEntry Cluster => Session.Input.Cluster;
+
+    /// <summary>Redraws the rows alone, for a batch.</summary>
+    public Task RefreshAsync() => disposed ? Task.CompletedTask : InvokeAsync(StateHasChanged);
+
+    protected override void OnParametersSet()
+    {
+        // Another tail in the same place: its details are not these.
+        if (!ReferenceEquals(shownSession, Session))
+        {
+            shownSession = Session;
+            expanded.Clear();
+            valueRefused.Clear();
+            clusterSettings = null;
+        }
+    }
+
+    private static string RowKey(KafkaMatch match) => $"{match.Topic}/{match.Partition}/{match.Offset}";
+
+    private async Task ToggleDetailAsync(string rowKey)
+    {
+        if (expanded.Remove(rowKey))
+        {
+            return;
+        }
+
+        await EnsureSettingsAsync();
+
+        // Showing a value is a view of it, checked and recorded here and never during a render (D-PAYLOAD decision 1.4): the detail is drawn only
+        // after the check has answered, so that a refusal is the first thing the visitor sees and the value is never in the markup before it.
+        KafkaMatch? shown = Session.Ring.FirstOrDefault(x => string.Equals(RowKey(x), rowKey, StringComparison.Ordinal));
+        if (shown is not null)
+        {
+            await RecordValueViewAsync(shown);
+        }
+
+        expanded.Add(rowKey);
+    }
+
+    /// <summary>Records the view of the value about to be shown, against the session's own cluster; a refusal marks the record as not the visitor's to read.</summary>
+    private async Task RecordValueViewAsync(KafkaMatch match)
+    {
+        if (!match.ReadWithPayload && !Session.Grant.HasPayload)
+        {
+            return;
+        }
+
+        try
+        {
+            if (!await Records.RecordValueViewAsync(Cluster, match, lifetime.Token))
+            {
+                valueRefused.Add(RowKey(match));
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Fail closed: a cancellation (the page leaving, or a host's policy timing out) never lets an unchecked value be drawn.
+            valueRefused.Add(RowKey(match));
+        }
+        catch (Exception e) when (!disposed)
+        {
+            Logger.LogWarning(e, "The Kafka tail page failed to record a value view");
+            valueRefused.Add(RowKey(match));
+        }
+    }
+
+    /// <summary>How a match's value reads to this visitor: what the record was read under, then a refusal of the view itself.</summary>
+    private KafkaValueAccess AccessOf(KafkaMatch match) =>
+        valueRefused.Contains(RowKey(match))
+            ? KafkaValueAccess.PolicyRefused
+            : match.ReadWithPayload ? KafkaValueAccess.Granted : Session.Grant.AccessFor(match.Topic);
+
+    /// <summary>Reads the cluster's settings once, for the kcat line of an opened record.</summary>
+    private async Task EnsureSettingsAsync()
+    {
+        if (clusterSettings is not null)
+        {
+            return;
+        }
+
+        try
+        {
+            clusterSettings = await Catalog.GetSettingsAsync(Cluster, lifetime.Token);
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            Logger.LogDebug(e, "The Kafka tail page could not read the cluster's settings");
+        }
+    }
+
+    private string KcatFor(KafkaMatch match) => KafkaMatchView.Kcat(match.Topic, match.Partition, match.Offset, clusterSettings);
+
+    private string RecordHref(KafkaMatch match) =>
+        KafkaAddress.Href(
+            Settings,
+            KafkaAddress.RecordRoute,
+            Cluster.Key,
+            (KafkaAddress.TopicParameter, match.Topic),
+            (KafkaAddress.PartitionParameter, match.Partition.ToString(CultureInfo.InvariantCulture)),
+            (KafkaAddress.OffsetParameter, match.Offset.ToString(CultureInfo.InvariantCulture)));
+
+    private string RelatedHref(KafkaMatch match) =>
+        KafkaAddress.Href(
+            Settings,
+            KafkaAddress.RelatedRoute,
+            Cluster.Key,
+            (KafkaAddress.TopicParameter, match.Topic),
+            (KafkaAddress.PartitionParameter, match.Partition.ToString(CultureInfo.InvariantCulture)),
+            (KafkaAddress.OffsetParameter, match.Offset.ToString(CultureInfo.InvariantCulture)));
+
+    private static string TimeTitle(KafkaMatch match) =>
+        match.Timestamp.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss'Z'", CultureInfo.InvariantCulture) + " (" + match.TimestampType + ")";
+
+    private static string KeyClass(KafkaMatch match) => match.Key.IsRedacted ? "ms-k-redacted" : match.Key.IsNull ? "ms-k-null" : string.Empty;
+
+    public void Dispose()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        disposed = true;
+        lifetime.Cancel();
+        lifetime.Dispose();
+    }
+}

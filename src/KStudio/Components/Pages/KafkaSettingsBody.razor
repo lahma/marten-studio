@@ -1,8 +1,12 @@
 @implements IAsyncDisposable
 @using KStudio.Core.Clusters
+@using KStudio.Core.Index
+@using KStudio.Core.Scanning
 @using Microsoft.Extensions.Logging
 @inject KafkaState State
 @inject KafkaCatalogService Catalog
+@inject IKafkaScanner Scanner
+@inject KafkaRecordIndexResolver RecordIndex
 @inject ILogger<KafkaSettingsBody> Logger
 
 @* The body of Cluster settings (D-UI decision 8b): the engine's reader's view of what the host handed KStudio, one setting at a time. The raw
@@ -24,6 +28,18 @@
     else
     {
         <p class="ms-muted">@KafkaStudioText.SettingsLead</p>
+
+        @if (State.ActiveCluster is { } active)
+        {
+            @* The profile the host set, and the limits it comes to (D-M5 decision 4.6): the numbers are the capped values, so a host that set lower
+               limits sees its own. A cluster with no profile is told so, because nothing else on the page says that its limits are not capped. *@
+            <h2 class="ms-section-title">Profile</h2>
+            <p class="ms-k-profile">@KafkaStudioText.ProfileSummary(active.Profile, Scanner.LimitsFor(active.Key))</p>
+            @if (active.Profile is null)
+            {
+                <p class="ms-k-note ms-k-note-warning" role="note">@KafkaStudioText.NoProfileWarning</p>
+            }
+        }
 
         <h2 class="ms-section-title">Your settings</h2>
         <TableScroll Label="Your settings">
@@ -89,6 +105,7 @@
         </TableScroll>
 
         <p class="ms-k-oauth">OAuth token refresh: @(view.TokenRefreshDeclared ? "declared" : "not declared")</p>
+        <p class="ms-k-record-index">@KafkaSearchText.RecordIndexLine(RecordIndex.Name)</p>
 
         @if (discovery is { IsEmpty: false })
         {

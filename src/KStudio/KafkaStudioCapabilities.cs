@@ -15,9 +15,22 @@ public sealed class KafkaStudioCapabilities
     /// </summary>
     public bool ReadPayloads { get; set; }
 
+    /// <summary>
+    /// Save records as a file: the records a search or a live tail holds, and one record or its value from the record page, as JSON Lines, CSV or
+    /// the value alone, redacted as the page shows them. Values are included only where <see cref="ReadPayloads" /> lets the visitor read them.
+    /// Needs <see cref="SearchRecords" />. A cluster whose profile is <c>Production</c> never exports.
+    /// </summary>
+    public bool ExportRecords { get; set; }
+
+    /// <summary>
+    /// Follow topics as records arrive, from the end of each partition. A tail holds a scan slot and reads against the visitor's hourly budget while
+    /// it runs, and pauses itself. Needs <see cref="SearchRecords" />. A cluster whose profile is <c>Production</c> never tails.
+    /// </summary>
+    public bool LiveTail { get; set; }
+
     /// <summary>No capability: the clusters and topics can be described and nothing is read.</summary>
     public static KafkaStudioCapabilities None() => new();
 
-    /// <summary>Every capability on.</summary>
-    public static KafkaStudioCapabilities All() => new() { SearchRecords = true, ReadPayloads = true };
+    /// <summary>Every capability on, including those a later version adds. Still subject to the host studio's ReadOnly.</summary>
+    public static KafkaStudioCapabilities All() => new() { SearchRecords = true, ReadPayloads = true, ExportRecords = true, LiveTail = true };
 }

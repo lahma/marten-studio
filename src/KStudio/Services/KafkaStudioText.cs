@@ -233,17 +233,228 @@ internal static class KafkaStudioText
     /// <summary>The sentence for a start the engine refused (D-UI decision 11).</summary>
     /// <param name="refusal">Why.</param>
     /// <param name="limits">The limits the plan ran under.</param>
-    public static string Refusal(KStudio.Core.Scanning.KafkaScanRefusal refusal, KafkaScanLimits limits) => refusal switch
+    public static string Refusal(KStudio.Core.Scanning.KafkaScanRefusal refusal, KafkaScanLimits limits) => Refusal(refusal, spent: null);
+
+    /// <summary>
+    /// The sentence for a start the engine refused, with the allowance that was spent: the process's, or the one a profile gave the cluster (D-M5
+    /// decision 4.5). The engine says which (<see cref="KStudio.Core.Scanning.KafkaSpentBudget" />); a refusal that does not says no number, because
+    /// the plan's capped value is the lower of the two whichever ran out.
+    /// </summary>
+    /// <param name="refusal">Why.</param>
+    /// <param name="spent">The allowance that has no bytes left, when the refusal is <c>OwnerBudgetSpent</c>.</param>
+    public static string Refusal(KStudio.Core.Scanning.KafkaScanRefusal refusal, KStudio.Core.Scanning.KafkaSpentBudget? spent) => refusal switch
     {
-        KStudio.Core.Scanning.KafkaScanRefusal.ProcessBusy => "Two searches are already running in this application. Try again when one has finished.",
-        KStudio.Core.Scanning.KafkaScanRefusal.OwnerBusy => "Another search of yours is running, in this tab or another. Stop it, or wait for it to finish.",
+        KStudio.Core.Scanning.KafkaScanRefusal.ProcessBusy => "Two searches or live tails are already running in this application. Try again when one has finished.",
+        KStudio.Core.Scanning.KafkaScanRefusal.OwnerBusy => "Another search of yours is running, in this tab or another. Stop it, or wait for it to finish. A live tail holds a search's place too. Pause the tail to search.",
         KStudio.Core.Scanning.KafkaScanRefusal.OwnerBudgetSpent =>
-            $"You have read your hourly allowance of {KafkaDisplay.Bytes(limits.OwnerBytesPerHour)}. It frees up as the hour rolls on.",
+            $"You have read {Allowance(spent)}. It frees up as the hour rolls on.",
+        KStudio.Core.Scanning.KafkaScanRefusal.ProfileForbids =>
+            "This cluster's profile forbids this: Production forbids export and live tail even when they are granted. The host sets the profile with KafkaClusterBuilder.Profile in AddCluster.",
         KStudio.Core.Scanning.KafkaScanRefusal.NeedsConfirmation => NeedsConfirmation,
         KStudio.Core.Scanning.KafkaScanRefusal.PredicateInvalid => PredicateInvalid,
         KStudio.Core.Scanning.KafkaScanRefusal.ShuttingDown => "The application is shutting down.",
         _ => SearchFailed,
     };
+
+    // ------------------------------------------------------------------------------------------------
+    // Export and profiles (UI-EXPORT, D45 and D47, decisions 2 and 4.6 of D-M5)
+    // ------------------------------------------------------------------------------------------------
+
+    /// <summary>What an export is called in a disabled control's sentence.</summary>
+    public const string ExportingRecords = "Exporting records";
+
+    /// <summary>What a live tail is called in a disabled control's sentence.</summary>
+    public const string LiveTailAction = "Live tail";
+
+    /// <summary>The audit action of an export.</summary>
+    public const string ExportAction = "ExportRecords";
+
+    /// <summary>The line under every export format: the file is what the page shows.</summary>
+    /// <param name="records">How many records the file would hold.</param>
+    public static string ExportAsShown(int records) =>
+        $"{KafkaDisplay.Count(records, "record")}, as shown: masked parts stay masked";
+
+    /// <summary>
+    /// What a control says where a cluster's profile forbids an action (D-M5 decision 4.6): one sentence that names the setting a host would change
+    /// and says that granting the capability is not enough.
+    /// </summary>
+    /// <param name="action">The action in the sentence's first words: <see cref="ExportingRecords" /> or <see cref="LiveTailAction" />.</param>
+    /// <param name="entry">The cluster.</param>
+    public static string ProfileForbids(string action, KafkaClusterEntry entry)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+
+        return $"{action} is off on {entry.DisplayName}: its profile is Production, which forbids export and live tail even when they are granted. "
+            + "The host sets the profile with KafkaClusterBuilder.Profile in AddCluster.";
+    }
+
+    /// <summary>The "predicate" of an export from the record page: it was opened by its place, not found by a search.</summary>
+    public const string RecordExportAuditText = "(none: the record page)";
+
+    /// <summary>The refusal of an export with no records.</summary>
+    public const string ExportNothing = "There are no records to save.";
+
+    /// <summary>The refusal of records that are not the source's.</summary>
+    public const string ExportRecordsNotFromTopics = "The records do not belong to these topics.";
+
+    /// <summary>The refusal of a value saved from more or fewer than one record.</summary>
+    public const string ExportValueFromOneRecord = "A value is saved from one record.";
+
+    /// <summary>The refusal of a third export at once.</summary>
+    public const string ExportsBusy = "Two exports are being saved; try again in a moment.";
+
+    /// <summary>The refusal of an export whose reader lost access since the records were read.</summary>
+    public const string ExportGrantChanged = "Your access changed since these records were read. Search again.";
+
+    /// <summary>The audit message of an export that ended (cancelled, or a policy or the delivery threw) before any entry was written: the browser may have saved the file.</summary>
+    public const string ExportAbandoned = "The export ended before the browser confirmed the file.";
+
+    /// <summary>The audit message of a file the browser never received.</summary>
+    public const string ExportNotDelivered = "The file did not reach the browser.";
+
+    /// <summary>The page's line when the export failed outside the engine.</summary>
+    public const string ExportFailed = "The export failed. The application's log has the reason.";
+
+    /// <summary>The audit target of an export: <c>export of orders.v1 (search 2026-11-12 10:00Z – 11:00Z)</c>, <c>export of 2 topics (live tail)</c>, <c>export of orders.v1/3/1200</c>.</summary>
+    /// <param name="source">Where the records came from.</param>
+    /// <param name="topics">The source's topics.</param>
+    /// <param name="from">The search's window start, for a search.</param>
+    /// <param name="to">The search's window end, for a search.</param>
+    /// <param name="place">The record's <c>topic/partition/offset</c>, for a record.</param>
+    public static string ExportTarget(KafkaExportSource source, IReadOnlyList<string> topics, DateTimeOffset? from, DateTimeOffset? to, string? place)
+    {
+        System.Globalization.CultureInfo invariant = System.Globalization.CultureInfo.InvariantCulture;
+        string named = topics.Count == 1 ? topics[0] : string.Create(invariant, $"{topics.Count} topics");
+
+        switch (source)
+        {
+            case KafkaExportSource.Record:
+                return "export of " + (place ?? named);
+
+            case KafkaExportSource.Tail:
+                return "export of " + named + " (live tail)";
+
+            default:
+                if (from is { } start && to is { } end)
+                {
+                    const string Full = "yyyy-MM-dd HH:mm'Z'";
+                    DateTimeOffset a = start.ToUniversalTime();
+                    DateTimeOffset b = end.ToUniversalTime();
+                    string endText = a.Date == b.Date ? b.ToString("HH:mm'Z'", invariant) : b.ToString(Full, invariant);
+                    return "export of " + named + " (search " + a.ToString(Full, invariant) + " – " + endText + ")";
+                }
+
+                return "export of " + named + " (search)";
+        }
+    }
+
+    /// <summary>The audit message of an export that was written (D-M5 decision 2.7).</summary>
+    /// <param name="written">How many records the file holds.</param>
+    /// <param name="bytes">The file's size.</param>
+    /// <param name="format">The format's name.</param>
+    /// <param name="valuesIncluded">Whether the file holds values.</param>
+    /// <param name="leftOut">How many records were left out at the size limit.</param>
+    /// <param name="source">Where the records came from.</param>
+    /// <param name="sourceRecords">The records the source read.</param>
+    /// <param name="sourceBytes">The bytes the source read.</param>
+    /// <param name="predicate">The source plan's audit text.</param>
+    public static string ExportMessage(int written, long bytes, string format, bool valuesIncluded, int leftOut, KafkaExportSource source, long sourceRecords, long sourceBytes, string predicate)
+    {
+        string from = source switch
+        {
+            KafkaExportSource.Tail => "live tail",
+            KafkaExportSource.Record => "record",
+            _ => "search",
+        };
+        string values = valuesIncluded ? "; values included" : string.Empty;
+        string limited = leftOut > 0 ? $"; {KafkaDisplay.Number(leftOut)} left out at the size limit" : string.Empty;
+
+        return $"{KafkaDisplay.Count(written, "record")} ({KafkaDisplay.Bytes(bytes)}) saved as {format}{values}{limited}; "
+            + $"from a {from} that read {KafkaDisplay.Count(sourceRecords, "record")} and {KafkaDisplay.Bytes(sourceBytes)}; predicate: {predicate}";
+    }
+
+    /// <summary>The page's line after an export was handed to the browser.</summary>
+    /// <param name="fileName">The file's name.</param>
+    public static string ExportSaved(string fileName) => "Saved " + fileName + ".";
+
+    /// <summary>The page's line when the file reached the size limit.</summary>
+    /// <param name="written">How many records the file holds.</param>
+    /// <param name="total">How many records there were.</param>
+    /// <param name="maxBytes">The limit.</param>
+    public static string ExportLimited(int written, int total, long maxBytes) =>
+        $"Saved {KafkaDisplay.Number(written)} of {KafkaDisplay.Number(total)} records: the file reached KafkaStudioOptions.Limits.MaxExportBytes ({KafkaDisplay.Bytes(maxBytes)}).";
+
+    /// <summary>The Settings page's sentence about a cluster's profile, from the limits it comes to.</summary>
+    /// <param name="profile">The profile, or <see langword="null" /> for none.</param>
+    /// <param name="limits">The cluster's capped limits.</param>
+    public static string ProfileSummary(KafkaProfile? profile, KafkaScanLimits limits)
+    {
+        ArgumentNullException.ThrowIfNull(limits);
+
+        string caps = $"scans capped at {KafkaDisplay.Bytes(limits.MaxBytesPerScan)}, {KafkaDisplay.Number(limits.MaxRecordsPerScan)} records and {SpanText(limits.MaxScanDuration)}, "
+            + $"{KafkaDisplay.Bytes(limits.BytesPerSecond)}/s and {KafkaDisplay.Bytes(limits.OwnerBytesPerHour)} an hour per visitor on this cluster";
+
+        return profile switch
+        {
+            null => "None: the host's limits.",
+            KafkaProfile.Development => "Development: the host's limits.",
+            KafkaProfile.Test => "Test: " + caps + ".",
+            _ => "Production: " + caps + "; export and live tail are off.",
+        };
+    }
+
+    /// <summary>"your hourly allowance of 2 GiB" or "your hourly allowance on this cluster of 512 MiB": the allowance that ran out; with none named, no number.</summary>
+    /// <param name="spent">The allowance that has no bytes left, when the engine said which.</param>
+    public static string Allowance(KStudio.Core.Scanning.KafkaSpentBudget? spent) => spent switch
+    {
+        null => "your hourly allowance",
+        { Scope: KStudio.Core.Scanning.KafkaBudgetScope.Cluster } => $"your hourly allowance on this cluster of {KafkaDisplay.Bytes(spent.BytesPerHour)}",
+        _ => $"your hourly allowance of {KafkaDisplay.Bytes(spent.BytesPerHour)}",
+    };
+
+    /// <summary>What a profile does, for its chip's tooltip: Development caps nothing beyond the host's own limits, so it must not say it lowers them.</summary>
+    /// <param name="profile">The profile.</param>
+    public static string ProfileChipTitle(KafkaProfile profile) => profile switch
+    {
+        KafkaProfile.Development => "This cluster's profile is Development: it caps nothing; the limits are the ones the host set (Settings shows them).",
+        KafkaProfile.Test => "This cluster's profile is Test: it caps each scan at KStudio's default limits (Settings shows them).",
+        _ => "This cluster's profile is Production: it caps scans, the byte rate and the hourly allowance, and turns export and live tail off (Settings shows them).",
+    };
+
+    /// <summary>The Settings page's warning for a cluster with no profile (M5 decisions, OPEN-1).</summary>
+    public const string NoProfileWarning =
+        "This cluster has no profile; its limits are the engine's defaults. Set KafkaClusterBuilder.Profile(...) to cap them.";
+
+    /// <summary>The allowance line of the search form for a cluster whose own allowance is the lower one.</summary>
+    /// <param name="left">What the visitor has left.</param>
+    /// <param name="perHour">The cluster's allowance an hour.</param>
+    /// <param name="profile">The cluster's profile.</param>
+    public static string ClusterAllowance(long left, long perHour, KafkaProfile profile) =>
+        $"{KafkaDisplay.Bytes(left)} of this cluster's {KafkaDisplay.Bytes(perHour)} an hour left ({profile} profile)";
+
+    /// <summary>A span in words: <c>5 minutes</c>, <c>10 seconds</c>.</summary>
+    /// <param name="span">The span.</param>
+    public static string SpanText(TimeSpan span) =>
+        span.TotalMinutes >= 1 && span.Seconds == 0
+            ? $"{(int)span.TotalMinutes} {((int)span.TotalMinutes == 1 ? "minute" : "minutes")}"
+            : $"{(int)span.TotalSeconds} seconds";
+
+    // ------------------------------------------------------------------------------------------------
+    // Live tail (UI-TAIL, D46, decisions 3.6 to 3.9 of D-M5)
+    // ------------------------------------------------------------------------------------------------
+
+    /// <summary>The audit action of a live tail.</summary>
+    public const string TailAction = "LiveTail";
+
+    /// <summary>The audit target of a live tail: <c>live tail of orders.v1, payments.v1</c>.</summary>
+    /// <param name="topics">The topics.</param>
+    public static string TailTarget(IReadOnlyList<string> topics) => "live tail of " + string.Join(", ", topics);
+
+    /// <summary>The page's line when the tail failed outside the engine.</summary>
+    public const string TailFailed = "The live tail failed. The application's log has the reason.";
+
+    /// <summary>A resume or a start whose reader lost access since the tail's first segment started.</summary>
+    public const string TailGrantChanged = "Your access changed since this tail started. Start a new tail.";
 
     // ------------------------------------------------------------------------------------------------
     // Related records and duplicates (UI-D, D42, decisions 3 and 4 of D-CORR)

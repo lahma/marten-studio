@@ -18,6 +18,9 @@ public sealed class KafkaClusterBuilder
     /// <summary>The environment label, when one was set.</summary>
     internal string? EnvironmentText { get; private set; }
 
+    /// <summary>The profile, when one was set; <see langword="null" /> is no profile (the host's limits, unchanged).</summary>
+    internal KafkaProfile? ProfileValue { get; private set; }
+
     /// <summary>The OAuth token refresh hook, when one was set.</summary>
     internal Action<IClient, string>? TokenRefresh { get; private set; }
 
@@ -44,6 +47,26 @@ public sealed class KafkaClusterBuilder
     {
         ArgumentNullException.ThrowIfNull(environment);
         EnvironmentText = environment;
+        return this;
+    }
+
+    /// <summary>
+    /// What kind of cluster this is, for KStudio's limits (AGENTS.md D47): a profile lowers limits on this cluster and, for
+    /// <see cref="KafkaProfile.Production" />, forbids export and live tail even when they are granted. It never grants a capability and
+    /// never raises a limit above the host's. It is set explicitly only: with no call, the cluster uses the host's limits as they are, and
+    /// KStudio never infers one from the host's environment or from <see cref="Environment" />. A second call replaces the first.
+    /// </summary>
+    /// <param name="profile">The profile.</param>
+    /// <returns>This builder.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="profile" /> is not a defined value.</exception>
+    public KafkaClusterBuilder Profile(KafkaProfile profile)
+    {
+        if (!Enum.IsDefined(profile))
+        {
+            throw new ArgumentOutOfRangeException(nameof(profile), profile, "The profile is not one of Development, Test and Production.");
+        }
+
+        ProfileValue = profile;
         return this;
     }
 

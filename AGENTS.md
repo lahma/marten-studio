@@ -59,7 +59,7 @@ document for your area before writing code in it. All documents are in `docs/mai
 | Build, packages, versions, CI, release, agent routing | [build-and-release.md](docs/maintainers/build-and-release.md) (D3, D15, D21) and [hard-rules.md](docs/maintainers/hard-rules.md) rules 1, 2, 8, 9 and 16 (D1, D15 and D20 are whole above) |
 | Tests | [testing.md](docs/maintainers/testing.md) (D16, D19) |
 | KStudio: the engine (KStudio.Core), Kafka reads, scans, predicates, decoders, redaction | [kstudio.md](docs/maintainers/kstudio.md) (D36-D41) and [testing.md](docs/maintainers/testing.md) (the KStudio suites) |
-| KStudio: the module seams, Kafka pages, its authorization, capabilities and audit | [kstudio.md](docs/maintainers/kstudio.md) (D34, D35, and the engine's), [architecture.md](docs/maintainers/architecture.md) (D11, D30), [authorization.md](docs/maintainers/authorization.md) (D4, D5), [ui.md](docs/maintainers/ui.md) (D24-D26) and [hard-rules.md](docs/maintainers/hard-rules.md) rules 5, 6, 7 and 16 |
+| KStudio: the module seams, Kafka pages, its authorization, capabilities and audit | [kstudio.md](docs/maintainers/kstudio.md) (D34, D35, D45-D48, and the engine's), [architecture.md](docs/maintainers/architecture.md) (D11, D30), [authorization.md](docs/maintainers/authorization.md) (D4, D5), [ui.md](docs/maintainers/ui.md) (D24-D26) and [hard-rules.md](docs/maintainers/hard-rules.md) rules 5, 6, 7 and 16 |
 | The evidence and history behind a rule | [decision-notes.md](docs/maintainers/decision-notes.md); the dated budget entries are in [package-budget-changes.md](docs/maintainers/package-budget-changes.md) |
 
 ## Hard rules
@@ -202,7 +202,7 @@ Each rule's full text, with its lists of events, tests and history, is in
     no produce, commit, delete or alter method. D37 has the overrides; `ConfluentOverridesTests`,
     `ReadNeverWritesMetadataLiveTests` and `ReadNeverWritesScanLiveTests` hold them. Full text: hard rule 17.
 
-## Design decisions (D1–D44)
+## Design decisions (D1–D48)
 
 Every one of these was taken deliberately. Reversing one is allowed; doing it without reading the rationale is not. D1,
 D8, D9, D14, D15 and D20 are short enough to stand whole here; every other entry is the decision itself, with a pointer
@@ -511,7 +511,7 @@ text: [kstudio.md](docs/maintainers/kstudio.md#d40).
 (10 MiB/s per process, paced by consumption), per-scan bytes, records, duration and matches, and an owner's rolling
 hourly byte budget. Memory is stated, about $S(C + 2mc)$: $C \approx 64$ MiB per consumer (measured), and a kept match holds at most $c$ bytes of key, headers, attributes and value together, kept as UTF-16 text; about 253 MiB at the defaults, as private memory (`RssAnon` on Linux, where .NET's
 `PrivateMemorySize64` counts untouched mappings). A record read holds at most 21 matches and the value of the record asked for, up to MaxDecodeBytes; masking never grows a value past twice that. A scan above the confirmation
-threshold starts only with a confirmation the engine checks. A profile or a visitor can only lower a limit. Full text:
+threshold starts only with a confirmation the engine checks. A profile or a visitor can only lower a limit. An export peaks at twice its file, so two in flight add $4 \cdot$ `MaxExportBytes` (D45), and a live tail holds at most $2 \cdot$ `TailCapacity` matches, its ring and one batch (D46), so the statement holds with tails counted in $S$. Full text:
 [kstudio.md](docs/maintainers/kstudio.md#d41).
 
 **D42 — KStudio correlates by declared fields, in one audited scan.** A topic's correlation fields (headers,
@@ -536,6 +536,38 @@ keeps its rows per tenant and lists no `KnownTenantIds`) and `IStudioRecordSearc
 beside `IStudioLinks`, under its rules. Neither module names the other, a masked value never enters a URL, a value travels
 in the fragment, and the destination authorizes again. External links are host templates with no credential, opened with
 `noreferrer`. Full text: [kstudio.md](docs/maintainers/kstudio.md#d44).
+
+**D45 — KStudio exports what the visitor holds, redacted, through the circuit.** `ExportRecords` (off by default, needs
+`SearchRecords`) writes the matches a search, a live tail or the record page already holds, as JSON Lines, CSV or one value, from
+`KafkaMatch` alone, so every mask is the engine's and nothing is read again; a JSON value is written compact on one line, and a CSV
+cell a spreadsheet would run is prefixed with `'`. The file is at most `MaxExportBytes`, written before it is sent, two at a time,
+and streamed to the browser with `DotNetStreamReference`: no endpoint, no token, nothing kept. The service asks the capability, the
+profile, every policy per topic and the payload grant again, refuses whole, is bound to the run on screen, and audits once however
+it ends (9606, 9609). `JsonView`'s Download stays off in KStudio, because a `data:` link cannot be gated or audited. Full text:
+[kstudio.md](docs/maintainers/kstudio.md#d45).
+
+**D46 — KStudio's live tail is a scan with no end.** `LiveTail` (off by default, needs `SearchRecords`) starts at each
+partition's end (the last stable offset under `read_committed`), keeps the newest `TailCapacity` matches in a ring, renders at most
+four times a second, and holds a scan slot and pays the owner's budgets while it reads. It pauses by ending its segment - after
+`TailPauseAfter`, a segment's byte or record budget, an owner's budget, a hidden tab, or a cluster that stopped answering - and
+resumes from its exact cursor, the gate and the planned grant asked again. It never stops for silence and a caught-up partition is
+never stalled. One audit entry per tail session however it ends (9608), its start logged (9607). Full text:
+[kstudio.md](docs/maintainers/kstudio.md#d46).
+
+**D47 — KStudio's profiles lower limits per cluster, explicitly, and never grant.** `KafkaClusterBuilder.Profile(KafkaProfile.
+Development | Test | Production)` caps a cluster's per-scan limits from a fixed table, gives a profiled cluster its own byte rate
+and hourly owner budget (planning reads included), and under `Production` forbids export and live tail even when granted; the
+disabled control names the setting. A cluster with no profile uses the host's limits, and the Settings page says so; the profile
+is never inferred from `IHostEnvironment` or `Environment`. Concurrency and consumer sizes stay process-wide. The ceilings apply in
+the engine's plan, and tests prove no profile raises a limit or grants a capability. Full text:
+[kstudio.md](docs/maintainers/kstudio.md#d47).
+
+**D48 — The record-index seam narrows a search and proves nothing.** `IKafkaRecordIndex` (public, registered with
+`RecordIndex<T>()`, no implementation shipped, none in the sample: K6) is asked once per plain search for one unredacted
+equality on the key, a header or a CloudEvents attribute, about the visitor's authorized topics only. Its hints narrow each
+partition's range inside the window; every record there is still judged, a hint about another topic is dropped unseen, a failure
+reads the whole window (9679, kind only), and a negative is said only of the ranges read, with "Search the whole window" beside it.
+Full text: [kstudio.md](docs/maintainers/kstudio.md#d48).
 
 ## Package budget
 

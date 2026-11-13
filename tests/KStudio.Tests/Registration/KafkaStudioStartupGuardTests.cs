@@ -35,6 +35,39 @@ public class KafkaStudioStartupGuardTests
             + "capabilities off; PostgresStudioOptions.ReadOnly = true turns them all off.");
     }
 
+    [Theory]
+    [InlineData("ReadPayloads")]
+    [InlineData("ExportRecords")]
+    [InlineData("LiveTail")]
+    public async Task Each_capability_alone_with_no_policy_refuses_to_start(string capability)
+    {
+        Func<Task> start = () => Start(
+            static _ => { },
+            o =>
+            {
+                typeof(KafkaStudioCapabilities).GetProperty(capability)!.SetValue(o.Capabilities, true);
+
+                // ReadPayloads on its own is refused by the options themselves (it needs SearchRecords); the two new flags are not.
+                o.Capabilities.SearchRecords = capability == "ReadPayloads";
+            });
+
+        (await start.Should().ThrowAsync<InvalidOperationException>()).Which.Message.Should().Contain(capability + " enabled and no policy decides");
+    }
+
+    [Theory]
+    [InlineData("ExportRecords")]
+    [InlineData("LiveTail")]
+    public async Task A_new_capability_without_SearchRecords_but_with_a_policy_starts(string capability)
+    {
+        await Start(
+            static _ => { },
+            o =>
+            {
+                typeof(KafkaStudioCapabilities).GetProperty(capability)!.SetValue(o.Capabilities, true);
+                o.ClusterAuthorizationPolicy = "kafka-topics";
+            });
+    }
+
     [Fact]
     public async Task A_capability_under_ReadOnly_starts()
     {
