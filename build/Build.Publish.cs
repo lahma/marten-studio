@@ -30,9 +30,10 @@ using static Fallout.Common.Tools.DotNet.DotNetTasks;
 /// through a <c>PackageReference</c>; there are no binaries to run, nothing to download and unpack, and
 /// therefore no assets on the GitHub Release either - <c>ICreateGitHubRelease.AssetFiles</c> in
 /// <c>Build.cs</c> is deliberately empty and the release carries only the changelog notes. There is no
-/// preview feed: every tagged version is published from <c>publish.yml</c> by trusted publishing, which
+/// feed for untagged builds: every tagged version is published from <c>publish.yml</c> by trusted publishing, which
 /// is why <c>Publish</c> is a single-source target gated on <see cref="Build.IsTaggedBuild"/> rather than
-/// a two-way switch between a release feed and a preview one.
+/// a two-way switch between a release feed and a development one. (KStudio's packages are a preview by version,
+/// <c>&lt;version&gt;-&lt;label&gt;</c>, and go out on the same feed with the same tag.)
 /// </remarks>
 partial class Build
 {
@@ -385,7 +386,7 @@ partial class Build
 
         Log.Warning(
             "Skipping Publish: this build is not a v* tag build, and nothing is pushed to nuget.org from " +
-            "anything else (there is no preview feed). Run `Pack` to build and inspect the package locally; " +
+            "anything else (there is no feed for untagged builds). Run `Pack` to build and inspect the package locally; " +
             "push tag v{Version} - the version CHANGELOG.md declares - to publish it.", Version);
 
         return false;

@@ -36,7 +36,9 @@
 
   <!-- K8: KStudio ships as a preview beside the family release. The three KStudio projects (KStudio.Core, KStudio, KStudio.Wolverine) pack
        at `<version>-<label>`, the version being CHANGELOG.md's (above); no other project reads the label. To graduate KStudio, empty it:
-       they then pack at the family version, and nothing else changes (build-and-release.md, "KStudio's preview label"). -->
+       they then pack at the family version and stamp no label. The rest of graduation is words (the READMEs' "preview" and the
+       prerelease flag of the install lines) and, a release later, the three projects' empty PackageValidationBaselineVersion element
+       (build-and-release.md, "KStudio's preview label"). -->
   <PropertyGroup>
     <KStudioPrereleaseLabel>preview.1</KStudioPrereleaseLabel>
   </PropertyGroup>

@@ -1,7 +1,7 @@
 # Marten Studio
 
 An embeddable Blazor Server admin UI for [MartenDB](https://martendb.io), shipped as an MIT-licensed
-Razor Class Library built on [Postgres Studio](#three-packages). You add `AddMartenStudio()` to your container and
+Razor Class Library built on [Postgres Studio](#six-packages). You add `AddMartenStudio()` to your container and
 `MapMartenStudio()` to your endpoint pipeline, and the studio runs inside your own ASP.NET Core application against *that
 application's own* configured `IDocumentStore` — browsing document collections and their JSON,
 inspecting and steering event streams, projections and the async daemon, running guarded queries and
@@ -40,9 +40,9 @@ byte-for-byte the application it was.
   name or a statement's queryid; one match opens it, several are listed. Each probe is the read its page makes, under the
   same gates; a hidden type never answers.
 
-## Three packages
+## Six packages
 
-The studio is three packages, released together at one version, and KStudio's three beside them as a preview:
+The studio is three packages, released together at one version, with KStudio's three beside them as a preview: six in all.
 
 | Package | For | Register and map | Mounted at |
 |---|---|---|---|
@@ -76,6 +76,9 @@ capabilities that are off by default, a search for the records you need. Call `A
 studio's own path, at `/kafka`. It never creates a topic, never commits an offset, and asks your own policies about every
 cluster and topic it reads. Apache Kafka is a trademark of the Apache Software Foundation. KStudio is not affiliated with
 or endorsed by the Apache Software Foundation.
+
+Install it with `dotnet add package KStudio --prerelease` (and `dotnet add package KStudio.Wolverine --prerelease` for a
+Wolverine application's clusters and topics); `KStudio.Core`, the engine, comes with it.
 
 #### KStudio in five lines
 

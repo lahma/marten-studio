@@ -31,7 +31,7 @@ public class PackReadinessTests
 
     [Theory]
     [MemberData(nameof(Projects))]
-    public void Each_project_has_its_package_metadata_and_stays_unpackable(string project, string tags, string pinTarget)
+    public void Each_project_has_its_package_metadata_is_packable_and_has_an_empty_validation_baseline(string project, string tags, string pinTarget)
     {
         var root = Load(project);
 
@@ -42,8 +42,9 @@ public class PackReadinessTests
         Property(root, "PackageReadmeFile").Should().Be("README.md");
         Property(root, "IsPackable").Should().Be("true", "K8: KStudio ships, as a preview");
         Property(root, "EnablePackageValidation").Should().Be("true");
-        Property(root, "PackageValidationBaselineVersion").Should().BeNullOrEmpty(
-            "the family's baseline (Directory.Build.props) is a release on nuget.org, and these ids have none yet");
+        root.Descendants().Where(static x => x.Name.LocalName == "PackageValidationBaselineVersion")
+            .Should().ContainSingle("the element must be there, or Directory.Build.props' baseline (the family's last release) would apply to an id nuget.org does not have")
+            .Which.Value.Should().BeEmpty("these ids have no release to be compared with yet");
 
         root.Descendants().Where(static x => x.Name.LocalName == "None"
                 && ((string?) x.Attribute("Include"))?.Replace('\\', '/') == "../KStudio/README.md")
@@ -103,8 +104,13 @@ public class PackReadinessTests
         XElement props = XDocument.Load(RepositoryRoot.Combine("Directory.Build.props")).Root!;
         List<XElement> labels = [.. props.Descendants().Where(static x => x.Name.LocalName == "KStudioPrereleaseLabel")];
 
-        labels.Should().ContainSingle("the label has exactly one home").Which.Value.Should().NotBeNullOrWhiteSpace();
-        labels[0].Value.Should().MatchRegex(@"^[0-9A-Za-z]+(\.[0-9A-Za-z]+)*$", "a SemVer prerelease label");
+        // The element must exist; its value may be empty - that is graduation. A label, when there is one, is a SemVer prerelease label.
+        labels.Should().ContainSingle("the label has exactly one home");
+
+        if (labels[0].Value.Trim().Length > 0)
+        {
+            labels[0].Value.Trim().Should().MatchRegex(@"^[0-9A-Za-z]+(\.[0-9A-Za-z]+)*$", "a SemVer prerelease label");
+        }
 
         foreach (string project in Names)
         {
@@ -112,7 +118,8 @@ public class PackReadinessTests
 
             text.Should().Contain("<PackageVersion>$(KStudioBaseVersion)-$(KStudioPrereleaseLabel)</PackageVersion>", $"{project} packs at <version>-<label>")
                 .And.Contain("<InformationalVersion>$(KStudioBaseVersion)-$(KStudioPrereleaseLabel)</InformationalVersion>")
-                .And.Contain("Condition=\"'$(KStudioPrereleaseLabel)' != ''\"", "an empty label packs at the family version")
+                .And.Contain("<PropertyGroup Condition=\"'$(KStudioPrereleaseLabel)' != ''\">", "an empty label sets neither PackageVersion nor InformationalVersion")
+                .And.Contain("<ItemGroup Condition=\"'$(KStudioPrereleaseLabel)' != ''\">", "an empty label stamps no AssemblyMetadata")
                 .And.Contain("<KStudioBaseVersion>$(Version)</KStudioBaseVersion>", "the CHANGELOG's version, read and never set")
                 .And.NotContain("<Version>", "Version is a global property that Pack passes");
             text.Should().NotContain("<AssemblyVersion>").And.NotContain("<FileVersion>", "both stay numeric");

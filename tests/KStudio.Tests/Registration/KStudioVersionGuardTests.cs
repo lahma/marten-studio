@@ -1,7 +1,10 @@
 using System.Reflection;
 using System.Reflection.Emit;
+using System.Xml.Linq;
 
 using KStudio.Internal;
+
+using MartenStudio.Tests.Conventions;
 
 using Microsoft.Extensions.DependencyInjection;
 
@@ -42,8 +45,22 @@ public class KStudioVersionGuardTests
         string? family = KStudioVersionGuard.FamilyVersion(KStudioVersionGuard.InformationalVersion(Module), label);
 
         required.Should().NotBe("?");
-        label.Should().NotBeNullOrEmpty("the three KStudio projects are stamped with Directory.Build.props' KStudioPrereleaseLabel");
-        KStudioVersionGuard.InformationalVersion(Module).Should().Contain("-" + label, "KStudio packs as a preview");
+
+        // The label is Directory.Build.props': stamped into the assembly while it is set, and nothing is stamped once it is emptied (graduation).
+        string configured = XDocument.Load(RepositoryRoot.Combine("Directory.Build.props")).Descendants()
+            .Single(static x => x.Name.LocalName == "KStudioPrereleaseLabel").Value.Trim();
+
+        if (configured.Length > 0)
+        {
+            label.Should().Be(configured, "the three KStudio projects are stamped with Directory.Build.props' KStudioPrereleaseLabel");
+            KStudioVersionGuard.InformationalVersion(Module).Should().Contain("-" + label, "KStudio packs as a preview");
+        }
+        else
+        {
+            label.Should().BeNull("an empty label stamps no metadata");
+            family.Should().Be(KStudioVersionGuard.InformationalVersion(Module), "the family version is KStudio's own");
+        }
+
         KStudioVersionGuard.InformationalVersion(Shared).Should().Be(family, "the family beside KStudio is at the version without its preview label");
         KStudioVersionGuard.InformationalVersion(Engine).Should().Be(family);
         KStudioVersionGuard.InformationalVersion(Kafka).Should().Be(KStudioVersionGuard.InformationalVersion(Module), "KStudio.Core is KStudio's own, label and all");
@@ -191,6 +208,23 @@ public class KStudioVersionGuardTests
     }
 
     /// <summary>After graduation (the label emptied) nothing is stamped and nothing is taken off: all four are one version again.</summary>
+    /// <summary>A label that is present but empty (the build never stamps one, but a hand-made assembly can) takes nothing off.</summary>
+    [Fact]
+    public void An_empty_label_takes_nothing_off_and_all_four_are_one_version()
+    {
+        AssemblyBuilder module = WithVersion("1.3.0+5f1c2a9d", "Release", label: "");
+
+        KStudioVersionGuard.PrereleaseLabel(module).Should().BeEmpty();
+        FluentActions.Invoking(() => KStudioVersionGuard.Ensure(
+                module,
+                () => WithVersion("1.3.0+5f1c2a9d"),
+                () => WithVersion("1.3.0+5f1c2a9d"),
+                () => WithVersion("1.3.0+5f1c2a9d")))
+            .Should().NotThrow();
+        FluentActions.Invoking(() => KStudioVersionGuard.Ensure(module, () => WithVersion("1.3.0-preview.1+5f1c2a9d"), () => module, () => module))
+            .Should().Throw<InvalidOperationException>("with no label to take off, a family assembly carrying one is another version");
+    }
+
     [Fact]
     public void Without_a_label_all_four_are_one_version()
     {

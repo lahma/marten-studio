@@ -144,7 +144,7 @@ tests/KStudio.Tests -p:KStudioConfluentVersion=2.16.0`.
 one after the other, all at the CHANGELOG version (the last three with the preview label, below) and all at the floors - it
 refuses a `--marten-version`, `--npgsql-version` or `--confluent-version` that is not the floor, and each csproj refuses a bare `dotnet pack` off its
 floor, by property and by `project.assets.json` (`PostgresStudio.Diagnostics` and `PostgresStudio` for Npgsql, MartenStudio
-for Marten) - and then asserts all six nuspecs, each dependency at exactly the range NuGet wrote. MartenStudio depends on
+for Marten, and `KStudio.Core` for Confluent.Kafka, `KStudioCorePackOnlyAtTheConfluentFloor`) - and then asserts all six nuspecs, each dependency at exactly the range NuGet wrote. MartenStudio depends on
 exactly `PostgresStudio [<version>]`, on `Marten <floor>` and on `Microsoft.AspNetCore.App.Internal.Assets` (written there
 by transitive pinning), and not on the engine, which a host gets through PostgresStudio's pin. PostgresStudio depends on
 exactly `PostgresStudio.Diagnostics [<version>]`, `Npgsql <floor>` (it no longer references Npgsql itself, but it still sets
@@ -180,8 +180,13 @@ informational version and PostgresStudio and PostgresStudio.Diagnostics with the
 `KStudioPrereleaseLabel` assembly metadata (stamped by the three projects) taken off. A different label, or a family assembly
 of another version, is still refused. Package validation runs on the three with no baseline: `PackageValidationBaselineVersion`
 is the family's last release, and these ids have none on nuget.org until the first release. **To graduate** KStudio, empty the
-label in `Directory.Build.props` in the release's pull request: the three then pack at the family version, no metadata is
-stamped, and the guards compare all four assemblies as one version again; give the three a baseline then, in the release after.
+label in `Directory.Build.props` in the release's pull request: the three then pack at the family version (`PackageVersion` is
+the `Version` `Pack` passes), no `AssemblyMetadata` is stamped, `Pack` names the six files with no label, and the guards compare
+all four assemblies as one version again. `PackReadinessTests` and `KStudioVersionGuardTests` hold both states (the element must
+exist; its value may be empty). The rest of graduation is words, in the same pull request: the "preview" wording in `README.md`
+(the package table and the KStudio paragraph), `src/KStudio/README.md` and the changelog, and the `--prerelease` of the install
+lines. In the release after it, once a KStudio release is on nuget.org, remove the empty `PackageValidationBaselineVersion` element
+from the three projects, so the family's baseline applies (and move `PackReadinessTests`' assertion with it).
 
 `build/_build.csproj` restores with no warnings. Fallout 10.4.0 brought `System.Security.Cryptography.Xml` and `.Pkcs` 10.0.10
 (NU1902/NU1903: GHSA-2fmv-rv2c-59x7, GHSA-846f-f764-76mx, GHSA-7hqp-7c5m-4vq6, GHSA-c399-9853-6jmj, GHSA-r955-8q5j-3h83);
@@ -250,7 +255,7 @@ One job, not several: more jobs would mean more OIDC exchanges racing the one-ke
 the release run.
 
 `Publish` is `.OnlyWhenDynamic(() => ShouldPublish())` and refuses in ordered steps: a non-tag invocation is
-a logged *skip* (there is no preview feed), and once past that gate it asserts, in order, that it is on
+a logged *skip* (there is no feed for untagged builds), and once past that gate it asserts, in order, that it is on
 GitHub Actions, that `NUGET_USER` is set, and that `GITHUB_REF_NAME` matches the changelog version. Only
 then does it mint the key, immediately before pushing — the key lives 15–60 minutes and one OIDC token
 mints exactly one key. Before it mints the key, it asserts that `artifacts/packages` holds exactly
@@ -300,8 +305,9 @@ None of these can be done from this repository, and the first tag will fail with
    Repository `marten-studio`; Workflow File `publish.yml` (**filename only** — not `release.yml`, and not
    the `.github/workflows/` path); Environment `nuget`. The policy is not limited to one package id: the key it
    mints pushes every id of the repository, including one that does not exist yet (confirmed by the policy owner,
-   2026-10-26); the three KStudio ids (`KStudio.Core`, `KStudio`, `KStudio.Wolverine`) are covered the same way, and the
-   user confirms that before the first tag that carries them.
+   2026-10-26); the three KStudio ids (`KStudio.Core`, `KStudio`, `KStudio.Wolverine`) are covered the same way: the three ids
+   are unowned on nuget.org (checked 2026-11-13: no registration for KStudio, KStudio.Core or KStudio.Wolverine), and the trusted
+   publishing policy covers new ids. The user confirms that before the first tag that carries them.
 2. **GitHub → Settings → Environments → `nuget`**, with a deployment branch/tag policy of `v*`. This is the
    second claim the nuget.org policy matches on, and it is what keeps a workflow run from a branch out of
    the publishing path.
