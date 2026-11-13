@@ -123,6 +123,33 @@ It is one search: it is estimated before it runs, confirmed above the same thres
 audit with every topic and each topic's predicate, and stopped by the same limits. A topic you may not read is not
 listed. A topic Kafka refuses shows why. Nothing runs until you press **Search related records**.
 
+## Record index
+
+KStudio keeps no index of your topics. If your application already knows where its records went (a document that stored the
+partition and offset its producer got back, say), it can tell a search where to look:
+
+```csharp
+o.RecordIndex<MyRecordIndex>();
+
+sealed class MyRecordIndex(IDocumentStore store) : IKafkaRecordIndex
+{
+    public async ValueTask<KafkaIndexAnswer> FindAsync(KafkaIndexQuery query, CancellationToken cancellationToken)
+    {
+        if (query.Field != KafkaIndexField.Key) return KafkaIndexAnswer.None;
+        await using var session = store.QuerySession();
+        var sent = await session.Query<SentMessage>().Where(x => x.Key == query.Value && query.Topics.Contains(x.Topic))
+            .Take(16).ToListAsync(cancellationToken);
+        return KafkaIndexAnswer.Hints(sent.Select(x => new KafkaIndexHint(x.Topic, x.Partition, x.Offset, x.Offset + 1)));
+    }
+}
+```
+
+A search for `key = '…'`, or `header.<name> = '…'` / `ce.<attribute> = '…'`, asks the index once while it is planned, never for a
+field a rule redacts. The search then reads only the ranges the index named, inside its window, and judges every record there
+as always: a wrong hint finds nothing, never something false. A search narrowed this way says so, its "no match" is said only of
+the ranges it read, and **Search the whole window** reads the rest. An index that throws or does not answer within the request
+timeout is ignored, and the whole window is read.
+
 ## Duplicates
 
 Under search results and related records, **Possible duplicates** groups the records found on one topic that carry the

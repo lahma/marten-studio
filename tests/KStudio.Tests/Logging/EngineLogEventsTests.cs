@@ -7,7 +7,7 @@ using Microsoft.Extensions.Logging;
 namespace KStudio.Tests.Logging;
 
 /// <summary>
-/// The engine's log events (decision 11): ids unique and inside 9650 to 9699 (ENG-A's are 9650 to 9664, ENG-B's 9665 to 9674, ENG-D's 9675, ENG-E's 9676, WOLV's 9677 and 9678), each level as designed, and no
+/// The engine's log events (decision 11): ids unique and inside 9650 to 9699 (ENG-A's are 9650 to 9664, ENG-B's 9665 to 9674, ENG-D's 9675, ENG-E's 9676, WOLV's 9677 and 9678, INDEX's 9679), each level as designed, and no
 /// parameter that could carry content. Engine events carry cluster keys, topics, partitions, offsets, counts, code names and librdkafka's own
 /// text, and never a predicate, a literal, a key, a header, a value, an owner or a user.
 /// </summary>
@@ -55,6 +55,9 @@ public class EngineLogEventsTests
         // WOLV (D43): a cluster, tenant or topic a source found was not listed (Warning once, Debug after); the Find in Kafka link could not read the clusters.
         [9677] = null,
         [9678] = LogLevel.Debug,
+
+        // INDEX (D48): the host's record index threw, timed out or could not be created (type and kind only).
+        [9679] = LogLevel.Debug,
     };
 
     private static readonly string[] AllowedParameters =
@@ -62,7 +65,7 @@ public class EngineLogEventsTests
         "logger", "level", "exception", "cluster", "call", "operation", "resourceType", "resource", "api", "code", "client", "facility",
         "text", "setting", "count", "idleSeconds", "partition", "topic", "logStart",
         "scanId", "records", "bytes", "matches", "undecidable", "elapsedMilliseconds", "reason", "refusal", "lost", "position", "isolation",
-        "offsets", "partitions", "topics", "exceptionKind", "decoder", "kind", "what", "source",
+        "offsets", "partitions", "topics", "exceptionKind", "decoder", "kind", "what", "source", "index",
     ];
 
     private static readonly string[] ForbiddenPlaceholders = ["Key", "Value", "Header", "Predicate", "Literal", "Owner", "User", "Payload", "Record"];
@@ -84,15 +87,15 @@ public class EngineLogEventsTests
     }
 
     [Fact]
-    public void The_engine_defines_exactly_ENG_As_events_9650_to_9664_ENG_Bs_9665_to_9674_ENG_Ds_9675_ENG_Es_9676_and_WOLVs_9677_and_9678()
+    public void The_engine_defines_exactly_ENG_As_events_9650_to_9664_ENG_Bs_9665_to_9674_ENG_Ds_9675_ENG_Es_9676_WOLVs_9677_and_9678_and_INDEXs_9679()
     {
         Events().Select(static x => x.Attribute.EventId).Order().Should().Equal(EngineEvents.Keys.Order());
     }
 
     [Fact]
-    public void WOLV_leaves_9679_to_9699_for_the_later_milestones()
+    public void INDEX_leaves_9680_to_9699_for_the_later_milestones()
     {
-        Events().Select(static x => x.Attribute.EventId).Should().NotContain(static x => x >= 9679, "9679 to 9699 are for the later packets");
+        Events().Select(static x => x.Attribute.EventId).Should().NotContain(static x => x >= 9680, "9680 to 9699 are for the later packets");
     }
 
     [Fact]

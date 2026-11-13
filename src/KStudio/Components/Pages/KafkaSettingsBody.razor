@@ -1,10 +1,12 @@
 @implements IAsyncDisposable
 @using KStudio.Core.Clusters
+@using KStudio.Core.Index
 @using KStudio.Core.Scanning
 @using Microsoft.Extensions.Logging
 @inject KafkaState State
 @inject KafkaCatalogService Catalog
 @inject IKafkaScanner Scanner
+@inject KafkaRecordIndexResolver RecordIndex
 @inject ILogger<KafkaSettingsBody> Logger
 
 @* The body of Cluster settings (D-UI decision 8b): the engine's reader's view of what the host handed KStudio, one setting at a time. The raw
@@ -103,6 +105,7 @@
         </TableScroll>
 
         <p class="ms-k-oauth">OAuth token refresh: @(view.TokenRefreshDeclared ? "declared" : "not declared")</p>
+        <p class="ms-k-record-index">@KafkaSearchText.RecordIndexLine(RecordIndex.Name)</p>
 
         @if (discovery is { IsEmpty: false })
         {

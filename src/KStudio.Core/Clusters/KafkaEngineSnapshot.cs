@@ -21,7 +21,15 @@ internal sealed class KafkaEngineSnapshot
         RequestTimeout = options.RequestTimeout;
         AdminIdleTimeout = options.AdminIdleTimeout;
         limits = options.Limits.Copy();
+        RecordIndexSource = options.RecordIndexSource;
+        RecordIndexName = options.RecordIndexName;
     }
+
+    /// <summary>How the host's record index is made (D48), or <see langword="null" /> when none was registered: read once, like everything here.</summary>
+    public Func<IServiceProvider, IKafkaRecordIndex>? RecordIndexSource { get; }
+
+    /// <summary>The registered index's type name; <see langword="null" /> when none was registered.</summary>
+    public string? RecordIndexName { get; }
 
     /// <summary>The prefix of every scan consumer's group id.</summary>
     public string GroupIdPrefix { get; }

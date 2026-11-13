@@ -984,3 +984,48 @@ read refuse `OwnerBudgetSpent` when either has nothing left. A cluster with no p
 **A profile never grants.** It has no capability in it: `ForbidsExport` and `ForbidsTail` can only refuse, and the limits above can only fall. `KafkaProfileTests`
 and `ProfileEngineTests` hold the engine's half; the capability half (every profile over every combination of the four capabilities leaves the usable ones a subset
 of those configured, and none under `ReadOnly`) is held where the capabilities live, in the services' tests.
+
+## D48
+
+**D48 — The record index is the host's answer to "where is this key?", and it only ever narrows.** `IKafkaRecordIndex` (public, in `KStudio.Core`, registered
+with `KafkaEngineOptions.RecordIndex<TIndex>()`) lets an application that already knows where its records went (a document that stored the partition and offset
+its producer got back) point a key or correlation search at offset ranges. KStudio ships **no implementation, keeps no index, and the sample has none**: K6 refuses
+a sightings index and any persistent index of ours, and a sample index is the one people copy, so it would be that index one copy away. The docs show twelve lines of
+a host implementing it, and the tests use a hand-written `FakeRecordIndex`, as the family uses no mocking library. One index per engine; a second call replaces the
+first. It is made once, on first use, from the root provider with `ActivatorUtilities.CreateInstance<TIndex>` behind a `Lazy` that is `PublicationOnly`, exactly as a
+topic's `Value<TDecoder>()` is (`KafkaRecordIndexResolver`), so a constructor that throws is tried again on the next plan and never cached as the answer. The options'
+registration is read once into `KafkaEngineSnapshot`, like every other value, so nothing written to the options later reaches the engine.
+
+**When it is asked.** Once per plan, in `PlanAsync`, after parsing, the gates and the partition pruning and before the estimate, when an index is registered and the
+request is a plain search: no cursor (`ContinueFrom`), no search for each topic (`PerTopic`, which is the correlation scan), and `KafkaScanRequest.IgnoreIndex`
+false. A tail and a record read have their own entry points and never reach it. `IndexClauseSelector` takes the search's **top-level conjunction** (an `and`, a
+parenthesised `and` inside it, or a lone clause) and the equalities in it on `key`, `header.<name>` or `ce.<attribute>` with a **string literal**: **one literal per
+question** (OPEN-7), so an `in` list, a prefix, a contains, a range, `any`, `value`, a JSON path, `is null`, and anything under an `or` or a `not` are never asked. The
+first of those in this order is asked: `key`; a header or attribute that is a correlation field (D42, defaults included) on any of the topics; any other; the order typed
+breaks ties. **A field any searched topic redacts is never a candidate, even a `Searchable()` one**: its literal never leaves the engine (D40), and then the next clause
+is. The query carries the cluster's entry key and tenant, the request's topics (every one has passed every gate), the window, the field, the name, the correlation kind
+the topics agree on (none when they disagree), and the literal as typed.
+
+**Narrow, never trust (`IndexNarrower`, pure).** A hint about a topic the search did not name is dropped **before it is counted, logged or shown**, so it cannot even
+use up the cap; so are a hint about a partition the plan does not read and one with an empty or reversed range. At most 64 of the rest are used (the number left
+over is counted and said). Per (topic, partition) the hints become one range, from the least first offset to the greatest end, **intersected with the plan's own
+range** there (the window's offsets, after pruning); an empty intersection drops the partition. The narrowed plan reads that, and every other partition an empty
+range, and the estimate is of the narrowed ranges. The scan reads and judges every record in them as in any scan: **a match is a match the scan found, never a hint
+the index gave**, and a wrong hint finds nothing. If no hint survives the plan is returned as it was, with a note.
+
+**Negatives stay truthful (D38).** `KafkaIndexNarrowing` carries the engine's sentences: the plan note, the caveat beside matches and negatives ("Read only where the
+host's record index pointed (60 of 2,000 offsets); other matches in the window were not looked for."), the narrowed negative ("No match in the 2 ranges the host's
+record index named (60 offsets). The rest of the window was not read."), and the audit suffix (`; narrowed by the host's record index to 2 ranges of orders.v1 (60
+offsets)`). The result banner never says "every offset in the window" of a narrowed scan. **Search the whole window** is the same input with `IgnoreIndex`, its own
+plan, estimate, confirmation, scan and audit entry, and is bound to the run on screen (`shownRun`), never to the latest plan. **Continue** from a narrowed scan reads
+the rest of the narrowed ranges: the cursor carries the narrowing in memory (like its pruning claim; the text form carries positions only), the continued plan keeps it
+and never asks again, because its negatives are still about those ranges only.
+
+**What the index cannot do to a search.** It is given the planning token linked with `RequestTimeout`, and the engine does not wait past that for an index that ignores
+its token. An exception, a timeout, a constructor that throws, or an answer of `None` costs the narrowing and nothing else: the whole window is read, with the note
+`The host's record index did not answer; the whole window is read.` (or `... pointed nowhere in this window ...`). Abandoning the planning is not a failure of the
+index and propagates. Event **9679** (Debug, once per cluster per ten minutes) carries the index's type name, the cluster and the exception's **type** (`Timeout` for a
+timeout): never the query, the literal, the message or a hint. The audit gains the narrowing suffix and nothing else: the call reads no record, so it is no entry of its
+own. `IndexNarrowerTests`, `IndexClauseSelectorTests`, `IndexPlanTests` (with a sentinel literal and exception message that no log line may contain),
+`KafkaSearchIndexTextTests` and `KafkaSearchIndexPageTests` hold all of this; `PublicApiTest_KStudioCore` holds the surface (the interface, `RecordIndex<T>()`, and the four
+types the interface's one method takes and returns).

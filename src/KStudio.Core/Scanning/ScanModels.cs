@@ -3,6 +3,7 @@ using System.Text;
 
 using KStudio.Core.Clusters;
 using KStudio.Core.Decoding;
+using KStudio.Core.Index;
 using KStudio.Core.Predicates;
 using KStudio.Core.Windows;
 
@@ -99,6 +100,7 @@ internal sealed record KafkaTopicQuery(KafkaTopicName Topic, string PredicateTex
 /// <param name="Lower">Limits lowered for this scan.</param>
 /// <param name="DisablePruning">Read every partition even where a verified partitioner would allow reading fewer ("Search all partitions", D-PAYLOAD decision 7.6).</param>
 /// <param name="PerTopic">A predicate and a grant for each topic (D42): <paramref name="PredicateText" /> is then <see langword="null" /> and <paramref name="Topics" /> are exactly these topics, in order. One scan still: one consumer, one slot, one estimate and one byte budget.</param>
+/// <param name="IgnoreIndex">Read the whole window even where the host's record index could narrow it ("Search the whole window", AGENTS.md D48). A search with a cursor, with a search for each topic or for a live tail never asks the index, whatever this says.</param>
 internal sealed record KafkaScanRequest(
     string Cluster,
     IReadOnlyList<KafkaTopicName> Topics,
@@ -110,7 +112,8 @@ internal sealed record KafkaScanRequest(
     KafkaScanCursor? ContinueFrom = null,
     KafkaScanLowering? Lower = null,
     bool DisablePruning = false,
-    IReadOnlyList<KafkaTopicQuery>? PerTopic = null);
+    IReadOnlyList<KafkaTopicQuery>? PerTopic = null,
+    bool IgnoreIndex = false);
 
 /// <summary>Why a scan stopped (decision 9.5): exactly one.</summary>
 internal enum KafkaScanStopReason
@@ -283,6 +286,7 @@ internal sealed class KafkaScanPlan
     /// <param name="pruning">What each topic's partitioner claim came to (decision 7.4); empty when pruning was not asked of any topic.</param>
     /// <param name="tail">The request of a live tail plan (D-M5 decision 3.1); <see langword="null" /> for a scan. <paramref name="request" /> is then its image as a scan request.</param>
     /// <param name="gaps">Records already lost to retention when the plan was made (a resumed tail whose cursor is below the log start); the run starts its gaps with these.</param>
+    /// <param name="index">What the host's record index did to this plan (AGENTS.md D48); <see langword="null" /> when it was not asked.</param>
     public KafkaScanPlan(
         KafkaScanRequest request,
         ResolvedWindow? window,
@@ -295,8 +299,10 @@ internal sealed class KafkaScanPlan
         string auditText,
         IReadOnlyList<KafkaTopicPruning>? pruning = null,
         KafkaTailRequest? tail = null,
-        IReadOnlyList<KafkaScanGap>? gaps = null)
+        IReadOnlyList<KafkaScanGap>? gaps = null,
+        KafkaIndexNarrowing? index = null)
     {
+        Index = index;
         Tail = tail;
         Gaps = gaps ?? [];
         Request = request;
@@ -364,6 +370,13 @@ internal sealed class KafkaScanPlan
     /// plan's <see cref="Ranges" /> keep only the pruned partitions of a pruned topic.
     /// </summary>
     public IReadOnlyList<KafkaTopicPruning> Pruning { get; }
+
+    /// <summary>
+    /// What the host's record index did to this plan (AGENTS.md D48): the ranges it narrowed the plan to, or that it pointed nowhere or did not answer.
+    /// <see langword="null" /> when it was not asked (none registered, nothing to ask, a continuation, a search for each topic, a tail, or the visitor
+    /// asked for the whole window). A continuation of a narrowed scan carries the narrowing forward, because its negatives are still about those ranges.
+    /// </summary>
+    public KafkaIndexNarrowing? Index { get; }
 
     /// <summary>Everything a visitor must be told about the window, the topics and the partitions, the pruned partitions included.</summary>
     public IEnumerable<WindowNote> Notes =>
@@ -516,6 +529,12 @@ internal sealed record KafkaScanResult(
     /// <summary>The audit message's suffix for the topics that were pruned (<c>; pruned to partition 3 of orders</c>); empty when none were.</summary>
     public string PruningAuditText => string.Concat(Pruning.Where(static x => x.IsPruned).Select(static x => x.AuditSuffix));
 
+    /// <summary>What the host's record index did to this scan (AGENTS.md D48), from its plan; <see langword="null" /> when it narrowed nothing and so changes no sentence.</summary>
+    public KafkaIndexNarrowing? Index { get; init; }
+
+    /// <summary>The audit message's suffix for a scan the host's record index narrowed; empty when it did not.</summary>
+    public string IndexAuditText => Index?.AuditSuffix ?? string.Empty;
+
     /// <summary>Sentences saying what the undecidable records could not be, for the line beside a negative.</summary>
     public IEnumerable<string> UndecidableSentences =>
         UndecidableByReason.Where(static x => x.Value > 0).Select(static x => string.Create(CultureInfo.InvariantCulture, $"{x.Value:N0} {(x.Value == 1 ? "record" : "records")} {KafkaUnknownReasonText.Describe(x.Key, one: x.Value == 1)}"));
@@ -561,6 +580,12 @@ internal sealed class KafkaScanCursor
     /// sample again. Held in memory only; the text form carries positions alone, so a cursor read back from text has none.
     /// </summary>
     public IReadOnlyList<KafkaTopicPruning> Pruning { get; init; } = [];
+
+    /// <summary>
+    /// The narrowing the host's record index gave the scan that made this cursor (AGENTS.md D48): a continued scan reads the rest of the same ranges, never
+    /// asks the index again, and says what the first said. In memory only, like <see cref="Pruning" />.
+    /// </summary>
+    public KafkaIndexNarrowing? Index { get; init; }
 
     /// <summary>Whether nothing is left to read.</summary>
     public bool IsEmpty => Positions.Count == 0;

@@ -878,6 +878,7 @@ internal sealed class ScanRun : IDisposable
             ])
             {
                 Pruning = [.. plan.Pruning.Where(static x => x.IsPruned)],
+                Index = plan.Index is { IsNarrowed: true } ? plan.Index : null,
             };
 
             List<KafkaTopicRefusal> refusals =
@@ -906,6 +907,7 @@ internal sealed class ScanRun : IDisposable
                 matchCounters.Copy())
             {
                 Pruning = plan.Pruning,
+                Index = plan.Index is { IsNarrowed: true } ? plan.Index : null,
                 SpentBudget = reason == KafkaScanStopReason.OwnerBudget ? spentBudget : null,
             };
         }

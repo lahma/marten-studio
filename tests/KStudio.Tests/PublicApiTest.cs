@@ -32,13 +32,14 @@ public class PublicApiTest
 
     /// <summary>
     /// The engine's public types by name, so an extra one fails with its name rather than a diff. ENG-A's (decision 1.5): the options, the
-    /// two builders and the key formats; ENG-B adds the decoder extension point; ENG-E the partitioner.
+    /// two builders and the key formats; ENG-B adds the decoder extension point; ENG-E the partitioner; INDEX the host's record index (D48) and the four types its one method takes and returns.
     /// </summary>
     [Fact]
     public void The_public_types_are_the_registration_types_and_the_extension_points()
     {
         Core.GetExportedTypes().Select(static type => type.FullName!).Order(StringComparer.Ordinal).Should().Equal(
             "KStudio.IKafkaRecordDecoder",
+            "KStudio.IKafkaRecordIndex",
             "KStudio.KafkaClusterBuilder",
             "KStudio.KafkaCorrelationBuilder",
             "KStudio.KafkaCorrelationField",
@@ -47,6 +48,10 @@ public class PublicApiTest
             "KStudio.KafkaDecoders",
             "KStudio.KafkaEngineOptions",
             "KStudio.KafkaHeader",
+            "KStudio.KafkaIndexAnswer",
+            "KStudio.KafkaIndexField",
+            "KStudio.KafkaIndexHint",
+            "KStudio.KafkaIndexQuery",
             "KStudio.KafkaKeyFormat",
             "KStudio.KafkaPartitioner",
             "KStudio.KafkaProfile",

@@ -19,6 +19,7 @@ namespace KStudio.Services;
 /// <param name="IncludeUncommitted">Whether uncommitted records are included.</param>
 /// <param name="ContinueFrom">The cursor of the search this one continues, or <see langword="null" />.</param>
 /// <param name="SearchAllPartitions">Whether to read every partition even where a verified partitioner would allow reading fewer.</param>
+/// <param name="IgnoreIndex">Whether to read the whole window even where the host's record index could narrow it (AGENTS.md D48): "Search the whole window".</param>
 internal sealed record KafkaSearchInput(
     KafkaClusterEntry Cluster,
     IReadOnlyList<string> Topics,
@@ -27,7 +28,8 @@ internal sealed record KafkaSearchInput(
     string? PredicateText,
     bool IncludeUncommitted,
     KafkaScanCursor? ContinueFrom = null,
-    bool SearchAllPartitions = false);
+    bool SearchAllPartitions = false,
+    bool IgnoreIndex = false);
 
 /// <summary>What a visitor may still read this hour on a cluster.</summary>
 /// <param name="Left">The bytes left.</param>
@@ -350,7 +352,8 @@ internal sealed class KafkaSearchService(
             grant,
             input.IncludeUncommitted ? KafkaIsolation.IncludeUncommitted : KafkaIsolation.Committed,
             ContinueFrom: input.ContinueFrom,
-            DisablePruning: input.SearchAllPartitions);
+            DisablePruning: input.SearchAllPartitions,
+            IgnoreIndex: input.IgnoreIndex);
 
     private static string PredicateNotRecorded(KafkaSearchInput input) =>
         string.Create(CultureInfo.InvariantCulture, $"(the search text is not recorded, {input.PredicateText?.Length ?? 0} characters)");
@@ -382,7 +385,7 @@ internal sealed class KafkaSearchService(
         bool readValues = plan.ReadsValues && plan.Request.Grant.HasFlag(KafkaReadGrant.Payload);
         string message = string.Create(
             CultureInfo.InvariantCulture,
-            $"{KafkaDisplay.Count(result.Records, "record")} and {KafkaDisplay.Bytes(result.Bytes)} read; stopped by {result.StopReason}{result.PruningAuditText}; predicate: {plan.AuditText}{(readValues ? "; values read" : string.Empty)}");
+            $"{KafkaDisplay.Count(result.Records, "record")} and {KafkaDisplay.Bytes(result.Bytes)} read; stopped by {result.StopReason}{result.PruningAuditText}{result.IndexAuditText}; predicate: {plan.AuditText}{(readValues ? "; values read" : string.Empty)}");
 
         actionLog.Record(input.Cluster, input.Topics, Action, target, succeeded, message, readValues ? KafkaCapability.ReadPayloads : KafkaCapability.SearchRecords);
         logger.SearchRan(

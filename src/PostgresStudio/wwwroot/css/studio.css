@@ -17814,3 +17814,17 @@ dialog.ms-modal::backdrop {
 .ms-k-tail-waiting {
     margin: var(--ms-space-md) 0;
 }
+
+/* ===== KS-INDEX: the host's record index (D48): the form's checkbox and the Settings line ===== */
+.ms-k-ignore-index {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-sm);
+}
+
+.ms-k-record-index {
+    margin: var(--ms-space-sm) 0 0;
+    color: var(--ms-color-text-secondary);
+    overflow-wrap: anywhere;
+}

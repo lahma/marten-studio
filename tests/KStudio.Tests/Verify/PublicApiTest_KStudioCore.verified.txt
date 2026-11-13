@@ -6,6 +6,10 @@ namespace KStudio
         string Name { get; }
         KStudio.KafkaDecodeResult Decode(KStudio.KafkaDecodeContext context);
     }
+    public interface IKafkaRecordIndex
+    {
+        System.Threading.Tasks.ValueTask<KStudio.KafkaIndexAnswer> FindAsync(KStudio.KafkaIndexQuery query, System.Threading.CancellationToken cancellationToken);
+    }
     public sealed class KafkaClusterBuilder
     {
         public KStudio.KafkaClusterBuilder ConsumerGroup(string groupId) { }
@@ -59,6 +63,8 @@ namespace KStudio
         public System.TimeSpan RequestTimeout { get; set; }
         public KStudio.KafkaEngineOptions AddCluster(string key, Confluent.Kafka.ClientConfig config, System.Action<KStudio.KafkaClusterBuilder>? configure = null) { }
         public KStudio.KafkaEngineOptions AddCluster(string key, Confluent.Kafka.ConsumerConfig consumerConfig, Confluent.Kafka.AdminClientConfig adminConfig, System.Action<KStudio.KafkaClusterBuilder>? configure = null) { }
+        public KStudio.KafkaEngineOptions RecordIndex<TIndex>()
+            where TIndex :  class, KStudio.IKafkaRecordIndex { }
         public KStudio.KafkaEngineOptions Topic(string name, System.Action<KStudio.KafkaTopicBuilder> configure) { }
     }
     public sealed record KafkaHeader : System.IEquatable<KStudio.KafkaHeader>
@@ -66,6 +72,38 @@ namespace KStudio
         public KafkaHeader(string Name, System.ReadOnlyMemory<byte>? Value) { }
         public string Name { get; init; }
         public System.ReadOnlyMemory<byte>? Value { get; init; }
+    }
+    public sealed class KafkaIndexAnswer
+    {
+        public System.Collections.Generic.IReadOnlyList<KStudio.KafkaIndexHint> Ranges { get; }
+        public static KStudio.KafkaIndexAnswer None { get; }
+        public static KStudio.KafkaIndexAnswer Hints(System.Collections.Generic.IEnumerable<KStudio.KafkaIndexHint> hints) { }
+    }
+    public enum KafkaIndexField
+    {
+        Key = 0,
+        Header = 1,
+        CloudEventAttribute = 2,
+    }
+    public sealed record KafkaIndexHint : System.IEquatable<KStudio.KafkaIndexHint>
+    {
+        public KafkaIndexHint(string Topic, int Partition, long FromOffset, long ToOffset) { }
+        public long FromOffset { get; init; }
+        public int Partition { get; init; }
+        public long ToOffset { get; init; }
+        public string Topic { get; init; }
+    }
+    public sealed class KafkaIndexQuery
+    {
+        public string Cluster { get; }
+        public string? CorrelationKind { get; }
+        public KStudio.KafkaIndexField Field { get; }
+        public string? FieldName { get; }
+        public System.DateTimeOffset From { get; }
+        public string? TenantId { get; }
+        public System.DateTimeOffset To { get; }
+        public System.Collections.Generic.IReadOnlyList<string> Topics { get; }
+        public string Value { get; }
     }
     public abstract class KafkaKeyFormat
     {

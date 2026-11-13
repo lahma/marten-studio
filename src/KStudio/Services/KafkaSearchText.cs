@@ -1,5 +1,6 @@
 using System.Globalization;
 
+using KStudio.Core.Index;
 using KStudio.Core.Scanning;
 using KStudio.Core.Windows;
 
@@ -11,6 +12,16 @@ namespace KStudio.Services;
 /// </summary>
 internal static class KafkaSearchText
 {
+    /// <summary>The button beside a result the host's record index narrowed: the same search, without the index.</summary>
+    public const string SearchWholeWindow = "Search the whole window";
+
+    /// <summary>The form's checkbox, shown only where the host registered a record index.</summary>
+    public const string IgnoreRecordIndex = "Ignore the host's record index";
+
+    /// <summary>The line on the Settings page: the registered index's type, or <c>none</c>.</summary>
+    /// <param name="name">The index's type name, or <see langword="null" /> when none is registered.</param>
+    public static string RecordIndexLine(string? name) => "Record index: " + (name ?? "none");
+
     /// <summary>The stop reasons after which "Continue" reads on from the cursor.</summary>
     public static bool CanContinue(KafkaScanStopReason reason) => reason is
         KafkaScanStopReason.MatchLimit
@@ -30,6 +41,11 @@ internal static class KafkaSearchText
 
         return result.StopReason switch
         {
+            // A scan the host's record index narrowed (AGENTS.md D48) read the ranges it named, not the window: neither sentence may say otherwise.
+            KafkaScanStopReason.Completed when result.Index is { IsNarrowed: true } index && result.Matches > 0 => string.Create(
+                CultureInfo.InvariantCulture,
+                $"Read every offset in the ranges the host's record index named ({KafkaIndexNarrowing.Offsets(index.OffsetsRead)}): {KafkaDisplay.Count(result.Records, "record")}, {KafkaDisplay.Bytes(result.Bytes)}, {KafkaDisplay.Count(result.Matches, "match", "matches")}. The rest of the window was not read."),
+            KafkaScanStopReason.Completed when result.Index is { IsNarrowed: true } index => index.NoMatch!,
             KafkaScanStopReason.Completed when result.Matches > 0 => string.Create(
                 CultureInfo.InvariantCulture,
                 $"Read every offset in the window: {KafkaDisplay.Count(result.Records, "record")}, {KafkaDisplay.Bytes(result.Bytes)}, {KafkaDisplay.Count(result.Matches, "match", "matches")}."),
@@ -122,6 +138,12 @@ internal static class KafkaSearchText
         foreach (string sentence in result.PruningSentences)
         {
             Add(caveats, sentence);
+        }
+
+        // What a search narrowed by the host's record index did not read, beside its matches and its negatives alike (AGENTS.md D48).
+        if (result.Index?.Caveat is { } narrowed)
+        {
+            Add(caveats, narrowed);
         }
 
         foreach (KafkaScanGap gap in result.Gaps)

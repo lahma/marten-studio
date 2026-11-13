@@ -2,6 +2,7 @@
 @using System.Globalization
 @using KStudio.Core.Clusters
 @using KStudio.Core.Correlation
+@using KStudio.Core.Index
 @using KStudio.Core.Predicates
 @using KStudio.Core.Scanning
 @using KStudio.Core.Decoding
@@ -14,6 +15,7 @@
 @inject KafkaRecordService Records
 @inject KafkaCatalogService Catalog
 @inject KafkaCapabilityGuard Capabilities
+@inject KafkaRecordIndexResolver RecordIndex
 @inject NavigationManager Navigation
 @inject IStudioSettings Settings
 @inject StudioState Studio
@@ -143,6 +145,15 @@
                 Include uncommitted records
                 <span class="ms-muted">@KafkaStudioText.UncommittedHelp</span>
             </label>
+
+            @if (RecordIndex.IsRegistered)
+            {
+                @* Only where the host registered a record index (AGENTS.md D48): a key or correlation search is narrowed by it unless this is checked. *@
+                <label class="ms-k-ignore-index">
+                    <input type="checkbox" checked="@ignoreIndex" disabled="@busy" @onchange="e => ignoreIndex = e.Value is true" />
+                    @KafkaSearchText.IgnoreRecordIndex
+                </label>
+            }
 
             <div class="ms-k-predicate-field">
                 <label for="ms-k-predicate">Search for</label>
@@ -320,6 +331,12 @@
                 @if (result.Matches == 0 && result.Pruning.Any(static x => x.IsPruned))
                 {
                     <button type="button" class="ms-button" disabled="@busy" @onclick="SearchAllPartitionsAsync">@KafkaStudioText.SearchAllPartitions</button>
+                }
+                @* The host's record index narrowed this run (AGENTS.md D48): its negatives are about the ranges it named only, so the visitor can read the rest.
+                   Bound to the run on screen, like Continue: the latest plan may be another search. *@
+                @if (result.Index is { IsNarrowed: true })
+                {
+                    <button type="button" class="ms-button" disabled="@busy" @onclick="SearchWholeWindowAsync">@KafkaSearchText.SearchWholeWindow</button>
                 }
             </div>
 
@@ -566,6 +583,7 @@
     private long? pendingContinuation;
     private KafkaAllowance? allowance;
     private bool includeUncommitted;
+    private bool ignoreIndex;
     private bool loadingTopics = true;
     private bool planning;
     private bool running;
@@ -979,7 +997,7 @@
             return;
         }
 
-        KafkaSearchInput input = new(active, [.. selected], from, to, predicate, includeUncommitted);
+        KafkaSearchInput input = new(active, [.. selected], from, to, predicate, includeUncommitted, IgnoreIndex: ignoreIndex && RecordIndex.IsRegistered);
         await PlanAndStartAsync(input);
     }
 
@@ -1004,6 +1022,17 @@
 
         // The same search as the run on screen with pruning off: verdicts, estimate and confirmation again, a new scan and a new audit entry.
         await PlanAndStartAsync(shownRun.Input with { ContinueFrom = null, SearchAllPartitions = true });
+    }
+
+    private async Task SearchWholeWindowAsync()
+    {
+        if (busy || shownRun is null)
+        {
+            return;
+        }
+
+        // The same search as the run on screen without the host's record index: its own plan, estimate and confirmation, a new scan and a new audit entry.
+        await PlanAndStartAsync(shownRun.Input with { ContinueFrom = null, IgnoreIndex = true });
     }
 
     private async Task PlanAndStartAsync(KafkaSearchInput input, long? continuing = null)
@@ -1256,7 +1285,10 @@
     {
         IEnumerable<string> drawnBelow = result is null ? [] : KafkaSearchText.Caveats(result);
 
-        return [.. shown.Plan.Notes.Select(static x => x.Text).Distinct(StringComparer.Ordinal).Except(drawnBelow, StringComparer.Ordinal)];
+        // What the host's record index did to this plan (AGENTS.md D48), said before the search reads anything.
+        IEnumerable<string> notes = shown.Plan.Index is { } index ? shown.Plan.Notes.Select(static x => x.Text).Append(index.Note) : shown.Plan.Notes.Select(static x => x.Text);
+
+        return [.. notes.Distinct(StringComparer.Ordinal).Except(drawnBelow, StringComparer.Ordinal)];
     }
 
     private static string EstimateText(KafkaSearchPlanned shown)

@@ -4,6 +4,7 @@ using System.Globalization;
 using KStudio.Core.Catalog;
 using KStudio.Core.Clusters;
 using KStudio.Core.Decoding;
+using KStudio.Core.Index;
 using KStudio.Core.Logging;
 using KStudio.Core.Predicates;
 using KStudio.Core.Redaction;
@@ -111,6 +112,7 @@ internal sealed partial class KafkaScanner(
     TimeProvider time,
     KStudioLoggers loggers,
     KafkaLogOnce once,
+    KafkaIndexPlanner indexes,
     IScanObserver? observer = null) : IKafkaScanner
 {
     /// <inheritdoc />
@@ -193,8 +195,27 @@ internal sealed partial class KafkaScanner(
         ranges = Pruned(ranges, pruning);
         verdicts = ApplyPruning(verdicts, pruning);
 
+        // The host's record index (D48, D-M5 decision 5) is asked once, after every gate has passed and the partitions are pruned, and only narrows what is
+        // read inside the ranges the plan already has. A continuation reads the rest of the first scan's ranges and never asks again; it keeps what the
+        // first scan was narrowed by, because its negatives are still about those ranges only.
+        KafkaIndexNarrowing? narrowing = request.ContinueFrom?.Index;
+
+        if (request.ContinueFrom is null && !request.IgnoreIndex && !perTopic)
+        {
+            IndexAsk ask = new(
+                definition,
+                [.. topics.Select(static x => x.Value)],
+                request.Window,
+                shared.Tree,
+                [.. topics.Select(x => definition.Descriptor(x.Value))],
+                redactors,
+                ranges);
+
+            (ranges, narrowing) = await indexes.NarrowAsync(ask, cancellationToken).ConfigureAwait(false);
+        }
+
         KafkaScanEstimate estimate = await EstimateAsync(request, ranges, owner, cost, limits, cancellationToken).ConfigureAwait(false);
-        return new KafkaScanPlan(request, window, ranges, contexts, [], verdicts, estimate, limits, audit, pruning);
+        return new KafkaScanPlan(request, window, ranges, contexts, [], verdicts, estimate, limits, audit, pruning, index: narrowing);
     }
 
     /// <summary>What <see cref="Compile" /> made of a request's search: a context for each topic that compiled, and what is wrong with the rest.</summary>
@@ -902,6 +923,8 @@ internal static class ScanningRegistration
         services.TryAddSingleton<RecordSizeSampler>();
         services.TryAddSingleton<PartitionerVerifier>();
         services.TryAddSingleton<KafkaDecoderResolver>();
+        services.TryAddSingleton<KafkaRecordIndexResolver>();
+        services.TryAddSingleton<KafkaIndexPlanner>();
         services.TryAddSingleton<KafkaScanCoordinator>();
         services.TryAddSingleton<IKafkaScanner, KafkaScanner>();
         return services;
