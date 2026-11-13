@@ -1,3 +1,34 @@
+# 1.3.1
+
+1.3.1 fixes the first reports against the KStudio preview (#71-#77). PostgresStudio.Diagnostics, PostgresStudio and
+MartenStudio are at 1.3.1 with no change of their own beyond the Activity footer's module seam. KStudio.Core, KStudio and
+KStudio.Wolverine are at 1.3.1-preview.1.
+
+- KStudio.Wolverine: `UseWolverineKafka(w => w.CloudEventsSerializer<T>())` declares a custom serializer that writes
+  structured CloudEvents, so its topics are decoded as CloudEvents (`ce.*` predicates and chips); nothing is guessed
+  from a value (#71).
+- KStudio.Wolverine: `UseWolverineKafka(w => w.ExcludeBroker("name"))` leaves a named broker out of discovery. Clusters
+  that share their bootstrap servers are marked "(same servers as …)" in the cluster selector and on the Settings page,
+  from configuration alone and naming only clusters the visitor may see. Settings names `ExcludeBroker` when one of
+  them is a named Wolverine broker, and otherwise says "Declare it once." (#72).
+- KStudio: a Wolverine listener's consumer group is shown on the topics it reads and no longer on every topic of the
+  cluster. A topic no group of the application reads says so, and a group declared for the whole cluster with no
+  committed offset on a topic is named on one muted line instead of a row with no lag (#73).
+- KStudio: a page leaves out the controls of a capability that is off or that the cluster's profile forbids (Export,
+  the Live tail rail entry and topic link), and a page reached by its address says in one sentence that the feature is
+  not available here. No page's own text names an option or a builder method except Cluster settings, which lists each
+  capability with the option that turns it on and says how a profile and consumer groups are declared (the header's
+  capabilities list and the audit entries on Activity still name the options) (#74).
+- KStudio: every search-text error is drawn as "Position n: message" with the position said once. A search or tail
+  that did not parse is recorded (event 9601, and 9609 for a tail) with the first error's position and a constant
+  phrase, never what was typed, without "see above" or a doubled full stop (#75).
+- KStudio: after Continue the results say which matches they show and that the earlier ones were cleared from the
+  page, and Possible duplicates says it compares the matches on the page (#76).
+- KStudio: a related-records topic the broker does not have is one "Not found" line and is not counted as searched.
+  The Activity footer names KStudio's events beside the studio's. A time zone reads as "Europe/Helsinki (UTC+02:00)",
+  also when a typed local time does not exist, and never as a Windows id. The topic count says "selected", the topic
+  filter fits a 390 px window, and the search page focuses its predicate box (#77).
+
 # 1.3.0
 
 1.3.0 brings KStudio, a third studio for the Apache Kafka® clusters an application already configures, as a preview beside

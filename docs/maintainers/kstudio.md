@@ -70,8 +70,13 @@ that names nothing, because a search silently narrowed to the allowed topics wou
 names the topic, and shows it only to a visitor who may read it.
 
 `KafkaStudioCapabilities` default to `false` (D4); metadata needs none (K5). The host's `ReadOnly` is the one master
-switch: it turns every Kafka capability off, and KStudio has no switch of its own. Each disabled control names
-`KafkaStudioOptions.Capabilities.<name>`, or the host's `ReadOnly` option. A startup guard refuses to start a host that
+switch: it turns every Kafka capability off, and KStudio has no switch of its own. Since 1.3.1 (#74), KStudio's pages
+leave out the controls of a capability that is off (or that the cluster's profile forbids), and a page reached by its
+address says in one neutral sentence that the feature is not available here. No option or builder method is named in a
+page's own text except on Cluster settings, which lists each capability with `KafkaStudioOptions.Capabilities.<name>`
+(or the host's `ReadOnly` option); the header's capabilities list (PostgresStudio's, D4) and the audit entries on
+Activity name the options too. D4's "every disabled control names the exact property" still holds for the other
+studios' own screens. A startup guard refuses to start a host that
 enables a Kafka capability, with `ReadOnly` off, while both Kafka policies are blank: every admitted visitor could then
 read every topic the application's credentials can read. There is no escape hatch; a development host states a
 one-line policy.
