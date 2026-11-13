@@ -234,8 +234,8 @@ public class KafkaWolverineDiscoveryNotesTests
         await using KafkaCatalogRig rig = new(engine: o => o.AddCluster("wolverine", new ClientConfig { BootstrapServers = "x:1" }), cluster: "wolverine");
         rig.Studio.Entries.Entries =
         [
-            new KafkaClusterEntry("wolverine", null, "Wolverine", null) { SameServersAs = ["wolverine-besteffort"], SameServersCanBeLeftOut = true },
-            new KafkaClusterEntry("wolverine-besteffort", null, "Wolverine · besteffort", null) { SameServersAs = ["wolverine"], SameServersCanBeLeftOut = true },
+            new KafkaClusterEntry("wolverine", null, "Wolverine", null) { SameServersAs = ["wolverine-besteffort"] },
+            new KafkaClusterEntry("wolverine-besteffort", null, "Wolverine · besteffort", null) { SameServersAs = ["wolverine"], CanBeLeftOut = true },
         ];
 
         await rig.Studio.Context.ReadyAsync();
@@ -244,6 +244,30 @@ public class KafkaWolverineDiscoveryNotesTests
 
         settings.WaitForAssertion(() => settings.Find(".ms-k-same-servers").TextContent.Should().Be(
             "Same bootstrap servers as Wolverine · besteffort: probably one cluster registered twice. KafkaWolverineOptions.ExcludeBroker leaves one out."));
+    }
+
+    [Fact]
+    public async Task A_refused_named_broker_does_not_change_the_advice_two_visible_clusters_get()
+    {
+        await using KafkaCatalogRig rig = new(
+            engine: o => o.AddCluster("wolverine", new ClientConfig { BootstrapServers = "x:1" }),
+            studio: o => o.ClusterAuthorizationPolicy = "kafka-topics",
+            cluster: "wolverine");
+        rig.Studio.Entries.Entries =
+        [
+            new KafkaClusterEntry("wolverine", null, "Wolverine", null) { SameServersAs = ["twin", "wolverine-besteffort"] },
+            new KafkaClusterEntry("twin", null, "Twin", null) { SameServersAs = ["wolverine", "wolverine-besteffort"] },
+            new KafkaClusterEntry("wolverine-besteffort", null, "Wolverine · besteffort", null) { SameServersAs = ["wolverine", "twin"], CanBeLeftOut = true },
+        ];
+        rig.Studio.Authorization.AllowKafka(static resource => resource.Cluster != "wolverine-besteffort");
+
+        await rig.Studio.Context.ReadyAsync();
+        rig.Studio.Navigation.Simulate("kafka/settings?cluster=wolverine", intercepted: false);
+        IRenderedComponent<KafkaSettingsPage> settings = rig.Studio.Context.Render<KafkaSettingsPage>();
+
+        settings.WaitForAssertion(() => settings.Find(".ms-k-same-servers").TextContent.Should().Be(
+            "Same bootstrap servers as Twin: probably one cluster registered twice. Declare it once."));
+        settings.Markup.Should().NotContain("besteffort").And.NotContain("ExcludeBroker");
     }
 
     [Fact]
@@ -328,10 +352,10 @@ public class KafkaWolverineDiscoveryNotesTests
         KafkaCatalog catalog = new(new KafkaClusterRegistry(options, new ServiceCollection().BuildServiceProvider()), null!, null!);
         Dictionary<string, KafkaClusterInfo> byKey = catalog.Clusters.ToDictionary(static x => x.Key, StringComparer.Ordinal);
 
-        byKey["wolverine"].SameServersCanBeLeftOut.Should().BeTrue("its twin is a named broker");
-        byKey["wolverine-besteffort"].SameServersCanBeLeftOut.Should().BeTrue();
-        byKey["host-twin"].SameServersCanBeLeftOut.Should().BeFalse("neither can be left out");
-        byKey["host-twin-2"].SameServersCanBeLeftOut.Should().BeFalse();
+        byKey["wolverine"].CanBeLeftOut.Should().BeFalse("each cluster carries its own fact, never its twin's");
+        byKey["wolverine-besteffort"].CanBeLeftOut.Should().BeTrue();
+        byKey["host-twin"].CanBeLeftOut.Should().BeFalse();
+        byKey["host-twin-2"].CanBeLeftOut.Should().BeFalse();
     }
 
     private static async Task<IRenderedComponent<KafkaTopicPage>> OpenTopicAsync(KafkaCatalogRig rig, string topic, string cluster)
