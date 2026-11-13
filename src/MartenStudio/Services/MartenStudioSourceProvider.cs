@@ -282,20 +282,15 @@ internal sealed class MartenStudioSource : IStudioSource
     public bool DeclaresTenants => Store.Options.Tenancy is StaticMultiTenancy;
 
     /// <inheritdoc />
-    public async ValueTask<TenantList> DeclaredTenantsAsync(IStudioDatabase database, IReadOnlyList<IStudioDatabase> all, CancellationToken cancellationToken)
+    public async ValueTask<IReadOnlyList<string>> DatabasesDeclaringAsync(string tenantId, IReadOnlyList<IStudioDatabase> all, CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(database);
+        ArgumentNullException.ThrowIfNull(tenantId);
         ArgumentNullException.ThrowIfNull(all);
 
-        if (!DeclaresTenants)
-        {
-            return TenantList.Unavailable;
-        }
-
-        // Tier 2 and nothing else: a static tenancy describes itself from configuration (no connection, no enumeration, no database
-        // built), through the one DescribeDatabasesAsync call TenantDiscovery already makes.
-        return await tenants.ListedOnlyAsync(Store, MartenStudioDatabase.Unwrap(database), Unwrap(all), cancellationToken).ConfigureAwait(false)
-            ?? TenantList.Unavailable;
+        // Guarded by the type, not by the flag: only a StaticMultiTenancy is ever described here (hard rule 14).
+        return Store.Options.Tenancy is StaticMultiTenancy
+            ? await TenantDiscovery.DeclaringDatabasesAsync(Store, tenantId, Unwrap(all), cancellationToken).ConfigureAwait(false)
+            : [];
     }
 
     /// <inheritdoc />

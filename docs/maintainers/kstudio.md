@@ -716,14 +716,24 @@ seam (a Postgres Studio host) nothing is drawn. MartenStudio answers `null` for 
 document type, for an ambiguous type, for a tenancy of the application's own (nothing says where its tenants are), and for a multi-tenanted store
 with no tenant, whether its tenants share a database or each has one (a link would open the visitor's own tenant and say "not found", which is false).
 A store that keeps each tenant in a database of its own gets a link with the tenant and no `db` (the link never names a database, so it never
-names one the visitor may not see) in two cases. **A static tenancy** (`MultiTenantedDatabases(...)`) always gets one, whether or not its rows are
-tenanted (ZW38): the host declared in configuration which database serves each tenant, and `StudioState.SetScopeAsync` reads that declaration from
-memory (`IStudioSource.DeclaresTenants` / `DeclaredTenantsAsync`, through the one `DescribeDatabasesAsync` call `TenantDiscovery` already makes - no
-tenancy enumeration, no connection) among the databases the visitor may see, at most 32 searched, and asks the store policy `(store, db, null)`
-again for the one it finds; where rows are single-tenanted the page opens that database with no tenant in the scope, as any page of such a store
-does, and where they are tenanted the tenant must also be in the database's policy-filtered listing. The one exception is tenanted rows with the host's
-`KnownTenantIds` listed, which make the database on screen "list" every tenant so that the page never searches. **A master-table, sharded or
-one-server tenancy** gets one only when it keeps its rows per tenant (`StoreTenancy.KeepsRowsPerTenant`, the test behind its tenant selector) and the
+names one the visitor may not see) in two cases; the tenant is the id as `TenantIdStyle.MaybeCorrectTenantId` writes it (the link stays pure).
+**A static tenancy** (`MultiTenantedDatabases(...)`) gets one whether or not its rows are tenanted (ZW38), except where they are tenanted and the
+host listed `KnownTenantIds` (the database on screen then "lists" every tenant, so `SetScopeAsync` never searches): the host declared in
+configuration which database serves each tenant, and `StudioState.SetScopeAsync` places the tenant from that declaration
+(`IStudioScopeCatalog.PlaceDeclaredTenantAsync`, `IStudioSource.DeclaresTenants` / `DatabasesDeclaringAsync`). It is one read from memory - the one
+`DescribeDatabasesAsync` call `TenantDiscovery` already makes, guarded by the type `StaticMultiTenancy`, so no tenancy enumeration, no connection,
+no `GetTenant` - counted over the whole declaration before any policy is asked: the usual database is considered, a tenant declared in more than one
+database is not placed (Marten itself keeps only the last), and a tenant declared in a database the visitor's listing lacks is not placed. The
+database found is put to the store policy `(store, db, null)` once more and, where rows are tenanted, the tenant must also be in its
+policy-filtered listing. The search has no 32-database bound (it asks nothing of any database); the bound stays for the tenant-listing search.
+Where rows are single-tenanted the page then opens that database with no tenant in the scope, as any page of such a store does.
+**A tenant that is not placed is one answer** (undeclared, declared twice, a refused database, an unreadable source): the scope stays on the usual
+database with no tenant, `StudioState.IsTenantUnplaced(store, db, tenant)` is true for that address until the next `SetScopeAsync` for any other
+address, `StudioLayout.SyncScopeToUrl` leaves the address as it was (rewriting it to the scope on screen would drop the tenant), and `DocumentDetail`
+and `StreamDetail` - the pages `ToDocument` and `ToStream` open - show their ordinary not-found wording without reading, the same words whatever
+the cause, so nothing can be probed. A placement is remembered for its address so that a page re-applying its address on every parameter set does
+not search again. **A master-table, sharded or
+one-server tenancy** gets a link only when it keeps its rows per tenant (`StoreTenancy.KeepsRowsPerTenant`, the test behind its tenant selector) and the
 host listed no `KnownTenantIds`: the page opens the first database, among those the visitor may see, whose tenant listing carries that tenant (at most
 32 searched, TENANT-DB). Where documents and events are single-tenanted (master table and one-server tenancies in Marten 9.57.0) no database lists
 tenants and nothing else maps a tenant to its database without a tenancy enumeration (a master-table tenancy's map is a table, and reading it is one,

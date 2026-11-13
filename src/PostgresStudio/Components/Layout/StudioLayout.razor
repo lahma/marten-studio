@@ -445,6 +445,14 @@
             return;
         }
 
+        // An address whose tenant the studio could not place keeps naming it (ZW38): the scope on screen is the usual database with no tenant,
+        // and rewriting the address to it would drop the tenant, so the page would read its id in the wrong database. The next scope change
+        // clears the state and writes the scope it moved to.
+        if (State.HasUnplacedTenant)
+        {
+            return;
+        }
+
         string target = StudioScopeQuery.WithScope(Navigation, State.ActiveScope, Descriptor.SourceQueryParameter);
         if (!string.Equals(target, Navigation.Uri, StringComparison.Ordinal))
         {

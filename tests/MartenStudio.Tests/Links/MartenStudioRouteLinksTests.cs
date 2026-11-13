@@ -372,6 +372,35 @@ public class MartenStudioRouteLinksTests
     }
 
     /// <summary>
+    /// Marten stores and declares a tenant id as <c>TenantIdStyle</c> writes it, so the link carries that spelling - a record's header may
+    /// spell it otherwise - and stays pure.
+    /// </summary>
+    [Theory]
+    [InlineData("static")]
+    [InlineData("conjoined")]
+    public void The_tenant_is_carried_as_the_stores_tenant_id_style_writes_it(string kind)
+    {
+        MartenStudioRouteLinks links = Links(services => services.AddMarten(x =>
+        {
+            x.TenantIdStyle = TenantIdStyle.ForceLowerCase;
+            x.Schema.For<Order>().MultiTenanted();
+            if (kind == "static")
+            {
+                DatabasePerTenant(x, "static");
+            }
+            else
+            {
+                x.Connection(Connection);
+            }
+        }));
+
+        string url = links.ToDocument(new StudioLinkScope(null, "GlobeX"), "order", "7")!;
+
+        Query(url).Should().Contain(new KeyValuePair<string, string?>("tenant", "globex"));
+        Query(url).Keys.Should().NotContain("db");
+    }
+
+    /// <summary>
     /// With single-tenanted rows no database lists a tenant whatever <c>KnownTenantIds</c> says, so the page searches the declaration and a
     /// static store keeps its link. With tenanted rows they make the database on screen "list" every tenant: the page would keep it, so no link.
     /// </summary>

@@ -1,8 +1,11 @@
 using Marten;
 
+using MartenStudio.Integration.Tests.Database;
 using MartenStudio.Services;
 using MartenStudio.Services.Documents;
+using MartenStudio.Services.Events;
 
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.DependencyInjection;
 
 using Npgsql;
@@ -140,10 +143,13 @@ public class TenantDatabaseSearchLiveTests(PostgresFixture postgres)
             });
 
             options.DatabaseSchemaName = Schema;
+            options.Events.DatabaseSchemaName = Events;
             options.Schema.For<TenancyNote>();
+            options.Events.AddEventType<TenancyNoteWritten>();
         }
 
-        // The same id in both databases, as two tenants' records share a surrogate: the link must open the tenant's own.
+        // The same id in both databases, as two tenants' records share a surrogate: the link must open the tenant's own. The two streams
+        // differ in length (one event in acme's database, two in initech's), which is what tells them apart.
         Guid shared = Guid.NewGuid();
         await using (DocumentStore seed = DocumentStore.For(Configure))
         {
@@ -152,6 +158,7 @@ public class TenantDatabaseSearchLiveTests(PostgresFixture postgres)
             {
                 await using IDocumentSession session = seed.LightweightSession(tenant);
                 session.Store(new TenancyNote { Id = shared, Text = "of " + tenant });
+                session.Events.StartStream(shared, tenant == Acme ? [new TenancyNoteWritten("one")] : [new TenancyNoteWritten("one"), new TenancyNoteWritten("two")]);
                 await session.SaveChangesAsync(Token);
             }
         }
@@ -191,12 +198,98 @@ public class TenantDatabaseSearchLiveTests(PostgresFixture postgres)
         opened.Found.Should().BeTrue(opened.NotFound?.Message);
         opened.Detail!.Json.Should().Contain("of " + foreign, "the document of the tenant's own database, not the same id in the one on screen");
 
-        // A tenant nobody declared leaves the circuit where it is, with no tenant.
+        // The stream link: the same id, and the tenant's own stream (acme's has one event, initech's two).
+        var events = services.GetRequiredService<IEventDataService>();
+        string streamUrl = links.ToStream(new StudioLinkScope(null, foreign), shared.ToString())!;
+        streamUrl.Should().Contain("tenant=" + foreign).And.NotContain("db=");
+        StreamState stream = await events.GetStreamAsync(state.ActiveScope, shared.ToString(), Token);
+        stream.Exists.Should().BeTrue();
+        stream.Version.Should().Be(foreign == Initech ? 2 : 1, "the tenant's own stream, not the same id in the database on screen");
+
+        // A tenant nobody declared leaves the circuit where it is, with no tenant - and says so, so the pages do not read the id there.
         string landed = state.ActiveScope.DatabaseId;
         await state.SetScopeAsync(MartenStoreRegistry.DefaultStoreKey, null, "umbrella", Token);
         state.ActiveScope.Should().Be(new StudioScope(MartenStoreRegistry.DefaultStoreKey, landed, null));
+        state.IsTenantUnplaced(MartenStoreRegistry.DefaultStoreKey, null, "umbrella").Should().BeTrue();
 
         before.ShouldBeUnchangedIn(await ServerSnapshot.ReadAsync(owned.ConnectionStrings, Prefix, null, Token));
+    }
+
+    /// <summary>
+    /// ZW38-FIX. A tenant declared in a database this visitor may not see is a miss, and a miss must never fall back to reading the database on
+    /// screen: the link, followed from the other tenant's database, leaves the scope there and marks the address unplaced - and the same id,
+    /// which exists in the database on screen, is what the page would otherwise have shown as the refused tenant's document. An undeclared
+    /// tenant answers exactly the same, so the refusal cannot be told from "no such tenant".
+    /// </summary>
+    [PostgresFact]
+    public async Task A_refused_tenants_link_is_a_miss_and_never_reads_the_document_in_the_database_on_screen()
+    {
+        await using OwnedDatabases owned = await OwnedDatabases.CreateAsync(postgres, [Prefix + "refused_a", Prefix + "refused_b"], Token);
+        string first = owned[0];
+        string second = owned[1];
+
+        void Configure(StoreOptions options)
+        {
+            options.MultiTenantedDatabases(tenancy =>
+            {
+                tenancy.AddMultipleTenantDatabase(first, "f8d3-tenantdb-refused-a").ForTenants(Acme);
+                tenancy.AddMultipleTenantDatabase(second, "f8d3-tenantdb-refused-b").ForTenants(Initech);
+            });
+
+            options.DatabaseSchemaName = Schema;
+            options.Schema.For<TenancyNote>();
+        }
+
+        Guid shared = Guid.NewGuid();
+        await using (DocumentStore seed = DocumentStore.For(Configure))
+        {
+            await seed.Storage.ApplyAllConfiguredChangesToDatabaseAsync();
+            foreach (string tenant in (string[])[Acme, Initech])
+            {
+                await using IDocumentSession session = seed.LightweightSession(tenant);
+                session.Store(new TenancyNote { Id = shared, Text = "of " + tenant });
+                await session.SaveChangesAsync(Token);
+            }
+        }
+
+        string? refused = null;
+        var policy = new ResourcePolicy(resource => refused is null || !string.Equals(resource.DatabaseIdentifier, refused, StringComparison.OrdinalIgnoreCase));
+
+        await using TenancyStudio studio = TenancyStudio.Start(
+            Configure,
+            services => services.AddSingleton<IAuthorizationService>(policy),
+            options => options.StoreAuthorizationPolicy = "store");
+
+        string secondName = new NpgsqlConnectionStringBuilder(second).Database!;
+        refused = (await studio.Store.Storage.AllDatabases()).Single(x => x.Id.Name == secondName).Id.Identity;
+
+        await using AsyncServiceScope circuit = studio.Services.CreateAsyncScope();
+        IServiceProvider services = circuit.ServiceProvider;
+
+        var state = services.GetRequiredService<StudioState>();
+        var documents = services.GetRequiredService<IDocumentDataService>();
+
+        await state.EnsureInitializedAsync(Token);
+        state.AvailableDatabases.Should().ContainSingle("the premise: initech's database is refused for this visitor");
+        string onScreen = state.ActiveScope!.DatabaseId;
+
+        // The hazard, so the test cannot pass vacuously: the same id is readable in the database on screen, and it is acme's record.
+        DocumentDetailResult hazard = await documents.GetDocumentAsync(state.ActiveScope, "tenancy_note", shared.ToString(), Token);
+        hazard.Found.Should().BeTrue();
+        hazard.Detail!.Json.Should().Contain("of " + Acme);
+
+        // The refused tenant's link and an undeclared tenant's: one answer, the scope unmoved and the address marked unplaced.
+        foreach (string tenant in (string[])[Initech, "umbrella"])
+        {
+            await state.SetScopeAsync(MartenStoreRegistry.DefaultStoreKey, null, tenant, Token);
+
+            state.ActiveScope.Should().Be(new StudioScope(MartenStoreRegistry.DefaultStoreKey, onScreen, null), tenant);
+            state.IsTenantUnplaced(MartenStoreRegistry.DefaultStoreKey, null, tenant).Should().BeTrue(tenant + ": the pages must show not-found without reading by id");
+        }
+
+        // Followed from the visitor's own tenant's address, nothing is unplaced.
+        await state.SetScopeAsync(MartenStoreRegistry.DefaultStoreKey, null, Acme, Token);
+        state.HasUnplacedTenant.Should().BeFalse();
     }
 
     /// <summary>The identity of the database whose tenant listing carries <paramref name="tenant" />, read as the scope picker reads it.</summary>

@@ -65,15 +65,17 @@ internal interface IStudioSource
     bool DeclaresTenants => false;
 
     /// <summary>
-    /// The tenants the source's configuration places in <paramref name="database" />, unfiltered by policy; only asked when
-    /// <see cref="DeclaresTenants" /> is <see langword="true" />. Answers from memory: it opens no connection, enumerates no tenancy
-    /// and provisions nothing. The default declares none.
+    /// The identities of the databases the source's configuration places <paramref name="tenantId" /> in, counted over the whole declaration
+    /// (every database it declares, not only the ones a visitor may see), each identity once, unfiltered by policy; only asked when
+    /// <see cref="DeclaresTenants" /> is <see langword="true" />. Exactly one means the tenant is placed; none or several mean it is not
+    /// (a tenant declared in two databases is not placed in either, whoever asks). Answers from memory in one read of the declaration: it opens
+    /// no connection, enumerates no tenancy and provisions nothing. The default declares none.
     /// </summary>
-    /// <param name="database">The database, as matched in <paramref name="all" />.</param>
-    /// <param name="all">What <see cref="DatabasesAsync" /> has just answered, so same-identity twins answer for their tenants.</param>
+    /// <param name="tenantId">The tenant, matched exactly.</param>
+    /// <param name="all">What <see cref="DatabasesAsync" /> has just answered, so the declaration's entries can be matched to databases.</param>
     /// <param name="cancellationToken">Cancels the read.</param>
-    ValueTask<TenantList> DeclaredTenantsAsync(IStudioDatabase database, IReadOnlyList<IStudioDatabase> all, CancellationToken cancellationToken) =>
-        ValueTask.FromResult(TenantList.Unavailable);
+    ValueTask<IReadOnlyList<string>> DatabasesDeclaringAsync(string tenantId, IReadOnlyList<IStudioDatabase> all, CancellationToken cancellationToken) =>
+        ValueTask.FromResult<IReadOnlyList<string>>([]);
 
     /// <summary>
     /// Every database instance the source holds, in the source's own order - two instances may share one

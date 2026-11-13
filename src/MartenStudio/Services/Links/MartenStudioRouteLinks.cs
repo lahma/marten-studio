@@ -1,4 +1,5 @@
 using JasperFx.Events;
+using JasperFx.MultiTenancy;
 
 using Marten;
 using Marten.Schema;
@@ -178,6 +179,23 @@ internal sealed class MartenStudioRouteLinks : IStudioRouteLinks
     /// </summary>
     private static bool TenantFor(IDocumentStore store, MartenStudioOptions current, string? tenantId, out string? tenant)
     {
+        if (!PlacesTenant(store, current, tenantId, out tenant))
+        {
+            return false;
+        }
+
+        // The id as Marten stores it (ForceLowerCase and its siblings), which is what a static tenancy's declaration and every tenant listing
+        // hold: a record's header may spell it otherwise. Pure, as the rest of the builder is.
+        if (tenant is not null)
+        {
+            tenant = store.Options.TenantIdStyle.MaybeCorrectTenantId(tenant);
+        }
+
+        return true;
+    }
+
+    private static bool PlacesTenant(IDocumentStore store, MartenStudioOptions current, string? tenantId, out string? tenant)
+    {
         tenant = null;
 
         // Read from the configuration alone: the tenancy's type and its in-memory cardinality, never its databases (hard rule 14).
@@ -197,7 +215,7 @@ internal sealed class MartenStudioRouteLinks : IStudioRouteLinks
 
             case StoreTenancyKind.Static:
                 // The declaration is the source: MultiTenantedDatabases(...) says in memory which database serves each tenant, and the page
-                // a link opens reads it (StudioState.SetScopeAsync's tenant search, IStudioSource.DeclaredTenantsAsync) with no connection and
+                // a link opens reads it (StudioState.SetScopeAsync's tenant search, IStudioSource.DatabasesDeclaringAsync) with no connection and
                 // no enumeration, whether or not rows are tenanted. The link still carries no database. One case the search is never
                 // started for: rows tenanted and the host's KnownTenantIds listed, when the database on screen "lists" every tenant and so
                 // already seems to hold this one - there the page would keep it and a link would reopen the wrong database.

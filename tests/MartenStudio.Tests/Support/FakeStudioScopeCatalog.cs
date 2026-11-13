@@ -149,5 +149,30 @@ internal sealed class FakeStudioScopeCatalog : IStudioScopeCatalog
         return Facts.TryGetValue(storeKey, out StoreScopeFacts? facts) ? facts : StoreScopeFacts.None;
     }
 
+    /// <summary>What <see cref="PlaceDeclaredTenantAsync" /> answers for a tenant of a store, by store key and tenant; a tenant not named is not declared.</summary>
+    public Dictionary<(string StoreKey, string TenantId), DeclaredTenantPlacement> Placements { get; } = new();
+
+    /// <summary>Every <see cref="PlaceDeclaredTenantAsync" /> call, in order.</summary>
+    public List<(string StoreKey, IReadOnlyList<string> DatabaseIds, string TenantId)> PlaceCalls { get; } = [];
+
+    /// <summary>Says the store declares where its tenant is: placed in a database, or (with <see langword="null" />) in none the visitor may see.</summary>
+    public FakeStudioScopeCatalog WithPlacement(string storeKey, string tenantId, string? databaseId, StoreScopeFacts? facts = null)
+    {
+        Placements[(storeKey, tenantId)] = databaseId is null
+            ? DeclaredTenantPlacement.NotPlaced
+            : new DeclaredTenantPlacement(true, new TenantDatabaseHit(databaseId, facts ?? StoreScopeFacts.None));
+        return this;
+    }
+
+    public Task<DeclaredTenantPlacement> PlaceDeclaredTenantAsync(
+        string storeKey,
+        IReadOnlyList<string> databaseIds,
+        string tenantId,
+        CancellationToken cancellationToken = default)
+    {
+        PlaceCalls.Add((storeKey, databaseIds, tenantId));
+        return Task.FromResult(Placements.TryGetValue((storeKey, tenantId), out DeclaredTenantPlacement? placement) ? placement : DeclaredTenantPlacement.NotDeclared);
+    }
+
     public void Invalidate() => InvalidateCount++;
 }

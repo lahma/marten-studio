@@ -314,10 +314,15 @@ opens related records for that id. A link grants nothing: the page it opens chec
 `tenant-id` is redacted has no Marten links.
 
 In a store that keeps each tenant in a database of its own, the link names the tenant and the studio opens the database that holds it
-among those you may see. A static tenancy (`MultiTenantedDatabases(...)`) always links: the studio reads which database serves each tenant from
-your configuration, whether or not the store's documents are tenanted. A master-table, sharded or one-server tenancy links only when the store
-keeps its rows per tenant and you listed no `KnownTenantIds`; where its documents are single-tenanted it gets no Marten link, because nothing the
-studio may read without enumerating the tenancy says which database holds a tenant.
+among those you may see. A static tenancy (`MultiTenantedDatabases(...)`) links whether or not the store's documents are tenanted, except where
+they are tenanted and you listed `KnownTenantIds`: the studio reads which database serves each tenant from your configuration. A master-table,
+sharded or one-server tenancy links only when the store keeps its rows per tenant and you listed no `KnownTenantIds`; where its documents are
+single-tenanted it gets no Marten link, because nothing the studio may read without enumerating the tenancy says which database holds a tenant.
+
+When the studio cannot place the tenant a link names - the tenant is not declared, is declared in two databases, or is declared in a database
+you may not see - the page says what it says of an id that is not there ("No document with id ... is in ... for tenant ...", "No such stream"),
+and reads nothing: it never shows the same id from the database that happens to be on screen. The words are the same whatever the reason, so
+they tell you nothing about databases or tenants you may not see. Picking a database or a tenant in the header clears it.
 
 `o.ExternalLink("Traces", "https://tempo.example.com/trace/{traceId}")` adds a link to your tracing or log tool, with
 `{traceId}`, `{correlationId}`, `{from}`, `{to}`, `{fromMs}` and `{toMs}`. Never put a credential in a template: it is
