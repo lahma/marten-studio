@@ -671,7 +671,7 @@ internal sealed partial class KafkaScanner(
 
         if (cost.Remaining(owner.Key, ownerBudget) <= 0)
         {
-            return Refuse(plan, KafkaScanRefusal.OwnerBudgetSpent);
+            return Refuse(plan, KafkaScanRefusal.OwnerBudgetSpent, cost.Spent(owner.Key, ownerBudget));
         }
 
         // A tail holds one of MaxConcurrentScans and one of MaxConcurrentScansPerOwner while it reads (a tail is no heavier than a scan: its ring

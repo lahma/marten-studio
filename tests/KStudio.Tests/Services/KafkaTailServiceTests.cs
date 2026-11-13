@@ -1,7 +1,10 @@
+using KStudio.Core.Clusters;
 using KStudio.Core.Scanning;
 using KStudio.Services;
 using KStudio.Tests.Scanning;
 using KStudio.Tests.Support;
+
+using Microsoft.Extensions.DependencyInjection;
 
 using PostgresStudio.Services;
 
@@ -343,6 +346,36 @@ public class KafkaTailServiceTests
         holder.Stop();
         await holderEnd.Bounded();
         await holder.Session.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task A_start_refused_for_the_allowance_names_the_allowance_that_is_spent_the_clusters_or_the_processs()
+    {
+        const long MiB = 1024 * 1024;
+        const long GiB = 1024 * MiB;
+
+        // The process allows 50 GiB an hour and a Test cluster caps its own at 2 GiB.
+        await using KafkaSearchRig rig = new(engine: o => o.Limits.OwnerBytesPerHour = 50 * GiB, studio: o => o.Capabilities.LiveTail = true, profile: KafkaProfile.Test);
+        Seed(rig);
+        KafkaTailService tail = rig.Tail();
+
+        // A named visitor: an anonymous one is an owner made once per service instance, and the budget is the engine's per owner.
+        rig.Studio.Visitor.SignIn("ann");
+        string owner = (await new KafkaOwnerKey(rig.Studio.Visitor).OwnerAsync()).Key;
+        KafkaTailPlanned planned = ((KafkaTailPlanResult.Planned) await tail.PlanAsync(rig.TailInput(["orders"]), null, Ct)).Value;
+        KafkaClusterRegistry registry = rig.Engine.Provider.GetRequiredService<KafkaClusterRegistry>();
+
+        rig.Engine.Provider.GetRequiredService<KafkaClusterCostControls>().For(registry.Get(rig.Entry.Key)).OwnerBudget!.Add(owner, 2 * GiB);
+        KafkaTailStartResult cluster = await tail.StartAsync(null, planned, Ct);
+
+        cluster.Should().BeOfType<KafkaTailStartResult.Refused>().Which.Text.Should().Be("You have read your hourly allowance on this cluster of 2 GiB. It frees up as the hour rolls on.");
+
+        rig.Engine.Provider.GetRequiredService<OwnerByteBudget>().Add(owner, 50 * GiB);
+        KafkaTailStartResult process = await tail.StartAsync(null, planned, Ct);
+
+        process.Should().BeOfType<KafkaTailStartResult.Refused>().Which.Text.Should().Be("You have read your hourly allowance of 50 GiB. It frees up as the hour rolls on.");
+        rig.Logs.Entries.Count(static x => x.EventId.Id == 9609).Should().Be(2);
+        rig.Logs.Entries.Should().NotContain(static x => x.EventId.Id == 9607);
     }
 
     [Fact]

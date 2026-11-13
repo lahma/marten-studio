@@ -744,14 +744,16 @@
 
             WriteAddress(planned);
 
-            // A new Start replaces the tail on screen: that tail's one audit entry is written now, and its slot was already free if it was paused.
-            if (session is { } old)
-            {
-                old.End(KafkaScanStopReason.Cancelled);
-                endedBy ??= KafkaScanStopReason.Cancelled;
-            }
-
+            // A new Start replaces the tail on screen, but only once it has started: a Start that is refused leaves the tail on screen as it was, still
+            // resumable. The tail it replaces holds no place (a paused tail released it), so the new one is not refused for it, and its one audit entry is
+            // written now.
+            KafkaTailSession? replaced = session;
             first = await StartSegmentAsync(null, planned);
+
+            if (first is not null)
+            {
+                replaced?.End(KafkaScanStopReason.Cancelled);
+            }
         }
         catch (OperationCanceledException)
         {

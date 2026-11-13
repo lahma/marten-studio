@@ -324,7 +324,7 @@ public class KafkaTailPageTests
         rig.Ring.Should().BeEmpty("the paused tail is still the session on screen");
 
         Task second = ClickAsync(page, "Start");
-        rig.Ring.Should().ContainSingle(static x => x.Action == "LiveTail", "the new Start ended the paused session");
+        page.WaitForAssertion(() => rig.Ring.Should().ContainSingle(static x => x.Action == "LiveTail", "the new Start ended the paused session"), Wait);
         WaitUntilLive(page);
 
         await ClickAsync(page, "Stop");
@@ -332,6 +332,37 @@ public class KafkaTailPageTests
         rig.Ring.Count(static x => x.Action == "LiveTail").Should().Be(2);
         rig.CircuitLogs.Entries.Count(static x => x.EventId.Id == 9607).Should().Be(2);
         rig.CircuitLogs.Entries.Count(static x => x.EventId.Id == 9608).Should().Be(2);
+    }
+
+    [Fact]
+    public async Task A_Start_that_is_refused_leaves_the_paused_tail_on_screen_and_resumable()
+    {
+        await using KafkaSearchRig rig = Rig();
+        Seed(rig);
+        IRenderedComponent<KafkaTailPage> page = await OpenAsync(rig);
+
+        Task first = ClickAsync(page, "Start");
+        WaitUntilLive(page);
+        rig.Produce("orders", 0, 10, "n1", "x");
+        page.WaitForAssertion(() => Rows(page).Should().Equal("0 / 3"), Wait);
+        await ClickAsync(page, "Pause");
+        page.WaitForAssertion(() => page.FindAll(".ms-k-tail-paused").Should().HaveCount(1), Wait);
+        await first.Bounded();
+
+        // The text no longer parses: the new Start is refused before it reads anything, and the tail on screen is as it was.
+        await page.Find("textarea.ms-k-predicate").InputAsync(new ChangeEventArgs { Value = "key ^^ 'n'" });
+        await ClickAsync(page, "Start");
+        page.WaitForAssertion(() => page.Find(".ms-k-tail-form [role=alert]").TextContent.Should().Be(KafkaStudioText.PredicateInvalid), Wait);
+
+        page.Find(".ms-k-tail-paused").TextContent.Should().Contain("Paused: you paused it. 1 record shown.").And.Contain("Resume");
+        Rows(page).Should().Equal("0 / 3");
+        rig.Ring.Count(static x => x.Action == "LiveTail" && x.Succeeded).Should().Be(0, "the tail on screen did not end");
+
+        rig.Produce("orders", 0, 11, "n2", "x");
+        Task resume = ClickAsync(page, "Resume");
+        page.WaitForAssertion(() => Rows(page).Should().Equal("0 / 4", "0 / 3"), Wait);
+        await ClickAsync(page, "Stop");
+        await resume.Bounded();
     }
 
     [Fact]
