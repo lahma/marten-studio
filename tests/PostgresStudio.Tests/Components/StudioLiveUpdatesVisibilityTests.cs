@@ -164,6 +164,67 @@ public class StudioLiveUpdatesVisibilityTests
         log.Entries.Should().Contain(static x => x.Level == Microsoft.Extensions.Logging.LogLevel.Debug && x.Message.Contains("visibility handler failed", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task Asking_the_browser_takes_its_answer_as_the_state_and_raises_a_change_only_if_it_differs()
+    {
+        AskedAnswers js = new(startsHidden: false, asked: true);
+        await using StudioLiveUpdates updates = new(js, NullLogger<StudioLiveUpdates>.Instance);
+        await updates.StartAsync(TimeSpan.FromHours(1), static _ => Task.CompletedTask, Xunit.TestContext.Current.CancellationToken);
+        ConcurrentQueue<bool> heard = new();
+        updates.VisibilityChanged += hidden =>
+        {
+            heard.Enqueue(hidden);
+            return Task.CompletedTask;
+        };
+
+        (await updates.ReadIsHiddenAsync(Xunit.TestContext.Current.CancellationToken)).Should().BeTrue();
+        updates.IsHidden.Should().BeTrue("the page missed the change and the browser's answer corrects it");
+        (await updates.ReadIsHiddenAsync(Xunit.TestContext.Current.CancellationToken)).Should().BeTrue();
+        await updates.VisibilityChangesRaised.Bounded();
+
+        heard.Should().Equal([true], "the second answer was no change");
+        js.Asked.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task A_browser_that_cannot_be_asked_counts_as_hidden()
+    {
+        AskedAnswers js = new(startsHidden: false, asked: false) { Fails = true };
+        await using StudioLiveUpdates updates = new(js, NullLogger<StudioLiveUpdates>.Instance);
+        await updates.StartAsync(TimeSpan.FromHours(1), static _ => Task.CompletedTask, Xunit.TestContext.Current.CancellationToken);
+
+        (await updates.ReadIsHiddenAsync(Xunit.TestContext.Current.CancellationToken)).Should().BeTrue();
+        updates.IsHidden.Should().BeTrue();
+    }
+
+    private sealed class AskedAnswers(bool startsHidden, bool asked) : IJSRuntime
+    {
+        public bool Fails { get; init; }
+
+        public int Asked { get; private set; }
+
+        public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args) =>
+#pragma warning disable BL0016 // A test fake forwarding to its own Invoke, not a studio call site.
+            Invoke<TValue>(identifier);
+#pragma warning restore BL0016
+
+        public ValueTask<TValue> InvokeAsync<TValue>(string identifier, CancellationToken cancellationToken, object?[]? args) =>
+#pragma warning disable BL0016 // A test fake forwarding to its own Invoke, not a studio call site.
+            Invoke<TValue>(identifier);
+#pragma warning restore BL0016
+
+        private ValueTask<TValue> Invoke<TValue>(string identifier)
+        {
+            if (identifier == "martenStudio.visibility.isHidden")
+            {
+                Asked++;
+                return Fails ? throw new JSException("gone") : ValueTask.FromResult((TValue) (object) asked);
+            }
+
+            return identifier == "martenStudio.visibility.watch" ? ValueTask.FromResult((TValue) (object) startsHidden) : ValueTask.FromResult(default(TValue)!);
+        }
+    }
+
     private sealed class ListLogger<T> : Microsoft.Extensions.Logging.ILogger<T>
     {
         private readonly System.Collections.Concurrent.ConcurrentQueue<(Microsoft.Extensions.Logging.LogLevel Level, string Message)> queue = new();

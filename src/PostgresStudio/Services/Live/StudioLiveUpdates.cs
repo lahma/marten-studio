@@ -221,6 +221,30 @@ internal sealed class StudioLiveUpdates : IAsyncDisposable
     }
 
     /// <summary>
+    /// Asks the browser now whether the tab is hidden, and takes the answer as the state (raising <see cref="VisibilityChanged" /> if it differs from the last one
+    /// heard). What a page calls after its connection returned, when it may have missed a change while the circuit was down. If the browser cannot be asked the tab
+    /// is taken as hidden - the answer that does nothing - and the next change the browser sends corrects it.
+    /// </summary>
+    /// <param name="cancellationToken">Ends the wait.</param>
+    /// <returns>Whether the tab is hidden.</returns>
+    public async Task<bool> ReadIsHiddenAsync(CancellationToken cancellationToken = default)
+    {
+        bool now;
+
+        try
+        {
+            now = await jsRuntime.InvokeAsync<bool>("martenStudio.visibility.isHidden", cancellationToken);
+        }
+        catch (Exception exception) when (IsInteropUnavailable(exception))
+        {
+            now = true;
+        }
+
+        OnVisibilityChanged(now);
+        return now;
+    }
+
+    /// <summary>
     /// Runs one tick now, outside the timer. What a Refresh button calls.
     /// </summary>
     public async Task TickNowAsync(CancellationToken cancellationToken = default)

@@ -58,6 +58,7 @@ internal static class KafkaTailText
             KafkaTailPause.Records => $"it read KafkaStudioOptions.Limits.MaxRecordsPerScan ({KafkaDisplay.Count(limits.MaxRecordsPerScan, "record")}) in one stretch",
             KafkaTailPause.Allowance => KafkaStudioText.Allowance(spent) + " is spent",
             KafkaTailPause.Unavailable => "the cluster stopped answering",
+            KafkaTailPause.ConnectionLost => "the connection to this page was lost",
             _ => pause.ToString(),
         };
     }

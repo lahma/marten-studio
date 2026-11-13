@@ -41,6 +41,9 @@ internal enum KafkaTailPause
 
     /// <summary>The cluster stopped answering; the cursor is exact, so the tail can go on once it does.</summary>
     Unavailable,
+
+    /// <summary>The circuit's connection dropped; the tail goes on by itself when it returns, if the tab is shown (D46).</summary>
+    ConnectionLost,
 }
 
 /// <summary>

@@ -208,6 +208,10 @@
                 }
 
                 drop(token);
+            },
+            /* isHidden() - whether the tab is hidden right now: what a page asks after its connection returned, when it may have missed a change. */
+            isHidden: function () {
+                return document.hidden === true;
             }
         };
     })();
