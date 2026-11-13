@@ -36,7 +36,7 @@
 
     @if (!Capabilities.IsEnabled(KafkaCapability.SearchRecords))
     {
-        <KafkaCapabilityDisabled Capability="@nameof(KafkaStudioCapabilities.SearchRecords)" Action="search related records" />
+        <KafkaCapabilityDisabled Capability="@nameof(KafkaStudioCapabilities.SearchRecords)" Action="Searching related records" />
     }
     else if (ready && mode == EntryMode.None)
     {
@@ -118,7 +118,7 @@
         {
             <div class="ms-k-search-form" aria-busy="@(busy ? "true" : "false")">
                 <details class="ms-k-related-topics">
-                    <summary>Topics searched (@selected.Count)</summary>
+                    <summary>Topics searched (@TopicsSearched())</summary>
                     <fieldset class="ms-k-topics" disabled="@busy">
                         <legend>Topics</legend>
                         <p class="ms-muted">@KafkaStudioText.RelatedScope</p>
@@ -208,6 +208,18 @@
                 <p class="ms-k-estimate">@EstimateText(shownPlan)</p>
             }
 
+            @* One "Not found" line per topic that does not exist on the cluster (#77): the name in <code>, never in backticks, and the topic is not counted
+               under "Topics searched". The same sentence is left out of the notes and caveats below, which would repeat it. *@
+            @if (MissingTopics() is { Count: > 0 } missing)
+            {
+                <ul class="ms-k-not-found" aria-label="Topics not found">
+                    @foreach (string name in missing)
+                    {
+                        <li @key="name">Not found: topic <code>@name</code></li>
+                    }
+                </ul>
+            }
+
             @if (progress is not null)
             {
                 <div class="ms-stat-grid ms-k-stats">
@@ -226,6 +238,7 @@
                     @if (continuedAfter is { } previous)
                     {
                         <p class="ms-muted">@KafkaStudioText.ContinuedAfter(previous)</p>
+                    <p class="ms-muted ms-k-continued-showing">@KafkaStudioText.ContinuedShowing(earlierMatches, result.Matches)</p>
                     }
                     @if (KafkaSearchText.CanContinue(result.StopReason) && !result.Cursor.IsEmpty)
                     {
@@ -233,7 +246,7 @@
                     }
                 </div>
 
-                @if (KafkaSearchText.Caveats(result) is { Count: > 0 } caveats)
+                @if (KafkaSearchText.Caveats(result, leaveOutMissingTopics: true) is { Count: > 0 } caveats)
                 {
                     <section class="ms-k-caveats" aria-label="What this result does not cover">
                         <h2 class="ms-section-title">What this result does not cover</h2>
@@ -384,6 +397,11 @@
     private int hiddenTopics;
     private long? continuedAfter;
     private long? pendingContinuation;
+
+    /// <summary>How many matches the runs before this one found, cleared from the page by Continue (#76); 0 for a first run.</summary>
+    private long earlierMatches;
+
+    private long pendingEarlierMatches;
     private long? allowanceLeft;
     private bool includeUncommitted;
     private bool anchorMissing;
@@ -797,10 +815,11 @@
 
         // The same cluster, topics, window, keys and per-topic searches; the cursor stays in memory and never enters the address.
         long records = result.Records;
-        await PlanAndStartAsync(planned.Input with { ContinueFrom = result.Cursor }, records);
+        long earlier = earlierMatches + result.Matches;
+        await PlanAndStartAsync(planned.Input with { ContinueFrom = result.Cursor }, records, earlier);
     }
 
-    private async Task PlanAndStartAsync(KafkaRelatedInput input, long? continuing = null)
+    private async Task PlanAndStartAsync(KafkaRelatedInput input, long? continuing = null, long continuingMatches = 0)
     {
         planning = true;
         refusal = null;
@@ -819,6 +838,7 @@
             planned = ((KafkaRelatedPlanResult.Planned) plan).Value;
             lanes = planned.Lanes;
             pendingContinuation = continuing;
+            pendingEarlierMatches = continuingMatches;
 
             if (planned.Plan.Estimate.NeedsConfirmation)
             {
@@ -864,6 +884,7 @@
     {
         confirmOpen = false;
         pendingContinuation = null;
+        pendingEarlierMatches = 0;
 
         try
         {
@@ -904,7 +925,9 @@
             result = null;
             progress = null;
             continuedAfter = pendingContinuation;
+            earlierMatches = pendingContinuation is null ? 0 : pendingEarlierMatches;
             pendingContinuation = null;
+            pendingEarlierMatches = 0;
             await InvokeAsync(StateHasChanged);
 
             await foreach (KafkaScanBatch batch in startedRun.ReadBatchesAsync(lifetime.Token))
@@ -983,9 +1006,26 @@
 
     private IReadOnlyList<string> PlanNotes(KafkaRelatedPlanned shown)
     {
-        IEnumerable<string> drawnBelow = result is null ? [] : KafkaSearchText.Caveats(result);
+        IEnumerable<string> drawnBelow = result is null ? [] : KafkaSearchText.Caveats(result, leaveOutMissingTopics: true);
 
-        return [.. shown.Plan.Notes.Select(static x => x.Text).Distinct(StringComparer.Ordinal).Except(drawnBelow, StringComparer.Ordinal)];
+        return [.. shown.Plan.Notes.Where(static x => !KafkaSearchText.IsMissingTopicNote(x)).Select(static x => x.Text).Distinct(StringComparer.Ordinal).Except(drawnBelow, StringComparer.Ordinal)];
+    }
+
+    /// <summary>The topics the plan (or, after a run, the result) found do not exist on the cluster.</summary>
+    private IReadOnlyList<string> MissingTopics()
+    {
+        IEnumerable<string> fromPlan = planned?.Plan.Window?.Topics.Where(static x => x.Refusal is KStudio.Core.Wire.WireError.NotFound).Select(static x => x.Topic) ?? [];
+        IEnumerable<string> fromResult = result?.TopicRefusals.Where(static x => x.Missing).Select(static x => x.Topic) ?? [];
+
+        return [.. fromPlan.Concat(fromResult).Distinct(StringComparer.Ordinal)];
+    }
+
+    /// <summary>How many of the selected topics a search reads: the ones that do not exist are not counted.</summary>
+    private int TopicsSearched()
+    {
+        IReadOnlyList<string> missing = MissingTopics();
+
+        return selected.Count(name => !missing.Contains(name, StringComparer.Ordinal));
     }
 
     private static string EstimateText(KafkaRelatedPlanned shown)

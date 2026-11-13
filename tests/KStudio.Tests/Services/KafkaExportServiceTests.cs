@@ -170,7 +170,8 @@ public class KafkaExportServiceTests
         outcome.LeftOut.Should().BeGreaterThan(0);
         (outcome.Written + outcome.LeftOut).Should().Be(20);
         outcome.Text.Should().Be(KafkaStudioText.ExportLimited(outcome.Written, 20, OneMiB))
-            .And.Contain("KafkaStudioOptions.Limits.MaxExportBytes");
+            .And.NotContain("KafkaStudioOptions", "an option's name is on Cluster settings only")
+            .And.Contain("size limit for an export");
         capture.Bytes.Length.Should().BeLessThanOrEqualTo((int) OneMiB);
         Encoding.UTF8.GetString(capture.Bytes).Split('\n', StringSplitOptions.RemoveEmptyEntries).Should().HaveCount(outcome.Written,"a file never holds a cut row");
         Exports(rig).Single().Message.Should().Contain($"{outcome.LeftOut} left out at the size limit");
@@ -189,7 +190,7 @@ public class KafkaExportServiceTests
         KafkaExportOutcome outcome = await rig.Export().ExportAsync(InputOf(rig, planned, matches, result), capture.DeliverAsync, Ct);
 
         outcome.Delivered.Should().BeFalse();
-        outcome.Text.Should().Contain("KafkaStudioOptions.Capabilities.ExportRecords");
+        outcome.Text.Should().Be("Exporting records is not available here.");
         capture.Calls.Should().Be(0);
         Exports(rig).Should().ContainSingle().Which.Succeeded.Should().BeFalse();
         rig.Logs.Entries.Should().Contain(static x => x.EventId.Id == 9602);
@@ -207,12 +208,12 @@ public class KafkaExportServiceTests
 
         KafkaExportOutcome outcome = await rig.Export().ExportAsync(InputOf(rig, planned, matches, result), capture.DeliverAsync, Ct);
 
-        outcome.Text.Should().Contain("KafkaStudioOptions.Capabilities.SearchRecords").And.NotContain("ExportRecords");
+        outcome.Text.Should().Be("Searching records is not available here.").And.NotContain("ExportRecords");
         capture.Calls.Should().Be(0);
     }
 
     [Fact]
-    public async Task ReadOnly_refuses_an_export_naming_the_hosts_option()
+    public async Task ReadOnly_refuses_an_export_in_one_neutral_sentence_and_the_audit_names_the_hosts_option()
     {
         await using KafkaSearchRig rig = Rig();
         Seed(rig);
@@ -222,7 +223,7 @@ public class KafkaExportServiceTests
 
         KafkaExportOutcome outcome = await rig.Export().ExportAsync(InputOf(rig, planned, matches, result), capture.DeliverAsync, Ct);
 
-        outcome.Text.Should().Contain("PostgresStudioOptions.ReadOnly");
+        outcome.Text.Should().Be("Searching records is not available here.", "the prerequisite is the first refusal");
         capture.Calls.Should().Be(0);
     }
 

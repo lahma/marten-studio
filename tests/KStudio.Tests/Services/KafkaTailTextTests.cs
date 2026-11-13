@@ -74,8 +74,8 @@ public class KafkaTailTextTests
         KafkaTailText.PausedBecause(KafkaTailPause.You, Limits, null).Should().Be("you paused it");
         KafkaTailText.PausedBecause(KafkaTailPause.TabHidden, Limits, null).Should().Be("the tab was hidden; it resumes when you come back");
         KafkaTailText.PausedBecause(KafkaTailPause.Time, Limits, null).Should().Be("it read for 10 seconds");
-        KafkaTailText.PausedBecause(KafkaTailPause.Bytes, Limits, null).Should().Be("it read KafkaStudioOptions.Limits.MaxBytesPerScan (64 MiB) in one stretch");
-        KafkaTailText.PausedBecause(KafkaTailPause.Records, Limits, null).Should().Be("it read KafkaStudioOptions.Limits.MaxRecordsPerScan (1,000,000 records) in one stretch");
+        KafkaTailText.PausedBecause(KafkaTailPause.Bytes, Limits, null).Should().Be("it read 64 MiB in one stretch");
+        KafkaTailText.PausedBecause(KafkaTailPause.Records, Limits, null).Should().Be("it read 1,000,000 records in one stretch");
         KafkaTailText.PausedBecause(KafkaTailPause.Unavailable, Limits, null).Should().Be("the cluster stopped answering");
         KafkaTailText.PausedBecause(KafkaTailPause.ConnectionLost, Limits, null).Should().Be("the connection to this page was lost");
         KafkaTailText.PausedLine(KafkaTailPause.ConnectionLost, Limits, null, 5).Should().Be("Paused: the connection to this page was lost. 5 records shown.");

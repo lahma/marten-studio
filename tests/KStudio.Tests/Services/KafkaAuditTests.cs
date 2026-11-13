@@ -165,6 +165,18 @@ public class KafkaAuditTests
     }
 
     [Fact]
+    public async Task The_activity_footer_names_the_modules_events_beside_the_studios()
+    {
+        using KafkaStudioHarness harness = new();
+        await harness.Context.ReadyAsync();
+
+        IRenderedComponent<Activity> page = harness.Context.Render<Activity>();
+
+        string footer = string.Join(' ', page.Find("p.ms-muted").TextContent.Split((char[]?) null, StringSplitOptions.RemoveEmptyEntries));
+        footer.Should().EndWith("under event ids 9200-9211 and KStudio for Apache Kafka®'s under 9600-9609.");
+    }
+
+    [Fact]
     public async Task The_scope_column_shows_the_cluster_label()
     {
         using KafkaStudioHarness harness = new();

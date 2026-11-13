@@ -215,6 +215,30 @@ public class KafkaTopicPageTests
     }
 
     [Fact]
+    public async Task The_live_tail_link_is_left_out_while_the_capability_is_off()
+    {
+        await using KafkaCatalogRig searchOnly = new(studio: o =>
+        {
+            o.Capabilities.SearchRecords = true;
+            o.CapabilityAuthorizationPolicy = "kafka-search";
+        });
+        await using KafkaCatalogRig both = new(studio: o =>
+        {
+            o.Capabilities = KafkaStudioCapabilities.All();
+            o.CapabilityAuthorizationPolicy = "kafka-search";
+        });
+        searchOnly.Topic("orders", 1, 1);
+        both.Topic("orders", 1, 1);
+
+        IRenderedComponent<KafkaTopicPage> withoutTail = await OpenAsync(searchOnly, "orders");
+        IRenderedComponent<KafkaTopicPage> withTail = await OpenAsync(both, "orders");
+
+        withoutTail.WaitForAssertion(() => withoutTail.FindAll("a[href*='kafka/search']").Should().HaveCount(1));
+        withoutTail.FindAll("a[href*='kafka/tail']").Should().BeEmpty("Live tail is off: the link is left out, not shown with a reason");
+        withTail.WaitForAssertion(() => withTail.FindAll("a[href*='kafka/tail']").Should().HaveCount(1));
+    }
+
+    [Fact]
     public async Task Search_this_topic_is_a_link_or_the_disabled_notice()
     {
         await using KafkaCatalogRig off = new();
@@ -230,7 +254,7 @@ public class KafkaTopicPageTests
         IRenderedComponent<KafkaTopicPage> enabled = await OpenAsync(on, "orders");
 
         disabled.WaitForAssertion(() => disabled.FindAll(".ms-capability-disabled").Should().HaveCount(1));
-        disabled.Find(".ms-capability-disabled").TextContent.Should().Contain("search this topic is not enabled").And.Contain("KafkaStudioOptions.Capabilities.SearchRecords");
+        disabled.Find(".ms-capability-disabled").TextContent.Should().Contain("Searching this topic is not available here.").And.NotContain("KafkaStudioOptions");
         disabled.FindAll("a[href*='kafka/search']").Should().BeEmpty();
 
         enabled.WaitForAssertion(() => enabled.FindAll("a[href*='kafka/search']").Should().HaveCount(1));

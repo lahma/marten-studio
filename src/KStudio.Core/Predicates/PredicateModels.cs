@@ -1,13 +1,117 @@
+using System.Globalization;
+
 namespace KStudio.Core.Predicates;
 
 /// <summary>
-/// Something wrong with a search text, for the visitor who typed it (decision 7.6). The message names fields, operators and positions and
-/// <b>never contains a literal</b>: an error is a sink like any other (D40).
+/// Something wrong with a search text, for the visitor who typed it (decision 7.6). The message names fields, operators and what was found and
+/// <b>never contains a literal</b>: an error is a sink like any other (D40). It does not carry its position: a page draws
+/// "Position {n}: {message}", so the position is said once (#75).
 /// </summary>
-/// <param name="Start">Where the problem starts, counted from 0 in the text; the message counts positions from 1.</param>
+/// <param name="Start">Where the problem starts, counted from 0 in the text; the page counts positions from 1.</param>
 /// <param name="Length">How many characters it covers.</param>
-/// <param name="Message">What is wrong, with no literal in it.</param>
-internal sealed record PredicateError(int Start, int Length, string Message);
+/// <param name="Message">What is wrong, with no literal in it and no position, starting in lower case after "Position {n}: ".</param>
+/// <param name="Kind">What kind of problem it is, which fixes the constant phrase the audit and the log record for it.</param>
+internal sealed record PredicateError(int Start, int Length, string Message, PredicateErrorKind Kind = PredicateErrorKind.Invalid)
+{
+    /// <summary>The page's wording: "Position {n}: {message}", the position counted from 1.</summary>
+    public string Shown => string.Create(CultureInfo.InvariantCulture, $"Position {Start + 1}: {Message}");
+
+    /// <summary>
+    /// The constant phrase for this kind of problem, fit for the audit and the log (#75): it carries nothing the visitor typed - no field, header
+    /// or rule name, no JSON path and no literal.
+    /// </summary>
+    public string AuditPhrase => Kind switch
+    {
+        PredicateErrorKind.Expected => "expected a value",
+        PredicateErrorKind.UnexpectedToken => "unexpected token",
+        PredicateErrorKind.UnexpectedCharacter => "unexpected character",
+        PredicateErrorKind.UnclosedString => "unclosed string",
+        PredicateErrorKind.ValueTooLong => "value too long",
+        PredicateErrorKind.TextTooLong => "search text too long",
+        PredicateErrorKind.TooManyConditions => "too many conditions",
+        PredicateErrorKind.TooManyValues => "too many values",
+        PredicateErrorKind.UnclosedParenthesis => "unclosed parenthesis",
+        PredicateErrorKind.NestedTooDeep => "nested too deeply",
+        PredicateErrorKind.EmptyHeaderName => "empty header name",
+        PredicateErrorKind.UnknownField => "unknown field",
+        PredicateErrorKind.NumberOutOfRange => "number out of range",
+        PredicateErrorKind.RedactedValueLeftOut => "redacted value left out",
+        PredicateErrorKind.JsonPath => "invalid JSON path",
+        PredicateErrorKind.RedactedFieldOperator => "redacted field operator",
+        PredicateErrorKind.ValuesNotAvailable => "values not available",
+        PredicateErrorKind.OperatorNotAllowed => "operator not allowed on this field",
+        PredicateErrorKind.LiteralType => "wrong kind of value",
+        PredicateErrorKind.KeyNotValid => "value not valid for the key format",
+        _ => "invalid search text",
+    };
+}
+
+/// <summary>The kinds of <see cref="PredicateError" />, each with one constant audit phrase (#75).</summary>
+internal enum PredicateErrorKind
+{
+    /// <summary>A search text that is not valid in a way no other kind names.</summary>
+    Invalid,
+
+    /// <summary>A value was expected and something else was found.</summary>
+    Expected,
+
+    /// <summary>Another token than the grammar allows.</summary>
+    UnexpectedToken,
+
+    /// <summary>A character the grammar has no use for.</summary>
+    UnexpectedCharacter,
+
+    /// <summary>A string with no closing quote.</summary>
+    UnclosedString,
+
+    /// <summary>A literal longer than the most the grammar takes.</summary>
+    ValueTooLong,
+
+    /// <summary>A search text longer than the most the grammar takes.</summary>
+    TextTooLong,
+
+    /// <summary>More conditions than the grammar takes.</summary>
+    TooManyConditions,
+
+    /// <summary>More values in a list than the grammar takes.</summary>
+    TooManyValues,
+
+    /// <summary>A parenthesis that is never closed.</summary>
+    UnclosedParenthesis,
+
+    /// <summary>Parentheses nested deeper than the grammar takes.</summary>
+    NestedTooDeep,
+
+    /// <summary>A <c>header[]</c> with no name.</summary>
+    EmptyHeaderName,
+
+    /// <summary>A name that is not a field.</summary>
+    UnknownField,
+
+    /// <summary>A number the engine cannot hold.</summary>
+    NumberOutOfRange,
+
+    /// <summary>A permalink's redacted value that was not typed in.</summary>
+    RedactedValueLeftOut,
+
+    /// <summary>A JSON path that does not parse.</summary>
+    JsonPath,
+
+    /// <summary>An operator a redacted field does not take.</summary>
+    RedactedFieldOperator,
+
+    /// <summary>A clause that reads values where the visitor may not.</summary>
+    ValuesNotAvailable,
+
+    /// <summary>An operator the field does not take.</summary>
+    OperatorNotAllowed,
+
+    /// <summary>A literal of the wrong kind for the field.</summary>
+    LiteralType,
+
+    /// <summary>A literal the topic's key format cannot encode.</summary>
+    KeyNotValid,
+}
 
 /// <summary>A node of the search tree; every node knows where it came from (decision 7.2).</summary>
 /// <param name="Start">Where it starts in the text, from 0.</param>

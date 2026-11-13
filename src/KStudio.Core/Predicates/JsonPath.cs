@@ -338,8 +338,7 @@ internal sealed class JsonPathExpression
     private static PredicateError Error(string text, int start, int at, string problem)
     {
         string shown = text.Length > ShownLength ? text[..ShownLength] : text;
-        int position = start + at + 1;
 
-        return new PredicateError(start + at, 1, string.Create(CultureInfo.InvariantCulture, $"The JSON path '{shown}' at position {position} {problem}"));
+        return new PredicateError(start + at, 1, string.Create(CultureInfo.InvariantCulture, $"the JSON path '{shown}' {problem}"), PredicateErrorKind.JsonPath);
     }
 }

@@ -164,7 +164,7 @@ public class KafkaRecordCompareTests
     }
 
     [Theory]
-    [InlineData("CapabilityOff", "Reading values is not enabled.")]
+    [InlineData("CapabilityOff", "Reading values is not available here.")]
     [InlineData("PolicyRefused", "The value of this record is not available to you.")]
     [InlineData("SearchWithoutValues", "This search could not read values on every topic it named. Open the record page to read this record's value.")]
     public async Task Without_Payload_the_value_section_says_why(string accessName, string sentence)

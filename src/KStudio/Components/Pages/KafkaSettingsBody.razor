@@ -3,8 +3,11 @@
 @using KStudio.Core.Index
 @using KStudio.Core.Scanning
 @using Microsoft.Extensions.Logging
+@using PostgresStudio.Services.Settings
 @inject KafkaState State
 @inject KafkaCatalogService Catalog
+@inject KafkaCapabilityGuard Capabilities
+@inject IStudioSettings StudioSettings
 @inject IKafkaScanner Scanner
 @inject KafkaRecordIndexResolver RecordIndex
 @inject ILogger<KafkaSettingsBody> Logger
@@ -46,6 +49,35 @@
             @* Two listed clusters with the same bootstrap servers (#72): compared from configuration, never by connecting. Only clusters the visitor may see are named. *@
             <p class="ms-k-note ms-k-same-servers" role="note">@KafkaStudioText.SameServersLine(sameServers, same.SameServersCanBeLeftOut(State.AvailableClusters))</p>
         }
+
+        @* The one page that names the option behind a capability (#74): every other page leaves a capability that is off out, or says in one neutral
+           sentence that it is not available, because the visitor is not the one who can change it. An operator looks here. *@
+        <h2 class="ms-section-title">Capabilities</h2>
+        @if (Capabilities.ReadOnly)
+        {
+            <p class="ms-muted"><code>@StudioSettings.ReadOnlyOption()</code> is <code>true</code>, which turns every capability off.</p>
+        }
+        <TableScroll Label="Capabilities">
+            <table class="ms-table ms-k-capabilities">
+                <thead>
+                    <tr>
+                        <th>Capability</th>
+                        <th>State</th>
+                        <th>Option</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (KafkaCapability capability in KafkaCapabilityGuard.Offered)
+                    {
+                        <tr class="ms-table-row" @key="capability">
+                            <td class="ms-table-cell">@capability</td>
+                            <td class="ms-table-cell">@(Capabilities.IsEnabled(capability) ? "on" : "off")</td>
+                            <td class="ms-table-cell"><code>@KafkaCapabilityGuard.OptionFor(capability)</code></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </TableScroll>
 
         <h2 class="ms-section-title">Your settings</h2>
         <TableScroll Label="Your settings">

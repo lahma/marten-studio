@@ -408,9 +408,9 @@ public class ValueEvaluationTests
     public void Under_the_envelope_grant_a_value_clause_does_not_compile_and_any_does_not_read_the_value()
     {
         Compile("$.a = 'x'", grant: KafkaReadGrant.Envelope).Errors.Single().Message.Should()
-            .Be("$.a reads the record's value, which needs ReadPayloads (KafkaStudioOptions.Capabilities.ReadPayloads).");
+            .Be("$.a reads the record's value, which is not available here.");
         Compile("value ~ 'x'", grant: KafkaReadGrant.Envelope).Errors.Single().Message.Should()
-            .Be("value reads the record's value, which needs ReadPayloads (KafkaStudioOptions.Capabilities.ReadPayloads).");
+            .Be("value reads the record's value, which is not available here.");
 
         Run("any ~ 'x'", Json("""{"a":"x"}"""), grant: KafkaReadGrant.Envelope).Verdict.Should().Be(TriState.False, "any widens over the value only under the payload grant");
         Outcome envelope = Run("any ~ 'x'", Json("""{"a":"x"}"""), grant: KafkaReadGrant.Envelope);
@@ -421,17 +421,17 @@ public class ValueEvaluationTests
     // ---- compile-time refusals
 
     [Theory]
-    [InlineData("value < 1", "'<' cannot be used on value (position 1): numbers compare only JSON paths.")]
-    [InlineData("value >= 'a'", "'>=' cannot be used on value (position 1): numbers compare only JSON paths.")]
-    [InlineData("value = 5", "Put the value at position 9 in quotes: value compares as text.")]
-    [InlineData("value in ('a', true)", "Put the value at position 16 in quotes: value compares as text.")]
-    [InlineData("$.a is null", "'is null' cannot be used on $.a (position 1): write $.a = null for a JSON null.")]
-    [InlineData("$.a is not null", "'is not null' cannot be used on $.a (position 1): write $.a = null for a JSON null.")]
-    [InlineData("$.a < 'x'", "'<' cannot be used on $.a (position 1): it compares numbers, and the value at position 7 is not one.")]
-    [InlineData("$.a >= true", "'>=' cannot be used on $.a (position 1): it compares numbers, and the value at position 8 is not one.")]
-    [InlineData("$.a ^= 5", "'^=' cannot be used on $.a (position 1): it compares text, and the value at position 8 is not a string.")]
-    [InlineData("$.a ~ null", "'~' cannot be used on $.a (position 1): it compares text, and the value at position 7 is not a string.")]
-    [InlineData("any is null", "'is null' cannot be used on any (position 1): is null applies to key, header.<name>, ce.<attribute> and value.")]
+    [InlineData("value < 1", "'<' cannot be used on value: numbers compare only JSON paths.")]
+    [InlineData("value >= 'a'", "'>=' cannot be used on value: numbers compare only JSON paths.")]
+    [InlineData("value = 5", "put this value in quotes: value compares as text.")]
+    [InlineData("value in ('a', true)", "put this value in quotes: value compares as text.")]
+    [InlineData("$.a is null", "'is null' cannot be used on $.a: write $.a = null for a JSON null.")]
+    [InlineData("$.a is not null", "'is not null' cannot be used on $.a: write $.a = null for a JSON null.")]
+    [InlineData("$.a < 'x'", "'<' cannot be used on $.a: it compares numbers, and a value here is not one.")]
+    [InlineData("$.a >= true", "'>=' cannot be used on $.a: it compares numbers, and a value here is not one.")]
+    [InlineData("$.a ^= 5", "'^=' cannot be used on $.a: it compares text, and a value here is not a string.")]
+    [InlineData("$.a ~ null", "'~' cannot be used on $.a: it compares text, and a value here is not a string.")]
+    [InlineData("any is null", "'is null' cannot be used on any: is null applies to key, header.<name>, ce.<attribute> and value.")]
     public void A_clause_the_value_cannot_answer_is_refused_with_its_reason(string text, string message)
     {
         Compile(text).Errors.Single().Message.Should().Be(message);

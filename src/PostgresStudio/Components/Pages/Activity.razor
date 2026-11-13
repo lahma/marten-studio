@@ -8,6 +8,7 @@
 @inject StudioState State
 @inject StudioAuthorization Authorization
 @inject StudioCapabilityGuard Capabilities
+@inject StudioDescriptor Descriptor
 
 <PageTitle>Activity</PageTitle>
 
@@ -20,7 +21,7 @@
     <p class="ms-muted">
         The most recent @StudioActionLogService.MaxEntries actions taken through @Settings.ProductName in this
         process, newest first. The ring is in memory and goes away with the process - the durable record
-        is in this application's own log, under event ids 9200-9211.
+        is in this application's own log, under event ids 9200-9211@(ModuleEvents()).
     </p>
 
     @if (visible.Count == 0)
@@ -98,6 +99,14 @@
 @code {
     private string filter = string.Empty;
     private List<StudioActionLogEntry> visible = [];
+
+    /// <summary>
+    /// What the footer adds for each composed module that logs events of its own (#77): " and {product}'s under {ids}". The text is the module's, so this
+    /// source names no module's product. A studio with no module renders exactly the footer it always did.
+    /// </summary>
+    private string ModuleEvents() => string.Concat(Descriptor.Modules
+        .Where(static module => !string.IsNullOrWhiteSpace(module.AuditEventIds))
+        .Select(static module => " and " + module.ProductName + "'s under " + module.AuditEventIds));
 
     /// <summary>Failures are recorded too, which is the point - so the outcome is a column, not a filter.</summary>
     private static string Outcome(StudioActionLogEntry entry) => entry.Succeeded ? "succeeded" : "failed";

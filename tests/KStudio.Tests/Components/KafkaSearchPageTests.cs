@@ -135,7 +135,8 @@ public class KafkaSearchPageTests
         page.Find(".ms-k-predicate-marks").GetAttribute("aria-hidden").Should().Be("true");
         page.Find(".ms-k-predicate-marks mark").Should().NotBeNull();
         page.FindAll("table.ms-k-matches").Should().BeEmpty();
-        rig.Ring.Should().ContainSingle().Which.Message.Should().Be(KafkaStudioText.PredicateInvalid);
+        page.Find(".ms-k-predicate-errors").TextContent.Should().MatchRegex(@"^Position \d+: ").And.NotMatchRegex("(?i)position.*position");
+        rig.Ring.Should().ContainSingle().Which.Message.Should().Be("position 1, redacted field operator", "the page says 'see above'; the audit says the cause");
     }
 
     [Fact]
@@ -360,15 +361,20 @@ public class KafkaSearchPageTests
         IRenderedComponent<KafkaSearchPage> page = await OpenAsync(rig, Window);
 
         await SearchAsync(page);
-        page.WaitForAssertion(() => page.Find(".ms-k-result-banner").TextContent.Should().Contain("Stopped at 2 matches, the most a search keeps (KafkaStudioOptions.Limits.MaxMatches). Continue reads on from where it stopped."));
+        page.WaitForAssertion(() => page.Find(".ms-k-result-banner").TextContent.Should().Contain("Stopped at 2 matches, the most a search keeps here. Continue reads on from where it stopped."));
         Rows(page).Should().Equal("0 / 0", "0 / 1");
+        page.FindAll(".ms-k-continued-showing").Should().BeEmpty("a first run has nothing earlier to say");
 
         await page.Find(".ms-k-result-banner button").ClickAsync(new MouseEventArgs());
         page.WaitForAssertion(() => Rows(page).Should().Equal("0 / 2", "0 / 3"));
         page.Markup.Should().Contain("Continued after offsets read by the previous search (");
 
+        // #76: the table is per run and says so, instead of looking like data loss.
+        page.Find(".ms-k-continued-showing").TextContent.Should().Be("Showing matches 3-4 of this search; the earlier 2 were cleared from the page. Export before Continue to keep them.");
+
         await page.Find(".ms-k-result-banner button").ClickAsync(new MouseEventArgs());
         page.WaitForAssertion(() => Rows(page).Should().Equal("0 / 4"));
+        page.Find(".ms-k-continued-showing").TextContent.Should().Be("Showing match 5 of this search; the earlier 4 were cleared from the page. Export before Continue to keep them.", "the earlier runs add up");
         page.FindAll(".ms-k-result-banner button").Should().BeEmpty("a completed search has no cursor to continue from");
         rig.Ring.Count(static x => x.Action == "SearchRecords" && x.Succeeded).Should().Be(3, "each scan is a new audit entry");
     }
@@ -554,7 +560,7 @@ public class KafkaSearchPageTests
     }
 
     [Fact]
-    public async Task Capability_off_shows_the_disabled_notice_naming_the_option()
+    public async Task Capability_off_shows_one_neutral_sentence_and_no_option_name()
     {
         await using KafkaSearchRig rig = new(searchOn: false);
         Seed(rig);
@@ -563,12 +569,12 @@ public class KafkaSearchPageTests
 
         IRenderedComponent<KafkaSearchPage> page = rig.Studio.Context.Render<KafkaSearchPage>();
 
-        page.WaitForAssertion(() => page.Markup.Should().Contain("KafkaStudioOptions.Capabilities.SearchRecords"));
+        page.WaitForAssertion(() => page.Markup.Should().Contain("Searching records is not available here.").And.NotContain("KafkaStudioOptions"));
         page.FindAll("textarea").Should().BeEmpty();
     }
 
     [Fact]
-    public async Task ReadOnly_shows_the_hosts_option()
+    public async Task ReadOnly_shows_the_same_neutral_sentence()
     {
         await using KafkaSearchRig rig = new();
         rig.Studio.Context.Options.ReadOnly = true;
@@ -577,7 +583,7 @@ public class KafkaSearchPageTests
 
         IRenderedComponent<KafkaSearchPage> page = rig.Studio.Context.Render<KafkaSearchPage>();
 
-        page.WaitForAssertion(() => page.Find(".ms-capability-disabled").TextContent.Should().Contain("ReadOnly").And.Contain("turns every capability off"));
+        page.WaitForAssertion(() => page.Find(".ms-capability-disabled").TextContent.Should().Contain("Searching records is not available here.").And.NotContain("ReadOnly"));
     }
 
     [Fact]
@@ -597,8 +603,28 @@ public class KafkaSearchPageTests
             await page.FindAll("label.ms-k-topic-option input")[i].ChangeAsync(new ChangeEventArgs { Value = true });
         }
 
-        page.Find(".ms-k-topic-count").TextContent.Should().Contain("20 of 20");
+        page.Find(".ms-k-topic-count").TextContent.Should().Be("20 of 20 topics selected (the most one search reads)", "#77: not a bare '1 of 20'");
         page.FindAll("label.ms-k-topic-option input[disabled]").Should().HaveCount(2);
+    }
+
+    [Fact]
+    public async Task The_predicate_box_takes_the_focus_once_when_the_form_is_first_drawn_and_never_again()
+    {
+        await using KafkaSearchRig rig = new(engine: o => o.Limits.MaxMatches = 2);
+        Seed(rig, "orders", 5);
+
+        IRenderedComponent<KafkaSearchPage> page = await OpenAsync(rig, Window);
+
+        static bool Focus(Bunit.JSRuntimeInvocation x) => x.Identifier == "Blazor._internal.domWrapper.focus";
+        page.WaitForAssertion(() => rig.Studio.Context.JSInterop.Invocations.Count(Focus).Should().Be(1, "the box is focused on the first render of the form"));
+
+        await TypeAsync(page, "key ^= 'k'");
+        await SearchAsync(page);
+        page.WaitForAssertion(() => page.Find(".ms-k-result-banner").TextContent.Should().Contain("Stopped at 2 matches"));
+        await page.Find(".ms-k-result-banner button").ClickAsync(new MouseEventArgs());
+        page.WaitForAssertion(() => Rows(page).Should().Equal("0 / 2", "0 / 3"));
+
+        rig.Studio.Context.JSInterop.Invocations.Count(Focus).Should().Be(1, "later renders, a search and a Continue leave the focus where the visitor put it");
     }
 
     [Fact]
@@ -607,11 +633,11 @@ public class KafkaSearchPageTests
         Func<KafkaScanStopReason, string> expected = static reason => reason switch
         {
             KafkaScanStopReason.Completed => "Read every offset in the window: 1,200 records, 2 KiB, 3 matches.",
-            KafkaScanStopReason.MatchLimit => "Stopped at 500 matches, the most a search keeps (KafkaStudioOptions.Limits.MaxMatches). Continue reads on from where it stopped.",
-            KafkaScanStopReason.ByteBudget => "Stopped after reading 2 KiB, this search's budget (KafkaStudioOptions.Limits.MaxBytesPerScan). Continue reads on from where it stopped.",
-            KafkaScanStopReason.RecordBudget => "Stopped after 1,200 records, this search's budget (KafkaStudioOptions.Limits.MaxRecordsPerScan). Continue reads on from where it stopped.",
+            KafkaScanStopReason.MatchLimit => "Stopped at 500 matches, the most a search keeps here. Continue reads on from where it stopped.",
+            KafkaScanStopReason.ByteBudget => "Stopped after reading 2 KiB, this search's budget. Continue reads on from where it stopped.",
+            KafkaScanStopReason.RecordBudget => "Stopped after 1,200 records, this search's budget. Continue reads on from where it stopped.",
             KafkaScanStopReason.OwnerBudget => "Stopped: you have read your hourly allowance. Continue reads on from where it stopped, once the allowance frees up.",
-            KafkaScanStopReason.Deadline => "Stopped after 2 min, the longest a search runs (KafkaStudioOptions.Limits.MaxScanDuration). Continue reads on from where it stopped.",
+            KafkaScanStopReason.Deadline => "Stopped after 2 min, the longest a search runs. Continue reads on from where it stopped.",
             KafkaScanStopReason.Cancelled => "Stopped by you. Continue reads on from where it stopped.",
             KafkaScanStopReason.Shutdown => "Stopped: the application is shutting down.",
             KafkaScanStopReason.NotAuthorized => "Nothing was read: every partition refused READ.",

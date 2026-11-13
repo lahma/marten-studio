@@ -49,6 +49,10 @@ Reading records does:
 | `ExportRecords` | `false` | Saving the records a search or a live tail holds, or one record or its value from the record page, as JSON Lines, CSV or the value alone, masked as the page shows them. Values only where `ReadPayloads` allows. Needs `SearchRecords`. Never on a `Production` cluster. |
 | `LiveTail` | `false` | Following topics as records arrive, from the end of each partition. Needs `SearchRecords`. Never on a `Production` cluster. |
 
+A page leaves out the controls of a capability that is off, or that the cluster's profile forbids (no Export, no Live tail entry
+or link), and a page reached by its address says in one sentence that the feature is not available here; **Cluster settings**
+lists each capability with the option that turns it on, which is the only page that names an option.
+
 `KafkaStudioOptions.ClusterAuthorizationPolicy` is asked about every cluster and every topic a page or a search touches,
 on a `KafkaTopicResource(Cluster, TenantId, Topic, Capability)`; a topic it refuses is absent from every list, and a
 search naming one is refused whole. `CapabilityAuthorizationPolicy` is asked for each use of a capability, per topic,
@@ -90,8 +94,11 @@ topic, and the page says which. A pruned "no match" offers a search of every par
 Before reading, the page shows how each clause runs on each topic, what the window cannot cover (retention, open
 transactions, compaction, the margin a `CreateTime` topic needs), and an estimate; above your threshold it asks you to
 confirm. Results stream in as they are found. A search stops for exactly one reason, which it names, and **Continue**
-reads on from exactly where it stopped. "No match" is always said with the number of records read and everything that
-could make it untrue.
+reads on from exactly where it stopped. The results are per run: **Continue** replaces the table with the next run's
+matches, and the page says so ("Showing matches 501-1,000 of this search; the earlier 500 were cleared from the page. Export
+before Continue to keep them."), because a scan keeps at most `Limits.MaxMatches` matches and an export holds what is on the
+page. Possible duplicates and related records compare the matches on the page. "No match" is always said with the number of
+records read and everything that could make it untrue.
 
 A search link keeps the cluster, topics and window in the address and the predicate after `#`, which browsers never send
 to a server. A record link (`kafka/record?cluster=…&topic=…&partition=…&offset=…`) carries no record data.
@@ -157,7 +164,8 @@ The index is created once and shared: take singletons such as `IDocumentStore`, 
 
 Under search results and related records, **Possible duplicates** groups the records found on one topic that carry the
 same identity: the same `id` header, the same CloudEvents source and id, or, when you may read values, the same key and
-value as shown. Only the records found are compared, and nothing more is read.
+value as shown. Only the matches on the page are compared (after **Continue**, those of the latest run), and nothing more is
+read.
 
 ## Export
 
@@ -179,7 +187,7 @@ A record that carries no timestamp has none in the file: `timestamp` is `null` i
 `timestampType` `NotAvailable` in both (never 1970).
 
 Export asks everything again when you click it: the capability, the cluster's profile (a `Production` cluster never exports,
-and its Export button says so), your cluster and capability policies for every topic of the records, and, for records read
+and has no Export control), your cluster and capability policies for every topic of the records, and, for records read
 with values, your right to read them now. A refusal refuses the whole file, never a part of it, and is recorded. At most two
 exports are written at a time in the application; a third is refused, not queued.
 

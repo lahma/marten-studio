@@ -544,7 +544,7 @@ public class ScanEngineTests
         KafkaScanPlan plan = await fixture.PlanAsync(ScanFixture.Request([topic], "key ="));
 
         plan.IsValid.Should().BeFalse();
-        plan.Errors.Single().Message.Should().Be("Unexpected the end at position 6: expected a value.");
+        plan.Errors.Single().Shown.Should().Be("Position 6: expected a value after '=', found the end.");
         plan.Window.Should().BeNull("nothing was resolved for a text that does not parse");
         fixture.Start(plan, confirmed: true).Refusal.Should().Be(KafkaScanRefusal.PredicateInvalid);
         fixture.Cluster.Calls.Should().BeEmpty("a text with errors reads nothing, not even offsets");

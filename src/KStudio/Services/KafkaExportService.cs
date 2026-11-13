@@ -199,7 +199,7 @@ internal sealed class KafkaExportService(
         {
             actionLog.RecordCapabilityDenied(cluster, topics, denial, KafkaStudioText.ExportAction, target);
             audited.Mark();
-            return new KafkaExportOutcome(false, denial.Message);
+            return new KafkaExportOutcome(false, denial.VisitorText);
         }
 
         // 2. The cluster's profile: Production never exports, even when the capability is granted.

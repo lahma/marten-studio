@@ -91,7 +91,7 @@ public abstract class PerTopicScanLiveTests(KafkaFixture fixture)
         KafkaScanPlan plan = await engine.PlanAsync(request, Token);
 
         plan.IsValid.Should().BeFalse();
-        plan.Errors.Should().ContainSingle().Which.Message.Should().StartWith($"On {envelope}: ");
+        plan.Errors.Should().ContainSingle().Which.Message.Should().StartWith($"on {envelope}: ");
     }
 
     private string[] TopicNames()

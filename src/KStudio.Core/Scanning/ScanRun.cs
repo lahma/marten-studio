@@ -883,7 +883,7 @@ internal sealed class ScanRun : IDisposable
 
             List<KafkaTopicRefusal> refusals =
             [
-                .. (plan.Window?.Topics ?? []).Where(static x => x.Refusal is not null).Select(static x => new KafkaTopicRefusal(x.Topic, KafkaAccessText.Describe(x.Refusal!))),
+                .. (plan.Window?.Topics ?? []).Where(static x => x.Refusal is not null).Select(static x => new KafkaTopicRefusal(x.Topic, KafkaAccessText.Describe(x.Refusal!), x.Refusal is WireError.NotFound)),
             ];
 
             result = new KafkaScanResult(

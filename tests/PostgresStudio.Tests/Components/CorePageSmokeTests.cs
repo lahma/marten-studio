@@ -238,6 +238,19 @@ public class CorePageSmokeTests
     }
 
     [Fact]
+    public async Task The_activity_footer_of_a_studio_with_no_module_is_exactly_the_old_one()
+    {
+        await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
+
+        var page = context.Render<Activity>();
+
+        page.WaitForAssertion(() => page.Find(".ms-page-title").TextContent.Should().Be("Activity"));
+        string footer = string.Join(' ', page.Find("p.ms-muted").TextContent.Split((char[]?) null, StringSplitOptions.RemoveEmptyEntries));
+        footer.Should().EndWith("is in this application's own log, under event ids 9200-9211.");
+        footer.Should().NotContain("'s under");
+    }
+
+    [Fact]
     public async Task The_sidebar_is_PostgresStudios_and_names_no_Marten_screen()
     {
         await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();

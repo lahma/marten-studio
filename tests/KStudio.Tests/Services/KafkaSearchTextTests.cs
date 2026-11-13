@@ -121,6 +121,37 @@ public class KafkaSearchTextTests
     }
 
     [Fact]
+    public void A_zone_is_an_IANA_id_or_a_UTC_offset_and_never_a_Windows_id()
+    {
+        DateTimeOffset at = new(2026, 11, 12, 8, 0, 0, TimeSpan.Zero);
+        TimeZoneInfo windowsStyle = TimeZoneInfo.CreateCustomTimeZone("FLE Standard Time", TimeSpan.FromHours(2), "(UTC+02:00) Helsinki", "FLE Standard Time");
+        TimeZoneInfo negative = TimeZoneInfo.CreateCustomTimeZone("Pacific Standard Time", TimeSpan.FromHours(-8), "Pacific", "Pacific Standard Time");
+        TimeZoneInfo half = TimeZoneInfo.CreateCustomTimeZone("India Standard Time", new TimeSpan(5, 30, 0), "India", "India Standard Time");
+
+        KafkaSearchText.ZoneLabel(TimeZoneInfo.FindSystemTimeZoneById("Europe/Helsinki"), at).Should().Be("Europe/Helsinki");
+        KafkaSearchText.ZoneLabel(windowsStyle, at).Should().Be("UTC+02:00");
+        KafkaSearchText.ZoneLabel(negative, at).Should().Be("UTC-08:00");
+        KafkaSearchText.ZoneLabel(half, at).Should().Be("UTC+05:30");
+        KafkaSearchText.ZoneLabel(TimeZoneInfo.Utc, at).Should().Be("UTC");
+
+        KafkaSearchText.WindowLine(at, at.AddHours(1), windowsStyle).Should().Be("10:00–11:00 UTC+02:00 · 08:00Z–09:00Z");
+    }
+
+    [Fact]
+    public void The_topic_count_says_what_it_counts()
+    {
+        KafkaStudioText.TopicsSelected(1).Should().Be("1 of 20 topics selected (the most one search reads)");
+    }
+
+    [Fact]
+    public void Continued_says_which_matches_the_page_shows_and_that_the_earlier_ones_were_cleared()
+    {
+        KafkaStudioText.ContinuedShowing(500, 500).Should().Be("Showing matches 501-1,000 of this search; the earlier 500 were cleared from the page. Export before Continue to keep them.");
+        KafkaStudioText.ContinuedShowing(4, 1).Should().Be("Showing match 5 of this search; the earlier 4 were cleared from the page. Export before Continue to keep them.");
+        KafkaStudioText.ContinuedShowing(500, 0).Should().Be("No new matches in this run; the earlier 500 were cleared from the page. Export before Continue to keep them.");
+    }
+
+    [Fact]
     public void A_window_of_a_day_or_more_shows_the_dates()
     {
         TimeZoneInfo helsinki = TimeZoneInfo.FindSystemTimeZoneById("Europe/Helsinki");

@@ -31,6 +31,8 @@ public class MartenModuleCompositionTests
         public IReadOnlyList<StudioModuleCapability> Capabilities => [];
 
         public IReadOnlyList<StudioShortcutGroup> Shortcuts => [];
+
+        public string AuditEventIds => string.Empty;
     }
 
     private static readonly StudioDescriptor Host = MartenStudio.Services.MartenStudioDescriptor.Instance;
@@ -91,5 +93,7 @@ public class MartenModuleCompositionTests
         public IReadOnlyList<StudioModuleCapability> Capabilities => inner.Capabilities;
 
         public IReadOnlyList<StudioShortcutGroup> Shortcuts => inner.Shortcuts;
+
+        public string AuditEventIds => inner.AuditEventIds;
     }
 }

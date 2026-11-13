@@ -87,7 +87,7 @@ public class KafkaReadGrantsTests
     }
 
     [Fact]
-    public async Task ReadOnly_refuses_a_value_search_naming_the_hosts_option()
+    public async Task ReadOnly_refuses_a_value_search_in_one_neutral_sentence_and_the_refusal_names_the_hosts_option()
     {
         await using KafkaSearchRig rig = new(payloads: true);
         Seed(rig, "orders");
@@ -96,7 +96,8 @@ public class KafkaReadGrantsTests
         KafkaGrantDecision decision = await Grants(rig).ForSearchAsync(rig.Entry, Names("orders"), readsValues: true, Ct);
 
         decision.Denied.Should().NotBeNull();
-        decision.Refusal.Should().Contain("ReadPayloads").And.Contain("PostgresStudioOptions.ReadOnly");
+        decision.Refusal.Should().Be("Reading values is not available here.");
+        decision.Denied!.Message.Should().Contain("ReadPayloads").And.Contain("PostgresStudioOptions.ReadOnly", "the audit and the log still name the option");
         decision.Grant.Should().Be(KafkaReadGrant.Envelope);
 
         KafkaGrantDecision quiet = await Grants(rig).ForSearchAsync(rig.Entry, Names("orders"), readsValues: false, Ct);

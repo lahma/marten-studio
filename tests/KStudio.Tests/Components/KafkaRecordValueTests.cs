@@ -135,7 +135,7 @@ public class KafkaRecordValueTests
 
         inDetail.Find(".ms-k-value-cut").TextContent.Should().StartWith("Shown ").And.Contain(" of 5.9 KiB.").And.Contain("Open the record page to read it whole.");
         inDetail.Find(".ms-k-value-cut a").GetAttribute("href").Should().Contain("kafka/record");
-        onPage.Find(".ms-k-value-cut").TextContent.Should().Contain("Values above KafkaStudioOptions.Limits.MaxDecodeBytes are not shown whole.");
+        onPage.Find(".ms-k-value-cut").TextContent.Should().Contain("Values above the size limit for reading a value are not shown whole.");
         onPage.FindAll(".ms-k-value-cut a").Should().BeEmpty();
     }
 
@@ -156,7 +156,7 @@ public class KafkaRecordValueTests
     }
 
     [Theory]
-    [InlineData("CapabilityOff", "Reading values is not enabled")]
+    [InlineData("CapabilityOff", "Reading values is not available here")]
     [InlineData("PolicyRefused", "The value of this record is not available to you.")]
     [InlineData("SearchWithoutValues", "This search could not read values on every topic it named. Open the record page to read this record's value.")]
     public async Task A_visitor_without_the_value_reads_why_and_the_value_is_not_in_the_markup(string accessName, string sentence)

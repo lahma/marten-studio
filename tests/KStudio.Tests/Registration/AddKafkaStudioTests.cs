@@ -158,7 +158,8 @@ public class AddKafkaStudioTests
             new StudioModuleCapability("ExportRecords", "KafkaStudioOptions.Capabilities.ExportRecords", Configured: false),
             new StudioModuleCapability("LiveTail", "KafkaStudioOptions.Capabilities.LiveTail", Configured: false));
         module.Navigation.Should().ContainSingle().Which.Items.Select(static x => x.Label).Should().Equal("Topics", "Search", "Live tail", "Cluster settings");
-        module.Navigation.Single().Items.Single(static x => x.Label == "Live tail").IsShown.Should().BeNull("the entry is drawn whatever the capability: its page says which option turns it on");
+        module.Navigation.Single().Items.Single(static x => x.Label == "Live tail").IsShown.Should().NotBeNull("the entry is drawn only while the capability is on (#74), like Search");
+        module.AuditEventIds.Should().Be("9600-9609");
     }
 
     [Fact]

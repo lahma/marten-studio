@@ -105,7 +105,6 @@ internal static class PredicateCompiler
     private static CompiledNode? BuildClause(ClauseNode clause, PredicateCompileContext context, List<PredicateError> errors, List<ClauseVerdict> verdicts)
     {
         string field = PredicateFormatter.Field(clause.Field);
-        int position = clause.Field.Start + 1;
         bool payload = context.Grant.HasFlag(KafkaReadGrant.Payload);
         bool isNull = clause.Operator is PredicateOperator.IsNull or PredicateOperator.IsNotNull;
 
@@ -123,20 +122,21 @@ internal static class PredicateCompiler
             errors.Add(new PredicateError(
                 clause.Field.Start,
                 clause.Field.Length,
-                $"{field} reads the record's value, which needs ReadPayloads (KafkaStudioOptions.Capabilities.ReadPayloads)."));
+                $"{field} reads the record's value, which is not available here.",
+                PredicateErrorKind.ValuesNotAvailable));
             return null;
         }
 
         if (clause.Operator is PredicateOperator.Less or PredicateOperator.LessOrEqual or PredicateOperator.Greater or PredicateOperator.GreaterOrEqual
             && clause.Field is not JsonPathField)
         {
-            errors.Add(Refuse(clause, field, position, "numbers compare only JSON paths"));
+            errors.Add(Refuse(clause, field, "numbers compare only JSON paths"));
             return null;
         }
 
         if (clause.Field is AnyField && isNull)
         {
-            errors.Add(Refuse(clause, field, position, "is null applies to key, header.<name>, ce.<attribute> and value"));
+            errors.Add(Refuse(clause, field, "is null applies to key, header.<name>, ce.<attribute> and value"));
             return null;
         }
 
@@ -153,15 +153,16 @@ internal static class PredicateCompiler
                     clause.Field.Start,
                     clause.Field.Length,
                     rule.Searchable
-                        ? string.Create(CultureInfo.InvariantCulture, $"{field} is redacted by {rule.Name} (position {position}): only = and in can search it.")
-                        : string.Create(CultureInfo.InvariantCulture, $"{field} is redacted by {rule.Name} (position {position}) and cannot be searched.")));
+                        ? $"{field} is redacted by {rule.Name}: only = and in can search it."
+                        : $"{field} is redacted by {rule.Name} and cannot be searched.",
+                    PredicateErrorKind.RedactedFieldOperator));
                 return null;
             }
         }
 
         if (clause.Field is JsonPathField path)
         {
-            return BuildPath(clause, path, field, position, rule is not null, context, errors, verdicts);
+            return BuildPath(clause, path, field, rule is not null, context, errors, verdicts);
         }
 
         if (isNull)
@@ -184,7 +185,8 @@ internal static class PredicateCompiler
                 errors.Add(new PredicateError(
                     literal.Start,
                     literal.Length,
-                    string.Create(CultureInfo.InvariantCulture, $"Put the value at position {literal.Start + 1} in quotes: {field} compares as text.")));
+                    $"put this value in quotes: {field} compares as text.",
+                    PredicateErrorKind.LiteralType));
                 return null;
             }
         }
@@ -193,7 +195,7 @@ internal static class PredicateCompiler
 
         CompiledNode? built = clause.Field switch
         {
-            KeyField => BuildKey(clause, field, position, texts, context, errors),
+            KeyField => BuildKey(clause, field, texts, context, errors),
             HeaderField header => new CompiledHeaderClause(
                 header.Name,
                 clause.Operator,
@@ -217,7 +219,6 @@ internal static class PredicateCompiler
         ClauseNode clause,
         JsonPathField path,
         string field,
-        int position,
         bool leafRule,
         PredicateCompileContext context,
         List<PredicateError> errors,
@@ -225,7 +226,7 @@ internal static class PredicateCompiler
     {
         if (clause.Operator is PredicateOperator.IsNull or PredicateOperator.IsNotNull)
         {
-            errors.Add(Refuse(clause, field, position, string.Create(CultureInfo.InvariantCulture, $"write {field} = null for a JSON null")));
+            errors.Add(Refuse(clause, field, string.Create(CultureInfo.InvariantCulture, $"write {field} = null for a JSON null")));
             return null;
         }
 
@@ -239,8 +240,7 @@ internal static class PredicateCompiler
                 errors.Add(Refuse(
                     clause,
                     field,
-                    position,
-                    string.Create(CultureInfo.InvariantCulture, $"it compares numbers, and the value at position {literal.Start + 1} is not one")));
+                    "it compares numbers, and a value here is not one"));
                 return null;
             }
 
@@ -249,8 +249,7 @@ internal static class PredicateCompiler
                 errors.Add(Refuse(
                     clause,
                     field,
-                    position,
-                    string.Create(CultureInfo.InvariantCulture, $"it compares text, and the value at position {literal.Start + 1} is not a string")));
+                    "it compares text, and a value here is not a string"));
                 return null;
             }
         }
@@ -259,7 +258,7 @@ internal static class PredicateCompiler
         return new CompiledJsonPathClause(path.Path, clause.Operator, clause.Literals, leafRule, context.Redactor);
     }
 
-    private static CompiledKeyClause? BuildKey(ClauseNode clause, string field, int position, string[] texts, PredicateCompileContext context, List<PredicateError> errors)
+    private static CompiledKeyClause? BuildKey(ClauseNode clause, string field, string[] texts, PredicateCompileContext context, List<PredicateError> errors)
     {
         KafkaKeyFormat format = context.KeyFormat;
 
@@ -274,7 +273,7 @@ internal static class PredicateCompiler
         {
             // The format words its own reason.
             _ = format.TryEncodePrefix(texts[0], out _, out string? reason);
-            errors.Add(Refuse(clause, field, position, reason ?? "a prefix needs a text key format"));
+            errors.Add(Refuse(clause, field, reason ?? "a prefix needs a text key format"));
             return null;
         }
 
@@ -291,7 +290,8 @@ internal static class PredicateCompiler
                 errors.Add(new PredicateError(
                     literal.Start,
                     literal.Length,
-                    string.Create(CultureInfo.InvariantCulture, $"The value at position {literal.Start + 1} is not a valid {format.Name} key: {problem}.")));
+                    string.Create(CultureInfo.InvariantCulture, $"this value is not a valid {format.Name} key: {problem}."),
+                    PredicateErrorKind.KeyNotValid));
                 return null;
             }
 
@@ -301,13 +301,14 @@ internal static class PredicateCompiler
         return new CompiledKeyClause(clause.Operator, [.. forms], texts, ReferenceEquals(format, KafkaKeyFormat.JsonString));
     }
 
-    private static PredicateError Refuse(ClauseNode clause, string field, int position, string reason) =>
+    private static PredicateError Refuse(ClauseNode clause, string field, string reason) =>
         new(
             clause.Start,
             clause.Length,
             string.Create(
                 CultureInfo.InvariantCulture,
-                $"'{PredicateFormatter.OperatorText(clause.Operator)}' cannot be used on {field} (position {position}): {reason}."));
+                $"'{PredicateFormatter.OperatorText(clause.Operator)}' cannot be used on {field}: {reason}."),
+            PredicateErrorKind.OperatorNotAllowed);
 
     private static void AddVerdict(List<ClauseVerdict> verdicts, PredicateCompileContext context, ClauseNode clause, string field, bool leafRule = false)
     {

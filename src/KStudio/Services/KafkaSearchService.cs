@@ -165,7 +165,7 @@ internal sealed class KafkaSearchService(
 
             if (!plan.IsValid)
             {
-                await NotRunAsync(input, KafkaStudioText.PredicateInvalid, KafkaStudioText.PredicateDidNotParse(input.PredicateText?.Length ?? 0)).ConfigureAwait(false);
+                await NotRunAsync(input, KafkaStudioText.PredicateDidNotRun(plan.Errors), KafkaStudioText.PredicateDidNotParse(input.PredicateText?.Length ?? 0)).ConfigureAwait(false);
             }
 
             return new KafkaSearchPlanResult.Planned(new KafkaSearchPlanned(input, plan, grant));
@@ -208,7 +208,7 @@ internal sealed class KafkaSearchService(
 
         if (!plan.IsValid)
         {
-            await NotRunAsync(input, KafkaStudioText.PredicateInvalid, KafkaStudioText.PredicateDidNotParse(input.PredicateText?.Length ?? 0)).ConfigureAwait(false);
+            await NotRunAsync(input, KafkaStudioText.PredicateDidNotRun(plan.Errors), KafkaStudioText.PredicateDidNotParse(input.PredicateText?.Length ?? 0)).ConfigureAwait(false);
             return new KafkaSearchStartResult.Refused(KafkaStudioText.PredicateInvalid);
         }
 
@@ -259,7 +259,7 @@ internal sealed class KafkaSearchService(
         catch (KafkaCapabilityDeniedException denial)
         {
             actionLog.RecordCapabilityDenied(cluster, topics, denial, Action, target);
-            return (denial.Message, [], KafkaGrantDecision.EnvelopeOnly);
+            return (denial.VisitorText, [], KafkaGrantDecision.EnvelopeOnly);
         }
 
         // 2. The input's own bounds.
@@ -294,7 +294,7 @@ internal sealed class KafkaSearchService(
         if (grant.Denied is { } denied)
         {
             actionLog.RecordCapabilityDenied(cluster, topics, denied, Action, target);
-            return (denied.Message, [], grant);
+            return (denied.VisitorText, [], grant);
         }
 
         if (grant.Refusal is not null)

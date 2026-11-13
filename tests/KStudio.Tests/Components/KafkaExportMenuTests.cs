@@ -106,7 +106,7 @@ public class KafkaExportMenuTests
     }
 
     [Fact]
-    public async Task With_the_capability_off_the_menu_is_a_notice_naming_the_option()
+    public async Task With_the_capability_off_the_export_control_is_left_out_and_no_option_name_is_drawn()
     {
         await using KafkaSearchRig rig = Rig(exportOn: false);
         Seed(rig);
@@ -114,26 +114,20 @@ public class KafkaExportMenuTests
         IRenderedComponent<KafkaSearchPage> page = await SearchedAsync(rig);
 
         page.FindAll(".ms-k-export-menu").Should().BeEmpty();
-        page.Find(".ms-k-export-off").TextContent.Should().Contain("KafkaStudioOptions.Capabilities.ExportRecords").And.Contain("Exporting records is not enabled");
-        page.FindAll(".ms-k-export-off .ms-alert").Should().BeEmpty("one line, not the alert block of the other disabled controls");
-        page.FindAll("[role=status] .ms-k-export-off").Should().BeEmpty("outside the banner's status region, so it is not announced again with every result");
+        page.FindAll(".ms-k-export, .ms-k-export-off").Should().BeEmpty("a capability that is off leaves its controls out (#74), as the SQL studio's Query does while RunSql is off");
+        page.Markup.Should().NotContain("KafkaStudioOptions").And.NotContain("Exporting records");
     }
 
     [Fact]
-    public async Task On_a_production_cluster_the_button_is_off_and_says_why_in_words_that_name_the_setting()
+    public async Task On_a_production_cluster_the_export_control_is_left_out()
     {
         await using KafkaSearchRig rig = Rig(profile: KafkaProfile.Production);
         Seed(rig);
 
         IRenderedComponent<KafkaSearchPage> page = await SearchedAsync(rig);
 
-        string expected = KafkaStudioText.ProfileForbids(KafkaStudioText.ExportingRecords, rig.Entry);
-        IElement button = page.Find(".ms-k-export-forbidden button");
-        button.HasAttribute("disabled").Should().BeTrue();
-        button.GetAttribute("title").Should().Be(expected);
-        page.Find(".ms-k-export-forbidden").TextContent.Should().Contain(expected);
-        expected.Should().Contain("KafkaClusterBuilder.Profile").And.Contain("Production").And.Contain("even when they are granted");
-        page.FindAll(".ms-k-export-popover").Should().BeEmpty();
+        page.FindAll(".ms-k-export, .ms-k-export-forbidden, .ms-k-export-popover").Should().BeEmpty("a profile that forbids export leaves the control out (#74)");
+        page.Markup.Should().NotContain("KafkaClusterBuilder").And.NotContain("KafkaStudioOptions");
         rig.Studio.Context.JSInterop.Invocations.Should().NotContain(static x => x.Identifier == "martenStudio.download.stream");
     }
 

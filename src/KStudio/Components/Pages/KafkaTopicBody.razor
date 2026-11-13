@@ -10,6 +10,7 @@
 @inject KafkaState State
 @inject KafkaCatalogService Catalog
 @inject KafkaCapabilityGuard Capabilities
+@inject KafkaTailService Tail
 @inject NavigationManager Navigation
 @inject StudioLiveUpdatesFactory LiveFactory
 @inject IStudioSettings Settings
@@ -270,12 +271,15 @@
         {
             <p>
                 <a class="ms-button" href="@SearchHref(overview.Name)">Search this topic</a>
-                <a class="ms-button" href="@TailHref(overview.Name)">Live tail</a>
+                @if (TailOffered)
+                {
+                    <a class="ms-button" href="@TailHref(overview.Name)">Live tail</a>
+                }
             </p>
         }
         else
         {
-            <KafkaCapabilityDisabled Capability="@nameof(KafkaStudioCapabilities.SearchRecords)" Action="search this topic" />
+            <KafkaCapabilityDisabled Capability="@nameof(KafkaStudioCapabilities.SearchRecords)" Action="Searching this topic" />
         }
     }
     else if (result is KafkaTopicPageResult.Withheld withheld)
@@ -313,6 +317,10 @@
     public Task? Ready { get; set; }
 
     private string TopicsHref => KafkaAddress.Href(Settings, KafkaAddress.TopicsRoute, State.ActiveCluster?.Key);
+
+    /// <summary>Whether the page links to the live tail: the capability is on and the cluster's profile does not forbid it. Otherwise the link is left out (#74).</summary>
+    private bool TailOffered =>
+        Capabilities.IsEnabled(KafkaCapability.LiveTail) && !(State.ActiveCluster is { } active && Tail.ForbiddenByProfile(active));
 
     private string TailHref(string topic) =>
         KafkaAddress.Href(Settings, KafkaAddress.TailRoute, State.ActiveCluster?.Key, (KafkaAddress.TopicsParameter, topic));

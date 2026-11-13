@@ -119,7 +119,8 @@ internal static class KafkaRelatedView
             string topic = lane.Topic.Value;
             KafkaMatch[] found = [.. byTopic[topic]];
             DateTimeOffset? first = found.Length == 0 ? null : found.Min(static x => x.Timestamp);
-            string? refusal = result?.TopicRefusals.FirstOrDefault(x => string.Equals(x.Topic, topic, StringComparison.Ordinal))?.Text;
+            KafkaTopicRefusal? topicRefusal = result?.TopicRefusals.FirstOrDefault(x => string.Equals(x.Topic, topic, StringComparison.Ordinal));
+            string? refusal = topicRefusal?.Text;
 
             string state;
             int rank;
@@ -131,7 +132,8 @@ internal static class KafkaRelatedView
             }
             else if (refusal is not null)
             {
-                state = KafkaStudioText.RelatedNotReadable(refusal);
+                // A topic that does not exist says so once, on the page's own "Not found" line; the lane only says "not found" (#77).
+                state = KafkaStudioText.RelatedNotReadable(topicRefusal is { Missing: true } ? "not found" : refusal);
                 rank = 3;
             }
             else

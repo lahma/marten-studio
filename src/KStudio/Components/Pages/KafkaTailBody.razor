@@ -51,7 +51,7 @@
     }
     else if (!Capabilities.IsEnabled(KafkaCapability.SearchRecords))
     {
-        <KafkaCapabilityDisabled Capability="@nameof(KafkaStudioCapabilities.SearchRecords)" Action="search records" />
+        <KafkaCapabilityDisabled Capability="@nameof(KafkaStudioCapabilities.SearchRecords)" Action="Searching records" />
     }
     else if (error is not null)
     {
@@ -78,7 +78,7 @@
                 <legend>Topics</legend>
                 <div class="ms-k-topics-header">
                     <KafkaFilterBox Placeholder="Filter topics" Value="@topicFilter" OnFilterChanged="OnTopicFilterAsync" />
-                    <span class="ms-muted ms-k-topic-count" aria-live="polite">@selected.Count of @KafkaStudioText.MaxSearchTopics</span>
+                    <span class="ms-muted ms-k-topic-count" aria-live="polite">@KafkaStudioText.TopicsSelected(selected.Count)</span>
                 </div>
                 @if (VisibleTopics().ToList() is { Count: > 0 } shownTopics)
                 {
@@ -132,7 +132,7 @@
                 <ul class="ms-k-predicate-errors" aria-live="polite">
                     @foreach (PredicateError problem in errors)
                     {
-                        <li>Position @(problem.Start + 1): @problem.Message</li>
+                        <li>@problem.Shown</li>
                     }
                 </ul>
                 <pre class="ms-k-predicate-marks" aria-hidden="true">@MarkedText()</pre>

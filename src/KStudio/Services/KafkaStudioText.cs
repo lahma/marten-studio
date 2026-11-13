@@ -1,3 +1,7 @@
+using System.Globalization;
+
+using KStudio.Core.Predicates;
+
 namespace KStudio.Services;
 
 /// <summary>
@@ -8,6 +12,9 @@ internal static class KafkaStudioText
 {
     /// <summary>The module's key: its audit scope kind, and its segment under the studio's mount.</summary>
     public const string Key = "kafka";
+
+    /// <summary>The durable audit events KStudio logs, as the Activity page's footer names them (#77): 9600 to 9609 (9610 and 9611 are not audit events), see <c>KafkaStudioLog</c>.</summary>
+    public const string AuditEventIds = "9600-9609";
 
     /// <summary>The product on first prominent use: the rail's credit line, the capability heading, the README.</summary>
     public const string ProductName = "KStudio for Apache Kafka®";
@@ -106,6 +113,13 @@ internal static class KafkaStudioText
     /// <summary>What a search says when its request names a topic the visitor may not use: whole, and naming nothing.</summary>
     public const string SearchNamesRefusedTopic = "This search names a topic that is not available to you.";
 
+    /// <summary>
+    /// The count beside the topic filter (#77): how many topics are ticked, out of the most one search reads. "1 of 20" alone read as a count of the
+    /// topics shown, or as a cap nobody explained.
+    /// </summary>
+    /// <param name="selected">How many topics are ticked.</param>
+    public static string TopicsSelected(int selected) => $"{selected} of {MaxSearchTopics} topics selected (the most one search reads)";
+
     /// <summary>A search with no topic, or more than <see cref="MaxSearchTopics" />.</summary>
     public const string SearchTopicCount = "A search reads 1 to 20 topics.";
 
@@ -171,13 +185,13 @@ internal static class KafkaStudioText
     public const string ValueCloudEventData = "The event's data:";
 
     /// <summary>The line a record page adds to a cut value.</summary>
-    public const string ValueCutOnRecordPage = "Values above KafkaStudioOptions.Limits.MaxDecodeBytes are not shown whole.";
+    public const string ValueCutOnRecordPage = "Values above the size limit for reading a value are not shown whole.";
 
     /// <summary>The line a search's detail adds to a cut value, before the link.</summary>
     public const string ValueCutOpenRecordPage = "Open the record page to read it whole.";
 
     /// <summary>The help line in place of the value syntax when <c>ReadPayloads</c> is off.</summary>
-    public const string SearchSyntaxNeedsReadPayloads = "value and $.json.paths need KafkaStudioOptions.Capabilities.ReadPayloads.";
+    public const string SearchSyntaxNeedsReadPayloads = "value and $.json.paths are not available here.";
 
     /// <summary>The help line for <c>value</c> and JSON paths when they are available.</summary>
     public const string SearchSyntaxValues =
@@ -198,7 +212,7 @@ internal static class KafkaStudioText
     public static string UndecodableReason(KStudio.Core.Decoding.KafkaUndecodableReason reason) => reason switch
     {
         KStudio.Core.Decoding.KafkaUndecodableReason.InvalidJson => "it is not valid JSON",
-        KStudio.Core.Decoding.KafkaUndecodableReason.TooLarge => "it is larger than KafkaStudioOptions.Limits.MaxDecodeBytes",
+        KStudio.Core.Decoding.KafkaUndecodableReason.TooLarge => "it is larger than the size limit for reading a value",
         KStudio.Core.Decoding.KafkaUndecodableReason.InvalidUtf8 => "it is not valid UTF-8",
         KStudio.Core.Decoding.KafkaUndecodableReason.InvalidBase64 => "its data_base64 is not valid base64",
         KStudio.Core.Decoding.KafkaUndecodableReason.DecoderFailed => "the topic's decoder failed",
@@ -232,6 +246,21 @@ internal static class KafkaStudioText
     public static string ContinuedAfter(long records) =>
         $"Continued after offsets read by the previous search ({KafkaDisplay.Count(records, "record")}).";
 
+    /// <summary>
+    /// What the results header says after Continue (#76): the table is per run (D41 bounds what a scan keeps, D45 binds an export to the run on screen), so
+    /// the page says which matches it shows and that the earlier ones left it, rather than letting it look like data loss.
+    /// </summary>
+    /// <param name="earlier">How many matches the earlier runs of this search found.</param>
+    /// <param name="matches">How many matches this run found.</param>
+    public static string ContinuedShowing(long earlier, long matches) =>
+        (matches switch
+        {
+            0 => "No new matches in this run",
+            1 => $"Showing match {KafkaDisplay.Number(earlier + 1)} of this search",
+            _ => $"Showing matches {KafkaDisplay.Number(earlier + 1)}-{KafkaDisplay.Number(earlier + matches)} of this search",
+        })
+        + $"; the earlier {KafkaDisplay.Number(earlier)} were cleared from the page. Export before Continue to keep them.";
+
     /// <summary>The audit target of a search: <c>orders.v1, payments.v1 · 2026-11-12 10:00Z – 11:00Z</c>.</summary>
     /// <param name="topics">The topics.</param>
     /// <param name="from">The window's start (UTC).</param>
@@ -250,6 +279,21 @@ internal static class KafkaStudioText
     /// <summary>What the audit says of a search text that did not parse: nobody can know which literal was on a redacted field.</summary>
     /// <param name="length">The text's length.</param>
     public static string PredicateDidNotParse(int length) => $"(a predicate that did not parse, {length} characters)";
+
+    /// <summary>
+    /// The 9601 and 9609 reason of a search or a tail whose text did not parse or compile (#75): the first error's position and a constant phrase for its
+    /// kind, <c>position 8, expected a value</c>. Nothing the visitor typed reaches the audit or the log - no field, header or rule name, no JSON path,
+    /// no literal - and the page's own wording ("see above") is never recorded.
+    /// </summary>
+    /// <param name="errors">The plan's errors, in the order the engine found them.</param>
+    public static string PredicateDidNotRun(IReadOnlyList<PredicateError> errors)
+    {
+        ArgumentNullException.ThrowIfNull(errors);
+
+        return errors.Count == 0
+            ? "invalid search text"
+            : string.Create(CultureInfo.InvariantCulture, $"position {errors[0].Start + 1}, {errors[0].AuditPhrase}");
+    }
 
     /// <summary>The sentence for a start the engine refused (D-UI decision 11).</summary>
     /// <param name="refusal">Why.</param>
@@ -286,6 +330,24 @@ internal static class KafkaStudioText
 
     /// <summary>What a live tail is called in a disabled control's sentence.</summary>
     public const string LiveTailAction = "Live tail";
+
+    /// <summary>
+    /// What a page says to a visitor of a capability that is off (#74): one neutral sentence with no option name. The option that turns a
+    /// capability on is on the Settings page, where an operator looks, and in the audit entry of the refusal.
+    /// </summary>
+    /// <param name="capability">The capability that is off.</param>
+    public static string CapabilityNotAvailable(KafkaCapability capability) => CapabilityNotAvailable(capability switch
+    {
+        KafkaCapability.SearchRecords => "Searching records",
+        KafkaCapability.ReadPayloads => "Reading values",
+        KafkaCapability.ExportRecords => ExportingRecords,
+        KafkaCapability.LiveTail => LiveTailAction,
+        _ => capability.ToString(),
+    });
+
+    /// <summary>The neutral sentence of an action that is not available here.</summary>
+    /// <param name="action">The action in the sentence's first words ("Searching records").</param>
+    public static string CapabilityNotAvailable(string action) => action + " is not available here.";
 
     /// <summary>The audit action of an export.</summary>
     public const string ExportAction = "ExportRecords";
@@ -403,7 +465,7 @@ internal static class KafkaStudioText
     /// <param name="total">How many records there were.</param>
     /// <param name="maxBytes">The limit.</param>
     public static string ExportLimited(int written, int total, long maxBytes) =>
-        $"Saved {KafkaDisplay.Number(written)} of {KafkaDisplay.Number(total)} records: the file reached KafkaStudioOptions.Limits.MaxExportBytes ({KafkaDisplay.Bytes(maxBytes)}).";
+        $"Saved {KafkaDisplay.Number(written)} of {KafkaDisplay.Number(total)} records: the file reached the size limit for an export ({KafkaDisplay.Bytes(maxBytes)}).";
 
     /// <summary>The Settings page's sentence about a cluster's profile, from the limits it comes to.</summary>
     /// <param name="profile">The profile, or <see langword="null" /> for none.</param>
@@ -552,7 +614,7 @@ internal static class KafkaStudioText
     /// <summary>The sentence under the duplicates heading.</summary>
     /// <param name="count">How many records were compared.</param>
     public static string DuplicatesScope(int count) =>
-        $"Compared among the {KafkaDisplay.Count(count, "record")} found. A copy outside these results is not seen.";
+        $"Compared among the {KafkaDisplay.Count(count, "match", "matches")} on this page. A copy outside these results, or in matches an earlier Continue cleared, is not seen.";
 
     /// <summary>The note on a group compared by its key and value as shown.</summary>
     public const string DuplicatesComparedAsShown = "Compared as shown: a masked part counts as equal to any other mask.";

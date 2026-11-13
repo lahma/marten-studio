@@ -1,30 +1,13 @@
 @using KStudio.Services
-@using PostgresStudio.Services.Settings
-@inject KafkaCapabilityGuard Capabilities
-@inject IStudioSettings Settings
 
-@* What a Kafka page renders where a control would be when the capability behind it is off. It names the exact property a host would
-   set, or the host studio's ReadOnly option when that is what turned it off, because "not permitted" with nothing to act on is the
-   failure mode of every feature-flagged admin UI (D4). Same markup and classes as the shared CapabilityDisabled, which takes a studio
-   capability and reads the studio's guard; KStudio's capabilities are its own (D35). The service refuses regardless of what is rendered. *@
+@* What a Kafka page renders where a page-level feature is off. One neutral sentence for the visitor with no option name (#74): the property that
+   turns a capability on is on Cluster settings, where an operator looks, and in the audit entry of the refusal. Same markup and classes as the
+   shared CapabilityDisabled, whose capabilities are the studio's own; KStudio's are its own (D35). The service refuses regardless of what is
+   rendered. *@
 
-<div class="ms-alert ms-alert-info ms-capability-disabled" role="note">
+<div class="ms-alert ms-alert-info ms-capability-disabled" role="note" data-capability="@Capability">
     <div class="ms-alert-content">
-        <p>@(string.IsNullOrWhiteSpace(Action) ? Capability : Action) is not enabled.</p>
-        @if (Capabilities.ReadOnly)
-        {
-            <p class="ms-muted">
-                <code>@Settings.ReadOnlyOption()</code> is <code>true</code>, which turns every capability off.
-            </p>
-        }
-        else
-        {
-            <p class="ms-muted">
-                Set <code>@(nameof(KafkaStudioOptions) + "." + nameof(KafkaStudioOptions.Capabilities) + "." + Capability)</code> to <code>true</code>,
-                or <code>@(nameof(KafkaStudioOptions) + "." + nameof(KafkaStudioOptions.Capabilities)) = @(nameof(KafkaStudioCapabilities) + "." + nameof(KafkaStudioCapabilities.All) + "()")</code>
-                to enable all of them.
-            </p>
-        }
+        <p>@KafkaStudioText.CapabilityNotAvailable(string.IsNullOrWhiteSpace(Action) ? Capability : Action)</p>
     </div>
 </div>
 

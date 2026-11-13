@@ -79,7 +79,7 @@ public class PayloadRedactionScanTests
 
         plan.IsValid.Should().BeFalse();
         plan.AuditText.Should().Be("$.customer.email ~ <redacted>");
-        plan.Errors.Should().ContainSingle().Which.Message.Should().Be("$.customer.email is redacted by $.customer.email (position 1): only = and in can search it.");
+        plan.Errors.Should().ContainSingle().Which.Message.Should().Be("$.customer.email is redacted by $.customer.email: only = and in can search it.");
         NoSentinel(plan.Errors.Select(static x => x.Message).Append(plan.AuditText).Append("guard"));
     }
 

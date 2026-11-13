@@ -39,6 +39,8 @@ public class StudioModuleCompositionTests
         public IReadOnlyList<StudioModuleCapability> Capabilities { get; } = [];
 
         public IReadOnlyList<StudioShortcutGroup> Shortcuts => [new StudioShortcutGroup(key + " keys", [])];
+
+        public string AuditEventIds => string.Empty;
     }
 
     private sealed class OtherFakeModule : IStudioModule
@@ -60,6 +62,8 @@ public class StudioModuleCompositionTests
         public IReadOnlyList<StudioModuleCapability> Capabilities => [];
 
         public IReadOnlyList<StudioShortcutGroup> Shortcuts => [];
+
+        public string AuditEventIds => string.Empty;
     }
 
     [Fact]

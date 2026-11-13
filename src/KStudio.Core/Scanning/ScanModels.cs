@@ -491,7 +491,8 @@ internal sealed record KafkaPartitionResult(
 /// <summary>A topic the scan could not read at all, with why.</summary>
 /// <param name="Topic">The topic.</param>
 /// <param name="Text">The sentence.</param>
-internal sealed record KafkaTopicRefusal(string Topic, string Text);
+/// <param name="Missing">Whether the topic does not exist on the cluster (the broker answered "not found"), as opposed to a refusal to read it (#77).</param>
+internal sealed record KafkaTopicRefusal(string Topic, string Text, bool Missing = false);
 
 /// <summary>
 /// A finished scan: why it stopped, what it read, and everything that could make "no match" untrue (decision 9.5): records lost to

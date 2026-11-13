@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+
 using AngleSharp.Dom;
 
 using Bunit;
@@ -242,7 +244,37 @@ public class KafkaRelatedPageTests
 
         page.WaitForAssertion(() => rig.Ring.Count(static x => x.Action == "SearchRecords").Should().BeGreaterThanOrEqualTo(2));
         page.Markup.Should().Contain("Continued after offsets read by the previous search");
+        page.Find(".ms-k-continued-showing").TextContent.Should().StartWith("Showing match").And.Contain("of this search; the earlier 1 were cleared from the page. Export before Continue to keep them.");
         rig.Ring.Where(static x => x.Action == "SearchRecords").Should().OnlyContain(static x => x.Message!.Contains("orders.in, orders.out: "), "each scan's entry carries the search of every topic, grouped where it is shared");
+    }
+
+    [Fact]
+    public async Task A_declared_topic_the_broker_does_not_have_is_one_Not_found_line_with_its_name_in_code_and_is_not_counted_as_searched()
+    {
+        await using KafkaSearchRig rig = new(engine: o =>
+        {
+            Declare(o);
+            o.Topic("orders.gone", _ => { });
+        });
+        Seed(rig);
+
+        IRenderedComponent<KafkaRelatedPage> page = await OpenAsync(rig, "&topic=orders.in&partition=0&offset=0" + Window);
+        page.WaitForAssertion(() => page.FindAll(".ms-k-lane").Should().HaveCountGreaterThanOrEqualTo(2));
+
+        void AssertOneLine()
+        {
+            page.WaitForAssertion(() => page.FindAll(".ms-k-not-found li").Should().ContainSingle().Which.TextContent.Should().Be("Not found: topic orders.gone"));
+            page.Find(".ms-k-not-found li code").TextContent.Should().Be("orders.gone");
+            page.Markup.Should().NotContain("`", "the name is in <code>, never in literal backticks");
+            Regex.Count(page.Markup, "Not found", RegexOptions.None, TimeSpan.FromSeconds(5)).Should().Be(1, "the sentence is drawn once, not in the notes and again in the caveats");
+            page.Find(".ms-k-related-topics summary").TextContent.Should().Be("Topics searched (2)", "a topic that does not exist is not searched");
+        }
+
+        // Whether a topic exists is known when the search is planned, not before.
+        await SearchAsync(page);
+        page.WaitForAssertion(() => Rows(page).Should().NotBeEmpty());
+
+        AssertOneLine();
     }
 
     [Fact]

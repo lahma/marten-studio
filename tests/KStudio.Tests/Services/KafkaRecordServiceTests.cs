@@ -45,7 +45,7 @@ public class KafkaRecordServiceTests
 
         KafkaRecordPageResult result = await rig.Records().ReadAsync(rig.Entry, "orders", 0, 1, Ct);
 
-        result.Should().BeOfType<KafkaRecordPageResult.CapabilityOff>().Which.Text.Should().Contain("KafkaStudioOptions.Capabilities.SearchRecords");
+        result.Should().BeOfType<KafkaRecordPageResult.CapabilityOff>().Which.Text.Should().Be("Searching records is not available here.");
         rig.BrokerCalls.Should().Be(callsBefore);
         rig.Logs.Entries.Should().ContainSingle(static x => x.EventId.Id == 9602);
     }
