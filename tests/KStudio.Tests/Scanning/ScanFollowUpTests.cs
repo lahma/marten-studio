@@ -154,7 +154,7 @@ public class ScanFollowUpTests
             envelope.Append(",\"a").Append(i.ToString("D3", System.Globalization.CultureInfo.InvariantCulture)).Append("\":\"v\"");
         }
 
-        envelope.Append(",\"").Append(new string('n', 1000)).Append("\":\"long-name\"}");
+        envelope.Append(",\"").Append('n', 1000).Append("\":\"long-name\"}");
         KafkaMatch match = Match(Record(null, Encoding.UTF8.GetBytes(envelope.ToString())), topic: Topic(decoder: KafkaDecoders.CloudEvents));
 
         match.CloudEventAttributes.Should().HaveCount(64);
@@ -173,7 +173,7 @@ public class ScanFollowUpTests
 
         for (int i = 0; i < 40; i++)
         {
-            envelope.Append(",\"a").Append(i.ToString("D2", System.Globalization.CultureInfo.InvariantCulture)).Append("\":\"").Append(new string('x', 1000)).Append('"');
+            envelope.Append(",\"a").Append(i.ToString("D2", System.Globalization.CultureInfo.InvariantCulture)).Append("\":\"").Append('x', 1000).Append('"');
         }
 
         envelope.Append('}');
