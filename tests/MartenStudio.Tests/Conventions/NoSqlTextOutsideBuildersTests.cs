@@ -118,7 +118,7 @@ public partial class NoSqlTextOutsideBuildersTests
     [InlineData("/// new NpgsqlCommand(\"select 1\") is the shape.", false)]
     public void The_scan_sees_each_way_of_writing_a_statement_into_a_command(string source, bool offends)
     {
-        Offences(source.Split('\n')).Any().Should().Be(offends);
+        (Offences(source.Split('\n')).Count > 0).Should().Be(offends);
     }
 
     [Fact]

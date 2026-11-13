@@ -162,7 +162,9 @@ public class StudioLiveUpdatesLifetimeTests
             if (identifier == Watch)
             {
                 Reference = args?.Length > 1 ? args[1] as DotNetObjectReference<StudioLiveUpdates> : null;
+#pragma warning disable BL0016 // A test fake completing the pending watch from its own helper, not a studio call site.
                 return new ValueTask<TValue>(WaitAsync<TValue>());
+#pragma warning restore BL0016
             }
 
             return ValueTask.FromResult(default(TValue)!);

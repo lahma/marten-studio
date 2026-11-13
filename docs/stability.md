@@ -54,7 +54,7 @@ What a minor or patch release will not break:
 
 | | Supported | Tested |
 |---|---|---|
-| .NET | `net10.0` | .NET 10; on .NET 11 (release candidate 3) both studios run in a Release build of the host and, from 1.2.0, in a Debug build with the 11 SDK (1.1.x does not start the studio's page there: build the host with `-p:EnableHotReloadInRuntimeConfigDevFile=false` until you are on 1.2.0). On .NET 11 the circuit starts only for a visitor the `FallbackPolicy` admits; an `AllowAnonymous()` mapping under a fail-closed policy is the usual case (dotnet/aspnetcore#69624, open): see [Hosting notes](../README.md#hosting-notes) |
+| .NET | `net10.0` | .NET 10; on .NET 11.0 (GA, 11.0.0) both studios run in a Release build of the host and, from 1.2.0, in a Debug build with the 11 SDK (1.1.x does not start the studio's page there: build the host with `-p:EnableHotReloadInRuntimeConfigDevFile=false` until you are on 1.2.0). On .NET 11 the circuit starts only for a visitor the `FallbackPolicy` admits; an `AllowAnonymous()` mapping under a fail-closed policy is the usual case (dotnet/aspnetcore#69624, open): see [Hosting notes](../README.md#hosting-notes) |
 | Marten (Marten Studio) | 9.x from 9.57.0 | 9.57.0 on every build |
 | Npgsql (Postgres Studio, Diagnostics) | from 9.0.4 | 9.0.4 and 10.0.3 |
 | PostgreSQL | 15 to 19; 14 works, untested | every major from 15 to 19, 19 on its release candidate until its general availability |
@@ -63,12 +63,6 @@ PostgreSQL 14 reaches its upstream end of life on 2026-11-12. 1.1 took it out of
 every read the studio makes on 14 is still there, and health check S01 still names its end of life, but no release is
 tested against it, and a minor release may stop supporting it outright. PostgreSQL 19 is supported in 1.1 on its release
 candidate, and the matrix moves to its general-availability image in a later patch.
-
-`PostgresStudio.DisableNavigationInterception` (AppContext switch, 1.2): `true` makes both studios navigate as 1.1 did, with an
-enhanced-navigation fetch per page. Temporary; to be removed in 1.3. With the switch on, a link the visitor clicks that
-names another store, database or tenant still moves the studio to it (enhanced navigation reports a click as intercepted).
-A Back or Forward is not intercepted there: the shell leaves the address as the browser returned it, and the pages that
-follow their own address apply the scope it names, as in 1.1.
 
 [docs/postgres-versions.md](postgres-versions.md) says what each version adds.
 

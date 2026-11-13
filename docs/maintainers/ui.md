@@ -138,7 +138,10 @@ a location change whose path or fragment changes, `StudioRoutes` scrolls to the 
 content arrives after its first render reveals its own fragment once drawn (Health, Connection). Nothing waits for a
 navigation to land, and the shell writes the scope into the address only after it has read the address's own scope.
 `data-ms-interactive` on `.ms-studio` is the browser suites' sign that the circuit has rendered and interception is on. The
-AppContext switch `PostgresStudio.DisableNavigationInterception` restores 1.1's enhanced navigation (`docs/stability.md`).
+1.2 AppContext switch `PostgresStudio.DisableNavigationInterception`, which restored 1.1's enhanced navigation, was removed in
+1.3. Apart from the static page before the circuit's first interactive render, the one remaining way interception is off is an ask
+that failed (a closed circuit, or another renderer holding it), when the enhanced navigation handles links and `StudioRoutes`
+neither force-loads nor scrolls to a fragment.
 
 ## Dialogs are native modals (1.2-A11Y)
 

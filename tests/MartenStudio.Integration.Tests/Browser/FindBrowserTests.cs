@@ -219,7 +219,7 @@ public class FindBrowserTests(BrowserSuiteFixture fixture)
                   return [doc.scrollWidth <= doc.clientWidth, outside.length === 0];
                 }
                 """);
-            int headerHeight = JsonDocument.Parse(layout).RootElement.GetProperty("header").GetInt32();
+            int headerHeight = JsonElement.Parse(layout).GetProperty("header").GetInt32();
             headerHeight.Should().BeLessThan(100, "the scope on one row and the environment, the magnifier and the actions on one more: " + layout);
             fits[0].Should().BeTrue("the page does not scroll sideways at 390 px: " + layout);
             fits[1].Should().BeTrue("and the magnifier does not push anything out of the header: " + layout);

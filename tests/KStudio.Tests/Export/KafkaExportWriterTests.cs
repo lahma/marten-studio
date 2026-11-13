@@ -62,7 +62,7 @@ public class KafkaExportWriterTests
         string text = Utf8.GetString(file.Content);
         text.Should().EndWith("\n").And.NotContain("\r\n");
 
-        return [.. text.TrimEnd('\n').Split('\n').Select(static x => JsonDocument.Parse(x).RootElement.Clone())];
+        return [.. text.TrimEnd('\n').Split('\n').Select(static x => JsonElement.Parse(x))];
     }
 
     /// <summary>A small RFC 4180 reader: rows of cells, quotes undoubled.</summary>
@@ -483,7 +483,7 @@ public class KafkaExportWriterTests
         string[] lines = Utf8.GetString(file.Content).TrimEnd('\n').Split('\n');
 
         lines.Should().HaveCount(2, "one line for each record, whatever newlines a producer put inside its value");
-        JsonElement[] rows = [.. lines.Select(static x => JsonDocument.Parse(x).RootElement.Clone())];
+        JsonElement[] rows = [.. lines.Select(static x => JsonElement.Parse(x))];
         rows.All(static x => x.TryGetProperty("valueFormat", out JsonElement _)).Should().BeTrue("every line is a record the writer wrote");
         rows.Select(static x => x.GetProperty("offset").GetInt64()).Should().Equal(1, 2);
         rows[0].GetProperty("value").GetRawText().Should().Be("""{"a":1,"b":[1,2]}""");

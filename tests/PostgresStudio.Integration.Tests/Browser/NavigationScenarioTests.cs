@@ -14,17 +14,10 @@ namespace PostgresStudio.Integration.Tests.Browser;
 /// is a count, not a timing. A scenario starts only once <c>StudioPage.GoAsync</c> has seen <c>data-ms-interactive</c>, so a click
 /// is never earlier than interception.
 /// </para>
-/// <para>
-/// With the AppContext switch <c>PostgresStudio.DisableNavigationInterception</c> on (the suite is run once that way,
-/// <see cref="StudioPage.InterceptionOffVariable" />) the studio navigates as 1.1 did and <see cref="StudioPage.AssertNoPageFetch" />
-/// accepts a page fetch; the three scenarios about what interception itself does are skipped there.
-/// </para>
 /// </remarks>
 [Collection(BrowserSuite.Name)]
 public class NavigationScenarioTests(BrowserSuiteFixture fixture)
 {
-    private const string SkippedWhenOff = "navigation interception is switched off in this run (1.1's navigation), and this scenario is about what interception does";
-
     private Task RunAsync(string name, string user, Func<StudioPage, Task> body) =>
         BrowserScenario.RunAsync(fixture.Browser, name, fixture.Host, user, body);
 
@@ -250,8 +243,6 @@ public class NavigationScenarioTests(BrowserSuiteFixture fixture)
     [BrowserFact]
     public async Task A_link_inside_the_mount_that_is_not_a_page_is_loaded_by_the_browser_once()
     {
-        Assert.SkipWhen(StudioPage.InterceptionIsOff, SkippedWhenOff);
-
         await RunAsync("nav-force-load-file", "admin", async studio =>
         {
             IPage page = studio.Page;
@@ -305,8 +296,6 @@ public class NavigationScenarioTests(BrowserSuiteFixture fixture)
     [BrowserFact]
     public async Task A_link_to_an_address_under_the_mount_that_does_not_exist_loads_the_hosts_404_once()
     {
-        Assert.SkipWhen(StudioPage.InterceptionIsOff, SkippedWhenOff);
-
         await RunAsync("nav-force-load-404", "admin", async studio =>
         {
             IPage page = studio.Page;
