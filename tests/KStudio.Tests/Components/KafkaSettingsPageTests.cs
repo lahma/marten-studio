@@ -75,6 +75,22 @@ public class KafkaSettingsPageTests
     }
 
     [Fact]
+    public async Task A_capability_a_Production_profile_forbids_reads_forbidden_by_the_profile_not_on()
+    {
+        await using KafkaCatalogRig rig = new(studio: o => o.Capabilities = KafkaStudioCapabilities.All(), profile: KafkaProfile.Production);
+
+        IRenderedComponent<KafkaSettingsPage> page = await OpenAsync(rig);
+
+        page.WaitForAssertion(() => page.FindAll("[aria-label='Capabilities'] tbody tr").Should().HaveCount(4));
+        string[] rows = [.. page.FindAll("[aria-label='Capabilities'] tbody tr").Select(static x => string.Join(" | ", x.QuerySelectorAll("td").Take(2).Select(static c => c.TextContent.Trim())))];
+        rows.Should().Equal(
+            "SearchRecords | on",
+            "ReadPayloads | on",
+            "ExportRecords | forbidden by the profile",
+            "LiveTail | forbidden by the profile");
+    }
+
+    [Fact]
     public async Task The_builder_hints_for_the_profile_and_for_consumer_groups_are_on_Settings()
     {
         await using KafkaCatalogRig rig = Rig(o => o.AddCluster("settings", new ClientConfig { BootstrapServers = "broker-1:9092" }));
@@ -83,7 +99,8 @@ public class KafkaSettingsPageTests
 
         page.WaitForAssertion(() => page.FindAll(".ms-k-profile-hint").Should().ContainSingle());
         page.Find(".ms-k-profile-hint").TextContent.Should().Contain("KafkaClusterBuilder.Profile").And.Contain("even when they are granted");
-        page.Find(".ms-k-groups-hint").TextContent.Should().Contain("KafkaClusterBuilder.ConsumerGroup");
+        page.Find(".ms-k-groups-hint").TextContent.Should().Contain("KafkaClusterBuilder.ConsumerGroup").And.Contain("UseWolverineKafka");
+        page.Find(".ms-k-profile-hint").TextContent.Should().Contain("UseWolverineKafka", "a discovered cluster sets its profile there, not in AddCluster alone");
     }
 
     [Fact]

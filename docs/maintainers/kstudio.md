@@ -848,9 +848,8 @@ audited, and an export must be all three. The bytes are no secret (the page show
 
 **The control** is `KafkaExportMenu` (public parameters are `object?` where the type is internal, as `KafkaRecordDetail`'s are): a `MenuButton` on a
 search's result banner (JSON Lines, CSV, each with "N records, as shown: masked parts stay masked"), on the record page (`This record (.jsonl)` and, when the
-value has text, `Value (.json|.txt)`), and, from UI-TAIL, on a tail. With the capability off it is the disabled notice naming
-`KafkaStudioOptions.Capabilities.ExportRecords`; on a `Production` cluster it is a disabled button whose title and text are
-`KafkaStudioText.ProfileForbids(...)`, which names `KafkaClusterBuilder.Profile` and says that granting the capability is not enough (D4). Both M5
+value has text, `Value (.json|.txt)`), and, from UI-TAIL, on a tail. With the capability off, or on a cluster whose profile forbids export, nothing is
+drawn (#74): the service refuses regardless (hard rule 5), and `Cluster settings` names the option and the profile's builder method. Both M5
 capabilities land with this packet so that the guard, the audit gate and the chip are written once: `Prerequisites(capability)` is `SearchRecords` for every
 other capability, `Require` asks the prerequisites first, `KafkaAuditGate` judges an entry with each prerequisite (per topic and at cluster level) where it
 used to hard-code `ReadPayloads → SearchRecords`, and `RequireOne` is the capability alone, for a caller that already passed its prerequisites' gate
@@ -937,10 +936,11 @@ the slot held and released, the governor within 10 % of the rate, the consumer's
 `TailLiveTests` (arrival within two seconds, an open transaction shown when it commits and an aborted one never, uncommitted records, pause and resume) and
 `ReadNeverWritesScanLiveTests`' tail case (a minute with a pause and resume in the middle: no topic created, no offset committed, no group left).
 
-**The page** (`/kafka/tail`, `KafkaTailPage` and `KafkaTailBody`, under `/kafka` by hard rule 16; rail entry *Live tail*, drawn whatever the capability so that the page can say
-which option turns it on, and a link beside *Search this topic*). Its address is `?cluster=&topics=a,b&iso=` with the search text in the fragment (`#q=`), as Search's is (D9):
-it fills the form and **never starts a tail**, so a pasted link holds no slot and spends no allowance. A page that can only say why it is off - the capability, `SearchRecords`
-or a `Production` profile (`KafkaStudioText.ProfileForbids`, which names `KafkaClusterBuilder.Profile`) - reads nothing from the cluster.
+**The page** (`/kafka/tail`, `KafkaTailPage` and `KafkaTailBody`, under `/kafka` by hard rule 16; rail entry *Live tail*, drawn while `LiveTail` and `SearchRecords` are on and `ReadOnly` is off (the rail is not per cluster, so a `Production`
+profile does not hide it), and a link beside *Search this topic*, which is also left out under a `Production` profile). Its address is `?cluster=&topics=a,b&iso=` with the search text in the fragment (`#q=`), as Search's is (D9):
+it fills the form and **never starts a tail**, so a pasted link holds no slot and spends no allowance. A page that can only say it is off - the capability, `SearchRecords`
+or a `Production` profile - says one neutral sentence ("Live tail is not available here.", or `KafkaStudioText.ProfileForbids`: "This cluster's profile does not
+allow live tail.") and reads nothing from the cluster; `Cluster settings` names the option and `KafkaClusterBuilder.Profile`.
 
 **A tail is a session of segments.** `KafkaTailSession` is the visitor's one tail from Start to Stop; a segment (`KafkaTailSegment`) is one run of the engine, ended by a
 pause. The session keeps what the segments leave, so that a pause loses nothing: the ring (the newest `TailCapacity` matches, newest first, built from the engine's

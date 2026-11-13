@@ -15,6 +15,7 @@
 @inject KafkaRecordService Records
 @inject KafkaCatalogService Catalog
 @inject KafkaCapabilityGuard Capabilities
+@inject KafkaExportService ExportService
 @inject KafkaRecordIndexResolver RecordIndex
 @inject NavigationManager Navigation
 @inject IStudioSettings Settings
@@ -324,7 +325,7 @@
                 @if (continuedAfter is { } previous)
                 {
                     <p class="ms-muted">@KafkaStudioText.ContinuedAfter(previous)</p>
-                <p class="ms-muted ms-k-continued-showing">@KafkaStudioText.ContinuedShowing(earlierMatches, result.Matches)</p>
+                    <p class="ms-muted ms-k-continued-showing">@KafkaStudioText.ContinuedShowing(earlierMatches, result.Matches, CanExport(ran.Input.Cluster))</p>
                 }
                 @if (KafkaSearchText.CanContinue(result.StopReason) && !result.Cursor.IsEmpty)
                 {
@@ -578,6 +579,10 @@
     private int pageNumber = 1;
     private long? continuedAfter;
     private ElementReference predicateBox;
+
+    /// <summary>Whether the Export menu is drawn for this run: the capability is on and the cluster's profile allows export (the menu's own two conditions).</summary>
+    private bool CanExport(KafkaClusterEntry cluster) =>
+        Capabilities.IsEnabled(KafkaCapability.ExportRecords) && !ExportService.ForbiddenByProfile(cluster);
     private bool predicateFocused;
 
     /// <summary>

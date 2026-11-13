@@ -568,7 +568,7 @@ gate with the identity the circuit held when the connection returned, so a chang
 **D47 — KStudio's profiles lower limits per cluster, explicitly, and never grant.** `KafkaClusterBuilder.Profile(KafkaProfile.
 Development | Test | Production)` caps a cluster's per-scan limits from a fixed table, gives a profiled cluster its own byte rate
 and hourly owner budget (planning reads included), and under `Production` forbids export and live tail even when granted; the
-disabled control names the setting. A cluster with no profile uses the host's limits, and the Settings page says so; the profile
+pages leave those controls out and Cluster settings names the setting (#74). A cluster with no profile uses the host's limits, and the Settings page says so; the profile
 is never inferred from `IHostEnvironment` or `Environment`. Concurrency and consumer sizes stay process-wide. The ceilings apply in
 the engine's plan, and tests prove no profile raises a limit or grants a capability. Full text:
 [kstudio.md](docs/maintainers/kstudio.md#d47).

@@ -356,7 +356,7 @@ public class KafkaSearchPageTests
     [Fact]
     public async Task Continue_appears_only_with_a_cursor_and_replaces_the_rows()
     {
-        await using KafkaSearchRig rig = new(engine: o => o.Limits.MaxMatches = 2);
+        await using KafkaSearchRig rig = new(engine: o => o.Limits.MaxMatches = 2, studio: o => o.Capabilities.ExportRecords = true);
         Seed(rig, "orders", 5);
         IRenderedComponent<KafkaSearchPage> page = await OpenAsync(rig, Window);
 
@@ -370,11 +370,11 @@ public class KafkaSearchPageTests
         page.Markup.Should().Contain("Continued after offsets read by the previous search (");
 
         // #76: the table is per run and says so, instead of looking like data loss.
-        page.Find(".ms-k-continued-showing").TextContent.Should().Be("Showing matches 3-4 of this search; the earlier 2 were cleared from the page. Export before Continue to keep them.");
+        page.Find(".ms-k-continued-showing").TextContent.Should().Be("Showing matches 3-4 of this search; the earlier 2 matches were cleared from the page. Export before Continue to keep them.");
 
         await page.Find(".ms-k-result-banner button").ClickAsync(new MouseEventArgs());
         page.WaitForAssertion(() => Rows(page).Should().Equal("0 / 4"));
-        page.Find(".ms-k-continued-showing").TextContent.Should().Be("Showing match 5 of this search; the earlier 4 were cleared from the page. Export before Continue to keep them.", "the earlier runs add up");
+        page.Find(".ms-k-continued-showing").TextContent.Should().Be("Showing match 5 of this search; the earlier 4 matches were cleared from the page. Export before Continue to keep it.", "the earlier runs add up");
         page.FindAll(".ms-k-result-banner button").Should().BeEmpty("a completed search has no cursor to continue from");
         rig.Ring.Count(static x => x.Action == "SearchRecords" && x.Succeeded).Should().Be(3, "each scan is a new audit entry");
     }
@@ -474,6 +474,22 @@ public class KafkaSearchPageTests
         }
 
         seen.Should().HaveCount(27).And.OnlyHaveUniqueItems();
+    }
+
+    [Fact]
+    public async Task The_continued_header_advises_Export_only_where_the_page_draws_it()
+    {
+        await using KafkaSearchRig noExport = new(engine: o => o.Limits.MaxMatches = 2, studio: o => o.Capabilities.ExportRecords = false);
+        Seed(noExport, "orders", 5);
+        IRenderedComponent<KafkaSearchPage> page = await OpenAsync(noExport, Window);
+
+        await SearchAsync(page);
+        page.WaitForAssertion(() => page.Find(".ms-k-result-banner").TextContent.Should().Contain("Stopped at 2 matches"));
+        await page.Find(".ms-k-result-banner button").ClickAsync(new MouseEventArgs());
+        page.WaitForAssertion(() => Rows(page).Should().Equal("0 / 2", "0 / 3"));
+
+        page.Find(".ms-k-continued-showing").TextContent.Should().Be("Showing matches 3-4 of this search; the earlier 2 matches were cleared from the page.");
+        page.FindAll(".ms-k-export").Should().BeEmpty();
     }
 
     [Fact]

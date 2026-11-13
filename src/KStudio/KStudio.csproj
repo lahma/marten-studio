@@ -8,7 +8,7 @@
     <RootNamespace>KStudio</RootNamespace>
     <PackageId>KStudio</PackageId>
     <IsPackable>true</IsPackable>
-    <!-- No baseline: the package is not on nuget.org yet, so Directory.Build.props' PackageValidationBaselineVersion (the family's) must not apply. -->
+    <!-- No baseline: the family's PackageValidationBaselineVersion (Directory.Build.props) must not apply; this package's own baseline stays empty until one release after it graduates from preview (K8). -->
     <EnablePackageValidation>true</EnablePackageValidation>
     <PackageValidationBaselineVersion></PackageValidationBaselineVersion>
     <PackageTags>kafka;blazor;studio;admin</PackageTags>
