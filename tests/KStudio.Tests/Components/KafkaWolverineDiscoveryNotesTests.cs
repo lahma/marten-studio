@@ -2,6 +2,7 @@ using Bunit;
 
 using Confluent.Kafka;
 
+using KStudio.Components.Layout;
 using KStudio.Components.Pages;
 using KStudio.Core.Catalog;
 using KStudio.Core.Clusters;
@@ -224,7 +225,113 @@ public class KafkaWolverineDiscoveryNotesTests
         IRenderedComponent<KafkaSettingsPage> settings = rig.Studio.Context.Render<KafkaSettingsPage>();
 
         settings.WaitForAssertion(() => settings.Find(".ms-k-same-servers").TextContent.Should().Be(
+            "Same bootstrap servers as Wolverine · besteffort: probably one cluster registered twice. Declare it once."));
+    }
+
+    [Fact]
+    public async Task The_settings_page_names_ExcludeBroker_only_when_one_of_the_clusters_is_a_named_broker()
+    {
+        await using KafkaCatalogRig rig = new(engine: o => o.AddCluster("wolverine", new ClientConfig { BootstrapServers = "x:1" }), cluster: "wolverine");
+        rig.Studio.Entries.Entries =
+        [
+            new KafkaClusterEntry("wolverine", null, "Wolverine", null) { SameServersAs = ["wolverine-besteffort"], SameServersCanBeLeftOut = true },
+            new KafkaClusterEntry("wolverine-besteffort", null, "Wolverine · besteffort", null) { SameServersAs = ["wolverine"], SameServersCanBeLeftOut = true },
+        ];
+
+        await rig.Studio.Context.ReadyAsync();
+        rig.Studio.Navigation.Simulate("kafka/settings?cluster=wolverine", intercepted: false);
+        IRenderedComponent<KafkaSettingsPage> settings = rig.Studio.Context.Render<KafkaSettingsPage>();
+
+        settings.WaitForAssertion(() => settings.Find(".ms-k-same-servers").TextContent.Should().Be(
             "Same bootstrap servers as Wolverine · besteffort: probably one cluster registered twice. KafkaWolverineOptions.ExcludeBroker leaves one out."));
+    }
+
+    [Fact]
+    public async Task A_refused_cluster_is_named_by_neither_the_selector_nor_the_settings_page_and_an_allowed_one_is_named_by_both()
+    {
+        await using KafkaCatalogRig rig = new(
+            engine: o => o.AddCluster("wolverine", new ClientConfig { BootstrapServers = "x:1" }),
+            studio: o => o.ClusterAuthorizationPolicy = "kafka-topics",
+            cluster: "wolverine");
+        rig.Studio.Entries.Entries =
+        [
+            new KafkaClusterEntry("wolverine", null, "Wolverine", null) { SameServersAs = ["wolverine-besteffort"] },
+            new KafkaClusterEntry("wolverine-besteffort", null, "Wolverine · besteffort", null) { SameServersAs = ["wolverine"] },
+        ];
+        rig.Studio.Authorization.AllowKafka(static resource => resource.Cluster != "wolverine-besteffort");
+
+        await rig.Studio.Context.ReadyAsync();
+        await rig.Studio.State.EnsureInitializedAsync(Token);
+        rig.Studio.State.AvailableClusters.Select(static x => x.Key).Should().Equal("wolverine");
+
+        IRenderedComponent<ClusterSelector> selector = rig.Studio.Context.Render<ClusterSelector>();
+        selector.WaitForAssertion(() => selector.Find(".ms-k-cluster-name").TextContent.Should().Be("Wolverine"));
+        selector.Markup.Should().NotContain("besteffort").And.NotContain("same servers");
+
+        rig.Studio.Navigation.Simulate("kafka/settings?cluster=wolverine", intercepted: false);
+        IRenderedComponent<KafkaSettingsPage> settings = rig.Studio.Context.Render<KafkaSettingsPage>();
+        settings.WaitForAssertion(() => settings.Markup.Should().Contain("Cluster settings"));
+        settings.Markup.Should().NotContain("besteffort").And.NotContain("Same bootstrap servers");
+
+        // Allowed, both are named: in the selector's option and on the Settings page.
+        await using KafkaCatalogRig both = new(
+            engine: o => o.AddCluster("wolverine", new ClientConfig { BootstrapServers = "x:1" }),
+            studio: o => o.ClusterAuthorizationPolicy = "kafka-topics",
+            cluster: "wolverine");
+        both.Studio.Entries.Entries = rig.Studio.Entries.Entries;
+
+        await both.Studio.Context.ReadyAsync();
+        await both.Studio.State.EnsureInitializedAsync(Token);
+
+        IRenderedComponent<ClusterSelector> open = both.Studio.Context.Render<ClusterSelector>();
+        open.WaitForAssertion(() => open.FindAll("option").Select(static x => x.TextContent.Trim()).Should().Equal(
+            "Wolverine (same servers as Wolverine · besteffort)",
+            "Wolverine · besteffort (same servers as Wolverine)"));
+    }
+
+    [Fact]
+    public async Task A_topic_nothing_reads_on_a_cluster_with_groups_says_no_group_reads_it_and_a_cluster_with_none_says_how_to_declare_one()
+    {
+        await using KafkaCatalogRig rig = new(
+            engine: o => o.ClusterSources.Add(_ => new FakeClusterSource(new KafkaClusterContribution(
+                [Cluster("wolverine", "broker:9092", null, null, Listener("orders", "orders-app"), Listener("out.v1", null))], []))),
+            cluster: "wolverine");
+        rig.Topic("out.v1", 1, 1);
+
+        IRenderedComponent<KafkaTopicPage> page = await OpenTopicAsync(rig, "out.v1", "wolverine");
+
+        page.WaitForAssertion(() => page.Markup.Should().Contain("No consumer group of this application reads this topic."));
+        page.Markup.Should().NotContain("No consumer groups are declared for this cluster");
+        page.FindAll(".ms-k-idle-groups").Should().BeEmpty();
+
+        await using KafkaCatalogRig none = new(engine: o => o.ClusterSources.Add(_ => new FakeClusterSource(new KafkaClusterContribution(
+            [Cluster("wolverine", "broker:9092", null, null, Listener("out.v1", null))], []))), cluster: "wolverine");
+        none.Topic("out.v1", 1, 1);
+
+        IRenderedComponent<KafkaTopicPage> empty = await OpenTopicAsync(none, "out.v1", "wolverine");
+
+        empty.WaitForAssertion(() => empty.Markup.Should().Contain("No consumer groups are declared for this cluster"));
+    }
+
+    [Fact]
+    public void A_cluster_a_source_lets_the_host_leave_out_marks_the_pair_in_the_catalog()
+    {
+        KafkaEngineOptions options = new();
+        options.ClusterSources.Add(_ => new FakeClusterSource(new KafkaClusterContribution(
+            [
+                Cluster("wolverine", "a:9092", null, null),
+                Cluster("wolverine-besteffort", "a:9092", null, null) with { CanBeLeftOut = true },
+                Cluster("host-twin", "z:9092", null, null),
+                Cluster("host-twin-2", "z:9092", null, null),
+            ],
+            [])));
+        KafkaCatalog catalog = new(new KafkaClusterRegistry(options, new ServiceCollection().BuildServiceProvider()), null!, null!);
+        Dictionary<string, KafkaClusterInfo> byKey = catalog.Clusters.ToDictionary(static x => x.Key, StringComparer.Ordinal);
+
+        byKey["wolverine"].SameServersCanBeLeftOut.Should().BeTrue("its twin is a named broker");
+        byKey["wolverine-besteffort"].SameServersCanBeLeftOut.Should().BeTrue();
+        byKey["host-twin"].SameServersCanBeLeftOut.Should().BeFalse("neither can be left out");
+        byKey["host-twin-2"].SameServersCanBeLeftOut.Should().BeFalse();
     }
 
     private static async Task<IRenderedComponent<KafkaTopicPage>> OpenTopicAsync(KafkaCatalogRig rig, string topic, string cluster)

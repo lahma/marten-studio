@@ -305,14 +305,16 @@ builder.Services.AddKafkaStudio(k => k.UseWolverineKafka(w => w
 **One group per topic.** A listener's consumer group is shown on the topics that listener reads, with its lag, and on no
 other: a topic the application only publishes to lists no group of it. A group you declare for the whole cluster with
 `c.ConsumerGroup("…")` is shown on every topic, and where it has no committed offset on a topic it is named on one muted line
-(*Groups with no committed offset on this topic*) instead of a row with no lag. At most 50 groups are read for a cluster.
+(*Groups with no committed offset on this topic*) instead of a row with no lag. A topic page reads the groups declared for the whole cluster and the one group of its own listener; of the groups the listeners use, the first 50 by name are read.
 
 **Named brokers on one cluster.** Wolverine can register several named brokers against the same physical Kafka cluster (a
-durable broker and a buffered twin, for example), and each is listed as a cluster of its own, `wolverine-{broker}`: the
-broker's name lower-cased, with every character outside letters, digits and hyphens made a hyphen, shown as
+durable broker and a buffered twin, for example), and each is listed as a cluster of its own, `{ClusterKey}-{slug}` (the
+cluster key is `wolverine` unless you changed it): the slug is the broker's name lower-cased, with every character outside
+letters, digits and hyphens replaced by a hyphen, runs of hyphens collapsed to one and the ends trimmed. It is shown as
 `Wolverine · {broker}`. KStudio never connects to merge them. Where two listed clusters have the same bootstrap servers
 (compared as a set, from configuration, so order and spaces do not matter), the selector adds *(same servers as …)* to
-their names and the Settings page says so, naming only the clusters you may see. Leave a broker out of discovery by its
+their names and the Settings page says so, naming only the clusters you may see (it names `ExcludeBroker` only when one of
+them is a named broker, which is the only kind it can leave out; otherwise it says to declare the cluster once). Leave a broker out of discovery by its
 name, and nothing of it is listed (no cluster, topics, groups or tenants):
 
 ```csharp

@@ -193,7 +193,7 @@
         IReadOnlyList<KafkaGroupOverview> idleGroups = [.. overview.Groups.Where(static x => x.HasNoCommittedOffset)];
         @if (overview.Groups.Count == 0)
         {
-            <p class="ms-muted">@KafkaStudioText.NoConsumerGroups</p>
+            <p class="ms-muted">@(overview.ClusterHasGroups ? KafkaStudioText.NoGroupReadsTopic : KafkaStudioText.NoConsumerGroups)</p>
         }
         else
         {

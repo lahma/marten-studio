@@ -29,6 +29,9 @@ internal sealed record KafkaClusterEntry(string Key, string? TenantId, string Di
     /// </summary>
     public IReadOnlyList<string> SameServersAs { get; init; } = [];
 
+    /// <summary>Whether this cluster or one in <see cref="SameServersAs" /> is one its source lets the host leave out of discovery: whether the Settings page may name the option that does.</summary>
+    public bool SameServersCanBeLeftOut { get; init; }
+
     /// <summary>
     /// The labels of the clusters in <see cref="SameServersAs" /> among <paramref name="visible" />, in the order the visitor's selector lists them.
     /// A cluster the visitor may not see is left out.
@@ -47,6 +50,7 @@ internal sealed record KafkaClusterEntry(string Key, string? TenantId, string Di
         && Environment == other.Environment
         && Profile == other.Profile
         && Cluster == other.Cluster
+        && SameServersCanBeLeftOut == other.SameServersCanBeLeftOut
         && SameServersAs.SequenceEqual(other.SameServersAs, StringComparer.Ordinal);
 
     /// <inheritdoc />
@@ -68,5 +72,5 @@ internal sealed class CatalogClusterEntrySource(IKafkaCatalog catalog) : IKafkaC
 {
     /// <inheritdoc />
     public IReadOnlyList<KafkaClusterEntry> Entries =>
-        [.. catalog.Clusters.Select(static x => new KafkaClusterEntry(x.Key, x.TenantId, x.DisplayName, x.Environment, x.Profile) { Cluster = x.BaseKey, SameServersAs = x.SameServersAs ?? [] })];
+        [.. catalog.Clusters.Select(static x => new KafkaClusterEntry(x.Key, x.TenantId, x.DisplayName, x.Environment, x.Profile) { Cluster = x.BaseKey, SameServersAs = x.SameServersAs ?? [], SameServersCanBeLeftOut = x.SameServersCanBeLeftOut })];
 }

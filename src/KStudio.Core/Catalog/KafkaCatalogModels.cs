@@ -51,6 +51,7 @@ internal readonly struct KafkaField<T>
 /// The entry keys of the other clusters, of another base cluster, whose bootstrap servers are the same set as this cluster's (#72): probably one cluster
 /// registered twice. Compared from configuration alone, never by connecting; the servers themselves are not in the record.
 /// </param>
+/// <param name="SameServersCanBeLeftOut">Whether this cluster or one in <paramref name="SameServersAs" /> is one its source lets the host leave out of discovery.</param>
 internal sealed record KafkaClusterInfo(
     string Key,
     string DisplayName,
@@ -60,7 +61,8 @@ internal sealed record KafkaClusterInfo(
     string? TenantId,
     string? Source,
     KafkaProfile? Profile = null,
-    IReadOnlyList<string>? SameServersAs = null);
+    IReadOnlyList<string>? SameServersAs = null,
+    bool SameServersCanBeLeftOut = false);
 
 /// <summary>A topic in the list.</summary>
 /// <param name="Name">The name.</param>
@@ -190,7 +192,8 @@ internal sealed record KafkaGroupOverview(
 /// <param name="OffsetSpan">The sum of the partitions' spans, an estimate shown with <c>~</c>.</param>
 /// <param name="OpenTransaction">Whether any partition has an open transaction.</param>
 /// <param name="OffsetsPerSecond">The recent rate of the high watermarks, an estimate; <see langword="null" /> until two samples exist.</param>
-/// <param name="Groups">The declared groups.</param>
+/// <param name="Groups">The groups read on this topic: the host's cluster-wide ones and the one a source paired with the topic's listener.</param>
+/// <param name="ClusterHasGroups">Whether the cluster has any consumer group at all, declared or found by a source (so an empty <paramref name="Groups" /> means none reads this topic).</param>
 internal sealed record KafkaTopicOverview(
     string Cluster,
     string Name,
@@ -201,7 +204,8 @@ internal sealed record KafkaTopicOverview(
     long? OffsetSpan,
     bool? OpenTransaction,
     double? OffsetsPerSecond,
-    IReadOnlyList<KafkaGroupOverview> Groups);
+    IReadOnlyList<KafkaGroupOverview> Groups,
+    bool ClusterHasGroups = false);
 
 /// <summary>A cluster overview.</summary>
 /// <param name="Key">The cluster's key.</param>

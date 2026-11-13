@@ -44,7 +44,7 @@
         @if (State.ActiveCluster is { } same && same.SameServersNames(State.AvailableClusters) is { Count: > 0 } sameServers)
         {
             @* Two listed clusters with the same bootstrap servers (#72): compared from configuration, never by connecting. Only clusters the visitor may see are named. *@
-            <p class="ms-k-note ms-k-same-servers" role="note">@KafkaStudioText.SameServersLine(sameServers)</p>
+            <p class="ms-k-note ms-k-same-servers" role="note">@KafkaStudioText.SameServersLine(sameServers, same.SameServersCanBeLeftOut)</p>
         }
 
         <h2 class="ms-section-title">Your settings</h2>

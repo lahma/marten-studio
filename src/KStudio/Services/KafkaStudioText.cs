@@ -64,11 +64,15 @@ internal static class KafkaStudioText
     public static string ClusterOptionText(string label, IReadOnlyList<string> sameServersAs) =>
         sameServersAs.Count == 0 ? label : label + " (same servers as " + string.Join(", ", sameServersAs) + ")";
 
-    /// <summary>The Settings page's line for a cluster that shares its bootstrap servers with others (#72). The servers themselves are in the table above it.</summary>
+    /// <summary>The Settings page's line for a cluster that shares its bootstrap servers with others (#72); the servers themselves are in the table below it.</summary>
     /// <param name="sameServersAs">The labels of the other clusters with the same bootstrap servers that the visitor may see.</param>
-    public static string SameServersLine(IReadOnlyList<string> sameServersAs) =>
+    /// <param name="canBeLeftOut">Whether one of the clusters is a named Wolverine broker, which <c>ExcludeBroker</c> can leave out; the default transport and a host's own cluster cannot be.</param>
+    public static string SameServersLine(IReadOnlyList<string> sameServersAs, bool canBeLeftOut) =>
         "Same bootstrap servers as " + string.Join(", ", sameServersAs) + ": probably one cluster registered twice. "
-        + "KafkaWolverineOptions.ExcludeBroker leaves one out.";
+        + (canBeLeftOut ? "KafkaWolverineOptions.ExcludeBroker leaves one out." : "Declare it once.");
+
+    /// <summary>A topic page of a cluster that has consumer groups, none of which reads the topic (#73).</summary>
+    public const string NoGroupReadsTopic = "No consumer group of this application reads this topic.";
 
     /// <summary>The topic page's line for declared groups with no committed offset on the topic (#73).</summary>
     /// <param name="groups">The group ids.</param>

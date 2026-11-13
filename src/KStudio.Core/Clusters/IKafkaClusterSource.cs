@@ -59,13 +59,15 @@ internal sealed record KafkaSourceNote(string What, string Reason, string Text);
 /// <param name="AdminConfig">The admin-side configuration.</param>
 /// <param name="Builder">What is said about the cluster beyond its configuration; the host's hook has already been applied to it.</param>
 /// <param name="Topics">The topics the source found.</param>
+/// <param name="CanBeLeftOut">Whether the source lets the host leave this cluster out of discovery (Wolverine: a named broker), which the Settings page says when two clusters share their servers.</param>
 internal sealed record KafkaContributedCluster(
     string Key,
     string? TenantId,
     ConsumerConfig ConsumerConfig,
     AdminClientConfig AdminConfig,
     KafkaClusterBuilder Builder,
-    IReadOnlyList<KafkaDiscoveredTopic> Topics);
+    IReadOnlyList<KafkaDiscoveredTopic> Topics,
+    bool CanBeLeftOut = false);
 
 /// <summary>What a source found out about one topic. It never replaces what the host declared (decision 5.6).</summary>
 /// <param name="Name">The topic's name.</param>
