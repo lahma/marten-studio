@@ -1078,6 +1078,13 @@
         {
             // Gone while resuming.
         }
+        catch (Exception e)
+        {
+            // Never unobserved: a resume nobody awaits says what went wrong where the visitor looks.
+            Logger.LogWarning(e, "The Kafka tail page failed to resume a live tail");
+            refusal = KafkaStudioText.TailFailed;
+            await InvokeAsync(StateHasChanged);
+        }
     }
 
     // ------------------------------------------------------------------------------------------------
@@ -1086,7 +1093,9 @@
 
     /// <summary>
     /// The circuit's connection dropped (<paramref name="up" /> false) or returned. A drop pauses the running segment, which releases its scan slot as every pause does; a
-    /// return resumes only a tail still paused for the drop and whose tab is shown, through the same gate as any resume. Called by <see cref="KafkaTailCircuitHandler" /> off the renderer.
+    /// return resumes only a tail still paused for the drop and whose tab is shown (asked of the browser, not remembered), through the same gate as any resume - with the
+    /// identity the circuit held when the connection returned: ASP.NET Core runs the circuit handlers before it installs the new connection's user, so a changed identity
+    /// takes effect at the next pause, as for any grant change (D-M5 3.8). Called by <see cref="KafkaTailCircuitHandler" />, which runs on the renderer's dispatcher.
     /// </summary>
     private Task OnConnectionChangedAsync(bool up)
     {
@@ -1109,14 +1118,46 @@
             });
         }
 
-        // Not awaited, as for the tab: the handler must not wait for a resumed read, which runs for as long as it runs.
-        _ = InvokeAsync(() =>
+        // The flag is cleared in the handler's own turn, in order with a drop that follows it.
+        Task cleared = InvokeAsync(() =>
         {
             connectionLost = false;
-            return ResumeIfPausedForTheTabOrConnectionAsync();
         });
 
-        return Task.CompletedTask;
+        // Deliberately not awaited: CircuitRegistry.ConnectAsync awaits the circuit handlers, so awaiting a resumed read (which runs for as long as it runs) would hold the
+        // reconnect open, and an exception from it would end the circuit. It starts after the framework's handler loop (the Task.Yield in it) and observes its own exceptions.
+        _ = ResumeAfterReconnectAsync();
+
+        return cleared;
+    }
+
+    /// <summary>
+    /// The resume after a reconnect. The tab is asked of the browser once, because a visibility change sent while the circuit was down never arrived and the cached flag may
+    /// be stale; when the browser cannot be asked the tab counts as hidden, so the tail stays paused and goes on at the next visibility change or at the visitor's Resume.
+    /// </summary>
+    private async Task ResumeAfterReconnectAsync()
+    {
+        try
+        {
+            await Task.Yield();
+
+            await InvokeAsync(async () =>
+            {
+                if (disposed || connectionLost || live is not { } watch || pause is not (KafkaTailPause.ConnectionLost or KafkaTailPause.TabHidden))
+                {
+                    return;
+                }
+
+                await watch.ReadIsHiddenAsync(lifetime.Token);
+            });
+        }
+        catch (Exception e) when (disposed || StudioLiveUpdates.IsInteropUnavailable(e))
+        {
+            // Gone while asking.
+            return;
+        }
+
+        await ResumeIfPausedForTheTabOrConnectionAsync();
     }
 
     // ------------------------------------------------------------------------------------------------

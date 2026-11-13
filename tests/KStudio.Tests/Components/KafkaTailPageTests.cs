@@ -73,6 +73,14 @@ public class KafkaTailPageTests
     private static DotNetObjectReference<StudioLiveUpdates> TabWatch(KafkaSearchRig rig) =>
         (DotNetObjectReference<StudioLiveUpdates>) rig.Studio.Context.JSInterop.Invocations["martenStudio.visibility.watch"].Single().Arguments[1]!;
 
+    /// <summary>Waits until the page has asked the browser whether the tab is hidden (after a connection returned), and lets what the answer set going settle.</summary>
+    private static async Task AfterHiddenReadAsync(IRenderedComponent<KafkaTailPage> page, KafkaSearchRig rig, DotNetObjectReference<StudioLiveUpdates> watch)
+    {
+        // Off the test's own context: the page's resume after a reconnect yields onto it, and a blocking wait here would hold it back.
+        await Task.Run(() => page.WaitForAssertion(() => rig.Studio.Context.JSInterop.Invocations["martenStudio.visibility.isHidden"].Should().NotBeEmpty(), Wait));
+        await SettleAsync(rig, watch);
+    }
+
     /// <summary>Lets every handler of the tab's last change hear of it, and the renderer do what they queued.</summary>
     private static async Task SettleAsync(KafkaSearchRig rig, DotNetObjectReference<StudioLiveUpdates> watch)
     {
@@ -373,15 +381,143 @@ public class KafkaTailPageTests
         await resume.Bounded();
         watch.Value.OnVisibilityChanged(true);
         await SettleAsync(rig, watch);
+        rig.Studio.Context.JSInterop.Setup<bool>("martenStudio.visibility.isHidden").SetResult(true);
         await ReturnAsync(rig);
-        await rig.Studio.Context.Renderer.Dispatcher.InvokeAsync(static () => { });
-        page.Find(".ms-k-tail-paused").TextContent.Should().Contain("the connection to this page was lost");
+        await AfterHiddenReadAsync(page, rig, watch);
+        page.Find(".ms-k-tail-paused").TextContent.Should().Contain("the connection to this page was lost").And.Contain("Resume");
         page.FindAll(".ms-k-tail-line").Should().BeEmpty("a hidden tab does not read");
 
         watch.Value.OnVisibilityChanged(false);
         page.WaitForAssertion(() => page.Find(".ms-k-tail-line").TextContent.Should().Contain("on from where it paused"), Wait);
 
         await ClickAsync(page, "Stop");
+    }
+
+    [Fact]
+    public async Task A_returned_connection_asks_the_browser_whether_the_tab_is_hidden_and_not_the_flag_it_remembers()
+    {
+        await using KafkaSearchRig rig = Rig();
+        Seed(rig);
+        IRenderedComponent<KafkaTailPage> page = await OpenAsync(rig);
+
+        Task start = ClickAsync(page, "Start");
+        WaitUntilLive(page);
+        DotNetObjectReference<StudioLiveUpdates> watch = TabWatch(rig);
+        await DropAsync(rig);
+        page.WaitForAssertion(() => page.Find(".ms-k-tail-paused").TextContent.Should().Contain("the connection to this page was lost"), Wait);
+        await start.Bounded();
+
+        // The tab was hidden while the circuit was down: the page never heard of it, and the browser says so when the connection returns.
+        watch.Value.IsHidden.Should().BeFalse("the page still remembers a shown tab");
+        rig.Studio.Context.JSInterop.Setup<bool>("martenStudio.visibility.isHidden").SetResult(true);
+        await ReturnAsync(rig);
+        await AfterHiddenReadAsync(page, rig, watch);
+        rig.Studio.Context.JSInterop.Invocations["martenStudio.visibility.isHidden"].Should().ContainSingle("asked once");
+        watch.Value.IsHidden.Should().BeTrue();
+        page.Find(".ms-k-tail-paused").TextContent.Should().Contain("the connection to this page was lost").And.Contain("Resume");
+        page.FindAll(".ms-k-tail-line").Should().BeEmpty();
+
+        // Shown again: it goes on.
+        watch.Value.OnVisibilityChanged(false);
+        page.WaitForAssertion(() => page.Find(".ms-k-tail-line").TextContent.Should().Contain("on from where it paused"), Wait);
+
+        await ClickAsync(page, "Stop");
+    }
+
+    [Fact]
+    public async Task A_browser_that_cannot_be_asked_counts_as_hidden_and_the_visitors_Resume_still_goes_on()
+    {
+        await using KafkaSearchRig rig = Rig();
+        Seed(rig);
+        IRenderedComponent<KafkaTailPage> page = await OpenAsync(rig);
+
+        Task start = ClickAsync(page, "Start");
+        WaitUntilLive(page);
+        DotNetObjectReference<StudioLiveUpdates> watch = TabWatch(rig);
+        await DropAsync(rig);
+        page.WaitForAssertion(() => page.Find(".ms-k-tail-paused").TextContent.Should().Contain("the connection to this page was lost"), Wait);
+        await start.Bounded();
+
+        rig.Studio.Context.JSInterop.Setup<bool>("martenStudio.visibility.isHidden").SetException(new JSException("gone"));
+        await ReturnAsync(rig);
+        await AfterHiddenReadAsync(page, rig, watch);
+        page.Find(".ms-k-tail-paused").TextContent.Should().Contain("the connection to this page was lost").And.Contain("Resume");
+        page.FindAll(".ms-k-tail-line").Should().BeEmpty("it stays paused");
+
+        Task resume = ClickAsync(page, "Resume");
+        page.WaitForAssertion(() => page.Find(".ms-k-tail-line").TextContent.Should().Contain("on from where it paused"), Wait);
+
+        await ClickAsync(page, "Stop");
+        await resume.Bounded();
+    }
+
+    [Fact]
+    public async Task A_connection_dropped_while_a_segment_is_starting_pauses_it_as_soon_as_it_has_started()
+    {
+        await using KafkaSearchRig rig = Rig();
+        Seed(rig);
+        IRenderedComponent<KafkaTailPage> page = await OpenAsync(rig);
+
+        // The second time the LiveTail policy is asked (the plan asked the first) is the start's own: hold it.
+        int asked = 0;
+        TaskCompletionSource reached = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource<bool> gate = rig.Studio.Authorization.HoldKafka(resource =>
+        {
+            if (resource.Capability != "LiveTail" || Interlocked.Increment(ref asked) != 2)
+            {
+                return false;
+            }
+
+            reached.TrySetResult();
+            return true;
+        });
+
+        Task start = ClickAsync(page, "Start");
+        await reached.Task.Bounded();
+
+        await DropAsync(rig);
+        gate.SetResult(true);
+        page.WaitForAssertion(() => page.Find(".ms-k-tail-paused").TextContent.Should().Contain("Paused: the connection to this page was lost."), Wait);
+        await start.Bounded();
+        rig.Engine.Provider.GetRequiredService<KafkaScanLimiter>().Running.Should().Be(0, "it paused as soon as it had started, and holds no place");
+
+        // Back: it goes on from the cursor.
+        rig.Produce("orders", 0, 10, "after", "x");
+        await ReturnAsync(rig);
+        page.WaitForAssertion(() => Rows(page).Should().Equal("0 / 3"), Wait);
+
+        await ClickAsync(page, "Stop");
+        page.WaitForAssertion(() => page.Find(".ms-k-result-banner").TextContent.Should().Contain("Stopped by you."), Wait);
+        rig.Ring.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task A_drop_and_a_return_back_to_back_while_the_segment_is_still_finishing_leave_the_tail_running_with_no_gap()
+    {
+        await using KafkaSearchRig rig = Rig();
+        Seed(rig);
+        IRenderedComponent<KafkaTailPage> page = await OpenAsync(rig);
+
+        Task start = ClickAsync(page, "Start");
+        WaitUntilLive(page);
+        rig.Produce("orders", 0, 10, "n1", "x");
+        page.WaitForAssertion(() => Rows(page).Should().Equal("0 / 3"), Wait);
+
+        // No wait between them: whichever side of the segment's end the return lands on, the tail goes on.
+        rig.Produce("orders", 0, 11, "n2", "x");
+        Task drop = DropAsync(rig);
+        Task back = ReturnAsync(rig);
+        await drop.Bounded();
+        await back.Bounded();
+
+        page.WaitForAssertion(() => Rows(page).Should().Equal("0 / 4", "0 / 3"), Wait);
+        page.WaitForAssertion(() => page.Find(".ms-k-tail-line").TextContent.Should().Contain("on from where it paused"), Wait);
+        page.FindAll(".ms-k-tail-paused").Should().BeEmpty("the connection is up");
+        rig.Engine.Provider.GetRequiredService<KafkaScanLimiter>().Running.Should().Be(1);
+
+        await ClickAsync(page, "Stop");
+        page.WaitForAssertion(() => page.Find(".ms-k-result-banner").TextContent.Should().Contain("Stopped by you."), Wait);
+        rig.Ring.Should().ContainSingle().Which.Message.Should().Contain("2 segments");
     }
 
     [Fact]

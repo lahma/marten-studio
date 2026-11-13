@@ -331,6 +331,8 @@ public class LogLevelsTests
             "Planning threw, on the visitor's Start: one line per click, and the page says the tail failed."),
         ["src/KStudio/Components/Pages/KafkaTailBody.razor : The Kafka tail page failed to start a live tail"] = (Verdict.VisitorAction,
             "Planning or starting a segment threw on the visitor's Resume or Jump to now, or on the tab being shown again: one line per click or per change of the tab, and the page says the tail failed."),
+        ["src/KStudio/Components/Pages/KafkaTailBody.razor : The Kafka tail page failed to resume a live tail"] = (Verdict.VisitorAction,
+            "A resume nobody awaits (the tab shown again, or the connection back) threw past the page's own handling: one line per change of the tab or per reconnect, and the page says the tail failed."),
         ["src/KStudio/Components/Pages/KafkaTailBody.razor : The Kafka tail page failed while reading a live tail"] = (Verdict.VisitorAction,
             "The batch loop of a tail the visitor started threw (the engine returns every broker failure as a value): one line per tail, the page says the same."),
         ["src/KStudio/Components/Pages/KafkaTailBody.razor : The Kafka tail page's live update failed"] = (Verdict.Throttled,

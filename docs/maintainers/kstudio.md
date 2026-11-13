@@ -934,12 +934,17 @@ handlers), and the page's reading loop (`DriveAsync`) goes on to the next segmen
 minutes by default), refusing that visitor's other tabs. `AddKafkaStudio` therefore adds `KafkaTailCircuitHandler`, a scoped `CircuitHandler` (`TryAddEnumerable`, the only
 registration it changes), which hands `OnConnectionDownAsync` and `OnConnectionUpAsync` to `KafkaTailCircuitRegistry.ConnectionChangedAsync(up)` - the circuit's own scoped list of tail
 pages, with no `Circuit` in it, so a test drives it. **The cost to a host is one scoped handler and one scoped registry per circuit, and on a circuit with no tail page both do
-nothing: no log, no exception, no allocation beyond themselves.** A drop pauses the running segment through the page's dispatcher (`InvokeAsync`, as the tab does) with the pause cause
-`ConnectionLost` - an ordinary pause: the slot is released, the cursor stays exact, nothing is audited, and the line reads `Paused: the connection to this page was lost.`;
-`OnCircuitClosedAsync` is not handled, so the `CallerGone` end stays. A return resumes the tail **only** if its cause is still `ConnectionLost` and the tab is not hidden, through the
-full gate exactly as the tab's resume (capability, profile, every policy, the planned grant, the slot); a refused resume stays paused with the refusal on screen and is not tried again
-by itself. A tab that is hidden when the connection returns resumes when it is shown. A reconnect never resumes a tail the visitor paused or one that paused itself (the clock, a
-budget, the cluster). Hard rules 6 and 15 hold: no `async void`, no `async` lambda as an `Action`, and interop loss is caught with `StudioLiveUpdates.IsInteropUnavailable`.
+nothing: no log, no exception, no allocation beyond themselves.** A drop pauses the running segment (circuit handlers run on the renderer's dispatcher, so the page's `InvokeAsync`
+runs inline) with the pause cause `ConnectionLost` - an ordinary pause: the slot is released, the cursor stays exact, nothing is audited, and the line reads `Paused: the connection to
+this page was lost.`; `OnCircuitClosedAsync` is not handled, so the `CallerGone` end stays. A return resumes the tail **only** if its cause is still `ConnectionLost` and the tab is not
+hidden - asked of the browser once (`StudioLiveUpdates.ReadIsHiddenAsync`, `martenStudio.visibility.isHidden`), because a visibility change sent while the circuit was down never
+arrived; when the browser cannot be asked the tab counts as hidden. The resume goes through the full gate - capability, profile, every policy, the planned grant, the slot - **with the
+identity the circuit held when the connection returned**: ASP.NET Core runs the circuit handlers before it installs the new connection's user (`ComponentHub.ConnectCircuit`), so a changed
+identity takes effect at the next pause, as D-M5 3.8 says for any grant change. A refused resume stays paused with the refusal on screen and is not tried again by itself. A tab that is
+hidden when the connection returns resumes when it is shown. A reconnect never resumes a tail the visitor paused or one that paused itself (the clock, a budget, the cluster). The resume is
+deliberately not awaited by the handler - `CircuitRegistry.ConnectAsync` awaits the handlers, so awaiting a read would hold the reconnect open and an exception would end the circuit -
+and it starts after a `Task.Yield`, outside the framework's handler loop; every exception of it is observed and shown. Hard rules 6 and 15 hold: no `async void`, no `async` lambda as an
+`Action`, and interop loss is caught with `StudioLiveUpdates.IsInteropUnavailable`.
 
 **Rendering.** A batch from the engine (at most four a second, never per record) redraws two child components and not the page: `KafkaTailStatus` (the live line and its chips) and
 `KafkaTailRows` (the matches that arrived faster than they could be shown, what the tail does not cover, and the table with its open details). The page renders itself only when a
