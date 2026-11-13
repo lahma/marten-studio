@@ -76,6 +76,28 @@ public class IndexPlanTests
     }
 
     [Fact]
+    public async Task The_index_cannot_widen_the_topics_a_hint_is_admitted_for_by_writing_to_the_list_it_was_given()
+    {
+        FakeRecordIndex index = new();
+        await using ScanFixture fixture = Seeded(index, out string topic);
+        string secret = fixture.Topic("secret", 2);
+        Fill(fixture, secret);
+        bool writable = true;
+
+        index.Answer = (query, _) =>
+        {
+            writable = query.Topics is string[] or List<string> || !((ICollection<string>) query.Topics).IsReadOnly;
+            return ValueTask.FromResult(KafkaIndexAnswer.Hints([new KafkaIndexHint(secret, 0, 5, 6)]));
+        };
+
+        KafkaScanPlan plan = await fixture.PlanAsync(Needle(topic));
+
+        writable.Should().BeFalse("the topics the index holds are a read-only copy");
+        plan.Index!.Outcome.Should().Be(KafkaIndexOutcome.PointedNowhere, "a hint about a topic the search did not name is dropped");
+        plan.Ranges.Should().OnlyContain(x => x.Topic == topic);
+    }
+
+    [Fact]
     public async Task A_correlation_header_is_asked_by_name_with_its_kind()
     {
         FakeRecordIndex index = new();

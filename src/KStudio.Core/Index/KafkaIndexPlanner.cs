@@ -89,10 +89,11 @@ internal sealed class KafkaIndexPlanner(
         try
         {
             IKafkaRecordIndex index = resolver.Get()!;
+            // The index is given a read-only copy of the topics: whatever it does to what it holds, the topics the narrowing admits hints for are the search's.
             KafkaIndexQuery query = new(
                 ask.Definition.Key,
                 ask.Definition.TenantId,
-                ask.Topics,
+                Array.AsReadOnly(ask.Topics.ToArray()),
                 ask.Window.From,
                 ask.Window.To,
                 clause.Field,
