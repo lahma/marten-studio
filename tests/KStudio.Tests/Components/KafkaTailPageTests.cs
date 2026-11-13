@@ -76,9 +76,16 @@ public class KafkaTailPageTests
     /// <summary>Waits until the page has asked the browser whether the tab is hidden (after a connection returned), and lets what the answer set going settle.</summary>
     private static async Task AfterHiddenReadAsync(IRenderedComponent<KafkaTailPage> page, KafkaSearchRig rig, DotNetObjectReference<StudioLiveUpdates> watch)
     {
-        // Off the test's own context: the page's resume after a reconnect yields onto it, and a blocking wait here would hold it back.
-        await Task.Run(() => page.WaitForAssertion(() => rig.Studio.Context.JSInterop.Invocations["martenStudio.visibility.isHidden"].Should().NotBeEmpty(), Wait));
-        await SettleAsync(rig, watch);
+        // Off the test's own context: the page's resume after a reconnect yields onto it, and a blocking wait here would hold it back. A condition poll and not
+        // page.WaitForAssertion: that rechecks only when the page renders, and asking the browser renders nothing, so on a slow machine it checked once and waited for ever.
+        bool asked = await Task.Run(() => SpinWait.SpinUntil(() => rig.Studio.Context.JSInterop.Invocations["martenStudio.visibility.isHidden"].Count > 0, Wait));
+        asked.Should().BeTrue("the page asks the browser once the connection is back");
+
+        // What the answer sets going (the flag, the change, the decision to resume or not) runs after the call is recorded: let it finish.
+        for (int i = 0; i < 3; i++)
+        {
+            await SettleAsync(rig, watch);
+        }
     }
 
     /// <summary>Lets every handler of the tab's last change hear of it, and the renderer do what they queued.</summary>
