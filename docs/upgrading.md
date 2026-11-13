@@ -5,7 +5,9 @@
 - **`PostgresStudio.DisableNavigationInterception` is removed.** 1.2 introduced it as a temporary AppContext switch that
   restored 1.1's navigation (an enhanced-navigation fetch per page) and promised to remove it in 1.3. A host that still
   sets it gets 1.2's default navigation, handled inside the studio's circuit: the setting is read by nothing and is
-  harmless, and the `AppContext.SetSwitch(...)` call can be deleted. No option, type or public API changed.
+  harmless, and the `AppContext.SetSwitch(...)` call can be deleted. Removing it changed no option, type or public API.
+
+# Upgrading to 1.2
 
 ## 1.1 → 1.2: what changes without a setting
 
