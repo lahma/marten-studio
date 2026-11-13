@@ -203,41 +203,99 @@ public class UnplacedTenantPageTests
     }
 
     /// <summary>
-    /// A page that asks while the placement is still being worked out is told the address is unplaced, so it reads nothing and never shows the
-    /// other database's record; it is told again, even when the scope did not move, when the answer is in.
+    /// The race, run: the page's own placement call A is held, a second call B for the same address is started and held, A is released and
+    /// the page - which a superseded call leaves with a placement still pending - reads nothing and says what it says of an id that is not
+    /// there; B then places the tenant in the database already on screen, so the scope does not move, and the page must be told anyway
+    /// (the notify on settle) and show the record. Then the reverse: the listings answer differently, B' does not place the tenant, the scope
+    /// does not move, and the page - started by the scope-change handler, which renders nothing of its own - must draw the not-found wording
+    /// (the <c>StateHasChanged</c> in its unplaced branch).
     /// </summary>
-    [Theory]
-    [InlineData(null)]
-    [InlineData("db-a")]
-    [InlineData("db-b")]
-    public async Task A_page_that_asks_during_the_race_never_shows_the_other_databases_record(string? placedIn)
+    [Fact]
+    public async Task A_page_that_asks_during_the_race_never_shows_the_other_databases_record_and_is_told_when_the_placement_settles()
     {
         using DocumentsComponentContext context = TwoDatabases();
-        context.Catalog.WithPlacement("default", "initech", placedIn);
+        context.Catalog.WithPlacement("default", "initech", "db-a");
         await context.State.EnsureInitializedAsync(Token);
-        context.Catalog.PlaceGate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource gateA = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource gateB = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        context.Catalog.PlaceGates.Enqueue(gateA);
+        context.Catalog.PlaceGates.Enqueue(gateB);
         context.Navigate($"marten/documents/customer/doc?id={Id}&tenant=initech");
 
+        // The page's own call is A, held. B is the same address again, as the shell's own call would be.
         IRenderedComponent<DetailPage> page = context.Render<DetailPage>(parameters => parameters.Add(x => x.Alias, "customer"));
+        Task b = page.InvokeAsync(() => context.State.SetScopeAsync("default", null, "initech", Token));
+        context.Catalog.PlaceCalls.Should().HaveCount(2, "the premise: both calls are in the catalog, held");
 
         context.State.IsTenantUnplaced(null, null, "initech").Should().BeTrue("a placement still being worked out is unplaced");
-        page.Markup.Should().NotContain("Customer 01", "the id in the database on screen is not the tenant's, and nothing has been placed yet");
+        page.Markup.Should().NotContain("Customer 01");
 
-        // The answer arrives; the scope moves for db-b only, and the page is told either way.
-        context.Catalog.PlaceGate.SetResult();
+        // A is released and is superseded by B: it applies nothing, and the page goes on while B's placement is still pending.
+        gateA.SetResult();
+        page.WaitForAssertion(() => page.Find(".ms-empty-description").TextContent.Should().Contain("No document with id"));
+        context.Data.DocumentReads.Should().BeEmpty("nothing was read while the tenant was unplaced");
+        page.Markup.Should().NotContain("Customer 01");
 
-        if (placedIn is null)
-        {
-            page.WaitForAssertion(() => page.Find(".ms-empty-description").TextContent.Should().Contain("No document with id"));
-            page.Markup.Should().NotContain("Customer 01");
-            context.State.IsTenantUnplaced(null, null, "initech").Should().BeTrue();
-        }
-        else
-        {
-            page.WaitForAssertion(() => page.Markup.Should().Contain("Customer 01"));
-            context.State.ActiveScope!.DatabaseId.Should().Be(placedIn);
-            context.State.IsTenantUnplaced(null, null, "initech").Should().BeFalse();
-        }
+        // B places the tenant in the database already on screen: the scope does not move, and the page is told anyway.
+        gateB.SetResult();
+        await b;
+        page.WaitForAssertion(() => page.Markup.Should().Contain("Customer 01"));
+        context.Data.DocumentReads.Should().OnlyContain(static x => x.DatabaseId == "db-a");
+        context.State.IsTenantUnplaced(null, null, "initech").Should().BeFalse();
+
+        // The reverse. The address is forgotten (a call for another address), the listings now place the tenant nowhere, and the same
+        // address is applied again; the scope does not move, and the handler's load must draw the words.
+        await page.InvokeAsync(() => context.State.SetScopeAsync("default", "db-a", null, Token));
+        context.Catalog.WithPlacement("default", "initech", null);
+        await page.InvokeAsync(() => context.State.SetScopeAsync("default", null, "initech", Token));
+
+        page.WaitForAssertion(() => page.Find(".ms-empty-description").TextContent.Should().Contain("No document with id"));
+        page.Markup.Should().NotContain("Customer 01");
+    }
+
+    /// <summary>
+    /// Refreshing the listings reads everything again, but an address that was unplaced stays unplaced (pending, until it is applied again):
+    /// the shell must not rewrite it to the scope on screen in between, which would drop the tenant and let the page read the other database.
+    /// </summary>
+    [Fact]
+    public async Task Refreshing_the_listings_while_an_address_is_unplaced_does_not_rewrite_it()
+    {
+        await using Shell shell = StartShell(unplaced: true);
+        await shell.Routes.InvokeAsync(() => { });
+        shell.Navigation.Uri.Should().Contain("tenant=initech", "the premise");
+
+        await shell.Routes.InvokeAsync(() => shell.Context.State.RefreshScopeListingsAsync(Token));
+        await shell.Routes.InvokeAsync(() => { });
+
+        shell.Context.State.IsTenantUnplaced(null, null, "initech").Should().BeTrue();
+        shell.Navigation.Uri.Should().Contain("tenant=initech").And.NotContain("db=");
+        shell.Routes.Markup.Should().Contain("No document with id").And.NotContain("Customer 01");
+    }
+
+    /// <summary>
+    /// The shell reads the address the page binds with <c>[SupplyParameterFromQuery]</c>, and for a repeated key Blazor binds the first value
+    /// (.NET 10, <c>QueryParameterValueSupplier</c> takes <c>values[0]</c>) - not the last, and not a comma-joined list - so the shell, which
+    /// decides whether the address is the unplaced one, must read the same value as the page that would read the id.
+    /// </summary>
+    [Fact]
+    public async Task A_repeated_query_parameter_is_read_by_the_shell_as_the_page_binds_it()
+    {
+        using DocumentsComponentContext context = TwoDatabases();
+        await context.State.EnsureInitializedAsync(Token);
+        context.Navigate($"marten/documents/customer/doc?id={Id}&tenant=a&tenant=b&db=d1&db=d2");
+
+        IRenderedComponent<DetailPage> page = context.Render<DetailPage>(parameters => parameters.Add(x => x.Alias, "customer"));
+        await page.InvokeAsync(() => { });
+
+        page.Instance.TenantId.Should().Be("a", "the page binds the first of a repeated key");
+        page.Instance.DatabaseId.Should().Be("d1");
+
+        (string? store, string? database, string? tenant) = StudioScopeQuery.Read(
+            "http://localhost/marten/documents/customer/doc?store=s1&store=s2&id=" + Id + "&tenant=a&tenant=b&db=d1&db=d2",
+            "store");
+
+        (store, database, tenant).Should().Be(("s1", "d1", "a"));
+        StudioScopeQuery.Read("http://localhost/marten/?tenant=&tenant=b", "store").TenantId.Should().BeNull("a blank first value is blank, as the page binds it");
     }
 
     /// <summary>A scope that did not move still notifies the pages once an address's placement has been settled, and not again for the same address.</summary>

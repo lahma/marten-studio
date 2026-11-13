@@ -241,8 +241,10 @@ internal sealed class StudioState
     {
         StudioScope? previous = ActiveScope;
 
-        // The listings are read again, so what an address's tenant was placed by is read again with them.
-        placement = null;
+        // The listings are read again, so what an address's tenant was placed by is read again with them. An address that was unplaced stays
+        // unplaced - pending, until the next SetScopeAsync for it places it again - so that refreshing the listings never lets a page read its
+        // id in the database on screen.
+        placement = placement is { Unplaced: true } kept ? kept with { Pending = true } : null;
 
         StoreListings listings = await catalog.ListStoresAsync(cancellationToken).ConfigureAwait(false);
         AvailableStores = listings.Listed;

@@ -164,8 +164,11 @@ internal sealed class FakeStudioScopeCatalog : IStudioScopeCatalog
         return this;
     }
 
-    /// <summary>A gate held shut on <see cref="PlaceDeclaredTenantAsync" />, as a policy handler that yields holds the real catalog's.</summary>
-    public TaskCompletionSource? PlaceGate { get; set; }
+    /// <summary>
+    /// Gates held shut on <see cref="PlaceDeclaredTenantAsync" />, one per call in the order the calls arrive, as a policy handler that yields
+    /// holds the real catalog's: the first call waits on the first gate, the second on the second, and a call with none waits for nothing.
+    /// </summary>
+    public Queue<TaskCompletionSource> PlaceGates { get; } = new();
 
     public async Task<DeclaredTenantPlacement> PlaceDeclaredTenantAsync(
         string storeKey,
@@ -175,7 +178,7 @@ internal sealed class FakeStudioScopeCatalog : IStudioScopeCatalog
     {
         PlaceCalls.Add((storeKey, databaseIds, tenantId));
 
-        if (PlaceGate is { } gate)
+        if (PlaceGates.TryDequeue(out TaskCompletionSource? gate))
         {
             await gate.Task.Bounded();
         }

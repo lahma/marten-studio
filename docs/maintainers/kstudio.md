@@ -716,7 +716,8 @@ seam (a Postgres Studio host) nothing is drawn. MartenStudio answers `null` for 
 document type, for an ambiguous type, for a tenancy of the application's own (nothing says where its tenants are), and for a multi-tenanted store
 with no tenant, whether its tenants share a database or each has one (a link would open the visitor's own tenant and say "not found", which is false).
 A store that keeps each tenant in a database of its own gets a link with the tenant and no `db` (the link never names a database, so it never
-names one the visitor may not see) in two cases; the tenant is the id as `TenantIdStyle.MaybeCorrectTenantId` writes it (the link stays pure).
+names one the visitor may not see) in two cases. A static tenancy's link carries the tenant as `TenantIdStyle.MaybeCorrectTenantId` writes it, because its declaration holds ids that way (the link
+stays pure); every other kind carries the id exactly as the record spelt it, so `KnownTenantIds` and the tenant listings match as they always did.
 **A static tenancy** (`MultiTenantedDatabases(...)`) gets one whether or not its rows are tenanted (ZW38), except where they are tenanted and the
 host listed `KnownTenantIds` (the database on screen then "lists" every tenant, so `SetScopeAsync` never searches): the host declared in
 configuration which database serves each tenant, and `StudioState.SetScopeAsync` places the tenant from that declaration
@@ -728,11 +729,17 @@ database found is put to the store policy `(store, db, null)` once more and, whe
 policy-filtered listing. The search has no 32-database bound (it asks nothing of any database); the bound stays for the tenant-listing search.
 Where rows are single-tenanted the page then opens that database with no tenant in the scope, as any page of such a store does.
 **A tenant that is not placed is one answer** (undeclared, declared twice, a refused database, an unreadable source): the scope stays on the usual
-database with no tenant, `StudioState.IsTenantUnplaced(store, db, tenant)` is true for that address until the next `SetScopeAsync` for any other
-address, `StudioLayout.SyncScopeToUrl` leaves the address as it was (rewriting it to the scope on screen would drop the tenant), and `DocumentDetail`
-and `StreamDetail` - the pages `ToDocument` and `ToStream` open - show their ordinary not-found wording without reading, the same words whatever
-the cause, so nothing can be probed. A placement is remembered for its address so that a page re-applying its address on every parameter set does
-not search again. **A master-table, sharded or
+database with no tenant, and `StudioState.IsTenantUnplaced(store, db, tenant)` is true for that address. `DocumentDetail` and `StreamDetail` - the
+pages `ToDocument` and `ToStream` open - show their ordinary not-found wording without reading, the same words whatever the cause, so nothing can be
+probed. **Only the address on screen is kept:** `StudioLayout.SyncScopeToUrl` skips its rewrite when the address it parses
+(`StudioScopeQuery.Read`, which takes the first value of a repeated key, as Blazor's `[SupplyParameterFromQuery]` does) is itself unplaced - rewriting
+it to the scope on screen would drop the tenant - and rewrites every other address as in 1.2.0, so an unplaced address elsewhere in the circuit's
+history changes nothing for them (Back to an address that names no database, a link to another or a refused store). **A placement still pending
+counts as unplaced:** from the start of `SetScopeAsync` for an address that names a tenant and no database until it is placed, a page that asks is told
+the address is unplaced and reads nothing, and the scope listeners are notified when it settles even if the scope did not move, so the page reads
+then. **The answer for every address is remembered** - placed, not placed, or "no source declares this" - until another address is applied or the
+listings are refreshed, so a page that re-applies its own address on every parameter set does not search again and the settle notification does not
+repeat; a refresh keeps an unplaced address unplaced (pending) rather than forgetting it. **A master-table, sharded or
 one-server tenancy** gets a link only when it keeps its rows per tenant (`StoreTenancy.KeepsRowsPerTenant`, the test behind its tenant selector) and the
 host listed no `KnownTenantIds`: the page opens the first database, among those the visitor may see, whose tenant listing carries that tenant (at most
 32 searched, TENANT-DB). Where documents and events are single-tenanted (master table and one-server tenancies in Marten 9.57.0) no database lists

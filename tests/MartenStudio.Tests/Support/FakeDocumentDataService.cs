@@ -36,6 +36,9 @@ internal sealed class FakeDocumentDataService : IDocumentDataService
     /// <summary>What one document read answers.</summary>
     public DocumentDetailResult Detail { get; set; } = DocumentDetailResult.Missing("nothing set up");
 
+    /// <summary>The scope of every document read, in order.</summary>
+    public List<StudioScope> DocumentReads { get; } = [];
+
     /// <summary>The related documents.</summary>
     public RelatedDocuments Related { get; set; } = RelatedDocuments.None;
 
@@ -94,8 +97,11 @@ internal sealed class FakeDocumentDataService : IDocumentDataService
         StudioScope scope,
         string alias,
         string id,
-        CancellationToken cancellationToken = default) =>
-        Failure is null ? Task.FromResult(Detail) : Task.FromException<DocumentDetailResult>(Failure);
+        CancellationToken cancellationToken = default)
+    {
+        DocumentReads.Add(scope);
+        return Failure is null ? Task.FromResult(Detail) : Task.FromException<DocumentDetailResult>(Failure);
+    }
 
     public Task<RelatedDocuments> GetRelatedAsync(
         StudioScope scope,
