@@ -227,11 +227,11 @@ public class KafkaProfileAllowanceTests
     }
 
     [Fact]
-    public void The_text_for_a_profile_refusal_names_the_setting()
+    public void The_text_for_a_profile_refusal_is_neutral_and_names_no_builder()
     {
         string text = KafkaStudioText.Refusal(KafkaScanRefusal.ProfileForbids, new KafkaScanLimits());
 
-        text.Should().Contain("KafkaClusterBuilder.Profile").And.Contain("Production").And.Contain("even when they are granted");
+        text.Should().Be("This cluster's profile does not allow this.").And.NotContain("KafkaClusterBuilder");
         text.Should().NotBe(KafkaStudioText.SearchFailed, "the default arm is not what a profile refusal says");
     }
 

@@ -50,8 +50,10 @@ Reading records does:
 | `LiveTail` | `false` | Following topics as records arrive, from the end of each partition. Needs `SearchRecords`. Never on a `Production` cluster. |
 
 A page leaves out the controls of a capability that is off, or that the cluster's profile forbids (no Export, no Live tail entry
-or link), and a page reached by its address says in one sentence that the feature is not available here; **Cluster settings**
-lists each capability with the option that turns it on, which is the only page that names an option.
+or link), and a page reached by its address says in one sentence that the feature is not available here. No page's own text
+names an option or a builder method except **Cluster settings**, which lists each capability with the option that turns it on and
+says how a profile and consumer groups are declared. The header's capabilities list and the audit entries on Activity name the options too: they
+are for the people who run the application.
 
 `KafkaStudioOptions.ClusterAuthorizationPolicy` is asked about every cluster and every topic a page or a search touches,
 on a `KafkaTopicResource(Cluster, TenantId, Topic, Capability)`; a topic it refuses is absent from every list, and a

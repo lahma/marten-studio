@@ -117,7 +117,7 @@ public class KafkaSearchTextTests
         TimeZoneInfo helsinki = TimeZoneInfo.FindSystemTimeZoneById("Europe/Helsinki");
         DateTimeOffset from = new(2026, 11, 12, 8, 0, 0, TimeSpan.Zero);
 
-        KafkaSearchText.WindowLine(from, from.AddHours(1), helsinki).Should().Be("10:00–11:00 Europe/Helsinki · 08:00Z–09:00Z");
+        KafkaSearchText.WindowLine(from, from.AddHours(1), helsinki).Should().Be("10:00–11:00 Europe/Helsinki (UTC+02:00) · 08:00Z–09:00Z");
     }
 
     [Fact]
@@ -128,13 +128,25 @@ public class KafkaSearchTextTests
         TimeZoneInfo negative = TimeZoneInfo.CreateCustomTimeZone("Pacific Standard Time", TimeSpan.FromHours(-8), "Pacific", "Pacific Standard Time");
         TimeZoneInfo half = TimeZoneInfo.CreateCustomTimeZone("India Standard Time", new TimeSpan(5, 30, 0), "India", "India Standard Time");
 
-        KafkaSearchText.ZoneLabel(TimeZoneInfo.FindSystemTimeZoneById("Europe/Helsinki"), at).Should().Be("Europe/Helsinki");
+        KafkaSearchText.ZoneLabel(TimeZoneInfo.FindSystemTimeZoneById("Europe/Helsinki"), at).Should().Be("Europe/Helsinki (UTC+02:00)", "an IANA id keeps its name and gains the offset");
         KafkaSearchText.ZoneLabel(windowsStyle, at).Should().Be("UTC+02:00");
         KafkaSearchText.ZoneLabel(negative, at).Should().Be("UTC-08:00");
         KafkaSearchText.ZoneLabel(half, at).Should().Be("UTC+05:30");
         KafkaSearchText.ZoneLabel(TimeZoneInfo.Utc, at).Should().Be("UTC");
 
         KafkaSearchText.WindowLine(at, at.AddHours(1), windowsStyle).Should().Be("10:00–11:00 UTC+02:00 · 08:00Z–09:00Z");
+    }
+
+    [Fact]
+    public void A_skipped_local_time_names_the_zone_as_the_label_does_never_by_a_Windows_id()
+    {
+        TimeZoneInfo helsinki = TimeZoneInfo.FindSystemTimeZoneById("Europe/Helsinki");
+        TimeZoneInfo windowsStyle = TimeZoneInfo.CreateCustomTimeZone("FLE Standard Time", TimeSpan.FromHours(2), "(UTC+02:00) Helsinki", "FLE Standard Time");
+        DateTime gap = new(2026, 3, 29, 3, 30, 0, DateTimeKind.Unspecified);
+
+        helsinki.IsInvalidTime(gap).Should().BeTrue();
+        KafkaSearchText.SkippedLocalTime("2026-03-29T03:30", gap, helsinki).Should().Be("2026-03-29T03:30 does not exist in Europe/Helsinki (UTC+02:00) (the clocks skip it).");
+        KafkaSearchText.SkippedLocalTime("2026-03-29T03:30", gap, windowsStyle).Should().Be("2026-03-29T03:30 does not exist in UTC+02:00 (the clocks skip it).");
     }
 
     [Fact]
@@ -158,7 +170,7 @@ public class KafkaSearchTextTests
         DateTimeOffset to = new(2026, 11, 12, 11, 48, 0, TimeSpan.Zero);
 
         KafkaSearchText.WindowLine(to.AddHours(-24), to, helsinki).Should()
-            .Be("2026-11-11 13:48–2026-11-12 13:48 Europe/Helsinki · 2026-11-11 11:48Z–2026-11-12 11:48Z", "24 h must not read 13:48–13:48");
+            .Be("2026-11-11 13:48–2026-11-12 13:48 Europe/Helsinki (UTC+02:00) · 2026-11-11 11:48Z–2026-11-12 11:48Z", "24 h must not read 13:48–13:48");
     }
 
     [Fact]

@@ -211,7 +211,7 @@ public class KafkaTopicPageTests
 
         IRenderedComponent<KafkaTopicPage> page = await OpenAsync(rig, "orders");
 
-        page.WaitForAssertion(() => page.Markup.Should().Contain("No consumer groups are declared for this cluster: add KafkaClusterBuilder.ConsumerGroup(\"…\") to show their lag here."));
+        page.WaitForAssertion(() => page.Markup.Should().Contain("No consumer groups are declared for this cluster.").And.NotContain("KafkaClusterBuilder"));
     }
 
     [Fact]

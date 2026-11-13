@@ -94,8 +94,8 @@ internal static class KafkaSearchText
     }
 
     /// <summary>
-    /// How a time zone is named beside a time (#77): an IANA id as it is (<c>Europe/Helsinki</c>), otherwise the UTC offset at <paramref name="at" />
-    /// (<c>UTC+02:00</c>, or <c>UTC</c> at no offset). Never a Windows id such as <c>FLE Standard Time</c>, which reads as a display name it is not.
+    /// How a time zone is named beside a time (#77): an IANA id with the UTC offset at <paramref name="at" /> (<c>Europe/Helsinki (UTC+02:00)</c>), otherwise the
+    /// offset alone (<c>UTC+02:00</c>, or <c>UTC</c> at no offset). Never a Windows id such as <c>FLE Standard Time</c>, which reads as a display name it is not.
     /// </summary>
     /// <param name="zone">The zone.</param>
     /// <param name="at">The time the offset is read at.</param>
@@ -103,16 +103,26 @@ internal static class KafkaSearchText
     {
         ArgumentNullException.ThrowIfNull(zone);
 
-        if (zone.Id.Contains('/', StringComparison.Ordinal))
-        {
-            return zone.Id;
-        }
-
         TimeSpan offset = zone.GetUtcOffset(at);
-
-        return offset == TimeSpan.Zero
+        string shown = offset == TimeSpan.Zero
             ? "UTC"
             : "UTC" + (offset < TimeSpan.Zero ? "-" : "+") + offset.Duration().ToString(@"hh\:mm", CultureInfo.InvariantCulture);
+
+        return zone.Id.Contains('/', StringComparison.Ordinal) ? zone.Id + " (" + shown + ")" : shown;
+    }
+
+    /// <summary>The page's line for a local time the zone's clocks skip, naming the zone as <see cref="ZoneLabel" /> does, never by a Windows id.</summary>
+    /// <param name="shown">The time as the visitor typed it.</param>
+    /// <param name="local">The time, kind unspecified.</param>
+    /// <param name="zone">The zone it was typed in.</param>
+    public static string SkippedLocalTime(string shown, DateTime local, TimeZoneInfo zone)
+    {
+        ArgumentNullException.ThrowIfNull(zone);
+
+        // The zone's offset before its clocks skipped this time: the standard offset, read an hour before the gap's start.
+        DateTimeOffset at = new DateTimeOffset(DateTime.SpecifyKind(local - zone.BaseUtcOffset, DateTimeKind.Utc)).AddHours(-1);
+
+        return $"{shown} does not exist in {ZoneLabel(zone, at)} (the clocks skip it).";
     }
 
     /// <summary>

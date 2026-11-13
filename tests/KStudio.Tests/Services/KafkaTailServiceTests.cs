@@ -104,7 +104,7 @@ public class KafkaTailServiceTests
 
         string text = plan.Should().BeOfType<KafkaTailPlanResult.Refused>().Subject.Text;
         text.Should().Be(KafkaStudioText.ProfileForbids(KafkaStudioText.LiveTailAction, rig.Entry));
-        text.Should().Contain("KafkaClusterBuilder.Profile").And.Contain("even when they are granted");
+        text.Should().Be("This cluster's profile does not allow live tail.").And.NotContain("KafkaClusterBuilder");
         rig.BrokerCalls.Should().Be(callsBefore);
 
         StudioActionLogEntry entry = rig.Ring.Should().ContainSingle().Subject;

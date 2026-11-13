@@ -75,6 +75,18 @@ public class KafkaSettingsPageTests
     }
 
     [Fact]
+    public async Task The_builder_hints_for_the_profile_and_for_consumer_groups_are_on_Settings()
+    {
+        await using KafkaCatalogRig rig = Rig(o => o.AddCluster("settings", new ClientConfig { BootstrapServers = "broker-1:9092" }));
+
+        IRenderedComponent<KafkaSettingsPage> page = await OpenAsync(rig);
+
+        page.WaitForAssertion(() => page.FindAll(".ms-k-profile-hint").Should().ContainSingle());
+        page.Find(".ms-k-profile-hint").TextContent.Should().Contain("KafkaClusterBuilder.Profile").And.Contain("even when they are granted");
+        page.Find(".ms-k-groups-hint").TextContent.Should().Contain("KafkaClusterBuilder.ConsumerGroup");
+    }
+
+    [Fact]
     public async Task The_overrides_table_lists_D37()
     {
         await using KafkaCatalogRig rig = Rig(o => o.AddCluster("settings", new ClientConfig { BootstrapServers = "broker-1:9092" }));
