@@ -117,7 +117,8 @@ public abstract class ReadNeverWritesMetadataLiveTests(KafkaFixture fixture)
         string topic = cluster.NewTopic("lag");
         await cluster.CreateTopicAsync(topic, 1);
         await cluster.ProduceAsync(topic, 0, [LiveRecords.At(0, "k", "v")]);
-        string asked = "kstudio-lag-" + fixture.RunId;
+        // Not "kstudio-lag-{RunId}": AclCatalogLiveTests commits offsets for that name in the same fixture, so the group would be listed whenever it ran first.
+        string asked = "kstudio-never-joined-" + Guid.NewGuid().ToString("N")[..8];
 
         WireResult<IReadOnlyList<WireGroupOffset>> read = await cluster.Wire.ListGroupOffsetsAsync(asked, [new WirePartition(topic, 0)], Token);
         read.IsOk.Should().BeTrue("a group that does not exist has no committed offsets, which is an answer");

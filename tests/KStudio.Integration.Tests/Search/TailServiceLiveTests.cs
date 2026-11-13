@@ -98,7 +98,8 @@ public abstract class TailServiceLiveTests(KafkaFixture fixture)
 
         KafkaTailPlanResult plan = await host.Tail.PlanAsync(new KafkaTailInput(host.Entry, [topic], null, IncludeUncommitted: false), null, Token);
 
-        plan.Should().BeOfType<KafkaTailPlanResult.Refused>().Which.Text.Should().Contain("KafkaClusterBuilder.Profile").And.Contain("even when they are granted");
+        plan.Should().BeOfType<KafkaTailPlanResult.Refused>().Which.Text.Should().Be("This cluster's profile does not allow live tail.", "the visitor's text is neutral and names no option (#74)").And.NotContain("KafkaClusterBuilder");
+        host.Ring.Where(static x => x.Action == "LiveTail").Should().ContainSingle().Which.Succeeded.Should().BeFalse();
         host.Logs.Entries.Should().Contain(static x => x.EventId.Id == 9609);
         host.Logs.Entries.Should().NotContain(static x => x.EventId.Id == 9607);
     }

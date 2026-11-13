@@ -131,8 +131,9 @@ public abstract class ExportLiveTests(KafkaFixture fixture)
             Token);
 
         outcome.Delivered.Should().BeFalse();
-        outcome.Text.Should().Contain("KafkaClusterBuilder.Profile");
+        outcome.Text.Should().Be("This cluster's profile does not allow exporting records.", "the visitor's text is neutral and names no option (#74)").And.NotContain("KafkaClusterBuilder");
         saved.FileName.Should().BeNull();
+        host.Ring.Where(static x => x.Action == "ExportRecords").Should().ContainSingle().Which.Succeeded.Should().BeFalse();
         host.Logs.Entries.Should().Contain(static x => x.EventId.Id == 9609);
         host.Logs.Entries.Should().NotContain(static x => x.EventId.Id == 9606);
     }
