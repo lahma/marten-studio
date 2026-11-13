@@ -63,6 +63,7 @@ public class KafkaTailTextTests
     public void A_pause_the_page_asked_for_keeps_its_cause_and_one_it_did_not_is_the_visitors()
     {
         KafkaTailText.PauseOf(KafkaScanStopReason.Paused, KafkaTailPause.TabHidden).Should().Be(KafkaTailPause.TabHidden);
+        KafkaTailText.PauseOf(KafkaScanStopReason.Paused, KafkaTailPause.ConnectionLost).Should().Be(KafkaTailPause.ConnectionLost);
         KafkaTailText.PauseOf(KafkaScanStopReason.Paused, requested: null).Should().Be(KafkaTailPause.You);
         KafkaTailText.PauseOf(KafkaScanStopReason.Deadline, KafkaTailPause.TabHidden).Should().Be(KafkaTailPause.Time, "the clock ended it: the tab is not why");
     }
@@ -76,6 +77,8 @@ public class KafkaTailTextTests
         KafkaTailText.PausedBecause(KafkaTailPause.Bytes, Limits, null).Should().Be("it read KafkaStudioOptions.Limits.MaxBytesPerScan (64 MiB) in one stretch");
         KafkaTailText.PausedBecause(KafkaTailPause.Records, Limits, null).Should().Be("it read KafkaStudioOptions.Limits.MaxRecordsPerScan (1,000,000 records) in one stretch");
         KafkaTailText.PausedBecause(KafkaTailPause.Unavailable, Limits, null).Should().Be("the cluster stopped answering");
+        KafkaTailText.PausedBecause(KafkaTailPause.ConnectionLost, Limits, null).Should().Be("the connection to this page was lost");
+        KafkaTailText.PausedLine(KafkaTailPause.ConnectionLost, Limits, null, 5).Should().Be("Paused: the connection to this page was lost. 5 records shown.");
 
         foreach (KafkaTailPause pause in Enum.GetValues<KafkaTailPause>())
         {

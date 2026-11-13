@@ -21,6 +21,7 @@
 @inject StudioLiveUpdatesFactory LiveFactory
 @inject ILogger<KafkaTailBody> Logger
 @inject IServiceProvider Services
+@inject KafkaTailCircuitRegistry CircuitTails
 
 @* Live tail (D-M5 decisions 3.6 to 3.9, AGENTS.md D46). The page never starts a tail by itself: a pasted link fills the form and waits for the visitor's click, so a
    link cannot hold a slot or spend an allowance on their behalf. Everything the form needs from a broker is read after the frame's Ready, and the body exists
@@ -286,6 +287,10 @@
     /// <summary>Set when a resume the page made by itself (the tab shown again) was refused: it does not try again, and the visitor's Resume does.</summary>
     private bool autoResumeRefused;
     private StudioLiveUpdates? live;
+
+    /// <summary>Set while the circuit's connection is down (D46): a tail paused for it goes on when it returns.</summary>
+    private bool connectionLost;
+    private IDisposable? circuitRegistration;
     private KafkaTailStatus? status;
     private KafkaTailRows? rows;
     private KafkaAllowance? allowance;
@@ -328,6 +333,8 @@
 
     protected override async Task OnInitializedAsync()
     {
+        circuitRegistration = CircuitTails.Register(OnConnectionChangedAsync);
+
         try
         {
             if (Ready is not null)
@@ -711,8 +718,13 @@
         endedBy = null;
         refusal = null;
 
-        // The tab hid while the segment was being started: no one is looking, so it does not read.
-        if (live is { IsHidden: true })
+        // The tab hid, or the connection dropped, while the segment was being started: no one is looking, so it does not read.
+        if (connectionLost)
+        {
+            requestedPause = KafkaTailPause.ConnectionLost;
+            started.Pause();
+        }
+        else if (live is { IsHidden: true })
         {
             requestedPause = KafkaTailPause.TabHidden;
             started.Pause();
@@ -846,9 +858,12 @@
         }
     }
 
-    /// <summary>Whether a tail paused by its tab being hidden should go on: the tab is shown again, and nothing else is in the way.</summary>
+    /// <summary>
+    /// Whether a tail paused by its tab being hidden or its connection being lost should go on: the tab is shown, the connection is up, and nothing else is in the way.
+    /// A tail the visitor paused, or one that paused itself, is never resumed here.
+    /// </summary>
     private bool ShouldAutoResume() =>
-        !disposed && session is not null && segment is null && !starting && pause == KafkaTailPause.TabHidden && endedBy is null && !autoResumeRefused && live is { IsHidden: false };
+        !disposed && session is not null && segment is null && !starting && pause is (KafkaTailPause.TabHidden or KafkaTailPause.ConnectionLost) && endedBy is null && !autoResumeRefused && !connectionLost && live is { IsHidden: false };
 
     /// <summary>
     /// Plans the next segment of the paused tail from its exact cursor - or from the end of each partition, for a jump to now - and starts it. The gates are
@@ -1040,10 +1055,10 @@
         }
 
         // Not awaited: the event's raise waits for its handlers, and a resumed tail runs for as long as it runs.
-        _ = InvokeAsync(ResumeIfHiddenPausedAsync);
+        _ = InvokeAsync(ResumeIfPausedForTheTabOrConnectionAsync);
     }
 
-    private async Task ResumeIfHiddenPausedAsync()
+    private async Task ResumeIfPausedForTheTabOrConnectionAsync()
     {
         if (!ShouldAutoResume())
         {
@@ -1063,6 +1078,45 @@
         {
             // Gone while resuming.
         }
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // The connection (D46)
+    // ------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// The circuit's connection dropped (<paramref name="up" /> false) or returned. A drop pauses the running segment, which releases its scan slot as every pause does; a
+    /// return resumes only a tail still paused for the drop and whose tab is shown, through the same gate as any resume. Called by <see cref="KafkaTailCircuitHandler" /> off the renderer.
+    /// </summary>
+    private Task OnConnectionChangedAsync(bool up)
+    {
+        if (disposed)
+        {
+            return Task.CompletedTask;
+        }
+
+        if (!up)
+        {
+            return InvokeAsync(() =>
+            {
+                connectionLost = true;
+
+                if (!disposed && segment is { } running && requestedPause is null)
+                {
+                    requestedPause = KafkaTailPause.ConnectionLost;
+                    running.Pause();
+                }
+            });
+        }
+
+        // Not awaited, as for the tab: the handler must not wait for a resumed read, which runs for as long as it runs.
+        _ = InvokeAsync(() =>
+        {
+            connectionLost = false;
+            return ResumeIfPausedForTheTabOrConnectionAsync();
+        });
+
+        return Task.CompletedTask;
     }
 
     // ------------------------------------------------------------------------------------------------
@@ -1167,6 +1221,7 @@
         disposed = true;
         State.ClusterChanged -= OnClusterChangedAsync;
         Navigation.LocationChanged -= OnLocationChanged;
+        circuitRegistration?.Dispose();
 
         try
         {

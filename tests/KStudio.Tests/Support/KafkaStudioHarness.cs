@@ -203,6 +203,7 @@ internal sealed class KafkaStudioHarness : IDisposable
             services.AddSingleton<KafkaExportGate>();
             services.AddSingleton<KafkaExportService>();
             services.AddSingleton<KafkaTailService>();
+            services.AddSingleton<KafkaTailCircuitRegistry>();
             extra?.Invoke(services);
         });
     }

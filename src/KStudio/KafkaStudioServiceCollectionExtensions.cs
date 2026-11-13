@@ -108,6 +108,10 @@ public static class KafkaStudioServiceCollectionExtensions
         // Live tail (UI-TAIL, D46): a scan with no end, whose sessions and audit are one circuit's.
         services.TryAddScoped<KafkaTailService>();
 
+        // A tail whose browser vanished is paused when the circuit's connection drops (D46): the module's own handler, a no-op on a circuit with no tail.
+        services.TryAddScoped<KafkaTailCircuitRegistry>();
+        services.TryAddEnumerable(ServiceDescriptor.Scoped<Microsoft.AspNetCore.Components.Server.Circuits.CircuitHandler, KafkaTailCircuitHandler>());
+
         // Related records (UI-D): one audited scan over several topics, each searched by its own fields.
         services.TryAddScoped<KafkaCorrelationService>();
 

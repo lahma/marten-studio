@@ -930,6 +930,17 @@ a one-second tick that redraws `KafkaTailStatus`, the live line, and nothing els
 the tab* goes on by itself from its cursor; a tail the visitor paused, or any other pause, waits for Resume. The handler never awaits the resumed read (the raise waits for its
 handlers), and the page's reading loop (`DriveAsync`) goes on to the next segment in the same frame, so a tail that pauses every few minutes for a day does not nest a day of calls.
 
+**The connection.** A tail whose browser vanished would read on and hold its owner's scan slot until Blazor tears the circuit down (`DisconnectedCircuitRetentionPeriod`, three
+minutes by default), refusing that visitor's other tabs. `AddKafkaStudio` therefore adds `KafkaTailCircuitHandler`, a scoped `CircuitHandler` (`TryAddEnumerable`, the only
+registration it changes), which hands `OnConnectionDownAsync` and `OnConnectionUpAsync` to `KafkaTailCircuitRegistry.ConnectionChangedAsync(up)` - the circuit's own scoped list of tail
+pages, with no `Circuit` in it, so a test drives it. **The cost to a host is one scoped handler and one scoped registry per circuit, and on a circuit with no tail page both do
+nothing: no log, no exception, no allocation beyond themselves.** A drop pauses the running segment through the page's dispatcher (`InvokeAsync`, as the tab does) with the pause cause
+`ConnectionLost` - an ordinary pause: the slot is released, the cursor stays exact, nothing is audited, and the line reads `Paused: the connection to this page was lost.`;
+`OnCircuitClosedAsync` is not handled, so the `CallerGone` end stays. A return resumes the tail **only** if its cause is still `ConnectionLost` and the tab is not hidden, through the
+full gate exactly as the tab's resume (capability, profile, every policy, the planned grant, the slot); a refused resume stays paused with the refusal on screen and is not tried again
+by itself. A tab that is hidden when the connection returns resumes when it is shown. A reconnect never resumes a tail the visitor paused or one that paused itself (the clock, a
+budget, the cluster). Hard rules 6 and 15 hold: no `async void`, no `async` lambda as an `Action`, and interop loss is caught with `StudioLiveUpdates.IsInteropUnavailable`.
+
 **Rendering.** A batch from the engine (at most four a second, never per record) redraws two child components and not the page: `KafkaTailStatus` (the live line and its chips) and
 `KafkaTailRows` (the matches that arrived faster than they could be shown, what the tail does not cover, and the table with its open details). The page renders itself only when a
 tail starts, pauses or ends, so the form, `VisibleTopics()` and the details the visitor has open are not drawn for a batch. An idle tail sends no batches, and the one-second tick
@@ -948,7 +959,9 @@ deny-listed `x-api-key` header and a JSON value under the topic's `$.customer.em
 **The tests** (fast): `KafkaTailServiceTests` (every gate refuses and audits, a refused topic names nothing, a session is one entry however many segments, a resume asks everything
 again, a refused resume is counted, the jump arithmetic, a disposed session writes its entry after its segment), `KafkaTailTextTests`, `KafkaTailPageTests` (the disabled states, a link
 that never starts, newest first, pause and resume without a gap, jump to now, the hidden and shown tab, the line that redraws alone, one entry per session, leaving the page, export
-bound to the session), `KafkaTailStylesheetTests` and the two log events in `KafkaStudioRefusalLogValuesTests`; in `PostgresStudio.Tests`, `StudioLiveUpdatesVisibilityTests`.
+bound to the session, a dropped connection pausing and a returned one resuming without a gap, a refused resume staying paused, a visitor's pause and a hidden tab left alone,
+a circuit with no tail ignoring both), `KafkaTailCircuitTests` (the handler relays to what registered, the empty registry finishes at once, the registration is added once and
+scoped), `KafkaTailStylesheetTests` and the two log events in `KafkaStudioRefusalLogValuesTests`; in `PostgresStudio.Tests`, `StudioLiveUpdatesVisibilityTests`.
 
 ## D47
 
