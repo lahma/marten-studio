@@ -143,8 +143,13 @@ internal static class StudioScopeQuery
         return url;
     }
 
+    /// <summary>
+    /// The value a page's <c>[SupplyParameterFromQuery]</c> binds for the same name: Blazor binds the <em>first</em> of a repeated key (.NET 10,
+    /// <c>QueryParameterValueSupplier</c>: <c>values[0]</c>), so the shell, which reads the same address, must not see another value (or the
+    /// comma-joined list <c>StringValues.ToString()</c> makes) than the page it sits above.
+    /// </summary>
     private static string? Single(Dictionary<string, StringValues> parsed, string name) =>
-        parsed.TryGetValue(name, out StringValues values) ? NullIfBlank(values.ToString()) : null;
+        parsed.TryGetValue(name, out StringValues values) && values.Count > 0 ? NullIfBlank(values[0]) : null;
 
     private static string? NullIfBlank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
 }

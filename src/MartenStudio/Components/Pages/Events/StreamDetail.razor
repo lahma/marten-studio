@@ -599,6 +599,12 @@
         await LoadAsync();
     }
 
+    /// <summary>
+    /// Whether this page's address names a tenant the studio could not place in any database (ZW38): the scope is the usual database with no
+    /// tenant, and the stream must not be read there.
+    /// </summary>
+    private bool TenantUnplaced => State.IsTenantUnplaced(Store, Database, Tenant);
+
     private async Task ApplyScopeFromQueryAsync()
     {
         if (string.IsNullOrWhiteSpace(Store) && string.IsNullOrWhiteSpace(Database) && string.IsNullOrWhiteSpace(Tenant))
@@ -701,6 +707,21 @@
         }
 
         string id = Id;
+
+        if (TenantUnplaced)
+        {
+            // Read nothing (ZW38): the id would be found in the database on screen, which is not the tenant's. The same words as a stream that is
+            // not there, whatever the reason the tenant was not placed.
+            loading = false;
+            timeline.Clear();
+            timelineError = null;
+            ForgetReplay();
+            compaction = null;
+            shape = null;
+            hasMoreEvents = false;
+            stream = StreamState.Missing(id);
+            return;
+        }
 
         loading = true;
         timeline.Clear();
@@ -1192,6 +1213,7 @@
             State.ActiveScope?.StoreKey,
             State.ActiveScope?.DatabaseId,
             State.ActiveScope?.TenantId,
+            TenantUnplaced,
             Id) + '';
 
     private string Signature() =>

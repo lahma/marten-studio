@@ -274,6 +274,26 @@ internal sealed class MartenStudioSource : IStudioSource
     public bool ShowsTenantSelector => tenants.IsTenantScopeRelevant(Store);
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Only a <see cref="StaticMultiTenancy" />: its tenant-to-database map is configuration, held in memory. A master-table tenancy's map
+    /// is a table (reading it is a tenancy enumeration, hard rule 14), and a one-server tenancy's is private and only reachable through
+    /// <c>BuildDatabases()</c>, which creates databases; neither declares anything (ZW38).
+    /// </remarks>
+    public bool DeclaresTenants => Store.Options.Tenancy is StaticMultiTenancy;
+
+    /// <inheritdoc />
+    public async ValueTask<IReadOnlyList<string>> DatabasesDeclaringAsync(string tenantId, IReadOnlyList<IStudioDatabase> all, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(tenantId);
+        ArgumentNullException.ThrowIfNull(all);
+
+        // Guarded by the type, not by the flag: only a StaticMultiTenancy is ever described here (hard rule 14).
+        return Store.Options.Tenancy is StaticMultiTenancy
+            ? await TenantDiscovery.DeclaringDatabasesAsync(Store, tenantId, Unwrap(all), cancellationToken).ConfigureAwait(false)
+            : [];
+    }
+
+    /// <inheritdoc />
     public async ValueTask<IReadOnlyList<IStudioDatabase>> DatabasesAsync(CancellationToken cancellationToken)
     {
         IReadOnlyList<IMartenDatabase> databases = await Store.Storage.AllDatabases().ConfigureAwait(false);

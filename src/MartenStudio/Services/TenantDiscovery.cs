@@ -366,7 +366,7 @@ internal sealed class TenantDiscovery
             return Whole();
         }
 
-        DatabaseUsage usage = await tenancy.DescribeDatabasesAsync(cancellationToken).ConfigureAwait(false);
+        DatabaseUsage usage = await DescribeAsync(tenancy, cancellationToken).ConfigureAwait(false);
         foreach (DatabaseDescriptor descriptor in usage.Databases)
         {
             if (DescribesSameDatabase(descriptor, database))
@@ -412,6 +412,65 @@ internal sealed class TenantDiscovery
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// The one <c>DescribeDatabasesAsync</c> call of this class (<c>TenancyEnumerationCallTests</c>): a static or single-server
+    /// multi-tenancy answers it from configuration, and so does a one-database tenancy.
+    /// </summary>
+    private static ValueTask<DatabaseUsage> DescribeAsync(ITenancy tenancy, CancellationToken cancellationToken) =>
+        tenancy.DescribeDatabasesAsync(cancellationToken);
+
+    /// <summary>
+    /// The identities of the databases a <see cref="StaticMultiTenancy" />'s configuration places <paramref name="tenantId" /> in - one read of
+    /// the declaration, counted over every database it declares (a tenant declared in two databases is in two, and Marten itself keeps only
+    /// the last), each identity once, ordinally on the tenant and ignoring case on the database as the studio scopes by identity. A descriptor
+    /// that names no listed database still counts, under its own identifier, so a declaration the listing cannot place is never mistaken for
+    /// a single one. Nothing is connected to and nothing is enumerated (hard rule 14): a static tenancy describes itself from memory.
+    /// </summary>
+    /// <param name="store">The store.</param>
+    /// <param name="tenantId">The tenant, matched exactly.</param>
+    /// <param name="databases">What <c>Storage.AllDatabases()</c> has just answered.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    public static async ValueTask<IReadOnlyList<string>> DeclaringDatabasesAsync(
+        IDocumentStore store,
+        string tenantId,
+        IReadOnlyList<IMartenDatabase> databases,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+        ArgumentNullException.ThrowIfNull(tenantId);
+        ArgumentNullException.ThrowIfNull(databases);
+
+        if (store.Options.Tenancy is not StaticMultiTenancy tenancy)
+        {
+            return [];
+        }
+
+        DatabaseUsage usage = await DescribeAsync(tenancy, cancellationToken).ConfigureAwait(false);
+        HashSet<string> identities = new(StringComparer.OrdinalIgnoreCase);
+
+        foreach (DatabaseDescriptor descriptor in usage.Databases)
+        {
+            if (!descriptor.TenantIds.Contains(tenantId, StringComparer.Ordinal))
+            {
+                continue;
+            }
+
+            string identity = descriptor.Identifier;
+            foreach (IMartenDatabase database in databases)
+            {
+                if (DescribesSameDatabase(descriptor, database))
+                {
+                    identity = database.Id.Identity;
+                    break;
+                }
+            }
+
+            identities.Add(identity);
+        }
+
+        return [.. identities.Order(StringComparer.OrdinalIgnoreCase)];
     }
 
     /// <summary>

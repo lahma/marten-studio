@@ -702,7 +702,7 @@ output folder stays free of Wolverine (`KStudioFenceTests`).
 ## D44
 
 **D44 — Links between a studio and a module are pure, internal and grant nothing.** `IStudioRouteLinks` (MartenStudio implements it: a document
-by type and id, a stream by id or key, in the record's tenant; for a store with a database per tenant only when the store keeps its rows per tenant and the host listed no `KnownTenantIds`) and
+by type and id, a stream by id or key, in the record's tenant; for a store with a database per tenant, see *From a record to Marten*) and
 `IStudioRecordSearchLinks` (KStudio implements it: "Find in Kafka") live in PostgresStudio beside `IStudioLinks`, under its rules: no IO, no policy,
 every id escaped, and the page a link opens resolves its own scope and asks its own policies again. Neither module names the other, a masked value
 never enters a URL, a value travels in the fragment, and the destination authorizes again. External links are host templates with no credential,
@@ -715,11 +715,37 @@ The address is the seam's, verbatim; a `null` answer draws the words and a reaso
 seam (a Postgres Studio host) nothing is drawn. MartenStudio answers `null` for a hidden
 document type, for an ambiguous type, for a tenancy of the application's own (nothing says where its tenants are), and for a multi-tenanted store
 with no tenant, whether its tenants share a database or each has one (a link would open the visitor's own tenant and say "not found", which is false).
-A store that keeps each tenant in a database of its own gets a link with the tenant and no `db` only when it keeps its rows per tenant
-(`StoreTenancy.KeepsRowsPerTenant`, the test behind its tenant selector) and the host listed no `KnownTenantIds`: `StudioState.SetScopeAsync` opens the
-first database, among those the visitor may see, whose tenant listing carries that tenant (at most 32 searched, TENANT-DB), and no database lists tenants
-where documents and events are single-tenanted (master table, one-server and static tenancies in Marten 9.57.0), so there the link would reopen the id
-in the database on screen; such a store gets no link yet. **The tenant**, the first that applies: the record's `tenant-id` header when it is a literal; **no Marten link at all when the
+A store that keeps each tenant in a database of its own gets a link with the tenant and no `db` (the link never names a database, so it never
+names one the visitor may not see) in two cases. A static tenancy's link carries the tenant as `TenantIdStyle.MaybeCorrectTenantId` writes it, because its declaration holds ids that way (the link
+stays pure); every other kind carries the id exactly as the record spelt it, so `KnownTenantIds` and the tenant listings match as they always did.
+**A static tenancy** (`MultiTenantedDatabases(...)`) gets one whether or not its rows are tenanted (ZW38), except where they are tenanted and the
+host listed `KnownTenantIds` (the database on screen then "lists" every tenant, so `SetScopeAsync` never searches): the host declared in
+configuration which database serves each tenant, and `StudioState.SetScopeAsync` places the tenant from that declaration
+(`IStudioScopeCatalog.PlaceDeclaredTenantAsync`, `IStudioSource.DeclaresTenants` / `DatabasesDeclaringAsync`). It is one read from memory - the one
+`DescribeDatabasesAsync` call `TenantDiscovery` already makes, guarded by the type `StaticMultiTenancy`, so no tenancy enumeration, no connection,
+no `GetTenant` - counted over the whole declaration before any policy is asked: the usual database is considered, a tenant declared in more than one
+database is not placed (Marten itself keeps only the last), and a tenant declared in a database the visitor's listing lacks is not placed. The
+database found is put to the store policy `(store, db, null)` once more and, where rows are tenanted, the tenant must also be in its
+policy-filtered listing. The search has no 32-database bound (it asks nothing of any database); the bound stays for the tenant-listing search.
+Where rows are single-tenanted the page then opens that database with no tenant in the scope, as any page of such a store does.
+**A tenant that is not placed is one answer** (undeclared, declared twice, a refused database, an unreadable source): the scope stays on the usual
+database with no tenant, and `StudioState.IsTenantUnplaced(store, db, tenant)` is true for that address. `DocumentDetail` and `StreamDetail` - the
+pages `ToDocument` and `ToStream` open - show their ordinary not-found wording without reading, the same words whatever the cause, so nothing can be
+probed. **Only the address on screen is kept:** `StudioLayout.SyncScopeToUrl` skips its rewrite when the address it parses
+(`StudioScopeQuery.Read`, which takes the first value of a repeated key, as Blazor's `[SupplyParameterFromQuery]` does) is itself unplaced - rewriting
+it to the scope on screen would drop the tenant - and rewrites every other address as in 1.2.0, so an unplaced address elsewhere in the circuit's
+history changes nothing for them (Back to an address that names no database, a link to another or a refused store). **A placement still pending
+counts as unplaced:** from the start of `SetScopeAsync` for an address that names a tenant and no database until it is placed, a page that asks is told
+the address is unplaced and reads nothing, and the scope listeners are notified when it settles even if the scope did not move, so the page reads
+then. **The answer for every address is remembered** - placed, not placed, or "no source declares this" - until another address is applied or the
+listings are refreshed, so a page that re-applies its own address on every parameter set does not search again and the settle notification does not
+repeat; a refresh keeps an unplaced address unplaced (pending) rather than forgetting it. **A master-table, sharded or
+one-server tenancy** gets a link only when it keeps its rows per tenant (`StoreTenancy.KeepsRowsPerTenant`, the test behind its tenant selector) and the
+host listed no `KnownTenantIds`: the page opens the first database, among those the visitor may see, whose tenant listing carries that tenant (at most
+32 searched, TENANT-DB). Where documents and events are single-tenanted (master table and one-server tenancies in Marten 9.57.0) no database lists
+tenants and nothing else maps a tenant to its database without a tenancy enumeration (a master-table tenancy's map is a table, and reading it is one,
+hard rule 14) or a call that creates databases (a one-server tenancy's map is private, and `DescribeDatabasesAsync` runs `BuildDatabases()`), so such a
+store gets no link: the link would reopen the id in the database on screen. **The tenant**, the first that applies: the record's `tenant-id` header when it is a literal; **no Marten link at all when the
 header is present and redacted or cut** - the address would carry the hidden value, and the page says so without it; the cluster entry's own tenant
 (a Wolverine broker-per-tenant cluster); none. The words cut an id at 24 characters, never the address.
 

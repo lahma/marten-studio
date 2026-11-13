@@ -251,7 +251,7 @@
         await State.EnsureInitializedAsync();
         await ApplyScopeFromUrlAsync();
 
-        string signature = string.Join('\u001f', Alias, Id, State.ActiveScope?.StoreKey, State.ActiveScope?.DatabaseId, State.ActiveScope?.TenantId);
+        string signature = string.Join('\u001f', Alias, Id, State.ActiveScope?.StoreKey, State.ActiveScope?.DatabaseId, State.ActiveScope?.TenantId, TenantUnplaced);
 
         if (string.Equals(signature, loadedSignature, StringComparison.Ordinal))
         {
@@ -261,6 +261,12 @@
         loadedSignature = signature;
         await LoadAsync();
     }
+
+    /// <summary>
+    /// Whether this page's address names a tenant the studio could not place in any database (ZW38): the scope is the usual database with no
+    /// tenant, and the id must not be read there. Whatever the reason, the page says what it says of an id that is not there.
+    /// </summary>
+    private bool TenantUnplaced => State.IsTenantUnplaced(StoreKey, DatabaseId, TenantId);
 
     private async Task ApplyScopeFromUrlAsync()
     {
@@ -295,6 +301,23 @@
         }
 
         CancellationToken token = ResetCancellation();
+
+        if (TenantUnplaced)
+        {
+            // Read nothing: the id would be found in the database on screen, which is not the tenant's. The same words as an id that is not there.
+            loading = false;
+            probes = [];
+            related = RelatedModel.None;
+            referencedBy = ReferencedByModel.None;
+            streamExists = false;
+            searchRequest = null;
+            editing = false;
+            result = DocumentDetailResult.Missing($"No document with id '{Id}' is in '{Alias}' for tenant '{TenantId}'.");
+
+            // Drawn now: this load may have been started by a scope change's handler, which renders nothing of its own.
+            StateHasChanged();
+            return;
+        }
 
         loading = true;
         probes = [];

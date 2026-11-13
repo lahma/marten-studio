@@ -1,4 +1,5 @@
 using JasperFx.Events;
+using JasperFx.MultiTenancy;
 
 using Marten;
 using Marten.Schema;
@@ -36,12 +37,17 @@ namespace MartenStudio.Services.Links;
 /// <para>
 /// <b>The tenant.</b> A store with tenants is given the tenant the caller knows; with none the answer is <see langword="null" />,
 /// because the page would open the visitor's current tenant and say "not found" falsely (OPEN-8). That holds for conjoined tenants
-/// in one database, and for a store that keeps each tenant in a database of its own (master table, sharded, one-server, static) when it
-/// also keeps its rows per tenant and the host listed no <c>KnownTenantIds</c>: the page a link opens looks for a tenant named with no
-/// database among the databases the visitor may see (<see cref="PostgresStudio.Services.StudioState.SetScopeAsync" />), and no database
-/// lists tenants where documents and events are single-tenanted, so the link would reopen the id of the database on screen. A store with
-/// no tenants ignores it. A tenancy of the application's own, or one the configuration cannot place, gets no link. The link carries <c>store</c> and <c>tenant</c> and never
-/// <c>db</c>.
+/// in one database, and for a store that keeps each tenant in a database of its own. A <b>static</b> tenancy always answers: the
+/// host declared in configuration which database serves each tenant, and the page a link opens places the tenant from that declaration
+/// (<see cref="PostgresStudio.Services.StudioState.SetScopeAsync" />, in memory, with no tenancy enumeration), whether or not rows are
+/// tenanted - except where they are tenanted and the host listed <c>KnownTenantIds</c>, which make the database on screen "list" every
+/// tenant so that the page never looks for it elsewhere. A master-table, sharded or one-server tenancy answers only when it also keeps its
+/// rows per tenant (<see cref="StoreTenancy.KeepsRowsPerTenant" />) and the host listed no <c>KnownTenantIds</c>: the page looks for the
+/// tenant in the tenant listings of the databases the visitor may see, and no database lists tenants where documents and events are
+/// single-tenanted, so a link would reopen the id of the database on screen - and the only maps from a tenant to its database are a
+/// table (reading it is a tenancy enumeration, hard rule 14) and one a one-server tenancy keeps private behind a call that creates
+/// databases. A store with no tenants ignores it. A tenancy of the application's own, or one the configuration cannot place, gets no
+/// link. The link carries <c>store</c> and <c>tenant</c> and never <c>db</c>.
 /// </para>
 /// </remarks>
 internal sealed class MartenStudioRouteLinks : IStudioRouteLinks
@@ -165,9 +171,10 @@ internal sealed class MartenStudioRouteLinks : IStudioRouteLinks
     /// <summary>
     /// The tenant the link carries, or whether there is a link at all. A single-database store with no tenants carries none and always
     /// answers. A store with tenants - conjoined in one database, or each in a database of its own (master table, sharded, one-server,
-    /// static) - answers only when the caller knows one. A store with a database per tenant answers only when it also keeps its rows per
-    /// tenant (<see cref="StoreTenancy.KeepsRowsPerTenant" />) and the host listed no <c>KnownTenantIds</c>: the page a link opens takes a
-    /// tenant with no database to the first database the visitor may see whose tenant listing carries it, and no database lists tenants
+    /// static) - answers only when the caller knows one. A static tenancy then answers whether or not its rows are tenanted, because its
+    /// configuration places the tenant in its database (ZW38), unless rows are tenanted and the host listed <c>KnownTenantIds</c>. A master-table, sharded or one-server tenancy answers only when it also keeps its rows per tenant
+    /// (<see cref="StoreTenancy.KeepsRowsPerTenant" />) and the host listed no <c>KnownTenantIds</c>: the page a link opens takes a tenant
+    /// with no database to the first database the visitor may see whose tenant listing carries it, and no database lists tenants
     /// otherwise. A tenancy of the application's own, or one the configuration would not classify, never answers.
     /// </summary>
     private static bool TenantFor(IDocumentStore store, MartenStudioOptions current, string? tenantId, out string? tenant)
@@ -189,7 +196,25 @@ internal sealed class MartenStudioRouteLinks : IStudioRouteLinks
                 tenant = tenantId;
                 return true;
 
-            case StoreTenancyKind.MasterTable or StoreTenancyKind.Sharded or StoreTenancyKind.OneServer or StoreTenancyKind.Static:
+            case StoreTenancyKind.Static:
+                // The declaration is the source: MultiTenantedDatabases(...) says in memory which database serves each tenant, and the page
+                // a link opens reads it (StudioState.SetScopeAsync's tenant search, IStudioSource.DatabasesDeclaringAsync) with no connection and
+                // no enumeration, whether or not rows are tenanted. The link still carries no database. One case the search is never
+                // started for: rows tenanted and the host's KnownTenantIds listed, when the database on screen "lists" every tenant and so
+                // already seems to hold this one - there the page would keep it and a link would reopen the wrong database.
+                if (string.IsNullOrWhiteSpace(tenantId)
+                    || (current.KnownTenantIds.Count > 0 && StoreTenancy.KeepsRowsPerTenant(store.Options, current.IsDocumentTypeVisible)))
+                {
+                    return false;
+                }
+
+                // The declaration is the source, and Marten declares a tenant id as TenantIdStyle writes it (ForceLowerCase and its siblings):
+                // a record's header may spell it otherwise. Every other kind carries the id as the caller wrote it, as before, so that
+                // KnownTenantIds and the tenant listings match exactly what they always matched. Pure, as the rest of the builder is.
+                tenant = store.Options.TenantIdStyle.MaybeCorrectTenantId(tenantId);
+                return true;
+
+            case StoreTenancyKind.MasterTable or StoreTenancyKind.Sharded or StoreTenancyKind.OneServer:
                 // The page finds a tenant's database only through the tenant listings of the databases, and a database lists tenants only
                 // where rows are tenanted: with single-tenanted documents and events the tenant selector is off, every listing is
                 // unavailable, and the link would reopen the same id in the database on screen - another tenant's record. A host's

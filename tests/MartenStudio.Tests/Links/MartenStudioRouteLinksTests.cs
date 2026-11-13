@@ -236,12 +236,23 @@ public class MartenStudioRouteLinksTests
         "static",
     };
 
-    /// <summary>The tenancies that leave documents and events single-tenanted unless the configuration says otherwise.</summary>
+    /// <summary>
+    /// The tenancies that leave documents and events single-tenanted unless the configuration says otherwise, and whose map from a tenant
+    /// to its database is not configuration: a table (reading it is a tenancy enumeration, hard rule 14) or a private one behind a call
+    /// that creates databases. They give a link only where rows are tenanted.
+    /// </summary>
     public static TheoryData<string> DatabasePerTenantKindsWithSingleTenantedDefaults => new()
     {
         "master table",
         "one server",
-        "static",
+    };
+
+    /// <summary>The kinds whose tenants a host's <c>KnownTenantIds</c> would make every database "list": no declaration says where one is.</summary>
+    public static TheoryData<string> DatabasePerTenantKindsWithoutADeclaration => new()
+    {
+        "master table",
+        "sharded",
+        "one server",
     };
 
     public static TheoryData<string> TenancyKindsThatPlaceNoTenant => new()
@@ -286,7 +297,8 @@ public class MartenStudioRouteLinksTests
 
     /// <summary>
     /// In Marten 9.57.0 these tenancies leave documents and events single-tenanted: no database lists a tenant, the search finds none,
-    /// and a link would reopen the same id in the database on screen - another tenant's record. So no link.
+    /// and a link would reopen the same id in the database on screen - another tenant's record. So no link. (A static tenancy is the
+    /// exception, ZW38: its configuration says where each tenant is.)
     /// </summary>
     [Theory]
     [MemberData(nameof(DatabasePerTenantKindsWithSingleTenantedDefaults))]
@@ -317,9 +329,118 @@ public class MartenStudioRouteLinksTests
         links.ToDocument(new StudioLinkScope(null, "globex"), "order", "7").Should().NotBeNull();
     }
 
+    /// <summary>
+    /// ZW38: a static tenancy declares in configuration which database serves each tenant, and the page a link opens reads that declaration
+    /// (no connection, no enumeration), so it gets a link with the tenant and no <c>db</c> whether or not its rows are tenanted - and
+    /// still none without a tenant to name.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void A_static_store_gets_a_link_with_the_tenant_and_no_db_whether_or_not_its_rows_are_tenanted(bool tenantedRows)
+    {
+        MartenStudioRouteLinks links = Links(services => services.AddMarten(x =>
+        {
+            if (tenantedRows)
+            {
+                x.Schema.For<Order>().MultiTenanted();
+            }
+            else
+            {
+                x.Schema.For<Order>();
+            }
+
+            x.Events.AddEventType<OrderPlaced>();
+            DatabasePerTenant(x, "static");
+        }));
+
+        string stream = Guid.NewGuid().ToString();
+
+        foreach (string? url in (string?[])
+        [
+            links.ToDocument(new StudioLinkScope(null, "globex"), "order", "7"),
+            links.ToStream(new StudioLinkScope(null, "globex"), stream),
+        ])
+        {
+            url.Should().NotBeNull();
+            Query(url!).Should().Contain(new KeyValuePair<string, string?>("tenant", "globex"));
+            Query(url!).Keys.Should().NotContain("db");
+        }
+
+        links.ToDocument(new StudioLinkScope(null, null), "order", "7").Should().BeNull("a database-per-tenant store needs its tenant");
+        links.ToStream(new StudioLinkScope(null, null), stream).Should().BeNull("a database-per-tenant store needs its tenant");
+    }
+
+    /// <summary>
+    /// A static tenancy's declaration is the source, and Marten declares a tenant id as <c>TenantIdStyle</c> writes it, so its link carries
+    /// that spelling - a record's header may spell it otherwise. Every other kind carries the id as the caller wrote it, as before.
+    /// </summary>
+    [Theory]
+    [InlineData("static", "globex")]
+    [InlineData("conjoined", "GlobeX")]
+    [InlineData("sharded", "GlobeX")]
+    public void The_tenant_is_corrected_by_the_tenant_id_style_only_for_a_static_tenancy(string kind, string expected)
+    {
+        MartenStudioRouteLinks links = Links(services => services.AddMarten(x =>
+        {
+            x.TenantIdStyle = TenantIdStyle.ForceLowerCase;
+            x.Schema.For<Order>().MultiTenanted();
+            if (kind == "conjoined")
+            {
+                x.Connection(Connection);
+            }
+            else
+            {
+                DatabasePerTenant(x, kind);
+            }
+        }));
+
+        string url = links.ToDocument(new StudioLinkScope(null, "GlobeX"), "order", "7")!;
+
+        Query(url).Should().Contain(new KeyValuePair<string, string?>("tenant", expected));
+        Query(url).Keys.Should().NotContain("db");
+    }
+
+    /// <summary>
+    /// With single-tenanted rows no database lists a tenant whatever <c>KnownTenantIds</c> says, so the page searches the declaration and a
+    /// static store keeps its link. With tenanted rows they make the database on screen "list" every tenant: the page would keep it, so no link.
+    /// </summary>
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    public void Known_tenant_ids_leave_a_static_store_its_link_only_where_rows_are_single_tenanted(bool tenantedRows, bool linked)
+    {
+        MartenStudioRouteLinks links = Links(
+            services => services.AddMarten(x =>
+            {
+                if (tenantedRows)
+                {
+                    x.Schema.For<Order>().MultiTenanted();
+                }
+                else
+                {
+                    x.Schema.For<Order>();
+                }
+
+                DatabasePerTenant(x, "static");
+            }),
+            options => options.KnownTenantIds.Add("globex"));
+
+        string? url = links.ToDocument(new StudioLinkScope(null, "globex"), "order", "7");
+
+        if (!linked)
+        {
+            url.Should().BeNull();
+            return;
+        }
+
+        Query(url!).Should().Contain(new KeyValuePair<string, string?>("tenant", "globex"));
+        Query(url!).Keys.Should().NotContain("db");
+    }
+
     /// <summary>The host's <c>KnownTenantIds</c> make every database list every tenant, so they say nothing about where one is.</summary>
     [Theory]
-    [MemberData(nameof(DatabasePerTenantKinds))]
+    [MemberData(nameof(DatabasePerTenantKindsWithoutADeclaration))]
     public void Known_tenant_ids_give_a_database_per_tenant_store_no_link(string kind)
     {
         MartenStudioRouteLinks links = Links(
