@@ -1,3 +1,38 @@
+# 1.3.0
+
+1.3.0 brings KStudio, a third studio for the Apache Kafka® clusters an application already configures, as a preview beside
+the family. It also opens a tenant's own database from a link, removes 1.2's temporary navigation switch as 1.2.0 promised,
+and is tested on .NET 11 GA. PostgresStudio.Diagnostics, PostgresStudio and MartenStudio are at 1.3.0. KStudio.Core,
+KStudio and KStudio.Wolverine are at 1.3.0-preview.1: their API and screens may change in a minor release, and installing
+them needs `--prerelease`.
+
+- KStudio (preview) lets a host browse its own Kafka clusters inside the studio shell, and so inside Marten Studio too.
+  It reads only through Confluent.Kafka (from 2.14.0). A read never writes: no topic is created, no offset is committed,
+  and no group is joined. It covers the cluster catalog and topics, and a guarded record search over a time window whose
+  "no match" is said only of what was read. It also covers record values with value and JSON-path search, redaction
+  before anything is shown, compare, related records and duplicates, export to JSON Lines or CSV, a live tail, and
+  cluster profiles (Development, Test, Production) that only ever lower a limit. Every capability is off by default,
+  as in the other studios. `KStudio.Wolverine` discovers a Wolverine application's Kafka clusters and topics.
+  Start at `src/KStudio/README.md` and docs/kstudio.md.
+- With KStudio registered, a Kafka record links to its Marten document or stream, and Marten Studio's document and
+  stream pages offer "Find in Kafka". Neither studio names the other, a link grants nothing, and a host without KStudio
+  sees no change.
+- A link that names a tenant and no database now opens the tenant's own database, among those the visitor may see.
+  Before, it opened the database on screen. This covers a database-per-tenant store that keeps its rows per tenant: at
+  most 32 databases' tenant listings are searched. It also covers a static multi-database tenancy
+  (`MultiTenantedDatabases(...)`), placed from its configuration with no connection, whether its rows are tenanted or
+  not. A tenant that cannot be placed (a database your policy refuses, an undeclared tenant, or a tenant declared in two
+  databases) leaves the scope where it was. The document and stream pages then show their not-found wording and never
+  read that id in the database on screen. Master-table and one-server tenancies whose rows are single-tenanted still get
+  no link: their map from a tenant to its database is a table, or a call that creates databases.
+- The temporary AppContext switch `PostgresStudio.DisableNavigationInterception` (1.2) is removed. A host that still
+  sets it gets 1.2's navigation inside the circuit, and the call can be deleted (docs/upgrading.md).
+- .NET 11 GA (11.0.0) is tested. Both studios' fast and live suites pass on it with no difference from .NET 10, and
+  the solution builds with no warnings on the 11 SDK. On .NET 11 the circuit still starts only for a visitor the
+  `FallbackPolicy` admits (dotnet/aspnetcore#69624, open; see Hosting notes).
+- Maintainers: the build is on Fallout 10.5.0 (stable). It brings no vulnerable crypto packages and needs no package pins
+  besides Fallout. `Pack` builds the six packages in dependency order.
+
 # 1.2.0
 
 1.2.0 makes the studio move like an application - pages change inside the circuit, the header finds anything by id, and

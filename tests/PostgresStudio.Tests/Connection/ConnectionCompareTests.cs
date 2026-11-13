@@ -175,7 +175,7 @@ public sealed class ConnectionCompareTests
         page.Find("button.ms-conn-compare-toggle").GetAttribute("aria-pressed").Should().Be("false");
         page.Find("button.ms-conn-compare-toggle").Click();
 
-        page.Find("button.ms-conn-compare-toggle").GetAttribute("aria-pressed").Should().Be("true");
+        Wait(() => page.Find("button.ms-conn-compare-toggle").GetAttribute("aria-pressed").Should().Be("true"), page);
         IElement host = page.Find("tr#conn-cmp-row-host");
         host.ClassList.Should().NotContain("ms-conn-compare-diff");
         host.QuerySelector(".ms-conn-compare-mark")!.TextContent.Should().Be("same");
