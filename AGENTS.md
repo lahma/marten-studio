@@ -254,8 +254,12 @@ the database it is supposed to help you understand. Exact counts are available o
 **D9 — Document and stream ids travel in the query string.** The hand-rolled router has no catch-all segment, and Marten
 ids are frequently strings that contain `/`. Scope (`?store=&db=&tenant=`) lives in the URL for the same reason a
 document id does: a link someone pastes into a chat has to reopen the same thing. A link that names a tenant and no
-database opens the first database, among those the visitor may see, whose tenant listing carries that tenant (at most 32
-searched, one enumeration); a link that names both is reopened exactly, and a tenant found nowhere falls back to all tenants.
+database opens the database, among those the visitor may see, that holds the tenant: a static tenancy places it from its
+configuration (the usual database included, with no tenancy enumeration, and nowhere when it is declared in more than one
+database), every other kind finds it in the databases' tenant listings (at most 32 searched, one enumeration). Where a
+static tenancy cannot place it, or is still placing it, the scope stays where it was and the pages a link opens show their
+not-found wording without reading by id; elsewhere a tenant found nowhere falls back to all tenants. A link that names
+both is reopened exactly.
 
 **D10 — No SignalR hub in v1.** Pages poll with a `PeriodicTimer` at `RefreshInterval`, paused on hidden tabs, through a
 single-flight snapshot cache so that N circuits cost one query per interval; there is no SignalR hub. Where the daemon
@@ -292,6 +296,8 @@ have.
 **D15 — Fallout's stable channel (10.5.0), CHANGELOG.md as the version authority, all four workflows generated, trusted publishing
 for nuget.org.** See *Build* and *Release engineering* below. The important half is that the version lives in one file
 that a human edits and no tool rewrites, and that the only credential anywhere in the release path lives for minutes.
+KStudio's three packages add one label to it, `Directory.Build.props`' `KStudioPrereleaseLabel` (`<version>-preview.1`, K8),
+which no other project reads; emptying it graduates them.
 
 **D16 — xunit.v3 3.2.2 and Verify.XunitV3 32.0.0, seven test projects all matching `*.Tests`.**
 `tests/MartenStudio.Tests`, `tests/PostgresStudio.Tests`, `tests/KStudio.Tests` and `tests/KStudio.Wolverine.Tests` are fast
@@ -531,8 +537,10 @@ reflection probe of three members that fails closed. A discovered topic never re
 discovery adds no redaction. Full text: [kstudio.md](docs/maintainers/kstudio.md#d43).
 
 **D44 — Links between a studio and a module are pure, internal and grant nothing.** `IStudioRouteLinks` (MartenStudio
-implements it: a document by type and id, a stream by id or key, in the record's tenant, and only for a store that
-keeps its rows per tenant and lists no `KnownTenantIds`) and `IStudioRecordSearchLinks` (KStudio implements it: "Find in Kafka") live in PostgresStudio
+implements it: a document by type and id, a stream by id or key, in the record's tenant: a static tenancy from its
+configuration, unless its rows are tenanted and it lists `KnownTenantIds`; a master-table, sharded or one-server tenancy only
+when it keeps its rows per tenant and lists no `KnownTenantIds`, so a master-table or one-server tenancy with single-tenanted
+rows gets no link) and `IStudioRecordSearchLinks` (KStudio implements it: "Find in Kafka") live in PostgresStudio
 beside `IStudioLinks`, under its rules. Neither module names the other, a masked value never enters a URL, a value travels
 in the fragment, and the destination authorizes again. External links are host templates with no credential, opened with
 `noreferrer`. Full text: [kstudio.md](docs/maintainers/kstudio.md#d44).
@@ -551,7 +559,10 @@ partition's end (the last stable offset under `read_committed`), keeps the newes
 four times a second, and holds a scan slot and pays the owner's budgets while it reads. It pauses by ending its segment - after
 `TailPauseAfter`, a segment's byte or record budget, an owner's budget, a hidden tab, or a cluster that stopped answering - and
 resumes from its exact cursor, the gate and the planned grant asked again. It never stops for silence and a caught-up partition is
-never stalled. One audit entry per tail session however it ends (9608), its start logged (9607). Full text:
+never stalled. A tail whose circuit loses its connection pauses (`ConnectionLost`, an ordinary pause) through the module's own
+scoped `CircuitHandler`, a no-op on a circuit with no tail and the only thing `AddKafkaStudio` adds to the host's circuits; on
+reconnect it resumes only if still paused for the drop and the browser, asked once, says the tab is shown, through the full
+gate with the identity the circuit held when the connection returned, so a changed identity takes effect at the next pause. One audit entry per tail session however it ends (9608), its start logged (9607). Full text:
 [kstudio.md](docs/maintainers/kstudio.md#d46).
 
 **D47 — KStudio's profiles lower limits per cluster, explicitly, and never grant.** `KafkaClusterBuilder.Profile(KafkaProfile.
@@ -580,13 +591,13 @@ Complete, as of the bootstrap commit. Versions are centrally pinned in `Director
 | `src/PostgresStudio` | `Microsoft.AspNetCore.App.Internal.Assets` | `10.0.12` | `blazor.web.js`, which as of .NET 10 lives nowhere else (D22); it reaches a MartenStudio host through MartenStudio's `ProjectReference` to PostgresStudio (two hops, measured by PS-0, *Package budget changes* 2026-10-20). Three `.js` files and one MSBuild target: no `lib/`, no `ref/`, no runtime assembly, so it pins no ASP.NET Core patch on the host. Floor, not exact pin — a host whose own SDK already resolves this pack keeps its version, because NuGet takes the higher of the two. Its `buildTransitive` targets are what put the script in the *consumer's* static web assets. MartenStudio no longer references it, but MartenStudio's nuspec still lists it at this version: under `CentralPackageTransitivePinningEnabled` NuGet writes a centrally pinned transitive package into the nuspec (the same line MartenStudio 0.4.0 carried when it referenced the pack directly), and `Pack` asserts the line. |
 | `src/PostgresStudio.Diagnostics` | `Npgsql` | `9.0.4` (latest tested `10.0.3`) | The diagnostics engine's database driver, and the studio's: since 0.11-C `src/PostgresStudio` takes it through its `ProjectReference` to this project and no longer references it directly (*Package budget changes* 2026-11-01). PostgresStudio has no Marten to bring it. A central row that only projects setting `PostgresStudioPinsNpgsql` see, so MartenStudio keeps taking Npgsql through Marten and the two never drift there (D3; *Package budget changes* 2026-10-20). Floor, not exact pin; 9.0.4 is Marten 9.57.0's own Npgsql, so a MartenStudio host resolves Marten's Npgsql, which is never lower (`NpgsqlVersionTests`; *Package budget changes* 2026-11-03, which moved it from the 8.0.3 that PS-7 measured on 2026-10-26). `samples/PostgresStudio.SampleData` references it directly too, and `samples/PostgresStudio.Sample`, both PostgresStudio test projects and `src/PostgresStudio` itself set `PostgresStudioPinsNpgsql` so the same row pins it transitively; all of them are in `postgres-studio.slnf`, so the latest-Npgsql pass builds them at 10.0.3. |
 | `src/PostgresStudio.Diagnostics` | `Microsoft.Extensions.DependencyInjection.Abstractions`, `Microsoft.Extensions.Logging.Abstractions`, `Microsoft.Extensions.Options`, `Microsoft.Extensions.Diagnostics.HealthChecks` | `10.0.0` each | The engine has no `FrameworkReference` to `Microsoft.AspNetCore.App` (hard rule 16), so the abstractions it registers into, logs through and exports a health check with come as packages. Four conditional central rows, visible only to projects that set `PostgresStudioDiagnosticsPinsExtensions` (this one, and the 0.11 worker sample), so Marten's, JasperFx's and Weasel's own Microsoft.Extensions.* stay unpinned in MartenStudio and its tests. Floors, not exact pins. 10.0.0 and not 8.0.x because Npgsql 10.0.3's net10.0 asset asks for `Logging.Abstractions` 10.0.0 and an older pin would silently win (measured: no NU code, 8.0.0 resolved), which is not a floor (D1: the library is net10.0 only). *Package budget changes* 2026-11-01. |
-| `src/KStudio.Core` | `Confluent.Kafka` | `2.14.0` (latest tested `2.16.0`) | KStudio's only Kafka client (plan K2), behind the engine's internal wire seam (D36). Floor, not exact pin: 2.14.0 is what WolverineFx.Kafka 6.61 pins, so a Wolverine host is never raised. It brings `librdkafka.redist` (native librdkafka for Windows, Linux and macOS) at its own version, unpinned. Unconditional row: only the KStudio projects reference it, and the KStudio sample transitively, for its seeder. Not packed before M4 (K8). *Package budget changes* 2026-11-09. |
+| `src/KStudio.Core` | `Confluent.Kafka` | `2.14.0` (latest tested `2.16.0`) | KStudio's only Kafka client (plan K2), behind the engine's internal wire seam (D36). Floor, not exact pin: 2.14.0 is what WolverineFx.Kafka 6.61 pins, so a Wolverine host is never raised. It brings `librdkafka.redist` (native librdkafka for Windows, Linux and macOS) at its own version, unpinned. Unconditional row: only the KStudio projects reference it, and the KStudio sample transitively, for its seeder. Packed as a preview since 1.3 (K8), with this floor in its nuspec. *Package budget changes* 2026-11-09. |
 | `src/KStudio.Core` | `Microsoft.Extensions.DependencyInjection.Abstractions`, `Microsoft.Extensions.Logging.Abstractions`, `Microsoft.Extensions.Options` | `10.0.0` each | The diagnostics engine's conditional rows, seen by KStudio.Core through `KStudioCorePinsExtensions`: the engine has no ASP.NET Core either (D36). |
 | `tests/KStudio.Integration.Tests`, `samples/KStudio.Sample` | `Testcontainers.Kafka` | `4.15.0` | The live suite's brokers, `apache/kafka:3.9.2` and `4.4.0` in KRaft mode, one per image with SASL/PLAIN and ACLs; and the KStudio sample's throwaway `apache/kafka:4.4.0` (D18). |
-| `src/KStudio.Wolverine` | `WolverineFx.Kafka` | `6.61.0` | Wolverine's Kafka transport, for configuration discovery only (D43): clusters, tenants and topics read from the built `WolverineOptions`, nothing started or written. Floor, not exact pin: 6.61.0 pins Confluent.Kafka 2.14.0, KStudio.Core's floor, so a Wolverine host is never raised. It brings JasperFx 2.99.0, above Marten 9.57.0's 2.98.0. `tests/KStudio.Wolverine.Tests` takes it through the project reference; `tests/KStudio.Integration.Tests` and `samples/KStudio.Sample` reference it for a real Wolverine host. Not packed before K8. *Package budget changes* 2026-11-12. |
+| `src/KStudio.Wolverine` | `WolverineFx.Kafka` | `6.61.0` | Wolverine's Kafka transport, for configuration discovery only (D43): clusters, tenants and topics read from the built `WolverineOptions`, nothing started or written. Floor, not exact pin: 6.61.0 pins Confluent.Kafka 2.14.0, KStudio.Core's floor, so a Wolverine host is never raised. It brings JasperFx 2.99.0, above Marten 9.57.0's 2.98.0. `tests/KStudio.Wolverine.Tests` takes it through the project reference; `tests/KStudio.Integration.Tests` and `samples/KStudio.Sample` reference it for a real Wolverine host. Packed as a preview since 1.3 (K8). *Package budget changes* 2026-11-12. |
 | `samples/KStudio.Sample` | `WolverineFx.RuntimeCompilation` | `6.61.0` | Wolverine's opt-in Roslyn code generation, for the sample's Wolverine application only (D-CORR decision 11): Wolverine 6.61 no longer ships its runtime compiler, and a host with a handler (`PlaceCheckoutHandler`, which stores a Marten document) needs it, or pre-generated code, to start. It matches `WolverineFx.Kafka` 6.61.0 and registers itself when referenced. One central row in `Directory.Packages.props`; no shipped package, `KStudio`, `KStudio.Core`, `KStudio.Wolverine` or test project references it. *Package budget changes* 2026-11-12. |
 | the four sample hosts, `tests/MartenStudio.Integration.Tests`, `tests/PostgresStudio.Integration.Tests` | `Testcontainers.PostgreSql` | `4.15.0` | D18's throwaway Postgres (the Marten, Postgres Studio and KStudio sample hosts and the diagnostics worker), and the container each integration suite runs against. |
-| `samples/PostgresStudio.Worker` | `Microsoft.Extensions.Hosting` | `10.0.0` | The generic host the diagnostics worker sample runs in (*Package budget changes* 2026-11-01). A fifth row of the conditional `PostgresStudioDiagnosticsPinsExtensions` group: no shipped package references it. |
+| `samples/PostgresStudio.Worker` | `Microsoft.Extensions.Hosting` | `10.0.0` | The generic host the diagnostics worker sample runs in (*Package budget changes* 2026-11-01). A fifth row of the conditional `PostgresStudioDiagnosticsPinsExtensions` group: no shipped package references it directly. KStudio.Wolverine's nuspec (1.3) carries it as a minimum, through `KStudioCorePinsExtensions` and transitive pinning; it equals WolverineFx 6.61's own net10.0 minimum and raises nothing. |
 | all seven test projects | `Microsoft.NET.Test.Sdk` | `18.10.0` | The VSTest host Fallout's `ITest` drives. |
 | all seven test projects | `xunit.v3` | `3.2.2` | Held — see below. |
 | all seven test projects | `xunit.runner.visualstudio` | `3.1.5` | The VSTest bridge. |
@@ -647,7 +658,7 @@ it would fail to compile (`GitHubActionsAttribute.Env`). Move to a new stable re
 .\build.ps1 Test --marten-version latest   # ... at the latest-tested Marten instead of the floor
 .\build.ps1 Test --npgsql-version latest   # ... and then PostgresStudio's projects at the latest-tested Npgsql
 .\build.ps1 Test --confluent-version latest   # ... and KStudio at the latest-tested Confluent.Kafka
-.\build.ps1 Pack                           # the three NuGet packages into artifacts/packages (always at the floors)
+.\build.ps1 Pack                           # the six NuGet packages into artifacts/packages (always at the floors)
 .\build.ps1 Browsers                       # just the Chromium install
 ```
 
@@ -665,7 +676,9 @@ The Marten version is `Directory.Packages.props`'s: `MartenStudioMartenFloor` an
 anything else. PostgresStudio's Npgsql follows the same scheme with `--npgsql-version`; anything but its floor gets a
 pass of its own over `postgres-studio.slnf`, never the `.slnx`. `Pack` packs `src/PostgresStudio.Diagnostics`, then
 `src/PostgresStudio`, then `src/MartenStudio`, all at the CHANGELOG version, each depending on exactly the one below it
-(`PostgresStudio.Diagnostics [<version>]`, `PostgresStudio [<version>]`), and `Publish` pushes the three in that order. The
+(`PostgresStudio.Diagnostics [<version>]`, `PostgresStudio [<version>]`), then `src/KStudio.Core`, `src/KStudio` and
+`src/KStudio.Wolverine` at `<version>-<KStudioPrereleaseLabel>` (KStudio on exactly `PostgresStudio [<version>]` and that
+`KStudio.Core`, KStudio.Wolverine on exactly that `KStudio.Core`), and `Publish` pushes the six in that order. The
 build needs at least one commit. To bump the latest-tested Marten, change `MartenStudioMartenLatest`, run both suites
 with `--marten-version latest` and fix or record every difference, in a pull request of its own. A project that sets
 `PostgresStudioPinsNpgsql` goes into `postgres-studio.slnf` in the same pull request. Full text:
