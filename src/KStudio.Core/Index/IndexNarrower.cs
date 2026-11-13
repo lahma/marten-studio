@@ -33,7 +33,9 @@ internal static class IndexNarrower
         HashSet<(string Topic, int Partition)> read = [.. plan.Where(static x => !x.IsEmpty).Select(static x => (x.Topic, x.Partition))];
         HashSet<string> named = new(topics, StringComparer.Ordinal);
 
+        // At most MaxHints are kept; the rest are counted and dropped as they come, so an index that names a million ranges costs no memory here.
         List<KafkaIndexHint> valid = [];
+        int notUsed = 0;
 
         foreach (KafkaIndexHint hint in answer.Ranges)
         {
@@ -42,13 +44,19 @@ internal static class IndexNarrower
                 continue;
             }
 
-            valid.Add(hint);
+            if (valid.Count < MaxHints)
+            {
+                valid.Add(hint);
+            }
+            else
+            {
+                notUsed++;
+            }
         }
 
-        int notUsed = Math.Max(0, valid.Count - MaxHints);
         Dictionary<(string Topic, int Partition), (long From, long To, int Hints)> hulls = [];
 
-        foreach (KafkaIndexHint hint in valid.Take(MaxHints))
+        foreach (KafkaIndexHint hint in valid)
         {
             (string, int) key = (hint.Topic, hint.Partition);
             hulls[key] = hulls.TryGetValue(key, out (long From, long To, int Hints) hull)

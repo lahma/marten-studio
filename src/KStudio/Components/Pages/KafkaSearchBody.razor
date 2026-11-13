@@ -305,7 +305,7 @@
                                     <td class="ms-table-cell">@KafkaDisplay.Bytes(partition.Bytes)</td>
                                     <td class="ms-table-cell">@KafkaDisplay.Number(partition.Matches)</td>
                                     <td class="ms-table-cell">@KafkaDisplay.Number(partition.Undecidable)</td>
-                                    <td class="ms-table-cell">@(partition.State is { } state ? KafkaSearchText.State(state, partition.Records) : string.Empty)</td>
+                                    <td class="ms-table-cell">@(partition.State is { } state ? KafkaSearchText.State(state, partition.Records, partition.Topic, partition.Partition, result?.Index ?? shownRun?.Plan.Index) : string.Empty)</td>
                                 </tr>
                             }
                         </tbody>

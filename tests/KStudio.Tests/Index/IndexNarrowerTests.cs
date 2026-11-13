@@ -151,6 +151,21 @@ public class IndexNarrowerTests
     }
 
     [Fact]
+    public void A_million_hints_are_counted_and_not_stored()
+    {
+        IReadOnlyList<PartitionRange> plan = Plan(Range("orders", 0, 0, 2_000_000));
+        KafkaIndexAnswer answer = KafkaIndexAnswer.Hints([.. Enumerable.Range(0, 1_000_000).Select(static x => new KafkaIndexHint("orders", 0, x, x + 1))]);
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        (_, KafkaIndexNarrowing narrowing) = IndexNarrower.Narrow(plan, answer, Orders);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        narrowing.HintsUsed.Should().Be(64);
+        narrowing.HintsNotUsed.Should().Be(1_000_000 - 64);
+        allocated.Should().BeLessThan(256 * 1024, "the narrowing keeps 64 hints, not a list that grows with the answer (the old list was about 8 MiB)");
+    }
+
+    [Fact]
     public void A_hint_about_another_topic_does_not_use_up_the_cap()
     {
         IReadOnlyList<PartitionRange> plan = Plan(Range("orders", 0, 0, 10_000), Range("secret", 0, 0, 10_000));
@@ -175,7 +190,7 @@ public class IndexNarrowerTests
             ["orders.v1"]);
 
         narrowing.Caveat.Should().Be("Read only where the host's record index pointed (60 of 2,000 offsets); other matches in the window were not looked for.");
-        narrowing.NoMatch.Should().Be("No match in the 2 ranges the host's record index named (60 offsets). The rest of the window was not read.");
+        narrowing.NoMatch(7).Should().Be("No match in the 7 records read from the 2 ranges the host's record index named. The rest of the window was not read.");
         narrowing.AuditSuffix.Should().Be("; narrowed by the host's record index to 2 ranges of orders.v1 (60 offsets)");
         narrowing.Note.Should().Be("The host's record index narrowed this search to 2 ranges (60 of 2,000 offsets of the window).");
     }
@@ -188,7 +203,7 @@ public class IndexNarrowerTests
         (_, KafkaIndexNarrowing one) = IndexNarrower.Narrow(plan, Answer(new KafkaIndexHint("a", 0, 5, 6)), ["a", "b"]);
         (_, KafkaIndexNarrowing two) = IndexNarrower.Narrow(plan, Answer(new KafkaIndexHint("a", 0, 5, 6), new KafkaIndexHint("b", 0, 7, 9)), ["a", "b"]);
 
-        one.NoMatch.Should().Be("No match in the range the host's record index named (1 offset). The rest of the window was not read.");
+        one.NoMatch(1).Should().Be("No match in the 1 record read from the 1 range the host's record index named. The rest of the window was not read.");
         one.AuditSuffix.Should().Be("; narrowed by the host's record index to 1 range of a (1 offset)");
         two.AuditSuffix.Should().Be("; narrowed by the host's record index to 2 ranges of a and b (3 offsets)");
     }
@@ -199,7 +214,6 @@ public class IndexNarrowerTests
         KafkaIndexNarrowing.DidNotAnswer(10).Note.Should().Be("The host's record index did not answer; the whole window is read.");
         KafkaIndexNarrowing.DidNotAnswer(10).IsNarrowed.Should().BeFalse();
         KafkaIndexNarrowing.DidNotAnswer(10).Caveat.Should().BeNull("an index that did not answer left the whole window read, so there is nothing a negative must not claim");
-        KafkaIndexNarrowing.PointedNowhere(10).NoMatch.Should().BeNull();
     }
 
     [Fact]

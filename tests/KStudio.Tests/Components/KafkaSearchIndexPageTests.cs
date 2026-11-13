@@ -85,7 +85,7 @@ public class KafkaSearchIndexPageTests
 
         await SearchForAsync(page, "key = 'needle'");
 
-        page.WaitForAssertion(() => page.Find(".ms-k-result-banner p").TextContent.Should().Be("No match in the range the host's record index named (2 offsets). The rest of the window was not read."));
+        page.WaitForAssertion(() => page.Find(".ms-k-result-banner p").TextContent.Should().Be("No match in the 2 records read from the 1 range the host's record index named. The rest of the window was not read."));
         Buttons(page).Select(static x => x.TextContent).Should().Contain(WholeWindow);
         page.Find(".ms-k-caveats").TextContent.Should().Contain("Read only where the host's record index pointed (2 of 30 offsets); other matches in the window were not looked for.");
         page.Find(".ms-k-plan-notes").TextContent.Should().Contain("The host's record index narrowed this search to 1 range (2 of 30 offsets of the window).");
@@ -192,6 +192,31 @@ public class KafkaSearchIndexPageTests
         // The button re-ran the search of the run on screen, not the unparsable text in the form.
         page.WaitForAssertion(() => Rows(page).Should().Equal("0 / 7"));
         index.Queries.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task The_progress_table_says_which_partitions_the_index_named_and_which_it_did_not()
+    {
+        FakeRecordIndex index = new();
+        await using KafkaSearchRig rig = Rig(index);
+        rig.Topic("orders", 2);
+
+        for (int partition = 0; partition < 2; partition++)
+        {
+            for (int i = 0; i < 30; i++)
+            {
+                rig.Produce("orders", partition, i, partition == 1 && i == 7 ? "needle" : $"k{partition}-{i}", "v");
+            }
+        }
+
+        index.Hints(new KafkaIndexHint("orders", 1, 5, 9));
+        IRenderedComponent<KafkaSearchPage> page = await OpenAsync(rig);
+
+        await SearchForAsync(page, "key = 'needle'");
+
+        page.WaitForAssertion(() => Rows(page).Should().Equal("1 / 7"));
+        string[] states = [.. page.FindAll("details.ms-k-progress tbody tr").Select(static x => x.QuerySelectorAll("td")[0].TextContent + "/" + x.QuerySelectorAll("td")[1].TextContent + ": " + x.QuerySelectorAll("td")[7].TextContent)];
+        states.Should().Equal("orders/0: not read: the record index named nothing here", "orders/1: read to the end of the range the record index named");
     }
 
     [Fact]

@@ -42,7 +42,7 @@ public class KafkaSearchIndexTextTests
     public void A_narrowed_negative_is_said_only_of_the_ranges_read()
     {
         KafkaSearchText.Stop(Result(index: Narrowed()), new KafkaScanLimits())
-            .Should().Be("No match in the 2 ranges the host's record index named (5 offsets). The rest of the window was not read.");
+            .Should().Be("No match in the 5 records read from the 2 ranges the host's record index named. The rest of the window was not read.");
     }
 
     [Fact]
@@ -79,6 +79,25 @@ public class KafkaSearchIndexTextTests
 
         KafkaSearchText.Stop(Result(KafkaScanStopReason.MatchLimit, 1, Narrowed()), limits).Should().StartWith("Stopped at 1 match, the most a search keeps");
         KafkaSearchText.Stop(Result(KafkaScanStopReason.Cancelled, 0, Narrowed()), limits).Should().Be("Stopped by you. Continue reads on from where it stopped.");
+    }
+
+    [Fact]
+    public void A_narrowed_searchs_partition_states_name_the_range_the_index_named()
+    {
+        KafkaIndexNarrowing narrowing = Narrowed();
+
+        KafkaSearchText.State(PartitionEndState.EndOfWindow, 3, "orders", 1, narrowing).Should().Be("read to the end of the range the record index named");
+        KafkaSearchText.State(PartitionEndState.Empty, 0, "orders", 7, narrowing).Should().Be("not read: the record index named nothing here");
+        KafkaSearchText.State(PartitionEndState.Empty, 0, "orders", 1, narrowing).Should().Be("nothing to read", "a partition in the ranges is never empty; only the unnamed ones are not read");
+        KafkaSearchText.State(PartitionEndState.NotReached, 2, "orders", 1, narrowing).Should().Be("stopped before its end");
+    }
+
+    [Fact]
+    public void A_search_the_index_did_not_narrow_keeps_the_old_partition_states()
+    {
+        KafkaSearchText.State(PartitionEndState.EndOfWindow, 3, "orders", 1, null).Should().Be("read to the window's end");
+        KafkaSearchText.State(PartitionEndState.Empty, 0, "orders", 7, KafkaIndexNarrowing.PointedNowhere(10)).Should().Be("nothing to read");
+        KafkaSearchText.State(PartitionEndState.EndOfWindow, 3, "orders", 1, KafkaIndexNarrowing.DidNotAnswer(10)).Should().Be("read to the window's end");
     }
 
     [Fact]

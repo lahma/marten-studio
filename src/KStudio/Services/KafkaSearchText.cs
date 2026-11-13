@@ -45,7 +45,7 @@ internal static class KafkaSearchText
             KafkaScanStopReason.Completed when result.Index is { IsNarrowed: true } index && result.Matches > 0 => string.Create(
                 CultureInfo.InvariantCulture,
                 $"Read every offset in the ranges the host's record index named ({KafkaIndexNarrowing.Offsets(index.OffsetsRead)}): {KafkaDisplay.Count(result.Records, "record")}, {KafkaDisplay.Bytes(result.Bytes)}, {KafkaDisplay.Count(result.Matches, "match", "matches")}. The rest of the window was not read."),
-            KafkaScanStopReason.Completed when result.Index is { IsNarrowed: true } index => index.NoMatch!,
+            KafkaScanStopReason.Completed when result.Index is { IsNarrowed: true } index => index.NoMatch(result.Records),
             KafkaScanStopReason.Completed when result.Matches > 0 => string.Create(
                 CultureInfo.InvariantCulture,
                 $"Read every offset in the window: {KafkaDisplay.Count(result.Records, "record")}, {KafkaDisplay.Bytes(result.Bytes)}, {KafkaDisplay.Count(result.Matches, "match", "matches")}."),
@@ -101,6 +101,31 @@ internal static class KafkaSearchText
     /// <param name="recordsRead">The records the scan read from it.</param>
     public static string State(PartitionEndState state, long recordsRead) =>
         state == PartitionEndState.NotReached && recordsRead > 0 ? "stopped before its end" : State(state);
+
+    /// <summary>
+    /// A partition's end state in a search the host's record index narrowed (AGENTS.md D48): the range is the one the index named, not the window's, and a
+    /// partition it named nothing in was not read at all. A search the index did not narrow reads as always.
+    /// </summary>
+    /// <param name="state">How it ended.</param>
+    /// <param name="recordsRead">The records the scan read from it.</param>
+    /// <param name="topic">The partition's topic.</param>
+    /// <param name="partition">The partition.</param>
+    /// <param name="narrowing">What the index did to the plan, or <see langword="null" /> when it was not asked.</param>
+    public static string State(PartitionEndState state, long recordsRead, string topic, int partition, KafkaIndexNarrowing? narrowing)
+    {
+        if (narrowing is not { IsNarrowed: true })
+        {
+            return State(state, recordsRead);
+        }
+
+        return state switch
+        {
+            PartitionEndState.EndOfWindow => "read to the end of the range the record index named",
+            PartitionEndState.Empty when !narrowing.Ranges.Any(x => x.Partition == partition && string.Equals(x.Topic, topic, StringComparison.Ordinal)) =>
+                "not read: the record index named nothing here",
+            _ => State(state, recordsRead),
+        };
+    }
 
     /// <summary>A partition's end state in words, for the progress table and the caveats.</summary>
     /// <param name="state">How it ended.</param>

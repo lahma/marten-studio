@@ -48,7 +48,7 @@ public abstract class RecordIndexLiveTests(KafkaFixture fixture)
 
         // The needle at 1/33 is outside the range and was not looked for.
         matches.Select(static x => (x.Partition, x.Offset)).Should().Equal((1, 12L));
-        result.Index!.NoMatch.Should().Contain("The rest of the window was not read.");
+        result.Index!.NoMatch(result.Records).Should().Contain("The rest of the window was not read.");
     }
 
     [Fact]

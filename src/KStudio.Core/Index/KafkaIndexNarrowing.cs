@@ -88,12 +88,15 @@ internal sealed class KafkaIndexNarrowing
             CultureInfo.InvariantCulture,
             $"Read only where the host's record index pointed ({OffsetsRead:N0} of {OffsetsInWindow:N0} offsets); other matches in the window were not looked for.{NotUsed}");
 
-    /// <summary>The sentence of a narrowed result with no match: a negative is said only of the ranges read.</summary>
-    public string? NoMatch => !IsNarrowed
-        ? null
-        : Ranges.Count == 1
-            ? string.Create(CultureInfo.InvariantCulture, $"No match in the range the host's record index named ({Offsets(OffsetsRead)}). The rest of the window was not read.")
-            : string.Create(CultureInfo.InvariantCulture, $"No match in the {Ranges.Count:N0} ranges the host's record index named ({Offsets(OffsetsRead)}). The rest of the window was not read.");
+    /// <summary>
+    /// The sentence of a narrowed run with no match: a negative is said only of what <b>this run</b> read, never of the ranges as a whole, because a
+    /// run that continues another reads the rest of them and the first may have found matches there.
+    /// </summary>
+    /// <param name="records">The records this run read.</param>
+    public string NoMatch(long records) =>
+        string.Create(
+            CultureInfo.InvariantCulture,
+            $"No match in the {records:N0} {(records == 1 ? "record" : "records")} read from the {Ranges.Count:N0} {(Ranges.Count == 1 ? "range" : "ranges")} the host's record index named. The rest of the window was not read.");
 
     /// <summary>What the audit message adds: <c>; narrowed by the host's record index to 2 ranges of orders (60 offsets)</c>; empty when the index narrowed nothing.</summary>
     public string AuditSuffix

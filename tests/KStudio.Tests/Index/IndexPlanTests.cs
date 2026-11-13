@@ -2,6 +2,7 @@ using KStudio.Core.Clusters;
 using KStudio.Core.Decoding;
 using KStudio.Core.Index;
 using KStudio.Core.Scanning;
+using KStudio.Services;
 using KStudio.Tests.Contract;
 using KStudio.Tests.Scanning;
 using KStudio.Tests.Support;
@@ -159,7 +160,7 @@ public class IndexPlanTests
 
         matches.Should().BeEmpty("a hint is where to look, never what was found");
         result.Records.Should().Be(3);
-        result.Index!.NoMatch.Should().Be("No match in the range the host's record index named (3 offsets). The rest of the window was not read.");
+        result.Index!.NoMatch(result.Records).Should().Be("No match in the 3 records read from the 1 range the host's record index named. The rest of the window was not read.");
     }
 
     [Fact]
@@ -291,7 +292,7 @@ public class IndexPlanTests
         plan.Index!.Ranges.Should().OnlyContain(x => x.Topic == topic);
         plan.Ranges.Should().OnlyContain(x => x.Topic == topic);
         matches.Should().OnlyContain(x => x.Topic == topic);
-        string[] texts = [plan.Index.Note, plan.Index.Caveat!, plan.Index.NoMatch!, plan.Index.AuditSuffix, result.IndexAuditText, .. result.Index!.Ranges.Select(static x => x.Topic)];
+        string[] texts = [plan.Index.Note, plan.Index.Caveat!, plan.Index.NoMatch(0), plan.Index.AuditSuffix, result.IndexAuditText, .. result.Index!.Ranges.Select(static x => x.Topic)];
         texts.Should().OnlyContain(x => !x.Contains(secret, StringComparison.Ordinal));
     }
 
@@ -438,6 +439,57 @@ public class IndexPlanTests
         rest.Index.Should().BeSameAs(first.Index);
         Positions([.. firstMatches, .. restMatches]).Should().Equal("0/5", "1/12", "1/18");
         second.Ranges.Should().OnlyContain(x => x.End <= (x.Partition == 0 ? 10 : 20), "the continuation stays inside the narrowed ranges");
+    }
+
+    [Fact]
+    public async Task A_continued_runs_negative_is_said_only_of_the_records_it_read_and_never_of_the_ranges_the_first_run_found_a_match_in()
+    {
+        FakeRecordIndex index = new();
+        await using ScanFixture fixture = Seeded(index, out string topic);
+
+        // The one range, offsets 4 to 6 of partition 0, holds the needle at 0/5. The first run stops at it; the rest of the range holds none.
+        index.Hints(new KafkaIndexHint(topic, 0, 4, 7));
+        (KafkaScanPlan first, KafkaScanResult stopped, IReadOnlyList<KafkaMatch> firstMatches) = await fixture.RunAsync(Needle(topic, lower: new KafkaScanLowering { MaxMatches = 1 }));
+        (_, KafkaScanResult rest, IReadOnlyList<KafkaMatch> restMatches) = await fixture.RunAsync(Needle(topic, cursor: stopped.Cursor));
+
+        Positions(firstMatches).Should().Equal("0/5");
+        restMatches.Should().BeEmpty();
+        rest.Records.Should().Be(1);
+        string stop = KafkaSearchText.Stop(rest, first.Limits);
+        stop.Should().Be("No match in the 1 record read from the 1 range the host's record index named. The rest of the window was not read.");
+        stop.Should().NotContain("offsets", "it does not claim the ranges as a whole had no match: the first run found one there");
+    }
+
+    [Fact]
+    public async Task An_index_that_blocks_its_thread_before_returning_is_bounded_by_the_request_timeout()
+    {
+        using ManualResetEventSlim release = new(false);
+        FakeRecordIndex index = new()
+        {
+            Answer = (_, _) =>
+            {
+                release.Wait(TestBounds.Gate, CancellationToken.None);
+                return ValueTask.FromResult(KafkaIndexAnswer.None);
+            },
+        };
+
+        await using ScanFixture fixture = Seeded(index, out string topic);
+
+        try
+        {
+            Task<KafkaScanPlan> planning = fixture.PlanAsync(Needle(topic));
+            ScanFixture.Until(() => index.Queries.Count == 1, "the index to be asked");
+            fixture.Clock.Advance(fixture.Options.RequestTimeout + TimeSpan.FromSeconds(1));
+
+            KafkaScanPlan plan = await planning.Bounded();
+
+            plan.Index!.Outcome.Should().Be(KafkaIndexOutcome.DidNotAnswer);
+            IndexLogs(fixture).Should().ContainSingle().Which.Message.Should().EndWith(": Timeout");
+        }
+        finally
+        {
+            release.Set();
+        }
     }
 
     [Fact]

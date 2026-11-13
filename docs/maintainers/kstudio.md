@@ -1014,15 +1014,17 @@ range, and the estimate is of the narrowed ranges. The scan reads and judges eve
 the index gave**, and a wrong hint finds nothing. If no hint survives the plan is returned as it was, with a note.
 
 **Negatives stay truthful (D38).** `KafkaIndexNarrowing` carries the engine's sentences: the plan note, the caveat beside matches and negatives ("Read only where the
-host's record index pointed (60 of 2,000 offsets); other matches in the window were not looked for."), the narrowed negative ("No match in the 2 ranges the host's
-record index named (60 offsets). The rest of the window was not read."), and the audit suffix (`; narrowed by the host's record index to 2 ranges of orders.v1 (60
+host's record index pointed (60 of 2,000 offsets); other matches in the window were not looked for."), the narrowed negative, **said only of what this run read** ("No match in the 12 records read from the 2 ranges the host's
+record index named. The rest of the window was not read." - never "no match in the ranges", because a run that continues another reads the rest of them and the
+first may have found matches there), and the audit suffix (`; narrowed by the host's record index to 2 ranges of orders.v1 (60
 offsets)`). The result banner never says "every offset in the window" of a narrowed scan. **Search the whole window** is the same input with `IgnoreIndex`, its own
 plan, estimate, confirmation, scan and audit entry, and is bound to the run on screen (`shownRun`), never to the latest plan. **Continue** from a narrowed scan reads
 the rest of the narrowed ranges: the cursor carries the narrowing in memory (like its pruning claim; the text form carries positions only), the continued plan keeps it
 and never asks again, because its negatives are still about those ranges only.
 
 **What the index cannot do to a search.** It is given the planning token linked with `RequestTimeout`, and the engine does not wait past that for an index that ignores
-its token. An exception, a timeout, a constructor that throws, or an answer of `None` costs the narrowing and nothing else: the whole window is read, with the note
+its token or blocks its thread before it returns a task: the call runs on the pool (`Task.Run`), so the wait starts at once. It is created once and shared by every
+search, so it takes singletons (an `IDocumentStore`), never a session. At most 64 hints are kept as they come; the rest are only counted. An exception, a timeout, a constructor that throws, or an answer of `None` costs the narrowing and nothing else: the whole window is read, with the note
 `The host's record index did not answer; the whole window is read.` (or `... pointed nowhere in this window ...`). Abandoning the planning is not a failure of the
 index and propagates. Event **9679** (Debug, once per cluster per ten minutes) carries the index's type name, the cluster and the exception's **type** (`Timeout` for a
 timeout): never the query, the literal, the message or a hint. The audit gains the narrowing suffix and nothing else: the call reads no record, so it is no entry of its

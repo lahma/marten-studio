@@ -147,8 +147,11 @@ sealed class MyRecordIndex(IDocumentStore store) : IKafkaRecordIndex
 A search for `key = '…'`, or `header.<name> = '…'` / `ce.<attribute> = '…'`, asks the index once while it is planned, never for a
 field a rule redacts. The search then reads only the ranges the index named, inside its window, and judges every record there
 as always: a wrong hint finds nothing, never something false. A search narrowed this way says so, its "no match" is said only of
-the ranges it read, and **Search the whole window** reads the rest. An index that throws or does not answer within the request
-timeout is ignored, and the whole window is read.
+the records that run read, in the ranges the index named (after **Continue**, only of the rest it read, never of the ranges the
+first run found a match in), and **Search the whole window** reads the rest. An index that throws or does not answer within the
+request timeout is ignored, and the whole window is read, even when it blocks its thread.
+
+The index is created once and shared: take singletons such as `IDocumentStore`, never a session.
 
 ## Duplicates
 

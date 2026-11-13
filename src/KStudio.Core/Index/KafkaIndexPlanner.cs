@@ -125,13 +125,14 @@ internal sealed class KafkaIndexPlanner(
 
     private async Task<(KafkaIndexAnswer? Answer, string? Failure)> AskAsync(IKafkaRecordIndex index, KafkaIndexQuery query, CancellationToken cancellationToken)
     {
-        // The request timeout bounds the wait even for an index that ignores its token: the abandoned call is not awaited again.
+        // The request timeout bounds the wait even for an index that ignores its token, and even one that blocks its thread before returning a task: the
+        // call runs on the pool, so the wait below starts at once, and an abandoned call is not awaited again.
         using CancellationTokenSource timeout = new(settings.RequestTimeout, time);
         using CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
 
         try
         {
-            KafkaIndexAnswer? answer = await index.FindAsync(query, linked.Token).AsTask().WaitAsync(linked.Token).ConfigureAwait(false);
+            KafkaIndexAnswer? answer = await Task.Run(() => index.FindAsync(query, linked.Token).AsTask(), CancellationToken.None).WaitAsync(linked.Token).ConfigureAwait(false);
             return (answer ?? KafkaIndexAnswer.None, null);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
