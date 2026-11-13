@@ -672,9 +672,13 @@ public class WolverineDiscoveryTests
     {
         WolverineOptions options = WolverineRig.Options();
         WolverineRig.Listen(WolverineRig.Default(options), "orders");
-        WolverineRig.Listen(WolverineRig.Named(options, "besteffort", "broker:9092"), "orders");
+        KafkaTransport named = WolverineRig.Named(options, "besteffort", "broker:9092");
+        WolverineRig.Listen(named, "orders");
+        options.AddNamedKafkaBroker(new BrokerName("besteffort"), "broker:9092").AddTenant("acme", "tenant:9092");
+        WolverineRig.ConnectTenants(options, named);
 
-        WolverineRig.Contribute(options).Clusters.Select(static x => (x.Key, x.CanBeLeftOut)).Should().Equal(("wolverine", false), ("wolverine-besteffort", true));
+        WolverineRig.Contribute(options).Clusters.Select(static x => (x.Key, x.TenantId, x.CanBeLeftOut)).Should().Equal(
+            ("wolverine", null, false), ("wolverine-besteffort", null, true), ("wolverine-besteffort", "acme", true));
     }
 
     [Fact]

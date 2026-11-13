@@ -51,7 +51,7 @@ internal readonly struct KafkaField<T>
 /// The entry keys of the other clusters, of another base cluster, whose bootstrap servers are the same set as this cluster's (#72): probably one cluster
 /// registered twice. Compared from configuration alone, never by connecting; the servers themselves are not in the record.
 /// </param>
-/// <param name="SameServersCanBeLeftOut">Whether this cluster or one in <paramref name="SameServersAs" /> is one its source lets the host leave out of discovery.</param>
+/// <param name="CanBeLeftOut">Whether the source that contributed this cluster lets the host leave it out of discovery. This cluster's own fact only: a page counts the clusters the visitor may see, never one it was refused (D35).</param>
 internal sealed record KafkaClusterInfo(
     string Key,
     string DisplayName,
@@ -62,7 +62,7 @@ internal sealed record KafkaClusterInfo(
     string? Source,
     KafkaProfile? Profile = null,
     IReadOnlyList<string>? SameServersAs = null,
-    bool SameServersCanBeLeftOut = false);
+    bool CanBeLeftOut = false);
 
 /// <summary>A topic in the list.</summary>
 /// <param name="Name">The name.</param>

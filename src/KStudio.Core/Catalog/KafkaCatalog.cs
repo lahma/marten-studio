@@ -64,7 +64,7 @@ internal sealed class KafkaCatalog(
                     x.Source,
                     x.Profile,
                     SameServers(x, all),
-                    x.CanBeLeftOut || SameServersDefinitions(x, all).Any(static y => y.CanBeLeftOut))),
+                    x.CanBeLeftOut)),
             ];
         }
     }
