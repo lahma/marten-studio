@@ -17744,3 +17744,73 @@ dialog.ms-modal::backdrop {
 .ms-k-profile {
     overflow-wrap: anywhere;
 }
+
+/* ===== KS-UI-TAIL: the live tail ===== */
+/* The form, the banner, the caveats, the export row and the matches table are Search's (KS-UI-B); this section adds what only a tail has. */
+.ms-k-tail,
+.ms-k-tail-form,
+.ms-k-tail-status,
+.ms-k-tail-paused {
+    min-width: 0;
+}
+
+/* A positioned table, as Search's: the details row and the popovers inside it measure against it. */
+.ms-k-tail-matches {
+    position: relative;
+}
+
+.ms-k-tail-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-sm);
+}
+
+/* The live line and its chips: the one place on the page that moves while no record arrives. */
+.ms-k-tail-status {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-sm);
+    margin: var(--ms-space-md) 0;
+    padding: var(--ms-space-md);
+    border: 1px solid var(--ms-color-border);
+    border-left: 3px solid var(--ms-color-success);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface-alt);
+}
+
+.ms-k-tail-line {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.ms-k-tail-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-xs);
+    min-width: 0;
+}
+
+.ms-k-tail-chip {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+}
+
+.ms-k-tail-chip-live {
+    border-color: var(--ms-color-success);
+    background: var(--ms-color-success-bg);
+}
+
+.ms-k-tail-paused {
+    border-left-color: var(--ms-color-warning);
+}
+
+.ms-k-tail-paused p,
+.ms-k-tail-forbidden,
+.ms-k-tail-waiting {
+    overflow-wrap: anywhere;
+}
+
+.ms-k-tail-waiting {
+    margin: var(--ms-space-md) 0;
+}

@@ -23,6 +23,9 @@ internal static class KafkaAddress
     /// <summary>Search.</summary>
     public const string SearchRoute = "kafka/search";
 
+    /// <summary>Live tail (D-M5 decision 3.7): the topics and the search text fill the form, and only a click starts a tail.</summary>
+    public const string TailRoute = "kafka/tail";
+
     /// <summary>A record's page, the permalink (D-UI decision 14).</summary>
     public const string RecordRoute = "kafka/record";
 

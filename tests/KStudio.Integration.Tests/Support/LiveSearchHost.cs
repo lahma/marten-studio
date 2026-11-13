@@ -47,6 +47,9 @@ internal sealed class LiveSearchHost : IAsyncDisposable
     /// <summary>The export service (D45).</summary>
     public KafkaExportService Export => scope.ServiceProvider.GetRequiredService<KafkaExportService>();
 
+    /// <summary>The live tail service (D46).</summary>
+    public KafkaTailService Tail => scope.ServiceProvider.GetRequiredService<KafkaTailService>();
+
     /// <summary>The related-records service (D42).</summary>
     public KafkaCorrelationService Correlation => scope.ServiceProvider.GetRequiredService<KafkaCorrelationService>();
 

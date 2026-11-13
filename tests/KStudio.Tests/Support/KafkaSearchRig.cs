@@ -125,6 +125,30 @@ internal sealed class KafkaSearchRig : IAsyncDisposable
             Logs.CreateFactory().CreateLogger<KafkaExportService>());
     }
 
+    /// <summary>A live tail service over the engine's scanner and registry whose events land in <see cref="Logs" />.</summary>
+    public KafkaTailService Tail()
+    {
+        IServiceProvider services = Studio.Context.Services;
+        KafkaActionLog actionLog = new(
+            Studio.Context.ActionLog,
+            Logs.CreateFactory().CreateLogger<KafkaActionLog>(),
+            Studio.Visitor);
+
+        return new KafkaTailService(
+            services.GetRequiredService<KafkaCapabilityGuard>(),
+            Studio.KafkaAuthorization,
+            services.GetRequiredService<KafkaReadGrants>(),
+            Engine.Provider.GetRequiredService<IKafkaScanner>(),
+            Engine.Provider.GetRequiredService<KStudio.Core.Clusters.KafkaClusterRegistry>(),
+            new KafkaOwnerKey(Studio.Visitor),
+            actionLog,
+            Logs.CreateFactory().CreateLogger<KafkaTailService>());
+    }
+
+    /// <summary>A tail over <paramref name="topics" />, from the end of each partition.</summary>
+    public KafkaTailInput TailInput(string[] topics, string? predicate = null, bool uncommitted = false, KafkaScanCursor? resumeFrom = null) =>
+        new(Entry, topics, predicate, uncommitted, resumeFrom);
+
     /// <summary>A record service over the engine's scanner whose events land in <see cref="Logs" />.</summary>
     public KafkaRecordService Records()
     {

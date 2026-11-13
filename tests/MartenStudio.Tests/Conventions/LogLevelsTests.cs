@@ -320,6 +320,22 @@ public class LogLevelsTests
         ["src/KStudio/Components/Shared/KafkaExportMenu.razor : The Kafka export menu failed to save records"] = (Verdict.VisitorAction,
             "The export call threw rather than returning a value, on the visitor's click; one line per click, and the menu says the export failed."),
 
+        // ---- KS-UI-TAIL: the live tail service and page (D46) -----------------------------------------
+        ["src/KStudio/Services/KafkaTailService.cs : KStudio could not plan a live tail"] = (Verdict.VisitorAction,
+            "The engine threw while planning a tail the visitor asked for (or resumed); one line per click, the ring records the failure and the page says the same."),
+        ["src/KStudio/Services/KafkaTailService.cs : KStudio could not start a live tail"] = (Verdict.VisitorAction,
+            "The engine threw while starting a tail segment the visitor asked for; one line per click, the ring records the failure and the page says the same."),
+        ["src/KStudio/Components/Pages/KafkaTailBody.razor : The Kafka tail page failed to read the catalog"] = (Verdict.VisitorAction,
+            "The topic list threw rather than returning a value: a fault in a page the visitor opened; one line per load, the page says the same."),
+        ["src/KStudio/Components/Pages/KafkaTailBody.razor : The Kafka tail page failed to plan a live tail"] = (Verdict.VisitorAction,
+            "Planning threw, on the visitor's Start: one line per click, and the page says the tail failed."),
+        ["src/KStudio/Components/Pages/KafkaTailBody.razor : The Kafka tail page failed to start a live tail"] = (Verdict.VisitorAction,
+            "Planning or starting a segment threw on the visitor's Resume or Jump to now, or on the tab being shown again: one line per click or per change of the tab, and the page says the tail failed."),
+        ["src/KStudio/Components/Pages/KafkaTailBody.razor : The Kafka tail page failed while reading a live tail"] = (Verdict.VisitorAction,
+            "The batch loop of a tail the visitor started threw (the engine returns every broker failure as a value): one line per tail, the page says the same."),
+        ["src/KStudio/Components/Pages/KafkaTailBody.razor : The Kafka tail page failed to record a value view"] = (Verdict.VisitorAction,
+            "Recording the view of a value threw, on the visitor's Details click: one line per click, and the value reads as not available to them."),
+
         // ---- KS-UI-D: related records (D42), classified in UI-E where the roster test first ran with them ------
         ["src/KStudio/Components/Pages/KafkaRelatedBody.razor : The Kafka related-records page failed to read the record"] = (Verdict.VisitorAction,
             "The anchor read threw rather than returning a status: a fault in a page the visitor opened; one line per load, the page says the same."),

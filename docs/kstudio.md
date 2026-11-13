@@ -153,6 +153,22 @@ and its Export button says so), your cluster and capability policies for every t
 with values, your right to read them now. A refusal refuses the whole file, never a part of it, and is recorded. At most two
 exports are written at a time in the application; a third is refused, not queued.
 
+## Live tail
+
+With `LiveTail`, **Live tail** follows topics as records arrive. A tail starts at the end of each partition (its last stable
+offset when uncommitted records are left out), takes the same predicates as Search, and shows the newest
+`Limits.MaxTailMatches` (200) matches, newest first, at most four updates a second. It never starts from an address: only from
+Start.
+
+A tail holds one of the process's `Limits.MaxConcurrentScans` and one of your `Limits.MaxConcurrentScansPerOwner` while it reads,
+is paced by `Limits.BytesPerSecond` and counts against your `Limits.OwnerBytesPerHour`. It pauses itself after
+`Limits.TailPauseAfter` (5 minutes), after `Limits.MaxBytesPerScan` or `Limits.MaxRecordsPerScan` in one stretch, when your
+hourly allowance is spent, and while its tab is hidden (it resumes when you come back). A paused tail frees its slot. **Resume**
+goes on from exactly where it stopped, so nothing produced meanwhile is missed; **Jump to now** starts again from the end and
+says how many offsets it skipped. Every resume asks your policies again, so a change to them takes effect at the next pause.
+Each tail is recorded once, when it ends (event 9608), with how long it read, what it read and why it ended; its start is
+logged as event 9607.
+
 ## Redaction
 
 ```csharp
@@ -278,7 +294,7 @@ placeholder goes in the path, the query or the fragment, never in the scheme or 
 
 ## Audit
 
-Every search, every export and every record opened is recorded in the studio's Activity page and in your log (events 9600-9609), with
+Every search, every export, every live tail and every record opened is recorded in the studio's Activity page and in your log (events 9600-9609), with
 who, the cluster, the topics, the window, the predicate with every redacted value replaced by `<redacted>`, what was read
 and why it stopped. Reading a record's value is recorded separately from the search that found it, once per record per
 session. A visitor sees an entry only if your policies would let them make the same read.

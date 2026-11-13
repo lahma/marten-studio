@@ -832,8 +832,8 @@ delivered that the flags did not grant), `KafkaExportMenuTests` (bUnit: the menu
 ## D46
 
 **D46 — KStudio's live tail is a scan with no end.** `LiveTail` (off by default, needs `SearchRecords`) starts at each partition's end, keeps the newest
-`MaxTailMatches` in a ring, and holds a scan slot and pays the owner's budget while it reads. This is the engine's half; the page, the capability's gate, the
-audit (9607, 9608, 9609) and the hidden-tab pause are UI-TAIL's and are added to this section with it.
+`MaxTailMatches` in a ring, and holds a scan slot and pays the owner's budget while it reads. The first part of this section is the engine's half; *The page* at its
+end is UI-TAIL's: the page, the capability's gate, the audit (9607, 9608, 9609) and the hidden-tab pause.
 
 **The plan.** `IKafkaScanner.PlanTailAsync(KafkaTailRequest)` parses and compiles the search per topic through the same `Compile` as `PlanAsync` (one method, so a tail
 judges a record exactly as a search does: the same grammar, verdicts, `AuditText` and `ReadsValues`), applies the cluster's profile (D47) to the limits, and
@@ -893,6 +893,54 @@ finishes, no `MatchLimit` with three times the ring and `Evicted` and `Skipped` 
 the slot held and released, the governor within 10 % of the rate, the consumer's overrides), `KafkaMatchStoreTests` and `KafkaScanCursorTests`. Live, on Kafka 3.9 and 4.x:
 `TailLiveTests` (arrival within two seconds, an open transaction shown when it commits and an aborted one never, uncommitted records, pause and resume) and
 `ReadNeverWritesScanLiveTests`' tail case (a minute with a pause and resume in the middle: no topic created, no offset committed, no group left).
+
+**The page** (`/kafka/tail`, `KafkaTailPage` and `KafkaTailBody`, under `/kafka` by hard rule 16; rail entry *Live tail*, drawn whatever the capability so that the page can say
+which option turns it on, and a link beside *Search this topic*). Its address is `?cluster=&topics=a,b&iso=` with the search text in the fragment (`#q=`), as Search's is (D9):
+it fills the form and **never starts a tail**, so a pasted link holds no slot and spends no allowance. A page that can only say why it is off - the capability, `SearchRecords`
+or a `Production` profile (`KafkaStudioText.ProfileForbids`, which names `KafkaClusterBuilder.Profile`) - reads nothing from the cluster.
+
+**A tail is a session of segments.** `KafkaTailSession` is the visitor's one tail from Start to Stop; a segment (`KafkaTailSegment`) is one run of the engine, ended by a
+pause. The session keeps what the segments leave, so that a pause loses nothing: the ring (the newest `TailCapacity` matches, newest first, built from the engine's
+oldest-first batches in one pass), the exact cursor of the last segment, the sums, the gaps, the notes and the caveats. **Resume** plans the next segment with the cursor as
+`ResumeFrom`; **Jump to now** plans without it and counts, over the partitions the tail followed, what was produced since the cursor (`KafkaTailService.SkippedByJumping`: the new
+start minus the cursor's next offset), which the page states (`Skipped {n} offsets produced while paused.`) and the session's entry repeats. A pause is told apart by
+`KafkaTailText.PauseOf`: `Paused` (the visitor, or the hidden tab, whichever the page asked for), `Deadline`, `ByteBudget`, `RecordBudget`, `OwnerBudget` - and **`Unavailable`**,
+because a quiet, caught-up tail can end that way after the stall timeout and its cursor is exact, so Resume is offered after it too (`KafkaSearchText.CanContinue` is Search's
+and does not list `Paused`). Every other reason ends the tail. The allowance sentence names the one that ran out (`KafkaStudioText.Allowance(result.SpentBudget)`: the process's,
+or the profile's on this cluster). The page shows no "behind by N" figure: the engine's progress carries no high watermark, so a partition that is still reading shows
+`{topic}/{p} behind`, and one that has reported its end counts in the `N live` chip.
+
+**The gate** (`KafkaTailService`, scoped) is hard rule 5's order before every plan and **every segment**: `Require(LiveTail)` (with `SearchRecords` first), the cluster's profile,
+the input's bounds, the cluster policy, per topic the cluster policy and the capability policy for `SearchRecords` and for `LiveTail`, then the payload grant (a tail whose
+predicate reads values is refused without `ReadPayloads`). A refused topic refuses the whole tail and names nothing (D35). A resume whose grant is lower than the first
+segment's is refused (`GrantChanged`). A policy that changes mid-segment takes effect at the segment's next pause, at most `TailPauseAfter` later, and the docs say so.
+
+**The audit is one entry per session.** 9607 (Information) is logged when the first segment starts, with no ring entry; **9608 and one ring entry** are written when the session
+ends - Stop, a terminal stop, a new Start, the cluster changing, or the page being left - by `KafkaTailSession.End`, which is idempotent (`Interlocked`) and takes the visitor's
+name captured at the start, so recording needs nothing from a scope that may be disposing. The entry's message carries the segments, the elapsed reading time, the records,
+bytes and matches the segments read, the stop reason, the predicate (`AuditText`: a literal on a redacted field is `<redacted>`; the typed text is never recorded), `; values read`,
+`; jumped to now {n} times, skipping {m} offsets`, and `; {k} resumes refused: {reason}`. A tail whose first segment is refused or fails to start is one entry and **9609** and
+leaves no session; a resume the gate or the engine refuses is counted in the session's entry and writes no 9609. (A capability or policy refusal of a resume still writes its
+9602 or 9603 and the ring entry those events always have: a security refusal is an audit event of its own.) The segment's disposal is one shared task, so a page left
+mid-segment writes the entry only after the segment's result was added.
+
+**The tab.** `StudioLiveUpdates.VisibilityChanged` (`Func<bool, Task>`, raised on the pool, one change at a time in the order the browser sent them, only when the value changed,
+never for the state the watch started in, a throwing handler handed to `Failed`) is how the page hears of it. The page starts a `StudioLiveUpdates` the first time a tail runs, with
+a one-second tick that redraws `KafkaTailStatus`, the live line, and nothing else. Hidden: the running segment is paused and the page remembers why. Shown: a tail paused *for
+the tab* goes on by itself from its cursor; a tail the visitor paused, or any other pause, waits for Resume. The handler never awaits the resumed read (the raise waits for its
+handlers), and the page's reading loop (`DriveAsync`) goes on to the next segment in the same frame, so a tail that pauses every few minutes for a day does not nest a day of calls.
+
+**Rendering.** One `InvokeAsync(StateHasChanged)` per engine batch (at most four a second), never per record; an idle tail sends no batches, and the one-second tick redraws only the
+live line (`KafkaTailBody.Renders` and a test hold that).
+
+**Export** is the existing menu (`KafkaExportService`, D45) over the *session on screen*: its cluster, topics, audit text and ring, never the newest plan, which a refused or
+failed Start replaces. It is offered when the tail is paused or over, not while it runs. The sample's `SampleTicker` writes a heartbeat to `heartbeats.v1` every two seconds, with the
+deny-listed `x-api-key` header and a JSON value under the topic's `$.customer.email` rule, for the tail to follow; it is the sample's producer, never KStudio's.
+
+**The tests** (fast): `KafkaTailServiceTests` (every gate refuses and audits, a refused topic names nothing, a session is one entry however many segments, a resume asks everything
+again, a refused resume is counted, the jump arithmetic, a disposed session writes its entry after its segment), `KafkaTailTextTests`, `KafkaTailPageTests` (the disabled states, a link
+that never starts, newest first, pause and resume without a gap, jump to now, the hidden and shown tab, the line that redraws alone, one entry per session, leaving the page, export
+bound to the session), `KafkaTailStylesheetTests` and the two log events in `KafkaStudioRefusalLogValuesTests`; in `PostgresStudio.Tests`, `StudioLiveUpdatesVisibilityTests`.
 
 ## D47
 

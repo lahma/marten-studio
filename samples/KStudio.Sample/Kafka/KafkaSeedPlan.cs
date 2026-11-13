@@ -89,6 +89,9 @@ internal sealed class KafkaSeedPlan
     /// <summary>The topic whose headers the built-in deny-list masks.</summary>
     public const string SecretsTopic = "secrets.v1";
 
+    /// <summary>The topic <see cref="KStudio.Sample.Kafka.SampleTicker" /> writes a record to every two seconds, for the live tail to follow. The seed creates it empty.</summary>
+    public const string HeartbeatsTopic = "heartbeats.v1";
+
     /// <summary>The topic whose presence says the sample seeded this cluster.</summary>
     public const string MarkerTopic = "kstudio-sample.seed-v2";
 
@@ -136,6 +139,7 @@ internal sealed class KafkaSeedPlan
         new(CustomersTopic, 1, new Dictionary<string, string> { ["cleanup.policy"] = "compact" }),
         new(DeadLetterTopic, 1),
         new(SecretsTopic, 1),
+        new(HeartbeatsTopic, 1),
         new(MarkerTopic, 1),
     ];
 

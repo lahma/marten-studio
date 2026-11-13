@@ -54,6 +54,7 @@ public class SampleSeedTests
                 [KafkaSeedPlan.CustomersTopic] = 1,
                 [KafkaSeedPlan.DeadLetterTopic] = 1,
                 [KafkaSeedPlan.SecretsTopic] = 1,
+                [KafkaSeedPlan.HeartbeatsTopic] = 1,
                 [KafkaSeedPlan.MarkerTopic] = 1,
             });
 
@@ -194,7 +195,7 @@ public class SampleSeedTests
 
         await KafkaSeeder.SeedAsync(target, plan, TestContext.Current.CancellationToken);
 
-        target.Calls.Should().Equal("topics:6", "produce:" + (plan.Records.Count - 1).ToString(CultureInfo.InvariantCulture), "commit:6", "produce:1");
+        target.Calls.Should().Equal("topics:7", "produce:" + (plan.Records.Count - 1).ToString(CultureInfo.InvariantCulture), "commit:6", "produce:1");
         target.Produced.Last().Topic.Should().Be(KafkaSeedPlan.MarkerTopic);
         target.Produced.Count(static x => x.Topic == KafkaSeedPlan.MarkerTopic).Should().Be(1);
         target.Committed.Should().OnlyContain(static x => x.Group == "sample-orders-handler" && x.Topic == "orders.v1");

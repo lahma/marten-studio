@@ -12,7 +12,7 @@ using PostgresStudio.Services;
 namespace KStudio.Tests.Conventions;
 
 /// <summary>
-/// Hard rule 5 for KStudio's events (9600 to 9611, 9605, 9606 and 9609 among them): a value a visitor could shape - the address's cluster, a topic, a user's name, a predicate -
+/// Hard rule 5 for KStudio's events (9600 to 9611, 9605 to 9609 among them): a value a visitor could shape - the address's cluster, a topic, a user's name, a predicate -
 /// reaches the log only through <see cref="StudioLogValue" />. Held three ways: every wrapper writes hostile values escaped and bounded, every
 /// <c>[LoggerMessage]</c> method is private to <c>KafkaStudioLog</c>, and none is called from anywhere else in KStudio.
 /// </summary>
@@ -37,10 +37,12 @@ public partial class KafkaStudioRefusalLogValuesTests
         logger.RecordOpened(Hostile, Hostile, 3, 4, Hostile, Hostile);
         logger.RecordValueRead(Hostile, Hostile, 3, 4, Hostile, Hostile);
         logger.RecordsExported(Hostile, 2, Hostile, Hostile, Hostile, Hostile, 4, values: true, HostileText);
+        logger.TailStarted(Hostile, Hostile, Hostile, Hostile, HostileText);
+        logger.TailEnded(Hostile, Hostile, Hostile, Hostile, Hostile, 2, 3, 4, 5, Hostile, HostileText);
         logger.ActionNotRun(Hostile, Hostile, Hostile, Hostile, Hostile, HostileText, HostileText);
         logger.ClusterAddressIgnored(Hostile, Hostile);
 
-        captured.Entries.Select(static x => x.EventId.Id).Should().Equal(9600, 9601, 9602, 9603, 9604, 9605, 9606, 9609, 9610);
+        captured.Entries.Select(static x => x.EventId.Id).Should().Equal(9600, 9601, 9602, 9603, 9604, 9605, 9606, 9607, 9608, 9609, 9610);
 
         foreach (CapturedLogEntry entry in captured.Entries)
         {
@@ -76,6 +78,8 @@ public partial class KafkaStudioRefusalLogValuesTests
         logger.RecordOpened("u", "t", 0, 0, "c", null);
         logger.RecordValueRead("u", "t", 0, 0, "c", null);
         logger.RecordsExported("u", 3, "t", "c", null, "CSV", 120, values: false, "key = 'x'");
+        logger.TailStarted("u", "t", "c", null, "key = 'x'");
+        logger.TailEnded("u", "t", "c", null, "0:42", 2, 10, 120, 3, "Cancelled", "key = 'x'");
         logger.ActionNotRun("u", "export", "t", "c", null, "refused", "key = 'x'");
         logger.ClusterAddressIgnored("a", "b");
         KafkaStudioLog.LiveUpdateHandlerFailed(logger, LogLevel.Debug, new InvalidOperationException("x"));
@@ -88,6 +92,8 @@ public partial class KafkaStudioRefusalLogValuesTests
             (9604, LogLevel.Information),
             (9605, LogLevel.Information),
             (9606, LogLevel.Information),
+            (9607, LogLevel.Information),
+            (9608, LogLevel.Information),
             (9609, LogLevel.Information),
             (9610, LogLevel.Debug),
             (9611, LogLevel.Debug));

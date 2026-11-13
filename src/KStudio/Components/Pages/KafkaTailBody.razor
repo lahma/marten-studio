@@ -1,0 +1,1368 @@
+@implements IAsyncDisposable
+@using System.Globalization
+@using KStudio.Core.Clusters
+@using KStudio.Core.Predicates
+@using KStudio.Core.Scanning
+@using KStudio.Core.Decoding
+@using Microsoft.Extensions.Logging
+@using PostgresStudio.Services
+@using PostgresStudio.Services.Live
+@using PostgresStudio.Services.Settings
+@inject KafkaState State
+@inject KafkaTailService Tail
+@inject KafkaSearchService Search
+@inject KafkaRecordService Records
+@inject KafkaCatalogService Catalog
+@inject KafkaCapabilityGuard Capabilities
+@inject NavigationManager Navigation
+@inject IStudioSettings Settings
+@inject StudioState Studio
+@inject TimeProvider Time
+@inject StudioLiveUpdatesFactory LiveFactory
+@inject ILogger<KafkaTailBody> Logger
+
+@* Live tail (D-M5 decisions 3.6 to 3.9, AGENTS.md D46). The page never starts a tail by itself: a pasted link fills the form and waits for the visitor's click, so a
+   link cannot hold a slot or spend an allowance on their behalf. Everything the form needs from a broker is read after the frame's Ready, and the body exists
+   only after it, so prerendering makes no call. A tail is a session of segments: each segment is one run of the engine, ended by a pause (the visitor, the clock,
+   a budget, a hidden tab), and a pause frees the engine's slot and consumer; Resume starts the next segment from the exact cursor, the gates asked again. The
+   page applies each of the engine's batches (at most four a second) with one InvokeAsync(StateHasChanged) per batch, never per record; the line that counts
+   time is a component of its own, redrawn once a second, so that an idle tail renders nothing else. Leaving the page ends the session. *@
+
+<div class="ms-page ms-k-tail">
+    <nav class="ms-db-breadcrumb" aria-label="Breadcrumb">
+        <a href="@TopicsHref">Topics</a>
+        <span class="ms-db-breadcrumb-sep" aria-hidden="true">/</span>
+        <span>Live tail</span>
+    </nav>
+
+    <div class="ms-page-header">
+        <h1 class="ms-page-title">Live tail</h1>
+    </div>
+
+    @if (!Capabilities.IsEnabled(KafkaCapability.LiveTail))
+    {
+        <KafkaCapabilityDisabled Capability="@nameof(KafkaStudioCapabilities.LiveTail)" Action="@KafkaStudioText.LiveTailAction" />
+    }
+    else if (State.ActiveCluster is { } profiled && Tail.ForbiddenByProfile(profiled))
+    {
+        <p class="ms-k-note ms-k-note-warning ms-k-tail-forbidden" role="note">@KafkaStudioText.ProfileForbids(KafkaStudioText.LiveTailAction, profiled)</p>
+    }
+    else if (!Capabilities.IsEnabled(KafkaCapability.SearchRecords))
+    {
+        <KafkaCapabilityDisabled Capability="@nameof(KafkaStudioCapabilities.SearchRecords)" Action="search records" />
+    }
+    else if (error is not null)
+    {
+        <ErrorAlert Message="@error" />
+    }
+    else if (loadingTopics)
+    {
+        <LoadingSpinner />
+    }
+    else
+    {
+        @if (droppedFromLink > 0)
+        {
+            <p class="ms-k-note" role="note">@KafkaStudioText.LinkTopicsDropped(droppedFromLink)</p>
+        }
+
+        @if (topicsRefusal is not null)
+        {
+            <p class="ms-k-note" role="note">@topicsRefusal</p>
+        }
+
+        <div class="ms-k-search-form ms-k-tail-form" aria-busy="@(busy ? "true" : "false")">
+            <fieldset class="ms-k-topics" disabled="@busy">
+                <legend>Topics</legend>
+                <div class="ms-k-topics-header">
+                    <KafkaFilterBox Placeholder="Filter topics" Value="@topicFilter" OnFilterChanged="OnTopicFilterAsync" />
+                    <span class="ms-muted ms-k-topic-count" aria-live="polite">@selected.Count of @KafkaStudioText.MaxSearchTopics</span>
+                </div>
+                @if (VisibleTopics().ToList() is { Count: > 0 } shownTopics)
+                {
+                    <div class="ms-k-topic-list">
+                        @foreach (string name in shownTopics)
+                        {
+                            bool isSelected = selected.Contains(name);
+                            <label class="ms-k-topic-option" @key="name">
+                                <input type="checkbox"
+                                       checked="@isSelected"
+                                       disabled="@(!isSelected && selected.Count >= KafkaStudioText.MaxSearchTopics)"
+                                       @onchange="e => ToggleTopic(name, e.Value is true)" />
+                                <span>@name</span>
+                            </label>
+                        }
+                    </div>
+                    @if (hiddenTopics > 0)
+                    {
+                        <p class="ms-muted">@KafkaDisplay.Count(hiddenTopics, "more topic matches", "more topics match"); narrow the filter.</p>
+                    }
+                }
+                else
+                {
+                    <p class="ms-muted">No topic to follow@(string.IsNullOrWhiteSpace(topicFilter) ? "." : " matches the filter.")</p>
+                }
+            </fieldset>
+
+            <label class="ms-k-isolation">
+                <input type="checkbox" checked="@includeUncommitted" disabled="@busy" @onchange="e => includeUncommitted = e.Value is true" />
+                Include uncommitted records
+                <span class="ms-muted">@KafkaStudioText.UncommittedHelp</span>
+            </label>
+
+            <div class="ms-k-predicate-field">
+                <label for="ms-k-predicate">Follow records that match</label>
+                <textarea id="ms-k-predicate"
+                          class="ms-input ms-k-predicate"
+                          spellcheck="false"
+                          autocomplete="off"
+                          rows="3"
+                          maxlength="@KafkaStudioText.MaxPredicateLength"
+                          placeholder="header.tenant-id = 'acme'  (empty: every record)"
+                          disabled="@busy"
+                          value="@predicate"
+                          @oninput="OnPredicateInput"
+                          @onkeydown="OnPredicateKeyAsync"></textarea>
+            </div>
+
+            @if (errors.Count > 0)
+            {
+                <ul class="ms-k-predicate-errors" aria-live="polite">
+                    @foreach (PredicateError problem in errors)
+                    {
+                        <li>Position @(problem.Start + 1): @problem.Message</li>
+                    }
+                </ul>
+                <pre class="ms-k-predicate-marks" aria-hidden="true">@MarkedText()</pre>
+            }
+
+            <details class="ms-k-syntax">
+                <summary>Search syntax</summary>
+                <p>
+                    A tail takes the same text as Search. Fields: <code>key</code>, <code>header.&lt;name&gt;</code>, <code>ce.&lt;attribute&gt;</code> and <code>any</code>.
+                    Operators: <code>=</code>, <code>in (…)</code>, <code>^=</code> (starts with), <code>~</code> (contains), <code>is null</code>, <code>is not null</code>.
+                    Combine with <code>and</code>, <code>or</code>, <code>not</code> and parentheses.
+                </p>
+                <ul class="ms-k-syntax-examples">
+                    @foreach (string example in KafkaSearchBody.SyntaxExamples)
+                    {
+                        <li><code>@example</code></li>
+                    }
+                </ul>
+                @if (Capabilities.IsEnabled(KafkaCapability.ReadPayloads))
+                {
+                    <p>@KafkaStudioText.SearchSyntaxValues</p>
+                    <ul class="ms-k-syntax-examples">
+                        @foreach (string example in KafkaSearchBody.ValueSyntaxExamples)
+                        {
+                            <li><code>@example</code></li>
+                        }
+                    </ul>
+                }
+                else
+                {
+                    <p class="ms-muted">@KafkaStudioText.SearchSyntaxNeedsReadPayloads</p>
+                }
+            </details>
+
+            <div class="ms-k-search-actions ms-k-tail-actions">
+                @if (running)
+                {
+                    <button type="button" class="ms-button" @onclick="PauseAsync">Pause</button>
+                    <button type="button" class="ms-button" @onclick="StopAsync">Stop</button>
+                }
+                else
+                {
+                    <button type="button" class="ms-button ms-button-primary" disabled="@(!CanStart)" @onclick="StartAsync">@(starting ? "Starting…" : "Start")</button>
+                    @if (session is not null && endedBy is null)
+                    {
+                        <button type="button" class="ms-button" disabled="@busy" @onclick="StopAsync">Stop</button>
+                    }
+                }
+            </div>
+
+            <p class="ms-muted ms-k-allowance">@AllowanceLine()</p>
+
+            @if (refusal is not null)
+            {
+                <p class="ms-k-note ms-k-note-warning" role="alert">@refusal</p>
+            }
+        </div>
+
+        @if (planned is { Plan.IsValid: true } shownPlan && session is null)
+        {
+            <details class="ms-k-verdicts">
+                <summary>How this tail runs</summary>
+                @if (shownPlan.Plan.Verdicts.Count == 0)
+                {
+                    <p class="ms-muted">No clause: every record that arrives is read.</p>
+                }
+                else
+                {
+                    <ul>
+                        @foreach (ClauseVerdict verdict in shownPlan.Plan.Verdicts)
+                        {
+                            <li>@verdict.Topic · @verdict.Field: @verdict.Description</li>
+                        }
+                    </ul>
+                }
+            </details>
+        }
+
+        @if (session is { } shown)
+        {
+            @if (running)
+            {
+                <section class="ms-k-tail-status" aria-label="The live tail">
+                    <KafkaTailStatus @ref="status" Describe="@LiveLine" />
+                    <div class="ms-k-tail-chips">
+                        @if (PartitionChips() is { } chips)
+                        {
+                            @if (chips.Live > 0)
+                            {
+                                <span class="ms-chip ms-k-chip ms-k-tail-chip ms-k-tail-chip-live">@KafkaTailText.LiveChip(chips.Live)</span>
+                            }
+
+                            @foreach (string behind in chips.Behind)
+                            {
+                                <span class="ms-chip ms-k-chip ms-k-tail-chip" @key="behind">@behind</span>
+                            }
+                        }
+                    </div>
+                </section>
+            }
+            else if (pause is { } paused)
+            {
+                <div class="ms-k-result-banner ms-k-tail-paused" role="status">
+                    <p>@KafkaTailText.PausedLine(paused, shown.Plan.Limits, spent, shown.Ring.Count)</p>
+                    @if (CanResume)
+                    {
+                        <button type="button" class="ms-button ms-button-primary" disabled="@busy" @onclick="ResumeAsync">Resume</button>
+                        <button type="button" class="ms-button" disabled="@busy" @onclick="JumpToNowAsync">Jump to now</button>
+                    }
+                </div>
+            }
+            else if (endedBy is { } ended)
+            {
+                <div class="ms-k-result-banner" role="status">
+                    <p>@KafkaTailText.Ended(ended)</p>
+                </div>
+            }
+
+            @if (jumpedOffsets is { } skippedOffsets)
+            {
+                <p class="ms-k-note" role="note">@KafkaTailText.Jumped(skippedOffsets)</p>
+            }
+
+            @if (!running && !starting && shown.Ring.Count > 0)
+            {
+                @* The records on screen, saved as a file (D-M5 decision 2.8): nothing is read again, and the service asks every gate at the click. Bound to the
+                   session on screen - its own cluster, topics and audit text - and never to the newest plan, which a failed or refused Start replaces. *@
+                <div class="ms-k-export-row">
+                    <KafkaExportMenu Cluster="@shown.Input.Cluster"
+                                     Matches="@shown.Ring"
+                                     Source="@KafkaExportSource.Tail"
+                                     Topics="@shown.Input.Topics"
+                                     AuditText="@shown.AuditText"
+                                     SourceRecords="@shown.Records"
+                                     SourceBytes="@shown.Bytes" />
+                </div>
+            }
+
+            @if (shown.Skipped > 0)
+            {
+                <p class="ms-k-note" role="note">@KafkaTailText.Faster(shown.Skipped, shown.Plan.Limits.TailCapacity)</p>
+            }
+
+            @if (KafkaTailText.Caveats(shown) is { Count: > 0 } caveats)
+            {
+                <section class="ms-k-caveats" aria-label="What this tail does not cover">
+                    <h2 class="ms-section-title">What this tail does not cover</h2>
+                    <ul>
+                        @foreach (string caveat in caveats)
+                        {
+                            <li>@caveat</li>
+                        }
+                    </ul>
+                </section>
+            }
+
+            @if (shown.Ring.Count > 0)
+            {
+                <TableScroll Label="Live tail">
+                    <table class="ms-table ms-k-matches ms-k-tail-matches">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Topic</th>
+                                <th>Partition / offset</th>
+                                <th>Key</th>
+                                <th>Type</th>
+                                <th>Correlation</th>
+                                <th>Size</th>
+                                <th><span class="ms-sr-only">Details</span></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (KafkaMatch match in shown.Ring)
+                            {
+                                string rowKey = RowKey(match);
+                                <tr class="ms-table-row" @key="rowKey">
+                                    <td class="ms-table-cell" title="@TimeTitle(match)">@Studio.FormatInSelectedTimeZone(match.Timestamp, "yyyy-MM-dd HH:mm:ss")</td>
+                                    <td class="ms-table-cell">@match.Topic</td>
+                                    <td class="ms-table-cell"><a href="@RecordHref(match)">@match.Partition / @KafkaDisplay.Number(match.Offset)</a></td>
+                                    <td class="ms-table-cell" title="@(match.Key.Text)">
+                                        <span class="@KeyClass(match)">@KafkaMatchView.KeyDisplay(match.Key)</span>
+                                        @if (match.Key.Truncated)
+                                        {
+                                            <span class="ms-muted"> (cut)</span>
+                                        }
+                                    </td>
+                                    <td class="ms-table-cell">@KafkaMatchView.TypeOf(match)</td>
+                                    <td class="ms-table-cell">
+                                        @foreach (KafkaChip chip in KafkaMatchView.Chips(match))
+                                        {
+                                            <button type="button" class="ms-chip ms-k-chip" title="@chip.Value" @onclick="() => UseChip(chip)">@chip.Display</button>
+                                        }
+                                    </td>
+                                    <td class="ms-table-cell">
+                                        @if (match.ValueKind == KafkaValueKind.Tombstone)
+                                        {
+                                            <span class="ms-chip ms-k-tombstone">tombstone</span>
+                                        }
+                                        else
+                                        {
+                                            @KafkaDisplay.Bytes(match.ValueLength)
+                                        }
+                                    </td>
+                                    <td class="ms-table-cell">
+                                        <button type="button"
+                                                class="ms-btn ms-btn-sm"
+                                                aria-expanded="@(expanded.Contains(rowKey) ? "true" : "false")"
+                                                @onclick="() => ToggleDetailAsync(rowKey)">Details</button>
+                                        <a class="ms-btn ms-btn-sm ms-k-related-link" href="@RelatedHref(match)" aria-label="@($"Related records of {match.Topic} {match.Partition}/{match.Offset}")">Related</a>
+                                    </td>
+                                </tr>
+                                @if (expanded.Contains(rowKey))
+                                {
+                                    <tr class="ms-k-match-detail" @key="@(rowKey + "#detail")">
+                                        <td colspan="8">
+                                            <KafkaRecordDetail Model="@match" Cluster="@State.ActiveCluster?.Key" Kcat="@KcatFor(match)" Access="@AccessOf(match)" />
+                                        </td>
+                                    </tr>
+                                }
+                            }
+                        </tbody>
+                    </table>
+                </TableScroll>
+            }
+            else if (running)
+            {
+                <p class="ms-muted ms-k-tail-waiting">Waiting for records. A tail shows what is produced from now on.</p>
+            }
+        }
+    }
+</div>
+
+@code {
+    private const int MaxListedTopics = 200;
+
+    private readonly CancellationTokenSource lifetime = new();
+    private readonly List<string> selected = [];
+    private readonly HashSet<string> expanded = new(StringComparer.Ordinal);
+    private readonly HashSet<string> valueRefused = new(StringComparer.Ordinal);
+
+    private IReadOnlyList<string> topicNames = [];
+    private IReadOnlyList<PredicateError> errors = [];
+    private IReadOnlyList<string> addressTopics = [];
+    private KafkaTailPlanned? planned;
+
+    /// <summary>The tail session whose rows, pause and cursor are on screen: set when a tail starts, kept when it ends. <see cref="planned" /> is only the latest plan.</summary>
+    private KafkaTailSession? session;
+    private KafkaTailSegment? segment;
+    private KafkaGrantDecision? runGrant;
+    private KafkaTailPause? pause;
+    private KafkaTailPause? requestedPause;
+    private KafkaSpentBudget? spent;
+    private KafkaScanStopReason? endedBy;
+    private long? jumpedOffsets;
+    private DateTimeOffset? segmentStartedAt;
+    private bool segmentFromEnd = true;
+    private StudioLiveUpdates? live;
+    private KafkaTailStatus? status;
+    private KafkaClusterSettingsView? clusterSettings;
+    private KafkaAllowance? allowance;
+    private string? error;
+    private string? refusal;
+    private string? topicsRefusal;
+    private string? lastWritten;
+    private string topicFilter = string.Empty;
+    private string predicate = string.Empty;
+    private int droppedFromLink;
+    private int hiddenTopics;
+    private bool includeUncommitted;
+    private bool loadingTopics = true;
+    private bool starting;
+    private bool disposed;
+    private bool ready;
+    private bool started;
+
+    /// <summary>Completed by the frame once the cluster policy passed and the circuit is interactive: a body reads nothing before it.</summary>
+    [CascadingParameter(Name = KafkaPageFrame.ReadyName)]
+    public Task? Ready { get; set; }
+
+    // A segment is running, or one is being planned and started: nothing else may plan or start and replace the plan it is about to run.
+    private bool running => segment is not null;
+
+    private bool busy => starting || running;
+
+    private string TopicsHref => KafkaAddress.Href(Settings, KafkaAddress.TopicsRoute, State.ActiveCluster?.Key);
+
+    private bool CanStart => !busy && selected.Count > 0;
+
+    /// <summary>Whether the page has a tail to offer: the capability and the one it needs are on, and the cluster's profile does not forbid it.</summary>
+    private bool Usable =>
+        Capabilities.IsEnabled(KafkaCapability.LiveTail)
+        && Capabilities.IsEnabled(KafkaCapability.SearchRecords)
+        && !(State.ActiveCluster is { } active && Tail.ForbiddenByProfile(active));
+
+    /// <summary>Whether Resume and Jump to now are offered: the tail is paused (by anything, a cluster that stopped answering included) and has an exact place to go on from.</summary>
+    private bool CanResume => session is { Cursor.IsEmpty: false } && pause is not null && endedBy is null && !busy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            if (Ready is not null)
+            {
+                await Ready;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        if (disposed)
+        {
+            return;
+        }
+
+        // Read once the frame is Ready: in an interactive circuit NavigationManager.Uri is the browser's own address, fragment included, while the
+        // prerendering request had none (a browser never sends one).
+        ApplyAddress();
+        State.ClusterChanged += OnClusterChangedAsync;
+        Navigation.LocationChanged += OnLocationChanged;
+        ready = true;
+    }
+
+    /// <summary>How many times this body has rendered (not its children: the live line has its own), for a test and for nothing else.</summary>
+    internal int Renders { get; private set; }
+
+    protected override void OnAfterRender(bool firstRender) => Renders++;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Not keyed on firstRender: a body created before the frame released reads becomes ready after its first render.
+        if (disposed || !ready || started)
+        {
+            return;
+        }
+
+        started = true;
+
+        // A page that only says why it is off reads nothing: no capability, a Production cluster, or no search to follow records with.
+        if (!Usable)
+        {
+            loadingTopics = false;
+            return;
+        }
+
+        await LoadTopicsAsync();
+    }
+
+    private async Task LoadTopicsAsync()
+    {
+        if (State.ActiveCluster is not { } active)
+        {
+            loadingTopics = false;
+            return;
+        }
+
+        try
+        {
+            KafkaTopicListing? listing = await Catalog.ListTopicsAsync(active, null, KafkaCapability.SearchRecords, lifetime.Token);
+
+            if (disposed)
+            {
+                return;
+            }
+
+            topicsRefusal = listing?.RefusalText;
+            topicNames = listing is null ? [] : [.. listing.Rows.Where(static x => x.Listed && !x.IsInternal).Select(static x => x.Name)];
+
+            HashSet<string> visible = new(topicNames, StringComparer.Ordinal);
+            selected.Clear();
+            selected.AddRange(addressTopics.Where(visible.Contains).Distinct(StringComparer.Ordinal).Take(KafkaStudioText.MaxSearchTopics));
+            droppedFromLink = addressTopics.Distinct(StringComparer.Ordinal).Count() - selected.Count;
+            allowance = await Search.AllowanceAsync(State.ActiveCluster);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception e) when (!disposed)
+        {
+            Logger.LogWarning(e, "The Kafka tail page failed to read the catalog");
+            error = KafkaStudioText.ReadFailed;
+        }
+
+        loadingTopics = false;
+
+        if (!disposed)
+        {
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    /// <summary>Fills the form from the address: the topics, the isolation and the fragment's search text. It never starts a tail.</summary>
+    private void ApplyAddress()
+    {
+        string uri = Navigation.Uri;
+
+        addressTopics =
+        [
+            .. (KafkaAddress.Get(uri, KafkaAddress.TopicsParameter) ?? string.Empty)
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Concat(KafkaAddress.GetAll(uri, KafkaAddress.TopicParameter))
+                .Distinct(StringComparer.Ordinal)
+                .Take(KafkaStudioText.MaxSearchTopics),
+        ];
+        includeUncommitted = string.Equals(KafkaAddress.Get(uri, KafkaAddress.IsolationParameter), KafkaAddress.UncommittedValue, StringComparison.Ordinal);
+        predicate = KafkaAddress.ReadPredicate(uri, KafkaStudioText.MaxPredicateLength) ?? string.Empty;
+
+        planned = null;
+        errors = [];
+        refusal = null;
+    }
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+    {
+        // The page's own rewrite of the address (after a plan) is not a new address, and a tail on screen is not replaced by one.
+        if (disposed || !KafkaAddress.IsPage(e.Location, KafkaAddress.TailRoute) || IsOwnWrite(e.Location) || busy || session is not null)
+        {
+            return;
+        }
+
+        _ = InvokeAsync(ApplyAddressAndReloadAsync);
+    }
+
+    /// <summary>Whether <paramref name="location" /> is the address this page just wrote (compared unescaped: a browser and a <c>Uri</c> disagree about which characters stay escaped).</summary>
+    private bool IsOwnWrite(string location) =>
+        lastWritten is not null && string.Equals(Uri.UnescapeDataString(location), Uri.UnescapeDataString(lastWritten), StringComparison.Ordinal);
+
+    private async Task ApplyAddressAndReloadAsync()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        ApplyAddress();
+        loadingTopics = true;
+        await InvokeAsync(StateHasChanged);
+        await LoadTopicsAsync();
+    }
+
+    private async Task OnClusterChangedAsync()
+    {
+        if (disposed || busy)
+        {
+            return;
+        }
+
+        // Another cluster ends the tail on screen: its rows belong to the cluster they were read from.
+        if (session is { } old)
+        {
+            old.End(KafkaScanStopReason.Cancelled);
+        }
+
+        selected.Clear();
+        addressTopics = [];
+        planned = null;
+        session = null;
+        pause = null;
+        endedBy = null;
+        expanded.Clear();
+        loadingTopics = true;
+        await InvokeAsync(StateHasChanged);
+        await LoadTopicsAsync();
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // The form
+    // ------------------------------------------------------------------------------------------------
+
+    private IEnumerable<string> VisibleTopics()
+    {
+        List<string> matching = [.. topicNames.Where(name => string.IsNullOrWhiteSpace(topicFilter) || name.Contains(topicFilter.Trim(), StringComparison.OrdinalIgnoreCase))];
+        hiddenTopics = Math.Max(0, matching.Count - MaxListedTopics);
+
+        // A selected topic stays visible, whatever the filter says.
+        return selected.Union(matching.Take(MaxListedTopics), StringComparer.Ordinal).Where(topicNames.Contains).OrderBy(static x => x, StringComparer.Ordinal).Take(MaxListedTopics + KafkaStudioText.MaxSearchTopics);
+    }
+
+    private Task OnTopicFilterAsync(string text)
+    {
+        topicFilter = text;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private void ToggleTopic(string name, bool on)
+    {
+        if (on && !selected.Contains(name, StringComparer.Ordinal) && selected.Count < KafkaStudioText.MaxSearchTopics)
+        {
+            selected.Add(name);
+        }
+        else if (!on)
+        {
+            selected.Remove(name);
+        }
+    }
+
+    /// <summary>Set by an input event whose only effect is the text in the box: the browser already shows it, so the whole page is not rendered again for each keystroke.</summary>
+    private bool skipNextRender;
+
+    protected override bool ShouldRender()
+    {
+        if (skipNextRender)
+        {
+            skipNextRender = false;
+            return false;
+        }
+
+        return true;
+    }
+
+    private void OnPredicateInput(ChangeEventArgs e)
+    {
+        predicate = e.Value?.ToString() ?? string.Empty;
+        skipNextRender = true;
+    }
+
+    private async Task OnPredicateKeyAsync(KeyboardEventArgs e)
+    {
+        if (e.CtrlKey && string.Equals(e.Key, "Enter", StringComparison.Ordinal) && CanStart)
+        {
+            await StartAsync();
+        }
+    }
+
+    private void UseChip(KafkaChip chip)
+    {
+        if (busy)
+        {
+            return;
+        }
+
+        // Fills the box and does not run it: every tail stays the visitor's own decision.
+        if (string.IsNullOrWhiteSpace(predicate))
+        {
+            predicate = chip.Predicate;
+        }
+        else if (!predicate.Contains(chip.Predicate, StringComparison.Ordinal))
+        {
+            predicate = "(" + predicate.Trim() + ") and " + chip.Predicate;
+        }
+    }
+
+    /// <summary>The visitor's own text with each error's range in <c>&lt;mark&gt;</c>: it is echoed on their own screen and sent nowhere.</summary>
+    private RenderFragment MarkedText() => builder =>
+    {
+        string text = planned?.Input.PredicateText ?? predicate;
+        int position = 0;
+        int sequence = 0;
+
+        foreach (PredicateError problem in errors.OrderBy(static x => x.Start))
+        {
+            int start = Math.Clamp(problem.Start, position, text.Length);
+            int end = Math.Clamp(problem.Start + Math.Max(1, problem.Length), start, text.Length);
+
+            builder.AddContent(sequence++, text[position..start]);
+
+            if (end > start)
+            {
+                builder.OpenElement(sequence++, "mark");
+                builder.AddContent(sequence++, text[start..end]);
+                builder.CloseElement();
+            }
+
+            position = end;
+        }
+
+        builder.AddContent(sequence, text[position..]);
+    };
+
+    // ------------------------------------------------------------------------------------------------
+    // Starting, reading, pausing and resuming
+    // ------------------------------------------------------------------------------------------------
+
+    /// <summary>Plans and starts a new tail session from the form; the session on screen, if any, ends.</summary>
+    private async Task StartAsync()
+    {
+        if (!CanStart || State.ActiveCluster is not { } active)
+        {
+            return;
+        }
+
+        starting = true;
+        refusal = null;
+        errors = [];
+        KafkaTailSegment? first = null;
+
+        try
+        {
+            await InvokeAsync(StateHasChanged);
+
+            KafkaTailInput input = new(active, [.. selected], predicate, includeUncommitted);
+            KafkaTailPlanResult plan = await Tail.PlanAsync(input, null, lifetime.Token);
+
+            if (plan is KafkaTailPlanResult.Refused refused)
+            {
+                refusal = refused.Text;
+                return;
+            }
+
+            planned = ((KafkaTailPlanResult.Planned) plan).Value;
+            errors = planned.Plan.Errors;
+
+            if (!planned.Plan.IsValid)
+            {
+                refusal = KafkaStudioText.PredicateInvalid;
+                return;
+            }
+
+            WriteAddress(planned);
+
+            // A new Start replaces the tail on screen: that tail's one audit entry is written now, and its slot was already free if it was paused.
+            if (session is { } old)
+            {
+                old.End(KafkaScanStopReason.Cancelled);
+                endedBy ??= KafkaScanStopReason.Cancelled;
+            }
+
+            first = await StartSegmentAsync(null, planned);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception e) when (!disposed)
+        {
+            Logger.LogWarning(e, "The Kafka tail page failed to plan a live tail");
+            refusal = KafkaStudioText.TailFailed;
+            return;
+        }
+        finally
+        {
+            starting = false;
+
+            if (!disposed)
+            {
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+
+        if (first is not null)
+        {
+            await DriveAsync(first);
+        }
+    }
+
+    /// <summary>
+    /// Starts one segment: the first of a new session when <paramref name="owner" /> is <see langword="null" />, the next of <paramref name="owner" />
+    /// otherwise. The service asks every gate again. <see cref="starting" /> is already set by the caller.
+    /// </summary>
+    private async Task<KafkaTailSegment?> StartSegmentAsync(KafkaTailSession? owner, KafkaTailPlanned toStart)
+    {
+        await EnsureLiveAsync();
+
+        KafkaTailStartResult start = await Tail.StartAsync(owner, toStart, lifetime.Token);
+
+        if (start is KafkaTailStartResult.Refused refused)
+        {
+            refusal = refused.Text;
+            return null;
+        }
+
+        KafkaTailSegment started = ((KafkaTailStartResult.Running) start).Segment;
+
+        if (owner is null)
+        {
+            expanded.Clear();
+            valueRefused.Clear();
+            jumpedOffsets = null;
+        }
+
+        segment = started;
+        session = started.Session;
+        runGrant = toStart.Grant;
+        segmentFromEnd = toStart.Input.ResumeFrom is null;
+        segmentStartedAt = Time.GetUtcNow();
+        pause = null;
+        requestedPause = null;
+        spent = null;
+        endedBy = null;
+        refusal = null;
+
+        // The tab hid while the segment was being started: no one is looking, so it does not read.
+        if (live is { IsHidden: true })
+        {
+            requestedPause = KafkaTailPause.TabHidden;
+            started.Pause();
+        }
+
+        return started;
+    }
+
+    /// <summary>
+    /// Reads segments until the tail pauses or ends. A pause that is the tab being hidden and a tab that is shown again goes straight on to the next segment in
+    /// this loop rather than inside a call of its own, so that a tail that pauses itself every few minutes for a day does not nest a day of calls.
+    /// </summary>
+    private async Task DriveAsync(KafkaTailSegment first)
+    {
+        KafkaTailSegment? next = first;
+
+        while (next is not null)
+        {
+            await ReadSegmentAsync(next);
+            next = ShouldAutoResume() ? await ResumeSegmentAsync(jump: false) : null;
+        }
+    }
+
+    /// <summary>Applies the engine's batches until the segment ends, then says what ended it. Rendering never paces the reader: the engine's batcher sends at most four a second.</summary>
+    private async Task ReadSegmentAsync(KafkaTailSegment toRead)
+    {
+        KafkaScanResult? final = null;
+        bool failed = false;
+
+        try
+        {
+            await InvokeAsync(StateHasChanged);
+
+            await foreach (KafkaScanBatch batch in toRead.ReadBatchesAsync(lifetime.Token))
+            {
+                toRead.Session.Apply(batch);
+
+                if (batch.Final is { } result)
+                {
+                    final = result;
+                    toRead.Complete(result);
+                }
+
+                if (disposed)
+                {
+                    break;
+                }
+
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // The visitor left the page: the segment is disposed below, which adds what it read to the session.
+        }
+        catch (Exception e) when (disposed && StudioLiveUpdates.IsInteropUnavailable(e))
+        {
+            // The tab went away while drawing: nothing left to draw to. A live page logs the failure and says so below.
+        }
+        catch (Exception e) when (!disposed)
+        {
+            Logger.LogWarning(e, "The Kafka tail page failed while reading a live tail");
+            refusal = KafkaStudioText.TailFailed;
+            failed = true;
+        }
+        finally
+        {
+            if (ReferenceEquals(segment, toRead))
+            {
+                segment = null;
+                segmentStartedAt = null;
+            }
+
+            await toRead.DisposeAsync();
+        }
+
+        if (disposed)
+        {
+            return;
+        }
+
+        Conclude(toRead.Session, final, failed);
+
+        try
+        {
+            allowance = await Search.AllowanceAsync(State.ActiveCluster);
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception e) when (e is OperationCanceledException or ObjectDisposedException || StudioLiveUpdates.IsInteropUnavailable(e))
+        {
+            // Gone while the line refreshed.
+        }
+    }
+
+    /// <summary>
+    /// Says what a segment's end means: a pause (the tail goes on from its cursor) or the end of the tail, whose one audit entry is written here. A tail the
+    /// engine stopped for a reason it can go on from - the clock, a budget, the cluster not answering - is a pause too.
+    /// </summary>
+    private void Conclude(KafkaTailSession owner, KafkaScanResult? final, bool failed)
+    {
+        KafkaScanStopReason reason = final?.StopReason ?? (failed ? KafkaScanStopReason.Failed : KafkaScanStopReason.CallerGone);
+        spent = final?.SpentBudget;
+
+        if (!failed && KafkaTailText.PauseOf(reason, requestedPause) is { } paused && owner.Cursor is { IsEmpty: false })
+        {
+            pause = paused;
+            requestedPause = null;
+            return;
+        }
+
+        requestedPause = null;
+        pause = null;
+        endedBy = reason;
+        owner.End(reason);
+    }
+
+    /// <summary>Whether a tail paused by its tab being hidden should go on: the tab is shown again, and nothing else is in the way.</summary>
+    private bool ShouldAutoResume() =>
+        !disposed && session is not null && segment is null && !starting && pause == KafkaTailPause.TabHidden && endedBy is null && live is { IsHidden: false };
+
+    /// <summary>
+    /// Plans the next segment of the paused tail from its exact cursor - or from the end of each partition, for a jump to now - and starts it. The gates are
+    /// asked again: a policy or capability that changed while the tail was paused takes effect here. Returns <see langword="null" /> when it did not start.
+    /// </summary>
+    private async Task<KafkaTailSegment?> ResumeSegmentAsync(bool jump)
+    {
+        if (disposed || busy || session is not { } paused || pause is null || endedBy is not null)
+        {
+            return null;
+        }
+
+        starting = true;
+        refusal = null;
+        KafkaTailSegment? next = null;
+
+        try
+        {
+            await InvokeAsync(StateHasChanged);
+
+            KafkaTailInput input = paused.Input with { ResumeFrom = jump ? null : paused.Cursor };
+            KafkaTailPlanResult plan = await Tail.PlanAsync(input, paused, lifetime.Token);
+
+            if (plan is KafkaTailPlanResult.Refused refused)
+            {
+                refusal = refused.Text;
+                return null;
+            }
+
+            KafkaTailPlanned toStart = ((KafkaTailPlanResult.Planned) plan).Value;
+
+            if (!toStart.Plan.IsValid)
+            {
+                refusal = KafkaStudioText.PredicateInvalid;
+                return null;
+            }
+
+            long skipped = jump ? KafkaTailService.SkippedByJumping(paused, toStart.Plan) : 0;
+            next = await StartSegmentAsync(paused, toStart);
+
+            if (next is not null && jump)
+            {
+                paused.CountJump(skipped);
+                jumpedOffsets = skipped;
+            }
+            else if (next is not null)
+            {
+                jumpedOffsets = null;
+            }
+
+            return next;
+        }
+        catch (OperationCanceledException)
+        {
+            return null;
+        }
+        catch (Exception e) when (!disposed)
+        {
+            Logger.LogWarning(e, "The Kafka tail page failed to start a live tail");
+            refusal = KafkaStudioText.TailFailed;
+            return null;
+        }
+        finally
+        {
+            starting = false;
+
+            if (!disposed)
+            {
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+    }
+
+    private async Task ResumeAsync() => await ResumeOrJumpAsync(jump: false);
+
+    private async Task JumpToNowAsync() => await ResumeOrJumpAsync(jump: true);
+
+    private async Task ResumeOrJumpAsync(bool jump)
+    {
+        if (!CanResume)
+        {
+            return;
+        }
+
+        KafkaTailSegment? next = await ResumeSegmentAsync(jump);
+
+        if (next is not null)
+        {
+            await DriveAsync(next);
+        }
+    }
+
+    private Task PauseAsync()
+    {
+        if (segment is { } running)
+        {
+            requestedPause = KafkaTailPause.You;
+            running.Pause();
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private async Task StopAsync()
+    {
+        if (segment is { } running)
+        {
+            // The segment ends with Cancelled, and Conclude ends the session.
+            running.Stop();
+            return;
+        }
+
+        if (session is { } paused && endedBy is null && !busy)
+        {
+            paused.End(KafkaScanStopReason.Cancelled);
+            pause = null;
+            endedBy = KafkaScanStopReason.Cancelled;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // The tab (D-M5 decision 3.6)
+    // ------------------------------------------------------------------------------------------------
+
+    /// <summary>Starts the tab watch the first time a tail runs: a page that never tails has no loop and asks the browser for nothing.</summary>
+    private async Task EnsureLiveAsync()
+    {
+        if (live is not null || disposed)
+        {
+            return;
+        }
+
+        live = LiveFactory.Create();
+        live.Failed += OnLiveFailedAsync;
+        live.VisibilityChanged += OnVisibilityChangedAsync;
+        await live.StartAsync(TimeSpan.FromSeconds(1), TickAsync, lifetime.Token);
+    }
+
+    /// <summary>The one-second tick: it redraws the live line (time passes while no record arrives) and nothing else.</summary>
+    private async Task TickAsync(CancellationToken cancellationToken)
+    {
+        if (segment is not null && status is { } line)
+        {
+            await line.RefreshAsync();
+        }
+    }
+
+    private Task OnLiveFailedAsync(Exception exception) => Task.CompletedTask;
+
+    /// <summary>
+    /// A hidden tab stops reading: nobody is looking and a tail holds a slot. Shown again, a tail that paused for the tab goes on by itself from its cursor;
+    /// a tail paused for any other reason waits for the visitor's Resume.
+    /// </summary>
+    private async Task OnVisibilityChangedAsync(bool hidden)
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        if (hidden)
+        {
+            await InvokeAsync(() =>
+            {
+                if (!disposed && segment is { } running && requestedPause is null)
+                {
+                    requestedPause = KafkaTailPause.TabHidden;
+                    running.Pause();
+                }
+            });
+
+            return;
+        }
+
+        // Not awaited: the event's raise waits for its handlers, and a resumed tail runs for as long as it runs.
+        _ = InvokeAsync(ResumeIfHiddenPausedAsync);
+    }
+
+    private async Task ResumeIfHiddenPausedAsync()
+    {
+        if (!ShouldAutoResume())
+        {
+            return;
+        }
+
+        try
+        {
+            KafkaTailSegment? next = await ResumeSegmentAsync(jump: false);
+
+            if (next is not null)
+            {
+                await DriveAsync(next);
+            }
+        }
+        catch (Exception e) when (disposed || StudioLiveUpdates.IsInteropUnavailable(e))
+        {
+            // Gone while resuming.
+        }
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // What the page says
+    // ------------------------------------------------------------------------------------------------
+
+    private string LiveLine()
+    {
+        if (session is not { } shown)
+        {
+            return string.Empty;
+        }
+
+        TimeSpan reading = shown.CompletedElapsed + (segmentStartedAt is { } begun ? Time.GetUtcNow() - begun : TimeSpan.Zero);
+
+        return KafkaTailText.Running(shown.Input.Topics, segmentFromEnd, shown.Records, shown.Bytes, shown.Matches, reading, shown.Plan.Limits.TailPauseAfter);
+    }
+
+    /// <summary>The "N live" chip and one chip for each partition that is still behind, or that stopped.</summary>
+    private (int Live, IReadOnlyList<string> Behind)? PartitionChips()
+    {
+        if (session?.LiveProgress is not { } progress)
+        {
+            return null;
+        }
+
+        int caughtUp = progress.Partitions.Count(static x => x.CaughtUp);
+        List<string> behind = [];
+        int more = 0;
+
+        foreach (KafkaPartitionProgress partition in progress.Partitions.Where(static x => !x.CaughtUp))
+        {
+            if (behind.Count >= KafkaTailText.MaxBehindChips)
+            {
+                more++;
+                continue;
+            }
+
+            behind.Add(partition.State is { } state
+                ? $"{partition.Topic}/{partition.Partition.ToString(CultureInfo.InvariantCulture)}: {KafkaSearchText.State(state, partition.Records)}"
+                : KafkaTailText.BehindChip(partition.Topic, partition.Partition));
+        }
+
+        if (more > 0)
+        {
+            behind.Add(KafkaTailText.MoreBehind(more));
+        }
+
+        return (caughtUp, behind);
+    }
+
+    /// <summary>The allowance line of the form: the process's allowance, or - when a profile gave this cluster a lower one of its own - that one, naming the profile.</summary>
+    private string AllowanceLine() => allowance switch
+    {
+        null => "Hourly allowance left: —",
+        { ClusterProfile: { } profile } own => KafkaStudioText.ClusterAllowance(own.Left, own.PerHour, profile),
+        { } process => "Hourly allowance left: " + KafkaDisplay.Bytes(process.Left),
+    };
+
+    /// <summary>
+    /// Writes the cluster and topics to the query string and <see cref="KafkaScanPlan.AuditText" /> to the fragment, so the link reopens the same form and a
+    /// literal on a redacted field is already <c>&lt;redacted&gt;</c>. It starts nothing. The page remembers what it wrote, so the change is not taken for a new address.
+    /// </summary>
+    private void WriteAddress(KafkaTailPlanned toWrite)
+    {
+        KafkaTailInput input = toWrite.Input;
+
+        string uri = Navigation.GetUriWithQueryParameters(new Dictionary<string, object?>
+        {
+            [KafkaState.ClusterParameter] = input.Cluster.Key,
+            [KafkaAddress.TopicsParameter] = string.Join(',', input.Topics),
+            [KafkaAddress.TopicParameter] = null,
+            [KafkaAddress.IsolationParameter] = input.IncludeUncommitted ? KafkaAddress.UncommittedValue : null,
+        });
+
+        int hash = uri.IndexOf('#', StringComparison.Ordinal);
+        if (hash >= 0)
+        {
+            uri = uri[..hash];
+        }
+
+        string audit = toWrite.Plan.AuditText;
+        if (audit.Length > 0)
+        {
+            uri += "#" + KafkaAddress.PredicateFragmentKey + "=" + Uri.EscapeDataString(audit);
+        }
+
+        if (!string.Equals(uri, Navigation.Uri, StringComparison.Ordinal))
+        {
+            lastWritten = uri;
+            Navigation.NavigateTo(uri, replace: true);
+        }
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // The rows
+    // ------------------------------------------------------------------------------------------------
+
+    private static string RowKey(KafkaMatch match) => $"{match.Topic}/{match.Partition}/{match.Offset}";
+
+    private async Task ToggleDetailAsync(string rowKey)
+    {
+        if (expanded.Remove(rowKey))
+        {
+            return;
+        }
+
+        await EnsureSettingsAsync();
+
+        // Showing a value is a view of it, checked and recorded here and never during a render (D-PAYLOAD decision 1.4): the detail is drawn only
+        // after the check has answered, so that a refusal is the first thing the visitor sees and the value is never in the markup before it.
+        KafkaMatch? shown = session?.Ring.FirstOrDefault(x => string.Equals(RowKey(x), rowKey, StringComparison.Ordinal));
+        if (shown is not null)
+        {
+            await RecordValueViewAsync(shown);
+        }
+
+        expanded.Add(rowKey);
+    }
+
+    /// <summary>Records the view of the value about to be shown; a refusal marks the record as not the visitor's to read.</summary>
+    private async Task RecordValueViewAsync(KafkaMatch match)
+    {
+        if (State.ActiveCluster is not { } active || runGrant is not { HasPayload: true })
+        {
+            return;
+        }
+
+        try
+        {
+            if (!await Records.RecordValueViewAsync(active, match, lifetime.Token))
+            {
+                valueRefused.Add(RowKey(match));
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Fail closed: a cancellation (the page leaving, or a host's policy timing out) never lets an unchecked value be drawn.
+            valueRefused.Add(RowKey(match));
+        }
+        catch (Exception e) when (!disposed)
+        {
+            Logger.LogWarning(e, "The Kafka tail page failed to record a value view");
+            valueRefused.Add(RowKey(match));
+        }
+    }
+
+    /// <summary>How a match's value reads to this visitor: the tail's grant, then a refusal of the view itself.</summary>
+    private KafkaValueAccess AccessOf(KafkaMatch match) =>
+        valueRefused.Contains(RowKey(match))
+            ? KafkaValueAccess.PolicyRefused
+            : (runGrant ?? KafkaGrantDecision.EnvelopeOnly).AccessFor(match.Topic);
+
+    /// <summary>Reads the cluster's settings once, for the kcat line of an opened record.</summary>
+    private async Task EnsureSettingsAsync()
+    {
+        if (clusterSettings is not null || State.ActiveCluster is not { } active)
+        {
+            return;
+        }
+
+        try
+        {
+            clusterSettings = await Catalog.GetSettingsAsync(active, lifetime.Token);
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            Logger.LogDebug(e, "The Kafka tail page could not read the cluster's settings");
+        }
+    }
+
+    private string KcatFor(KafkaMatch match) => KafkaMatchView.Kcat(match.Topic, match.Partition, match.Offset, clusterSettings);
+
+    private string RecordHref(KafkaMatch match) =>
+        KafkaAddress.Href(
+            Settings,
+            KafkaAddress.RecordRoute,
+            State.ActiveCluster?.Key,
+            (KafkaAddress.TopicParameter, match.Topic),
+            (KafkaAddress.PartitionParameter, match.Partition.ToString(CultureInfo.InvariantCulture)),
+            (KafkaAddress.OffsetParameter, match.Offset.ToString(CultureInfo.InvariantCulture)));
+
+    private string RelatedHref(KafkaMatch match) =>
+        KafkaAddress.Href(
+            Settings,
+            KafkaAddress.RelatedRoute,
+            State.ActiveCluster?.Key,
+            (KafkaAddress.TopicParameter, match.Topic),
+            (KafkaAddress.PartitionParameter, match.Partition.ToString(CultureInfo.InvariantCulture)),
+            (KafkaAddress.OffsetParameter, match.Offset.ToString(CultureInfo.InvariantCulture)));
+
+    private static string TimeTitle(KafkaMatch match) =>
+        match.Timestamp.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss'Z'", CultureInfo.InvariantCulture) + " (" + match.TimestampType + ")";
+
+    private static string KeyClass(KafkaMatch match) => match.Key.IsRedacted ? "ms-k-redacted" : match.Key.IsNull ? "ms-k-null" : string.Empty;
+
+    public async ValueTask DisposeAsync()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        disposed = true;
+        State.ClusterChanged -= OnClusterChangedAsync;
+        Navigation.LocationChanged -= OnLocationChanged;
+
+        try
+        {
+            await lifetime.CancelAsync();
+
+            if (live is not null)
+            {
+                live.Failed -= OnLiveFailedAsync;
+                live.VisibilityChanged -= OnVisibilityChangedAsync;
+                await live.DisposeAsync();
+                live = null;
+            }
+
+            // The visitor left mid-tail: stop the segment, add what it read, and write the session's one entry (the session's own flag holds if Stop got there first).
+            if (session is { } current)
+            {
+                await current.DisposeAsync();
+            }
+        }
+        finally
+        {
+            lifetime.Dispose();
+        }
+    }
+}

@@ -89,7 +89,9 @@ The Kafka pages are at `{studio path}/kafka`: the topics this application's cred
 partitions, watermarks, configuration and consumer-group lag, and the cluster's settings, with every secret shown only as
 "set" or "not set". With `o.Capabilities.SearchRecords = true` and a policy that answers who may use it, **Search** finds
 records by key, header and CloudEvents attribute in a time window, shows exactly what it read and why it stopped, and links
-every record by its offset. Values are not read in this preview. See [docs/kstudio.md](docs/kstudio.md).
+every record by its offset. With `ReadPayloads` it reads values too, with JSON-path searches and redaction rules; `ExportRecords`
+saves results as JSON Lines or CSV, and `LiveTail` follows topics as records arrive. A cluster marked
+`Profile(KafkaProfile.Production)` gets lower limits and no export or tail. See [docs/kstudio.md](docs/kstudio.md).
 
 **Upgrade them together.** The assemblies are one program in several files, so `MartenStudio` depends on exactly its
 own `PostgresStudio` (an exact `[x.y.z]` dependency in the nuspec), and `PostgresStudio` on exactly its own `PostgresStudio.Diagnostics`. A

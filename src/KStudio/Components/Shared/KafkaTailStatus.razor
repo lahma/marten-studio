@@ -1,0 +1,14 @@
+@* The live line of a tail (D-M5 decision 3.6): a component of its own so that the one-second tick redraws this line and not the table beneath it. The page
+   passes what to say; an idle tail sends no batches, and this is the only thing that moves. *@
+
+<p class="ms-k-tail-line" aria-live="off">@Describe()</p>
+
+@code {
+    /// <summary>What the line says now; read on every render of the line.</summary>
+    [Parameter]
+    [EditorRequired]
+    public Func<string> Describe { get; set; } = static () => string.Empty;
+
+    /// <summary>Redraws this line alone.</summary>
+    public Task RefreshAsync() => InvokeAsync(StateHasChanged);
+}

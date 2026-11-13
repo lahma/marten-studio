@@ -105,6 +105,9 @@ public static class KafkaStudioServiceCollectionExtensions
         services.TryAddSingleton<KafkaExportGate>();
         services.TryAddScoped<KafkaExportService>();
 
+        // Live tail (UI-TAIL, D46): a scan with no end, whose sessions and audit are one circuit's.
+        services.TryAddScoped<KafkaTailService>();
+
         // Related records (UI-D): one audited scan over several topics, each searched by its own fields.
         services.TryAddScoped<KafkaCorrelationService>();
 

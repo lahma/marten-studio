@@ -245,7 +245,7 @@ internal static class KafkaStudioText
     public static string Refusal(KStudio.Core.Scanning.KafkaScanRefusal refusal, KStudio.Core.Scanning.KafkaSpentBudget? spent) => refusal switch
     {
         KStudio.Core.Scanning.KafkaScanRefusal.ProcessBusy => "Two searches are already running in this application. Try again when one has finished.",
-        KStudio.Core.Scanning.KafkaScanRefusal.OwnerBusy => "Another search of yours is running, in this tab or another. Stop it, or wait for it to finish.",
+        KStudio.Core.Scanning.KafkaScanRefusal.OwnerBusy => "Another search of yours is running, in this tab or another. Stop it, or wait for it to finish. A live tail holds a search's place too. Pause the tail to search.",
         KStudio.Core.Scanning.KafkaScanRefusal.OwnerBudgetSpent =>
             $"You have read {Allowance(spent)}. It frees up as the hour rolls on.",
         KStudio.Core.Scanning.KafkaScanRefusal.ProfileForbids =>
@@ -432,10 +432,29 @@ internal static class KafkaStudioText
     public static string ClusterAllowance(long left, long perHour, KafkaProfile profile) =>
         $"{KafkaDisplay.Bytes(left)} of this cluster's {KafkaDisplay.Bytes(perHour)} an hour left ({profile} profile)";
 
-    private static string SpanText(TimeSpan span) =>
+    /// <summary>A span in words: <c>5 minutes</c>, <c>10 seconds</c>.</summary>
+    /// <param name="span">The span.</param>
+    public static string SpanText(TimeSpan span) =>
         span.TotalMinutes >= 1 && span.Seconds == 0
             ? $"{(int)span.TotalMinutes} {((int)span.TotalMinutes == 1 ? "minute" : "minutes")}"
             : $"{(int)span.TotalSeconds} seconds";
+
+    // ------------------------------------------------------------------------------------------------
+    // Live tail (UI-TAIL, D46, decisions 3.6 to 3.9 of D-M5)
+    // ------------------------------------------------------------------------------------------------
+
+    /// <summary>The audit action of a live tail.</summary>
+    public const string TailAction = "LiveTail";
+
+    /// <summary>The audit target of a live tail: <c>live tail of orders.v1, payments.v1</c>.</summary>
+    /// <param name="topics">The topics.</param>
+    public static string TailTarget(IReadOnlyList<string> topics) => "live tail of " + string.Join(", ", topics);
+
+    /// <summary>The page's line when the tail failed outside the engine.</summary>
+    public const string TailFailed = "The live tail failed. The application's log has the reason.";
+
+    /// <summary>A resume or a start whose reader lost access since the tail's first segment started.</summary>
+    public const string TailGrantChanged = "Your access changed since this tail started. Start a new tail.";
 
     // ------------------------------------------------------------------------------------------------
     // Related records and duplicates (UI-D, D42, decisions 3 and 4 of D-CORR)

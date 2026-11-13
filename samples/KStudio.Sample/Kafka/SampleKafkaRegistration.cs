@@ -13,10 +13,17 @@ internal static class SampleKafkaRegistration
     /// <summary>The cluster's key.</summary>
     public const string ClusterKey = "local";
 
+    /// <summary>The setting that lowers how long a live tail reads before it pauses itself (a <see cref="TimeSpan" />, <c>00:00:10</c> at least), so a demo shows the pause.</summary>
+    public const string TailPauseAfterSetting = "KStudioSample:TailPauseAfter";
+
+    /// <summary>The setting that picks the capabilities: <c>all</c> (the default) or <c>search</c>, which leaves export, payloads and the live tail off so their notices can be seen.</summary>
+    public const string CapabilitiesSetting = "KStudioSample:Capabilities";
+
     /// <summary>Configures KStudio for the sample's cluster.</summary>
     /// <param name="o">KStudio's options.</param>
     /// <param name="bootstrapServers">The cluster's bootstrap servers.</param>
-    public static void Configure(KafkaStudioOptions o, string bootstrapServers)
+    /// <param name="configuration">The host's configuration, for <see cref="TailPauseAfterSetting" /> and <see cref="CapabilitiesSetting" />; <see langword="null" /> for neither.</param>
+    public static void Configure(KafkaStudioOptions o, string bootstrapServers, IConfiguration? configuration = null)
     {
         ArgumentNullException.ThrowIfNull(o);
 
@@ -41,17 +48,30 @@ internal static class SampleKafkaRegistration
             .Partitioner(KafkaPartitioner.Crc32)
             .Redact(r => r.CloudEvent("subject")));
 
+        // What the sample's ticker writes every two seconds (the live tail's demo): the deny-listed x-api-key header and the same JSON-path rule as orders.v1.
+        o.Topic(KafkaSeedPlan.HeartbeatsTopic, t => t
+            .Description("A heartbeat every two seconds, for the live tail.")
+            .Key(KafkaKeyFormat.Utf8String)
+            .Redact(r => r.JsonPath("$.customer.email").Searchable()));
+
         o.Topic("customers.v1", t => t
             .Description("The customer table, compacted.")
             .Redact(r => r.Pattern(@"\+[0-9]{3} [0-9]{2} [0-9]{3} [0-9]{4}", "phone")));
 
-        o.Capabilities = KafkaStudioCapabilities.All();
+        o.Capabilities = string.Equals(configuration?[CapabilitiesSetting], "search", StringComparison.OrdinalIgnoreCase)
+            ? new KafkaStudioCapabilities { SearchRecords = true }
+            : KafkaStudioCapabilities.All();
         o.ClusterAuthorizationPolicy = SampleKafkaPolicies.Topics;
         o.CapabilityAuthorizationPolicy = SampleKafkaPolicies.Search;
 
         // Lowered so that the demo shows what it is about: "Continue" after 50 matches, and the confirmation above 5,000 records.
         o.Limits.MaxMatches = 50;
         o.Limits.ConfirmAboveRecords = 5_000;
+
+        if (configuration?.GetValue<TimeSpan?>(TailPauseAfterSetting) is { } pauseAfter)
+        {
+            o.Limits.TailPauseAfter = pauseAfter;
+        }
     }
 
     /// <summary>The key of the cluster KStudio.Wolverine discovers (the adapter's default).</summary>
