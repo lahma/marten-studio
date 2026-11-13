@@ -142,8 +142,9 @@ internal sealed class KafkaTailService(
             return new KafkaTailStartResult.Refused(refusal);
         }
 
-        // A grant lower than the one the tail started under refuses the segment; a higher one starts with the planned (lower) grant.
-        if (!grant.AtLeast(session?.Grant ?? planned.Grant))
+        // A grant lower than the one the segment was planned under refuses it (the plan's compiled predicates were judged under that grant), and so does one
+        // lower than the tail's first segment had; a higher one starts with the planned (lower) grant.
+        if (!grant.AtLeast(planned.Grant) || (session is not null && !planned.Grant.AtLeast(session.Grant)))
         {
             await NotRunAsync(input, session, KafkaStudioText.TailGrantChanged, AuditTextOf(input, planned.Plan)).ConfigureAwait(false);
             return new KafkaTailStartResult.Refused(KafkaStudioText.TailGrantChanged);
@@ -160,6 +161,9 @@ internal sealed class KafkaTailService(
         try
         {
             KafkaScanOwner owner = await owners.OwnerAsync().ConfigureAwait(false);
+
+            // The page was left while the gates were being asked: no segment starts for a page that is gone (it would hold a place nobody reads).
+            cancellationToken.ThrowIfCancellationRequested();
             KafkaScanStart start = scanner.StartTail(plan, owner);
 
             if (start.Handle is not { } handle)

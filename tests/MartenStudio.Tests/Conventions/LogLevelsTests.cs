@@ -333,7 +333,9 @@ public class LogLevelsTests
             "Planning or starting a segment threw on the visitor's Resume or Jump to now, or on the tab being shown again: one line per click or per change of the tab, and the page says the tail failed."),
         ["src/KStudio/Components/Pages/KafkaTailBody.razor : The Kafka tail page failed while reading a live tail"] = (Verdict.VisitorAction,
             "The batch loop of a tail the visitor started threw (the engine returns every broker failure as a value): one line per tail, the page says the same."),
-        ["src/KStudio/Components/Pages/KafkaTailBody.razor : The Kafka tail page failed to record a value view"] = (Verdict.VisitorAction,
+        ["src/KStudio/Components/Pages/KafkaTailBody.razor : The Kafka tail page's live update failed"] = (Verdict.Throttled,
+            "A tick of the tail's live line (a second apart) or a handler of the tab failed; the level comes from the studio's throttle, Warning once per kind of failure per ten minutes and Debug in between."),
+        ["src/KStudio/Components/Pages/KafkaTailRows.razor : The Kafka tail page failed to record a value view"] = (Verdict.VisitorAction,
             "Recording the view of a value threw, on the visitor's Details click: one line per click, and the value reads as not available to them."),
 
         // ---- KS-UI-D: related records (D42), classified in UI-E where the roster test first ran with them ------

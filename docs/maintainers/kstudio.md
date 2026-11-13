@@ -930,8 +930,16 @@ a one-second tick that redraws `KafkaTailStatus`, the live line, and nothing els
 the tab* goes on by itself from its cursor; a tail the visitor paused, or any other pause, waits for Resume. The handler never awaits the resumed read (the raise waits for its
 handlers), and the page's reading loop (`DriveAsync`) goes on to the next segment in the same frame, so a tail that pauses every few minutes for a day does not nest a day of calls.
 
-**Rendering.** One `InvokeAsync(StateHasChanged)` per engine batch (at most four a second), never per record; an idle tail sends no batches, and the one-second tick redraws only the
-live line (`KafkaTailBody.Renders` and a test hold that).
+**Rendering.** A batch from the engine (at most four a second, never per record) redraws two child components and not the page: `KafkaTailStatus` (the live line and its chips) and
+`KafkaTailRows` (the matches that arrived faster than they could be shown, what the tail does not cover, and the table with its open details). The page renders itself only when a
+tail starts, pauses or ends, so the form, `VisibleTopics()` and the details the visitor has open are not drawn for a batch. An idle tail sends no batches, and the one-second tick
+redraws only the live line (`KafkaTailBody.Renders` and a test hold both). The rows belong to the session's own cluster - their links, the check of a value's view and the settings
+behind the kcat line - never to `State.ActiveCluster`, which the selector may have moved while the tail reads on.
+
+**Leaving and resuming.** A page left while a tail was being started starts nothing (the service checks its token just before `StartTail`) and, if a segment did start, writes the
+session's entry from the reading loop (`End(CallerGone)`, idempotent). A resume checks the grant it was *planned* under as well as the tail's first: access that fell between the plan and
+the start refuses it. A resume the page makes by itself (the tab shown again) is tried once; if it is refused the page waits for the visitor's Resume. Segments that paused because the
+cluster stopped answering are counted in the session's entry. A failed tick or tab handler is logged: Debug in `StudioLiveUpdates`, and throttled (Warning once per kind per ten minutes) by the page.
 
 **Export** is the existing menu (`KafkaExportService`, D45) over the *session on screen*: its cluster, topics, audit text and ring, never the newest plan, which a refused or
 failed Start replaces. It is offered when the tail is paused or over, not while it runs. The sample's `SampleTicker` writes a heartbeat to `heartbeats.v1` every two seconds, with the

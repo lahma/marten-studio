@@ -138,9 +138,45 @@ public class StudioLiveUpdatesVisibilityTests
         await updates.DisposeAsync();
         updates.OnVisibilityChanged(true);
 
-        // The raise would be on the pool; a flush of the pool's queue is all there is to wait on for something that must not happen.
-        await Task.Run(static () => { }, Xunit.TestContext.Current.CancellationToken);
+        // The raise of a change is a task on the pool; this is the one a change would have queued, and when it has finished every handler it would have run has run.
+        await updates.VisibilityChangesRaised.Bounded();
+        updates.VisibilityChangesRaised.IsCompleted.Should().BeTrue();
         raised.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task A_handler_that_throws_is_logged_at_Debug_as_well_as_handed_to_Failed()
+    {
+        ListLogger<StudioLiveUpdates> log = new();
+        await using StudioLiveUpdates updates = new(new WatchAnswers(false), log);
+        await updates.StartAsync(TimeSpan.FromHours(1), static _ => Task.CompletedTask, Xunit.TestContext.Current.CancellationToken);
+        TaskCompletionSource failed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        updates.Failed += _ =>
+        {
+            failed.TrySetResult();
+            return Task.CompletedTask;
+        };
+        updates.VisibilityChanged += static _ => throw new InvalidOperationException("a page bug");
+
+        updates.OnVisibilityChanged(true);
+        await failed.Task.Bounded();
+
+        log.Entries.Should().Contain(static x => x.Level == Microsoft.Extensions.Logging.LogLevel.Debug && x.Message.Contains("visibility handler failed", StringComparison.Ordinal));
+    }
+
+    private sealed class ListLogger<T> : Microsoft.Extensions.Logging.ILogger<T>
+    {
+        private readonly System.Collections.Concurrent.ConcurrentQueue<(Microsoft.Extensions.Logging.LogLevel Level, string Message)> queue = new();
+
+        public IReadOnlyCollection<(Microsoft.Extensions.Logging.LogLevel Level, string Message)> Entries => queue;
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            queue.Enqueue((logLevel, formatter(state, exception)));
     }
 
     private static async Task<StudioLiveUpdates> StartedAsync(bool startsHidden)

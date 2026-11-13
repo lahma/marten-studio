@@ -1,7 +1,22 @@
-@* The live line of a tail (D-M5 decision 3.6): a component of its own so that the one-second tick redraws this line and not the table beneath it. The page
-   passes what to say; an idle tail sends no batches, and this is the only thing that moves. *@
+@* The live line of a tail and its partition chips (D-M5 decision 3.6): a component of its own so that the one-second tick and a batch redraw this and nothing
+   beneath it. The page passes what to say; an idle tail sends no batches, and this is the only thing that moves. *@
 
 <p class="ms-k-tail-line" aria-live="off">@Describe()</p>
+
+<div class="ms-k-tail-chips">
+    @if (Chips() is { } chips)
+    {
+        @if (chips.Live > 0)
+        {
+            <span class="ms-chip ms-k-chip ms-k-tail-chip ms-k-tail-chip-live">@KafkaTailText.LiveChip(chips.Live)</span>
+        }
+
+        @foreach (string behind in chips.Behind)
+        {
+            <span class="ms-chip ms-k-chip ms-k-tail-chip" @key="behind">@behind</span>
+        }
+    }
+</div>
 
 @code {
     /// <summary>What the line says now; read on every render of the line.</summary>
@@ -9,6 +24,11 @@
     [EditorRequired]
     public Func<string> Describe { get; set; } = static () => string.Empty;
 
-    /// <summary>Redraws this line alone.</summary>
+    /// <summary>The "N live" chip and one chip for each partition that is still behind, or <see langword="null" /> before the first batch.</summary>
+    [Parameter]
+    [EditorRequired]
+    public Func<(int Live, IReadOnlyList<string> Behind)?> Chips { get; set; } = static () => null;
+
+    /// <summary>Redraws this line and its chips alone.</summary>
     public Task RefreshAsync() => InvokeAsync(StateHasChanged);
 }

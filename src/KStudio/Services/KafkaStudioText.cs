@@ -244,7 +244,7 @@ internal static class KafkaStudioText
     /// <param name="spent">The allowance that has no bytes left, when the refusal is <c>OwnerBudgetSpent</c>.</param>
     public static string Refusal(KStudio.Core.Scanning.KafkaScanRefusal refusal, KStudio.Core.Scanning.KafkaSpentBudget? spent) => refusal switch
     {
-        KStudio.Core.Scanning.KafkaScanRefusal.ProcessBusy => "Two searches are already running in this application. Try again when one has finished.",
+        KStudio.Core.Scanning.KafkaScanRefusal.ProcessBusy => "Two searches or live tails are already running in this application. Try again when one has finished.",
         KStudio.Core.Scanning.KafkaScanRefusal.OwnerBusy => "Another search of yours is running, in this tab or another. Stop it, or wait for it to finish. A live tail holds a search's place too. Pause the tail to search.",
         KStudio.Core.Scanning.KafkaScanRefusal.OwnerBudgetSpent =>
             $"You have read {Allowance(spent)}. It frees up as the hour rolls on.",

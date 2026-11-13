@@ -1,7 +1,6 @@
 using Bunit;
 
 using KStudio.Components.Pages;
-using KStudio.Components.Shared;
 using KStudio.Core.Scanning;
 using KStudio.Services;
 using KStudio.Tests.Scanning;
@@ -28,7 +27,7 @@ public class KafkaTailPageTests
 
     private static readonly TimeSpan Wait = TimeSpan.FromSeconds(30);
 
-    private static KafkaSearchRig Rig(KafkaProfile? profile = null, bool tailOn = true, bool exportOn = false, bool searchOn = true, Action<KafkaEngineOptions>? engine = null) =>
+    private static KafkaSearchRig Rig(KafkaProfile? profile = null, bool tailOn = true, bool exportOn = false, bool searchOn = true, Action<KafkaEngineOptions>? engine = null, bool payloads = false, KafkaClusterEntry? other = null) =>
         new(
             engine: engine,
             studio: o =>
@@ -37,8 +36,10 @@ public class KafkaTailPageTests
                 o.Capabilities.ExportRecords = exportOn;
             },
             searchOn: searchOn,
+            payloads: payloads,
             traceCircuit: true,
-            profile: profile);
+            profile: profile,
+            other: other);
 
     private static void Seed(KafkaSearchRig rig, string topic = "orders", int count = 3)
     {
@@ -207,7 +208,7 @@ public class KafkaTailPageTests
 
         await ClickAsync(page, "Stop");
         await resume.Bounded();
-        rig.Ring.Should().ContainSingle(static x => x.Action == "LiveTail").Which.Message.Should().Contain("2 segments");
+        rig.Ring.Should().ContainSingle(static x => x.Action == "LiveTail").Which.Message.Should().Contain("2 segments").And.Contain("1 segment paused because the cluster stopped answering");
     }
 
     [Fact]
@@ -281,7 +282,7 @@ public class KafkaTailPageTests
     }
 
     [Fact]
-    public async Task The_line_that_counts_time_redraws_by_itself_and_the_page_does_not()
+    public async Task A_batch_and_the_one_second_tick_redraw_the_rows_and_the_line_and_never_the_page()
     {
         await using KafkaSearchRig rig = Rig();
         Seed(rig);
@@ -290,18 +291,29 @@ public class KafkaTailPageTests
         Task start = ClickAsync(page, "Start");
         WaitUntilLive(page);
         IRenderedComponent<KafkaTailBody> body = page.FindComponent<KafkaTailBody>();
-        IRenderedComponent<KafkaTailStatus> status = body.FindComponent<KafkaTailStatus>();
+        IRenderedComponent<KafkaTailRows> rows = body.FindComponent<KafkaTailRows>();
+        DotNetObjectReference<StudioLiveUpdates> watch = TabWatch(rig);
         int bodyRenders = body.Instance.Renders;
-        int statusRenders = status.RenderCount;
+        int rowsRenders = rows.RenderCount;
 
-        // The live line's own redraw, as the one-second tick does it. A batch may arrive meanwhile and draw the page once; the tick is what happens every time.
-        for (int i = 0; i < 20; i++)
+        // Three batches, each with a record: the rows show them, and the page (the form, its topic list, the details the visitor has open) is not drawn for any.
+        for (int i = 0; i < 3; i++)
         {
-            await status.Instance.RefreshAsync();
+            rig.Produce("orders", 0, 10 + i, "n" + i, "x");
+            int expected = i + 1;
+            page.WaitForAssertion(() => Rows(page).Should().HaveCount(expected), Wait);
         }
 
-        (status.RenderCount - statusRenders).Should().BeGreaterThanOrEqualTo(20, "the one-second tick redraws the live line");
-        (body.Instance.Renders - bodyRenders).Should().BeLessThan(5, "and an idle tail renders nothing else: the tick does not draw the table");
+        rows.RenderCount.Should().BeGreaterThan(rowsRenders, "the rows are drawn for a batch");
+        body.Instance.Renders.Should().Be(bodyRenders, "a batch does not draw the page");
+
+        // The tick, as the page's own loop runs it: the live line is redrawn and the page is not.
+        for (int i = 0; i < 5; i++)
+        {
+            await watch.Value.TickNowAsync(Xunit.TestContext.Current.CancellationToken);
+        }
+
+        body.Instance.Renders.Should().Be(bodyRenders, "and neither does the tick");
 
         await ClickAsync(page, "Stop");
         await start.Bounded();
@@ -386,7 +398,7 @@ public class KafkaTailPageTests
     }
 
     [Fact]
-    public async Task A_tail_without_ReadPayloads_shows_envelopes_and_never_a_value()
+    public async Task A_tail_without_ReadPayloads_shows_envelopes_and_opening_a_record_never_shows_a_value()
     {
         await using KafkaSearchRig rig = Rig();
         rig.Topic("orders");
@@ -396,8 +408,132 @@ public class KafkaTailPageTests
         WaitUntilLive(page);
         rig.Produce("orders", 0, 1, "k", "the value " + Sentinel);
         page.WaitForAssertion(() => Rows(page).Should().HaveCount(1), Wait);
-
         page.Markup.Should().NotContain(Sentinel);
+
+        await ClickAsync(page, "Stop");
+        await start.Bounded();
+
+        // Opening the record is where a value could appear: it says it is not available, and the value is in no byte of the page.
+        await page.Find("table.ms-k-tail-matches button[aria-expanded]").ClickAsync(new MouseEventArgs());
+        page.WaitForAssertion(() => page.FindAll(".ms-k-record-detail").Should().HaveCount(1), Wait);
+        page.Find(".ms-k-record-detail").TextContent.Should().NotContain(Sentinel);
+        page.Markup.Should().NotContain(Sentinel);
+        rig.CircuitLogs.Entries.Should().NotContain(static x => x.EventId.Id == 9605, "no value was shown, so no view is recorded");
+    }
+
+    [Fact]
+    public async Task A_page_left_while_its_tail_was_being_started_starts_nothing_and_holds_no_place()
+    {
+        await using KafkaSearchRig rig = Rig();
+        Seed(rig);
+        IRenderedComponent<KafkaTailPage> page = await OpenAsync(rig);
+
+        // The second time the LiveTail policy is asked (the plan asked the first) is the start's own: hold it.
+        int asked = 0;
+        TaskCompletionSource reached = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource<bool> gate = rig.Studio.Authorization.HoldKafka(resource =>
+        {
+            if (resource.Capability != "LiveTail" || Interlocked.Increment(ref asked) != 2)
+            {
+                return false;
+            }
+
+            reached.TrySetResult();
+            return true;
+        });
+
+        Task start = ClickAsync(page, "Start");
+        await reached.Task.Bounded();
+
+        await rig.Studio.Context.DisposeComponentsAsync();
+        gate.SetResult(true);
+        await start.Bounded();
+
+        KafkaScanLimiter limiter = rig.Engine.Provider.GetRequiredService<KafkaScanLimiter>();
+        limiter.Running.Should().Be(0, "no segment holds a place for a page that is gone");
+        rig.Ring.Should().BeEmpty("nothing started, so there is no tail to record");
+        rig.CircuitLogs.Entries.Should().NotContain(static x => x.EventId.Id == 9607);
+    }
+
+    [Fact]
+    public async Task The_rows_belong_to_the_tails_own_cluster_when_the_selector_moves_to_another()
+    {
+        KafkaClusterEntry other = new("other", null, "Other cluster", null);
+        await using KafkaSearchRig rig = Rig(payloads: true, other: other);
+        Seed(rig);
+        IRenderedComponent<KafkaTailPage> page = await OpenAsync(rig);
+
+        Task start = ClickAsync(page, "Start");
+        WaitUntilLive(page);
+        rig.Produce("orders", 0, 10, "k", "v");
+        page.WaitForAssertion(() => Rows(page).Should().HaveCount(1), Wait);
+
+        await rig.Studio.State.SetClusterAsync("other");
+        rig.Studio.State.ActiveCluster!.Key.Should().Be("other");
+
+        // The tail goes on reading the cluster it was started on, so its rows link to that one and a value is viewed against it.
+        page.Find("table.ms-k-tail-matches a[href*='kafka/record']").GetAttribute("href").Should().Contain("cluster=test").And.NotContain("cluster=other");
+        page.Find("table.ms-k-tail-matches a[href*='kafka/related']").GetAttribute("href").Should().Contain("cluster=test").And.NotContain("cluster=other");
+
+        await page.Find("table.ms-k-tail-matches button[aria-expanded]").ClickAsync(new MouseEventArgs());
+        page.WaitForAssertion(() => page.FindAll(".ms-k-record-detail").Should().HaveCount(1), Wait);
+        rig.CircuitLogs.Entries.Single(static x => x.EventId.Id == 9605).Message.Should().Contain("cluster test");
+
+        await ClickAsync(page, "Stop");
+        await start.Bounded();
+    }
+
+    [Fact]
+    public async Task A_resume_the_page_made_by_itself_and_was_refused_is_not_tried_again_until_the_visitor_resumes()
+    {
+        await using KafkaSearchRig rig = Rig();
+        Seed(rig);
+        IRenderedComponent<KafkaTailPage> page = await OpenAsync(rig);
+
+        Task start = ClickAsync(page, "Start");
+        WaitUntilLive(page);
+        DotNetObjectReference<StudioLiveUpdates> watch = TabWatch(rig);
+        watch.Value.OnVisibilityChanged(true);
+        page.WaitForAssertion(() => page.Find(".ms-k-tail-paused").TextContent.Should().Contain("the tab was hidden"), Wait);
+        await start.Bounded();
+
+        // The policy changed while the tab was hidden: the tab shown again tries once, is refused, and says so.
+        rig.Studio.Authorization.AllowKafka(static resource => resource.Capability != "LiveTail");
+        watch.Value.OnVisibilityChanged(false);
+        page.WaitForAssertion(() => page.Find(".ms-k-tail-form [role=alert]").TextContent.Should().Be(KafkaStudioText.RequestRefused), Wait);
+        int asked = rig.Studio.Authorization.KafkaCalls.Count();
+
+        watch.Value.OnVisibilityChanged(true);
+        watch.Value.OnVisibilityChanged(false);
+        await SettleAsync(rig, watch);
+        rig.Studio.Authorization.KafkaCalls.Count().Should().Be(asked, "the page does not try again by itself");
+
+        // The visitor's own Resume asks again, and goes on.
+        rig.Studio.Authorization.AllowKafka(static _ => true);
+        rig.Produce("orders", 0, 10, "after", "x");
+        Task resume = ClickAsync(page, "Resume");
+        page.WaitForAssertion(() => Rows(page).Should().Equal("0 / 3"), Wait);
+
+        await ClickAsync(page, "Stop");
+        await resume.Bounded();
+    }
+
+    [Fact]
+    public async Task A_failed_live_update_is_logged_and_not_discarded()
+    {
+        await using KafkaSearchRig rig = Rig();
+        Seed(rig);
+        IRenderedComponent<KafkaTailPage> page = await OpenAsync(rig);
+        Task start = ClickAsync(page, "Start");
+        WaitUntilLive(page);
+        KafkaTailBody body = page.FindComponent<KafkaTailBody>().Instance;
+
+        // What StudioLiveUpdates hands the page when a tick or the tab's handler threw.
+        System.Reflection.MethodInfo failed = typeof(KafkaTailBody).GetMethod("OnLiveFailedAsync", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        await (Task) failed.Invoke(body, [new InvalidOperationException("the tick failed")])!;
+
+        rig.CircuitLogs.Entries.Should().Contain(static x => x.Level >= Microsoft.Extensions.Logging.LogLevel.Warning && x.Message.Contains("live update failed", StringComparison.Ordinal));
+
         await ClickAsync(page, "Stop");
         await start.Bounded();
     }

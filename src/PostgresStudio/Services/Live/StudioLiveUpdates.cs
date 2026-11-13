@@ -404,6 +404,7 @@ internal sealed class StudioLiveUpdates : IAsyncDisposable
                 catch (Exception exception)
                 {
                     LastError = exception;
+                    logger.LogDebug(exception, "A live update visibility handler failed");
                     await ReportFailureAsync(exception).ConfigureAwait(false);
                 }
             }

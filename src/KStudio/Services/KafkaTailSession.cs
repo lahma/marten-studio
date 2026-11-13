@@ -140,6 +140,9 @@ internal sealed class KafkaTailSession : IAsyncDisposable
     /// <summary>Resumes that were refused: counted here and not as entries of their own (D-M5 decision 3.9).</summary>
     public int RefusedResumes { get; private set; }
 
+    /// <summary>How many segments ended because the cluster stopped answering: the tail paused and could go on, and the entry says it had to.</summary>
+    public int UnavailableSegments { get; private set; }
+
     /// <summary>Why the last refused resume was refused.</summary>
     public string? LastRefusedResume { get; private set; }
 
@@ -257,6 +260,12 @@ internal sealed class KafkaTailSession : IAsyncDisposable
         NoTimestamp += result.NoTimestamp;
         LastStop = result.StopReason;
         Cursor = result.Cursor;
+
+        if (result.StopReason == KafkaScanStopReason.Unavailable)
+        {
+            UnavailableSegments++;
+        }
+
         AddNotes(result.Notes.Select(static x => x.Text));
 
         foreach (KafkaScanGap gap in result.Gaps)
@@ -333,13 +342,16 @@ internal sealed class KafkaTailSession : IAsyncDisposable
         string refused = RefusedResumes == 0
             ? string.Empty
             : string.Create(c, $"; {KafkaDisplay.Count(RefusedResumes, "resume")} refused: {LastRefusedResume?.TrimEnd('.')}");
+        string unavailable = UnavailableSegments == 0
+            ? string.Empty
+            : string.Create(c, $"; {KafkaDisplay.Count(UnavailableSegments, "segment")} paused because the cluster stopped answering");
         string jumped = Jumps == 0
             ? string.Empty
             : string.Create(c, $"; jumped to now {KafkaDisplay.Count(Jumps, "time")}, skipping {KafkaDisplay.Count(JumpedOffsets, "offset")} produced while paused");
 
         return string.Create(
             c,
-            $"{KafkaDisplay.Count(Segments, "segment")} over {KafkaTailText.Elapsed(CompletedElapsed)}: {KafkaDisplay.Count(CompletedRecords, "record")} and {KafkaDisplay.Bytes(CompletedBytes)} read, {KafkaDisplay.Count(CompletedMatches, "match", "matches")}; ended by {reason}; predicate: {AuditText}{(ReadsValues && Grant.HasPayload ? "; values read" : string.Empty)}{jumped}{refused}");
+            $"{KafkaDisplay.Count(Segments, "segment")} over {KafkaTailText.Elapsed(CompletedElapsed)}: {KafkaDisplay.Count(CompletedRecords, "record")} and {KafkaDisplay.Bytes(CompletedBytes)} read, {KafkaDisplay.Count(CompletedMatches, "match", "matches")}; ended by {reason}; predicate: {AuditText}{(ReadsValues && Grant.HasPayload ? "; values read" : string.Empty)}{jumped}{unavailable}{refused}");
     }
 }
 

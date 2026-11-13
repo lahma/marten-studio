@@ -402,6 +402,51 @@ public class KafkaTailServiceTests
     }
 
     [Fact]
+    public async Task A_resume_is_refused_when_access_fell_between_its_plan_and_its_start_even_if_the_tail_began_with_less()
+    {
+        await using KafkaSearchRig rig = Rig();
+        Seed(rig);
+        KafkaTailService tail = rig.Tail();
+
+        // The tail's first segment had the envelope only (ReadPayloads was off).
+        (KafkaTailSegment first, Task firstEnd) = await BeginAsync(tail, rig.TailInput(["orders"]));
+        KafkaTailSession session = first.Session;
+        session.Grant.HasPayload.Should().BeFalse();
+        UntilCaughtUp(session);
+        first.Pause();
+        await firstEnd.Bounded();
+
+        // ReadPayloads came on, the resume was planned under it, and went off again before the start: the plan was judged under a grant the visitor no longer has.
+        rig.Studio.Options.Capabilities.ReadPayloads = true;
+        KafkaTailPlanned planned = ((KafkaTailPlanResult.Planned) await tail.PlanAsync(session.Input with { ResumeFrom = session.Cursor }, session, Ct)).Value;
+        planned.Grant.HasPayload.Should().BeTrue();
+        rig.Studio.Options.Capabilities.ReadPayloads = false;
+
+        KafkaTailStartResult start = await tail.StartAsync(session, planned, Ct);
+
+        start.Should().BeOfType<KafkaTailStartResult.Refused>().Which.Text.Should().Be(KafkaStudioText.TailGrantChanged);
+        session.RefusedResumes.Should().Be(1);
+        await session.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task A_start_cancelled_after_the_gates_starts_no_segment_and_holds_no_place()
+    {
+        await using KafkaSearchRig rig = Rig();
+        Seed(rig);
+        KafkaTailService tail = rig.Tail();
+        KafkaTailPlanned planned = ((KafkaTailPlanResult.Planned) await tail.PlanAsync(rig.TailInput(["orders"]), null, Ct)).Value;
+        using CancellationTokenSource cancelled = new();
+        await cancelled.CancelAsync();
+
+        Func<Task> start = () => tail.StartAsync(null, planned, cancelled.Token);
+
+        await start.Should().ThrowAsync<OperationCanceledException>();
+        rig.Engine.Provider.GetRequiredService<KafkaScanLimiter>().Running.Should().Be(0);
+        rig.Logs.Entries.Should().NotContain(static x => x.EventId.Id == 9607);
+    }
+
+    [Fact]
     public async Task Jumping_to_now_skips_exactly_what_was_produced_while_paused()
     {
         await using KafkaSearchRig rig = Rig();
