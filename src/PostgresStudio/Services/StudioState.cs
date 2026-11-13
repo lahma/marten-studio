@@ -324,13 +324,21 @@ internal sealed class StudioState
         // on every parameter set must not search again), and any other call forgets it - including what it said about a tenant it could not place.
         AddressPlacement? remembered = placement;
         if (remembered is null
+            || remembered.Pending
             || !NamesTenantWithoutDatabase(databaseId, tenantId)
             || !string.Equals(remembered.StoreKey, store.Key, StringComparison.OrdinalIgnoreCase)
             || !string.Equals(remembered.TenantId, tenantId, StringComparison.Ordinal))
         {
             remembered = null;
-            placement = null;
+
+            // An address that names a tenant and no database is unplaced until it is placed: a page that asks while this call waits on a
+            // policy or a read is told so and reads nothing, and is told again (ScopeChanged) when the answer is in.
+            placement = NamesTenantWithoutDatabase(databaseId, tenantId)
+                ? new AddressPlacement(store.Key, tenantId!, null, Declared: false, Pending: true)
+                : null;
         }
+
+        AddressPlacement? pending = placement is { Pending: true } ? placement : null;
 
         // Before the first await: from here until the scope is the active one, a link is drawn from the scope being applied.
         long generation = SetApplying(PendingScopeFor(store.Key, databaseId, tenantId, previous, storeChanged));
@@ -361,7 +369,7 @@ internal sealed class StudioState
             if (NamesTenantWithoutDatabase(databaseId, tenantId))
             {
                 DeclaredTenantPlacement placed = remembered is not null
-                    ? new DeclaredTenantPlacement(true, remembered.Hit)
+                    ? new DeclaredTenantPlacement(remembered.Declared, remembered.Hit)
                     : await catalog.PlaceDeclaredTenantAsync(store.Key, [.. AvailableDatabases.Select(static x => x.Identity)], tenantId!, cancellationToken).ConfigureAwait(false);
 
                 // A later scope change began (or applied) its own while this search waited: it stands, and this call applies nothing.
@@ -370,10 +378,12 @@ internal sealed class StudioState
                     return;
                 }
 
+                // What was found out is kept for this address, whether or not the source declares anything: a page that applies its own address
+                // again does not ask again, and an address no source declares is never unplaced.
+                placement = new AddressPlacement(store.Key, tenantId!, placed.Hit, placed.Declared, Pending: false);
+
                 if (placed.Declared)
                 {
-                    placement = new AddressPlacement(store.Key, tenantId!, placed.Hit);
-
                     if (placed.Hit is { } declaredHit)
                     {
                         if (!string.Equals(declaredHit.DatabaseId, resolvedDatabaseId, StringComparison.OrdinalIgnoreCase))
@@ -427,10 +437,17 @@ internal sealed class StudioState
                     ? NullIfBlank(tenantId)
                     : TenantList.IsAcceptable(AvailableTenants, previous?.TenantId) ? NullIfBlank(previous?.TenantId) : null;
 
-            await SetActiveScopeAsync(new StudioScope(store.Key, resolvedDatabaseId, resolvedTenantId), previous, generation).ConfigureAwait(false);
+            // Pages may have been told the address was unplaced while the answer was awaited: they are told again, even if the scope did not move.
+            await SetActiveScopeAsync(new StudioScope(store.Key, resolvedDatabaseId, resolvedTenantId), previous, generation, notifyAnyway: pending is not null).ConfigureAwait(false);
         }
         finally
         {
+            // A read that threw or was cancelled placed nothing: its pending marker does not stand for good.
+            if (pending is not null && ReferenceEquals(placement, pending))
+            {
+                placement = null;
+            }
+
             // A read that threw or was cancelled applied nothing: the links go back to the scope that is still the active one.
             // (A no-op after the scope was applied: SetActiveScopeAsync ended it before it notified anyone.) Only this call's own: a
             // later call that began applying another scope meanwhile keeps its own pending scope.
@@ -449,20 +466,20 @@ internal sealed class StudioState
     /// <param name="databaseId">The address's database; a named database is never unplaced.</param>
     /// <param name="tenantId">The address's tenant.</param>
     public bool IsTenantUnplaced(string? storeKey, string? databaseId, string? tenantId) =>
-        placement is { Hit: null } unplaced
+        placement is { Unplaced: true } unplaced
         && NamesTenantWithoutDatabase(databaseId, tenantId)
         && string.Equals(unplaced.StoreKey, storeKey ?? ActiveScope?.StoreKey, StringComparison.OrdinalIgnoreCase)
         && string.Equals(unplaced.TenantId, tenantId, StringComparison.Ordinal);
 
     /// <summary>
-    /// Whether the last <see cref="SetScopeAsync" /> could not place the tenant its address named (<see cref="IsTenantUnplaced" />). The
-    /// shell keeps such an address as it was instead of rewriting it to the scope on screen, which would drop the tenant and let the page read
-    /// the id in the wrong database.
+    /// The placement of the tenant an address named, kept for that address: where it was placed, or <see langword="null" /> when it was not.
+    /// <paramref name="Pending" /> is a placement still being worked out, which answers <see cref="IsTenantUnplaced" /> as an unplaced one.
     /// </summary>
-    public bool HasUnplacedTenant => placement is { Hit: null };
-
-    /// <summary>The placement by declaration of the tenant an address named, kept for that address: where it was placed, or <see langword="null" /> when it was not.</summary>
-    private sealed record AddressPlacement(string StoreKey, string TenantId, TenantDatabaseHit? Hit);
+    private sealed record AddressPlacement(string StoreKey, string TenantId, TenantDatabaseHit? Hit, bool Declared, bool Pending)
+    {
+        /// <summary>Still being worked out, or a source that declares its tenants could not place it.</summary>
+        public bool Unplaced => Pending || (Declared && Hit is null);
+    }
 
     /// <summary>
     /// Says, before anything is read, that the shell is about to apply the scope a pasted address names, so the links drawn while
@@ -752,7 +769,7 @@ internal sealed class StudioState
         ActiveStoreUnavailableMessage = facts.UnavailableMessage;
     }
 
-    private async Task SetActiveScopeAsync(StudioScope? scope, StudioScope? previous, long endsGeneration = 0)
+    private async Task SetActiveScopeAsync(StudioScope? scope, StudioScope? previous, long endsGeneration = 0, bool notifyAnyway = false)
     {
         // The links move first and synchronously (LinkScopeChanged); only then does the awaited ScopeChanged walk its handlers. The
         // scope being applied ends here when it is the one that has just become active, and stands when a refresh of the listings
@@ -766,7 +783,7 @@ internal sealed class StudioState
 
         RaiseLinkScopeChanged(linkBefore);
 
-        if (scope != previous)
+        if (scope != previous || notifyAnyway)
         {
             await NotifyAsync().ConfigureAwait(false);
         }

@@ -164,14 +164,23 @@ internal sealed class FakeStudioScopeCatalog : IStudioScopeCatalog
         return this;
     }
 
-    public Task<DeclaredTenantPlacement> PlaceDeclaredTenantAsync(
+    /// <summary>A gate held shut on <see cref="PlaceDeclaredTenantAsync" />, as a policy handler that yields holds the real catalog's.</summary>
+    public TaskCompletionSource? PlaceGate { get; set; }
+
+    public async Task<DeclaredTenantPlacement> PlaceDeclaredTenantAsync(
         string storeKey,
         IReadOnlyList<string> databaseIds,
         string tenantId,
         CancellationToken cancellationToken = default)
     {
         PlaceCalls.Add((storeKey, databaseIds, tenantId));
-        return Task.FromResult(Placements.TryGetValue((storeKey, tenantId), out DeclaredTenantPlacement? placement) ? placement : DeclaredTenantPlacement.NotDeclared);
+
+        if (PlaceGate is { } gate)
+        {
+            await gate.Task.Bounded();
+        }
+
+        return Placements.TryGetValue((storeKey, tenantId), out DeclaredTenantPlacement? placement) ? placement : DeclaredTenantPlacement.NotDeclared;
     }
 
     public void Invalidate() => InvalidateCount++;

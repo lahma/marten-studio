@@ -445,10 +445,13 @@
             return;
         }
 
-        // An address whose tenant the studio could not place keeps naming it (ZW38): the scope on screen is the usual database with no tenant,
-        // and rewriting the address to it would drop the tenant, so the page would read its id in the wrong database. The next scope change
-        // clears the state and writes the scope it moved to.
-        if (State.HasUnplacedTenant)
+        // The address on screen keeps naming a tenant the studio could not place (ZW38): the scope on screen is the usual database with no
+        // tenant, and rewriting the address to it would drop the tenant, so the page would read its id in the wrong database. Only that
+        // address is kept - judged from the address itself, so an unplaced address elsewhere in the circuit's history changes nothing for any
+        // other (Back to an address that names no database, a link to another store): those are rewritten as in 1.2.0. The next scope
+        // change clears the placement and writes the scope it moved to.
+        (string? addressStore, string? addressDatabase, string? addressTenant) = StudioScopeQuery.Read(Navigation.Uri, Descriptor.SourceQueryParameter);
+        if (State.IsTenantUnplaced(addressStore, addressDatabase, addressTenant))
         {
             return;
         }

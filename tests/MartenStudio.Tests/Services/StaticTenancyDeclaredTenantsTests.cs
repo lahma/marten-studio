@@ -117,9 +117,11 @@ public class StaticTenancyDeclaredTenantsTests
     }
 
     [Fact]
-    public async Task The_declaration_is_read_once_per_search_and_has_no_database_bound()
+    public async Task The_declaration_search_has_no_database_bound()
     {
-        // 40 databases, the tenant in the 40th: past the tenant-listing search's bound of 32, which the declaration does not have.
+        // 40 databases, the tenant in the 40th: past the tenant-listing search's bound of 32, which the declaration does not have. (That the
+        // declaration is described once per search is TenantDiscovery.DeclaringDatabasesAsync's single DescribeDatabasesAsync call, held by
+        // TenancyEnumerationCallTests; a tenancy that counts calls cannot be built, as StoreOptions creates StaticMultiTenancy itself.)
         await using Harness harness = await Harness.CreateAsync(tenantedRows: false, extraDatabases: 38);
 
         DeclaredTenantPlacement placement = await harness.Catalog.PlaceDeclaredTenantAsync(Key, harness.Everything, "tenant-39", Token);
@@ -167,7 +169,6 @@ public class StaticTenancyDeclaredTenantsTests
 
         state.ActiveScope.Should().Be(new StudioScope(Key, usual, null));
         state.IsTenantUnplaced(Key, null, ownTenant).Should().BeFalse("the usual database declares it: the id is read in the tenant's own database");
-        state.HasUnplacedTenant.Should().BeFalse();
     }
 
     [Theory]
@@ -190,7 +191,6 @@ public class StaticTenancyDeclaredTenantsTests
         state.IsTenantUnplaced(Key, null, tenant).Should().BeTrue(cause);
         state.IsTenantUnplaced(Key, null, "someone-else").Should().BeFalse("only the address that was not placed");
         state.IsTenantUnplaced(Key, usual, tenant).Should().BeFalse("an address that names a database is never unplaced");
-        state.HasUnplacedTenant.Should().BeTrue();
     }
 
     [Fact]
@@ -201,11 +201,10 @@ public class StaticTenancyDeclaredTenantsTests
         string usual = state.ActiveScope!.DatabaseId;
 
         await state.SetScopeAsync(Key, null, "umbrella", Token);
-        state.HasUnplacedTenant.Should().BeTrue("the premise");
+        state.IsTenantUnplaced(Key, null, "umbrella").Should().BeTrue("the premise");
 
         await state.SetScopeAsync(Key, usual, null, Token);
 
-        state.HasUnplacedTenant.Should().BeFalse();
         state.IsTenantUnplaced(Key, null, "umbrella").Should().BeFalse();
     }
 
@@ -262,7 +261,7 @@ public class StaticTenancyDeclaredTenantsTests
         state.ActiveScope.Should().Be(
             new StudioScope(Key, harness.First, null),
             "no search: the named database stays and the tenant it does not list is dropped");
-        state.HasUnplacedTenant.Should().BeFalse();
+        state.IsTenantUnplaced(Key, null, "initech").Should().BeFalse();
     }
 
     [Fact]

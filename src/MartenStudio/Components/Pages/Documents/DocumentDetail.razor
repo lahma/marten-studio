@@ -313,6 +313,9 @@
             searchRequest = null;
             editing = false;
             result = DocumentDetailResult.Missing($"No document with id '{Id}' is in '{Alias}' for tenant '{TenantId}'.");
+
+            // Drawn now: this load may have been started by a scope change's handler, which renders nothing of its own.
+            StateHasChanged();
             return;
         }
 

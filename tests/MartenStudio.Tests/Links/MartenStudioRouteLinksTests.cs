@@ -372,31 +372,32 @@ public class MartenStudioRouteLinksTests
     }
 
     /// <summary>
-    /// Marten stores and declares a tenant id as <c>TenantIdStyle</c> writes it, so the link carries that spelling - a record's header may
-    /// spell it otherwise - and stays pure.
+    /// A static tenancy's declaration is the source, and Marten declares a tenant id as <c>TenantIdStyle</c> writes it, so its link carries
+    /// that spelling - a record's header may spell it otherwise. Every other kind carries the id as the caller wrote it, as before.
     /// </summary>
     [Theory]
-    [InlineData("static")]
-    [InlineData("conjoined")]
-    public void The_tenant_is_carried_as_the_stores_tenant_id_style_writes_it(string kind)
+    [InlineData("static", "globex")]
+    [InlineData("conjoined", "GlobeX")]
+    [InlineData("sharded", "GlobeX")]
+    public void The_tenant_is_corrected_by_the_tenant_id_style_only_for_a_static_tenancy(string kind, string expected)
     {
         MartenStudioRouteLinks links = Links(services => services.AddMarten(x =>
         {
             x.TenantIdStyle = TenantIdStyle.ForceLowerCase;
             x.Schema.For<Order>().MultiTenanted();
-            if (kind == "static")
+            if (kind == "conjoined")
             {
-                DatabasePerTenant(x, "static");
+                x.Connection(Connection);
             }
             else
             {
-                x.Connection(Connection);
+                DatabasePerTenant(x, kind);
             }
         }));
 
         string url = links.ToDocument(new StudioLinkScope(null, "GlobeX"), "order", "7")!;
 
-        Query(url).Should().Contain(new KeyValuePair<string, string?>("tenant", "globex"));
+        Query(url).Should().Contain(new KeyValuePair<string, string?>("tenant", expected));
         Query(url).Keys.Should().NotContain("db");
     }
 

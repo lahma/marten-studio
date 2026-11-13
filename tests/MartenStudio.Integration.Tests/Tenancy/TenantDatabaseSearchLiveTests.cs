@@ -222,7 +222,7 @@ public class TenantDatabaseSearchLiveTests(PostgresFixture postgres)
     /// tenant answers exactly the same, so the refusal cannot be told from "no such tenant".
     /// </summary>
     [PostgresFact]
-    public async Task A_refused_tenants_link_is_a_miss_and_never_reads_the_document_in_the_database_on_screen()
+    public async Task A_refused_or_undeclared_tenants_link_leaves_the_scope_and_marks_the_address_unplaced()
     {
         await using OwnedDatabases owned = await OwnedDatabases.CreateAsync(postgres, [Prefix + "refused_a", Prefix + "refused_b"], Token);
         string first = owned[0];
@@ -289,7 +289,7 @@ public class TenantDatabaseSearchLiveTests(PostgresFixture postgres)
 
         // Followed from the visitor's own tenant's address, nothing is unplaced.
         await state.SetScopeAsync(MartenStoreRegistry.DefaultStoreKey, null, Acme, Token);
-        state.HasUnplacedTenant.Should().BeFalse();
+        state.IsTenantUnplaced(MartenStoreRegistry.DefaultStoreKey, null, Acme).Should().BeFalse();
     }
 
     /// <summary>The identity of the database whose tenant listing carries <paramref name="tenant" />, read as the scope picker reads it.</summary>

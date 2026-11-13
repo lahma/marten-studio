@@ -179,23 +179,6 @@ internal sealed class MartenStudioRouteLinks : IStudioRouteLinks
     /// </summary>
     private static bool TenantFor(IDocumentStore store, MartenStudioOptions current, string? tenantId, out string? tenant)
     {
-        if (!PlacesTenant(store, current, tenantId, out tenant))
-        {
-            return false;
-        }
-
-        // The id as Marten stores it (ForceLowerCase and its siblings), which is what a static tenancy's declaration and every tenant listing
-        // hold: a record's header may spell it otherwise. Pure, as the rest of the builder is.
-        if (tenant is not null)
-        {
-            tenant = store.Options.TenantIdStyle.MaybeCorrectTenantId(tenant);
-        }
-
-        return true;
-    }
-
-    private static bool PlacesTenant(IDocumentStore store, MartenStudioOptions current, string? tenantId, out string? tenant)
-    {
         tenant = null;
 
         // Read from the configuration alone: the tenancy's type and its in-memory cardinality, never its databases (hard rule 14).
@@ -225,7 +208,10 @@ internal sealed class MartenStudioRouteLinks : IStudioRouteLinks
                     return false;
                 }
 
-                tenant = tenantId;
+                // The declaration is the source, and Marten declares a tenant id as TenantIdStyle writes it (ForceLowerCase and its siblings):
+                // a record's header may spell it otherwise. Every other kind carries the id as the caller wrote it, as before, so that
+                // KnownTenantIds and the tenant listings match exactly what they always matched. Pure, as the rest of the builder is.
+                tenant = store.Options.TenantIdStyle.MaybeCorrectTenantId(tenantId);
                 return true;
 
             case StoreTenancyKind.MasterTable or StoreTenancyKind.Sharded or StoreTenancyKind.OneServer:
