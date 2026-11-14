@@ -88,6 +88,8 @@ tests/PostgresStudio.Tests/Components/Json/  The JSON viewer's parameters a host
                                          Postgres copy items, and a host's "Copy as search"
 tests/PostgresStudio.Tests/Conventions/  The assembly fence: no Marten family in the assembly, the restore or the output folder
 tests/PostgresStudio.Tests/Endpoints/    An API-only host with one NpgsqlDataSource; the two registration guards
+tests/PostgresStudio.Tests/Shell/        Golden files of the prerendered rail, header and anonymous banner of the core pages (the shell's
+                                         markup stays byte for byte as it is restructured)
 tests/PostgresStudio.Tests/Sources/      The source provider over DI descriptors and host database sources
 tests/PostgresStudio.Tests/Support/      PostgresStudio's own test doubles (the shared ones are linked from MartenStudio.Tests)
 tests/PostgresStudio.Tests/Verify/       PostgresStudio's approved API baseline; never hand-edited (hard rule 7)
@@ -123,6 +125,8 @@ samples/MartenStudio.SampleDomain/Documents/  The demo document types
 samples/MartenStudio.Sample/Auth/        Cookie auth, the three demo users, the two policies
 samples/MartenStudio.Sample/Properties/  launchSettings.json, fixed at http://localhost:5210
 tests/MartenStudio.Tests/Endpoints/      Authorization matrix, sub-path re-rooting, the startup guard
+tests/MartenStudio.Tests/Shell/          Golden files of the prerendered chrome of the Marten pages; ShellGolden (Support/) cuts and scrubs
+                                         the fragments for all three suites
 tests/MartenStudio.Tests/Links/          MartenStudioRouteLinks, the record search button and the pages' scope from a link - no database
 tests/MartenStudio.Tests/Services/       Registry, scope resolver, audit log, tenant discovery
 tests/MartenStudio.Tests/Components/     bUnit: StudioComponentContext, StudioMarkup and the page tests
@@ -394,6 +398,7 @@ src/KStudio.Core/Index/                  The record-index seam (D48): the host's
 tests/KStudio.Tests/Conventions/         KStudio's fences and convention scans
 tests/KStudio.Tests/Registration/        AddKafkaStudio, the version guard, the startup guard
 tests/KStudio.Tests/Endpoints/           Mounting, endpoint authorization, a host with no data source
+tests/KStudio.Tests/Shell/               Golden files of the prerendered chrome of a Postgres Studio host with the Kafka module
 tests/KStudio.Tests/Components/          bUnit: the layout on a Kafka page, the rail, the chip, the frame, Activity
 tests/KStudio.Tests/Services/            Authorization, the capability guard, the cluster scope, the audit gate and action log
 tests/PostgresStudio.Tests/Modules/      The module seam (D34): the composed descriptor, root-keeping routes and a module's audit entries, with fake modules

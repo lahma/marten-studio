@@ -63,6 +63,7 @@
     <Compile Include="../MartenStudio.Tests/Support/TestAuthenticationHandler.cs" Link="Support/Linked/TestAuthenticationHandler.cs" />
     <Compile Include="../MartenStudio.Tests/Support/TestAuthenticationStateProvider.cs" Link="Support/Linked/TestAuthenticationStateProvider.cs" />
     <Compile Include="../MartenStudio.Tests/Support/TestFileProvider.cs" Link="Support/Linked/TestFileProvider.cs" />
+    <Compile Include="../MartenStudio.Tests/Support/ShellGolden.cs" Link="Support/Linked/ShellGolden.cs" />
     <Compile Include="../MartenStudio.Tests/Support/TestPersistentComponentStateStore.cs" Link="Support/Linked/TestPersistentComponentStateStore.cs" />
     <Compile Include="../MartenStudio.Tests/Health/FakeHealthService.cs" Link="Support/Linked/FakeHealthService.cs" />
   </ItemGroup>
