@@ -174,7 +174,7 @@ Phase A changes no package, no public type and no word. It can ship in any relea
 
 **Phase A: the database becomes a module, inside `PostgresStudio`**
 
-- [ ] 1. Before any change, capture the prerendered rail and header of the three samples' pages as a golden file per
+- [x] 1. Before any change, capture the prerendered rail and header of the three samples' pages as a golden file per
       sample, in a test that phase A must keep green.
 - [ ] 2. Split `Services/StudioState.cs` into `StudioPreferences` and the scope state; `StudioLayout` and
       `PreferencesMenu` read the first.
