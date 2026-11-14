@@ -14,7 +14,7 @@
 @inject NavigationManager Navigation
 @inject StudioLiveUpdatesFactory LiveFactory
 @inject IStudioSettings Settings
-@inject StudioState Studio
+@inject StudioPreferences Preferences
 @inject ILogger<KafkaTopicBody> Logger
 
 @* The body of the topic overview (D-UI decision 8). Missing, invalid and refused all render one notice, and the invalid and the refused make no
@@ -527,7 +527,7 @@
         }
 
         return field.Value is { } at
-            ? KafkaDisplay.Number(at.Offset) + " · " + Studio.FormatInSelectedTimeZone(at.Timestamp, "yyyy-MM-dd HH:mm:ss")
+            ? KafkaDisplay.Number(at.Offset) + " · " + Preferences.FormatInSelectedTimeZone(at.Timestamp, "yyyy-MM-dd HH:mm:ss")
             : "empty";
     }
 

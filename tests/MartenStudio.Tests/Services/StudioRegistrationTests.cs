@@ -74,12 +74,16 @@ public class StudioRegistrationTests
         (typeof(IDiagnosticsSettings), ServiceLifetime.Singleton, How.Factory, typeof(IDiagnosticsSettings)),
         (typeof(StudioDescriptor), ServiceLifetime.Singleton, How.Factory, typeof(StudioDescriptor)),
         (typeof(IStudioSettings), ServiceLifetime.Singleton, How.Factory, typeof(IStudioSettings)),
+
+        // Shell A1: the shell's view of the very same settings object, and the circuit's preferences beside the scope state.
+        (typeof(IShellSettings), ServiceLifetime.Singleton, How.Factory, typeof(IShellSettings)),
         (typeof(StudioMappedEndpoints), ServiceLifetime.Singleton, How.Type, typeof(StudioMappedEndpoints)),
         (typeof(IHostedService), ServiceLifetime.Singleton, How.Type, typeof(StudioEndpointAuthorizationGuard)),
         (typeof(StudioCapabilityGuard), ServiceLifetime.Singleton, How.Type, typeof(StudioCapabilityGuard)),
         (typeof(StudioActionLogService), ServiceLifetime.Singleton, How.Type, typeof(StudioActionLogService)),
         (typeof(StudioLogThrottle), ServiceLifetime.Singleton, How.Factory, typeof(StudioLogThrottle)),
         (typeof(ColumnCatalog), ServiceLifetime.Singleton, How.Type, typeof(ColumnCatalog)),
+        (typeof(StudioPreferences), ServiceLifetime.Scoped, How.Type, typeof(StudioPreferences)),
         (typeof(StudioState), ServiceLifetime.Scoped, How.Type, typeof(StudioState)),
         (typeof(IStudioScopeCatalog), ServiceLifetime.Scoped, How.Type, typeof(StudioScopeCatalog)),
         (typeof(StudioAuthorization), ServiceLifetime.Scoped, How.Type, typeof(StudioAuthorization)),
@@ -298,6 +302,7 @@ public class StudioRegistrationTests
     {
         [typeof(IDiagnosticsSettings)] = typeof(MartenStudioSettings),
         [typeof(IStudioSettings)] = typeof(MartenStudioSettings),
+        [typeof(IShellSettings)] = typeof(MartenStudioSettings),
         [typeof(StudioLogThrottle)] = typeof(StudioLogThrottle),
         [typeof(IStudioRuntime)] = typeof(MartenStudioRuntime),
 

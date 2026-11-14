@@ -19,7 +19,7 @@
 @inject KafkaRecordIndexResolver RecordIndex
 @inject NavigationManager Navigation
 @inject IStudioSettings Settings
-@inject StudioState Studio
+@inject StudioPreferences Preferences
 @inject TimeProvider Time
 @inject ILogger<KafkaSearchBody> Logger
 
@@ -414,7 +414,7 @@
                         {
                             string rowKey = RowKey(match);
                             <tr class="ms-table-row" @key="rowKey">
-                                <td class="ms-table-cell" title="@TimeTitle(match)">@Studio.FormatInSelectedTimeZone(match.Timestamp, "yyyy-MM-dd HH:mm:ss")</td>
+                                <td class="ms-table-cell" title="@TimeTitle(match)">@Preferences.FormatInSelectedTimeZone(match.Timestamp, "yyyy-MM-dd HH:mm:ss")</td>
                                 <td class="ms-table-cell">@match.Topic</td>
                                 <td class="ms-table-cell"><a href="@RecordHref(match)">@match.Partition / @KafkaDisplay.Number(match.Offset)</a></td>
                                 <td class="ms-table-cell" title="@(match.Key.Text)">
@@ -870,7 +870,7 @@
     {
         try
         {
-            return TimeZoneInfo.FindSystemTimeZoneById(Studio.SelectedTimeZoneId);
+            return TimeZoneInfo.FindSystemTimeZoneById(Preferences.SelectedTimeZoneId);
         }
         catch (Exception e) when (e is TimeZoneNotFoundException or InvalidTimeZoneException)
         {

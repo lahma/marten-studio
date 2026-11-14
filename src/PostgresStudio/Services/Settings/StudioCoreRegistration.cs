@@ -81,6 +81,9 @@ internal static class StudioCoreRegistration
         services.TryAddSingleton(provider => StudioModuleComposition.Compose(descriptor, provider.GetServices<IStudioModule>()));
         services.TryAddSingleton(settings);
 
+        // The shell's view of the same object (D30: one object, two interfaces).
+        services.TryAddSingleton<IShellSettings>(static provider => provider.GetRequiredService<IStudioSettings>());
+
         // Refuses to start an application whose mapped studio nothing authorizes. Registered here rather
         // than at the map site, because a hosted service added to a built application is too late.
         services.TryAddSingleton<StudioMappedEndpoints>();
@@ -107,6 +110,7 @@ internal static class StudioCoreRegistration
 
         // Scoped, because all of these are about one circuit: what it is pointed at, who is driving it, and
         // what it has been told.
+        services.TryAddScoped<StudioPreferences>();
         services.TryAddScoped<StudioState>();
         services.TryAddScoped<IStudioScopeCatalog, StudioScopeCatalog>();
         services.TryAddScoped<StudioAuthorization>();

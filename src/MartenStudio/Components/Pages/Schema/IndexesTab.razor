@@ -9,6 +9,7 @@
 @implements IDisposable
 @inject ISchemaDataService SchemaData
 @inject StudioState State
+@inject StudioPreferences Preferences
 @inject IHealthService Health
 @inject IOptions<MartenStudioOptions> Options
 @inject ILogger<IndexesTab> Logger
@@ -92,7 +93,7 @@ else
     {
         <p class="ms-schema-note ms-schema-health-note">
             The invalid, redundant and unused marks are the health advisor's, from its last check
-            @(marksMeasuredAt is { } at ? "(" + State.FormatInSelectedTimeZone(at) + ")" : string.Empty); each links to
+            @(marksMeasuredAt is { } at ? "(" + Preferences.FormatInSelectedTimeZone(at) + ")" : string.Empty); each links to
             the finding, with what it is based on and what to change.
         </p>
     }

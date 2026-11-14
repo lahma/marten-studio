@@ -3,7 +3,7 @@
 @using KStudio.Core.Scanning
 @using PostgresStudio.Components.Json
 @using PostgresStudio.Services
-@inject StudioState Studio
+@inject StudioPreferences Preferences
 
 @* Two records side by side (D-PAYLOAD decision 5), from the two in-memory matches: it reads nothing. Each match was read by a scan or a record read that
    had passed every gate for its own topic, so its value is present only if that read had the payload grant. A masked header or part of a value is
@@ -120,7 +120,7 @@
     }
 
     private string Time(KafkaMatch match) =>
-        Studio.FormatInSelectedTimeZone(match.Timestamp, "yyyy-MM-dd HH:mm:ss") + " (" + match.TimestampType + ")";
+        Preferences.FormatInSelectedTimeZone(match.Timestamp, "yyyy-MM-dd HH:mm:ss") + " (" + match.TimestampType + ")";
 
     private static string KeyClass(KafkaMatch match) => match.Key.IsRedacted ? "ms-k-redacted" : match.Key.IsNull ? "ms-k-null" : string.Empty;
 

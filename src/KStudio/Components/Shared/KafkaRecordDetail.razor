@@ -5,7 +5,7 @@
 @using PostgresStudio.Services.Live
 @using PostgresStudio.Services.Settings
 @inject IStudioSettings Settings
-@inject StudioState Studio
+@inject StudioPreferences Preferences
 @inject ToastService Toasts
 @inject IJSRuntime JsRuntime
 
@@ -22,7 +22,7 @@
             <dt>Offset</dt><dd>@KafkaDisplay.Number(match.Offset)</dd>
             <dt>Timestamp</dt>
             <dd title="@match.Timestamp.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss'Z'", CultureInfo.InvariantCulture)">
-                @Studio.FormatInSelectedTimeZone(match.Timestamp, "yyyy-MM-dd HH:mm:ss") (@match.TimestampType)
+                @Preferences.FormatInSelectedTimeZone(match.Timestamp, "yyyy-MM-dd HH:mm:ss") (@match.TimestampType)
             </dd>
             @if (match.LeaderEpoch is { } epoch)
             {

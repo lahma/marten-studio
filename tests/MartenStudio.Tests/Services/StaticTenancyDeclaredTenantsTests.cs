@@ -404,7 +404,7 @@ public class StaticTenancyDeclaredTenantsTests
         /// <summary>A circuit's state over the catalog, opened on the tenancy's first listed database.</summary>
         public async Task<StudioState> StateAsync()
         {
-            StudioState state = new(Catalog, NullLogger<StudioState>.Instance, new HttpContextAccessor());
+            StudioState state = new(Catalog, NullLogger<StudioState>.Instance, new StudioPreferences(new HttpContextAccessor()));
             await state.EnsureInitializedAsync(Token);
             return state;
         }

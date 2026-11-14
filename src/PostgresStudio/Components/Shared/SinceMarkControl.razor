@@ -1,5 +1,5 @@
 @using PostgresStudio.Services.Live
-@inject StudioState State
+@inject StudioPreferences Preferences
 
 @* The Mark control of Statements, Storage and Maintenance (1.2-H-A, X6): "count from now".
 
@@ -15,8 +15,8 @@
         bool ended = Invalid is { Length: > 0 };
 
         <span class="ms-mark-chip @(ended ? "ms-mark-chip-invalid" : null)"
-              title="@(ended ? Invalid : "Counted from the read at " + SinceMarkTime.When(State, at, seconds: true) + ": the counters on screen when you pressed Mark.")">
-            @(ended ? "Mark no longer holds (" + SinceMarkTime.When(State, at, seconds: true) + ")" : "Counting since " + SinceMarkTime.When(State, at, seconds: true))
+              title="@(ended ? Invalid : "Counted from the read at " + SinceMarkTime.When(Preferences, at, seconds: true) + ": the counters on screen when you pressed Mark.")">
+            @(ended ? "Mark no longer holds (" + SinceMarkTime.When(Preferences, at, seconds: true) + ")" : "Counting since " + SinceMarkTime.When(Preferences, at, seconds: true))
         </span>
 
         @if (ended)

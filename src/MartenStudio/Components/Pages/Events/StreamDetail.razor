@@ -10,6 +10,7 @@
 @implements IAsyncDisposable
 @inject IEventDataService Events
 @inject StudioState State
+@inject StudioPreferences Preferences
 @inject StudioCapabilityGuard Capabilities
 @inject StudioAuthorization Authorization
 @inject ToastService Toasts
@@ -78,12 +79,12 @@
         <div class="ms-kv">
             <div class="ms-kv-row">
                 <span class="ms-kv-key">Created</span>
-                <span class="ms-kv-value">@State.FormatInSelectedTimeZone(stream.Created)</span>
+                <span class="ms-kv-value">@Preferences.FormatInSelectedTimeZone(stream.Created)</span>
             </div>
             <div class="ms-kv-row">
                 <span class="ms-kv-key">Last event</span>
                 <span class="ms-kv-value">
-                    @State.FormatInSelectedTimeZone(stream.LastEvent) (<TimeAgo Timestamp="stream.LastEvent" />)
+                    @Preferences.FormatInSelectedTimeZone(stream.LastEvent) (<TimeAgo Timestamp="stream.LastEvent" />)
                 </span>
             </div>
         </div>

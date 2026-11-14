@@ -7,6 +7,7 @@
 @inject IStudioSettings Settings
 @inject StudioDescriptor Descriptor
 @inject StudioState State
+@inject StudioPreferences Preferences
 @inject INavIndicatorService Indicators
 @inject StudioLiveUpdatesFactory LiveFactory
 @inject HealthMutes HealthMutes
@@ -324,7 +325,7 @@
             _ => $", and {health.Withheld:N0} findings not shown to you",
         };
 
-        return string.Join(" and ", parts) + withheld + ", as of " + State.FormatInSelectedTimeZone(health.MeasuredAt, "HH:mm");
+        return string.Join(" and ", parts) + withheld + ", as of " + Preferences.FormatInSelectedTimeZone(health.MeasuredAt, "HH:mm");
     }
 
     /// <summary>

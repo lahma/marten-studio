@@ -8,6 +8,7 @@
 @implements IAsyncDisposable
 @inject IEventDataService Events
 @inject StudioState State
+@inject StudioPreferences Preferences
 @inject NavigationManager Navigation
 @inject IOptions<MartenStudioOptions> Options
 
@@ -204,7 +205,7 @@
                                 }
                             </td>
                             <td class="ms-table-cell ms-table-cell-mono">@row.Version.ToString(CultureInfo.InvariantCulture)</td>
-                            <td class="ms-table-cell ms-stream-created">@State.FormatInSelectedTimeZone(row.Created)</td>
+                            <td class="ms-table-cell ms-stream-created">@Preferences.FormatInSelectedTimeZone(row.Created)</td>
                             <td class="ms-table-cell"><TimeAgo Timestamp="row.LastEvent" /></td>
                             @if (ShowTenant)
                             {

@@ -15,6 +15,7 @@
 @implements IAsyncDisposable
 @inject IStatementsService StatementsData
 @inject StudioState State
+@inject StudioPreferences Preferences
 @inject StudioLiveUpdatesFactory LiveFactory
 @inject IStudioSettings Settings
 @inject StudioDescriptor Descriptor
@@ -129,7 +130,7 @@
             <div class="ms-alert ms-alert-warning ms-mark-alert" role="status">
                 <div class="ms-alert-content">
                     <p>
-                        Your mark at @SinceMarkTime.When(State, held.At) no longer holds: @ended.Text(moment => SinceMarkTime.When(State, moment)). @EndedConsequence
+                        Your mark at @SinceMarkTime.When(Preferences, held.At) no longer holds: @ended.Text(moment => SinceMarkTime.When(Preferences, moment)). @EndedConsequence
                     </p>
                 </div>
             </div>
@@ -138,7 +139,7 @@
         @if (view.MarkedAt is { } markedAt)
         {
             <p class="ms-stmts-window ms-stmts-window-marked">
-                Since your mark at @SinceMarkTime.When(State, markedAt) (@TableText.Span(view.MarkSpan ?? TimeSpan.Zero)): each statement's change since
+                Since your mark at @SinceMarkTime.When(Preferences, markedAt) (@TableText.Span(view.MarkSpan ?? TimeSpan.Zero)): each statement's change since
                 then, and its share of every statement's.
             </p>
         }
@@ -297,7 +298,7 @@
 
                                     @if (row.WatchedFrom is { } from)
                                     {
-                                        <p class="ms-stmts-note">Watched since @(view.MarkedAt is not null ? SinceMarkTime.When(State, from) : TableText.When(from)), part of the window.</p>
+                                        <p class="ms-stmts-note">Watched since @(view.MarkedAt is not null ? SinceMarkTime.When(Preferences, from) : TableText.When(from)), part of the window.</p>
                                     }
 
                                     @if (row.ParallelNote is { Length: > 0 } parallel)
@@ -642,7 +643,7 @@
                 @if (shown.PlannedAt is { } planned)
                 {
                     <p class="ms-plan-drill-measured">
-                        Planned @State.FormatInSelectedTimeZone(planned) (<TimeAgo Timestamp="planned" />), as the console's role, and
+                        Planned @Preferences.FormatInSelectedTimeZone(planned) (<TimeAgo Timestamp="planned" />), as the console's role, and
                         recorded in the Activity log.
                     </p>
                 }
@@ -782,7 +783,7 @@
         @if (shown.MeasuredAt is { } measured)
         {
             <p class="ms-stmts-measured">
-                Read @State.FormatInSelectedTimeZone(measured) (<TimeAgo Timestamp="measured" />), for this database only. While
+                Read @Preferences.FormatInSelectedTimeZone(measured) (<TimeAgo Timestamp="measured" />), for this database only. While
                 the page is open it shows the latest read and starts none of its own; Refresh reads again once the last read is
                 five minutes old.
             </p>

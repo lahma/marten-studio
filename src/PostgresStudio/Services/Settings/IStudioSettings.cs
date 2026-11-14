@@ -24,31 +24,16 @@ namespace PostgresStudio.Services.Settings;
 /// is a singleton - nothing on it is about a visitor.
 /// </para>
 /// </remarks>
-internal interface IStudioSettings : IDiagnosticsSettings
+internal interface IStudioSettings : IShellSettings, IDiagnosticsSettings
 {
+    /// <summary>
+    /// The product's name in a sentence: <c>Marten Studio</c>. Declared by both bases (<see cref="IShellSettings" /> and
+    /// <see cref="IDiagnosticsSettings" />) and redeclared here so that <c>settings.ProductName</c> is unambiguous.
+    /// </summary>
+    new string ProductName { get; }
+
     /// <summary>The public capabilities type's name: <c>MartenStudioCapabilities</c>, whose <c>All()</c> a remedy names.</summary>
     string CapabilitiesTypeName { get; }
-
-    /// <summary>The browser title.</summary>
-    string Title { get; }
-
-    /// <summary>The mount path, rooted and without a trailing slash: <c>/marten</c>, <c>/ops/marten</c>.</summary>
-    string TrimmedPath { get; }
-
-    /// <summary><see cref="TrimmedPath" /> percent-encoded, as a browser emits it in a request URI and a <c>&lt;base href&gt;</c>.</summary>
-    string EscapedPath { get; }
-
-    /// <summary>Whether <see cref="TrimmedPath" /> differs from the studio's compile-time default. A fact, not a mode.</summary>
-    bool HasCustomPath { get; }
-
-    /// <summary>
-    /// The header's "Back to application" target, exactly as the host wrote it (a host-relative path or an absolute http(s) URL;
-    /// never re-rooted under the mount), or <see langword="null" /> for no link.
-    /// </summary>
-    string? ApplicationPath { get; }
-
-    /// <summary>The endpoint policy every studio endpoint requires, or <see langword="null" /> for none of its own.</summary>
-    string? AuthorizationPolicy { get; }
 
     /// <summary>
     /// The policy asked, with the scope as the resource, before anything of a source, database or tenant is listed,
@@ -62,9 +47,6 @@ internal interface IStudioSettings : IDiagnosticsSettings
     /// </summary>
     string? WritePolicy { get; }
 
-    /// <summary>The master switch: every capability off, whatever else is set.</summary>
-    bool ReadOnly { get; }
-
     /// <summary>
     /// The capabilities this studio offers at all, in the order the capability chip lists them. A capability not in it is
     /// a switch this studio does not have, and <see cref="IsConfigured" /> is never asked about it by shared code.
@@ -72,7 +54,7 @@ internal interface IStudioSettings : IDiagnosticsSettings
     IReadOnlyList<StudioCapability> Capabilities { get; }
 
     /// <summary>
-    /// Whether the host switched <paramref name="capability" /> on - the individual flag, without <see cref="ReadOnly" />.
+    /// Whether the host switched <paramref name="capability" /> on - the individual flag, without <see cref="IShellSettings.ReadOnly" />.
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException">
     /// <paramref name="capability" /> has no flag in this studio's options. Thrown rather than answered <see langword="false" />:
@@ -100,9 +82,6 @@ internal interface IStudioSettings : IDiagnosticsSettings
     /// </summary>
     string MaxInlineValueBytesMember { get; }
 
-    /// <summary>How often a live page polls.</summary>
-    TimeSpan RefreshInterval { get; }
-
     /// <summary>Above this estimate an exact count is offered on demand rather than run.</summary>
     long ExactCountThreshold { get; }
 }
@@ -121,7 +100,7 @@ internal static class StudioSettingsText
     public static string ReadOnlyOption(this IStudioSettings settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
-        return settings.OptionName("ReadOnly");
+        return settings.ReadOnlyOptionName;
     }
 
     /// <summary>The one-line opt-in that turns every capability on: <c>MartenStudioCapabilities.All()</c>.</summary>

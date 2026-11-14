@@ -8,6 +8,7 @@
 @using PostgresStudio.Services
 @inject ITableRowService Rows
 @inject StudioState State
+@inject StudioPreferences Preferences
 @inject NavigationManager Navigation
 @inject IStudioSettings Settings
 @inject StudioDescriptor Descriptor
@@ -457,13 +458,13 @@
 
     private string? DateHintFor(Dictionary<int, DateHintUnit> hints, int column, SqlCell cell) =>
         ShowDateHints && hints.TryGetValue(column, out DateHintUnit unit) && SqlCellFormat.Instant(cell.Text, unit) is { } instant
-            ? State.FormatInSelectedTimeZone(instant, SqlCellFormat.HintFormat)
+            ? Preferences.FormatInSelectedTimeZone(instant, SqlCellFormat.HintFormat)
             : null;
 
     private string? DateHintTitle(Dictionary<int, DateHintUnit> hints, int column) =>
         hints.TryGetValue(column, out DateHintUnit unit)
             ? "Read as " + SqlCellFormat.UnitLabel(unit) + " because of the column's name and every value on this page - a guess, shown in " +
-              State.SelectedTimeZoneId + ". The number is the stored value."
+              Preferences.SelectedTimeZoneId + ". The number is the stored value."
             : null;
 
     private async Task ToggleDateHintsAsync() => await OnToggleDateHints.InvokeAsync();

@@ -71,7 +71,7 @@ public class StudioScopeCatalogUnlistableTests
     {
         await using Harness harness = Harness.Create(storePolicy: null);
 
-        var state = new StudioState(harness.Catalog, NullLogger<StudioState>.Instance, new Microsoft.AspNetCore.Http.HttpContextAccessor());
+        var state = new StudioState(harness.Catalog, NullLogger<StudioState>.Instance, new StudioPreferences(new Microsoft.AspNetCore.Http.HttpContextAccessor()));
         await state.EnsureInitializedAsync(Token);
 
         state.AvailableStores.Select(static x => x.Key).Should().Equal([nameof(IUnlistableCatalogStore)], "only a listable store is selectable");

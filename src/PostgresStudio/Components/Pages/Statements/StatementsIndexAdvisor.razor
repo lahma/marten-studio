@@ -10,6 +10,7 @@
 @implements IAsyncDisposable
 @inject IStatementsService StatementsData
 @inject StudioState State
+@inject StudioPreferences Preferences
 @inject IStudioSettings Settings
 @inject StudioDescriptor Descriptor
 
@@ -219,7 +220,7 @@
         @if (shown.RanAt is { } ranAt)
         {
             <p class="ms-advisor-ran">
-                Ran @State.FormatInSelectedTimeZone(ranAt)@(shown.Took is { } took ? " in " + took.TotalSeconds.ToString("0.#", CultureInfo.InvariantCulture) + " s" : string.Empty).
+                Ran @Preferences.FormatInSelectedTimeZone(ranAt)@(shown.Took is { } took ? " in " + took.TotalSeconds.ToString("0.#", CultureInfo.InvariantCulture) + " s" : string.Empty).
                 @if (shown.StatementsSelected > 0)
                 {
                     <text> Planned @shown.StatementsTried of @shown.StatementsSelected statements@(shown.CandidatesTried > 0 || shown.CandidatesFound > 0 ? "; tried " + shown.CandidatesTried + " of " + shown.CandidatesFound + " indexes" : string.Empty).</text>

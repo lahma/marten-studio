@@ -79,6 +79,9 @@ internal sealed class PostgresStudioSettings : IStudioSettings
     public bool ReadOnly => Value.ReadOnly;
 
     /// <inheritdoc />
+    public string ReadOnlyOptionName => ((IDiagnosticsSettings) this).OptionName("ReadOnly");
+
+    /// <inheritdoc />
     /// <remarks>The four reads authorized like writes; PostgresStudio has no mutating capability.</remarks>
     public IReadOnlyList<StudioCapability> Capabilities => Offered;
 

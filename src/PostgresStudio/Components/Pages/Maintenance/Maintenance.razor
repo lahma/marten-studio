@@ -13,6 +13,7 @@
 @implements IAsyncDisposable
 @inject IMaintenanceService MaintenanceData
 @inject StudioState State
+@inject StudioPreferences Preferences
 @inject StudioLiveUpdatesFactory LiveFactory
 @inject IStudioSettings Settings
 @inject SinceMarks Marks
@@ -80,7 +81,7 @@
             <div class="ms-alert ms-alert-warning ms-mark-alert" role="status">
                 <div class="ms-alert-content">
                     <p>
-                        Your mark at @SinceMarkTime.When(State, held.At) no longer holds: @ended.Text(moment => SinceMarkTime.When(State, moment)). @EndedConsequence
+                        Your mark at @SinceMarkTime.When(Preferences, held.At) no longer holds: @ended.Text(moment => SinceMarkTime.When(Preferences, moment)). @EndedConsequence
                     </p>
                 </div>
             </div>
@@ -93,7 +94,7 @@
         @if (view.MeasuredAt is { } measured)
         {
             <p class="ms-maint-measured">
-                Read by the health sweep @State.FormatInSelectedTimeZone(measured) (<TimeAgo Timestamp="measured" />). Counters read just
+                Read by the health sweep @Preferences.FormatInSelectedTimeZone(measured) (<TimeAgo Timestamp="measured" />). Counters read just
                 after a manual VACUUM can be inflated: a backend's pending counts reach the statistics after the VACUUM reset them.
             </p>
         }
@@ -141,7 +142,7 @@
                                 }
                                 @if (Counting is not null)
                                 {
-                                    <th scope="col" class="ms-mark-column" title="The vacuums and analyzes each table has had since your mark (autovacuum's and manual ones together)">Since @SinceMarkTime.When(State, mark!.At)</th>
+                                    <th scope="col" class="ms-mark-column" title="The vacuums and analyzes each table has had since your mark (autovacuum's and manual ones together)">Since @SinceMarkTime.When(Preferences, mark!.At)</th>
                                 }
                                 <th scope="col">Bloat</th>
                             </tr>
@@ -191,7 +192,7 @@
                                     }
                                     @if (PostgresFeatures.Has(PostgresFeature.StatsResetPerTable, view.ServerVersion))
                                     {
-                                        <td class="ms-table-cell ms-maint-since" title="@(table.CountersReset is null ? "never reset" : null)">@(table.CountersReset is { } reset ? State.FormatInSelectedTimeZone(reset, "yyyy-MM-dd HH:mm") : "never reset")</td>
+                                        <td class="ms-table-cell ms-maint-since" title="@(table.CountersReset is null ? "never reset" : null)">@(table.CountersReset is { } reset ? Preferences.FormatInSelectedTimeZone(reset, "yyyy-MM-dd HH:mm") : "never reset")</td>
                                     }
                                     @if (Counting is { } counted)
                                     {
@@ -289,7 +290,7 @@
                         }
 
                         <p class="ms-muted">
-                            Measured @State.FormatInSelectedTimeZone(result.At) with pgstattuple_approx and pgstatindex, all within QueryTimeout:
+                            Measured @Preferences.FormatInSelectedTimeZone(result.At) with pgstattuple_approx and pgstatindex, all within QueryTimeout:
                             an estimate of the heap from the visibility map, then an exact read of every page of each index measured, each holding
                             an ACCESS SHARE lock for as long as it reads - which a migration's ALTER waits behind. A leaf density far below the
                             index's fillfactor (90% by default) is space a REINDEX CONCURRENTLY would give back.

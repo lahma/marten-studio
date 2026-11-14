@@ -12,6 +12,7 @@
 @inject IStoreInfoService StoreInfo
 @inject IHealthService HealthData
 @inject StudioState State
+@inject StudioPreferences Preferences
 @inject StudioLiveUpdatesFactory LiveFactory
 @inject IOptions<MartenStudioOptions> Options
 
@@ -621,7 +622,7 @@
 
     private string? ChipTitle(HealthGlance? glance) => glance is null
         ? "No sweep within the last few intervals. Check runs one."
-        : "As of " + State.FormatInSelectedTimeZone(glance.MeasuredAt, "HH:mm") + (glance.Withheld > 0 ? "; some findings are not shown to you" : string.Empty);
+        : "As of " + Preferences.FormatInSelectedTimeZone(glance.MeasuredAt, "HH:mm") + (glance.Withheld > 0 ? "; some findings are not shown to you" : string.Empty);
 
     public async ValueTask DisposeAsync()
     {

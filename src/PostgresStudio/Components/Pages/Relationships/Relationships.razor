@@ -8,6 +8,7 @@
 @implements IDisposable
 @inject IRelationshipDataService RelationshipData
 @inject StudioState State
+@inject StudioPreferences Preferences
 @inject IStudioSettings Settings
 @inject IStudioLinks Links
 @inject StudioDescriptor Descriptor
@@ -115,7 +116,7 @@
         <div class="ms-graph-actions">
             @if (!loading && graph.ReadAt != DateTimeOffset.MinValue)
             {
-                <span class="ms-graph-readat">Read @State.FormatInSelectedTimeZone(graph.ReadAt)</span>
+                <span class="ms-graph-readat">Read @Preferences.FormatInSelectedTimeZone(graph.ReadAt)</span>
             }
             <button type="button" class="ms-button" @onclick="LoadAsync" disabled="@loading">Refresh</button>
         </div>

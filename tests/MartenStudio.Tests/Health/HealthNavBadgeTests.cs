@@ -153,7 +153,7 @@ public class HealthNavBadgeTests
             TestAuthenticationStateProvider users = new();
             users.SignIn("operator");
 
-            StudioState state = new(catalog, NullLogger<StudioState>.Instance, new HttpContextAccessor());
+            StudioState state = new(catalog, NullLogger<StudioState>.Instance, new StudioPreferences(new HttpContextAccessor()));
             await state.EnsureInitializedAsync(Token);
 
             FakeEventDataService events = new();

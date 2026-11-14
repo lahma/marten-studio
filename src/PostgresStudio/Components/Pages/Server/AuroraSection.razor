@@ -3,6 +3,7 @@
 @using PostgresStudio.Services.Database
 @using PostgresStudio.Services.Health
 @inject StudioState State
+@inject StudioPreferences Preferences
 
 @*
     The Server page's Aurora section (issue #8 A1, A3, A4, A8; W5-AUR), drawn in S2's platform slot from IAuroraService's view:
@@ -47,7 +48,7 @@ else
                     @(view.AnsweredBy ?? "not known")
                     @if (view.StartedAt is { } started)
                     {
-                        <span class="ms-aur-fact-note">up since @State.FormatInSelectedTimeZone(started)</span>
+                        <span class="ms-aur-fact-note">up since @Preferences.FormatInSelectedTimeZone(started)</span>
                     }
                     @if (view.InstanceNotRead is { Length: > 0 } notRead)
                     {

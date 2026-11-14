@@ -13,7 +13,7 @@
 @inject KafkaCapabilityGuard Capabilities
 @inject NavigationManager Navigation
 @inject IStudioSettings Settings
-@inject StudioState Studio
+@inject StudioPreferences Preferences
 @inject TimeProvider Time
 @inject ILogger<KafkaRelatedBody> Logger
 
@@ -72,7 +72,7 @@
         {
             <p class="ms-muted ms-k-record-address">
                 Around <a href="@RecordHref(anchored)"><code>@anchored.Topic</code> · partition @anchored.Partition · offset @KafkaDisplay.Number(anchored.Offset)</a>
-                · @Studio.FormatInSelectedTimeZone(anchored.Timestamp, "yyyy-MM-dd HH:mm:ss")
+                · @Preferences.FormatInSelectedTimeZone(anchored.Timestamp, "yyyy-MM-dd HH:mm:ss")
             </p>
             <KafkaExternalLinks Model="@anchored" />
         }
@@ -316,7 +316,7 @@
                             {
                                 bool isAnchor = IsAnchor(match);
                                 <tr class="ms-table-row@(isAnchor ? " ms-k-anchor-row" : string.Empty)" @key="@KafkaRelatedView.RowKey(match)" aria-current="@(isAnchor ? "true" : null)">
-                                    <td class="ms-table-cell" title="@TimeTitle(match)">@Studio.FormatInSelectedTimeZone(match.Timestamp, "yyyy-MM-dd HH:mm:ss")</td>
+                                    <td class="ms-table-cell" title="@TimeTitle(match)">@Preferences.FormatInSelectedTimeZone(match.Timestamp, "yyyy-MM-dd HH:mm:ss")</td>
                                     <td class="ms-table-cell">@match.Topic</td>
                                     <td class="ms-table-cell"><a href="@RecordHref(match)">@match.Partition / @KafkaDisplay.Number(match.Offset)</a></td>
                                     <td class="ms-table-cell">@KafkaMatchView.TypeOf(match)</td>
@@ -656,7 +656,7 @@
     {
         try
         {
-            return TimeZoneInfo.FindSystemTimeZoneById(Studio.SelectedTimeZoneId);
+            return TimeZoneInfo.FindSystemTimeZoneById(Preferences.SelectedTimeZoneId);
         }
         catch (Exception e) when (e is TimeZoneNotFoundException or InvalidTimeZoneException)
         {

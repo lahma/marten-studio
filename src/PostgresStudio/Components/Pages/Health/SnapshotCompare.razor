@@ -7,6 +7,7 @@
 @implements IDisposable
 @inject IServiceProvider Services
 @inject StudioState State
+@inject StudioPreferences Preferences
 @inject ILogger<SnapshotCompare> Logger
 
 @*
@@ -170,7 +171,7 @@
         }
     }
 
-    private string Time(DateTimeOffset? at) => State.FormatInSelectedTimeZone(at);
+    private string Time(DateTimeOffset? at) => Preferences.FormatInSelectedTimeZone(at);
 
     private RenderFragment Result(SnapshotComparison result) => __builder =>
     {

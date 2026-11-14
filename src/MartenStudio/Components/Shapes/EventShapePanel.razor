@@ -6,6 +6,7 @@
 @inject IEventShapeCheck Check
 @inject IEventDataService EventData
 @inject StudioState State
+@inject StudioPreferences Preferences
 @inject IOptions<MartenStudioOptions> Options
 @inject NavigationManager Navigation
 @inject IServiceProvider Services
@@ -156,7 +157,7 @@
 
     private string FromCounts(DateTimeOffset? listedAt) =>
         listedAt is { } at
-            ? "Unregistered types are taken from the counts read at " + State.FormatInSelectedTimeZone(at, "HH:mm:ss") + "."
+            ? "Unregistered types are taken from the counts read at " + Preferences.FormatInSelectedTimeZone(at, "HH:mm:ss") + "."
             : "Unregistered types are taken from the counts in hand.";
 
     // Why the last click stopped before the end of the list, or null: the click's own bound (ShapeCheckLimits.ClickBudget) ran out.
@@ -193,7 +194,7 @@
     private bool RecheckDisabled => !running && stoppedNote is null && NextRecheck is { } at && clock.GetUtcNow() < at;
 
     private string? RecheckTitle => RecheckDisabled && NextRecheck is { } at
-        ? ShapeCheckText.AvailableAt(State.FormatInSelectedTimeZone(at, "HH:mm:ss"))
+        ? ShapeCheckText.AvailableAt(Preferences.FormatInSelectedTimeZone(at, "HH:mm:ss"))
         : null;
 
     // A result finished before this press began is the last check's, handed back by the shared cache (five minutes).
@@ -202,7 +203,7 @@
     private string EntrySummary(Entry entry) =>
         ShapeCheckText.EventSummary(
             entry.Result,
-            State.FormatInSelectedTimeZone(entry.Result.CheckedAt, "HH:mm"),
+            Preferences.FormatInSelectedTimeZone(entry.Result.CheckedAt, "HH:mm"),
             entry.Result.CheckedAt < ranAt ? clock.GetUtcNow() - entry.Result.CheckedAt : null);
 
     private string Summary

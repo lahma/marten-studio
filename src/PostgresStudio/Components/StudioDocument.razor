@@ -1,6 +1,6 @@
 @using PostgresStudio.Services.Settings
 @inject Microsoft.AspNetCore.Components.NavigationManager Navigation
-@inject IStudioSettings Settings
+@inject IShellSettings Settings
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -75,7 +75,7 @@
     /// <remarks>
     /// Every mount is studio-rooted, the default included, because the studio always takes its own
     /// <c>/_blazor</c>, its framework script and its asset mirror under the mount path
-    /// (<see cref="IStudioSettings.TrimmedPath" />) - a second <c>/_blazor</c> at the application root is an
+    /// (<see cref="IShellSettings.TrimmedPath" />) - a second <c>/_blazor</c> at the application root is an
     /// <c>AmbiguousMatchException</c> in any host that has a Blazor app of its own. Rooting the document
     /// here is what makes every relative URL in it resolve to those copies, and it is the only prefix a
     /// path-forwarding reverse proxy is guaranteed to expose.

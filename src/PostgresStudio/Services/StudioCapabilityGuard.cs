@@ -64,7 +64,7 @@ internal enum StudioCapability
 /// <summary>Why a capability was refused.</summary>
 internal enum CapabilityDenialReason
 {
-    /// <summary>The studio's master switch (<see cref="IStudioSettings.ReadOnly" />) is on, so every capability is off.</summary>
+    /// <summary>The studio's master switch (<see cref="IShellSettings.ReadOnly" />) is on, so every capability is off.</summary>
     ReadOnly,
 
     /// <summary>The individual capability is off.</summary>

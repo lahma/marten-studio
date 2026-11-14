@@ -1,5 +1,5 @@
 @using PostgresStudio.Services.Health
-@inject StudioState State
+@inject StudioPreferences Preferences
 
 @*
     Which server answered the advisor's last sweep, and the compute capacity the host's source reported for it (issue #8 A1,
@@ -13,7 +13,7 @@
     <p class="ms-aur-answer" aria-label="Server that answered">
         @if (line.AnsweredBy is { Length: > 0 } answeredBy)
         {
-            <span class="ms-aur-answer-instance">Answered by @answeredBy@(line.StartedAt is { } started ? ", up since " + State.FormatInSelectedTimeZone(started) : string.Empty).</span>
+            <span class="ms-aur-answer-instance">Answered by @answeredBy@(line.StartedAt is { } started ? ", up since " + Preferences.FormatInSelectedTimeZone(started) : string.Empty).</span>
         }
         @if (line.Capacity is { Length: > 0 } capacity)
         {

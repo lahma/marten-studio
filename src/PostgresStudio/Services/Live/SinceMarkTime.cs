@@ -7,17 +7,17 @@ internal static class SinceMarkTime
     /// <paramref name="at" /> in the selected zone as "14:02" (or "14:02:05" with <paramref name="seconds" />), preceded by its date
     /// ("2026-10-26 14:02") when that is not today's date in that zone.
     /// </summary>
-    /// <param name="state">The circuit's state, which knows the selected zone.</param>
+    /// <param name="preferences">The circuit's preferences, which know the selected zone.</param>
     /// <param name="at">The moment.</param>
     /// <param name="seconds">Whether to spell seconds.</param>
-    /// <param name="now">The moment "today" is taken from; the state's <see cref="StudioState.Clock" /> when <see langword="null" />.</param>
-    public static string When(StudioState state, DateTimeOffset at, bool seconds = false, DateTimeOffset? now = null)
+    /// <param name="now">The moment "today" is taken from; the preferences' <see cref="StudioPreferences.Clock" /> when <see langword="null" />.</param>
+    public static string When(StudioPreferences preferences, DateTimeOffset at, bool seconds = false, DateTimeOffset? now = null)
     {
-        ArgumentNullException.ThrowIfNull(state);
+        ArgumentNullException.ThrowIfNull(preferences);
 
-        string time = state.FormatInSelectedTimeZone(at, seconds ? "HH:mm:ss" : "HH:mm");
-        bool today = state.ConvertToSelectedTimeZone(at).Date == state.ConvertToSelectedTimeZone(now ?? state.Clock.GetUtcNow()).Date;
+        string time = preferences.FormatInSelectedTimeZone(at, seconds ? "HH:mm:ss" : "HH:mm");
+        bool today = preferences.ConvertToSelectedTimeZone(at).Date == preferences.ConvertToSelectedTimeZone(now ?? preferences.Clock.GetUtcNow()).Date;
 
-        return today ? time : state.FormatInSelectedTimeZone(at, "yyyy-MM-dd") + " " + time;
+        return today ? time : preferences.FormatInSelectedTimeZone(at, "yyyy-MM-dd") + " " + time;
     }
 }

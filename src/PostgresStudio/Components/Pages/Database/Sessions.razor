@@ -10,6 +10,7 @@
 @inject ISessionActivityService SessionData
 @inject SessionPoolObserver Pools
 @inject StudioState State
+@inject StudioPreferences Preferences
 @inject StudioLiveUpdatesFactory LiveFactory
 @inject IStudioSettings Settings
 @inject StudioDescriptor Descriptor
@@ -448,7 +449,7 @@
                                     <tr @key="row.Gid">
                                         <td class="ms-mono">@row.Gid</td>
                                         <td>@row.Owner</td>
-                                        <td>@State.FormatInSelectedTimeZone(row.Prepared)</td>
+                                        <td>@Preferences.FormatInSelectedTimeZone(row.Prepared)</td>
                                         <td>@SessionText.Duration(row.Age)</td>
                                     </tr>
                                 }
@@ -476,7 +477,7 @@
         @if (summary.MeasuredAt is { } measured)
         {
             <p class="ms-sessions-measured">
-                Read @State.FormatInSelectedTimeZone(measured) (<TimeAgo Timestamp="measured" />), @(HoldersTab ? "for the whole server" : "for this database only").
+                Read @Preferences.FormatInSelectedTimeZone(measured) (<TimeAgo Timestamp="measured" />), @(HoldersTab ? "for the whole server" : "for this database only").
             </p>
         }
     }

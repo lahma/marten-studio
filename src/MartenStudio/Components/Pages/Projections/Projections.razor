@@ -15,6 +15,7 @@
 @implements IAsyncDisposable
 @inject IProjectionDataService ProjectionData
 @inject StudioState State
+@inject StudioPreferences Preferences
 @inject StudioCapabilityGuard Capabilities
 @inject StudioAuthorization Authorization
 @inject StudioLiveUpdatesFactory LiveFactory
@@ -132,7 +133,7 @@
                         @finding.Finding.Title
                     </p>
                     <p class="ms-muted ms-health-banner-meta">
-                        From the health advisor's check at @State.FormatInSelectedTimeZone(finding.Finding.MeasuredAt).
+                        From the health advisor's check at @Preferences.FormatInSelectedTimeZone(finding.Finding.MeasuredAt).
                         <a class="ms-health-banner-link" href="@HealthLinks.ToFinding(Options.Value, State.ActiveScope, finding)">Why, and what to change</a>
                     </p>
 
@@ -192,7 +193,7 @@
                                                             <td class="ms-table-cell">@(suspect.User ?? "not visible")</td>
                                                             <td class="ms-table-cell">@suspect.Application</td>
                                                             <td class="ms-table-cell ms-table-cell-mono">@suspect.ClientAddress</td>
-                                                            <td class="ms-table-cell ms-table-cell-mono">@(suspect.TransactionStart is { } began ? State.FormatInSelectedTimeZone(began) : string.Empty)</td>
+                                                            <td class="ms-table-cell ms-table-cell-mono">@(suspect.TransactionStart is { } began ? Preferences.FormatInSelectedTimeZone(began) : string.Empty)</td>
                                                             <td class="ms-table-cell">@(suspect.State + (suspect.Wait is { } wait ? " (" + wait + ")" : string.Empty))</td>
                                                             <td class="ms-table-cell">@SuspectVerdict(suspect)</td>
                                                             <td class="ms-table-cell ms-table-cell-mono ms-high-water-statement" title="@suspect.Query">@suspect.Query</td>
@@ -220,7 +221,7 @@
                                                         <tr class="ms-table-row" @key="prepared.Gid">
                                                             <td class="ms-table-cell ms-table-cell-mono">@prepared.Gid</td>
                                                             <td class="ms-table-cell">@prepared.Owner</td>
-                                                            <td class="ms-table-cell ms-table-cell-mono">@State.FormatInSelectedTimeZone(prepared.Prepared)</td>
+                                                            <td class="ms-table-cell ms-table-cell-mono">@Preferences.FormatInSelectedTimeZone(prepared.Prepared)</td>
                                                         </tr>
                                                     }
                                                 </tbody>
@@ -724,7 +725,7 @@
                                             @orphan.Sequence.ToString("N0", CultureInfo.InvariantCulture)
                                         </td>
                                         <td class="ms-table-cell ms-table-cell-mono">
-                                            @(orphan.LastUpdated is { } updated ? State.FormatInSelectedTimeZone(updated) : "not recorded")
+                                            @(orphan.LastUpdated is { } updated ? Preferences.FormatInSelectedTimeZone(updated) : "not recorded")
                                         </td>
                                         <td class="ms-table-cell ms-orphaned-progression-reason">@orphan.Explanation</td>
                                         <td class="ms-table-cell ms-table-cell-actions">
@@ -1476,14 +1477,14 @@
             return ago < TimeSpan.FromSeconds(1) ? "just now" : DaemonCheckConfiguration.Format(ago) + " ago";
         }
 
-        return shard.LastAdvanced is { } advanced ? State.FormatInSelectedTimeZone(advanced) : "never";
+        return shard.LastAdvanced is { } advanced ? Preferences.FormatInSelectedTimeZone(advanced) : "never";
     }
 
     private string LastProgressTitle(ShardProgress shard) =>
         shard.LastProgress is { } at
-            ? "Last progress written " + State.FormatInSelectedTimeZone(at) + " (mt_event_progression.last_updated, database server time)."
+            ? "Last progress written " + Preferences.FormatInSelectedTimeZone(at) + " (mt_event_progression.last_updated, database server time)."
             : shard.LastAdvanced is { } advanced
-                ? "Last advanced " + State.FormatInSelectedTimeZone(advanced) + ", as the in-process daemon's tracker reported it."
+                ? "Last advanced " + Preferences.FormatInSelectedTimeZone(advanced) + ", as the in-process daemon's tracker reported it."
                 : "This shard has no progress recorded.";
 
     /// <summary>The Explain's verdict on one session, in Marten's terms.</summary>
@@ -1960,7 +1961,7 @@
     /// <summary>When the row the Remove dialog is about was last written, as the page drew it - or <see langword="null" /> when not recorded.</summary>
     private string? PendingOrphanLastWritten =>
         view?.Orphans.Rows.FirstOrDefault(x => string.Equals(x.Name, pendingOrphan, StringComparison.Ordinal))?.LastUpdated is { } updated
-            ? State.FormatInSelectedTimeZone(updated)
+            ? Preferences.FormatInSelectedTimeZone(updated)
             : null;
 
     private string PendingMessage => pending switch
@@ -2118,11 +2119,11 @@
 
     private string FreshnessTitle => view is null
         ? string.Empty
-        : $"Read {State.FormatInSelectedTimeZone(view.ReadAt)}; refreshed every {Options.Value.RefreshInterval.TotalSeconds:0.#} s and paused while this tab is hidden.";
+        : $"Read {Preferences.FormatInSelectedTimeZone(view.ReadAt)}; refreshed every {Options.Value.RefreshInterval.TotalSeconds:0.#} s and paused while this tab is hidden.";
 
     /// <summary>When the studio paused this store's coordinator, in the visitor's selected time zone.</summary>
     private string PausedAtText => view?.Daemon.PausedByStudio is { } pause
-        ? State.FormatInSelectedTimeZone(pause.PausedAt)
+        ? Preferences.FormatInSelectedTimeZone(pause.PausedAt)
         : string.Empty;
 
     private string HighWaterAgeText

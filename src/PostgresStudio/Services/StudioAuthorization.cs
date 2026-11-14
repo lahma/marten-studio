@@ -16,7 +16,7 @@ namespace PostgresStudio.Services;
 /// <para>
 /// The visitor comes from <see cref="AuthenticationStateProvider" /> and not from an
 /// <c>HttpContext</c>: a rendered studio is a circuit, and its request is long gone by the time a page
-/// asks for anything. The endpoint policy (<see cref="IStudioSettings.AuthorizationPolicy" />) has
+/// asks for anything. The endpoint policy (<see cref="IShellSettings.AuthorizationPolicy" />) has
 /// already decided who gets in; this decides which source, database and tenant, and it is asked on
 /// <em>every</em> data call rather than only at the selector (plan D5).
 /// </para>

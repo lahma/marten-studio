@@ -14,6 +14,7 @@
 @inject IDocumentWriteService Writes
 @inject DocumentBrowserState Browser
 @inject StudioState State
+@inject StudioPreferences Preferences
 @inject StudioCapabilityGuard Capabilities
 @inject StudioAuthorization Authorization
 @inject ToastService Toasts
@@ -563,7 +564,7 @@
                                            href="@DocumentLinks.ToDocument(Options.Value, State.ActiveScope, document.Alias, document.Id)"
                                            title="@document.Id">@document.Id</a>
                                     </td>
-                                    <td title="@State.FormatInSelectedTimeZone(document.LastModified)">
+                                    <td title="@Preferences.FormatInSelectedTimeZone(document.LastModified)">
                                         <TimeAgo Timestamp="document.LastModified" />
                                     </td>
                                 </tr>

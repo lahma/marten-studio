@@ -39,7 +39,7 @@ namespace MartenStudio.Tests.Components;
 /// <c>DocumentsComponentContext</c> does - there is one context class, not one per packet.
 /// </para>
 /// <para>
-/// The time zone is pinned to UTC: <see cref="StudioState" /> formats every timestamp in the selected
+/// The time zone is pinned to UTC: <see cref="StudioPreferences" /> formats every timestamp in the selected
 /// zone, which otherwise is the machine's and makes rendered text machine-dependent.
 /// </para>
 /// </remarks>
@@ -86,6 +86,7 @@ internal class StudioComponentContext : BunitContext
         // descriptor, and the links into MartenStudio's own screens.
         Services.AddSingleton<IStudioSettings>(static provider =>
             new MartenStudioSettings(provider.GetRequiredService<IOptions<MartenStudioOptions>>()));
+        Services.AddSingleton<IShellSettings>(static provider => provider.GetRequiredService<IStudioSettings>());
         Services.AddSingleton(MartenStudioDescriptor.Instance);
         Services.AddSingleton<IStudioLinks, MartenStudioLinks>();
         Services.AddSingleton<IHttpContextAccessor>(new HttpContextAccessor());
@@ -143,10 +144,11 @@ internal class StudioComponentContext : BunitContext
         // constructor has run.
         Services.AddSingleton(static provider =>
         {
-            StudioState state = ActivatorUtilities.CreateInstance<StudioState>(provider);
-            state.SelectedTimeZoneId = TimeZoneInfo.Utc.Id;
-            return state;
+            StudioPreferences preferences = ActivatorUtilities.CreateInstance<StudioPreferences>(provider);
+            preferences.SelectedTimeZoneId = TimeZoneInfo.Utc.Id;
+            return preferences;
         });
+        Services.AddSingleton<StudioState>();
 
         Services.AddSingleton<StudioCapabilityGuard>();
         Services.AddSingleton<ToastService>();
@@ -225,6 +227,9 @@ internal class StudioComponentContext : BunitContext
     /// Resolved on first use, not in the constructor: see the note there about bUnit's service provider.
     /// </remarks>
     public StudioState State => Services.GetRequiredService<StudioState>();
+
+    /// <summary>The circuit's preferences (theme, time zone, clock), as the components see them; the time zone is pinned to UTC.</summary>
+    public StudioPreferences Preferences => Services.GetRequiredService<StudioPreferences>();
 
     /// <summary>What the startup guard observed about the mapping, as the layout reads it.</summary>
     public StudioMappedEndpoints MappedEndpoints { get; }

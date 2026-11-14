@@ -64,6 +64,7 @@ internal sealed class PostgresStudioComponentContext : BunitContext
         Services.AddSingleton<IOptions<PostgresDiagnosticsOptions>>(Microsoft.Extensions.Options.Options.Create<PostgresDiagnosticsOptions>(Options));
         Services.AddSingleton<IStudioSettings>(static provider =>
             new PostgresStudioSettings(provider.GetRequiredService<IOptions<PostgresStudioOptions>>()));
+        Services.AddSingleton<IShellSettings>(static provider => provider.GetRequiredService<IStudioSettings>());
         Services.AddSingleton(PostgresStudioDescriptor.Instance);
         Services.AddSingleton<IStudioLinks, PostgresStudioLinks>();
         Services.AddSingleton<IHttpContextAccessor>(new HttpContextAccessor());
@@ -114,10 +115,11 @@ internal sealed class PostgresStudioComponentContext : BunitContext
 
         Services.AddSingleton(static provider =>
         {
-            StudioState state = ActivatorUtilities.CreateInstance<StudioState>(provider);
-            state.SelectedTimeZoneId = TimeZoneInfo.Utc.Id;
-            return state;
+            StudioPreferences preferences = ActivatorUtilities.CreateInstance<StudioPreferences>(provider);
+            preferences.SelectedTimeZoneId = TimeZoneInfo.Utc.Id;
+            return preferences;
         });
+        Services.AddSingleton<StudioState>();
 
         Services.AddSingleton<StudioCapabilityGuard>();
         Services.AddSingleton<ToastService>();
@@ -171,6 +173,9 @@ internal sealed class PostgresStudioComponentContext : BunitContext
     public StudioMappedEndpoints MappedEndpoints { get; }
 
     public StudioState State => Services.GetRequiredService<StudioState>();
+
+    /// <summary>The circuit's preferences (theme, time zone, clock), as the components see them; the time zone is pinned to UTC.</summary>
+    public StudioPreferences Preferences => Services.GetRequiredService<StudioPreferences>();
 
     public StudioActionLog ActionLog => Services.GetRequiredService<StudioActionLog>();
 

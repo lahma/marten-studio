@@ -123,7 +123,7 @@ internal static class StudioEndpointMapper
     }
 
     /// <summary>
-    /// Maps the studio rooted at <typeparamref name="TRoot" /> under <see cref="IStudioSettings.TrimmedPath" />, with the
+    /// Maps the studio rooted at <typeparamref name="TRoot" /> under <see cref="IShellSettings.TrimmedPath" />, with the
     /// endpoint markers the startup guard reads, and answers one builder that covers everything it mapped.
     /// </summary>
     /// <typeparam name="TRoot">The studio's root component, whose assembly is the page discovery root.</typeparam>
@@ -133,7 +133,7 @@ internal static class StudioEndpointMapper
     {
         ArgumentNullException.ThrowIfNull(builder);
 
-        IStudioSettings settings = builder.ServiceProvider.GetRequiredService<IStudioSettings>();
+        IShellSettings settings = builder.ServiceProvider.GetRequiredService<IShellSettings>();
         StudioDescriptor descriptor = builder.ServiceProvider.GetRequiredService<StudioDescriptor>();
 
         // Built here, before anything is mapped, so that a page template outside its assembly's root or a relative

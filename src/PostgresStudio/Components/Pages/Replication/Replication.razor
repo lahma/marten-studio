@@ -12,6 +12,7 @@
 @inject IReplicationService ReplicationData
 @inject IHealthService Health
 @inject StudioState State
+@inject StudioPreferences Preferences
 @inject StudioLiveUpdatesFactory LiveFactory
 @inject IStudioSettings Settings
 @inject StudioDescriptor Descriptor
@@ -122,7 +123,7 @@
                 <div class="ms-alert-content">
                     <p class="ms-repl-finding-title"><code>@finding.Code</code> @finding.Finding.Title</p>
                     <p class="ms-muted">
-                        From the health advisor's check at @State.FormatInSelectedTimeZone(finding.Finding.MeasuredAt).
+                        From the health advisor's check at @Preferences.FormatInSelectedTimeZone(finding.Finding.MeasuredAt).
                         <a href="@HealthLinks.ToFinding(Settings, Descriptor.SourceQueryParameter, State.ActiveScope, finding)">Why, and what to change</a>
                     </p>
                 </div>
@@ -219,7 +220,7 @@
                     <dt>Behind what it received</dt>
                     <dd>@Bytes(standbyRole.ReplayBehindBytes)</dd>
                     <dt>Last replayed commit</dt>
-                    <dd>@(standbyRole.LastReplayAt is { } at ? State.FormatInSelectedTimeZone(at) + (standbyRole.ReplayAgeAtRead is { } age ? ", " + SessionText.Duration(age) + " ago" : string.Empty) : "none yet")</dd>
+                    <dd>@(standbyRole.LastReplayAt is { } at ? Preferences.FormatInSelectedTimeZone(at) + (standbyRole.ReplayAgeAtRead is { } age ? ", " + SessionText.Duration(age) + " ago" : string.Empty) : "none yet")</dd>
                     <dt>Replay</dt>
                     <dd>@(standbyRole.PauseState ?? "–")</dd>
                 </dl>
@@ -331,7 +332,7 @@
                         }
                     </dd>
                     <dt>Statistics since</dt>
-                    <dd>@(archiver.Facts.StatsReset is { } reset ? State.FormatInSelectedTimeZone(reset) : "–")</dd>
+                    <dd>@(archiver.Facts.StatsReset is { } reset ? Preferences.FormatInSelectedTimeZone(reset) : "–")</dd>
                 </dl>
             }
         </section>
@@ -353,14 +354,14 @@
                     @if (wal.Totals.Writes is not null)
                     {
                         <dt>Writes and syncs</dt>
-                        <dd>@WriteCounts(wal.Totals, wal.Totals.StatsReset is { } countsSince ? State.FormatInSelectedTimeZone(countsSince) : null)</dd>
+                        <dd>@WriteCounts(wal.Totals, wal.Totals.StatsReset is { } countsSince ? Preferences.FormatInSelectedTimeZone(countsSince) : null)</dd>
                     }
                     <dt>Rate</dt>
                     <dd>@(wal.BytesPerSecond is { } rate ? WalText.Bytes((long) rate) + " a second over the last " + SessionText.Duration(wal.Window!.Span) : NoWindow)</dd>
                     <dt>Full-page images</dt>
                     <dd>@(wal.FullPageImageShare is { } share ? SessionText.Percent(share) + " of the records written over the last " + SessionText.Duration(wal.Window!.Span) : NoWindow)</dd>
                     <dt>Statistics since</dt>
-                    <dd>@(wal.Totals.StatsReset is { } reset ? State.FormatInSelectedTimeZone(reset) : "–")</dd>
+                    <dd>@(wal.Totals.StatsReset is { } reset ? Preferences.FormatInSelectedTimeZone(reset) : "–")</dd>
                 </dl>
             }
         </section>
@@ -526,7 +527,7 @@
         }
 
         <p class="ms-repl-measured">
-            Read @State.FormatInSelectedTimeZone(view.MeasuredAt) (<TimeAgo Timestamp="view.MeasuredAt" />). Rates and windows are the
+            Read @Preferences.FormatInSelectedTimeZone(view.MeasuredAt) (<TimeAgo Timestamp="view.MeasuredAt" />). Rates and windows are the
             health advisor's samples, taken while <a href="@HealthLinks.ToPage(Settings, Descriptor.SourceQueryParameter, State.ActiveScope)">Health</a>
             or the Overview is open.
         </p>
@@ -738,7 +739,7 @@
                             <td class="ms-repl-number">@(replica.Writer ? "–" : replica.Lag is { } lag ? StandbyLagCheck.Milliseconds(lag) : "not reported")</td>
                             <td class="ms-repl-number">@(replica.ReplayLatency is { } replay ? StandbyLagCheck.Milliseconds(replay) : "–")</td>
                             <td class="ms-mono">@(replica.FeedbackXmin ?? "–")</td>
-                            <td>@(replica.LastUpdate is { } updated ? State.FormatInSelectedTimeZone(updated) : "–")</td>
+                            <td>@(replica.LastUpdate is { } updated ? Preferences.FormatInSelectedTimeZone(updated) : "–")</td>
                         </tr>
                     }
                 </tbody>
@@ -785,7 +786,7 @@
 
     private string When(DateTimeOffset? at, TimeSpan? ago) =>
         at is { } time
-            ? State.FormatInSelectedTimeZone(time) + (ago is { } age ? " (" + SessionText.Duration(age) + " ago)" : string.Empty)
+            ? Preferences.FormatInSelectedTimeZone(time) + (ago is { } age ? " (" + SessionText.Duration(age) + " ago)" : string.Empty)
             : "never";
 
     private static string BacklogText(ArchiveBacklog? backlog) => backlog switch

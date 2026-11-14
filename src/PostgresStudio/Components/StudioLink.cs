@@ -24,7 +24,7 @@ namespace PostgresStudio.Components;
 
 /// <summary>
 /// Builds dashboard link URLs relative to the application base URI so they honor the configured
-/// mount path (<see cref="IStudioSettings.TrimmedPath"/>) and any path base set by the host or a
+/// mount path (<see cref="IShellSettings.TrimmedPath"/>) and any path base set by the host or a
 /// reverse proxy (relative URLs resolve against the rendered &lt;base href&gt;).
 /// </summary>
 internal static class StudioLink
@@ -39,7 +39,7 @@ internal static class StudioLink
     /// that does depend on the settings must not be a signature change across all of them.
     /// </param>
     /// <param name="subPath">The path below the studio root, with no leading slash.</param>
-    internal static string To(IStudioSettings settings, string subPath)
+    internal static string To(IShellSettings settings, string subPath)
     {
         // Relative to the studio-rooted document base; an empty href resolves to the base URI
         // (RFC 3986 §5.4), which is the studio's own front page.
@@ -55,7 +55,7 @@ internal static class StudioLink
     /// prefix, while on the interactive circuit the base URI is the studio root itself (the rendered
     /// &lt;base href&gt;).
     /// </summary>
-    internal static string? ToDashboardRelativePath(string uri, string baseUri, IStudioSettings settings)
+    internal static string? ToDashboardRelativePath(string uri, string baseUri, IShellSettings settings)
     {
         string? relative = ToBaseRelative(uri, baseUri);
         if (relative is null)
@@ -90,7 +90,7 @@ internal static class StudioLink
     /// studio root) when the path is under the studio root, otherwise <see langword="false"/>.
     /// The comparison uses the percent-encoded dashboard path, matching browser-emitted URIs.
     /// </summary>
-    internal static bool TryStripDashboardPrefix(string normalizedPath, IStudioSettings settings, out string stripped)
+    internal static bool TryStripDashboardPrefix(string normalizedPath, IShellSettings settings, out string stripped)
     {
         string dashboardRoot = settings.EscapedPath.TrimStart('/');
         if (normalizedPath.Equals(dashboardRoot, StringComparison.OrdinalIgnoreCase))

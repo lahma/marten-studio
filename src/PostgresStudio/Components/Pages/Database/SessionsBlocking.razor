@@ -3,6 +3,7 @@
 @using PostgresStudio.Components.Shared
 @using PostgresStudio.Services
 @inject StudioState State
+@inject StudioPreferences Preferences
 
 @*
     Database › Sessions › Blocking (X3): who holds up whom, as trees - each chain's head, then the sessions waiting on it,
@@ -141,7 +142,7 @@
                                 <td>@SessionText.Number(row.Waits)</td>
                                 <td>@(row.Waits == 0 ? "–" : SessionText.Duration(TimeSpan.FromMilliseconds(row.WaitTimeMilliseconds)))</td>
                                 <td>@SessionText.Number(row.FastPathExceeded)</td>
-                                <td>@(row.StatsReset is { } reset ? State.FormatInSelectedTimeZone(reset) : "–")</td>
+                                <td>@(row.StatsReset is { } reset ? Preferences.FormatInSelectedTimeZone(reset) : "–")</td>
                             </tr>
                         }
                     </tbody>

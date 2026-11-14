@@ -1,6 +1,6 @@
 @using PostgresStudio.Services.Database
 @using PostgresStudio.Services
-@inject StudioState State
+@inject StudioPreferences Preferences
 
 @*
     One cell of a SQL result: what the SQL console's grid draws, and what the database browser's row grid
@@ -60,7 +60,7 @@ else if (Rich && Vector is PgVectorColumn vector && PgVector.Preview(Text, IsTru
 }
 else if (Rich && IsKind(TimestampKind) && SqlCellFormat.IsTimestampWithZone(Type) && SqlCellFormat.ParseInstant(Text) is { } instant)
 {
-    <span class="ms-query-cell-text ms-row-time" title="@($"{Text} - shown in {State.SelectedTimeZoneId}")">@State.FormatInSelectedTimeZone(instant, SqlCellFormat.TimeFormat)</span>
+    <span class="ms-query-cell-text ms-row-time" title="@($"{Text} - shown in {Preferences.SelectedTimeZoneId}")">@Preferences.FormatInSelectedTimeZone(instant, SqlCellFormat.TimeFormat)</span>
 }
 else if (Rich && IsKind(TimestampKind) && SqlCellFormat.IsTimestampWithoutZone(Type) && SqlCellFormat.FormatWithoutZone(Text) is { } local)
 {

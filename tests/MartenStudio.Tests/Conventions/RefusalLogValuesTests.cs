@@ -155,7 +155,7 @@ public partial class RefusalLogValuesTests
             ring,
             captured.CreateFactory().CreateLogger<StudioActionLog>(),
             users,
-            new StudioState(catalog, NullLogger<StudioState>.Instance, new HttpContextAccessor()));
+            new StudioState(catalog, NullLogger<StudioState>.Instance, new StudioPreferences(new HttpContextAccessor())));
 
         log.RecordScopeDenied(new StudioScope(HostileStoreKey, HostileDatabaseId, "acme\nforged"), "studio-store", "Read rows", HostileStatement);
         log.RecordCapabilityDenied(

@@ -133,7 +133,7 @@ public class SinceMarkPagesTests
     {
         (PostgresStudioComponentContext context, FakeStatements service) = await StatementsContextAsync(Statements(T0, 10, 100, 1_000));
         await using PostgresStudioComponentContext disposing = context;
-        context.State.SelectedTimeZoneId = "Asia/Kolkata";
+        context.Preferences.SelectedTimeZoneId = "Asia/Kolkata";
 
         var page = context.Render<StatementsPage>();
         page.WaitForAssertion(() => page.Find(".ms-stmts-window").TextContent.Should().Be(Advisor));
@@ -162,7 +162,7 @@ public class SinceMarkPagesTests
     {
         (PostgresStudioComponentContext context, FakeStatements service) = await StatementsContextAsync(Statements(T0, 10, 100, 1_000));
         await using PostgresStudioComponentContext disposing = context;
-        context.State.SelectedTimeZoneId = "Asia/Kolkata";
+        context.Preferences.SelectedTimeZoneId = "Asia/Kolkata";
 
         var page = context.Render<StatementsPage>();
         page.WaitForAssertion(() => page.Find(".ms-mark-button").HasAttribute("disabled").Should().BeFalse());
@@ -495,7 +495,7 @@ public class SinceMarkPagesTests
     public async Task A_valid_marks_chip_says_which_read_it_counts_from_and_an_ended_marks_says_what_the_page_does_instead()
     {
         await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
-        context.State.SelectedTimeZoneId = "Asia/Kolkata";
+        context.Preferences.SelectedTimeZoneId = "Asia/Kolkata";
         context.Storage.View = Storage(T0, 400L << 20, 100L << 20, 1_000);
 
         var page = context.Render<StoragePage>();
@@ -537,14 +537,14 @@ public class SinceMarkPagesTests
     public async Task A_moment_is_spelt_in_the_selected_zone_and_carries_its_date_unless_it_is_today()
     {
         await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
-        context.State.SelectedTimeZoneId = "Asia/Kolkata";
+        context.Preferences.SelectedTimeZoneId = "Asia/Kolkata";
 
-        SinceMarkTime.When(context.State, T0, now: T0.AddHours(1)).Should().Be("17:30");
-        SinceMarkTime.When(context.State, T0, seconds: true, now: T0.AddHours(1)).Should().Be("17:30:00");
-        SinceMarkTime.When(context.State, T0, now: T0.AddDays(1)).Should().Be("2026-10-26 17:30");
+        SinceMarkTime.When(context.Preferences, T0, now: T0.AddHours(1)).Should().Be("17:30");
+        SinceMarkTime.When(context.Preferences, T0, seconds: true, now: T0.AddHours(1)).Should().Be("17:30:00");
+        SinceMarkTime.When(context.Preferences, T0, now: T0.AddDays(1)).Should().Be("2026-10-26 17:30");
 
         // Today is the selected zone's today: 20:00 UTC is already the next day in Kolkata.
-        SinceMarkTime.When(context.State, T0, now: T0.AddHours(8)).Should().Be("2026-10-26 17:30", "20:00 UTC is 01:30 the next day in Kolkata");
+        SinceMarkTime.When(context.Preferences, T0, now: T0.AddHours(8)).Should().Be("2026-10-26 17:30", "20:00 UTC is 01:30 the next day in Kolkata");
     }
 
     /// <summary>A clock that stands still, for a test that pins what "today" is.</summary>
@@ -559,24 +559,24 @@ public class SinceMarkPagesTests
     {
         await using PostgresStudioComponentContext pinned = new(static services => services.AddSingleton<TimeProvider>(new FixedClock(T0.AddHours(1))));
         await pinned.ReadyAsync();
-        pinned.State.SelectedTimeZoneId = "Asia/Kolkata";
+        pinned.Preferences.SelectedTimeZoneId = "Asia/Kolkata";
 
-        SinceMarkTime.When(pinned.State, T0).Should().Be("17:30", "the pinned clock says it is 13:00 UTC on the same day");
+        SinceMarkTime.When(pinned.Preferences, T0).Should().Be("17:30", "the pinned clock says it is 13:00 UTC on the same day");
 
         await using PostgresStudioComponentContext later = new(static services => services.AddSingleton<TimeProvider>(new FixedClock(T0.AddDays(3))));
         await later.ReadyAsync();
-        later.State.SelectedTimeZoneId = "Asia/Kolkata";
+        later.Preferences.SelectedTimeZoneId = "Asia/Kolkata";
 
-        SinceMarkTime.When(later.State, T0).Should().Be("2026-10-26 17:30", "three days later the date is spelt");
-        SinceMarkTime.When(later.State, T0.AddDays(3).AddMinutes(5)).Should().Be("17:35", "a moment of the pinned day is not given a date");
+        SinceMarkTime.When(later.Preferences, T0).Should().Be("2026-10-26 17:30", "three days later the date is spelt");
+        SinceMarkTime.When(later.Preferences, T0.AddDays(3).AddMinutes(5)).Should().Be("17:35", "a moment of the pinned day is not given a date");
 
         await using PostgresStudioComponentContext system = new();
         await system.ReadyAsync();
-        system.State.SelectedTimeZoneId = "Asia/Kolkata";
+        system.Preferences.SelectedTimeZoneId = "Asia/Kolkata";
 
-        system.State.Clock.Should().BeSameAs(TimeProvider.System, "no clock registered");
-        SinceMarkTime.When(system.State, DateTimeOffset.UtcNow).Should().NotContain("-", "now is today: no date");
-        SinceMarkTime.When(system.State, T0).Should().Contain("2026-10-26", "a moment in 2026-10 is not today");
+        system.Preferences.Clock.Should().BeSameAs(TimeProvider.System, "no clock registered");
+        SinceMarkTime.When(system.Preferences, DateTimeOffset.UtcNow).Should().NotContain("-", "now is today: no date");
+        SinceMarkTime.When(system.Preferences, T0).Should().Contain("2026-10-26", "a moment in 2026-10 is not today");
     }
 
     private static StatementsView WithLateEntry(DateTimeOffset at, DateTimeOffset lateEntryBegan) => Statements(at, 30, 300, 1_400) with
@@ -608,7 +608,7 @@ public class SinceMarkPagesTests
         });
         context.WithAllCapabilities();
         await context.ReadyAsync();
-        context.State.SelectedTimeZoneId = "Asia/Kolkata";
+        context.Preferences.SelectedTimeZoneId = "Asia/Kolkata";
 
         var page = context.Render<StatementsPage>();
         page.WaitForAssertion(() => page.Find(".ms-stmts-window").TextContent.Should().Be(Advisor));

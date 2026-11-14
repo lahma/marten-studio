@@ -9,7 +9,7 @@
 @inject KafkaRecordService Records
 @inject KafkaCatalogService Catalog
 @inject IStudioSettings Settings
-@inject StudioState Studio
+@inject StudioPreferences Preferences
 @inject ILogger<KafkaTailRows> Logger
 
 @* The records of a live tail, newest first, and what is said beside them (D-M5 decision 3.7): the matches that arrived faster than they could be shown, what the
@@ -57,7 +57,7 @@
                 {
                     string rowKey = RowKey(match);
                     <tr class="ms-table-row" @key="rowKey">
-                        <td class="ms-table-cell" title="@TimeTitle(match)">@Studio.FormatInSelectedTimeZone(match.Timestamp, "yyyy-MM-dd HH:mm:ss")</td>
+                        <td class="ms-table-cell" title="@TimeTitle(match)">@Preferences.FormatInSelectedTimeZone(match.Timestamp, "yyyy-MM-dd HH:mm:ss")</td>
                         <td class="ms-table-cell">@match.Topic</td>
                         <td class="ms-table-cell"><a href="@RecordHref(match)">@match.Partition / @KafkaDisplay.Number(match.Offset)</a></td>
                         <td class="ms-table-cell" title="@(match.Key.Text)">

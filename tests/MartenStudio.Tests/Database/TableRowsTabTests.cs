@@ -129,7 +129,7 @@ public class TableRowsTabTests
     public async Task A_timestamptz_is_shown_in_the_chosen_zone_and_a_timestamp_is_never_converted()
     {
         await using var context = await RowUiData.ContextAsync();
-        context.State.SelectedTimeZoneId = "Asia/Kolkata";
+        context.Preferences.SelectedTimeZoneId = "Asia/Kolkata";
         context.TableRows.Page = RowUiData.Keyless();
 
         var tab = RowUiData.RenderTab(context, schema: "legacy", name: "audit_log");

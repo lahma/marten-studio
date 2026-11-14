@@ -102,7 +102,7 @@ public class StudioScopeCatalogTenantFilterTests
         await using Harness harness = await Harness.CreateAsync(StorePolicy);
         harness.Policies.Allow(static resource => resource.TenantId is null or "acme");
 
-        var state = new StudioState(harness.Catalog, NullLogger<StudioState>.Instance, new HttpContextAccessor());
+        var state = new StudioState(harness.Catalog, NullLogger<StudioState>.Instance, new StudioPreferences(new HttpContextAccessor()));
         await state.EnsureInitializedAsync(Token);
 
         await state.SetScopeAsync(MartenStoreRegistry.DefaultStoreKey, harness.DatabaseId, "acme", Token);

@@ -14,6 +14,7 @@
 @inject IEventDataService Events
 @inject IHealthService Health
 @inject StudioState State
+@inject StudioPreferences Preferences
 @inject IOptions<MartenStudioOptions> Options
 @inject ILogger<EventTypes> Logger
 
@@ -39,7 +40,7 @@
     @if (!loading && list is { Error: null, ListedAt: { } listedAt })
     {
         <p class="ms-muted ms-event-types-listed" role="status">
-            Counted at @State.FormatInSelectedTimeZone(listedAt, "HH:mm:ss"). The count is shared for
+            Counted at @Preferences.FormatInSelectedTimeZone(listedAt, "HH:mm:ss"). The count is shared for
             @EventTypeListingCache.TimeToLive.TotalSeconds.ToString("0", CultureInfo.InvariantCulture) seconds, so an event type written
             since then appears after Load counts is pressed again.
         </p>
@@ -65,7 +66,7 @@
                 </p>
                 <p class="ms-event-types-health-why">@finding.Finding.WhyItMatters</p>
                 <p class="ms-muted ms-health-banner-meta">
-                    From the health advisor's check at @State.FormatInSelectedTimeZone(finding.Finding.MeasuredAt).
+                    From the health advisor's check at @Preferences.FormatInSelectedTimeZone(finding.Finding.MeasuredAt).
                     <a class="ms-health-banner-link" href="@HealthLinks.ToFinding(Options.Value, State.ActiveScope, finding)">Why, and what to change</a>
                 </p>
             </div>

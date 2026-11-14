@@ -5,6 +5,7 @@
 @implements IDisposable
 @inject IDocumentShapeCheck Check
 @inject StudioState State
+@inject StudioPreferences Preferences
 @inject IOptions<MartenStudioOptions> Options
 @inject NavigationManager Navigation
 @inject IServiceProvider Services
@@ -57,7 +58,7 @@
         else
         {
             <div class="ms-shape-summary-row">
-                <p class="ms-shape-summary" role="status">@ShapeCheckText.Summary(shown, State.FormatInSelectedTimeZone(shown.CheckedAt, "HH:mm"), AgeOf(shown))</p>
+                <p class="ms-shape-summary" role="status">@ShapeCheckText.Summary(shown, Preferences.FormatInSelectedTimeZone(shown.CheckedAt, "HH:mm"), AgeOf(shown))</p>
                 @if (AgeOf(shown) is not null)
                 {
                     @* The cache handed back a check made before this press: the time says so, and a new check is offered beside it. *@
@@ -133,7 +134,7 @@
     private bool RecheckDisabled => result is { Error: null } shown && clock.GetUtcNow() < shown.RecheckAt;
 
     private string? RecheckTitle => RecheckDisabled && result is { } shown
-        ? ShapeCheckText.AvailableAt(State.FormatInSelectedTimeZone(shown.RecheckAt, "HH:mm:ss"))
+        ? ShapeCheckText.AvailableAt(Preferences.FormatInSelectedTimeZone(shown.RecheckAt, "HH:mm:ss"))
         : null;
 
     /// <inheritdoc />

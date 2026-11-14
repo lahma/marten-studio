@@ -250,7 +250,7 @@ public class StudioHeaderTests
         layout.WaitForAssertion(() =>
         {
             layout.ThemeAttribute().Should().Be("dark");
-            context.State.SelectedTheme.Should().Be("dark");
+            context.Preferences.SelectedTheme.Should().Be("dark");
         });
     }
 

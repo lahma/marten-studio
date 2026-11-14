@@ -6,6 +6,7 @@
 @implements IDisposable
 @inject ISchemaDataService SchemaData
 @inject StudioState State
+@inject StudioPreferences Preferences
 
 @*
     Every ordinary and partitioned table in the schemas this store owns, largest first, joined to what the
@@ -213,9 +214,9 @@ else
                             <td class="ms-table-cell ms-num">@SchemaFormat.Count(table.SequentialScans)</td>
                             <td class="ms-table-cell ms-num">@SchemaFormat.Count(table.IndexScans)</td>
                         }
-                        <td class="ms-table-cell ms-table-cell-mono">@State.FormatInSelectedTimeZone(table.LastVacuum)</td>
-                        <td class="ms-table-cell ms-table-cell-mono ms-schema-autovacuum">@State.FormatInSelectedTimeZone(table.LastAutovacuum)</td>
-                        <td class="ms-table-cell ms-table-cell-mono">@State.FormatInSelectedTimeZone(table.LastAnalyze)</td>
+                        <td class="ms-table-cell ms-table-cell-mono">@Preferences.FormatInSelectedTimeZone(table.LastVacuum)</td>
+                        <td class="ms-table-cell ms-table-cell-mono ms-schema-autovacuum">@Preferences.FormatInSelectedTimeZone(table.LastAutovacuum)</td>
+                        <td class="ms-table-cell ms-table-cell-mono">@Preferences.FormatInSelectedTimeZone(table.LastAnalyze)</td>
                         <td class="ms-table-cell ms-schema-parameters">
                             @if (table.StorageParameters.Count == 0)
                             {

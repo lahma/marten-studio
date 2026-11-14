@@ -12,6 +12,7 @@
 @implements IAsyncDisposable
 @inject IStorageService StorageData
 @inject StudioState State
+@inject StudioPreferences Preferences
 @inject StudioLiveUpdatesFactory LiveFactory
 @inject IStudioSettings Settings
 @inject SinceMarks Marks
@@ -80,7 +81,7 @@
             <div class="ms-alert ms-alert-warning ms-mark-alert" role="status">
                 <div class="ms-alert-content">
                     <p>
-                        Your mark at @SinceMarkTime.When(State, held.At) no longer holds: @ended.Text(moment => SinceMarkTime.When(State, moment)). @EndedConsequence
+                        Your mark at @SinceMarkTime.When(Preferences, held.At) no longer holds: @ended.Text(moment => SinceMarkTime.When(Preferences, moment)). @EndedConsequence
                     </p>
                 </div>
             </div>
@@ -105,7 +106,7 @@
                     }
                     @if (since is { Ended: null, DatabaseChange: { } change } && mark is { } markedNow)
                     {
-                        <span class="ms-mark-delta">@(" · " + change + " since " + SinceMarkTime.When(State, markedNow.At))</span>
+                        <span class="ms-mark-delta">@(" · " + change + " since " + SinceMarkTime.When(Preferences, markedNow.At))</span>
                     }
                 </dd>
             </div>
@@ -187,7 +188,7 @@
                                 }
                                 @if (Counting is not null)
                                 {
-                                    <th scope="col" class="ms-mark-column" title="The change in each named table's size and its rows written since your mark. A table the page withholds shows a dash.">Since @SinceMarkTime.When(State, mark!.At)</th>
+                                    <th scope="col" class="ms-mark-column" title="The change in each named table's size and its rows written since your mark. A table the page withholds shows a dash.">Since @SinceMarkTime.When(Preferences, mark!.At)</th>
                                 }
                             </tr>
                         </thead>
@@ -226,7 +227,7 @@
                                     <td class="ms-storage-number" title="@NewPageTitle(row)">@(row.HotUpdateRatio is { } hot ? Percent(hot) : "–")</td>
                                     @if (view.StatsResetPerTableRead)
                                     {
-                                        <td class="ms-storage-since" title="@(!row.Withheld && row.CountersReset is null ? "never reset" : null)">@(row.Withheld ? "–" : row.CountersReset is { } reset ? State.FormatInSelectedTimeZone(reset, "yyyy-MM-dd HH:mm") : "never reset")</td>
+                                        <td class="ms-storage-since" title="@(!row.Withheld && row.CountersReset is null ? "never reset" : null)">@(row.Withheld ? "–" : row.CountersReset is { } reset ? Preferences.FormatInSelectedTimeZone(reset, "yyyy-MM-dd HH:mm") : "never reset")</td>
                                     }
                                     @if (Counting is { } counted)
                                     {
@@ -249,7 +250,7 @@
         @if (view.MeasuredAt is { } measured)
         {
             <p class="ms-storage-measured">
-                Read @State.FormatInSelectedTimeZone(measured) (<TimeAgo Timestamp="measured" />), for this database only.
+                Read @Preferences.FormatInSelectedTimeZone(measured) (<TimeAgo Timestamp="measured" />), for this database only.
             </p>
         }
     }
@@ -427,7 +428,7 @@
         _ => "+" + SchemaFormat.Bytes((long) Math.Round(bytes.Value)),
     };
 
-    private string Since(StatisticsWindow? window) => window is null ? "–" : State.FormatInSelectedTimeZone(window.Since, "yyyy-MM-dd HH:mm");
+    private string Since(StatisticsWindow? window) => window is null ? "–" : Preferences.FormatInSelectedTimeZone(window.Since, "yyyy-MM-dd HH:mm");
 
     private static string Coverage(StorageView view) => view.Coverage is { Length: > 0 } coverage
         ? "Judged: " + coverage + "."

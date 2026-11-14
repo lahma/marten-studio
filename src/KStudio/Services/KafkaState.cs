@@ -6,7 +6,7 @@ namespace KStudio.Services;
 
 /// <summary>
 /// What the circuit's Kafka pages are about (D34): the cluster entry in scope, and the entries this visitor may see. The host studio's
-/// <c>StudioState</c> is not generalised; this is KStudio's own, and the two never touch.
+/// own state is not generalised; this is KStudio's own, and the two never touch.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -18,7 +18,7 @@ namespace KStudio.Services;
 /// <para>
 /// <b>A picked cluster is validated.</b> <see cref="SetClusterAsync" /> accepts only a key in <see cref="AvailableClusters" />, compared
 /// ordinally. A <c>change</c> event's value comes from the browser, and Blazor does not check it against the options the server rendered
-/// (<c>StudioState</c>'s own remarks): without this a client could name any cluster in the process.
+/// (the host studio's own state says the same of its scopes): without this a client could name any cluster in the process.
 /// </para>
 /// <para>
 /// <b>Tenants.</b> A broker-per-tenant cluster is one entry per tenant; there is no <c>tenant=</c> on a Kafka address.

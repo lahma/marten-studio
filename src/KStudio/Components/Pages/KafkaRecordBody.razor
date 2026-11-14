@@ -11,7 +11,7 @@
 @inject KafkaCapabilityGuard Capabilities
 @inject NavigationManager Navigation
 @inject IStudioSettings Settings
-@inject StudioState Studio
+@inject StudioPreferences Preferences
 @inject ILogger<KafkaRecordBody> Logger
 
 @* The record page (D-UI decision 14): one record by its offset and its neighbours. It reads once per address, after the frame's Ready - never while
@@ -105,7 +105,7 @@
                                 }
                                 else
                                 {
-                                    <td class="ms-table-cell">@Studio.FormatInSelectedTimeZone(match.Timestamp, "yyyy-MM-dd HH:mm:ss")</td>
+                                    <td class="ms-table-cell">@Preferences.FormatInSelectedTimeZone(match.Timestamp, "yyyy-MM-dd HH:mm:ss")</td>
                                     <td class="ms-table-cell"><span class="@KeyClass(match)">@KafkaMatchView.KeyDisplay(match.Key)</span></td>
                                     <td class="ms-table-cell">@KafkaMatchView.TypeOf(match)</td>
                                     <td class="ms-table-cell">

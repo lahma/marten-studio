@@ -391,7 +391,7 @@ public class NavIndicatorServiceTests
             FakeStudioScopeCatalog catalog = new();
             catalog.WithStore(storeKey, "Default", databaseIdentities: databaseId);
 
-            StudioState state = new(catalog, NullLogger<StudioState>.Instance, new HttpContextAccessor());
+            StudioState state = new(catalog, NullLogger<StudioState>.Instance, new StudioPreferences(new HttpContextAccessor()));
             await state.EnsureInitializedAsync(TestContext.Current.CancellationToken);
 
             TestAuthenticationStateProvider visitor = new();
@@ -515,7 +515,7 @@ public class NavIndicatorServiceTests
 
             AuthenticationState.SignIn("operator");
 
-            State = new StudioState(Catalog, NullLogger<StudioState>.Instance, new HttpContextAccessor());
+            State = new StudioState(Catalog, NullLogger<StudioState>.Instance, new StudioPreferences(new HttpContextAccessor()));
 
             Contributor = new MartenNavIndicatorContributor(Events, Projections);
 

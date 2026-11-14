@@ -4,7 +4,7 @@
 @using PostgresStudio.Services
 @using PostgresStudio.Services.Settings
 @inject IStudioSettings Settings
-@inject StudioState Studio
+@inject StudioPreferences Preferences
 
 @* Possible duplicates (decision 4 of D-CORR): the records already held that look like one message delivered more than once. It is drawn from the
    matches the page has, reads nothing and records nothing; it is collapsed by default and absent when there is nothing to show. *@
@@ -21,7 +21,7 @@
                     @group.Topic · @KafkaDisplay.Count(group.Count, "copy", "copies") · @BasisText(group.Basis)
                 </h3>
                 <p class="ms-muted">
-                    @Studio.FormatInSelectedTimeZone(group.First, "yyyy-MM-dd HH:mm:ss") to @Studio.FormatInSelectedTimeZone(group.Last, "yyyy-MM-dd HH:mm:ss")
+                    @Preferences.FormatInSelectedTimeZone(group.First, "yyyy-MM-dd HH:mm:ss") to @Preferences.FormatInSelectedTimeZone(group.Last, "yyyy-MM-dd HH:mm:ss")
                     @if (group.ComparedAsShown)
                     {
                         <span> · @KafkaStudioText.DuplicatesComparedAsShown</span>
@@ -39,7 +39,7 @@
                             @foreach (KafkaMatch copy in group.Copies)
                             {
                                 <tr class="ms-table-row" @key="@(copy.Partition + "/" + copy.Offset)">
-                                    <td class="ms-table-cell">@Studio.FormatInSelectedTimeZone(copy.Timestamp, "yyyy-MM-dd HH:mm:ss")</td>
+                                    <td class="ms-table-cell">@Preferences.FormatInSelectedTimeZone(copy.Timestamp, "yyyy-MM-dd HH:mm:ss")</td>
                                     <td class="ms-table-cell"><a href="@RecordHref(copy)">@copy.Partition / @KafkaDisplay.Number(copy.Offset)</a></td>
                                 </tr>
                             }

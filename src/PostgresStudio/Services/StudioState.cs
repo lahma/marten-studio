@@ -1,9 +1,6 @@
-using System.Globalization;
-
 using PostgresStudio.Services.Settings;
 using PostgresStudio.Services.Sources;
 
-using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 
 namespace PostgresStudio.Services;
@@ -21,19 +18,13 @@ namespace PostgresStudio.Services;
 /// store in the process and every subscribed page would re-read for it.
 /// </para>
 /// <para>
-/// The theme and the time zone are seeded from cookies in the constructor rather than fetched from
-/// <c>localStorage</c> after the first render, so a dark studio renders dark on the server and there is
-/// no flash of the light theme during prerendering.
+/// The theme, the time zone and the clock are <see cref="StudioPreferences" />'s, not this class's. A change of preference still
+/// reaches every page that listens to <see cref="ScopeChanged" />: the constructor subscribes <see cref="NotifyAsync" /> to
+/// <see cref="StudioPreferences.Changed" />, so a time-zone change redraws them as it always has.
 /// </para>
 /// </remarks>
 internal sealed class StudioState
 {
-    /// <summary>The cookie and <c>localStorage</c> key the theme is remembered under.</summary>
-    public const string ThemePreferenceKey = "ms_theme";
-
-    /// <summary>The cookie and <c>localStorage</c> key the time zone is remembered under.</summary>
-    public const string TimeZonePreferenceKey = "ms_tz";
-
     /// <summary>
     /// The most databases, the usual one excluded, that <see cref="SetScopeAsync" /> asks for a tenant when an address names a tenant and no
     /// database. Each one is a tenant listing, which may be a query; past the bound the search stops and the address is applied as if
@@ -44,11 +35,7 @@ internal sealed class StudioState
     private readonly IStudioScopeCatalog catalog;
     private readonly ILogger<StudioState> logger;
     private readonly StudioProduct product;
-    private readonly TimeProvider clock;
 
-    private string selectedTheme = "system";
-    private string selectedTimeZoneId = TimeZoneInfo.Local.Id;
-    private long preferenceVersion;
     private bool initialized;
     private StudioScope? applyingScope;
     private long applyingGeneration;
@@ -56,44 +43,26 @@ internal sealed class StudioState
 
     /// <param name="catalog">The sources, databases and tenants this visitor may see.</param>
     /// <param name="logger">Where a page's failed scope-change handler goes.</param>
-    /// <param name="httpContextAccessor">The request that opened the circuit, for the remembered preferences.</param>
+    /// <param name="preferences">
+    /// The circuit's preferences, whose change this state relays to every page that listens to <see cref="ScopeChanged" />. Never
+    /// unsubscribed: both are scoped to the same circuit.
+    /// </param>
     /// <param name="settings">
     /// The studio's settings, whose words that line is logged in - optional so that a test can build the state by hand;
     /// the container always supplies them (<see cref="StudioText.Of" />).
     /// </param>
-    /// <param name="timeProvider">
-    /// The clock "today" is taken from when a moment is spelt (<see cref="Clock" />): the host's own <see cref="TimeProvider" /> when
-    /// it registered one, the system's otherwise.
-    /// </param>
     public StudioState(
         IStudioScopeCatalog catalog,
         ILogger<StudioState> logger,
-        IHttpContextAccessor httpContextAccessor,
-        IStudioSettings? settings = null,
-        TimeProvider? timeProvider = null)
+        StudioPreferences preferences,
+        IStudioSettings? settings = null)
     {
+        ArgumentNullException.ThrowIfNull(preferences);
+
         this.catalog = catalog;
         this.logger = logger;
         product = StudioText.Of(settings).Product;
-        clock = timeProvider ?? TimeProvider.System;
-
-        HttpContext? httpContext = httpContextAccessor.HttpContext;
-        if (httpContext is null)
-        {
-            return;
-        }
-
-        string? themeCookie = httpContext.Request.Cookies[ThemePreferenceKey];
-        if (!string.IsNullOrWhiteSpace(themeCookie))
-        {
-            selectedTheme = NormalizeTheme(themeCookie);
-        }
-
-        string? timeZoneCookie = httpContext.Request.Cookies[TimeZonePreferenceKey];
-        if (!string.IsNullOrWhiteSpace(timeZoneCookie))
-        {
-            selectedTimeZoneId = NormalizeTimeZoneId(timeZoneCookie);
-        }
+        preferences.Changed += NotifyAsync;
     }
 
     /// <summary>
@@ -186,40 +155,6 @@ internal sealed class StudioState
 
     /// <summary>What the active store said when it would not build, or <see langword="null" />.</summary>
     public string? ActiveStoreUnavailableMessage { get; private set; }
-
-    /// <summary><c>system</c>, <c>light</c> or <c>dark</c>.</summary>
-    public string SelectedTheme
-    {
-        get => selectedTheme;
-        set => Set(ref selectedTheme, NormalizeTheme(value));
-    }
-
-    /// <summary>The time zone every timestamp is rendered in.</summary>
-    public string SelectedTimeZoneId
-    {
-        get => selectedTimeZoneId;
-        set => Set(ref selectedTimeZoneId, NormalizeTimeZoneId(value));
-    }
-
-    /// <summary>
-    /// How many times <see cref="SelectedTheme" /> or <see cref="SelectedTimeZoneId" /> has actually
-    /// moved on this circuit.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// A sequence number rather than a timestamp, and it exists for exactly one reason: reading the
-    /// browser's remembered preferences is two awaited JS round trips, and on a slow browser the visitor
-    /// can pick a theme while those are in flight. Without a stamp taken before the awaits and checked
-    /// after them, the answer that comes back - which was read <em>before</em> the click, so it is the
-    /// preference the visitor has just moved away from - is written over the one they chose, and the
-    /// picker snaps back on its own a moment after they used it.
-    /// </para>
-    /// <para>
-    /// Only a real change counts. Re-selecting the theme that is already on changes nothing and needs no
-    /// protecting, and counting it would make a stored time zone lose a race it never entered.
-    /// </para>
-    /// </remarks>
-    public long PreferenceVersion => Volatile.Read(ref preferenceVersion);
 
     /// <summary>Builds the listings and picks an opening scope, once per circuit.</summary>
     public async Task EnsureInitializedAsync(CancellationToken cancellationToken = default)
@@ -731,25 +666,6 @@ internal sealed class StudioState
         return null;
     }
 
-    /// <summary>The clock a page takes "now" and "today" from: the host's <see cref="TimeProvider" /> if one is registered, else the system's.</summary>
-    public TimeProvider Clock => clock;
-
-    /// <summary><paramref name="value" /> in the selected time zone.</summary>
-    public DateTimeOffset ConvertToSelectedTimeZone(DateTimeOffset value) =>
-        TimeZoneInfo.ConvertTime(value, ResolveSelectedTimeZone());
-
-    /// <summary><paramref name="value" /> formatted in the selected time zone.</summary>
-    public string FormatInSelectedTimeZone(DateTimeOffset value, string format = "u")
-    {
-        DateTimeOffset converted = ConvertToSelectedTimeZone(value);
-        string outputFormat = string.Equals(format, "u", StringComparison.Ordinal) ? "yyyy-MM-dd HH:mm:ss zzz" : format;
-        return converted.ToString(outputFormat, CultureInfo.InvariantCulture);
-    }
-
-    /// <inheritdoc cref="FormatInSelectedTimeZone(DateTimeOffset, string)" />
-    public string FormatInSelectedTimeZone(DateTimeOffset? value, string format = "u") =>
-        value.HasValue ? FormatInSelectedTimeZone(value.Value, format) : "n/a";
-
     private string PickDatabase(string? preferred)
     {
         foreach (DatabaseListing database in AvailableDatabases)
@@ -792,68 +708,4 @@ internal sealed class StudioState
     }
 
     private static string? NullIfBlank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
-
-    /// <summary>
-    /// Assigns one preference and counts it, so <see cref="PreferenceVersion" /> says whether the visitor
-    /// has expressed a preference since some earlier moment.
-    /// </summary>
-    private void Set(ref string field, string value)
-    {
-        if (string.Equals(field, value, StringComparison.Ordinal))
-        {
-            return;
-        }
-
-        field = value;
-        Interlocked.Increment(ref preferenceVersion);
-    }
-
-    private TimeZoneInfo ResolveSelectedTimeZone()
-    {
-        try
-        {
-            return TimeZoneInfo.FindSystemTimeZoneById(selectedTimeZoneId);
-        }
-        catch (TimeZoneNotFoundException)
-        {
-            return TimeZoneInfo.Local;
-        }
-        catch (InvalidTimeZoneException)
-        {
-            return TimeZoneInfo.Local;
-        }
-    }
-
-    private static string NormalizeTimeZoneId(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return TimeZoneInfo.Local.Id;
-        }
-
-        string candidate = value.Trim();
-        try
-        {
-            _ = TimeZoneInfo.FindSystemTimeZoneById(candidate);
-            return candidate;
-        }
-        catch (TimeZoneNotFoundException)
-        {
-            return TimeZoneInfo.Local.Id;
-        }
-        catch (InvalidTimeZoneException)
-        {
-            return TimeZoneInfo.Local.Id;
-        }
-    }
-
-    private static string NormalizeTheme(string? value)
-    {
-        if (string.Equals(value, "light", StringComparison.OrdinalIgnoreCase))
-        {
-            return "light";
-        }
-
-        return string.Equals(value, "dark", StringComparison.OrdinalIgnoreCase) ? "dark" : "system";
-    }
 }

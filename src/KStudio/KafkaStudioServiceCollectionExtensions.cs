@@ -84,7 +84,7 @@ public static class KafkaStudioServiceCollectionExtensions
         KStudioEngineRegistration.Add(
             services,
             static provider => provider.GetRequiredService<IOptions<KafkaStudioOptions>>().Value,
-            static provider => new KafkaEngineSettings(provider.GetRequiredService<IStudioSettings>()));
+            static provider => new KafkaEngineSettings(provider.GetRequiredService<IShellSettings>()));
 
         services.TryAddSingleton<IKafkaClusterEntrySource, CatalogClusterEntrySource>();
         services.TryAddSingleton<KafkaCapabilityGuard>();

@@ -148,7 +148,7 @@ public class ActivityTests
     public void Timestamps_are_rendered_in_the_selected_time_zone()
     {
         using var context = new StudioComponentContext();
-        context.State.SelectedTimeZoneId = TimeZoneInfo.Utc.Id;
+        context.Preferences.SelectedTimeZoneId = TimeZoneInfo.Utc.Id;
         Record(context, "ops", "DeleteDocument", succeeded: true);
 
         var page = context.Render<Activity>();

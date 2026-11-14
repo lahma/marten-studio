@@ -5,7 +5,7 @@
 @using PostgresStudio.Components.Shared
 @using PostgresStudio.Services
 @using PostgresStudio.Services.Query
-@inject StudioState State
+@inject StudioPreferences Preferences
 
 @*
     The document list itself. Sortable headers, an expander per row, and the badges that say what a row is
@@ -363,7 +363,7 @@
         }
 
         builder.OpenElement(1, "span");
-        builder.AddAttribute(2, "title", State.FormatInSelectedTimeZone(parsed));
+        builder.AddAttribute(2, "title", Preferences.FormatInSelectedTimeZone(parsed));
         builder.OpenComponent<TimeAgo>(3);
         builder.AddComponentParameter(4, nameof(TimeAgo.Timestamp), parsed);
         builder.CloseComponent();

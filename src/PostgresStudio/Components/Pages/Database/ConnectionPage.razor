@@ -11,6 +11,7 @@
 @inject HealthMutes Mutes
 @inject SessionPoolObserver Pools
 @inject StudioState State
+@inject StudioPreferences Preferences
 @inject StudioLiveUpdatesFactory LiveFactory
 @inject IStudioSettings Settings
 @inject StudioDescriptor Descriptor
@@ -116,7 +117,7 @@
         }
 
         <p class="ms-muted ms-conn-measured">
-            Read @State.FormatInSelectedTimeZone(view.MeasuredAt) (<TimeAgo Timestamp="view.MeasuredAt" />).
+            Read @Preferences.FormatInSelectedTimeZone(view.MeasuredAt) (<TimeAgo Timestamp="view.MeasuredAt" />).
         </p>
 
         @foreach (HealthStatement statement in view.Statements)

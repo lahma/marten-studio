@@ -12,6 +12,7 @@
 @inject IHealthService Health
 @inject HealthMutes Mutes
 @inject StudioState State
+@inject StudioPreferences Preferences
 @inject StudioLiveUpdatesFactory LiveFactory
 @inject IStudioSettings Settings
 @inject StudioDescriptor Descriptor
@@ -103,7 +104,7 @@
                     <dd>
                         @if (view.ServerStarted is { } started)
                         {
-                            @State.FormatInSelectedTimeZone(started)
+                            @Preferences.FormatInSelectedTimeZone(started)
                             @if (view.Uptime is { } uptime)
                             {
                                 <span class="ms-s2-fact-note">up @SessionText.Duration(uptime)</span>
@@ -354,7 +355,7 @@
 
         <ServerPlatformSlot Model="State.ActiveScope" Revision="view.MeasuredAt" />
 
-        <p class="ms-muted ms-s2-measured">Read @State.FormatInSelectedTimeZone(view.MeasuredAt) (<TimeAgo Timestamp="view.MeasuredAt" />).</p>
+        <p class="ms-muted ms-s2-measured">Read @Preferences.FormatInSelectedTimeZone(view.MeasuredAt) (<TimeAgo Timestamp="view.MeasuredAt" />).</p>
 
         @foreach (HealthStatement statement in view.Statements)
         {

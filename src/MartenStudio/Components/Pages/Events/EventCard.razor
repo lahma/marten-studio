@@ -7,7 +7,7 @@
 @using PostgresStudio.Components.Shared
 @using PostgresStudio.Services
 @using PostgresStudio.Services.Live
-@inject StudioState State
+@inject StudioPreferences Preferences
 @inject IJSRuntime JsRuntime
 
 @* One event, on the timeline or in the feed.
@@ -116,7 +116,7 @@
         </span>
 
         <span class="ms-event-card-seq" title="Global event sequence">#@Sequence.ToString(CultureInfo.InvariantCulture)</span>
-        <span class="ms-event-card-time" title="@State.FormatInSelectedTimeZone(Timestamp)">
+        <span class="ms-event-card-time" title="@Preferences.FormatInSelectedTimeZone(Timestamp)">
             <TimeAgo Timestamp="Timestamp" />
         </span>
     </div>

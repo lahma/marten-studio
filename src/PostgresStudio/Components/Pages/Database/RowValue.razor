@@ -6,6 +6,7 @@
 @using PostgresStudio.Services
 @inject ITableRowService Rows
 @inject StudioState State
+@inject StudioPreferences Preferences
 @inject IStudioSettings Settings
 
 @*
@@ -239,12 +240,12 @@ else
     private string? DateHint =>
         SqlCellFormat.DateHintFor(Column, Type, [Text]) is var unit and not DateHintUnit.None
         && SqlCellFormat.Instant(Text, unit) is { } instant
-            ? State.FormatInSelectedTimeZone(instant, SqlCellFormat.HintFormat)
+            ? Preferences.FormatInSelectedTimeZone(instant, SqlCellFormat.HintFormat)
             : null;
 
     private string DateHintTitle =>
         "Read as " + SqlCellFormat.UnitLabel(SqlCellFormat.DateHintFor(Column, Type, [Text])) +
-        " because of the column's name and the size of the value - a guess, shown in " + State.SelectedTimeZoneId + ".";
+        " because of the column's name and the size of the value - a guess, shown in " + Preferences.SelectedTimeZoneId + ".";
 
     private bool CanFetch => CellKey is { Count: > 0 };
 

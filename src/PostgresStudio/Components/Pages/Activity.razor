@@ -6,6 +6,7 @@
 @inject IStudioSettings Settings
 @inject StudioActionLog ActionLog
 @inject StudioState State
+@inject StudioPreferences Preferences
 @inject StudioAuthorization Authorization
 @inject StudioCapabilityGuard Capabilities
 @inject StudioDescriptor Descriptor
@@ -62,7 +63,7 @@
                            equality, and two identical actions a second apart would collide on one key and
                            make the diff reuse the wrong row. *@
                         <tr class="ms-table-row" @key="entry.Sequence">
-                            <td class="ms-table-cell ms-table-cell-mono ms-activity-when">@State.FormatInSelectedTimeZone(entry.Timestamp)</td>
+                            <td class="ms-table-cell ms-table-cell-mono ms-activity-when">@Preferences.FormatInSelectedTimeZone(entry.Timestamp)</td>
                             <td class="ms-table-cell">@entry.User</td>
                             <td class="ms-table-cell ms-table-cell-mono ms-activity-scope" title="@ScopeTitle(entry)">
                                 @* The separators are text and not `aria-hidden` decoration: hiding them

@@ -4,6 +4,7 @@
 @using PostgresStudio.Components.Shared
 @inject IStudioSettings Settings
 @inject StudioState State
+@inject StudioPreferences Preferences
 
 @*
     Database › Sessions › Holders (issue #20): who holds the whole server's connections - every database on it, not only this one -
@@ -43,11 +44,11 @@
         @* Issue #43: what held the server's connections before now - counts under the page's own gate, names past the activity gate. *@
         @if (Summary.ConnectionHistory is { } history)
         {
-            <h3 class="ms-holders-subheading" id="ms-holders-history">Since @State.FormatInSelectedTimeZone(history.Since)</h3>
+            <h3 class="ms-holders-subheading" id="ms-holders-history">Since @Preferences.FormatInSelectedTimeZone(history.Since)</h3>
             <p class="ms-holders-history">
                 The most client sessions one sample counted was @SessionText.Number(history.Peak) of the @SessionText.Number(history.ClientLimit)
-                an ordinary role may open, at @State.FormatInSelectedTimeZone(history.PeakAt) - @SessionText.Count(history.Samples, "sample") up to
-                @State.FormatInSelectedTimeZone(history.Until)@(history.InstanceChanges > 0 ? ", across " + SessionText.Count(history.InstanceChanges, "change") + " of the answering instance (a failover or a restart)" : string.Empty).
+                an ordinary role may open, at @Preferences.FormatInSelectedTimeZone(history.PeakAt) - @SessionText.Count(history.Samples, "sample") up to
+                @Preferences.FormatInSelectedTimeZone(history.Until)@(history.InstanceChanges > 0 ? ", across " + SessionText.Count(history.InstanceChanges, "change") + " of the answering instance (a failover or a restart)" : string.Empty).
             </p>
 
             @if (ShowDetails && Details!.ConnectionHistory is { Applications.Count: > 0 } named)
@@ -67,7 +68,7 @@
                                 <tr>
                                     <td>@(peak.Application ?? "(none set)")</td>
                                     <td>@SessionText.Number(peak.Peak)</td>
-                                    <td>@State.FormatInSelectedTimeZone(peak.At)</td>
+                                    <td>@Preferences.FormatInSelectedTimeZone(peak.At)</td>
                                 </tr>
                             }
                         </tbody>

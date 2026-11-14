@@ -198,7 +198,7 @@ public class StudioLayoutTests
         layout.WaitForAssertion(() =>
         {
             layout.ThemeAttribute().Should().Be(theme);
-            context.State.SelectedTheme.Should().Be(theme);
+            context.Preferences.SelectedTheme.Should().Be(theme);
         });
     }
 
@@ -234,7 +234,7 @@ public class StudioLayoutTests
     public void The_theme_is_seeded_from_the_cookie_before_the_first_render()
     {
         using var context = new StudioComponentContext();
-        context.State.SelectedTheme = "dark";
+        context.Preferences.SelectedTheme = "dark";
 
         RenderLayout(context).ThemeAttribute().Should().Be("dark");
     }
@@ -251,11 +251,11 @@ public class StudioLayoutTests
         var layout = RenderLayout(context);
 
         string other = layout.SelectorOptions("ms-timezone-select")
-            .First(id => !string.Equals(id, context.State.SelectedTimeZoneId, StringComparison.Ordinal));
+            .First(id => !string.Equals(id, context.Preferences.SelectedTimeZoneId, StringComparison.Ordinal));
 
         layout.Find("#ms-timezone-select").Change(other);
 
-        layout.WaitForAssertion(() => context.State.SelectedTimeZoneId.Should().Be(other));
+        layout.WaitForAssertion(() => context.Preferences.SelectedTimeZoneId.Should().Be(other));
     }
 
     /// <summary>
@@ -286,13 +286,13 @@ public class StudioLayoutTests
     {
         using var context = new StudioComponentContext();
         context.JSInterop
-            .Setup<string?>("martenStudio.prefs.get", StudioState.ThemePreferenceKey)
+            .Setup<string?>("martenStudio.prefs.get", StudioPreferences.ThemePreferenceKey)
             .SetResult("dark");
 
         var layout = RenderLayout(context);
 
         layout.WaitForAssertion(() => layout.ThemeAttribute().Should().Be("dark"));
-        context.State.SelectedTheme.Should().Be("dark");
+        context.Preferences.SelectedTheme.Should().Be("dark");
     }
 
     /// <summary>
@@ -319,16 +319,16 @@ public class StudioLayoutTests
         using var context = new StudioComponentContext();
 
         JSRuntimeInvocationHandler<string?> storedTheme =
-            context.JSInterop.Setup<string?>("martenStudio.prefs.get", StudioState.ThemePreferenceKey);
+            context.JSInterop.Setup<string?>("martenStudio.prefs.get", StudioPreferences.ThemePreferenceKey);
         JSRuntimeInvocationHandler<string?> storedZone =
-            context.JSInterop.Setup<string?>("martenStudio.prefs.get", StudioState.TimeZonePreferenceKey);
+            context.JSInterop.Setup<string?>("martenStudio.prefs.get", StudioPreferences.TimeZonePreferenceKey);
 
         var layout = context.Render<StudioLayout>(parameters => parameters.Add(x => x.Body, Body));
 
         layout.Instance.PreferencesLoaded.Should().BeFalse("the browser has not answered yet");
 
         layout.Find("#ms-theme-select").Change("dark");
-        layout.WaitForAssertion(() => context.State.SelectedTheme.Should().Be("dark"));
+        layout.WaitForAssertion(() => context.Preferences.SelectedTheme.Should().Be("dark"));
 
         // Only now does the read that started before the click come back, and it carries the theme the
         // visitor has just moved away from.
@@ -337,7 +337,7 @@ public class StudioLayoutTests
 
         layout.WaitForState(() => layout.Instance.PreferencesLoaded);
 
-        context.State.SelectedTheme.Should().Be("dark", "the visitor's choice is the newer answer");
+        context.Preferences.SelectedTheme.Should().Be("dark", "the visitor's choice is the newer answer");
         layout.ThemeAttribute().Should().Be("dark");
     }
 
@@ -862,7 +862,7 @@ public class StudioLayoutTests
 
         layout.WaitForAssertion(() =>
         {
-            context.State.SelectedTheme.Should().Be("dark");
+            context.Preferences.SelectedTheme.Should().Be("dark");
             layout.ThemeAttribute().Should().Be("dark");
             layout.Find("#ms-theme-select option[value=dark]").HasAttribute("selected").Should().BeTrue();
             layout.Find("#ms-theme-select option[value=light]").HasAttribute("selected").Should().BeFalse();
@@ -876,7 +876,7 @@ public class StudioLayoutTests
         var layout = RenderLayout(context);
 
         string other = layout.SelectorOptions("ms-timezone-select")
-            .First(id => !string.Equals(id, context.State.SelectedTimeZoneId, StringComparison.Ordinal));
+            .First(id => !string.Equals(id, context.Preferences.SelectedTimeZoneId, StringComparison.Ordinal));
 
         layout.Find("#ms-timezone-select").Change(other);
 
@@ -1052,9 +1052,9 @@ public class StudioLayoutTests
         using var context = new StudioComponentContext();
 
         JSRuntimeInvocationHandler<string?> storedTheme =
-            context.JSInterop.Setup<string?>("martenStudio.prefs.get", StudioState.ThemePreferenceKey);
+            context.JSInterop.Setup<string?>("martenStudio.prefs.get", StudioPreferences.ThemePreferenceKey);
         JSRuntimeInvocationHandler<string?> storedZone =
-            context.JSInterop.Setup<string?>("martenStudio.prefs.get", StudioState.TimeZonePreferenceKey);
+            context.JSInterop.Setup<string?>("martenStudio.prefs.get", StudioPreferences.TimeZonePreferenceKey);
 
         var layout = context.Render<StudioLayout>(parameters => parameters.Add(x => x.Body, Body));
 
@@ -1114,15 +1114,15 @@ public class StudioLayoutTests
         var layout = RenderLayout(context);
 
         layout.ThemeAttribute().Should().Be("dark");
-        context.State.SelectedTheme.Should().Be("dark");
-        context.State.SelectedTimeZoneId.Should().Be("UTC");
+        context.Preferences.SelectedTheme.Should().Be("dark");
+        context.Preferences.SelectedTimeZoneId.Should().Be("UTC");
     }
 
     [Fact]
     public void Nothing_persisted_leaves_the_state_as_the_scope_found_it()
     {
         using var context = new StudioComponentContext();
-        context.State.SelectedTheme = "light";
+        context.Preferences.SelectedTheme = "light";
 
         RenderLayout(context).ThemeAttribute().Should().Be("light");
     }

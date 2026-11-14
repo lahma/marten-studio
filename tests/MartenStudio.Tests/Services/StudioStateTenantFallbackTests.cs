@@ -59,7 +59,7 @@ public class StudioStateTenantFallbackTests
             .WithStore("b", "Store B", DatabaseCardinality.Single, "db_b")
             .WithTenants("b", storeB);
 
-        StudioState state = new(catalog, NullLogger<StudioState>.Instance, new HttpContextAccessor());
+        StudioState state = new(catalog, NullLogger<StudioState>.Instance, new StudioPreferences(new HttpContextAccessor()));
         await state.EnsureInitializedAsync(Token);
         await state.SetScopeAsync("a", null, "acme", Token);
 

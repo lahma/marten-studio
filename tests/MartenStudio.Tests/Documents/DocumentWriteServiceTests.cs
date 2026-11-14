@@ -86,7 +86,7 @@ public class DocumentWriteServiceTests
         var authorization = MartenSpine.Authorization(wrapped, authorizationService, users);
         var tenants = new TenantDiscovery(wrapped, NullLogger<TenantDiscovery>.Instance);
         var (_, catalog, resolver) = MartenSpine.Scope(wrapped, registry, authorization, tenants, provider);
-        var state = new StudioState(catalog, NullLogger<StudioState>.Instance, new HttpContextAccessor());
+        var state = new StudioState(catalog, NullLogger<StudioState>.Instance, new StudioPreferences(new HttpContextAccessor()));
 
         var ring = new StudioActionLogService();
         var captured = new CapturingLoggerProvider();

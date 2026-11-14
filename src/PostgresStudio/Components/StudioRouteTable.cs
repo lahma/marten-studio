@@ -112,18 +112,18 @@ internal sealed class StudioRouteTable
     /// in <see cref="StudioLink.ToDashboardRelativePath"/> cannot distinguish from an
     /// interactive leaf, so a failed match gets a second chance without the prefix.
     /// </summary>
-    internal RouteData? Match(string dashboardRelativePath, IStudioSettings settings)
+    internal RouteData? Match(string dashboardRelativePath, IShellSettings settings)
     {
         return Match(ResolveLeaf(dashboardRelativePath, settings));
     }
 
     /// <summary>
     /// Resolves a dashboard-relative path to the leaf that actually maps to a dashboard page,
-    /// applying the same prefix-strip retry as <see cref="Match(string, IStudioSettings)"/>.
+    /// applying the same prefix-strip retry as <see cref="Match(string, IShellSettings)"/>.
     /// Used where the leaf itself is needed (navigation highlighting) rather than the route data.
     /// Returns the direct form when neither the direct nor the stripped path maps to a page.
     /// </summary>
-    internal string ResolveLeaf(string dashboardRelativePath, IStudioSettings settings)
+    internal string ResolveLeaf(string dashboardRelativePath, IShellSettings settings)
     {
         string normalized = StudioLink.NormalizeRelativePath(dashboardRelativePath);
         if (Match(normalized) is not null)
