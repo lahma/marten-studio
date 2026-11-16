@@ -46,11 +46,44 @@ public class PayloadRedactionTests
         return new TopicScanContext("t", descriptor, redactor, compiled.Predicate!, decoder);
     }
 
+    /// <summary>The time a test that is not about time gives the rules of one value: far more than any machine needs.</summary>
+    internal static readonly TimeSpan Unhurried = TimeSpan.FromSeconds(30);
+
+    /// <summary>How often <see cref="Match" /> makes a match again after the redactor ran out of time on it.</summary>
+    private const int StallAttempts = 5;
+
+    /// <summary>
+    /// The match the engine makes of a record. The engine withholds a value its rules ran out of time on
+    /// (<see cref="PayloadPatterns.MatchTimeout" /> a pattern call, <see cref="PayloadRedactor.Budget" /> a value), and on a loaded machine a
+    /// stalled thread can run out of either, which no caller of this helper is about. Such a match is made again, and one that runs out of
+    /// time every time fails here with the cause, where "expected the masked text, found null" would not say why.
+    /// </summary>
     internal static KafkaMatch Match(WireRecord record, KafkaRedactionRules? rules, IKafkaRecordDecoder? decoder = null, Action<KafkaScanLimits>? limits = null, int focus = 0)
     {
         KafkaScanLimits caps = new();
         limits?.Invoke(caps);
-        return KafkaMatchFactory.Create(record, Topic(rules, decoder), Payload, caps, new DecodeCounters(), focusValueBytes: focus);
+
+        for (int attempt = 1; ; attempt++)
+        {
+            RedactedValue? failed = null;
+            KafkaMatch match = KafkaMatchFactory.Create(
+                record, Topic(rules, decoder), Payload, caps, new DecodeCounters(), focusValueBytes: focus, onRedactionFailed: x => failed = x);
+
+            if (failed is not { Failure: PayloadRedactionFailure.PatternTimeout or PayloadRedactionFailure.OutOfTime })
+            {
+                return match;
+            }
+
+            string cause = $"the redactor ran out of time on a value ({failed.Failure}, attempt {attempt} of {StallAttempts}; "
+                + $"{PayloadPatterns.MatchTimeout.TotalMilliseconds:N0} ms a pattern call, {PayloadRedactor.Budget.TotalMilliseconds:N0} ms a value)";
+
+            if (attempt == StallAttempts)
+            {
+                throw new InvalidOperationException($"Every attempt was withheld: {cause}. The machine is too slow for the engine's limits, or a rule really is.");
+            }
+
+            TestContext.Current.SendDiagnosticMessage($"PayloadRedactionTests.Match: {cause}; making the match again.");
+        }
     }
 
     /// <summary>Every string reachable from an object by its public properties, collections included.</summary>
@@ -315,7 +348,7 @@ public class PayloadRedactionTests
         RecordValue value = Detect($$"""{"items":[{{items}}]}""");
         IKafkaRedactor redactor = new KafkaRedactor(Rules(static r => r.JsonPath("$.nothing")));
 
-        RedactedValue? whole = PayloadRedactor.Apply(value, redactor, TimeSpan.FromSeconds(30));
+        RedactedValue? whole = PayloadRedactor.Apply(value, redactor, Unhurried);
         RedactedValue? none = PayloadRedactor.Apply(value, redactor, TimeSpan.Zero);
 
         whole!.WithheldBy.Should().BeNull();

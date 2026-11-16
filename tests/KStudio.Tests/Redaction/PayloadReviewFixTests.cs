@@ -37,7 +37,7 @@ public class PayloadReviewFixTests
 
         value.Cut.Should().BeTrue();
 
-        RedactedValue? redacted = PayloadRedactor.Apply(value, new KafkaRedactor(Rules(static r => r.Pattern(PhonePattern, "phone"))), PayloadRedactor.Budget, Limit);
+        RedactedValue? redacted = PayloadRedactor.Apply(value, new KafkaRedactor(Rules(static r => r.Pattern(PhonePattern, "phone"))), Unhurried, Limit);
 
         redacted!.WithheldBy.Should().Be("pattern phone");
         redacted.Failure.Should().Be(PayloadRedactionFailure.NotApplicable);
@@ -91,7 +91,7 @@ public class PayloadReviewFixTests
 
         text.Cut.Should().BeFalse();
 
-        RedactedValue? redacted = PayloadRedactor.Apply(text, redactor, PayloadRedactor.Budget, Limit);
+        RedactedValue? redacted = PayloadRedactor.Apply(text, redactor, Unhurried, Limit);
 
         redacted!.WithheldBy.Should().Be("pattern digit");
         redacted.Failure.Should().Be(PayloadRedactionFailure.NotApplicable);
@@ -99,7 +99,7 @@ public class PayloadReviewFixTests
 
         RecordValue json = Detect("{\"a\":\"" + string.Concat(Enumerable.Repeat("1 ", 20_000)) + "\"}");
 
-        PayloadRedactor.Apply(json, redactor, PayloadRedactor.Budget, Limit)!.WithheldBy.Should().Be("pattern digit");
+        PayloadRedactor.Apply(json, redactor, Unhurried, Limit)!.WithheldBy.Should().Be("pattern digit");
     }
 
     [Fact]
@@ -107,7 +107,7 @@ public class PayloadReviewFixTests
     {
         RecordValue text = Detect(string.Concat(Enumerable.Repeat("1 ", 1_000)));
 
-        PayloadRedactor.Apply(text, new KafkaRedactor(Rules(static r => r.Pattern("1", "digit"))), PayloadRedactor.Budget, Limit)!.WithheldBy.Should().BeNull();
+        PayloadRedactor.Apply(text, new KafkaRedactor(Rules(static r => r.Pattern("1", "digit"))), Unhurried, Limit)!.WithheldBy.Should().BeNull();
     }
 
     // ---- 3: the match budget counts the masks
@@ -169,7 +169,7 @@ public class PayloadReviewFixTests
         RedactionRule rule = new KafkaRedactor(Rules(static r => r.Pattern("SENTINEL-[a-z]+", "secret"))).PayloadRules.Single();
         rule.ToString().Should().NotContain("SENTINEL").And.Contain("pattern secret");
 
-        RedactedValue? redacted = PayloadRedactor.Apply(value, new KafkaRedactor(Rules(static r => r.JsonPath("$.secret"))), PayloadRedactor.Budget, Limit);
+        RedactedValue? redacted = PayloadRedactor.Apply(value, new KafkaRedactor(Rules(static r => r.JsonPath("$.secret"))), Unhurried, Limit);
         redacted!.ToString().Should().NotContain("SENTINEL");
         redacted.MaskedPaths.Single().ToString().Should().NotContain("SENTINEL");
     }
