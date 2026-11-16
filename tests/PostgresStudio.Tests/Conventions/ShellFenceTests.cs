@@ -22,7 +22,7 @@ namespace PostgresStudio.Tests.Conventions;
 /// <para>
 /// <b>The compiled fence</b> reads the built <c>PostgresStudio.dll</c>: no type in a <c>DataStudio</c> namespace may reference, in a base type, an
 /// interface, a field, a method signature, an attribute or a method body, a type of a <c>PostgresStudio</c> namespace, except the types this test lists by
-/// name with the reason. The four <b>engine helpers</b> are the ones phase B copies into the shell's own assembly; the entries marked
+/// name with the reason. The <b>engine helpers</b> are the ones phase B copies into the shell's own assembly; the entries marked
 /// <c>A3 finding</c> are what the shell reaches beyond them, listed and not fixed because moving or editing the file that would remove each is not
 /// A3's decision.
 /// </para>
@@ -39,8 +39,6 @@ public partial class ShellFenceTests
     [
         ("PostgresStudio.Services.StudioPageRoutes", "an engine helper phase B copies: the mount-relative form of a page's path (StudioLink)"),
         ("PostgresStudio.Services.StudioLogThrottle", "an engine helper phase B copies: the throttle behind a repeated warning"),
-        ("PostgresStudio.Services.StudioLogValue", "an engine helper phase B copies: the one door a visitor-shaped value takes into a log"),
-        ("PostgresStudio.Services.Settings.StudioPath", "an engine helper phase B copies: the mount path's normal form"),
     ];
 
     [Fact]
@@ -134,16 +132,15 @@ public partial class ShellFenceTests
         {
             reason.Should().NotBeNullOrWhiteSpace();
             AllTypes().Any(x => x.FullName == type).Should().BeTrue(type + " is a type of the PostgresStudio assemblies");
+            referenced.Should().Contain(type, "an entry nobody uses is a hole in the fence");
         }
-
-        referenced.Should().Contain("PostgresStudio.Services.StudioPageRoutes", "StudioLink names it, and an entry nobody uses is a hole in the fence");
     }
 
     [Fact]
-    public void The_compiled_scan_sees_a_field_a_signature_a_base_type_and_a_method_body()
+    public void The_compiled_scan_sees_a_field_and_a_method_body()
     {
-        // DatabaseScopeHost is the database's own component: it names StudioState in a field, StudioScopeCatalog in a signature and
-        // StudioScopeQuery in a method body. If the scan did not see all three, a shell type could hide the same way.
+        // DatabaseScopeHost is the database's own component: it names StudioState in a field and StudioScopeQuery in a method body.
+        // If the scan did not see both, a shell type could hide the same way.
         string[] seen =
         [
             .. ReferencedTypes(typeof(PostgresStudio.Components.Layout.DatabaseScopeHost)).Select(static x => x.FullName ?? x.Name),

@@ -12,6 +12,9 @@ namespace PostgresStudio.Services.Live;
 /// </summary>
 internal static class DatabaseLiveLogs
 {
+    /// <summary>The throttle's key for event 9220, one per kind of failure per window, whichever product logs it.</summary>
+    private const string FailedHandlerKey = "LiveUpdates.FailedHandler";
+
     /// <summary>Marten Studio's words.</summary>
     public static StudioLiveLog MartenStudio { get; } = new()
     {
@@ -19,7 +22,7 @@ internal static class DatabaseLiveLogs
         LiveUpdateHandlerFailed = static (logger, throttle, exception) =>
         {
             // A bug in a page, on a loop that runs every RefreshInterval while the read keeps failing: event 9220, a Warning once per kind of failure per window.
-            LogLevel level = StudioLogThrottle.LevelOrWarning(throttle, "LiveUpdates.FailedHandler", null, null, StudioLogThrottle.KindOf(exception));
+            LogLevel level = StudioLogThrottle.LevelOrWarning(throttle, FailedHandlerKey, null, null, StudioLogThrottle.KindOf(exception));
             logger.LiveUpdateHandlerFailed(level, exception);
         },
     };
@@ -30,7 +33,7 @@ internal static class DatabaseLiveLogs
         LiveUpdateFailed = static (logger, exception) => logger.LogDebug(exception, "A Postgres Studio live update failed"),
         LiveUpdateHandlerFailed = static (logger, throttle, exception) =>
         {
-            LogLevel level = StudioLogThrottle.LevelOrWarning(throttle, "LiveUpdates.FailedHandler", null, null, StudioLogThrottle.KindOf(exception));
+            LogLevel level = StudioLogThrottle.LevelOrWarning(throttle, FailedHandlerKey, null, null, StudioLogThrottle.KindOf(exception));
             logger.PostgresStudioLiveUpdateHandlerFailed(level, exception);
         },
     };

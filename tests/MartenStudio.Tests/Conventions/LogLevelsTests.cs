@@ -79,7 +79,7 @@ public class LogLevelsTests
     private static readonly Dictionary<string, string> ThrottleLessHelpers = new(StringComparer.Ordinal)
     {
         ["StudioLogThrottle.LevelOrWarning"] =
-            "The throttle's own answer, or Warning for an owner a test built without one (StudioScopeCatalog, MartenStoreRegistry, StudioLiveUpdates); the container always supplies a throttle.",
+            "The throttle's own answer, or Warning for an owner a test built without one (StudioScopeCatalog, MartenStoreRegistry, DatabaseLiveLogs); the container always supplies a throttle.",
         ["KafkaLogOnce.WarningOrDebug"] =
             "KStudio.Core cannot use StudioLogThrottle across the fence (hard rule 16), and this helper is KStudio's own ten-minute throttle: Warning once per key per window, Debug in between.",
     };

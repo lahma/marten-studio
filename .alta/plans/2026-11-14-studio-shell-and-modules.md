@@ -186,7 +186,7 @@ Phase A changes no package, no public type and no word. It can ship in any relea
       `ScopeGate` component.
 - [x] 6. Give the database's audit entries a scope kind and register its `IStudioAuditScopeGate`; the ring has no default
       gate left.
-- [ ] 7. Move the shell's files to `src/PostgresStudio/Shell/` in the shell's final namespace, and add `ShellFenceTests`:
+- [x] 7. Move the shell's files to `src/PostgresStudio/Shell/` in the shell's final namespace, and add `ShellFenceTests`:
       no file there names Npgsql, `StudioScope`, a source or tenant type, or an engine namespace.
 
 **Phase B: the package and the registration**
