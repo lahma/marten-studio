@@ -179,7 +179,7 @@ Phase A changes no package, no public type and no word. It can ship in any relea
 - [x] 2. Split `Services/StudioState.cs` into `StudioPreferences` and the scope state; `StudioLayout` and
       `PreferencesMenu` read the first.
 - [x] 3. Add `IShellSettings` under `IStudioSettings` and switch the files of the left column above to it.
-- [ ] 4. Split `StudioDescriptor` into the shell's and the database's; `StudioModuleComposition` composes the shell's from
+- [x] 4. Split `StudioDescriptor` into the shell's and the database's; `StudioModuleComposition` composes the shell's from
       modules only.
 - [ ] 5. Extend `IStudioModule` (`ScopeGate`, `HeaderSearch`, `HomeRoute`, `IsRoot`) and add `DatabaseStudioModule` in
       `PostgresStudio`, built from either descriptor. Move the layout's scope gate and address rewrite into its
