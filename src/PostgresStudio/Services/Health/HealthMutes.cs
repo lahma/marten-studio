@@ -4,7 +4,6 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 
 using DataStudio.Services;
-using PostgresStudio.Services.Live;
 using PostgresStudio.Services.Settings;
 
 using Microsoft.AspNetCore.DataProtection;

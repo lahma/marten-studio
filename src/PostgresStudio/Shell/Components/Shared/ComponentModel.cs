@@ -1,4 +1,4 @@
-namespace PostgresStudio.Components.Shared;
+namespace DataStudio.Components.Shared;
 
 /// <summary>
 /// Reads a component's model parameter back into the type it really is.

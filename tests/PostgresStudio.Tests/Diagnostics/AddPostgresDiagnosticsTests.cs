@@ -174,7 +174,7 @@ public class AddPostgresDiagnosticsTests
 
         add.Should().Throw<InvalidOperationException>()
             .Which.Message.Should().Contain("already registers the diagnostics engine").And.Contain("Remove AddPostgresDiagnostics()");
-        services.Where(static x => x.ServiceType == typeof(PostgresStudio.Services.Settings.StudioRegistrationMarker)).Should().BeEmpty("refused before anything of the studio is registered");
+        services.Where(static x => x.ServiceType == typeof(DataStudio.Services.Settings.StudioRegistrationMarker)).Should().BeEmpty("refused before anything of the studio is registered");
     }
 
     [Fact]

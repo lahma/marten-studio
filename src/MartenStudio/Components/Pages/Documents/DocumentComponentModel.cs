@@ -1,4 +1,4 @@
-using PostgresStudio.Components.Shared;
+using DataStudio.Components.Shared;
 using MartenStudio.Services.Documents;
 using MartenStudio.Services.Query;
 using PostgresStudio.Services.Query;

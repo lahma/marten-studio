@@ -19,6 +19,7 @@
  */
 #endregion
 
+using DataStudio.Internal;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
@@ -27,7 +28,6 @@ using Microsoft.Extensions.Options;
 using MartenStudio.Components;
 using MartenStudio.Services;
 using PostgresStudio.Services.Settings;
-using PostgresStudio.Internal;
 
 namespace MartenStudio;
 

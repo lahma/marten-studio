@@ -168,7 +168,7 @@ else if (CurrentMatches.Count > 0)
             {
                 await InvokeAsync(StateHasChanged);
             }
-            catch (Exception e) when (e is ObjectDisposedException || PostgresStudio.Services.Live.StudioLiveUpdates.IsInteropUnavailable(e))
+            catch (Exception e) when (e is ObjectDisposedException || DataStudio.Services.StudioLiveUpdates.IsInteropUnavailable(e))
             {
                 // The circuit went away while the line was drawn.
             }
@@ -184,7 +184,7 @@ else if (CurrentMatches.Count > 0)
         {
             return await JsRuntime.InvokeAsync<bool>("martenStudio.download.stream", cancellationToken, fileName, mime, reference);
         }
-        catch (Exception e) when (e is not OperationCanceledException && PostgresStudio.Services.Live.StudioLiveUpdates.IsInteropUnavailable(e))
+        catch (Exception e) when (e is not OperationCanceledException && DataStudio.Services.StudioLiveUpdates.IsInteropUnavailable(e))
         {
             return false;
         }

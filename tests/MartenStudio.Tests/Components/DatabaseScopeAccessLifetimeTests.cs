@@ -1,12 +1,12 @@
 using Bunit;
 
+using DataStudio.Components;
 using MartenStudio.Tests.Support;
 
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Routing;
 using Microsoft.Extensions.DependencyInjection;
 
-using PostgresStudio.Components;
 using PostgresStudio.Services;
 
 namespace MartenStudio.Tests.Components;

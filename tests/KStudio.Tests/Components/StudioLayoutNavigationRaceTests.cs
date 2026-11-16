@@ -1,9 +1,8 @@
 using Bunit;
 
+using DataStudio.Components.Layout;
+using DataStudio.Components;
 using KStudio.Tests.Support;
-
-using PostgresStudio.Components;
-using PostgresStudio.Components.Layout;
 
 namespace KStudio.Tests.Components;
 

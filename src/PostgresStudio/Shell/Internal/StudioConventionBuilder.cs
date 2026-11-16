@@ -19,7 +19,7 @@
 
 using Microsoft.AspNetCore.Builder;
 
-namespace PostgresStudio;
+namespace DataStudio.Internal;
 
 /// <summary>
 /// What <c>MapMartenStudio</c> hands back: everything the studio mapped, as one thing to say something

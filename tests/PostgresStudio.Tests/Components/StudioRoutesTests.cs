@@ -1,11 +1,11 @@
 using Bunit;
 
+using DataStudio.Components;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.JSInterop;
 
-using PostgresStudio.Components;
 using PostgresStudio.Tests.Support;
 
 namespace PostgresStudio.Tests.Components;

@@ -1,5 +1,6 @@
 using Bunit;
 
+using DataStudio.Components.Layout;
 using JasperFx.Descriptors;
 
 using MartenStudio.Tests.Support;

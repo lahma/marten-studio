@@ -1,3 +1,4 @@
+using DataStudio.Services.Settings;
 using KStudio.Services;
 
 using Microsoft.Extensions.DependencyInjection;

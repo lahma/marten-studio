@@ -19,7 +19,7 @@
 
 using System.Text;
 
-namespace PostgresStudio.Components.Shared;
+namespace DataStudio.Components.Shared;
 
 /// <summary>
 /// Formatting the studio's pages share.

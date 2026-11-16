@@ -1,11 +1,11 @@
 using Bunit;
 
+using DataStudio.Components.Layout;
+using DataStudio.Components;
 using KStudio.Tests.Support;
 
 using Microsoft.Extensions.DependencyInjection;
 
-using PostgresStudio.Components;
-using PostgresStudio.Components.Layout;
 using PostgresStudio.Services;
 using PostgresStudio.Services.Find;
 

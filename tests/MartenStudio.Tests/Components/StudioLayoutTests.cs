@@ -2,6 +2,7 @@ using AngleSharp.Dom;
 
 using Bunit;
 
+using DataStudio.Components.Layout;
 using DataStudio.Services;
 using JasperFx.Descriptors;
 

@@ -1,10 +1,10 @@
+using DataStudio.Internal;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
 using PostgresStudio.Components;
-using PostgresStudio.Internal;
 using PostgresStudio.Services.Postgres;
 using PostgresStudio.Services.Settings;
 

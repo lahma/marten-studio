@@ -2,11 +2,13 @@ using System.Collections.Concurrent;
 
 using Bunit;
 
+using DataStudio.Services;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.JSInterop;
 
 using PostgresStudio.Components.Pages.Database;
 using PostgresStudio.Services.Live;
+using PostgresStudio.Services.Settings;
 using PostgresStudio.Tests.Support;
 
 namespace PostgresStudio.Tests.Components;
@@ -25,7 +27,7 @@ public class StudioLiveUpdatesLifetimeTests
     public async Task A_dispose_during_the_watch_call_starts_no_loop_and_unwatches_once_after_the_watch()
     {
         var js = new PendingWatchRuntime();
-        var updates = new StudioLiveUpdates(js, NullLogger<StudioLiveUpdates>.Instance);
+        var updates = new StudioLiveUpdates(js, NullLogger<StudioLiveUpdates>.Instance, DatabaseLiveLogs.For(StudioProduct.MartenStudio));
 
         Task start = updates.StartAsync(TimeSpan.FromMilliseconds(20), static _ => Task.CompletedTask, Xunit.TestContext.Current.CancellationToken);
 
@@ -52,7 +54,7 @@ public class StudioLiveUpdatesLifetimeTests
     public async Task A_watch_that_fails_as_interop_unavailable_after_the_dispose_costs_nothing()
     {
         var js = new PendingWatchRuntime();
-        var updates = new StudioLiveUpdates(js, NullLogger<StudioLiveUpdates>.Instance);
+        var updates = new StudioLiveUpdates(js, NullLogger<StudioLiveUpdates>.Instance, DatabaseLiveLogs.For(StudioProduct.MartenStudio));
 
         Task start = updates.StartAsync(TimeSpan.FromMilliseconds(20), static _ => Task.CompletedTask, Xunit.TestContext.Current.CancellationToken);
 
@@ -71,7 +73,7 @@ public class StudioLiveUpdatesLifetimeTests
     public async Task A_start_that_is_not_disposed_still_runs_its_loop_once_the_watch_answers()
     {
         var js = new PendingWatchRuntime();
-        await using var updates = new StudioLiveUpdates(js, NullLogger<StudioLiveUpdates>.Instance);
+        await using var updates = new StudioLiveUpdates(js, NullLogger<StudioLiveUpdates>.Instance, DatabaseLiveLogs.For(StudioProduct.MartenStudio));
         var ticked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         Task start = updates.StartAsync(

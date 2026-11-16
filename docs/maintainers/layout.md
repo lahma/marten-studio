@@ -32,20 +32,22 @@ src/PostgresStudio/                      The shared studio's Razor Class Library
                                          engine; references no Marten and no MartenStudio (PostgresStudioFenceTests, CoreFenceTests)
 src/PostgresStudio/Shell/                 The shell (A3): the chrome of the studio, in the DataStudio.* namespaces, which phase B makes an assembly.
                                          It knows no store, database, tenant, source, SQL, health or Npgsql (ShellFenceTests); its _Imports.razor names only DataStudio
-src/PostgresStudio/Shell/Components/      The route table and the links the shell draws and resolves with
-src/PostgresStudio/Shell/Components/Layout/ The capability chip, the preferences popover, the back-to-application link and the environment badge
+src/PostgresStudio/Shell/Components/      The shared document every root renders, the routes component, the route table and the links
+src/PostgresStudio/Shell/Components/Layout/ The layout, the rail, the capability chip, the preferences popover, the copy-link button, the
+                                         back-to-application link and the environment badge
 src/PostgresStudio/Shell/Components/Pages/ Activity: the Activity ring as a page
-src/PostgresStudio/Shell/Components/Shared/ The building blocks every module draws with: TableScroll (D25), ErrorAlert, LoadingSpinner, Pagination,
-                                         SearchFilter, StatCard, BreakableName, ToastHost, ShortcutSheet
-src/PostgresStudio/Shell/Internal/        Startup authorization guard, endpoint marker and mapped-endpoint tracking (D11)
-src/PostgresStudio/Shell/Services/        Preferences, the Activity ring and its audit seam, toasts, the shortcut list
-src/PostgresStudio/Shell/Services/Settings/ The module seam: shell settings and descriptor, the module and its rail, route and record links, the navigation records
-src/PostgresStudio/Components/           the shared document every root renders, the routes component and the scope query (the route table
-                                         and the links are in Shell/Components/)
-src/PostgresStudio/Components/Shared/    small building-block components that name a database type or the live-update seam: CopyButton,
-                                         dialogs, chips (the rest are in Shell/Components/Shared/)
-src/PostgresStudio/Internal/             the endpoint mapper (D11), which names the registration marker and the convention builder, and the
-                                         diagnostics version guard (the endpoint marker, guard and tracking are in Shell/Internal/)
+src/PostgresStudio/Shell/Components/Shared/ The building blocks every module draws with: TableScroll (D25), CopyButton, the dialogs, menus, the
+                                         empty and error states, pagers, ToastHost, ShortcutSheet
+src/PostgresStudio/Shell/Internal/        The endpoint mapper, its convention builder, the startup authorization guard, the endpoint marker and
+                                         mapped-endpoint tracking (D11)
+src/PostgresStudio/Shell/Services/        Preferences, the Activity ring and its audit seam, toasts, the shortcut list, the live-update loop and its log
+                                         words (StudioLiveLog)
+src/PostgresStudio/Shell/Services/Settings/ The module seam: shell settings and descriptor, the module and its rail, route and record links, the
+                                         navigation records, the registration marker
+src/PostgresStudio/Components/           the root component and the scope query (the shell's components are in Shell/Components/)
+src/PostgresStudio/Components/Shared/    small building-block components that name a database type: the SQL views and disclosure, chips, the
+                                         refusal and not-authorized notices (the neutral ones are in Shell/Components/Shared/)
+src/PostgresStudio/Internal/             the diagnostics version guard (the endpoint mapper and its guard are in Shell/Internal/)
 src/PostgresStudio.Diagnostics/Internal/  Nothing but the engine's SQL builders, in Internal/Sql/ (hard rule 4)
 src/PostgresStudio.Diagnostics/Services/  The scope types, the shared log events (StudioLog, PostgresStudioLog), the log throttle and the
                                          capping of a visitor's value in a log line
@@ -128,8 +130,8 @@ src/PostgresStudio/Internal/Sql/         The shared studio's own builders - the 
 src/MartenStudio/Internal/Sql/           The Marten builders - documents, events, the daemon, projections: the
                                          third (hard rule 4); Marten's own DDL for a what-if (X2); the dead-letter
                                          groups (M3)
-src/PostgresStudio/Components/Layout/    Shell chrome: layout, nav, scope selector, capability chip, the
-                                         preferences popover (theme and time zone, behind the gear)
+src/PostgresStudio/Components/Layout/    The database's part of the chrome: scope selector, find box, the circuit host and the scope gate
+                                         (the layout, rail and chip are in Shell/Components/Layout/)
 src/PostgresStudio/Components/Pages/     The shared routed pages; each @page must be rooted at /postgres
 src/MartenStudio/Components/Pages/       The Marten routed pages; each @page must be rooted at /marten
 samples/MartenStudio.SampleDomain/Documents/  The demo document types
@@ -173,8 +175,8 @@ tests/MartenStudio.Tests/Shapes/          The shape check's classifier, sentence
 src/MartenStudio/Services/Projections/    Projection data service, daemon accessor, operation tracker; the lag history
                                          (M2); the progression-row classifier and the daemon topology (M47)
 src/PostgresStudio.Diagnostics/Services/Live/  The single-flight snapshot cache every reader shares (D10)
-src/PostgresStudio/Services/Live/         The per-page polling helper (D10) and the nav indicators, and the per-circuit
-                                         since-marks
+src/PostgresStudio/Services/Live/         The database's rail, the nav indicators, the per-circuit since-marks and the live loop's log words
+                                         (the per-page polling helper, D10, is in Shell/Services/)
 src/MartenStudio/Services/Live/           The tracker observer: the in-process daemon's latest shard state (D10)
 src/PostgresStudio.Diagnostics/Services/Settings/  The engine's settings seam, descriptor, words, mount path, registration marker, option validation and
                                          core registration (AddPostgresDiagnostics and every Add*Studio call it)

@@ -12,7 +12,6 @@ using KStudio.Tests.Support;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
 
-using PostgresStudio.Components.Layout;
 using PostgresStudio.Services;
 
 namespace KStudio.Tests.Components;

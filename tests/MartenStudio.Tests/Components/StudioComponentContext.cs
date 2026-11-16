@@ -114,6 +114,7 @@ internal class StudioComponentContext : BunitContext
         Services.AddSingleton(DatabaseBrowser);
 
         // Every live page builds its own loop from this, so the circuit's container never tracks one.
+        Services.AddSingleton(PostgresStudio.Services.Live.DatabaseLiveLogs.For(StudioProduct.MartenStudio));
         Services.AddScoped<StudioLiveUpdatesFactory>();
 
         // 1.2-H-A: Mark on Statements, Storage and Maintenance - the circuit's, so the context's one root is the one circuit.

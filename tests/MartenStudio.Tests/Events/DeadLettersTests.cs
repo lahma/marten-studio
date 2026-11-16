@@ -68,7 +68,7 @@ public class DeadLettersTests
         using StudioComponentContext context = await NewContextAsync();
         context.Options.IsDocumentTypeVisible = Hiding(throws);
 
-        var nav = context.Render<PostgresStudio.Components.Layout.NavMenu>();
+        var nav = context.Render<DataStudio.Components.Layout.NavMenu>();
 
         // The rail's links carry the scope since 1.2 (?store=&db=), so the page is the part before the query.
         List<string?> links = [.. nav.FindAll("a.ms-nav-link").Select(static x => x.GetAttribute("href")?.Split('?')[0])];
@@ -83,7 +83,7 @@ public class DeadLettersTests
         using StudioComponentContext context = await NewContextAsync();
         context.Options.IsDocumentTypeVisible = static type => type != typeof(Uri);
 
-        var nav = context.Render<PostgresStudio.Components.Layout.NavMenu>();
+        var nav = context.Render<DataStudio.Components.Layout.NavMenu>();
 
         nav.FindAll("a.ms-nav-link").Select(static x => x.GetAttribute("href")?.Split('?')[0]).Should().Contain("events/dead-letters");
     }

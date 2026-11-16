@@ -2,10 +2,9 @@ using AngleSharp.Dom;
 
 using Bunit;
 
+using DataStudio.Components.Shared;
 using Microsoft.AspNetCore.Components;
 using Microsoft.JSInterop;
-
-using PostgresStudio.Components.Shared;
 
 namespace PostgresStudio.Tests.Components;
 

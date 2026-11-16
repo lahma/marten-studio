@@ -2,7 +2,7 @@ using AngleSharp.Dom;
 
 using Bunit;
 
-using PostgresStudio.Components.Shared;
+using DataStudio.Components.Shared;
 
 using Microsoft.JSInterop;
 

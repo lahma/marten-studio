@@ -22,9 +22,7 @@
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
 
-using DataStudio.Internal;
 using DataStudio.Services.Settings;
-using PostgresStudio.Services.Settings;
 
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
@@ -41,7 +39,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Net.Http.Headers;
 
-namespace PostgresStudio.Internal;
+namespace DataStudio.Internal;
 
 /// <summary>
 /// Maps one studio's pages, circuit and assets under its mount path - D11's sub-path mounting, ported from
@@ -51,7 +49,7 @@ namespace PostgresStudio.Internal;
 /// <para>
 /// A studio's public <c>Map*Studio()</c> validates its pattern, writes it onto its options and calls
 /// <see cref="Map{TRoot}" /> with its root component; everything after that is here, driven by the studio's
-/// <see cref="StudioDescriptor" /> and <see cref="IStudioSettings" /> and by nothing a studio's own types say.
+/// <c>StudioDescriptor</c> and <c>IStudioSettings</c> and by nothing a studio's own types say.
 /// </para>
 /// <para>
 /// <b>Pages are re-rooted per assembly.</b> A page endpoint is rebased when its component's assembly is one of

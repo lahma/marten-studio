@@ -1,6 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 
-namespace PostgresStudio.Services.Settings;
+namespace DataStudio.Services.Settings;
 
 /// <summary>
 /// Which studio this process registered: one per process (design PS8, option a).

@@ -232,7 +232,7 @@ public class SchemaPageTests
         ClickPreview(page);
         page.WaitForAssertion(() => schema.Previews.Should().Be(2));
 
-        await page.InvokeAsync(() => page.FindComponent<PostgresStudio.Components.Shared.ConfirmDialog>().Instance.OnConfirm.InvokeAsync("localhost.marten"));
+        await page.InvokeAsync(() => page.FindComponent<DataStudio.Components.Shared.ConfirmDialog>().Instance.OnConfirm.InvokeAsync("localhost.marten"));
 
         schema.Applies.Should().Be(0);
         page.FindAll(".ms-confirm-dialog").Should().BeEmpty("the dialog is closed, not left up over a dropped confirm");

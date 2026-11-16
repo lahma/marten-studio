@@ -1,9 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.JSInterop;
 
-using PostgresStudio.Services.Settings;
-
-namespace PostgresStudio.Services.Live;
+namespace DataStudio.Services;
 
 /// <summary>
 /// One page's polling loop: a timer that stops while the tab is hidden and is cancelled when the page
@@ -50,8 +48,8 @@ internal sealed class StudioLiveUpdates : IAsyncDisposable
 {
     private readonly IJSRuntime jsRuntime;
     private readonly ILogger<StudioLiveUpdates> logger;
-    private readonly StudioLogThrottle? throttle;
-    private readonly StudioProduct product;
+    private readonly PostgresStudio.Services.StudioLogThrottle? throttle;
+    private readonly StudioLiveLog log;
 
     /// <summary>
     /// What the browser-side watcher list is keyed on for this instance.
@@ -76,19 +74,21 @@ internal sealed class StudioLiveUpdates : IAsyncDisposable
 
     /// <remarks>
     /// <paramref name="throttle" /> is optional so that a test can build a loop by hand; the factory
-    /// always hands the container's over, and without one a failing handler is simply a Warning. So is
-    /// <paramref name="product" />, the studio whose words the loop logs in.
+    /// always hands the container's over, and without one a failing handler is simply a Warning.
+    /// <paramref name="log" /> is the studio's words for the two lines the loop logs: the container's own, from the studio that registered the shell.
     /// </remarks>
     public StudioLiveUpdates(
         IJSRuntime jsRuntime,
         ILogger<StudioLiveUpdates> logger,
-        StudioLogThrottle? throttle = null,
-        StudioProduct product = StudioProduct.MartenStudio)
+        StudioLiveLog log,
+        PostgresStudio.Services.StudioLogThrottle? throttle = null)
     {
+        ArgumentNullException.ThrowIfNull(log);
+
         this.jsRuntime = jsRuntime;
         this.logger = logger;
         this.throttle = throttle;
-        this.product = product;
+        this.log = log;
     }
 
     /// <summary>
@@ -352,14 +352,7 @@ internal sealed class StudioLiveUpdates : IAsyncDisposable
             LastError = exception;
             TickCount++;
 
-            if (product == StudioProduct.PostgresStudio)
-            {
-                logger.LogDebug(exception, "A Postgres Studio live update failed");
-            }
-            else
-            {
-                logger.LogDebug(exception, "A Marten Studio live update failed");
-            }
+            log.LiveUpdateFailed(logger, exception);
 
             await ReportFailureAsync(exception).ConfigureAwait(false);
         }
@@ -379,17 +372,9 @@ internal sealed class StudioLiveUpdates : IAsyncDisposable
             {
                 // A bug in a page, on a loop that runs every RefreshInterval while the read keeps
                 // failing: event 9220, a Warning once per kind of failure per window.
-                LogLevel level = StudioLogThrottle.LevelOrWarning(
-                    throttle, "LiveUpdates.FailedHandler", null, null, StudioLogThrottle.KindOf(handlerFailure));
-
-                if (product == StudioProduct.PostgresStudio)
-                {
-                    logger.PostgresStudioLiveUpdateHandlerFailed(level, handlerFailure);
-                }
-                else
-                {
-                    logger.LiveUpdateHandlerFailed(level, handlerFailure);
-                }
+                // The studio takes the level from the throttle where it logs (DatabaseLiveLogs). The delegate is invoked by name: the throttled-call scan of
+                // LogLevelsTests reads the first argument of every ".LiveUpdateHandlerFailed(" as a level, and this one is the logger.
+                log.LiveUpdateHandlerFailed.Invoke(logger, throttle, handlerFailure);
             }
         }
     }

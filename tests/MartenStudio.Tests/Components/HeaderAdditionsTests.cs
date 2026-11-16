@@ -10,8 +10,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.JSInterop;
 
-using PostgresStudio.Components.Layout;
-
 namespace MartenStudio.Tests.Components;
 
 /// <summary>

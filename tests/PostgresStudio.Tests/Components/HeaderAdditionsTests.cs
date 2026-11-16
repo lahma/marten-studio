@@ -2,12 +2,11 @@ using AngleSharp.Dom;
 
 using Bunit;
 
+using DataStudio.Components.Layout;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Microsoft.JSInterop;
-
-using PostgresStudio.Components.Layout;
 
 namespace PostgresStudio.Tests.Components;
 

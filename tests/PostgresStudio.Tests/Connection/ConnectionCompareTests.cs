@@ -7,11 +7,11 @@ using AngleSharp.Dom;
 
 using Bunit;
 
+using DataStudio.Components.Shared;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 using PostgresStudio.Components.Pages.Database;
-using PostgresStudio.Components.Shared;
 using PostgresStudio.Services.Connection;
 using PostgresStudio.Services.Diagnostics;
 using PostgresStudio.Tests.Components;

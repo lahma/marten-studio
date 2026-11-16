@@ -1,6 +1,8 @@
+using DataStudio.Services;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.JSInterop;
 using PostgresStudio.Services.Live;
+using PostgresStudio.Services.Settings;
 
 namespace MartenStudio.Tests.Projections;
 
@@ -24,7 +26,7 @@ public class StudioLiveUpdatesTests
     public async Task Starting_watches_the_tab_and_ticks_on_the_interval()
     {
         var js = new FakeJsRuntime();
-        await using var updates = new StudioLiveUpdates(js, NullLogger<StudioLiveUpdates>.Instance);
+        await using var updates = new StudioLiveUpdates(js, NullLogger<StudioLiveUpdates>.Instance, DatabaseLiveLogs.For(StudioProduct.MartenStudio));
 
         var ticked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         await updates.StartAsync(Interval, _ =>
@@ -54,7 +56,7 @@ public class StudioLiveUpdatesTests
     public async Task The_watch_token_round_trips_from_watch_to_unwatch()
     {
         var js = new FakeJsRuntime();
-        var updates = new StudioLiveUpdates(js, NullLogger<StudioLiveUpdates>.Instance);
+        var updates = new StudioLiveUpdates(js, NullLogger<StudioLiveUpdates>.Instance, DatabaseLiveLogs.For(StudioProduct.MartenStudio));
 
         await updates.StartAsync(Interval, static _ => Task.CompletedTask, Token);
 
@@ -74,8 +76,8 @@ public class StudioLiveUpdatesTests
         var first = new FakeJsRuntime();
         var second = new FakeJsRuntime();
 
-        await using var one = new StudioLiveUpdates(first, NullLogger<StudioLiveUpdates>.Instance);
-        await using var two = new StudioLiveUpdates(second, NullLogger<StudioLiveUpdates>.Instance);
+        await using var one = new StudioLiveUpdates(first, NullLogger<StudioLiveUpdates>.Instance, DatabaseLiveLogs.For(StudioProduct.MartenStudio));
+        await using var two = new StudioLiveUpdates(second, NullLogger<StudioLiveUpdates>.Instance, DatabaseLiveLogs.For(StudioProduct.MartenStudio));
 
         await one.StartAsync(Interval, static _ => Task.CompletedTask, Token);
         await two.StartAsync(Interval, static _ => Task.CompletedTask, Token);
@@ -91,7 +93,7 @@ public class StudioLiveUpdatesTests
     public async Task A_hidden_tab_pauses_the_polling_and_showing_it_again_resumes_it()
     {
         var js = new FakeJsRuntime();
-        await using var updates = new StudioLiveUpdates(js, NullLogger<StudioLiveUpdates>.Instance);
+        await using var updates = new StudioLiveUpdates(js, NullLogger<StudioLiveUpdates>.Instance, DatabaseLiveLogs.For(StudioProduct.MartenStudio));
 
         TaskCompletionSource ticked = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -124,7 +126,7 @@ public class StudioLiveUpdatesTests
     public async Task A_failing_tick_is_reported_as_a_value_and_does_not_stop_the_loop()
     {
         var js = new FakeJsRuntime();
-        await using var updates = new StudioLiveUpdates(js, NullLogger<StudioLiveUpdates>.Instance);
+        await using var updates = new StudioLiveUpdates(js, NullLogger<StudioLiveUpdates>.Instance, DatabaseLiveLogs.For(StudioProduct.MartenStudio));
 
         List<string> reported = [];
         updates.Failed += exception =>
@@ -159,7 +161,7 @@ public class StudioLiveUpdatesTests
     public async Task Disposing_unwatches_the_tab_and_stops_the_loop()
     {
         var js = new FakeJsRuntime();
-        var updates = new StudioLiveUpdates(js, NullLogger<StudioLiveUpdates>.Instance);
+        var updates = new StudioLiveUpdates(js, NullLogger<StudioLiveUpdates>.Instance, DatabaseLiveLogs.For(StudioProduct.MartenStudio));
 
         var ticked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         await updates.StartAsync(Interval, _ =>
@@ -193,7 +195,7 @@ public class StudioLiveUpdatesTests
                 "JavaScript interop calls cannot be issued at this time. This is because the component is being statically rendered.")
         };
 
-        await using var updates = new StudioLiveUpdates(js, NullLogger<StudioLiveUpdates>.Instance);
+        await using var updates = new StudioLiveUpdates(js, NullLogger<StudioLiveUpdates>.Instance, DatabaseLiveLogs.For(StudioProduct.MartenStudio));
 
         var ticked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         await updates.StartAsync(Interval, _ =>
@@ -210,7 +212,7 @@ public class StudioLiveUpdatesTests
     public async Task A_tab_that_starts_hidden_is_known_to_be_hidden()
     {
         var js = new FakeJsRuntime { StartsHidden = true };
-        await using var updates = new StudioLiveUpdates(js, NullLogger<StudioLiveUpdates>.Instance);
+        await using var updates = new StudioLiveUpdates(js, NullLogger<StudioLiveUpdates>.Instance, DatabaseLiveLogs.For(StudioProduct.MartenStudio));
 
         await updates.StartAsync(Interval, static _ => Task.CompletedTask, Token);
 

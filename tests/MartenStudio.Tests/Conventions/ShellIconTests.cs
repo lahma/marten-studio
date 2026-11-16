@@ -25,7 +25,7 @@ public partial class ShellIconTests
     [Fact]
     public void The_shell_links_the_packaged_icon_by_a_relative_address()
     {
-        string shell = File.ReadAllText(RepositoryRoot.Combine("src", StudioProjects.Shared, "Components", "StudioDocument.razor"));
+        string shell = File.ReadAllText(RepositoryRoot.Combine("src", StudioProjects.Shared, "Shell", "Components", "StudioDocument.razor"));
 
         Match link = IconLink().Match(shell);
 

@@ -102,6 +102,8 @@ public class StudioRegistrationTests
         (typeof(IStudioAuditScopeGate), ServiceLifetime.Scoped, How.Type, typeof(DatabaseAuditGate)),
         (typeof(ToastService), ServiceLifetime.Scoped, How.Type, typeof(ToastService)),
         (typeof(StudioSnapshotCache), ServiceLifetime.Singleton, How.Type, typeof(StudioSnapshotCache)),
+        // The shell's live-update loop logs in the studio's words: this studio's own log methods, chosen by its product.
+        (typeof(StudioLiveLog), ServiceLifetime.Singleton, How.Factory, typeof(StudioLiveLog)),
         (typeof(StudioLiveUpdatesFactory), ServiceLifetime.Scoped, How.Type, typeof(StudioLiveUpdatesFactory)),
         (typeof(INavIndicatorService), ServiceLifetime.Scoped, How.Type, typeof(NavIndicatorService)),
 
@@ -322,6 +324,9 @@ public class StudioRegistrationTests
 
         // D34: the shell's descriptor is composed from the registered modules, the database among them, when first resolved.
         [typeof(StudioShellDescriptor)] = typeof(StudioShellDescriptor),
+
+        // A3: the live-update loop's log words, this studio's own log methods, chosen by its product.
+        [typeof(StudioLiveLog)] = typeof(StudioLiveLog),
         [typeof(ISqlConsoleService)] = typeof(SqlConsoleService),
         [typeof(HealthMuteKeys)] = typeof(HealthMuteKeys),
 

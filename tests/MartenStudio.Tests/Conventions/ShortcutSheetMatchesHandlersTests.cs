@@ -86,7 +86,7 @@ public class ShortcutSheetMatchesHandlersTests
     [InlineData("src/PostgresStudio/Components/Json/JsonSearchBar.razor", "private async Task OnKeyDownAsync", "JSON viewer search box", null)]
     [InlineData("src/PostgresStudio/Components/Pages/Query/PlanIcicle.razor", "private async Task KeyAsync", "Plan icicle (a frame has focus)", null)]
     [InlineData("src/PostgresStudio/Components/Pages/Database/RowGrid.razor", "private async Task OnRowKeyAsync", "Table rows (a row has focus)", null)]
-    [InlineData("src/PostgresStudio/Components/Shared/MenuButton.razor", "private async Task OnKeyDownAsync", "Menus", null)]
+    [InlineData("src/PostgresStudio/Shell/Components/Shared/MenuButton.razor", "private async Task OnKeyDownAsync", "Menus", null)]
     [InlineData("src/MartenStudio/Components/Pages/Documents/DocumentTable.razor", "private async Task OnRowKeyAsync", "Document lists (a row has focus)", null)]
     public void The_sheets_group_lists_the_keys_its_handler_answers_to(string file, string signature, string group, string? typedKey)
     {

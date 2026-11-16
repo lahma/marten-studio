@@ -109,7 +109,7 @@ public class NoJsInitializerTests
 
         // The shared document every studio's root component renders (0.5, PS-1a): MartenStudioApp is its root only.
         string shell = File.ReadAllText(
-            RepositoryRoot.Combine("src", "PostgresStudio", "Components", "StudioDocument.razor"));
+            RepositoryRoot.Combine("src", "PostgresStudio", "Shell", "Components", "StudioDocument.razor"));
 
         shell.Should().Contain($"<script src=\"{HelperScript}\">",
             "the shell is what loads the helpers now that no convention does it");

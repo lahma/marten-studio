@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Security.Claims;
 
+using DataStudio.Services;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.JSInterop;
@@ -61,14 +62,14 @@ public sealed class PostgresStudioWiringTests : IAsyncDisposable
         {
             FieldInfo[] words = [.. owner.GetType()
                 .GetFields(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
-                .Where(static x => x.FieldType == typeof(StudioProduct) || x.FieldType == typeof(StudioText))];
+                .Where(static x => x.FieldType == typeof(StudioProduct) || x.FieldType == typeof(StudioText) || x.FieldType == typeof(StudioLiveLog))];
 
             words.Should().NotBeEmpty(owner.GetType().Name + " takes the studio's words");
 
             foreach (FieldInfo field in words)
             {
                 object? value = field.GetValue(owner);
-                (value is StudioProduct.PostgresStudio || ReferenceEquals(value, PostgresStudioText.Instance))
+                (value is StudioProduct.PostgresStudio || ReferenceEquals(value, PostgresStudioText.Instance) || ReferenceEquals(value, DatabaseLiveLogs.PostgresStudio))
                     .Should().BeTrue(owner.GetType().Name + "." + field.Name + " is PostgresStudio's, not MartenStudio's");
             }
         }

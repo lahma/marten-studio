@@ -2,6 +2,7 @@ using AngleSharp.Dom;
 
 using Bunit;
 
+using DataStudio.Services;
 using MartenStudio.Services;
 using MartenStudio.Services.Projections;
 using MartenStudio.Tests.Components;
@@ -9,7 +10,6 @@ using MartenStudio.Tests.Components;
 using Microsoft.Extensions.DependencyInjection;
 
 using Page = MartenStudio.Components.Pages.Projections.Projections;
-using PostgresStudio.Services.Live;
 
 namespace MartenStudio.Tests.Projections;
 

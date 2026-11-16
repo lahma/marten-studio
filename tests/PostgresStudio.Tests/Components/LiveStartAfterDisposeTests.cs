@@ -1,8 +1,8 @@
 using Bunit;
 
+using DataStudio.Components.Layout;
 using Microsoft.AspNetCore.Components;
 
-using PostgresStudio.Components.Layout;
 using PostgresStudio.Components.Pages;
 
 namespace PostgresStudio.Tests.Components;

@@ -133,6 +133,9 @@ internal static class StudioCoreRegistration
         services.TryAddEnumerable(ServiceDescriptor.Scoped<IStudioAuditScopeGate, DatabaseAuditGate>());
         services.TryAddScoped<ToastService>();
 
+        // The words the shell's live-update loop logs in are the studio's: this studio's own log methods, chosen by its product.
+        services.TryAddSingleton(static provider => DatabaseLiveLogs.For(provider.GetRequiredService<IStudioSettings>().Text.Product));
+
         // A factory rather than the loop itself: StudioLiveUpdates is IAsyncDisposable, and a transient
         // registration would leave the circuit's container tracking one instance per page visit for the
         // life of the circuit. The page owns the loop it creates.

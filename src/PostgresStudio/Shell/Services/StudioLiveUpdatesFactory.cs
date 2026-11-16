@@ -1,9 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.JSInterop;
 
-using PostgresStudio.Services.Settings;
-
-namespace PostgresStudio.Services.Live;
+namespace DataStudio.Services;
 
 /// <summary>
 /// Hands a page its own polling loop without the container holding on to it.
@@ -28,28 +26,31 @@ internal sealed class StudioLiveUpdatesFactory
 {
     private readonly IJSRuntime jsRuntime;
     private readonly ILoggerFactory loggerFactory;
-    private readonly StudioLogThrottle? throttle;
-    private readonly StudioProduct product;
+    private readonly PostgresStudio.Services.StudioLogThrottle? throttle;
+    private readonly StudioLiveLog log;
 
     /// <remarks>
-    /// <paramref name="throttle" /> and <paramref name="settings" /> are optional so that a component test's
-    /// container, which registers this factory without the rest of the studio, still resolves it.
+    /// <paramref name="throttle" /> is optional so that a component test's container, which registers this factory without the rest of
+    /// the studio, still resolves it. <paramref name="log" /> is the studio's words for what the loop logs, which the studio that registered the
+    /// shell gives (<c>StudioCoreRegistration</c>).
     /// </remarks>
     public StudioLiveUpdatesFactory(
         IJSRuntime jsRuntime,
         ILoggerFactory loggerFactory,
-        StudioLogThrottle? throttle = null,
-        IStudioSettings? settings = null)
+        StudioLiveLog log,
+        PostgresStudio.Services.StudioLogThrottle? throttle = null)
     {
+        ArgumentNullException.ThrowIfNull(log);
+
         this.jsRuntime = jsRuntime;
         this.loggerFactory = loggerFactory;
+        this.log = log;
         this.throttle = throttle;
-        product = StudioText.Of(settings).Product;
     }
 
     /// <summary>
     /// A polling loop for one page. The caller disposes it from its own <c>DisposeAsync</c>.
     /// </summary>
     public StudioLiveUpdates Create() =>
-        new(jsRuntime, loggerFactory.CreateLogger<StudioLiveUpdates>(), throttle, product);
+        new(jsRuntime, loggerFactory.CreateLogger<StudioLiveUpdates>(), log, throttle);
 }

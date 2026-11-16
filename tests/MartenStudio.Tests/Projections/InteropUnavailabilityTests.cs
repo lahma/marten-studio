@@ -1,5 +1,5 @@
+using DataStudio.Services;
 using Microsoft.JSInterop;
-using PostgresStudio.Services.Live;
 
 namespace MartenStudio.Tests.Projections;
 
