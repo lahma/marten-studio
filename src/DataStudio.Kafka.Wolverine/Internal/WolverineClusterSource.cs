@@ -2,7 +2,7 @@ using System.Text;
 
 using Confluent.Kafka;
 
-using KStudio.Core.Clusters;
+using DataStudio.Kafka.Core.Clusters;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -10,7 +10,7 @@ using Microsoft.Extensions.Hosting;
 using Wolverine;
 using Wolverine.Kafka.Internals;
 
-namespace KStudio.Internal;
+namespace DataStudio.Kafka.Internal;
 
 /// <summary><see cref="KafkaWolverineOptions" /> as <c>UseWolverineKafka</c> found them: a copy, so a later write to the host's object reaches nothing.</summary>
 internal sealed class WolverineSourceSettings

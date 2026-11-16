@@ -1,16 +1,16 @@
 using System.Reflection;
 using System.Runtime.CompilerServices;
 
-namespace KStudio.Internal;
+namespace DataStudio.Kafka.Internal;
 
 /// <summary>
-/// Refuses to wire KStudio.Wolverine to any KStudio.Core but its own build (D43, D30's discipline one assembly over). KStudio.Core grants this
+/// Refuses to wire DataStudio.Kafka.Wolverine to any DataStudio.Kafka.Core but its own build (D43, D30's discipline one assembly over). DataStudio.Kafka.Core grants this
 /// assembly its internals (<c>InternalsVisibleTo</c>), so one skewed assembly is a <see cref="MissingMethodException" /> on the first internal
-/// member that moved; the nuspec pins KStudio.Core exactly, and this is the check for the place NuGet's pin does not reach.
+/// member that moved; the nuspec pins DataStudio.Kafka.Core exactly, and this is the check for the place NuGet's pin does not reach.
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>How it runs before anything of KStudio.Core's internals is touched.</b> The public <c>UseWolverineKafka</c> names only KStudio.Core's public
+/// <b>How it runs before anything of DataStudio.Kafka.Core's internals is touched.</b> The public <c>UseWolverineKafka</c> names only DataStudio.Kafka.Core's public
 /// <c>KafkaEngineOptions</c> and calls <see cref="Ensure()" /> first; the body that adds the source - which names <c>IKafkaClusterSource</c> and
 /// the rest - is a <see cref="MethodImplOptions.NoInlining" /> method of its own, so the JIT resolves none of it until the guard has passed.
 /// <c>KStudioWolverineVersionGuardTests</c> scans the IL to keep it that way.
@@ -23,17 +23,17 @@ namespace KStudio.Internal;
 internal static class KStudioWolverineVersionGuard
 {
     /// <summary>KStudio's engine assembly name: a string, never a type, for the reason in the remarks.</summary>
-    internal const string EngineAssemblyName = "KStudio.Core";
+    internal const string EngineAssemblyName = "DataStudio.Kafka.Core";
 
-    /// <summary>Throws unless the KStudio.Core this process loads is the build this KStudio.Wolverine was packed with.</summary>
-    /// <exception cref="InvalidOperationException">KStudio.Core is missing, or is another version.</exception>
+    /// <summary>Throws unless the DataStudio.Kafka.Core this process loads is the build this DataStudio.Kafka.Wolverine was packed with.</summary>
+    /// <exception cref="InvalidOperationException">DataStudio.Kafka.Core is missing, or is another version.</exception>
     [MethodImpl(MethodImplOptions.NoInlining)]
     public static void Ensure() => Ensure(typeof(KStudioWolverineVersionGuard).Assembly, LoadEngine);
 
     /// <summary>The whole check, with the loader supplied - the seam the tests use.</summary>
     /// <param name="self">This assembly, whose version is the one required.</param>
-    /// <param name="loadEngine">Loads KStudio.Core; may throw <see cref="FileNotFoundException" />.</param>
-    /// <exception cref="InvalidOperationException">KStudio.Core is missing, or is another version.</exception>
+    /// <param name="loadEngine">Loads DataStudio.Kafka.Core; may throw <see cref="FileNotFoundException" />.</param>
+    /// <exception cref="InvalidOperationException">DataStudio.Kafka.Core is missing, or is another version.</exception>
     internal static void Ensure(Assembly self, Func<Assembly> loadEngine)
     {
         string? selfVersion = InformationalVersion(self);
@@ -47,9 +47,9 @@ internal static class KStudioWolverineVersionGuard
         catch (FileNotFoundException e)
         {
             throw new InvalidOperationException(
-                $"KStudio.Wolverine {required} needs {EngineAssemblyName} {required} exactly, and this application was deployed " +
+                $"DataStudio.Kafka.Wolverine {required} needs {EngineAssemblyName} {required} exactly, and this application was deployed " +
                 $"without {EngineAssemblyName}. The packages are released together: pin {EngineAssemblyName} to {required}, or remove its " +
-                $"PackageVersion row and let KStudio.Wolverine bring it.",
+                $"PackageVersion row and let DataStudio.Kafka.Wolverine bring it.",
                 e);
         }
 
@@ -66,9 +66,9 @@ internal static class KStudioWolverineVersionGuard
         string shownFound = commits ? loadedVersion! : ReleaseVersion(loadedVersion);
 
         throw new InvalidOperationException(
-            $"KStudio.Wolverine {shownRequired} needs {EngineAssemblyName} {shownRequired} exactly, and found {EngineAssemblyName} " +
+            $"DataStudio.Kafka.Wolverine {shownRequired} needs {EngineAssemblyName} {shownRequired} exactly, and found {EngineAssemblyName} " +
             $"{shownFound}. The packages are released together and must be upgraded together: a central PackageVersion or a " +
-            $"PackageReference for {EngineAssemblyName} must say {required}, or be removed and let KStudio.Wolverine bring it.");
+            $"PackageReference for {EngineAssemblyName} must say {required}, or be removed and let DataStudio.Kafka.Wolverine bring it.");
     }
 
     /// <summary>Whether two informational versions name the same build (the rule in the remarks).</summary>
@@ -111,7 +111,7 @@ internal static class KStudioWolverineVersionGuard
     private static bool HasBuildMetadata(string? informationalVersion) =>
         informationalVersion?.Contains('+', StringComparison.Ordinal) == true;
 
-    /// <summary>Loads KStudio.Core by name - the one place its name meets the loader.</summary>
+    /// <summary>Loads DataStudio.Kafka.Core by name - the one place its name meets the loader.</summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static Assembly LoadEngine() => Assembly.Load(new AssemblyName(EngineAssemblyName));
 }

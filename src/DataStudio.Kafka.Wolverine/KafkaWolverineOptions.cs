@@ -1,6 +1,6 @@
 using Wolverine.Runtime.Serialization;
 
-namespace KStudio;
+namespace DataStudio.Kafka;
 
 /// <summary>What <see cref="KafkaWolverineExtensions.UseWolverineKafka" /> may be told about how a Wolverine application's clusters are listed (D43).</summary>
 public sealed class KafkaWolverineOptions

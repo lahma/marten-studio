@@ -1,8 +1,8 @@
 using System.Runtime.CompilerServices;
 
-using KStudio.Internal;
+using DataStudio.Kafka.Internal;
 
-namespace KStudio;
+namespace DataStudio.Kafka;
 
 /// <summary>Lists a Wolverine application's Kafka clusters and topics in KStudio (D43).</summary>
 public static class KafkaWolverineExtensions
@@ -15,13 +15,13 @@ public static class KafkaWolverineExtensions
     /// <param name="options">KStudio's options: <c>services.AddKafkaStudio(k =&gt; k.UseWolverineKafka())</c>.</param>
     /// <param name="configure">How the clusters are listed.</param>
     /// <returns>These options.</returns>
-    /// <exception cref="InvalidOperationException">KStudio.Core is not the build this KStudio.Wolverine was packed with.</exception>
+    /// <exception cref="InvalidOperationException">DataStudio.Kafka.Core is not the build this DataStudio.Kafka.Wolverine was packed with.</exception>
     /// <exception cref="ArgumentException">The cluster key is not a valid one.</exception>
     public static KafkaEngineOptions UseWolverineKafka(this KafkaEngineOptions options, Action<KafkaWolverineOptions>? configure = null)
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        // Names only KafkaEngineOptions, which is public: everything of KStudio.Core's internals is behind the guard (KStudioWolverineVersionGuardTests).
+        // Names only KafkaEngineOptions, which is public: everything of DataStudio.Kafka.Core's internals is behind the guard (KStudioWolverineVersionGuardTests).
         KStudioWolverineVersionGuard.Ensure();
 
         KafkaWolverineOptions settings = new();
@@ -30,7 +30,7 @@ public static class KafkaWolverineExtensions
         return AddSource(options, settings);
     }
 
-    /// <summary>The body of <see cref="UseWolverineKafka" />, once KStudio.Core is known to be the right build.</summary>
+    /// <summary>The body of <see cref="UseWolverineKafka" />, once DataStudio.Kafka.Core is known to be the right build.</summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static KafkaEngineOptions AddSource(KafkaEngineOptions options, KafkaWolverineOptions settings)
     {

@@ -2,7 +2,7 @@ using System.Globalization;
 
 using Confluent.Kafka;
 
-using KStudio.Core.Clusters;
+using DataStudio.Kafka.Core.Clusters;
 
 using Wolverine.Configuration;
 using Wolverine.Kafka;
@@ -10,7 +10,7 @@ using Wolverine.Kafka.Internals;
 using Wolverine.Runtime.Interop;
 using Wolverine.Runtime.Routing;
 
-namespace KStudio.Internal;
+namespace DataStudio.Kafka.Internal;
 
 /// <summary>The topics and consumer groups one Kafka transport declares.</summary>
 /// <param name="Topics">The topics, ordinal by name.</param>

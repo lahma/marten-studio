@@ -1,11 +1,11 @@
 using System.Collections;
 using System.Reflection;
 
-using KStudio.Core.Clusters;
+using DataStudio.Kafka.Core.Clusters;
 
 using Wolverine.Kafka.Internals;
 
-namespace KStudio.Internal;
+namespace DataStudio.Kafka.Internal;
 
 /// <summary>One broker-per-tenant registration whose child transport has its cluster configured.</summary>
 /// <param name="TenantId">The tenant's id.</param>
@@ -22,7 +22,7 @@ internal sealed record WolverineTenantProbeResult(IReadOnlyList<WolverineProbedT
 }
 
 /// <summary>
-/// The only reflection in KStudio.Wolverine (D43, decision 5.4). Wolverine 6.61 keeps its broker-per-tenant registrations internal
+/// The only reflection in DataStudio.Kafka.Wolverine (D43, decision 5.4). Wolverine 6.61 keeps its broker-per-tenant registrations internal
 /// (<c>KafkaTransport.Tenants</c> and <c>KafkaTenant</c> are <c>internal</c>; the public surface can only write them), so a tenant's cluster is
 /// reached through exactly three members: <c>KafkaTransport.Tenants</c>, <c>KafkaTenant.TenantId</c> and <c>KafkaTenant.Transport</c>.
 /// </summary>
