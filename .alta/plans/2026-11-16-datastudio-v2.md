@@ -85,11 +85,14 @@ The public surface, package by package:
 
 Rules a host can rely on:
 
-- **One shell per application**, `AddDataStudio()` once. A module added twice is refused.
+- **One shell per application.** `AddDataStudio()` and each module's `Add…()` are idempotent: called twice, they
+  configure the options twice and register once.
 - **The shell's options are the shell's.** A module's options have no `Path`, `Title` or `AuthorizationPolicy`. The
   shell's `ReadOnly` turns every module's capabilities off; a module keeps a `ReadOnly` of its own.
 - **`AddMarten()` brings the Postgres pages** over the Marten stores' databases; it needs `DataStudio.Postgres` and
   registers that module itself. `AddMarten()` beside `AddPostgres()` is refused in 2.0 (see *Out of scope*).
+- **Two read-only switches.** The shell's turns every module off. A module's own turns only that module off: unlike
+  1.x, `MartenOptions.ReadOnly` no longer turns the Kafka capabilities off (`docs/upgrading.md` says so).
 - **Nothing connects at registration**, and a host that adds the packages and never calls `MapDataStudio()` is the
   application it was. That constraint of 1.x stays.
 
