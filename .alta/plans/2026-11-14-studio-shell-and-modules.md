@@ -242,8 +242,11 @@ Phase A changes no package, no public type and no word. It can ship in any relea
 
 ## How it is verified
 
-- [ ] After phase A: all seven suites green at the Marten floor and latest and the Npgsql latest pass; no `.verified.txt`
-      moved; `StudioTextPinTests` and step 1's golden files unchanged; both browser suites green.
+- [x] After phase A: all seven suites green at the Marten floor and latest and the Npgsql latest pass; no `.verified.txt`
+      moved; `StudioTextPinTests` and step 1's golden files unchanged; both browser suites green. (2026-11-16, at
+      `a7dff7b1`: floors all green; at the latest-tested versions one Kafka live test,
+      `WireContractLiveTests4.Aborted_records_are_invisible…`, timed out once and passed on a re-run, with another
+      session's containers loading the shared Docker. Phase A touched neither that test nor `KStudio.Core`.)
 - [ ] After phase B: the three existing public API baselines only gain the builder extension; the new baseline holds
       exactly `AddDataStudio`, `DataStudioBuilder`, `DataStudioOptions` and `MapDataStudio`.
 - [ ] A host with `AddDataStudio().AddKafka()` starts, serves `/studio/kafka`, and its output folder has no `Npgsql.dll`
