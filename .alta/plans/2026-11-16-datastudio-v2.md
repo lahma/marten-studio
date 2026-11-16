@@ -150,7 +150,7 @@ Each step ends with every suite it can reach green. Steps 1 to 3 change no behav
       engine helpers with parity tests. `DataStudio.Postgres` and `DataStudio.Kafka` reference it with an exact pin and
       a version guard. `DataStudio.Kafka` drops its reference to `DataStudio.Postgres`. New `tests/DataStudio.Tests`
       (the shell with fake modules). `ShellFenceTests` becomes a reference check.
-- [ ] 4. **The registration.** `AddDataStudio`, `DataStudioBuilder`, `DataStudioOptions`, `MapDataStudio`; the three
+- [x] 4. **The registration.** `AddDataStudio`, `DataStudioBuilder`, `DataStudioOptions`, `MapDataStudio`; the three
       `Add…` builder extensions; the options split of the table above; the startup guards reworded for one shell. Delete
       `AddMartenStudio`, `AddPostgresStudio`, `AddKafkaStudio` and their `Map…` calls. Apply the public renames of
       step 1 (`MartenStudioOptions` → `MartenOptions`, and so on). The four public API baselines are replaced, reviewed
