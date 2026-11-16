@@ -122,7 +122,7 @@ public class StudioLayoutTests
         var credit = layout.Find(".ms-rail-credit");
         var lines = credit.QuerySelectorAll(".ms-rail-credit-line").Select(static x => x.TextContent.Trim()).ToList();
         lines.Should().HaveCount(3, "the product and its version, the licence and the author, a line each");
-        lines[0].Should().StartWith("Marten Studio ").And.NotContain("MIT").And.NotContain("Marko");
+        lines[0].Should().StartWith("Data Studio ").And.NotContain("MIT").And.NotContain("Marko");
         lines[1].Should().Be("MIT licensed");
         lines[2].Should().Be("by Marko Lahma");
         credit.QuerySelectorAll("a").Select(static a => a.GetAttribute("href")).Should().Contain(
@@ -556,11 +556,11 @@ public class StudioLayoutTests
     /// what does it, and a row page that a later packet builds is covered before it exists.
     /// </summary>
     [Theory]
-    [InlineData("marten/database", "database")]
-    [InlineData("marten/database?schema=quartz&kind=views", "database")]
-    [InlineData("marten/database/object?schema=quartz&name=qrtz_triggers&tab=keys", "database")]
-    [InlineData("marten/database/row?schema=quartz&name=qrtz_triggers&key.sched_name=QRTZ", "database")]
-    [InlineData("marten/relationships", "relationships")]
+    [InlineData("studio/database", "database")]
+    [InlineData("studio/database?schema=quartz&kind=views", "database")]
+    [InlineData("studio/database/object?schema=quartz&name=qrtz_triggers&tab=keys", "database")]
+    [InlineData("studio/database/row?schema=quartz&name=qrtz_triggers&key.sched_name=QRTZ", "database")]
+    [InlineData("studio/relationships", "relationships")]
     public void The_database_entry_stays_lit_on_every_page_below_it(string uri, string active)
     {
         using var context = new StudioComponentContext();
@@ -986,7 +986,7 @@ public class StudioLayoutTests
             .WithStore("IInvoicingStore", "Invoicing Store", databaseIdentities: "localhost.invoicing");
 
         // On a studio page: the shell writes the scope only into one (1.2-UX-FIX-FU4).
-        context.Navigate("marten");
+        context.Navigate("studio");
 
         var layout = RenderLayout(context);
         layout.Find("#ms-store-select").Change("IInvoicingStore");
@@ -1065,7 +1065,7 @@ public class StudioLayoutTests
     {
         using var context = new StudioComponentContext().WithPolicy("default");
         context.Catalog.WithStore("default", "Default", DatabaseCardinality.StaticMultiple, "db-a", "db-b");
-        context.Navigate("marten");
+        context.Navigate("studio");
 
         var layout = RenderLayout(context);
         layout.WaitForAssertion(() => layout.Markup.Should().Contain(BodyMarker));

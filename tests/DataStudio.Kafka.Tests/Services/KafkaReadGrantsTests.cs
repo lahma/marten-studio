@@ -91,13 +91,13 @@ public class KafkaReadGrantsTests
     {
         await using KafkaSearchRig rig = new(payloads: true);
         Seed(rig, "orders");
-        rig.Studio.Context.Options.ReadOnly = true;
+        rig.Studio.Context.ShellOptions.ReadOnly = true;
 
         KafkaGrantDecision decision = await Grants(rig).ForSearchAsync(rig.Entry, Names("orders"), readsValues: true, Ct);
 
         decision.Denied.Should().NotBeNull();
         decision.Refusal.Should().Be("Reading values is not available here.");
-        decision.Denied!.Message.Should().Contain("ReadPayloads").And.Contain("PostgresStudioOptions.ReadOnly", "the audit and the log still name the option");
+        decision.Denied!.Message.Should().Contain("ReadPayloads").And.Contain("DataStudioOptions.ReadOnly", "the audit and the log still name the option");
         decision.Grant.Should().Be(KafkaReadGrant.Envelope);
 
         KafkaGrantDecision quiet = await Grants(rig).ForSearchAsync(rig.Entry, Names("orders"), readsValues: false, Ct);

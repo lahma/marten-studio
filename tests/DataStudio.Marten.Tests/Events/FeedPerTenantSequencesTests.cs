@@ -86,7 +86,7 @@ public class FeedPerTenantSequencesTests
         context.EventData.Shape = context.EventData.Shape with { PerTenantSequences = true, EventsConjoined = true, HasTenantId = true };
         context.EventData.Feed = EventPage.Failed(new EventDataError(StreamCompactionRules.ReadNeedsTenant("the feed"), null, false));
 
-        context.Navigate("marten/events/feed?follow=1");
+        context.Navigate("studio/events/feed?follow=1");
         IRenderedComponent<Feed> page = context.Render<Feed>();
 
         page.Find(".ms-error-alert").TextContent.Should().Contain("choose a tenant to read the feed");

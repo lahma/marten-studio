@@ -30,7 +30,7 @@ internal static class DatabasePageData
         StudioComponentContext context,
         string query = "")
     {
-        context.Navigate("marten/database" + (query.Length == 0 ? string.Empty : "?" + query));
+        context.Navigate("studio/database" + (query.Length == 0 ? string.Empty : "?" + query));
 
         var page = context.Render<DataStudio.Postgres.Components.Pages.Database.DatabaseObjects>();
         page.WaitForAssertion(() => page.FindAll(".ms-loading-spinner").Should().BeEmpty());
@@ -45,7 +45,7 @@ internal static class DatabasePageData
         string? tab = null)
     {
         context.Navigate(
-            "marten/database/object?schema=" + Uri.EscapeDataString(schema) + "&name=" + Uri.EscapeDataString(name)
+            "studio/database/object?schema=" + Uri.EscapeDataString(schema) + "&name=" + Uri.EscapeDataString(name)
             + (tab is null ? string.Empty : "&tab=" + tab));
 
         var page = context.Render<DataStudio.Postgres.Components.Pages.Database.ObjectDetail>();

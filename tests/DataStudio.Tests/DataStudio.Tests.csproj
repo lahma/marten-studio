@@ -1,8 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- The shell's own fast suite (AGENTS.md D16, v2 step 3): no Docker, no database and no module. It references the DataStudio project alone, so
-       what it builds against is a host with ASP.NET Core and nothing else, and the output folder proves at the file level that the shell brings no
-       database driver, no Marten and no Kafka client (ShellFenceTests). A test that composes a real database module lives in the module's suite. -->
+  <!-- The shell's own fast suite (AGENTS.md D16, v2 steps 3 and 4): no Docker and no database. It references the DataStudio project and the one
+       module that needs no database, DataStudio.Kafka (v2 step 4: a Kafka-only host), so that a host with the shell and that module is built and
+       mapped for real, and its output folder is the file-level proof that such a host holds no Npgsql and no DataStudio.Postgres*
+       (KafkaOnlyHostTests). The shell's own purity is held at the project file, the restore graph and the built assembly (ShellFenceTests), which
+       the reference does not touch. A test that composes a database module lives in the module's suite. -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <IsTestProject>true</IsTestProject>
@@ -26,6 +28,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/DataStudio/DataStudio.csproj" />
+    <ProjectReference Include="../../src/DataStudio.Kafka/DataStudio.Kafka.csproj" />
   </ItemGroup>
 
   <ItemGroup>

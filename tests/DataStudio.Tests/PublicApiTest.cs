@@ -9,10 +9,9 @@ namespace DataStudio.Tests;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The shell's registration, mapping and options arrive with v2 step 4, and until then it has no public type that is not a Razor component: its
-/// services, its settings seam and its endpoint mapper are internal, and the modules reach them through <c>InternalsVisibleTo</c>. D20 keeps the
-/// components out of the snapshot, so the baseline is the assembly's header and nothing else, and a type that appears in it is a mistake rather
-/// than a feature.
+/// The shell's public surface is its registration, its mapping, its builder and its options (v2 step 4); everything else - its services, its settings
+/// seam and its endpoint mapper - is internal, and the modules reach it through <c>InternalsVisibleTo</c>. D20 keeps the components out of the
+/// snapshot, so a type that appears in it and is not one of the four is a mistake rather than a feature.
 /// </para>
 /// <para>
 /// A failure here is not automatically a bug. Run the test, open the <c>.received.txt</c> beside the <c>.verified.txt</c>, read the diff line by
@@ -35,9 +34,13 @@ public class PublicApiTest
 
     /// <summary>The public types that are not components, by name, so an extra one fails with its name rather than a diff.</summary>
     [Fact]
-    public void Every_public_type_is_a_Razor_component()
+    public void The_public_types_that_are_not_Razor_components_are_the_registration_the_mapping_the_builder_and_the_options()
     {
-        Exported().Should().BeEmpty("the shell's services are internal until step 4 gives it its registration");
+        Exported().Should().Equal(
+            "DataStudio.DataStudioBuilder",
+            "DataStudio.DataStudioEndpointRouteBuilderExtensions",
+            "DataStudio.DataStudioOptions",
+            "DataStudio.DataStudioServiceCollectionExtensions");
     }
 
     private static string[] Exported() =>

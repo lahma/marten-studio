@@ -25,7 +25,7 @@ public class KafkaRecordValueTests
             .Add(x => x.Model, match)
             .Add(x => x.Access, access)
             .Add(x => x.OnRecordPage, recordPage)
-            .Add(x => x.RecordHref, "/postgres/kafka/record?topic=orders&partition=0&offset=0"));
+            .Add(x => x.RecordHref, "/studio/kafka/record?topic=orders&partition=0&offset=0"));
 
     [Fact]
     public async Task A_tombstone_an_empty_value_and_a_withheld_value_read_as_sentences()

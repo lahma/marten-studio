@@ -177,7 +177,7 @@ public sealed class MartenStudioOptions
     /// </para>
     /// <para>
     /// Keys are compared ignoring case. The entries are read once, at startup (a frozen copy is taken when options
-    /// validation runs): add them in the <c>AddMartenStudio</c> callback, because a change made afterwards is not seen.
+    /// validation runs): add them in the <c>AddMarten</c> callback, because a change made afterwards is not seen.
     /// Validation at startup refuses a key that is not a check of this studio, and a reason that is empty, whitespace or
     /// longer than 500 characters.
     /// </para>
@@ -214,7 +214,7 @@ public sealed class MartenStudioOptions
     /// The dictionary applies to <b>every store</b> of the application, by projection name alone; a name that no projection of
     /// a store has is not an error (projections are often registered per environment), the disclosure just says so. Keys are
     /// compared exactly, case included. The entries are <b>read once, at startup</b> (options validation freezes a copy):
-    /// add them in the <c>AddMartenStudio</c> callback, because a change made afterwards is not seen. Validation at startup
+    /// add them in the <c>AddMarten</c> callback, because a change made afterwards is not seen. Validation at startup
     /// refuses an entry whose numbers are not greater than zero or whose critical threshold is below its warning
     /// threshold, naming the projection.
     /// </para>

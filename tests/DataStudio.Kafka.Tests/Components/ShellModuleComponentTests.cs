@@ -96,7 +96,7 @@ public class ShellModuleComponentTests
         using KafkaStudioHarness off = new();
         using KafkaStudioHarness on = new(static o => o.Capabilities = KafkaStudioCapabilities.All());
         using KafkaStudioHarness readOnly = new(static o => o.Capabilities = KafkaStudioCapabilities.All());
-        readOnly.Context.Options.ReadOnly = true;
+        readOnly.Context.ShellOptions.ReadOnly = true;
         await off.Context.ReadyAsync();
         await on.Context.ReadyAsync();
         await readOnly.Context.ReadyAsync();
@@ -116,7 +116,7 @@ public class ShellModuleComponentTests
         using KafkaStudioHarness searchOnly = new(static o => o.Capabilities.SearchRecords = true);
         using KafkaStudioHarness on = new(static o => o.Capabilities = KafkaStudioCapabilities.All());
         using KafkaStudioHarness readOnly = new(static o => o.Capabilities = KafkaStudioCapabilities.All());
-        readOnly.Context.Options.ReadOnly = true;
+        readOnly.Context.ShellOptions.ReadOnly = true;
         await off.Context.ReadyAsync();
         await searchOnly.Context.ReadyAsync();
         await on.Context.ReadyAsync();
@@ -156,7 +156,7 @@ public class ShellModuleComponentTests
 
         string[] lines = [.. rail.Find(".ms-rail-credit").QuerySelectorAll(".ms-rail-credit-line").Select(static x => x.TextContent.Trim())];
         lines.Should().HaveCount(4);
-        lines[0].Should().StartWith("Postgres Studio ");
+        lines[0].Should().StartWith("Data Studio ");
         lines[1].Should().Be("KStudio for Apache Kafka®");
         lines[2].Should().Be("MIT licensed");
         lines[3].Should().Be("by Marko Lahma");
@@ -215,7 +215,7 @@ public class ShellModuleComponentTests
     public async Task ReadOnly_counts_the_kafka_capabilities_off()
     {
         using KafkaStudioHarness harness = new(static o => o.Capabilities = KafkaStudioCapabilities.All());
-        harness.Context.Options.ReadOnly = true;
+        harness.Context.ShellOptions.ReadOnly = true;
         await harness.Context.ReadyAsync();
 
         IRenderedComponent<CapabilityBanner> banner = harness.Context.Render<CapabilityBanner>();
@@ -280,7 +280,7 @@ public class ShellModuleComponentTests
         harness.State.ActiveCluster.Should().Be(KafkaStudioHarness.Primary, "the premise: the state first loaded from an address that named none");
 
         // Arriving from a host page, or by Back: the state is the circuit's, so it still holds the cluster it last had.
-        harness.Context.Navigate("/postgres/kafka?cluster=secondary");
+        harness.Context.Navigate("/studio/kafka?cluster=secondary");
         harness.Context.Render<KafkaPageFrame>(p => p.Add(x => x.ChildContent, ProbeBody(new Counter())));
 
         harness.State.ActiveCluster.Should().Be(KafkaStudioHarness.Secondary);
@@ -294,7 +294,7 @@ public class ShellModuleComponentTests
         await harness.Context.ReadyAsync();
         await harness.State.EnsureInitializedAsync(Xunit.TestContext.Current.CancellationToken);
 
-        harness.Context.Navigate("/postgres/kafka?cluster=secondary");
+        harness.Context.Navigate("/studio/kafka?cluster=secondary");
         harness.Context.Render<KafkaPageFrame>(p => p.Add(x => x.ChildContent, ProbeBody(new Counter())));
 
         harness.State.ActiveCluster.Should().Be(KafkaStudioHarness.Primary, "a refused cluster reads as an unknown one");
@@ -360,7 +360,7 @@ public class ShellModuleComponentTests
 
         off.Markup.Should().Contain("Searching records is not available here.").And.NotContain("KafkaStudioOptions");
 
-        harness.Context.Options.ReadOnly = true;
+        harness.Context.ShellOptions.ReadOnly = true;
         IRenderedComponent<KafkaCapabilityDisabled> readOnly = harness.Context.Render<KafkaCapabilityDisabled>(
             p => p.Add(x => x.Capability, nameof(KafkaStudioCapabilities.SearchRecords)));
 

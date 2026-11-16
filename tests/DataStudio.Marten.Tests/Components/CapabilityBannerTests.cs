@@ -6,6 +6,8 @@ using DataStudio.Components.Layout;
 using DataStudio.Marten.Services;
 using DataStudio.Postgres.Services;
 
+using Microsoft.Extensions.DependencyInjection;
+
 namespace DataStudio.Marten.Tests.Components;
 
 /// <summary>
@@ -42,16 +44,33 @@ public class CapabilityBannerTests
     public void ReadOnly_is_an_amber_chip_of_its_own_and_there_is_no_popover()
     {
         using var context = new StudioComponentContext().WithAllCapabilities();
-        context.Options.ReadOnly = true;
+        context.ShellOptions.ReadOnly = true;
 
         var banner = context.Render<CapabilityBanner>();
 
         var chip = banner.Find(".ms-chip");
         chip.TextContent.Trim().Should().Be("Read-only");
         chip.ClassList.Should().Contain("ms-chip-warning");
-        chip.GetAttribute("title").Should().Contain("MartenStudioOptions.ReadOnly");
+        chip.GetAttribute("title").Should().Contain("DataStudioOptions.ReadOnly");
 
         banner.FindAll("#ms-capability-popover").Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// A module's own switch turns only that module's capabilities off: the chip is not the shell's "Read-only", it counts the module's
+    /// capabilities as effectively off, and the guard names the module's option (the shell's chip names the shell's).
+    /// </summary>
+    [Fact]
+    public void A_modules_own_ReadOnly_turns_its_capabilities_off_and_is_not_the_shells_chip()
+    {
+        using var context = new StudioComponentContext().WithAllCapabilities();
+        context.Options.ReadOnly = true;
+
+        var banner = context.Render<CapabilityBanner>();
+
+        banner.Find(".ms-chip").TextContent.Trim().Should().StartWith("0 / 14");
+        banner.FindAll(".ms-capability-on").Should().BeEmpty("every one of the module's rows is off while its own switch is on");
+        context.Services.GetRequiredService<DataStudio.Postgres.Services.Settings.IStudioSettings>().ReadOnlyOptionName.Should().Be("MartenStudioOptions.ReadOnly");
     }
 
     /// <summary>

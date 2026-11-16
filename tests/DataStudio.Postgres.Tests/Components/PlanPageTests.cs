@@ -277,7 +277,7 @@ public class PlanPageTests
     public async Task A_link_reopens_the_page_with_the_editor_the_mode_and_the_options_filled_and_does_not_run()
     {
         await using PostgresStudioComponentContext context = await ReadyAsync();
-        context.Navigate("postgres/plan?sql=" + Uri.EscapeDataString("select 1 from t where a = $1") + "&mode=analyze&options=verbose,wal");
+        context.Navigate("studio/plan?sql=" + Uri.EscapeDataString("select 1 from t where a = $1") + "&mode=analyze&options=verbose,wal");
 
         IRenderedComponent<PlanPage> page = context.Render<PlanPage>();
 

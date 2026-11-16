@@ -86,8 +86,8 @@ public class PublicApiTest
             .Should().Equal(
                 "DataStudio.Kafka.KafkaStudioCapabilities",
                 "DataStudio.Kafka.KafkaStudioOptions",
-                "DataStudio.Kafka.KafkaStudioServiceCollectionExtensions",
-                "DataStudio.Kafka.KafkaTopicResource");
+                "DataStudio.Kafka.KafkaTopicResource",
+                "DataStudio.KafkaDataStudioBuilderExtensions");
     }
 
     private static ApiGeneratorOptions Options(Assembly assembly) => new()

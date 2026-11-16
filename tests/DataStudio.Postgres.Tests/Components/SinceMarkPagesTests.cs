@@ -377,7 +377,7 @@ public class SinceMarkPagesTests
         (PostgresStudioComponentContext context, FakeStatements service) = await StatementsContextAsync(Statements(T0, 10, 100, 1_000));
         await using PostgresStudioComponentContext disposing = context;
         service.Plan = AdvisorPlan;
-        context.Navigate("postgres/statements?queryid=1");
+        context.Navigate("studio/statements?queryid=1");
 
         var page = context.Render<StatementsPage>();
         page.WaitForAssertion(() => page.Find(".ms-plan-drill-counts").TextContent.Should().Contain("1,234 calls"));
@@ -403,7 +403,7 @@ public class SinceMarkPagesTests
         (PostgresStudioComponentContext context, FakeStatements service) = await StatementsContextAsync(Statements(T0, 10, 100, 1_000));
         await using PostgresStudioComponentContext disposing = context;
         service.Plan = AdvisorPlan;
-        context.Navigate("postgres/statements?queryid=2");
+        context.Navigate("studio/statements?queryid=2");
 
         // Statement 2 is new to the kept statements after the mark, on a server that does not give an entry its own start.
         StatementsView later = Statements(T1, 30, 300, 1_400);

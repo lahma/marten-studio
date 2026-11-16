@@ -291,7 +291,7 @@ public class DatabaseRailTests
         var page = DatabasePageData.RenderBrowser(context);
         int before = context.JSInterop.Invocations["martenStudio.disclosure.close"].Count;
 
-        context.Navigate("marten/database?schema=quartz");
+        context.Navigate("studio/database?schema=quartz");
         page.WaitForAssertion(() => page.Find(".ms-db-rail-schemas a.ms-rail-link-active").TextContent.Should().Contain("quartz"));
 
         var closes = context.JSInterop.Invocations["martenStudio.disclosure.close"];

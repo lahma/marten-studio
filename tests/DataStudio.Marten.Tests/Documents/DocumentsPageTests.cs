@@ -354,7 +354,7 @@ public class DocumentsPageTests
         using var context = new DocumentsComponentContext();
         context.Data.Rail = FakeDocuments.Rail();
         context.Data.Page = FakeDocuments.Page(rows: [FakeDocuments.Row("1")], hasMore: true);
-        context.Navigate("marten/documents/customer?paging=offset&page=500&size=50");
+        context.Navigate("studio/documents/customer?paging=offset&page=500&size=50");
 
         var page = Render(context, "customer");
 

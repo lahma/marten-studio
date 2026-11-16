@@ -6,7 +6,7 @@ namespace DataStudio.Marten.Tests.Services;
 
 /// <summary>
 /// The diagnostics engine is registered once per container (0.11-C): <c>AddPostgresDiagnostics()</c> beside
-/// <c>AddMartenStudio()</c>, in either order, is refused with the reason, as it is beside <c>AddPostgresStudio()</c>.
+/// <c>AddMarten()</c>, in either order, is refused with the reason, as it is beside <c>AddPostgres()</c>.
 /// </summary>
 public class DiagnosticsRegistrationTests
 {
@@ -19,7 +19,7 @@ public class DiagnosticsRegistrationTests
         Action add = () => services.AddPostgresDiagnostics();
 
         add.Should().Throw<InvalidOperationException>()
-            .Which.Message.Should().Contain("AddMartenStudio()").And.Contain("already registers the diagnostics engine").And.Contain("Remove AddPostgresDiagnostics()");
+            .Which.Message.Should().Contain("AddMarten()").And.Contain("already registers the diagnostics engine").And.Contain("Remove AddPostgresDiagnostics()");
     }
 
     [Fact]
@@ -27,13 +27,14 @@ public class DiagnosticsRegistrationTests
     {
         ServiceCollection services = new();
         services.AddPostgresDiagnostics();
+        DataStudioBuilder builder = services.AddDataStudio();
         int before = services.Count;
 
-        Action add = () => services.AddDataStudio().AddMarten();
+        Action add = () => builder.AddMarten();
 
         add.Should().Throw<InvalidOperationException>()
-            .Which.Message.Should().Contain("AddMartenStudio()").And.Contain("already registers the diagnostics engine").And.Contain("Remove AddPostgresDiagnostics()");
-        services.Count.Should().Be(before, "refused before anything of the studio is registered");
+            .Which.Message.Should().Contain("AddMarten()").And.Contain("already registers the diagnostics engine").And.Contain("Remove AddPostgresDiagnostics()");
+        services.Count.Should().Be(before, "refused before anything of the module is registered");
     }
 
     [Fact]

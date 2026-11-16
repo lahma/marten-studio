@@ -301,7 +301,7 @@ public class TableRowsTabTests
         href.Should().StartWith("database/row?schema=quartz&name=qrtz_triggers&key.sched_name=QuartzScheduler&key.trigger_name=trigger-00&key.trigger_group=DEFAULT");
         Query(href, "store").Should().Be("default");
         Query(href, "db").Should().Be("localhost.marten");
-        Query(href, "from").Should().StartWith("marten/database/object?schema=quartz&name=qrtz_triggers&tab=rows");
+        Query(href, "from").Should().StartWith("studio/database/object?schema=quartz&name=qrtz_triggers&tab=rows");
 
         Cell(tab, 0, "sched_name").ClassList.Should().Contain("ms-row-sticky", "the row's name stays put while the rest scrolls");
         Cell(tab, 0, "trigger_name").QuerySelector("a").Should().BeNull("one link per row, not one per key column");

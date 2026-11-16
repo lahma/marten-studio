@@ -75,7 +75,7 @@ public class DatabasePagePrerenderTests
     public async Task Row_detail_reads_nothing_while_prerendered_and_once_in_the_circuit()
     {
         await using StudioComponentContext context = await RowUiData.ContextAsync();
-        context.Navigate("marten/database/row?schema=quartz&name=qrtz_triggers&key.sched_name=QuartzScheduler&key.trigger_name=trigger-00&key.trigger_group=DEFAULT");
+        context.Navigate("studio/database/row?schema=quartz&name=qrtz_triggers&key.sched_name=QuartzScheduler&key.trigger_name=trigger-00&key.trigger_group=DEFAULT");
 
         string html = await StaticAsync<RowDetail>(context);
 
@@ -94,10 +94,10 @@ public class DatabasePagePrerenderTests
         using StudioComponentContext context = DatabasePageData.Context();
         await context.ReadyAsync();
 
-        context.Navigate("marten/database/object?schema=quartz&name=qrtz_triggers&tab=columns");
+        context.Navigate("studio/database/object?schema=quartz&name=qrtz_triggers&tab=columns");
         (await StaticAsync<ObjectDetail>(context)).Should().Contain(Spinner);
 
-        context.Navigate("marten/database?schema=quartz");
+        context.Navigate("studio/database?schema=quartz");
         (await StaticAsync<DatabaseObjects>(context)).Should().Contain(Spinner);
 
         context.DatabaseObjects.Reads.Should().Be(0, "neither page asks the service anything until the circuit renders it");
@@ -124,13 +124,13 @@ public class DatabasePagePrerenderTests
         using StudioComponentContext context = real.Context();
         await context.ReadyAsync();
 
-        context.Navigate("marten/database");
+        context.Navigate("studio/database");
         await real.PrerenderAsync<DatabaseObjects>(context);
         real.Circuit();
         var browser = context.Render<DatabaseObjects>();
         browser.WaitForAssertion(() => browser.FindAll(".ms-db-grid, .ms-empty, .ms-error-alert, .ms-db-refusal").Should().NotBeEmpty());
 
-        context.Navigate("marten/database/object?schema=public&name=host_settings");
+        context.Navigate("studio/database/object?schema=public&name=host_settings");
         await real.PrerenderAsync<ObjectDetail>(context);
         real.Circuit();
         var detail = context.Render<ObjectDetail>();
@@ -152,7 +152,7 @@ public class DatabasePagePrerenderTests
         using StudioComponentContext context = real.Context();
         await context.ReadyAsync();
 
-        context.Navigate("marten/database/object?schema=quartz&name=qrtz_triggers&tab=rows");
+        context.Navigate("studio/database/object?schema=quartz&name=qrtz_triggers&tab=rows");
         await real.PrerenderAsync<ObjectDetail>(context);
         real.Circuit();
         var page = context.Render<ObjectDetail>();
@@ -174,7 +174,7 @@ public class DatabasePagePrerenderTests
         using StudioComponentContext context = real.Context();
         await context.ReadyAsync();
 
-        context.Navigate("marten/database?schema=quartz&kind=views");
+        context.Navigate("studio/database?schema=quartz&kind=views");
         await real.PrerenderAsync<DatabaseObjects>(context);
         real.Circuit();
         var page = context.Render<DatabaseObjects>();
@@ -200,7 +200,7 @@ public class DatabasePagePrerenderTests
         using StudioComponentContext context = real.Context();
         await context.ReadyAsync();
 
-        context.Navigate("marten/database/object?schema=quartz&name=qrtz_triggers");
+        context.Navigate("studio/database/object?schema=quartz&name=qrtz_triggers");
         await real.PrerenderAsync<ObjectDetail>(context);
         real.Circuit();
         var page = context.Render<ObjectDetail>();

@@ -21,7 +21,7 @@ namespace DataStudio.Postgres.Services.Postgres;
 /// <remarks>
 /// <para>
 /// <b>Lazy, like MartenStudio's store registry.</b> Holds the <see cref="IServiceCollection" /> captured at
-/// <c>AddPostgresStudio</c> time and scans it on first use, because <c>AddPostgresStudio()</c> may be called before
+/// <c>AddPostgres</c> time and scans it on first use, because <c>AddPostgres()</c> may be called before
 /// <c>AddNpgsqlDataSource()</c>. Only a descriptor whose service type is exactly <see cref="NpgsqlDataSource" />, unkeyed,
 /// counts: <c>AddNpgsqlDataSource</c> also registers <c>DbDataSource</c> and a transient <c>NpgsqlConnection</c>, and
 /// neither is a source (PS-0, E7: it registers factories only, so nothing here reads an instance off a descriptor). And

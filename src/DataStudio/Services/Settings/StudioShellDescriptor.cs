@@ -39,7 +39,7 @@ internal sealed class StudioShellDescriptor
 
     /// <summary>
     /// The module whose pages sit directly under the mount, or <see langword="null" /> when none is the root: a shell with only a module that
-    /// keeps its own segment (Kafka) has none, and its front address leads to <see cref="First" />'s home.
+    /// keeps its own segment has none, and its front address leads to <see cref="First" />'s home.
     /// </summary>
     public IStudioModule? Root => root.Value;
 

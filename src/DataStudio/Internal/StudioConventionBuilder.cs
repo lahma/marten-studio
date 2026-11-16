@@ -22,7 +22,7 @@ using Microsoft.AspNetCore.Builder;
 namespace DataStudio.Internal;
 
 /// <summary>
-/// What <c>MapMartenStudio</c> hands back: everything the studio mapped, as one thing to say something
+/// What <c>MapDataStudio</c> hands back: everything the studio mapped, as one thing to say something
 /// about.
 /// </summary>
 /// <remarks>
@@ -68,7 +68,7 @@ internal sealed class StudioConventionBuilder : IEndpointConventionBuilder
     /// <param name="hub">
     /// The studio's live-events hub, or <see langword="null" /> when there is none. There is none in v1:
     /// pages poll through a snapshot cache rather than opening a second host-visible endpoint (D10), and
-    /// the slot is kept because adding the hub later must not change what <c>MapMartenStudio</c> returns.
+    /// the slot is kept because adding the hub later must not change what <c>MapDataStudio</c> returns.
     /// </param>
     /// <param name="frameworkFiles">
     /// The forward of the host's own <c>_framework</c> files under the mount path: host-owned content, so it is governed

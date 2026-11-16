@@ -50,12 +50,12 @@ namespace DataStudio.Internal;
 /// nothing.
 /// </para>
 /// <para>
-/// Registered by <c>AddMartenStudio</c>. Adding it without mapping it leaves nothing marked and nothing
+/// Registered by <c>AddMarten</c>. Adding it without mapping it leaves nothing marked and nothing
 /// to refuse, which is right: an application that registered the services and never mapped the endpoints
 /// serves nothing.
 /// </para>
 /// <para>
-/// A <c>MapMartenStudio()</c> made after the host has started — from a hosted service, from a lazily
+/// A <c>MapDataStudio()</c> made after the host has started — from a hosted service, from a lazily
 /// built <see cref="EndpointDataSource" />, from anything that runs once requests are already being
 /// served — is out of scope and always will be. Both of this guard's passes have run by then, so such a
 /// mapping is never checked and never refused. There is no hook that would catch it without inspecting

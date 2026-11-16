@@ -99,7 +99,7 @@ public class ConfirmsRefuseDuringScopeChangeTests
         context.EventData.Groups = FakeEventDataService.GroupList(FakeEventDataService.Group(events: 40, skipped: 3));
         context.EventData.SkipPlan = new DeadLetterGroupSkipPlan(37, 37, 3, null);
         Gate gate = new(context);
-        context.Navigate("marten/events/dead-letters?view=grouped");
+        context.Navigate("studio/events/dead-letters?view=grouped");
 
         IRenderedComponent<DeadLetters> page = context.Render<DeadLetters>();
         await page.Find(".ms-dl-group-skip").ClickAsync(new());
@@ -160,7 +160,7 @@ public class ConfirmsRefuseDuringScopeChangeTests
         context.WithAllCapabilities();
         context.EventData.StreamStates[StreamId] = Stream();
         Gate gate = new(context);
-        context.Navigate("marten/events/streams/s?id=" + StreamId);
+        context.Navigate("studio/events/streams/s?id=" + StreamId);
 
         IRenderedComponent<StreamDetail> page = context.Render<StreamDetail>();
         await page.Find("button.ms-button-danger").ClickAsync(new());
@@ -188,7 +188,7 @@ public class ConfirmsRefuseDuringScopeChangeTests
         context.EventData.StreamStates[StreamId] = Stream();
         context.EventData.CompactionPlans[StreamId] = FakeEventDataService.Offered(StreamId, version: 3);
         Gate gate = new(context);
-        context.Navigate("marten/events/streams/s?id=" + StreamId);
+        context.Navigate("studio/events/streams/s?id=" + StreamId);
 
         IRenderedComponent<StreamDetail> page = context.Render<StreamDetail>();
         await page.Find(".ms-stream-compact-button").ClickAsync(new());
@@ -238,7 +238,7 @@ public class ConfirmsRefuseDuringScopeChangeTests
         context.Writes.Preview = FakeDocumentWriteService.Ready(stored, edited, "legacyNote");
         context.JSInterop.Setup<string?>("martenStudio.json.readValue", _ => true).SetResult(edited);
         Gate gate = new(context);
-        context.Navigate("marten/documents/customer/doc?id=" + id);
+        context.Navigate("studio/documents/customer/doc?id=" + id);
 
         IRenderedComponent<DetailPage> page = context.Render<DetailPage>(parameters => parameters.Add(x => x.Alias, "customer"));
         page.Find(".ms-doc-edit-btn").Click();

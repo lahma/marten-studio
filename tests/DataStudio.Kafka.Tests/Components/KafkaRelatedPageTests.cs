@@ -69,7 +69,7 @@ public class KafkaRelatedPageTests
         await rig.Studio.State.EnsureInitializedAsync(Xunit.TestContext.Current.CancellationToken);
 
         // A prerendering request has no fragment: a browser never sends one.
-        KafkaAddress.ReadSeed("http://localhost/postgres/kafka/related?cluster=test", 1_000).Should().BeNull();
+        KafkaAddress.ReadSeed("http://localhost/studio/kafka/related?cluster=test", 1_000).Should().BeNull();
         rig.Studio.Navigation.Simulate("kafka/related?cluster=test#link=document&type=Order&v=ORD-1", intercepted: false);
 
         TaskCompletionSource ready = new(TaskCreationOptions.RunContinuationsAsynchronously);

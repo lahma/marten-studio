@@ -21,7 +21,7 @@ public class EventFlowPageTests
 {
     private static IRenderedComponent<FlowPage> Render(StudioComponentContext context, string query = "")
     {
-        context.Navigate("marten/events/flow" + query);
+        context.Navigate("studio/events/flow" + query);
 
         return context.Render<FlowPage>();
     }

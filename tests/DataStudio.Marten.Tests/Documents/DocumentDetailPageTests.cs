@@ -57,7 +57,7 @@ public class DocumentDetailPageTests
 
     private static IRenderedComponent<DetailPage> Render(DocumentsComponentContext context)
     {
-        context.Navigate($"marten/documents/customer/doc?id={Id}");
+        context.Navigate($"studio/documents/customer/doc?id={Id}");
 
         // The id is a [SupplyParameterFromQuery] parameter, and bUnit insists it arrive the way the
         // browser delivers it: through the navigation manager, not as a component parameter.
@@ -517,7 +517,7 @@ public class DocumentDetailPageTests
     public void Prev_and_next_come_from_the_list_the_document_was_opened_from()
     {
         using var context = new DocumentsComponentContext();
-        context.Browser.RememberPage("customer", ["a", Id, "z"], "marten/documents/customer");
+        context.Browser.RememberPage("customer", ["a", Id, "z"], "studio/documents/customer");
         context.Data.Detail = DocumentDetailResult.Ok(Detail());
 
         var page = Render(context);

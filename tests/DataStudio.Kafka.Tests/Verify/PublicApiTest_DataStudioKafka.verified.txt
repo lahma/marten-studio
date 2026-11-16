@@ -19,10 +19,6 @@ namespace DataStudio.Kafka
         public string? ClusterAuthorizationPolicy { get; set; }
         public DataStudio.Kafka.KafkaStudioOptions ExternalLink(string label, string urlTemplate) { }
     }
-    public static class KafkaStudioServiceCollectionExtensions
-    {
-        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddKafkaStudio(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Action<DataStudio.Kafka.KafkaStudioOptions>? configure = null) { }
-    }
     public sealed record KafkaTopicResource : System.IEquatable<DataStudio.Kafka.KafkaTopicResource>
     {
         public KafkaTopicResource(string Cluster, string? TenantId, string? Topic, string? Capability) { }
@@ -30,5 +26,12 @@ namespace DataStudio.Kafka
         public string Cluster { get; init; }
         public string? TenantId { get; init; }
         public string? Topic { get; init; }
+    }
+}
+namespace DataStudio
+{
+    public static class KafkaDataStudioBuilderExtensions
+    {
+        public static DataStudio.DataStudioBuilder AddKafka(this DataStudio.DataStudioBuilder builder, System.Action<DataStudio.Kafka.KafkaStudioOptions>? configure = null) { }
     }
 }

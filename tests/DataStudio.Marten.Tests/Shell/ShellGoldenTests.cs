@@ -34,10 +34,10 @@ public class ShellGoldenTests
     }
 
     [Theory]
-    [InlineData("/marten")]
-    [InlineData("/marten/documents")]
-    [InlineData("/marten/health")]
-    [InlineData("/marten/activity")]
+    [InlineData("/studio")]
+    [InlineData("/studio/documents")]
+    [InlineData("/studio/health")]
+    [InlineData("/studio/activity")]
     public async Task The_prerendered_chrome_of_a_page_is_stable(string path)
     {
         await using WebApplication app = CreateApp();
@@ -52,7 +52,7 @@ public class ShellGoldenTests
     {
         await using WebApplication app = CreateApp(static options => options.Capabilities = MartenStudioCapabilities.All());
 
-        string golden = await ShellGolden.GoldenAsync(app, "/marten", Token);
+        string golden = await ShellGolden.GoldenAsync(app, "/studio", Token);
 
         await Verify(golden);
     }

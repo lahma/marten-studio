@@ -199,7 +199,7 @@ public class EventsWritePolicyTests
 
     private static IRenderedComponent<StreamDetail> RenderStream(StudioComponentContext context)
     {
-        context.Navigate("marten/events/streams/s?id=" + StreamId);
+        context.Navigate("studio/events/streams/s?id=" + StreamId);
         return context.Render<StreamDetail>();
     }
 

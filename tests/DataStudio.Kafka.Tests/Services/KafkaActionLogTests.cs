@@ -21,7 +21,7 @@ public class KafkaActionLogTests
         using KafkaStudioHarness harness = new();
         CapturingLoggerProvider captured = new();
         KafkaActionLog log = new(harness.Context.ActivityRing, captured.CreateFactory().CreateLogger<KafkaActionLog>(), harness.Visitor);
-        KafkaCapabilityDeniedException denial = new(KafkaCapability.SearchRecords, DataStudio.Services.CapabilityDenialReason.Disabled, "PostgresStudioOptions.ReadOnly");
+        KafkaCapabilityDeniedException denial = new(KafkaCapability.SearchRecords, DataStudio.Services.CapabilityDenialReason.Disabled, "DataStudioOptions.ReadOnly");
 
         log.RecordCapabilityDenied(KafkaStudioHarness.Primary, ["orders.v1"], denial, "SearchRecords", "orders.v1");
 
@@ -66,7 +66,7 @@ public class KafkaActionLogTests
     public async Task A_line_break_in_a_cluster_from_the_address_is_escaped_in_9610()
     {
         using KafkaStudioHarness harness = new(null, KafkaStudioHarness.Primary);
-        harness.Context.Navigate("/postgres/kafka?cluster=evil%0D%0A2026-11-12%20forged%20line");
+        harness.Context.Navigate("/studio/kafka?cluster=evil%0D%0A2026-11-12%20forged%20line");
         CapturingLoggerProvider captured = new();
         KafkaState state = new(
             harness.Entries,

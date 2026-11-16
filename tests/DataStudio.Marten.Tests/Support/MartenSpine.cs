@@ -1,6 +1,7 @@
 using DataStudio.Components;
 using DataStudio.Marten.Services;
 using DataStudio.Services;
+using DataStudio.Services.Settings;
 using DataStudio.Postgres.Services.Settings;
 using DataStudio.Postgres.Services.Sources;
 
@@ -15,7 +16,7 @@ namespace DataStudio.Marten.Tests.Support;
 
 /// <summary>
 /// The shared studio's services in MartenStudio's terms, for a test that builds them by hand rather than through
-/// <c>AddMartenStudio()</c> - so that the shared services' constructors, which take the studio's settings and
+/// <c>AddMarten()</c> - so that the shared services' constructors, which take the studio's settings and
 /// descriptor rather than <see cref="MartenStudioOptions" />, are spelled once.
 /// </summary>
 internal static class MartenSpine
@@ -26,7 +27,7 @@ internal static class MartenSpine
     /// <summary>MartenStudio's route table.</summary>
     public static StudioRouteTable Routes => RouteTable.Value;
 
-    private static readonly Lazy<StudioRouteTable> RouteTable = new(static () => new StudioRouteTable(Descriptor.PageAssemblies));
+    private static readonly Lazy<StudioRouteTable> RouteTable = new(static () => new StudioRouteTable([.. Descriptor.PageAssemblies, StudioShellDescriptor.ShellPages]));
 
     /// <summary>The settings over <paramref name="options" />, or over the defaults.</summary>
     public static MartenStudioSettings Settings(MartenStudioOptions? options = null) => MartenStudioSettings.Of(options ?? new MartenStudioOptions());

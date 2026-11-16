@@ -217,14 +217,14 @@ public class KafkaExportServiceTests
         await using KafkaSearchRig rig = Rig();
         Seed(rig);
         (KafkaSearchPlanned planned, List<KafkaMatch> matches, KafkaScanResult result) = await SearchAsync(rig, ["orders"]);
-        rig.Studio.Context.Options.ReadOnly = true;
+        rig.Studio.Context.ShellOptions.ReadOnly = true;
         Capture capture = new();
 
         KafkaExportOutcome outcome = await rig.Export().ExportAsync(InputOf(rig, planned, matches, result), capture.DeliverAsync, Ct);
 
         outcome.Text.Should().Be("Searching records is not available here.", "the prerequisite is the first refusal");
         capture.Calls.Should().Be(0);
-        Exports(rig).Should().ContainSingle().Which.Message.Should().Contain("PostgresStudioOptions.ReadOnly", "the audit entry still names the host's option");
+        Exports(rig).Should().ContainSingle().Which.Message.Should().Contain("DataStudioOptions.ReadOnly", "the audit entry still names the host's option");
     }
 
     [Fact]

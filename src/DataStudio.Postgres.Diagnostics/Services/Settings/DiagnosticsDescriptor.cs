@@ -20,7 +20,7 @@ internal sealed record StudioHealthCheckAssembly(Assembly Assembly, IReadOnlySet
 /// health checks are discovered in and how it names a source.
 /// </summary>
 /// <remarks>
-/// A singleton, registered by <c>AddPostgresDiagnostics()</c> or by a studio's <c>Add*Studio()</c>, whose
+/// A singleton, registered by <c>AddPostgresDiagnostics()</c> or by a studio's <c>Add…()</c>, whose
 /// <see cref="DiagnosticsDescriptor" /> is one of these with the studio's pages, navigation and authorization resource added.
 /// Nothing on it is about a visitor and nothing on it does IO.
 /// </remarks>

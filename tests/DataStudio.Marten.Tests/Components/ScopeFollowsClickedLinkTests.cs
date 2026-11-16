@@ -26,7 +26,7 @@ public class ScopeFollowsClickedLinkTests
 
     private static async Task<Rig> StartAsync(string relativeStart = "")
     {
-        ClickableNavigationManager navigation = new("http://localhost/marten/" + relativeStart);
+        ClickableNavigationManager navigation = new("http://localhost/studio/" + relativeStart);
 
         StudioComponentContext context = new(services =>
         {

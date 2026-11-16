@@ -69,7 +69,7 @@ public class KafkaSearchPageTests
         await rig.Studio.State.EnsureInitializedAsync(Xunit.TestContext.Current.CancellationToken);
 
         // A prerendering request has no fragment: a browser never sends one.
-        KafkaAddress.ReadPredicate("http://localhost/postgres/kafka/search?cluster=test&topic=orders", 4_096).Should().BeNull();
+        KafkaAddress.ReadPredicate("http://localhost/studio/kafka/search?cluster=test&topic=orders", 4_096).Should().BeNull();
         rig.Studio.Navigation.Simulate("kafka/search?cluster=test&topic=orders#q=" + Uri.EscapeDataString("key = 'k1'"), intercepted: false);
 
         // The body is rendered with the frame's Ready still pending: it shows nothing, reads nothing and has not looked at the address.
@@ -593,7 +593,7 @@ public class KafkaSearchPageTests
     public async Task ReadOnly_shows_the_same_neutral_sentence()
     {
         await using KafkaSearchRig rig = new();
-        rig.Studio.Context.Options.ReadOnly = true;
+        rig.Studio.Context.ShellOptions.ReadOnly = true;
         await rig.Studio.Context.ReadyAsync();
         rig.Studio.Navigation.Simulate("kafka/search?cluster=test", intercepted: false);
 

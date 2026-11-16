@@ -99,7 +99,7 @@ internal sealed class DatabaseBrowserConfigurationNotice : IHostedLifecycleServi
     public Task StoppedAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     /// <summary>
-    /// Whether any endpoint carries the studio's marker - on a route builder <c>MapMartenStudio</c> was
+    /// Whether any endpoint carries the studio's marker - on a route builder <c>MapDataStudio</c> was
     /// called on, or, for a mapping onto a group, among the host's finished endpoints.
     /// </summary>
     private bool IsStudioMapped()

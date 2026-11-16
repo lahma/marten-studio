@@ -106,7 +106,7 @@ public class ViewDefinitionsWordsTests
     public async Task The_notice_with_nothing_on_says_what_each_capability_would_add_and_names_no_Marten_option()
     {
         await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
-        context.Navigate("postgres/database");
+        context.Navigate("studio/database");
 
         DatabaseAccessState access = Gate(browse: false, authorized: null, definitions: null).State;
         context.DatabaseObjects.Overview = FakeDatabaseObjects.Overview() with { Access = access };
@@ -125,7 +125,7 @@ public class ViewDefinitionsWordsTests
     public async Task The_notice_with_only_ViewDefinitions_says_definitions_are_shown_and_rows_need_BrowseDatabase()
     {
         await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
-        context.Navigate("postgres/database");
+        context.Navigate("studio/database");
 
         DatabaseAccessState access = Gate(browse: false, authorized: null, DefinitionsPass).State;
         access.DefinitionsOpen.Should().BeTrue();

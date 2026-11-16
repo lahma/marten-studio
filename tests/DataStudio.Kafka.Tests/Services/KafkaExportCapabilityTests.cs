@@ -84,7 +84,7 @@ public class KafkaExportCapabilityTests
         guard.Offered().Should().HaveCount(4);
         guard.Offered().Should().OnlyContain(c => guard.IsEnabled(c));
 
-        harness.Context.Options.ReadOnly = true;
+        harness.Context.ShellOptions.ReadOnly = true;
 
         guard.Offered().Should().OnlyContain(c => !guard.IsEnabled(c), "the host studio's master switch turns every capability off");
     }
@@ -128,7 +128,7 @@ public class KafkaExportCapabilityTests
         harness.Authorization.AllowKafka(static _ => true);
         (await Visible(harness)).Should().ContainSingle();
 
-        harness.Context.Options.ReadOnly = true;
+        harness.Context.ShellOptions.ReadOnly = true;
         (await Visible(harness)).Should().BeEmpty("the host's master switch turns both off");
     }
 

@@ -17,7 +17,7 @@ namespace DataStudio.Marten.Tests.Events;
 /// </summary>
 public class DeadLetterGroupsTests
 {
-    private const string GroupedUri = "marten/events/dead-letters?view=grouped";
+    private const string GroupedUri = "studio/events/dead-letters?view=grouped";
 
     // ------------------------------------------------------------------------------------------------
     // The view
@@ -46,7 +46,7 @@ public class DeadLetterGroupsTests
     {
         using StudioComponentContext context = await ContextAsync();
 
-        IRenderedComponent<DeadLetters> page = Render(context, "marten/events/dead-letters");
+        IRenderedComponent<DeadLetters> page = Render(context, "studio/events/dead-letters");
 
         page.Find(".ms-dl-views .ms-tab-active").TextContent.Should().Be("List");
         page.FindAll(".ms-dl-views a").Single(static x => x.TextContent == "Grouped by cause")
@@ -129,7 +129,7 @@ public class DeadLetterGroupsTests
         DeadLetterGroupKey key = FakeEventDataService.Group().Key;
         context.EventData.DeadLetters = new DeadLetterPage([FakeEventDataService.DeadLetter(Guid.NewGuid())], false);
 
-        IRenderedComponent<DeadLetters> page = Render(context, "marten/events/dead-letters?group=" + key.Encode() + "&projection=OrderSummary");
+        IRenderedComponent<DeadLetters> page = Render(context, "studio/events/dead-letters?group=" + key.Encode() + "&projection=OrderSummary");
 
         DeadLetterQuery query = context.EventData.DeadLetterQueries[^1];
         query.Group.Should().Be(key);
@@ -155,7 +155,7 @@ public class DeadLetterGroupsTests
         context.EventData.DeadLetters = new DeadLetterPage(
             [.. Enumerable.Range(0, letters).Select(static _ => FakeEventDataService.DeadLetter(Guid.NewGuid()))], false) { LettersCut = true };
 
-        IRenderedComponent<DeadLetters> page = Render(context, "marten/events/dead-letters?group=" + key.Encode());
+        IRenderedComponent<DeadLetters> page = Render(context, "studio/events/dead-letters?group=" + key.Encode());
 
         page.Find(".ms-dl-groups-cut").TextContent.Should().Be(DeadLetterGroupText.LettersCut);
         DeadLetterGroupText.LettersCut.Should().Contain("a group opened in the list shows its letters among them");
@@ -167,7 +167,7 @@ public class DeadLetterGroupsTests
         using StudioComponentContext context = await ContextAsync();
         context.EventData.DeadLetters = new DeadLetterPage([FakeEventDataService.DeadLetter(Guid.NewGuid())], false);
 
-        IRenderedComponent<DeadLetters> page = Render(context, "marten/events/dead-letters?group=" + FakeEventDataService.Group().Key.Encode());
+        IRenderedComponent<DeadLetters> page = Render(context, "studio/events/dead-letters?group=" + FakeEventDataService.Group().Key.Encode());
 
         page.FindAll(".ms-dl-groups-cut").Should().BeEmpty();
     }
@@ -177,7 +177,7 @@ public class DeadLetterGroupsTests
     {
         using StudioComponentContext context = await ContextAsync();
 
-        IRenderedComponent<DeadLetters> page = Render(context, "marten/events/dead-letters?group=not-a-group");
+        IRenderedComponent<DeadLetters> page = Render(context, "studio/events/dead-letters?group=not-a-group");
 
         context.EventData.DeadLetterQueries[^1].Group.Should().BeNull();
         page.Find(".ms-dl-group-filter").TextContent.Should().Contain("cannot read");

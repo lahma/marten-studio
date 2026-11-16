@@ -27,7 +27,7 @@ internal sealed class ConnectionHistoryReaderStartCheck(IServiceProvider service
 
     internal const string NoStudio =
         "AddPostgresConnectionHistoryReader() reads the history of the servers a studio or the diagnostics engine reads: "
-        + "register AddPostgresStudio(), AddMartenStudio() or AddPostgresDiagnostics() as well.";
+        + "register AddPostgres(), AddMarten() or AddPostgresDiagnostics() as well.";
 
     /// <inheritdoc />
     public ValidateOptionsResult Validate(string? name, PostgresConnectionHistoryOptions options)

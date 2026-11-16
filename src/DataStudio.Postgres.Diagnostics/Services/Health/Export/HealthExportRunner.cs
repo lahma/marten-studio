@@ -51,7 +51,7 @@ internal sealed record HealthExportLimits(int MaxDatabases, TimeSpan? Budget = n
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Registered only by <c>AddHealthChecks().AddMartenStudio()</c></b>, never by <c>AddMartenStudio()</c>,
+/// <b>Registered only by <c>AddHealthChecks().AddMartenStudio()</c></b>, never by <c>AddMarten()</c>,
 /// and it runs nothing on its own: no timer, no hosted service. A run starts when a probe asks and there is no
 /// result yet, or the one there is has been held for an interval.
 /// </para>
@@ -107,7 +107,7 @@ internal sealed record HealthExportLimits(int MaxDatabases, TimeSpan? Budget = n
 /// </para>
 /// <para>
 /// <b>The studio's own services are looked up lazily</b>, from the root container, so a host that added the
-/// health check but not <c>AddMartenStudio()</c> gets a Degraded result that says so, rather than a probe that
+/// health check but not <c>AddMarten()</c> gets a Degraded result that says so, rather than a probe that
 /// throws.
 /// </para>
 /// </remarks>
@@ -136,10 +136,10 @@ internal sealed class HealthExportRunner
     /// <param name="timeProvider">The host's clock, or the system's.</param>
     /// <param name="limits">How much a run may do; <see cref="HealthExportLimits.Default" /> unless a test says otherwise.</param>
     /// <param name="logger">Where a failure of the export itself goes.</param>
-    /// <param name="throttle">The studio's log throttle, which <c>AddMartenStudio()</c> registers.</param>
+    /// <param name="throttle">The studio's log throttle, which <c>AddMarten()</c> registers.</param>
     /// <param name="lifetime">The host's lifetime, whose stopping ends a run in flight.</param>
     /// <param name="registeredText">
-    /// The words of the studio whose <c>AddHealthChecks().Add*Studio()</c> registered this runner, for the one sentence
+    /// The words of the studio whose <c>AddHealthChecks().Add…()</c> registered this runner, for the one sentence
     /// said when that studio's own services are missing: MartenStudio's when <see langword="null" />, which is what its
     /// registration leaves it. A studio that registers the runner itself hands its own.
     /// </param>
@@ -169,7 +169,7 @@ internal sealed class HealthExportRunner
     /// <summary>
     /// The words the export's own sentences and its 9270 are in: the studio's settings' when they are registered, and
     /// otherwise those of the studio whose health-check registration made this runner (<c>registeredText</c>) - which
-    /// is the only one that can name the <c>Add*Studio()</c> call a host forgot.
+    /// is the only one that can name the <c>Add…()</c> call a host forgot.
     /// </summary>
     internal StudioText Text
     {

@@ -69,7 +69,7 @@ public class UnplacedTenantPageTests
         using DocumentsComponentContext context = TwoDatabases();
         context.Catalog.WithPlacement("default", "initech", placedIn);
         await context.State.EnsureInitializedAsync(Token);
-        context.Navigate($"marten/documents/customer/doc?id={Id}&tenant=initech");
+        context.Navigate($"studio/documents/customer/doc?id={Id}&tenant=initech");
 
         IRenderedComponent<DetailPage> page = context.Render<DetailPage>(parameters => parameters.Add(x => x.Alias, "customer"));
 
@@ -92,7 +92,7 @@ public class UnplacedTenantPageTests
         using DocumentsComponentContext context = TwoDatabases();
         context.Catalog.WithPlacement("default", "initech", null);
         await context.State.EnsureInitializedAsync(Token);
-        context.Navigate($"marten/events/streams/s?id={StreamId}&tenant=initech");
+        context.Navigate($"studio/events/streams/s?id={StreamId}&tenant=initech");
 
         IRenderedComponent<StreamDetail> page = context.Render<StreamDetail>();
 
@@ -106,7 +106,7 @@ public class UnplacedTenantPageTests
         using DocumentsComponentContext context = TwoDatabases();
         context.Catalog.WithPlacement("default", "initech", "db-b");
         await context.State.EnsureInitializedAsync(Token);
-        context.Navigate($"marten/events/streams/s?id={StreamId}&tenant=initech");
+        context.Navigate($"studio/events/streams/s?id={StreamId}&tenant=initech");
 
         IRenderedComponent<StreamDetail> page = context.Render<StreamDetail>();
 
@@ -125,7 +125,7 @@ public class UnplacedTenantPageTests
     /// </summary>
     private static Shell StartShell(bool unplaced)
     {
-        ClickableNavigationManager navigation = new("http://localhost/marten/documents/customer/doc?id=" + Id + "&tenant=initech");
+        ClickableNavigationManager navigation = new("http://localhost/studio/documents/customer/doc?id=" + Id + "&tenant=initech");
 
         StudioComponentContext context = new(services =>
         {
@@ -221,7 +221,7 @@ public class UnplacedTenantPageTests
         TaskCompletionSource gateB = new(TaskCreationOptions.RunContinuationsAsynchronously);
         context.Catalog.PlaceGates.Enqueue(gateA);
         context.Catalog.PlaceGates.Enqueue(gateB);
-        context.Navigate($"marten/documents/customer/doc?id={Id}&tenant=initech");
+        context.Navigate($"studio/documents/customer/doc?id={Id}&tenant=initech");
 
         // The page's own call is A, held. B is the same address again, as the shell's own call would be.
         IRenderedComponent<DetailPage> page = context.Render<DetailPage>(parameters => parameters.Add(x => x.Alias, "customer"));
@@ -283,7 +283,7 @@ public class UnplacedTenantPageTests
     {
         using DocumentsComponentContext context = TwoDatabases();
         await context.State.EnsureInitializedAsync(Token);
-        context.Navigate($"marten/documents/customer/doc?id={Id}&tenant=a&tenant=b&db=d1&db=d2");
+        context.Navigate($"studio/documents/customer/doc?id={Id}&tenant=a&tenant=b&db=d1&db=d2");
 
         IRenderedComponent<DetailPage> page = context.Render<DetailPage>(parameters => parameters.Add(x => x.Alias, "customer"));
         await page.InvokeAsync(() => { });
@@ -292,11 +292,11 @@ public class UnplacedTenantPageTests
         page.Instance.DatabaseId.Should().Be("d1");
 
         (string? store, string? database, string? tenant) = StudioScopeQuery.Read(
-            "http://localhost/marten/documents/customer/doc?store=s1&store=s2&id=" + Id + "&tenant=a&tenant=b&db=d1&db=d2",
+            "http://localhost/studio/documents/customer/doc?store=s1&store=s2&id=" + Id + "&tenant=a&tenant=b&db=d1&db=d2",
             "store");
 
         (store, database, tenant).Should().Be(("s1", "d1", "a"));
-        StudioScopeQuery.Read("http://localhost/marten/?tenant=&tenant=b", "store").TenantId.Should().BeNull("a blank first value is blank, as the page binds it");
+        StudioScopeQuery.Read("http://localhost/studio/?tenant=&tenant=b", "store").TenantId.Should().BeNull("a blank first value is blank, as the page binds it");
     }
 
     /// <summary>A scope that did not move still notifies the pages once an address's placement has been settled, and not again for the same address.</summary>

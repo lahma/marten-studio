@@ -136,7 +136,7 @@ public class StudioModuleCompositionTests
         StudioRouteTable own = new(Host.PageAssemblies);
         string[] paths = EveryPagePath(Host);
 
-        paths.Should().HaveCountGreaterThan(15, "every page of the assembly is compared, not the rail's entries alone")
+        paths.Should().HaveCountGreaterThan(14, "every page of the assembly is compared, not the rail's entries alone")
             .And.Contain("database/row", "a page only a link reaches is among them");
         foreach (string path in paths)
         {
@@ -181,8 +181,8 @@ public class StudioModuleCompositionTests
         // the rail of its module, whichever module it is; before, they carried none.
         shell.Navigation.Should().OnlyContain(static x => x.ModuleKey == "postgres", "the root's own sections carry the root's key");
 
-        // The route table is the database's own: one built from its page assemblies alone matches every entry's route to the same page.
-        StudioRouteTable own = new(Host.PageAssemblies);
+        // The route table is the database's own plus the shell's Activity page: one built from those alone matches every entry's route to the same page.
+        StudioRouteTable own = new([.. Host.PageAssemblies, StudioShellDescriptor.ShellPages]);
         string[] routes = [.. Host.Navigation(Settings).SelectMany(static x => x.Items).Select(static x => x.Route).OfType<string>()];
         routes.Should().NotBeEmpty();
         foreach (string route in routes)

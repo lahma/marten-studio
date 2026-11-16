@@ -92,7 +92,7 @@ public class KafkaAuditTests
         (await Visible(harness)).Should().BeEmpty("the capability policy refuses");
 
         harness.Authorization.AllowKafka(static _ => true);
-        harness.Context.Options.ReadOnly = true;
+        harness.Context.ShellOptions.ReadOnly = true;
         (await Visible(harness)).Should().BeEmpty("the host's master switch turns the capability off");
     }
 
@@ -120,7 +120,7 @@ public class KafkaAuditTests
         harness.Authorization.KafkaCalls.Should().Contain(static x => x.Resource.Capability == "ReadPayloads" && x.Resource.Topic == "orders.v1");
 
         harness.Authorization.AllowKafka(static _ => true);
-        harness.Context.Options.ReadOnly = true;
+        harness.Context.ShellOptions.ReadOnly = true;
         (await Visible(harness)).Should().BeEmpty("the host's master switch turns the capability off");
     }
 

@@ -150,7 +150,7 @@ public class NavMenuLinkScopeTests
     [Fact]
     public async Task During_the_first_load_the_rail_carries_the_scope_the_pasted_address_names_and_a_click_keeps_it()
     {
-        ClickableNavigationManager navigation = new("http://localhost/marten/?store=other&db=db-x");
+        ClickableNavigationManager navigation = new("http://localhost/studio/?store=other&db=db-x");
 
         await using StudioComponentContext context = new(services =>
         {

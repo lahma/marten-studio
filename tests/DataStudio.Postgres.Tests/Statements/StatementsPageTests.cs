@@ -247,7 +247,7 @@ public class StatementsPageTests
     public async Task The_queryid_in_the_address_opens_the_statements_plan_as_a_tree_with_its_insights()
     {
         (PostgresStudioComponentContext context, FakeStatements service) = await ContextAsync(
-            Shown(ThreeStatements()), Planned, "postgres/statements?queryid=1");
+            Shown(ThreeStatements()), Planned, "studio/statements?queryid=1");
         await using PostgresStudioComponentContext owned = context;
 
         var page = context.Render<StatementsPage>();
@@ -269,7 +269,7 @@ public class StatementsPageTests
     public async Task Plan_again_plans_again_and_the_poll_never_does()
     {
         (PostgresStudioComponentContext context, FakeStatements service) = await ContextAsync(
-            Shown(ThreeStatements()), Planned, "postgres/statements?queryid=1");
+            Shown(ThreeStatements()), Planned, "studio/statements?queryid=1");
         await using PostgresStudioComponentContext owned = context;
 
         // Both intervals: the page polls at EffectiveHealthInterval, the longer of the two, and RefreshInterval's five-second
@@ -293,7 +293,7 @@ public class StatementsPageTests
     public async Task A_statement_with_no_plan_says_why_in_place_of_the_tree(string why)
     {
         (PostgresStudioComponentContext context, _) = await ContextAsync(
-            Shown(ThreeStatements()), id => new StatementPlanView { QueryId = id, NoPlan = why }, "postgres/statements?queryid=2");
+            Shown(ThreeStatements()), id => new StatementPlanView { QueryId = id, NoPlan = why }, "studio/statements?queryid=2");
         await using PostgresStudioComponentContext owned = context;
 
         var page = context.Render<StatementsPage>();
@@ -307,7 +307,7 @@ public class StatementsPageTests
         (PostgresStudioComponentContext context, _) = await ContextAsync(
             Shown(ThreeStatements()),
             id => StatementPlanView.Refused(id, DatabaseRefusal.WritePolicy, PostgresStudioText.Instance.StatementsWritePolicyDenial),
-            "postgres/statements?queryid=1");
+            "studio/statements?queryid=1");
         await using PostgresStudioComponentContext owned = context;
 
         var page = context.Render<StatementsPage>();
@@ -325,7 +325,7 @@ public class StatementsPageTests
         (PostgresStudioComponentContext context, _) = await ContextAsync(
             Shown(ThreeStatements()),
             id => Planned(id) with { Plan = QueryPlanReader.Read(json, static x => x.Replace(literal, "[masked]", StringComparison.Ordinal)).Plan },
-            "postgres/statements?queryid=1");
+            "studio/statements?queryid=1");
         await using PostgresStudioComponentContext owned = context;
         context.JSInterop.Setup<bool>("martenStudio.clipboard.copyText", static _ => true).SetResult(true);
         context.JSInterop.Setup<bool>("martenStudio.download.text", static _ => true).SetResult(true);
@@ -353,7 +353,7 @@ public class StatementsPageTests
     public async Task A_drill_in_with_no_plan_or_a_refusal_offers_no_export()
     {
         (PostgresStudioComponentContext none, _) = await ContextAsync(
-            Shown(ThreeStatements()), id => new StatementPlanView { QueryId = id, NoPlan = "nothing" }, "postgres/statements?queryid=2");
+            Shown(ThreeStatements()), id => new StatementPlanView { QueryId = id, NoPlan = "nothing" }, "studio/statements?queryid=2");
         await using PostgresStudioComponentContext ownedNone = none;
         var planless = none.Render<StatementsPage>();
         planless.WaitForAssertion(() => planless.Find(".ms-plan-drill-none"));
@@ -362,7 +362,7 @@ public class StatementsPageTests
         (PostgresStudioComponentContext refused, _) = await ContextAsync(
             Shown(ThreeStatements()),
             id => StatementPlanView.Refused(id, DatabaseRefusal.WritePolicy, PostgresStudioText.Instance.StatementsWritePolicyDenial),
-            "postgres/statements?queryid=1");
+            "studio/statements?queryid=1");
         await using PostgresStudioComponentContext ownedRefused = refused;
         var page = refused.Render<StatementsPage>();
         page.WaitForAssertion(() => page.Find(".ms-plan-drill-refusal"));
@@ -370,9 +370,9 @@ public class StatementsPageTests
     }
 
     [Theory]
-    [InlineData("postgres/statements?queryid=abc")]
-    [InlineData("postgres/statements?queryid=")]
-    [InlineData("postgres/statements")]
+    [InlineData("studio/statements?queryid=abc")]
+    [InlineData("studio/statements?queryid=")]
+    [InlineData("studio/statements")]
     public async Task An_address_with_no_queryid_opens_no_drill_in_and_plans_nothing(string address)
     {
         (PostgresStudioComponentContext context, FakeStatements service) = await ContextAsync(Shown(ThreeStatements()), Planned, address);
@@ -461,7 +461,7 @@ public class StatementsPageTests
     [Fact]
     public async Task The_advisor_opens_from_the_address_and_plans_nothing_until_Run_is_pressed()
     {
-        (PostgresStudioComponentContext context, FakeStatements service) = await ContextAsync(Shown(ThreeStatements()), address: "postgres/statements?advise=all");
+        (PostgresStudioComponentContext context, FakeStatements service) = await ContextAsync(Shown(ThreeStatements()), address: "studio/statements?advise=all");
         await using PostgresStudioComponentContext owned = context;
         service.Advice = _ => Advised();
 
@@ -494,7 +494,7 @@ public class StatementsPageTests
     [Fact]
     public async Task A_run_draws_the_headline_the_remedy_with_a_copy_button_and_the_statements_with_their_links_in_a_scroll_region()
     {
-        (PostgresStudioComponentContext context, FakeStatements service) = await ContextAsync(Shown(ThreeStatements()), address: "postgres/statements?advise=all");
+        (PostgresStudioComponentContext context, FakeStatements service) = await ContextAsync(Shown(ThreeStatements()), address: "studio/statements?advise=all");
         await using PostgresStudioComponentContext owned = context;
         service.Advice = _ => Advised();
 
@@ -524,7 +524,7 @@ public class StatementsPageTests
     public async Task A_run_naming_a_table_offers_the_picker_and_Try_this_index_sends_the_columns()
     {
         (PostgresStudioComponentContext context, FakeStatements service) = await ContextAsync(
-            Shown(ThreeStatements()), address: "postgres/statements?advise=public.orders");
+            Shown(ThreeStatements()), address: "studio/statements?advise=public.orders");
         await using PostgresStudioComponentContext owned = context;
         service.Advice = _ => Advised();
 
@@ -548,7 +548,7 @@ public class StatementsPageTests
     [Fact]
     public async Task Hypopgs_sentence_is_the_answer_when_it_is_not_there()
     {
-        (PostgresStudioComponentContext context, FakeStatements service) = await ContextAsync(Shown(ThreeStatements()), address: "postgres/statements?advise=all");
+        (PostgresStudioComponentContext context, FakeStatements service) = await ContextAsync(Shown(ThreeStatements()), address: "studio/statements?advise=all");
         await using PostgresStudioComponentContext owned = context;
         service.Advice = _ => new IndexAdviceView { Unavailable = HypotheticalIndexAvailability.NotInstalledSentence };
 
@@ -563,7 +563,7 @@ public class StatementsPageTests
     [Fact]
     public async Task A_failure_is_on_the_panel()
     {
-        (PostgresStudioComponentContext context, FakeStatements service) = await ContextAsync(Shown(ThreeStatements()), address: "postgres/statements?advise=all");
+        (PostgresStudioComponentContext context, FakeStatements service) = await ContextAsync(Shown(ThreeStatements()), address: "studio/statements?advise=all");
         await using PostgresStudioComponentContext owned = context;
         service.Advice = _ => throw new InvalidOperationException("the advisor failed");
 

@@ -196,7 +196,7 @@ public class EventFlowLinksTests
         await using StudioComponentContext context = new StudioComponentContext();
         context.EventData.EventFlow = new EventFlowResult(EventFlowFixtures.Sample(), null);
         await context.ReadyAsync();
-        context.Navigate("marten/events/flow");
+        context.Navigate("studio/events/flow");
 
         IRenderedComponent<DataStudio.Marten.Components.Pages.Events.EventFlow> page = context.Render<DataStudio.Marten.Components.Pages.Events.EventFlow>();
 
@@ -256,7 +256,7 @@ public class EventFlowLinksTests
         await using StudioComponentContext context = new StudioComponentContext().WithAllCapabilities();
         context.ProjectionData.WithProjection("DailySales");
         await context.ReadyAsync();
-        context.Navigate("marten/projections#projection-DailySales");
+        context.Navigate("studio/projections#projection-DailySales");
 
         IRenderedComponent<ProjectionsPage> page = context.Render<ProjectionsPage>();
         page.WaitForElement("tr[data-projection='DailySales']");
@@ -273,7 +273,7 @@ public class EventFlowLinksTests
         await using StudioComponentContext context = new StudioComponentContext().WithAllCapabilities();
         context.ProjectionData.WithProjection("DailySales");
         await context.ReadyAsync();
-        context.Navigate("marten/projections" + fragment);
+        context.Navigate("studio/projections" + fragment);
 
         IRenderedComponent<ProjectionsPage> page = context.Render<ProjectionsPage>();
         page.WaitForElement("tr[data-projection='DailySales']");
@@ -315,7 +315,7 @@ public class EventFlowLinksTests
         await using StudioComponentContext context = new StudioComponentContext();
         context.EventData.EventFlow = new EventFlowResult(model, null);
         await context.ReadyAsync();
-        context.Navigate("marten/events/flow");
+        context.Navigate("studio/events/flow");
 
         IRenderedComponent<DataStudio.Marten.Components.Pages.Events.EventFlow> page = context.Render<DataStudio.Marten.Components.Pages.Events.EventFlow>();
 

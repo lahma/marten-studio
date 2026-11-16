@@ -36,9 +36,9 @@ public class ShellGoldenTests
     }
 
     [Theory]
-    [InlineData("/postgres")]
-    [InlineData("/postgres/health")]
-    [InlineData("/postgres/activity")]
+    [InlineData("/studio")]
+    [InlineData("/studio/health")]
+    [InlineData("/studio/activity")]
     public async Task The_prerendered_chrome_of_a_page_is_stable(string path)
     {
         await using WebApplication app = CreateApp();
@@ -53,7 +53,7 @@ public class ShellGoldenTests
     {
         await using WebApplication app = CreateApp(static options => options.Capabilities = PostgresStudioCapabilities.All());
 
-        string golden = await ShellGolden.GoldenAsync(app, "/postgres", Token);
+        string golden = await ShellGolden.GoldenAsync(app, "/studio", Token);
 
         await Verify(golden);
     }

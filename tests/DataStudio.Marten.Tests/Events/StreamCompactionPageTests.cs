@@ -516,7 +516,7 @@ public class StreamCompactionPageTests
 
     private static IRenderedComponent<StreamDetail> Render(StudioComponentContext context)
     {
-        context.Navigate("marten/events/streams/s?id=" + StreamId);
+        context.Navigate("studio/events/streams/s?id=" + StreamId);
         return context.Render<StreamDetail>();
     }
 

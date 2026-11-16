@@ -26,7 +26,7 @@ else
            answer per call and per scope, and a number that tried to sum them would be a guess. *@
         <p class="ms-popover-lead">What this studio allows. Your account's policies decide what you may do.</p>
         @* The root's groups first, as they have always been drawn: the reads, and the mutating operations when the studio offers any. A shell with
-           no root module (Kafka alone) has none. *@
+           no root module (every module keeps its own segment) has none. *@
         @if (Descriptor.Root is not null)
         {
             <p class="ms-popover-title">@RootReads.Heading</p>

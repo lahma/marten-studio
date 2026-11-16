@@ -427,7 +427,7 @@ public class ObjectDetailPageTests
         }
 
         string columns = page.FindAll(".ms-db-object-tabs a.ms-tab").Single(x => x.TextContent.Contains("Columns", StringComparison.Ordinal)).GetAttribute("href")!;
-        context.Navigate("marten/" + columns);
+        context.Navigate("studio/" + columns);
 
         page.WaitForAssertion(() => ActiveTab(page).Should().Be("Columns"));
         page.FindAll(".ms-db-columns").Should().ContainSingle();

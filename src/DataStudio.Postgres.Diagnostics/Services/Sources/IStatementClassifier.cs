@@ -30,7 +30,7 @@ internal sealed record StatementGroup(string Key, string Label)
 /// statement names; MartenStudio's names the Marten operation and the document type.
 /// </para>
 /// <para>
-/// Registered by each studio's <c>Add*Studio</c>. A studio that registers none groups nothing: the page shows the statements
+/// Registered by each studio's <c>Add…</c>. A studio that registers none groups nothing: the page shows the statements
 /// alone.
 /// </para>
 /// </remarks>

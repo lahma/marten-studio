@@ -143,8 +143,8 @@ internal sealed record MartenDataSourceRegistrations(IReadOnlyList<(object? Key,
 /// counted and never compared; the answer for it is Marten's own <c>OwnsDataSource</c>.
 /// </para>
 /// <para>
-/// <b>Like <c>MartenStoreRegistry</c>, lazy.</b> It captures the <see cref="IServiceCollection" /> at <c>AddMartenStudio</c> time and
-/// reads it when asked, because <c>AddMartenStudio()</c> is routinely called before <c>AddNpgsqlDataSource()</c>.
+/// <b>Like <c>MartenStoreRegistry</c>, lazy.</b> It captures the <see cref="IServiceCollection" /> at <c>AddMarten</c> time and
+/// reads it when asked, because <c>AddMarten()</c> is routinely called before <c>AddNpgsqlDataSource()</c>.
 /// </para>
 /// <para>
 /// <b>Singletons only, and the last registration of each key.</b> The container resolves the last descriptor of a service type and

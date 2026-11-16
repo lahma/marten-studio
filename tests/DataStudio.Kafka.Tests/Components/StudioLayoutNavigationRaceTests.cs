@@ -18,9 +18,9 @@ namespace DataStudio.Kafka.Tests.Components;
 /// </remarks>
 public class StudioLayoutNavigationRaceTests
 {
-    private const string KafkaPage = "/postgres/kafka";
+    private const string KafkaPage = "/studio/kafka";
 
-    private const string HostPath = "postgres/database/connection";
+    private const string HostPath = "studio/database/connection";
 
     private static KafkaStudioHarness Harness(string startAt)
     {
@@ -110,7 +110,7 @@ public class StudioLayoutNavigationRaceTests
 
         // A link on a host page to the second cluster. The state holds the first from before, and the shell must neither keep it nor rewrite
         // this address to it.
-        harness.Navigation.Simulate("postgres/kafka?cluster=secondary", intercepted: true);
+        harness.Navigation.Simulate("studio/kafka?cluster=secondary", intercepted: true);
 
         routes.WaitForAssertion(() => harness.State.ActiveCluster.Should().Be(KafkaStudioHarness.Secondary));
         routes.WaitForAssertion(() => harness.Navigation.Uri.Should().EndWith("kafka?cluster=secondary"));
@@ -130,7 +130,7 @@ public class StudioLayoutNavigationRaceTests
         await routes.InvokeAsync(() => harness.State.SetClusterAsync("primary"));
         harness.Navigation.Simulate(HostPath, intercepted: true);
         routes.WaitForAssertion(() => routes.FindAll("#ms-cluster-select").Should().BeEmpty());
-        harness.Navigation.Simulate("postgres/kafka?cluster=secondary", intercepted: true);
+        harness.Navigation.Simulate("studio/kafka?cluster=secondary", intercepted: true);
 
         routes.WaitForAssertion(() => harness.State.ActiveCluster.Should().Be(KafkaStudioHarness.Secondary));
         routes.WaitForAssertion(() => harness.Navigation.Uri.Should().EndWith("kafka?cluster=secondary"));

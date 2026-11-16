@@ -51,9 +51,9 @@ public class ShellGoldenTests
     }
 
     [Theory]
-    [InlineData("/postgres")]
-    [InlineData("/postgres/kafka")]
-    [InlineData("/postgres/kafka/search")]
+    [InlineData("/studio")]
+    [InlineData("/studio/kafka")]
+    [InlineData("/studio/kafka/search")]
     public async Task The_prerendered_chrome_of_a_page_is_stable(string path)
     {
         await using WebApplication app = CreateApp();
@@ -68,7 +68,7 @@ public class ShellGoldenTests
     {
         await using WebApplication app = CreateApp(allCapabilities: true);
 
-        string golden = await ShellGolden.GoldenAsync(app, "/postgres", Token);
+        string golden = await ShellGolden.GoldenAsync(app, "/studio", Token);
 
         await Verify(golden);
     }

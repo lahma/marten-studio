@@ -4,7 +4,7 @@ namespace DataStudio;
 
 /// <summary>
 /// Options for the Data Studio shell, configured through <c>AddDataStudio(Action&lt;DataStudioOptions&gt;)</c>: where it is mounted, what it
-/// is called, who gets in, whether it is read-only and how often a live page polls. A module's own options (a database, a Kafka cluster) are
+/// is called, who gets in, whether it is read-only and how often a live page polls. A module's own options (a database, a message broker) are
 /// that module's. Validation runs when the options are first read, which <c>MapDataStudio()</c> does at startup.
 /// </summary>
 /// <remarks>

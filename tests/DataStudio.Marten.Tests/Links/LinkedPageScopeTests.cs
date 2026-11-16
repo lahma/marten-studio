@@ -39,7 +39,7 @@ public class LinkedPageScopeTests
         context.Data.Detail = DocumentDetailResult.Ok(Detail());
 
         await context.State.EnsureInitializedAsync(Xunit.TestContext.Current.CancellationToken);
-        context.Navigate($"marten/documents/customer/doc?store=default&tenant=globex&id={DocumentId}");
+        context.Navigate($"studio/documents/customer/doc?store=default&tenant=globex&id={DocumentId}");
         context.Render<DocumentPage>(parameters => parameters.Add(x => x.Alias, "customer"));
 
         StudioScope? scope = context.State.ActiveScope;
@@ -58,7 +58,7 @@ public class LinkedPageScopeTests
         context.EventData.StreamStates[StreamId] = Stream("globex");
 
         await context.State.EnsureInitializedAsync(Xunit.TestContext.Current.CancellationToken);
-        context.Navigate($"marten/events/streams/s?store=default&tenant=globex&id={StreamId}");
+        context.Navigate($"studio/events/streams/s?store=default&tenant=globex&id={StreamId}");
         context.Render<StreamPage>();
 
         StudioScope? scope = context.State.ActiveScope;
@@ -76,7 +76,7 @@ public class LinkedPageScopeTests
 
         await context.State.EnsureInitializedAsync(Xunit.TestContext.Current.CancellationToken);
         context.State.ActiveScope.Should().Be(new StudioScope("default", "db_a", null), "the premise: the circuit is on the first database");
-        context.Navigate($"marten/documents/customer/doc?store=default&tenant=globex&id={DocumentId}");
+        context.Navigate($"studio/documents/customer/doc?store=default&tenant=globex&id={DocumentId}");
         context.Render<DocumentPage>(parameters => parameters.Add(x => x.Alias, "customer"));
 
         context.State.ActiveScope.Should().Be(new StudioScope("default", "db_b", "globex"));
@@ -90,7 +90,7 @@ public class LinkedPageScopeTests
         context.EventData.StreamStates[StreamId] = Stream("globex");
 
         await context.State.EnsureInitializedAsync(Xunit.TestContext.Current.CancellationToken);
-        context.Navigate($"marten/events/streams/s?store=default&tenant=globex&id={StreamId}");
+        context.Navigate($"studio/events/streams/s?store=default&tenant=globex&id={StreamId}");
         context.Render<StreamPage>();
 
         context.State.ActiveScope.Should().Be(new StudioScope("default", "db_b", "globex"));

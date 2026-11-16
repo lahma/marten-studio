@@ -8,7 +8,7 @@ namespace DataStudio.Services.Settings;
 /// Shared by every studio's options type so that the rules - the default when unset, the trim, the encoding a browser
 /// emits - are written once. An options type keeps one of these behind a single reference keyed by the raw path string
 /// (<see cref="Of" />), so a reader on a render path either sees the old triple or the new one and never a mixture,
-/// even while <c>Map*Studio(pattern)</c> writes the path after startup.
+/// even while <c>MapDataStudio(pattern)</c> writes the path after startup.
 /// </remarks>
 /// <param name="Source">The raw configured path this was derived from.</param>
 /// <param name="Trimmed">Rooted, without a trailing slash; the default when the source is blank.</param>

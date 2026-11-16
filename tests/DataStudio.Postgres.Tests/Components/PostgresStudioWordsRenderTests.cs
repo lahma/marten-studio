@@ -31,13 +31,13 @@ public class PostgresStudioWordsRenderTests
     }
 
     [Fact]
-    public async Task Activity_names_Postgres_Studio()
+    public async Task Activity_is_the_shells_page_and_names_the_shell()
     {
         await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
 
         var page = context.Render<Activity>();
 
-        page.WaitForAssertion(() => page.Markup.Should().Contain("actions taken through Postgres Studio in this"));
+        page.WaitForAssertion(() => page.Markup.Should().Contain("actions taken through Data Studio in this"));
         page.Markup.Should().NotContain("Marten Studio");
     }
 
@@ -56,7 +56,7 @@ public class PostgresStudioWordsRenderTests
     public async Task The_database_page_points_a_Marten_stores_objects_at_Marten_Studio_and_names_no_MartenStudio_option()
     {
         await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
-        context.Navigate("postgres/database");
+        context.Navigate("studio/database");
 
         var page = context.Render<DatabaseObjects>();
 
@@ -108,7 +108,7 @@ public class PostgresStudioWordsRenderTests
 
     private static string RenderDatabase(PostgresStudioComponentContext context)
     {
-        context.Navigate("postgres/database");
+        context.Navigate("studio/database");
         return Rendered(context.Render<DatabaseObjects>(), ".ms-db-kind-tabs");
     }
 

@@ -86,10 +86,9 @@ public class PublicApiTest
     {
         Exported(typeof(PostgresStudioOptions).Assembly).Should().Equal(
             "DataStudio.Postgres.PostgresStudioCapabilities",
-            "DataStudio.Postgres.PostgresStudioEndpointRouteBuilderExtensions",
             "DataStudio.Postgres.PostgresStudioOptions",
             "DataStudio.Postgres.PostgresStudioResource",
-            "DataStudio.Postgres.PostgresStudioServiceCollectionExtensions");
+            "DataStudio.PostgresDataStudioBuilderExtensions");
 
         Exported(typeof(PostgresDiagnosticsOptions).Assembly).Should().Equal(
             "DataStudio.Postgres.IPostgresCapacitySource",

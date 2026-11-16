@@ -63,7 +63,7 @@ public class FeedLinqLinkTests
         using StudioComponentContext context = await NewContextAsync(
             static options => options.Capabilities.RunLinqQueries = true,
             tenant: "acme");
-        context.Navigate("marten/events/feed?types=OrderPlaced&stream=abc&archived=1");
+        context.Navigate("studio/events/feed?types=OrderPlaced&stream=abc&archived=1");
 
         string href = context.Render<Feed>().Find(LinkSelector).GetAttribute("href")!;
 

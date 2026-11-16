@@ -24,7 +24,7 @@ public class StreamStepperTests
     {
         using StudioComponentContext context = await NewContextAsync();
 
-        context.Navigate("marten/events/streams/step");
+        context.Navigate("studio/events/streams/step");
         IRenderedComponent<StreamStepper> page = context.Render<StreamStepper>();
 
         page.Find(".ms-empty-title").TextContent.Should().Be("No stream asked for");
@@ -270,7 +270,7 @@ public class StreamStepperTests
     {
         using StudioComponentContext context = await ArrangedAsync();
 
-        context.Navigate("marten/events/streams/s?id=" + StreamId + "&agg=" + Aggregate + "&v=2");
+        context.Navigate("studio/events/streams/s?id=" + StreamId + "&agg=" + Aggregate + "&v=2");
         IRenderedComponent<StreamDetail> page = context.Render<StreamDetail>();
 
         page.Find("a.ms-time-travel-step").GetAttribute("href").Should()
@@ -325,7 +325,7 @@ public class StreamStepperTests
         return context;
     }
 
-    private static string Url(string extra) => "marten/events/streams/step?id=" + StreamId + extra;
+    private static string Url(string extra) => "studio/events/streams/step?id=" + StreamId + extra;
 
     private static IRenderedComponent<StreamStepper> Render(StudioComponentContext context, string extra)
     {

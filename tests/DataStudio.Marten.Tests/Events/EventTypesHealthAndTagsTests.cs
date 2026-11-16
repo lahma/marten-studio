@@ -220,7 +220,7 @@ public class EventTypesHealthAndTagsTests
         StudioComponentContext context = new(services => services.AddSingleton(health));
         data?.Invoke(context.EventData);
         await context.ReadyAsync();
-        context.Navigate("marten/events/types");
+        context.Navigate("studio/events/types");
         return context;
     }
 

@@ -252,7 +252,7 @@ public class PostgresStudioOptionsTests
             StudioCapability.RunSql, StudioCapability.BrowseDatabase, StudioCapability.ViewDefinitions, StudioCapability.ViewDatabaseActivity);
         settings.CapabilityOption(StudioCapability.ViewDefinitions).Should().Be("PostgresStudioOptions.Capabilities.ViewDefinitions");
         settings.IsDocumentTypeVisible.Should().BeNull();
-        settings.TrimmedPath.Should().Be("/postgres");
+        settings.TrimmedPath.Should().Be("/studio", "the shell's default mount");
         settings.HasCustomPath.Should().BeFalse();
     }
 

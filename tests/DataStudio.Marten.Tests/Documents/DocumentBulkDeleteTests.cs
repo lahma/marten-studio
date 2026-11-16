@@ -35,7 +35,7 @@ public class DocumentBulkDeleteTests
         context.Data.Rail = FakeDocuments.Rail(
             documents: [FakeDocuments.Collection("customer", softDeleted: softDeleted)]);
 
-        context.Navigate("marten/documents/customer");
+        context.Navigate("studio/documents/customer");
         return context.Render<ListPage>(parameters => parameters.Add(x => x.Alias, "customer"));
     }
 
@@ -74,7 +74,7 @@ public class DocumentBulkDeleteTests
             documents: [],
             discovered: [FakeDocuments.Collection("customer", registered: false)]);
 
-        context.Navigate("marten/documents/customer");
+        context.Navigate("studio/documents/customer");
         var page = context.Render<ListPage>(parameters => parameters.Add(x => x.Alias, "customer"));
 
         page.FindAll(".ms-doc-col-select").Should().BeEmpty();
@@ -280,13 +280,13 @@ public class DocumentBulkDeleteTests
         context.Data.Rail = FakeDocuments.Rail(
             documents: [FakeDocuments.Collection("customer"), FakeDocuments.Collection("order")]);
 
-        context.Navigate("marten/documents/customer");
+        context.Navigate("studio/documents/customer");
         var page = context.Render<ListPage>(parameters => parameters.Add(x => x.Alias, "customer"));
 
         page.Find(".ms-doc-select-all").Change(true);
         page.Find(".ms-doc-bulk-count").TextContent.Trim().Should().Be("3 selected");
 
-        context.Navigate("marten/documents/order");
+        context.Navigate("studio/documents/order");
         page.Render(parameters => parameters.Add(x => x.Alias, "order"));
 
         page.FindAll(".ms-doc-bulk-bar").Should().BeEmpty();

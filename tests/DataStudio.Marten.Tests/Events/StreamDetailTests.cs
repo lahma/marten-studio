@@ -364,7 +364,7 @@ public class StreamDetailTests
 
     private static IRenderedComponent<StreamDetail> Render(StudioComponentContext context, string extra = "")
     {
-        context.Navigate("marten/events/streams/s?id=" + StreamId + extra);
+        context.Navigate("studio/events/streams/s?id=" + StreamId + extra);
         return context.Render<StreamDetail>();
     }
 

@@ -43,7 +43,7 @@ public class DocumentPageHardeningTests
             rows: [FakeDocuments.Row("id-1")],
             verdict: Verdict(search));
 
-        context.Navigate("marten/documents/customer?q=" + Uri.EscapeDataString(search));
+        context.Navigate("studio/documents/customer?q=" + Uri.EscapeDataString(search));
         var page = context.Render<ListPage>(parameters => parameters.Add(x => x.Alias, "customer"));
 
         // Rendered twice on purpose. Blazor only compares keys when it *diffs* two renders of the same
@@ -113,7 +113,7 @@ public class DocumentPageHardeningTests
         context.Data.Detail = DocumentDetailResult.Ok(Detail());
 
         context.Navigate(
-            $"marten/documents/customer/doc?id={Id}&from=" +
+            $"studio/documents/customer/doc?id={Id}&from=" +
             Uri.EscapeDataString("javascript:alert(document.domain)"));
 
         var page = context.Render<DetailPage>(parameters => parameters.Add(x => x.Alias, "customer"));
@@ -131,7 +131,7 @@ public class DocumentPageHardeningTests
         context.Data.Detail = DocumentDetailResult.Ok(Detail());
 
         const string from = "documents/customer?q=ada&page=2";
-        context.Navigate($"marten/documents/customer/doc?id={Id}&from=" + Uri.EscapeDataString(from));
+        context.Navigate($"studio/documents/customer/doc?id={Id}&from=" + Uri.EscapeDataString(from));
 
         var page = context.Render<DetailPage>(parameters => parameters.Add(x => x.Alias, "customer"));
 
@@ -150,7 +150,7 @@ public class DocumentPageHardeningTests
         context.Browser.RememberPage("customer", ["other-id", Id, "next-id"], "documents/customer");
 
         context.Navigate(
-            $"marten/documents/customer/doc?id={Id}&from=" + Uri.EscapeDataString("javascript:alert(1)"));
+            $"studio/documents/customer/doc?id={Id}&from=" + Uri.EscapeDataString("javascript:alert(1)"));
 
         var page = context.Render<DetailPage>(parameters => parameters.Add(x => x.Alias, "customer"));
 
@@ -190,7 +190,7 @@ public class DocumentPageHardeningTests
         context.JSInterop.Setup<bool>("martenStudio.clipboard.copyText", _ => true)
             .SetException(new Microsoft.JSInterop.JSDisconnectedException("the circuit closed"));
 
-        context.Navigate($"marten/documents/customer/doc?id={Id}");
+        context.Navigate($"studio/documents/customer/doc?id={Id}");
         var page = context.Render<DetailPage>(parameters => parameters.Add(x => x.Alias, "customer"));
 
         // The header's own copy, through the detail page's CopyTextAsync, rather than the viewer's:

@@ -105,15 +105,15 @@ internal static class StudioEndpointMapper
         if (builder.ServiceProvider.GetService<ShellRegistrationMarker>() is null)
         {
             throw new InvalidOperationException(
-                "MapDataStudio() was called in an application that did not call AddDataStudio(). Register the shell first, and add a module to it: "
-                + "services.AddDataStudio().AddPostgres() (or any other installed module's Add... call), then app.MapDataStudio().");
+                "MapDataStudio() was called in an application that did not call AddDataStudio(): register the shell with services.AddDataStudio() and add a "
+                + "module to it, as in services.AddDataStudio().AddPostgres(), before mapping it.");
         }
 
         if (!builder.ServiceProvider.GetServices<IStudioModule>().Any())
         {
             throw new InvalidOperationException(
-                "MapDataStudio() was called in an application whose Data Studio has no module: the shell serves what its modules register. "
-                + "Add one to AddDataStudio(): AddPostgres(), AddMarten() or the Add... call of another installed module.");
+                "MapDataStudio() was called in an application that added no module to Data Studio: add one to the builder AddDataStudio() returns, "
+                + "with AddPostgres(), AddMarten() or the Add…() call of another installed module.");
         }
     }
 
@@ -132,7 +132,7 @@ internal static class StudioEndpointMapper
         StudioShellDescriptor descriptor = builder.ServiceProvider.GetRequiredService<StudioShellDescriptor>();
 
         // Built here, before anything is mapped, so that a page template outside its assembly's root or a relative
-        // route two pages claim makes Map*Studio() throw at startup - not the first request for a page, and not an
+        // route two pages claim makes MapDataStudio() throw at startup - not the first request for a page, and not an
         // AmbiguousMatchException between two endpoints on one pattern.
         _ = descriptor.Routes;
 
@@ -140,7 +140,7 @@ internal static class StudioEndpointMapper
 
         string studioPath = settings.TrimmedPath;
 
-        // A shell whose modules all keep their own segment (Kafka alone) has no page at the mount itself: its front address leads to the
+        // A shell whose modules all keep their own segment (every module keeps its own segment) has no page at the mount itself: its front address leads to the
         // first module's home. A circuit's own navigation to it is handled by the router (StudioRoutes).
         RouteHandlerBuilder? front = descriptor.Root is null && descriptor.First is { } first
             ? MapStudioFront(builder, studioPath, first.HomeRoute)
@@ -452,7 +452,7 @@ internal static class StudioEndpointMapper
     /// <para>
     /// <b>These are the host's files, so the studio never serves a visitor what the host itself would refuse.</b> The
     /// endpoint is not one of the anonymous asset endpoints: it carries the studio's policy when one is configured, and
-    /// otherwise it belongs to the builder <c>Map*Studio()</c> returns, so the caller's <c>RequireAuthorization()</c> or
+    /// otherwise it belongs to the builder <c>MapDataStudio()</c> returns, so the caller's <c>RequireAuthorization()</c> or
     /// <c>AllowAnonymous()</c> and the host's <c>FallbackPolicy</c> govern it as they govern the page that imports the
     /// files. On top of that, as defence in depth, the forward asks for no more than the root would give: it skips a root
     /// endpoint that does not answer the request's method (a host's <c>MapPost("/_framework/x")</c> is never run by a GET),

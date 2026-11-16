@@ -26,7 +26,7 @@ using Microsoft.AspNetCore.Routing;
 namespace DataStudio.Internal;
 
 /// <summary>
-/// Where the startup guard reads endpoints from: the route builder <c>MapMartenStudio</c> was called
+/// Where the startup guard reads endpoints from: the route builder <c>MapDataStudio</c> was called
 /// on.
 /// </summary>
 /// <remarks>
@@ -88,7 +88,7 @@ internal sealed class StudioMappedEndpoints
     /// </summary>
     /// <remarks>
     /// <para>
-    /// A deliberate state — <c>MapMartenStudio().AllowAnonymous()</c> is one of the three things the
+    /// A deliberate state — <c>MapDataStudio().AllowAnonymous()</c> is one of the three things the
     /// startup guard accepts — and one a person looking at the page has to be told about, because the
     /// studio looks exactly the same either way. The layout draws a banner from this and the sample's
     /// landing page says the same thing, so <c>--anonymous</c> can never be mistaken for a demo that

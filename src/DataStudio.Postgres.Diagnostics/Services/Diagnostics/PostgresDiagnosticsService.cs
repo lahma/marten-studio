@@ -23,7 +23,7 @@ namespace DataStudio.Postgres.Services.Diagnostics;
 
 /// <summary>
 /// <see cref="IPostgresDiagnostics" />: the studio's findings and the facts behind its pages, for host code, through the host
-/// gate (D31, API design §1-§3). Registered by <c>AddPostgresStudio()</c> and by <c>AddMartenStudio()</c>, a singleton over
+/// gate (D31, API design §1-§3). Registered by <c>AddPostgres()</c> and by <c>AddMarten()</c>, a singleton over
 /// the studio's own singletons.
 /// </summary>
 /// <remarks>

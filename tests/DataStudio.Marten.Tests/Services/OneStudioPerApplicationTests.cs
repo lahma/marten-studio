@@ -5,14 +5,14 @@ using DataStudio.Postgres.Services.Settings;
 namespace DataStudio.Marten.Tests.Services;
 
 /// <summary>
-/// Design PS8, option (a): one studio per application, with the real registration methods in both orders. This is the
+/// Design PS8, option (a): one database module per application, with the real registration methods in both orders. This is the
 /// one project that references both packages, so it is where the pair is proved; DataStudio.Postgres.Tests proves the
 /// refusal against a claimed marker.
 /// </summary>
 public class OneStudioPerApplicationTests
 {
     [Fact]
-    public void AddPostgresStudio_after_AddMartenStudio_is_refused_and_says_why()
+    public void AddPostgres_after_AddMarten_is_refused_and_says_why()
     {
         ServiceCollection services = new();
         services.AddDataStudio().AddMarten();
@@ -20,9 +20,9 @@ public class OneStudioPerApplicationTests
         Action add = () => services.AddDataStudio().AddPostgres();
 
         add.Should().Throw<InvalidOperationException>().WithMessage(
-            "AddPostgresStudio() was called in an application that already registered Marten Studio with AddMartenStudio(). "
-            + "One studio per application: Marten Studio and Postgres Studio share their services, so a second one would answer "
-            + "for the first. Register one of them.");
+            "AddPostgres() was called in an application that already registered the Marten module with AddMarten(). "
+            + "One database module per application: the Marten module and the Postgres module share their services, so a second one would answer "
+            + "for the first. Add one of them.");
 
         // A factory since D34 (the composition with the registered modules); with no module it answers the very instance.
         using ServiceProvider provider = services.BuildServiceProvider();
@@ -31,7 +31,7 @@ public class OneStudioPerApplicationTests
     }
 
     [Fact]
-    public void AddMartenStudio_after_AddPostgresStudio_is_refused_and_says_why()
+    public void AddMarten_after_AddPostgres_is_refused_and_says_why()
     {
         ServiceCollection services = new();
         services.AddDataStudio().AddPostgres();
@@ -39,8 +39,8 @@ public class OneStudioPerApplicationTests
         Action add = () => services.AddDataStudio().AddMarten();
 
         add.Should().Throw<InvalidOperationException>().WithMessage(
-            "AddMartenStudio() was called in an application that already registered Postgres Studio with AddPostgresStudio(). "
-            + "One studio per application: Postgres Studio and Marten Studio share their services, so a second one would answer "
-            + "for the first. Register one of them.");
+            "AddMarten() was called in an application that already registered the Postgres module with AddPostgres(). "
+            + "One database module per application: the Postgres module and the Marten module share their services, so a second one would answer "
+            + "for the first. Add one of them.");
     }
 }

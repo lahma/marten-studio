@@ -143,7 +143,7 @@ public class StudioSpineTests
     // ---------------------------------------------------------------------------------------------
 
     [Fact]
-    public void Registering_the_same_studio_twice_is_allowed_and_a_second_studio_is_refused()
+    public void Registering_the_same_module_twice_is_allowed_and_a_second_database_module_is_refused()
     {
         ServiceCollection services = new();
         services.AddDataStudio().AddMarten();
@@ -151,14 +151,14 @@ public class StudioSpineTests
 
         services.Count(static x => x.ServiceType == typeof(StudioRegistrationMarker)).Should().Be(1);
 
-        Action other = () => StudioRegistrationMarker.Claim(services, new StudioRegistrationMarker("postgre", "Postgres Studio", "AddPostgresStudio()"));
+        Action other = () => StudioRegistrationMarker.Claim(services, new StudioRegistrationMarker("postgre", "the Postgres module", "AddPostgres()"));
 
         other.Should().Throw<InvalidOperationException>()
-            .WithMessage("AddPostgresStudio() was called in an application that already registered Marten Studio with AddMartenStudio()*");
+            .WithMessage("AddPostgres() was called in an application that already registered the Marten module with AddMarten()*");
     }
 
     [Fact]
-    public async Task AddMartenStudio_registers_every_seam_in_Marten_s_terms()
+    public async Task AddMarten_registers_every_seam_in_Marten_s_terms()
     {
         ServiceCollection services = new();
         services.AddLogging();

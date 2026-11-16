@@ -16,7 +16,7 @@ namespace DataStudio.Postgres.Services.Settings;
 
 /// <summary>
 /// Registers the diagnostics engine - the health sweep and its history, the facts the pages and the API read, and
-/// <see cref="IPostgresDiagnostics" /> - for whichever of <c>AddPostgresDiagnostics()</c> or a studio's <c>Add*Studio()</c>
+/// <see cref="IPostgresDiagnostics" /> - for whichever of <c>AddPostgresDiagnostics()</c> or a studio's <c>Add…()</c>
 /// calls it.
 /// </summary>
 /// <remarks>

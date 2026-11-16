@@ -21,7 +21,7 @@ public class FeedTests
         using StudioComponentContext context = await NewContextAsync();
         context.EventData.Shape = context.EventData.Shape with { HasIsSkipped = true };
         context.Navigate(
-            "marten/events/feed?types=OrderPlaced,OrderShipped&stream=abc&range=1h&archived=1&skipped=0&after=500");
+            "studio/events/feed?types=OrderPlaced,OrderShipped&stream=abc&range=1h&archived=1&skipped=0&after=500");
 
         context.Render<Feed>();
 
@@ -134,7 +134,7 @@ public class FeedTests
     public async Task Follow_is_unavailable_once_the_reader_has_paged_back()
     {
         using StudioComponentContext context = await NewContextAsync();
-        context.Navigate("marten/events/feed?after=500&follow=1");
+        context.Navigate("studio/events/feed?after=500&follow=1");
 
         IRenderedComponent<Feed> page = context.Render<Feed>();
 
@@ -204,7 +204,7 @@ public class FeedTests
         context.EventData.FeedDeltas.Enqueue(new EventPage(
             [FakeEventDataService.Event(12), FakeEventDataService.Event(11)], 11, false));
 
-        context.Navigate("marten/events/feed?follow=1");
+        context.Navigate("studio/events/feed?follow=1");
 
         IRenderedComponent<Feed> page = context.Render<Feed>();
 
@@ -289,7 +289,7 @@ public class FeedTests
         burst.Should().HaveCount(501);
         context.EventData.FeedDeltas.Enqueue(new EventPage(burst, 11, false));
 
-        context.Navigate("marten/events/feed?follow=1");
+        context.Navigate("studio/events/feed?follow=1");
 
         IRenderedComponent<Feed> page = context.Render<Feed>();
 

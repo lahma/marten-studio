@@ -11,7 +11,7 @@ namespace DataStudio.Postgres.Services.Postgres;
 /// <summary>
 /// Registers the diagnostics engine's seams as answered for plain PostgreSQL - where the application's own data sources are
 /// found, how they are listed, which locks are labelled and how a statement is grouped - for whichever of
-/// <c>AddPostgresDiagnostics()</c> or <c>AddPostgresStudio()</c> calls it.
+/// <c>AddPostgresDiagnostics()</c> or <c>AddPostgres()</c> calls it.
 /// </summary>
 internal static class PostgresSeamRegistration
 {

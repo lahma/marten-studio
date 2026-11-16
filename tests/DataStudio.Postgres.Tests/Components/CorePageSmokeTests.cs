@@ -26,7 +26,7 @@ namespace DataStudio.Postgres.Tests.Components;
 public class CorePageSmokeTests
 {
     private const string Row =
-        "postgres/database/row?schema=quartz&name=qrtz_triggers&key.sched_name=QuartzScheduler&key.trigger_name=trigger-00&key.trigger_group=DEFAULT";
+        "studio/database/row?schema=quartz&name=qrtz_triggers&key.sched_name=QuartzScheduler&key.trigger_name=trigger-00&key.trigger_group=DEFAULT";
 
     [Fact]
     public async Task The_scope_is_the_one_data_source_named_default()
@@ -48,7 +48,7 @@ public class CorePageSmokeTests
         var credit = rail.Find(".ms-rail-credit");
         var lines = credit.QuerySelectorAll(".ms-rail-credit-line").Select(static x => x.TextContent.Trim()).ToList();
         lines.Should().HaveCount(3, "the product and its version, the licence and the author, a line each");
-        lines[0].Should().StartWith("Postgres Studio ").And.NotContain("MIT").And.NotContain("Marko");
+        lines[0].Should().StartWith("Data Studio ").And.NotContain("MIT").And.NotContain("Marko");
         lines[1].Should().Be("MIT licensed");
         lines[2].Should().Be("by Marko Lahma");
         rail.Find(".ms-sidebar-inner").LastElementChild!.ClassList.Should().Contain("ms-rail-credit", "the credit is the last thing in the rail's column, after the list");
@@ -97,7 +97,7 @@ public class CorePageSmokeTests
     public async Task Query_is_the_sql_console_alone_with_its_title_and_deep_link()
     {
         await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().WithAllCapabilities().ReadyAsync();
-        context.Navigate("postgres/query?sql=" + Uri.EscapeDataString("select 1"));
+        context.Navigate("studio/query?sql=" + Uri.EscapeDataString("select 1"));
 
         var page = context.Render<QueryPage>();
 
@@ -140,7 +140,7 @@ public class CorePageSmokeTests
     public async Task The_database_browser_renders()
     {
         await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
-        context.Navigate("postgres/database");
+        context.Navigate("studio/database");
 
         var page = context.Render<DatabaseObjects>();
 
@@ -152,7 +152,7 @@ public class CorePageSmokeTests
     public async Task An_objects_page_renders()
     {
         await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
-        context.Navigate("postgres/database/object?schema=legacy&name=orders");
+        context.Navigate("studio/database/object?schema=legacy&name=orders");
 
         var page = context.Render<ObjectDetail>();
 
@@ -328,7 +328,7 @@ public class CorePageSmokeTests
     public async Task On_Sessions_only_the_Sessions_entry_is_lit()
     {
         await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
-        context.Navigate("postgres/database/sessions");
+        context.Navigate("studio/database/sessions");
 
         var menu = context.Render<NavMenu>();
 

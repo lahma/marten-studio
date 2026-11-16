@@ -8,7 +8,7 @@ namespace DataStudio.Postgres.Services.Settings;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Live, never a copy.</b> An implementation reads its options object on every access. <c>MapMartenStudio(pattern)</c>
+/// <b>Live, never a copy.</b> An implementation reads its options object on every access. <c>MapDataStudio(pattern)</c>
 /// writes <c>Path</c> onto the resolved options instance after the container is built (the pattern wins over the
 /// option), and every component that builds a link or matches a route has to see that write; a snapshot taken when the
 /// first circuit opened would serve pages that navigate somewhere else.

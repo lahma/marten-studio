@@ -22,7 +22,7 @@ namespace DataStudio.Marten.Tests.Database;
 public class RowDetailPageTests
 {
     private const string TriggerRow =
-        "marten/database/row?schema=quartz&name=qrtz_triggers&key.sched_name=QuartzScheduler&key.trigger_name=trigger-00&key.trigger_group=DEFAULT";
+        "studio/database/row?schema=quartz&name=qrtz_triggers&key.sched_name=QuartzScheduler&key.trigger_name=trigger-00&key.trigger_group=DEFAULT";
 
     [Fact]
     public void The_studios_router_reaches_the_page()
@@ -198,7 +198,7 @@ public class RowDetailPageTests
 
         const string from = "&from=database%2Fobject%3Fschema%3Dquartz%26name%3Dqrtz_triggers%26tab%3Drows";
         var page = Render(context,
-            "marten/database/row?schema=quartz&name=qrtz_triggers&key.sched_name=QuartzScheduler&key.trigger_name=trigger-01&key.trigger_group=reports" + from);
+            "studio/database/row?schema=quartz&name=qrtz_triggers&key.sched_name=QuartzScheduler&key.trigger_name=trigger-01&key.trigger_group=reports" + from);
 
         IReadOnlyList<IElement> arrows = page.FindAll(".ms-row-detail-actions .ms-doc-detail-nav a");
         arrows[0].GetAttribute("href").Should().Contain("key.trigger_name=trigger-00").And.Contain("from=");
@@ -277,7 +277,7 @@ public class RowDetailPageTests
     {
         await using var context = await RowUiData.ContextAsync();
 
-        var page = Render(context, "marten/database/row?schema=legacy&name=audit_log");
+        var page = Render(context, "studio/database/row?schema=legacy&name=audit_log");
 
         page.Find(".ms-row-keyless .ms-empty-description").TextContent
             .Should().Be("This table has no key, so a row cannot be linked; expand it in the grid.");
@@ -287,7 +287,7 @@ public class RowDetailPageTests
             DatabaseRefusal.NotApplicable,
             "legacy.audit_log has no key, so a row of it cannot be opened on its own; its rows are shown inline.");
 
-        page = Render(context, "marten/database/row?schema=legacy&name=audit_log&key.id=7");
+        page = Render(context, "studio/database/row?schema=legacy&name=audit_log&key.id=7");
 
         page.Find(".ms-row-keyless").TextContent.Should().Contain("its rows are shown inline");
         page.Find(".ms-row-keyless a").GetAttribute("href").Should().StartWith("database/object?schema=legacy&name=audit_log&tab=rows");

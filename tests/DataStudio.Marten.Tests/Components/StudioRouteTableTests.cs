@@ -132,9 +132,9 @@ public class StudioRouteTableTests
     // -------------------------------------------------------------------------------------------
 
     [Theory]
-    [InlineData(null, "http://host/", "http://host/marten", "")]
-    [InlineData(null, "http://host/", "http://host/marten/activity", "activity")]
-    [InlineData(null, "http://host/app/", "http://host/app/marten/activity", "activity")]
+    [InlineData(null, "http://host/", "http://host/studio", "")]
+    [InlineData(null, "http://host/", "http://host/studio/activity", "activity")]
+    [InlineData(null, "http://host/app/", "http://host/app/studio/activity", "activity")]
     [InlineData("/ops/marten", "http://host/", "http://host/ops/marten", "")]
     [InlineData("/ops/marten", "http://host/", "http://host/ops/marten/activity", "activity")]
     public void The_prerendered_shape_strips_the_studio_prefix(string? path, string baseUri, string uri, string expected)
@@ -147,10 +147,10 @@ public class StudioRouteTableTests
     // -------------------------------------------------------------------------------------------
 
     [Theory]
-    [InlineData(null, "http://host/marten/", "http://host/marten/", "")]
-    [InlineData(null, "http://host/marten/", "http://host/marten", "")]
-    [InlineData(null, "http://host/marten/", "http://host/marten/activity", "activity")]
-    [InlineData(null, "http://host/marten/", "http://host/marten/activity?store=default", "activity")]
+    [InlineData(null, "http://host/studio/", "http://host/studio/", "")]
+    [InlineData(null, "http://host/studio/", "http://host/studio", "")]
+    [InlineData(null, "http://host/studio/", "http://host/studio/activity", "activity")]
+    [InlineData(null, "http://host/studio/", "http://host/studio/activity?store=default", "activity")]
     [InlineData("/ops/marten", "http://host/ops/marten/", "http://host/ops/marten/activity", "activity")]
     public void The_circuit_shape_is_already_studio_rooted(string? path, string baseUri, string uri, string expected)
     {
@@ -212,7 +212,7 @@ public class StudioRouteTableTests
     /// match gets a second chance with the prefix stripped. It applies at the default path too now.
     /// </summary>
     [Theory]
-    [InlineData(null, "marten/activity")]
+    [InlineData(null, "studio/activity")]
     [InlineData("/ops/marten", "ops/marten/activity")]
     public void A_still_prefixed_path_is_resolved_on_the_retry(string? path, string relative)
     {

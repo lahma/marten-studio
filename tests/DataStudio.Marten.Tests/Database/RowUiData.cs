@@ -43,7 +43,7 @@ internal static class RowUiData
 
     /// <summary>The object page's Rows tab, as the address bar spells it.</summary>
     public static string TabUrl(string schema, string name) =>
-        "marten/database/object?schema=" + Uri.EscapeDataString(schema) + "&name=" + Uri.EscapeDataString(name) + "&tab=rows";
+        "studio/database/object?schema=" + Uri.EscapeDataString(schema) + "&name=" + Uri.EscapeDataString(name) + "&tab=rows";
 
     /// <summary>One column, as the header draws it.</summary>
     public static TableRowColumn Column(

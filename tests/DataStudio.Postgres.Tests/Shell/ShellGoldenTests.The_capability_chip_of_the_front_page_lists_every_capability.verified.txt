@@ -1,15 +1,11 @@
 <!-- banner -->
-<div class="ms-anonymous-banner" role="alert"><strong>This studio is served to anyone (AllowAnonymous)</strong>
-            <span>
-                Its pages carry no authorization, so the structure of every database this application registered, and whatever its capabilities read, is readable by anyone who can
-                reach this URL.
-            </span></div>
+<div class="ms-anonymous-banner" role="alert"><strong>This studio is served to anyone (AllowAnonymous)</strong><span>Its pages carry no authorization, so the structure of every database this application registered, and whatever its capabilities read, is readable by anyone who can reach this URL.</span></div>
 
 <!-- rail -->
-<aside class="ms-sidebar" role="navigation" aria-label="Postgres Studio navigation"><div class="ms-sidebar-inner"><div class="ms-sidebar-brand"><svg class="ms-sidebar-brand-logo" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><ellipse cx="14" cy="7" rx="10" ry="4" stroke="currentColor" stroke-width="2"></ellipse>
+<aside class="ms-sidebar" role="navigation" aria-label="Data Studio navigation"><div class="ms-sidebar-inner"><div class="ms-sidebar-brand"><svg class="ms-sidebar-brand-logo" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><ellipse cx="14" cy="7" rx="10" ry="4" stroke="currentColor" stroke-width="2"></ellipse>
             <path d="M4 7v14c0 2.2 4.5 4 10 4s10-1.8 10-4V7" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
             <path d="M4 14c0 2.2 4.5 4 10 4s10-1.8 10-4" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path></svg>
-        <span class="ms-sidebar-brand-text">Postgres Studio</span></div>
+        <span class="ms-sidebar-brand-text">Data Studio</span></div>
 
     <nav><ul class="ms-sidebar-nav"><li class="ms-sidebar-section">Data</li><li class="ms-nav-item"><a class="ms-nav-link ms-nav-active" href="?store=default&amp;db=default" title="Overview"><svg class="ms-nav-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1" y="1" width="7" height="7" rx="1" /><rect x="10" y="1" width="7" height="7" rx="1" /><rect x="1" y="10" width="7" height="7" rx="1" /><rect x="10" y="10" width="7" height="7" rx="1" /></svg>
                                 <span class="ms-nav-link-text">Overview</span></a></li><li class="ms-nav-item"><a class="ms-nav-link " href="query?store=default&amp;db=default" title="The SQL console"><svg class="ms-nav-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6" /><line x1="12.5" y1="12.5" x2="17" y2="17" /></svg>
@@ -27,7 +23,7 @@
                                 <span class="ms-nav-link-text">Server</span></a></li><li class="ms-nav-item"><a class="ms-nav-link " href="activity?store=default&amp;db=default" title="Activity"><svg class="ms-nav-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="3" y1="4" x2="15" y2="4" /><line x1="3" y1="9" x2="15" y2="9" /><line x1="3" y1="14" x2="15" y2="14" /></svg>
                                 <span class="ms-nav-link-text">Activity</span></a></li></ul></nav>
 
-    <p class="ms-rail-credit"><span class="ms-rail-credit-line">Postgres Studio <version></span><span class="ms-rail-credit-line"><a href="https://github.com/lahma/marten-studio/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT licensed</a></span>
+    <p class="ms-rail-credit"><span class="ms-rail-credit-line">Data Studio <version></span><span class="ms-rail-credit-line"><a href="https://github.com/lahma/marten-studio/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT licensed</a></span>
         <span class="ms-rail-credit-line">by <a href="https://github.com/lahma/marten-studio" target="_blank" rel="noopener noreferrer">Marko Lahma</a></span></p></div></aside>
 
 <!-- header -->
@@ -37,9 +33,8 @@
         <div id="ms-find-popover" popover="auto" class="ms-popover ms-find-popover"><div class="ms-find"><input id="ms-find-input" type="search" class="ms-input ms-find-input" placeholder="Find by id (/)" aria-label="Find by id" aria-describedby="ms-find-hint" autocomplete="off" spellcheck="false" enterkeyhint="search" />
                 <span id="ms-find-hint" class="ms-sr-only">An exact table or view name, or a statement&#x27;s queryid</span>
 
-                <div class="ms-find-status" role="status" aria-live="polite"></div></div></div></div><div class="ms-header-right"><button type="button" class="ms-chip ms-chip-button" popovertarget="ms-capability-popover" aria-label="4 of 4 capabilities enabled">4 / 4<span class="ms-chip-word"> capabilities</span></button><div id="ms-capability-popover" popover="auto" class="ms-popover ms-capability-popover"><p class="ms-popover-lead">What this studio allows. Your account's policies decide what you may do.</p>
-        <p class="ms-popover-title">Reads authorized like writes</p>
-        <ul class="ms-capability-list" aria-label="Reads authorized like writes"><li class="ms-capability ms-capability-on"><span class="ms-capability-state" aria-hidden="true">on</span>
+                <div class="ms-find-status" role="status" aria-live="polite"></div></div></div></div><div class="ms-header-right"><button type="button" class="ms-chip ms-chip-button" popovertarget="ms-capability-popover" aria-label="4 of 4 capabilities enabled">4 / 4<span class="ms-chip-word"> capabilities</span></button><div id="ms-capability-popover" popover="auto" class="ms-popover ms-capability-popover"><p class="ms-popover-lead">What this studio allows. Your account's policies decide what you may do.</p><p class="ms-popover-title">Reads authorized like writes</p>
+            <ul class="ms-capability-list" aria-label="Reads authorized like writes"><li class="ms-capability ms-capability-on"><span class="ms-capability-state" aria-hidden="true">on</span>
             <span class="ms-capability-name">RunSql</span>
             <code class="ms-capability-option">PostgresStudioOptions.<wbr>Capabilities.<wbr>RunSql</code></li><li class="ms-capability ms-capability-on"><span class="ms-capability-state" aria-hidden="true">on</span>
             <span class="ms-capability-name">BrowseDatabase</span>
@@ -49,7 +44,7 @@
             <span class="ms-capability-name">ViewDatabaseActivity</span>
             <code class="ms-capability-option">PostgresStudioOptions.<wbr>Capabilities.<wbr>ViewDatabaseActivity</code></li></ul><p class="ms-popover-footnote">
             Every one of these is off until the host sets it. <code>PostgresStudioCapabilities.All()</code>
-            turns them all on; <code>PostgresStudioOptions.ReadOnly</code> turns them all off again.
+            turns them all on; <code>DataStudioOptions.ReadOnly</code> turns them all off again.
         </p></div>
                     
                     <div class="ms-copy-link"><button type="button" class="ms-button ms-btn-icon ms-copy-link-button" aria-label="Copy link to this page" title="Copy link to this page"><svg class="ms-copy-link-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.75 10.25a3.25 3.25 0 0 0 4.6 0l2.4-2.4a3.25 3.25 0 0 0-4.6-4.6l-.7.7"></path>

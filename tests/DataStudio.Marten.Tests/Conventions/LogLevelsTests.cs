@@ -160,6 +160,8 @@ public class LogLevelsTests
             "Tenant discovery failed; the header asks on every scope change in every circuit."),
         ["src/DataStudio.Postgres.Diagnostics/Services/StudioLog.cs : 9220 LiveUpdateHandlerFailed"] = (Verdict.Throttled,
             "A page's own refresh-failure handler threw: a studio bug, on a loop that runs every RefreshInterval."),
+        ["src/DataStudio/Services/ShellLiveLog.cs : 9220 LiveUpdateHandlerFailed"] = (Verdict.Throttled,
+            "The shell's own words for event 9220, for a host with no database module: a page's refresh-failure handler threw, on a loop that runs every RefreshInterval; the shell's private throttle names its level."),
         ["src/DataStudio.Postgres.Diagnostics/Services/StudioLog.cs : 9221 TenantPolicyFailed"] = (Verdict.Throttled,
             "The host's store policy threw while the header asked which discovered tenants to list; asked on every scope change in every circuit."),
         ["src/DataStudio.Postgres.Diagnostics/Services/StudioLog.cs : 9222 HealthCheckFailed"] = (Verdict.Throttled,

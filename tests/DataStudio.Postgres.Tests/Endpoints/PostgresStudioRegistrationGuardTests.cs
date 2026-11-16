@@ -15,8 +15,8 @@ using DataStudio.Postgres.Services.Settings;
 namespace DataStudio.Postgres.Tests.Endpoints;
 
 /// <summary>
-/// The two registration guards (design §4): a <c>MapPostgresStudio()</c> that answered no authorization question
-/// refuses to start (D5), and a second studio in one container is refused with the reason.
+/// The two registration guards (design §4): a <c>MapDataStudio()</c> that answered no authorization question
+/// refuses to start (D5), and a second database module in one container is refused with the reason.
 /// </summary>
 public class PostgresStudioRegistrationGuardTests
 {
@@ -48,7 +48,7 @@ public class PostgresStudioRegistrationGuardTests
     }
 
     [Fact]
-    public async Task A_mapping_that_answers_nothing_refuses_to_start_and_names_PostgresStudios_remedies()
+    public async Task A_mapping_that_answers_nothing_refuses_to_start_and_names_the_shells_remedies_and_the_modules_words()
     {
         await using WebApplication app = CreateApp();
         app.MapDataStudio();
@@ -56,11 +56,11 @@ public class PostgresStudioRegistrationGuardTests
         Exception? failure = await StartAndStopAsync(app);
 
         failure.Should().BeOfType<InvalidOperationException>();
-        failure!.Message.Should().Contain("Postgres Studio is mapped with no authorization");
-        failure.Message.Should().Contain("app.MapPostgresStudio().RequireAuthorization()");
-        failure.Message.Should().Contain("options.AuthorizationPolicy");
-        failure.Message.Should().Contain("app.MapPostgresStudio().AllowAnonymous()");
-        failure.Message.Should().Contain("/postgres", "the message names the routes nothing authorizes");
+        failure!.Message.Should().Contain("Data Studio is mapped with no authorization. Its pages carry no authorization, so the structure of every database this application registered");
+        failure.Message.Should().Contain("app.MapDataStudio().RequireAuthorization()");
+        failure.Message.Should().Contain("services.AddDataStudio(options => options.AuthorizationPolicy");
+        failure.Message.Should().Contain("app.MapDataStudio().AllowAnonymous()");
+        failure.Message.Should().Contain("/studio", "the message names the routes nothing authorizes");
         failure.Message.Should().NotContain("Marten");
     }
 
@@ -95,7 +95,7 @@ public class PostgresStudioRegistrationGuardTests
     }
 
     [Fact]
-    public void Calling_AddPostgresStudio_twice_is_one_studio()
+    public void Calling_AddPostgres_twice_is_one_module()
     {
         ServiceCollection services = new();
 
@@ -107,43 +107,21 @@ public class PostgresStudioRegistrationGuardTests
     }
 
     /// <summary>
-    /// Another studio first, then this one: refused, naming both and why. DataStudio.Marten.Tests holds the same refusal with
-    /// the real <c>AddMartenStudio()</c> in both orders; this project cannot reference it.
+    /// Another database module first, then this one: refused, naming both and why. DataStudio.Marten.Tests holds the same refusal with
+    /// the real <c>AddMarten()</c> in both orders; this project cannot reference it.
     /// </summary>
     [Fact]
-    public void A_second_studio_is_refused_with_the_reason()
+    public void A_second_database_module_is_refused_with_the_reason()
     {
         ServiceCollection services = new();
-        StudioRegistrationMarker.Claim(services, new StudioRegistrationMarker("marten", "Marten Studio", "AddMartenStudio()"));
+        StudioRegistrationMarker.Claim(services, new StudioRegistrationMarker("marten", "the Marten module", "AddMarten()"));
 
         Action add = () => services.AddDataStudio().AddPostgres();
 
         add.Should().Throw<InvalidOperationException>()
-            .WithMessage("AddPostgresStudio() was called in an application that already registered Marten Studio with AddMartenStudio().*One studio per application*");
+            .WithMessage("AddPostgres() was called in an application that already registered the Marten module with AddMarten().*One database module per application*");
 
-        services.Should().NotContain(static x => x.ServiceType == typeof(StudioDescriptor), "nothing of the refused studio is registered");
-    }
-
-    /// <summary>
-    /// <c>MapPostgresStudio()</c> in an application that registered another studio is refused, saying which and why -
-    /// before it writes a path onto anybody's options. DataStudio.Marten.Tests holds both directions with the real methods.
-    /// </summary>
-    [Fact]
-    public async Task MapPostgresStudio_in_an_application_that_registered_another_studio_is_refused()
-    {
-        WebApplicationBuilder builder = WebApplication.CreateBuilder();
-        builder.WebHost.UseTestServer();
-        builder.Services.AddSingleton(new StudioRegistrationMarker("marten", "Marten Studio", "AddMartenStudio()"));
-        await using WebApplication app = builder.Build();
-
-        Action map = () => app.MapDataStudio();
-        Action pattern = () => app.MapDataStudio("/db");
-
-        map.Should().Throw<InvalidOperationException>().WithMessage(
-            "MapPostgresStudio() was called in an application that registered Marten Studio with AddMartenStudio(). "
-            + "Map the studio the application registered - app.MapMartenStudio() - or register Postgres Studio with "
-            + "AddPostgresStudio() in its place*");
-        pattern.Should().Throw<InvalidOperationException>().WithMessage("MapPostgresStudio() was called*");
+        services.Should().NotContain(static x => x.ServiceType == typeof(StudioDescriptor), "nothing of the refused module is registered");
     }
 
     [Fact]
@@ -172,6 +150,6 @@ public class PostgresStudioRegistrationGuardTests
     [Fact]
     public void The_marker_is_PostgresStudios()
     {
-        PostgresStudioDescriptor.Marker.Should().Be(new StudioRegistrationMarker("postgres", "Postgres Studio", "AddPostgresStudio()"));
+        PostgresStudioDescriptor.Marker.Should().Be(new StudioRegistrationMarker("postgres", "the Postgres module", "AddPostgres()"));
     }
 }

@@ -360,7 +360,7 @@ public class StudioEndpointsTest
             body.Should().Contain("<script src=\"_framework/blazor.web.js\">");
             body.Should().Contain("<link rel=\"stylesheet\" href=\"_content/DataStudio/css/studio.css\"");
             body.Should().Contain("<link rel=\"icon\" type=\"image/svg+xml\" href=\"_content/DataStudio/favicon.svg\"", "the document names its own icon (issue #33)");
-            body.Should().Contain("<title>Marten Studio</title>");
+            body.Should().Contain("<title>Data Studio</title>");
         }
         finally
         {

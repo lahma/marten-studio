@@ -55,7 +55,7 @@ public class KafkaProfileNeverGrantsTests
             foreach (bool readOnly in new[] { false, true })
             {
                 rig.Studio.Options.Capabilities = set;
-                rig.Studio.Context.Options.ReadOnly = readOnly;
+                rig.Studio.Context.ShellOptions.ReadOnly = readOnly;
                 string where = $"profile {profile?.ToString() ?? "none"}, flags {mask}, ReadOnly {readOnly}";
 
                 KafkaCapability[] usable = [.. KafkaCapabilityGuard.Offered.Where(c => guard.IsEnabled(c) && !ProfileForbids(profile, c))];

@@ -84,7 +84,7 @@ public class DatabaseLinksTests
 
         url.Should().StartWith("database/row?");
 
-        DatabaseRowLink read = DatabaseLinks.ReadRow("http://localhost/marten/" + url);
+        DatabaseRowLink read = DatabaseLinks.ReadRow("http://localhost/studio/" + url);
         read.Schema.Should().Be(schema);
         read.Name.Should().Be(name);
         Pairs(read.Key).Should().Equal(Pairs(key), "every key column comes back, in order, with its value exactly - an empty one included");

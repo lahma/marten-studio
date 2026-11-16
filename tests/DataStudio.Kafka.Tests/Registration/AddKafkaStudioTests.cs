@@ -57,20 +57,15 @@ public class AddKafkaStudioTests
     }
 
     [Fact]
-    public async Task Kafka_without_a_studio_refuses_to_start()
+    public async Task Kafka_alone_in_the_shell_starts_because_the_builder_makes_a_studio_without_one_impossible()
     {
         using ServiceProvider provider = Build(static services => services.AddDataStudio().AddKafka());
 
-        Func<Task> start = () => Start(provider);
-
-        (await start.Should().ThrowAsync<InvalidOperationException>()).Which.Message.Should().Be(
-            "AddKafkaStudio() was called in an application that registered no studio. KStudio is a module of Marten Studio or Postgres Studio: "
-            + "call services.AddMartenStudio() or services.AddPostgresStudio() as well, and map that studio with app.MapMartenStudio() or "
-            + "app.MapPostgresStudio(); the Kafka pages are served under its path, at /kafka.");
+        await Start(provider);
     }
 
     [Fact]
-    public async Task Kafka_beside_diagnostics_alone_refuses_to_start()
+    public async Task Kafka_beside_diagnostics_alone_starts()
     {
         using ServiceProvider provider = Build(static services =>
         {
@@ -78,9 +73,7 @@ public class AddKafkaStudioTests
             services.AddDataStudio().AddKafka();
         });
 
-        Func<Task> start = () => Start(provider);
-
-        (await start.Should().ThrowAsync<InvalidOperationException>()).Which.Message.Should().StartWith("AddKafkaStudio() was called in an application that registered no studio.");
+        await Start(provider);
     }
 
     [Fact]

@@ -45,7 +45,7 @@ public class KafkaCapabilityGuardTests
         KafkaCapabilityGuard guard = on.Context.Services.GetRequiredService<KafkaCapabilityGuard>();
         guard.IsEnabled(KafkaCapability.SearchRecords).Should().BeTrue();
 
-        on.Context.Options.ReadOnly = true;
+        on.Context.ShellOptions.ReadOnly = true;
         guard.IsEnabled(KafkaCapability.SearchRecords).Should().BeFalse("the host studio's master switch turns every capability off");
         guard.IsConfigured(KafkaCapability.SearchRecords).Should().BeTrue();
     }
@@ -54,13 +54,13 @@ public class KafkaCapabilityGuardTests
     public void ReadOnly_names_the_hosts_option()
     {
         using KafkaStudioHarness harness = new(static o => o.Capabilities = KafkaStudioCapabilities.All());
-        harness.Context.Options.ReadOnly = true;
+        harness.Context.ShellOptions.ReadOnly = true;
         KafkaCapabilityGuard guard = harness.Context.Services.GetRequiredService<KafkaCapabilityGuard>();
 
         Action require = () => guard.Require(KafkaCapability.SearchRecords);
 
         require.Should().Throw<KafkaCapabilityDeniedException>().WithMessage(
-            "KStudio refused 'SearchRecords' because PostgresStudioOptions.ReadOnly is true, which turns every capability off.");
+            "KStudio refused 'SearchRecords' because DataStudioOptions.ReadOnly is true, which turns every capability off.");
     }
 
     [Fact]

@@ -33,7 +33,7 @@ public class FeedTagsAndNaturalKeyPageTests
     {
         using StudioComponentContext context = await ContextAsync();
 
-        IRenderedComponent<Feed> page = Render(context, "marten/events/feed");
+        IRenderedComponent<Feed> page = Render(context, "studio/events/feed");
 
         page.FindAll("#ms-feed-tag").Should().BeEmpty();
     }
@@ -47,7 +47,7 @@ public class FeedTagsAndNaturalKeyPageTests
             data.TagTypes = CustomerTags();
         });
 
-        IRenderedComponent<Feed> page = Render(context, "marten/events/feed?tag=customer%3Dacme-1");
+        IRenderedComponent<Feed> page = Render(context, "studio/events/feed?tag=customer%3Dacme-1");
 
         page.WaitForAssertion(() => context.EventData.FeedRequests.Should().NotBeEmpty());
 
@@ -69,7 +69,7 @@ public class FeedTagsAndNaturalKeyPageTests
             data.TagTypes = CustomerTags(IndexVerdictLevel.Red);
         });
 
-        IRenderedComponent<Feed> page = Render(context, "marten/events/feed?tag=customer%3Dacme-1");
+        IRenderedComponent<Feed> page = Render(context, "studio/events/feed?tag=customer%3Dacme-1");
 
         page.WaitForAssertion(() =>
             page.Find(".ms-event-tag-filter-reason").TextContent.Should().Contain("No index leads with value"));
@@ -86,7 +86,7 @@ public class FeedTagsAndNaturalKeyPageTests
             data.TagTypes = CustomerTags();
         });
 
-        IRenderedComponent<Feed> page = Render(context, "marten/events/feed?tag=acme-1");
+        IRenderedComponent<Feed> page = Render(context, "studio/events/feed?tag=acme-1");
 
         page.WaitForAssertion(() => page.Find(".ms-error-alert").TextContent.Should().Contain("tag:<type>=<value>"));
         context.EventData.FeedRequests.Should().BeEmpty();
@@ -101,7 +101,7 @@ public class FeedTagsAndNaturalKeyPageTests
             data.TagTypes = CustomerTags();
         });
 
-        IRenderedComponent<Feed> page = Render(context, "marten/events/feed");
+        IRenderedComponent<Feed> page = Render(context, "studio/events/feed");
 
         await page.Find("#ms-feed-tag").ChangeAsync(new() { Value = "tag:customer=acme-1" });
 
@@ -121,7 +121,7 @@ public class FeedTagsAndNaturalKeyPageTests
             };
         });
 
-        IRenderedComponent<Feed> page = Render(context, "marten/events/feed");
+        IRenderedComponent<Feed> page = Render(context, "studio/events/feed");
 
         page.WaitForAssertion(() => page.FindAll(".ms-event-tag-chip").Should().ContainSingle());
         page.Find(".ms-event-tag-chip a").GetAttribute("href").Should().Contain("tag=customer%3Dacme-1");
@@ -141,7 +141,7 @@ public class FeedTagsAndNaturalKeyPageTests
             data.TagRead = new EventTagRead([new EventTagRow(7, null, new EventTag("customer", "acme-1"))]);
         });
 
-        IRenderedComponent<Feed> page = Render(context, "marten/events/feed");
+        IRenderedComponent<Feed> page = Render(context, "studio/events/feed");
 
         page.WaitForAssertion(() => page.Find(".ms-event-tags-note").TextContent.Should().Contain("ExactCountThreshold"));
         context.EventData.TagReads.Should().BeEmpty();
@@ -175,7 +175,7 @@ public class FeedTagsAndNaturalKeyPageTests
 
         context.ShellOptions.RefreshInterval = TimeSpan.FromMilliseconds(20);
 
-        IRenderedComponent<Feed> page = Render(context, "marten/events/feed?follow=1");
+        IRenderedComponent<Feed> page = Render(context, "studio/events/feed?follow=1");
 
         await page.Find(".ms-event-tags-load").ClickAsync(new());
 
@@ -213,7 +213,7 @@ public class FeedTagsAndNaturalKeyPageTests
                 ["Ticket.Number"]);
         });
 
-        IRenderedComponent<Streams> page = Render<Streams>(context, "marten/events/streams?id=T-100");
+        IRenderedComponent<Streams> page = Render<Streams>(context, "studio/events/streams?id=T-100");
 
         page.WaitForAssertion(() => page.FindAll(".ms-natural-key-matches .ms-table-row").Should().ContainSingle());
 
@@ -228,7 +228,7 @@ public class FeedTagsAndNaturalKeyPageTests
     {
         using StudioComponentContext context = await ContextAsync();
 
-        IRenderedComponent<Streams> page = Render<Streams>(context, "marten/events/streams?id=T-100");
+        IRenderedComponent<Streams> page = Render<Streams>(context, "studio/events/streams?id=T-100");
 
         page.WaitForAssertion(() => context.EventData.StreamRequests.Should().NotBeEmpty());
         context.EventData.NaturalKeyLookups.Should().BeEmpty();
@@ -244,7 +244,7 @@ public class FeedTagsAndNaturalKeyPageTests
             data.NaturalKeys = new NaturalKeyLookup([], ["Ticket.Number"]);
         });
 
-        IRenderedComponent<Streams> page = Render<Streams>(context, "marten/events/streams?id=T-404");
+        IRenderedComponent<Streams> page = Render<Streams>(context, "studio/events/streams?id=T-404");
 
         page.WaitForAssertion(() =>
             page.Find(".ms-natural-key-none").TextContent.Should().Contain("T-404").And.Contain("Ticket.Number"));

@@ -29,7 +29,7 @@ public class TenantsPageTests
 
         if (query.Length > 0)
         {
-            context.Navigate("marten/tenants" + query);
+            context.Navigate("studio/tenants" + query);
         }
 
         return (context, data);

@@ -35,9 +35,9 @@ public static class PostgresDiagnosticsServiceCollectionExtensions
     /// read them before the first call.
     /// </para>
     /// <para>
-    /// <b>One registration.</b> <c>AddPostgresStudio()</c> and <c>AddMartenStudio()</c> register the engine themselves, with
+    /// <b>One registration.</b> <c>AddPostgres()</c> and <c>AddMarten()</c> register the engine themselves, with
     /// the same options as base members of their own: calling this in an application that registers either throws, in
-    /// either order. Calling it twice behaves as calling <c>AddPostgresStudio()</c> twice does: every service is registered
+    /// either order. Calling it twice behaves as calling <c>AddPostgres()</c> twice does: every service is registered
     /// once and the options are configured twice.
     /// </para>
     /// </remarks>

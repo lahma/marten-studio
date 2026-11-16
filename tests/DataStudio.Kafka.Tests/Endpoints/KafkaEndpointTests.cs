@@ -209,7 +209,7 @@ public class KafkaEndpointTests
 
         Func<Task> start = () => app.StartAsync(Token);
 
-        (await start.Should().ThrowAsync<InvalidOperationException>()).Which.Message.Should().Contain("Postgres Studio");
+        (await start.Should().ThrowAsync<InvalidOperationException>()).Which.Message.Should().StartWith("Data Studio is mapped with no authorization.").And.Contain("KStudio's pages show the clusters");
     }
 
     [Fact]

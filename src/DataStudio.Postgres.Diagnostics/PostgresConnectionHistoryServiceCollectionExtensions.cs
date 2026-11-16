@@ -15,7 +15,7 @@ public static class PostgresConnectionHistoryServiceCollectionExtensions
     /// <see cref="PostgresConnectionHistoryOptions.Interval" />, over one connection per server kept open from the application's own
     /// data source, into the <see cref="IPostgresConnectionHistoryStore" /> the container holds: the host's own, registered before
     /// or after this call, or this process's memory. Database › Sessions › Holders then shows the peaks beside what holds the server's
-    /// connections now. Needs <c>AddPostgresDiagnostics()</c>, <c>AddPostgresStudio()</c> or <c>AddMartenStudio()</c>, whose sources it
+    /// connections now. Needs <c>AddPostgresDiagnostics()</c>, <c>AddPostgres()</c> or <c>AddMarten()</c>, whose sources it
     /// samples; it adds one hosted service, and nothing else changes.
     /// </summary>
     /// <param name="services">The application's services.</param>
@@ -50,7 +50,7 @@ public static class PostgresConnectionHistoryServiceCollectionExtensions
             provider.GetService<DataStudio.Postgres.Services.Settings.IDiagnosticsSettings>() is null
                 ? throw new InvalidOperationException(
                     "AddPostgresConnectionHistory() samples the servers of the data sources a studio or the diagnostics engine reads: "
-                    + "register AddPostgresStudio(), AddMartenStudio() or AddPostgresDiagnostics() as well.")
+                    + "register AddPostgres(), AddMarten() or AddPostgresDiagnostics() as well.")
                 : ActivatorUtilities.CreateInstance<ConnectionHistorySampler>(provider));
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, ConnectionHistorySampler>(static provider => provider.GetRequiredService<ConnectionHistorySampler>()));
 

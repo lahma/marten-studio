@@ -27,8 +27,8 @@ internal sealed record MartenStoreRegistration(string Key, string DisplayName, T
 /// </summary>
 /// <remarks>
 /// <para>
-/// Constructed with the <see cref="IServiceCollection" /> at <c>AddMartenStudio</c> time and scanned
-/// <em>lazily</em> on first use, because <c>AddMartenStudio()</c> is routinely called before
+/// Constructed with the <see cref="IServiceCollection" /> at <c>AddMarten</c> time and scanned
+/// <em>lazily</em> on first use, because <c>AddMarten()</c> is routinely called before
 /// <c>AddMarten()</c> and a scan at registration time would find nothing. By the time anything renders,
 /// the collection is complete - and enumerating it after <c>MakeReadOnly()</c> is allowed, which is what
 /// makes reading it from a built application safe.

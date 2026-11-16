@@ -515,7 +515,7 @@ public class QueryPageTests
         service.SqlResult = FakeQueryService.OneRow();
 
         using StudioComponentContext context = CreateContext(service, runSql: true);
-        context.Navigate("marten/query?mode=sql&sql=select+1");
+        context.Navigate("studio/query?mode=sql&sql=select+1");
 
         var page = context.Render<QueryPage>();
 
@@ -569,7 +569,7 @@ public class QueryPageTests
         service.UseRealClauseGuard = true;
 
         using StudioComponentContext context = CreateContext(service);
-        context.Navigate("marten/query?type=person&where=" + Uri.EscapeDataString(clause));
+        context.Navigate("studio/query?type=person&where=" + Uri.EscapeDataString(clause));
 
         context.CurrentUri.Should().Contain("%0D", "the carriage return travels percent-encoded");
 
@@ -600,7 +600,7 @@ public class QueryPageTests
         service.UseRealClauseGuard = true;
 
         using StudioComponentContext context = CreateContext(service);
-        context.Navigate("marten/query?type=person&where=" + Uri.EscapeDataString(clause));
+        context.Navigate("studio/query?type=person&where=" + Uri.EscapeDataString(clause));
 
         var page = context.Render<QueryPage>();
 

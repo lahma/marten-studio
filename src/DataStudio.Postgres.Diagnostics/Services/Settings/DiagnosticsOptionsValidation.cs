@@ -13,7 +13,7 @@ namespace DataStudio.Postgres.Services.Settings;
 /// <summary>
 /// The validation rules for the options the diagnostics engine reads - the query timeout, the console's role, the health
 /// interval, the browsable schemas, the accepted checks and the source names - each as a predicate and the sentence that
-/// refuses it, so that <c>AddPostgresDiagnostics</c>, <c>AddPostgresStudio</c> and <c>AddMartenStudio</c> refuse the same
+/// refuses it, so that <c>AddPostgresDiagnostics</c>, <c>AddPostgres</c> and <c>AddMarten</c> refuse the same
 /// value in the same words, in their own options type's name.
 /// </summary>
 /// <remarks>

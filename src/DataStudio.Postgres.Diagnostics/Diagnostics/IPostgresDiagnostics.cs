@@ -2,8 +2,8 @@ namespace DataStudio.Postgres;
 
 /// <summary>
 /// What the studio finds in this application's PostgreSQL databases, for the application's own code: the findings with
-/// their stable codes, and the measurements behind them as typed sections. Registered by <c>AddPostgresStudio()</c> and by
-/// <c>AddMartenStudio()</c>; resolve it from the container.
+/// their stable codes, and the measurements behind them as typed sections. Registered by <c>AddPostgres()</c> and by
+/// <c>AddMarten()</c>; resolve it from the container.
 /// </summary>
 /// <remarks>
 /// <para>

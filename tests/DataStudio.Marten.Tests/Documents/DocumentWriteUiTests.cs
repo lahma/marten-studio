@@ -72,7 +72,7 @@ public class DocumentWriteUiTests
 
     private static IRenderedComponent<DetailPage> Render(DocumentsComponentContext context)
     {
-        context.Navigate($"marten/documents/customer/doc?id={Id}");
+        context.Navigate($"studio/documents/customer/doc?id={Id}");
         return context.Render<DetailPage>(parameters => parameters.Add(x => x.Alias, "customer"));
     }
 

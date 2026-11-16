@@ -247,7 +247,7 @@ public class StreamDetailStreamChangeTests
             IsArchived: false,
             TenantId: null);
 
-    private static string Url(string id) => "marten/events/streams/s?id=" + id;
+    private static string Url(string id) => "studio/events/streams/s?id=" + id;
 
     private static IRenderedComponent<StreamDetail> Render(StudioComponentContext context, string id)
     {

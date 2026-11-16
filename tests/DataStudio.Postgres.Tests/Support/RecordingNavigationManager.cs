@@ -10,7 +10,7 @@ namespace DataStudio.Postgres.Tests.Support;
 /// </summary>
 internal sealed class RecordingNavigationManager : NavigationManager
 {
-    public RecordingNavigationManager(string startAt = "http://localhost/postgres/") => Initialize("http://localhost/", startAt);
+    public RecordingNavigationManager(string startAt = "http://localhost/studio/") => Initialize("http://localhost/", startAt);
 
     /// <summary>Every <c>NavigateTo</c> the component under test made, in order, as the absolute address and its options.</summary>
     public List<(string Uri, NavigationOptions Options)> Requests { get; } = [];

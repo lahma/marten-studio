@@ -9,7 +9,7 @@ namespace DataStudio.Postgres.Services.Health.Checks;
 /// <param name="SqlConsoleRole">Whether <c>SqlConsoleRole</c> is set - never the name, which is the database-wide gate's (D29).</param>
 /// <param name="BrowsesEverySchema">Whether <c>BrowsableSchemas</c> contains <c>"*"</c>.</param>
 /// <param name="OptionsTypeName">The options type's name, as a host's registration spells it.</param>
-/// <param name="RegistrationMethod">The registration method: <c>AddMartenStudio</c>, <c>AddPostgresStudio</c>.</param>
+/// <param name="RegistrationMethod">The registration method: <c>AddMarten</c>, <c>AddPostgres</c>.</param>
 /// <param name="CapabilitiesTypeName">The capabilities type's name.</param>
 internal sealed record StudioLintFacts(
     bool ReadOnly,
@@ -29,7 +29,7 @@ internal sealed record StudioLintFacts(
     /// <summary><paramref name="member" /> as the host's registration spells it.</summary>
     public string OptionName(string member) => OptionsTypeName + "." + member;
 
-    /// <summary>The method that maps the studio: <c>MapMartenStudio</c>, <c>MapPostgresStudio</c>.</summary>
+    /// <summary>The method that maps the studio: <c>MapDataStudio</c>, <c>MapDataStudio</c>.</summary>
     public string MapMethod => RegistrationMethod.StartsWith("Add", StringComparison.Ordinal) ? "Map" + RegistrationMethod[3..] : RegistrationMethod;
 
     /// <summary>Reads them off the studio's settings.</summary>

@@ -215,7 +215,7 @@ public class CoreFenceTests
                         problems.Add(file + ": @namespace overrides the folder's namespace");
                     }
                 }
-                else if (declared is not [{ } only] || only != SharedNamespace(file))
+                else if (declared is not [{ } only] || (only != SharedNamespace(file) && !IsBuilderCall(file, only)))
                 {
                     problems.Add(file + ": declares [" + string.Join(", ", declared) + "], not " + SharedNamespace(file));
                 }
@@ -234,6 +234,13 @@ public class CoreFenceTests
         martenFiles.Should().BeGreaterThan(100, "every file of MartenStudio is read");
         problems.Should().BeEmpty(string.Join(Environment.NewLine, problems));
     }
+
+    /// <summary>
+    /// The one kind of file whose namespace is not its folder's (v2 step 4): a module's <c>Add…()</c> extension on the shell's builder, declared in the
+    /// shell's own namespace <c>DataStudio</c> so that one <c>using DataStudio;</c> lights up every installed module.
+    /// </summary>
+    private static bool IsBuilderCall(string file, string declared) =>
+        declared == "DataStudio" && file.EndsWith("DataStudioBuilderExtensions.cs", StringComparison.Ordinal);
 
     /// <summary>
     /// The namespace a file's folder gives under <paramref name="root" /> - except the diagnostics read model's folder, whose
@@ -407,7 +414,7 @@ public class CoreFenceTests
             "each is declared in a .cs file under src/DataStudio.Marten/ - MartenTable as a global alias");
 
         stayBehind.Components.Should().Contain(
-            ["MartenStudioApp", "Projections", "Overview", "Schema"],
+            ["Projections", "Overview", "Schema"],
             "each is a component under src/DataStudio.Marten/");
 
         stayBehind.All.Should().NotContain(

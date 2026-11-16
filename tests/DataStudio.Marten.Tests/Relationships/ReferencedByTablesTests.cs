@@ -257,7 +257,7 @@ public class ReferencedByTablesTests
 
     private static IRenderedComponent<DetailPage> RenderDetail(DocumentsComponentContext context)
     {
-        context.Navigate($"marten/documents/customer/doc?id={CustomerId}");
+        context.Navigate($"studio/documents/customer/doc?id={CustomerId}");
         return context.Render<DetailPage>(parameters => parameters.Add(x => x.Alias, "customer"));
     }
 

@@ -38,8 +38,8 @@ using DataStudio.Postgres.Services.Server;
 namespace DataStudio.Marten.Tests.Services;
 
 /// <summary>
-/// What <c>AddMartenStudio()</c> puts in a host's container, pinned: moving a shared service's registration from
-/// <c>AddMartenStudio()</c> into <see cref="StudioCoreRegistration" /> (PS-1e) must leave a MartenStudio host with the
+/// What <c>AddDataStudio().AddMarten()</c> puts in a host's container, pinned: moving a shared service's registration from
+/// <c>AddMarten()</c> into <see cref="StudioCoreRegistration" /> (PS-1e) must leave a MartenStudio host with the
 /// same services, the same lifetimes and the same implementations - and every enumerable service in the same order.
 /// </summary>
 /// <remarks>
@@ -82,8 +82,11 @@ public class StudioRegistrationTests
         (typeof(IStudioSettings), ServiceLifetime.Singleton, How.Factory, typeof(IStudioSettings)),
         (typeof(IStudioModule), ServiceLifetime.Singleton, How.Type, typeof(DatabaseStudioModule)),
 
-        // Shell A1: the shell's view of the very same settings object, and the circuit's preferences beside the scope state.
-        (typeof(IShellSettings), ServiceLifetime.Singleton, How.Factory, typeof(IShellSettings)),
+        // v2 step 4: the shell's own settings, over the shell's options, registered by AddDataStudio() - never a module's object - with its validator
+        // and its marker, so that a map call without the shell can say so.
+        (typeof(IShellSettings), ServiceLifetime.Singleton, How.Type, typeof(ShellSettings)),
+        (typeof(IValidateOptions<DataStudioOptions>), ServiceLifetime.Singleton, How.Type, typeof(DataStudioOptionsValidator)),
+        (typeof(ShellRegistrationMarker), ServiceLifetime.Singleton, How.Type, typeof(ShellRegistrationMarker)),
         (typeof(StudioMappedEndpoints), ServiceLifetime.Singleton, How.Type, typeof(StudioMappedEndpoints)),
         (typeof(IHostedService), ServiceLifetime.Singleton, How.Type, typeof(StudioEndpointAuthorizationGuard)),
         (typeof(StudioCapabilityGuard), ServiceLifetime.Singleton, How.Type, typeof(StudioCapabilityGuard)),
@@ -149,10 +152,6 @@ public class StudioRegistrationTests
         (typeof(SessionActivitySnapshots), ServiceLifetime.Singleton, How.Type, typeof(SessionActivitySnapshots)),
         (typeof(SessionHolderNames), ServiceLifetime.Scoped, How.Type, typeof(SessionHolderNames)),
         (typeof(ISessionActivityService), ServiceLifetime.Scoped, How.Type, typeof(SessionActivityService)),
-        (typeof(IValidateOptions<MartenStudioOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenStudioOptions>)),
-        (typeof(IValidateOptions<MartenStudioOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenStudioOptions>)),
-        (typeof(IValidateOptions<MartenStudioOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenStudioOptions>)),
-        (typeof(IValidateOptions<MartenStudioOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenStudioOptions>)),
         (typeof(IValidateOptions<MartenStudioOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenStudioOptions>)),
         (typeof(IValidateOptions<MartenStudioOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenStudioOptions>)),
         (typeof(IValidateOptions<MartenStudioOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenStudioOptions>)),
@@ -301,7 +300,7 @@ public class StudioRegistrationTests
     ];
 
     [Fact]
-    public void AddMartenStudio_registers_the_same_services_with_the_same_lifetimes_and_order_as_before_the_move()
+    public void AddDataStudio_and_AddMarten_register_the_same_services_with_the_same_lifetimes_and_order_as_before_the_move()
     {
         ServiceCollection services = new();
         services.AddDataStudio().AddMarten();
@@ -318,7 +317,6 @@ public class StudioRegistrationTests
     {
         [typeof(IDiagnosticsSettings)] = typeof(MartenStudioSettings),
         [typeof(IStudioSettings)] = typeof(MartenStudioSettings),
-        [typeof(IShellSettings)] = typeof(MartenStudioSettings),
         [typeof(StudioLogThrottle)] = typeof(StudioLogThrottle),
         [typeof(IStudioRuntime)] = typeof(MartenStudioRuntime),
 

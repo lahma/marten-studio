@@ -37,7 +37,7 @@ public sealed class KafkaWolverineOptions
     /// <returns>These options.</returns>
     /// <example>
     /// <code>
-    /// services.AddKafkaStudio().UseWolverineKafka(w => w.CloudEventsSerializer&lt;StructuredCloudEventsSerializer&gt;());
+    /// services.AddKafka().UseWolverineKafka(w => w.CloudEventsSerializer&lt;StructuredCloudEventsSerializer&gt;());
     /// </code>
     /// </example>
     public KafkaWolverineOptions CloudEventsSerializer<TSerializer>()

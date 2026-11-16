@@ -63,7 +63,7 @@ src/DataStudio.Postgres/Services/             state, authorization, the capabili
 
 src/DataStudio.Marten/                        The Marten Razor Class Library: public API, the store-facing services,
                                          pages and checks, and Internal/; references PostgresStudio
-src/DataStudio.Marten/Components/             MartenStudioApp (the root component) and the component bridges
+src/DataStudio.Marten/Components/             The component bridges
 src/DataStudio.Marten/Internal/               the duplicated-field enumeration, and the Marten SQL builders below
 src/DataStudio.Marten/Services/               store registry, scope resolver, tenant discovery, the source provider,
                                          descriptor, settings and links, and the bridges onto the shared seams
@@ -100,8 +100,10 @@ src/DataStudio.Postgres.Diagnostics/Services/Postgres/  The engine's plain-Postg
 src/DataStudio.Postgres/Services/Postgres/    PostgresStudio's own: the studio's settings and descriptor, the links out of the browser
                                          and the Overview's server read
 tests/DataStudio.Postgres.Tests/              PostgresStudio's fast suite: no Docker, and no Marten anywhere in its graph
-tests/DataStudio.Tests/                       The shell's fast suite (v2 step 3): no Docker, no database, no module. It references the DataStudio project alone
-tests/DataStudio.Tests/Conventions/           ShellFenceTests: the shell's project file, restore graph, built references and this output folder hold no driver, Marten or Kafka
+tests/DataStudio.Tests/                       The shell's fast suite (v2 steps 3 and 4): no Docker, no database. It references the DataStudio project and the one module that needs none, DataStudio.Kafka
+tests/DataStudio.Tests/Conventions/           ShellFenceTests: the shell's project file, restore graph and built references hold no driver, Marten or Kafka; this output folder holds none of those but the Kafka module
+tests/DataStudio.Tests/Endpoints/             MapDataStudio and the startup guard, and a host with only the Kafka module (its output folder holds no Npgsql and no DataStudio.Postgres*)
+tests/DataStudio.Tests/Registration/          AddDataStudio: the shell's options and validation, its registrations, its live-update log
 tests/DataStudio.Tests/Modules/               The route table's module rules (D34), on pages of the test assembly
 tests/DataStudio.Tests/Verify/                The shell's approved API baseline; never hand-edited (hard rule 7)
 tests/DataStudio.Postgres.Tests/Components/   bUnit: PostgresStudioComponentContext and the core pages' smoke tests, the plan view

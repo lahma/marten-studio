@@ -2,7 +2,7 @@ namespace DataStudio.Postgres.Services.Settings;
 
 /// <summary>
 /// Everything the diagnostics engine reads from a host's options, behind one interface - so that no engine type names an
-/// options type, and so that <c>AddPostgresDiagnostics()</c> and a studio's <c>Add*Studio()</c> answer it from their own.
+/// options type, and so that <c>AddPostgresDiagnostics()</c> and a studio's <c>Add…()</c> answer it from their own.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -28,7 +28,7 @@ internal interface IDiagnosticsSettings
     /// <see cref="StudioText.Marten" />, which is 0.4's wording to the byte. This member has no default implementation, so
     /// a studio's settings must say. A few shared services take the settings optionally, only so that a test can build
     /// them by hand, and fall back to MartenStudio's words when given none (<see cref="StudioText.Of" />); every studio's
-    /// registration supplies its settings, which <c>PostgresStudioWiringTests</c> holds a real <c>AddPostgresStudio()</c>
+    /// registration supplies its settings, which <c>PostgresStudioWiringTests</c> holds a real <c>AddPostgres()</c>
     /// host to.
     /// </summary>
     StudioText Text { get; }

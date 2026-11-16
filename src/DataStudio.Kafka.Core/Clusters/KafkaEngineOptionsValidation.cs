@@ -9,7 +9,7 @@ namespace DataStudio.Kafka.Core.Clusters;
 
 /// <summary>
 /// The engine options' bounds (decision 2.5): at least one cluster, valid and unique keys, and every number inside its range. KStudio's
-/// own <c>AddKafkaStudio</c> runs it with validate-on-start; the registry runs it again so that no cluster is ever built from options it
+/// own <c>AddKafka</c> runs it with validate-on-start; the registry runs it again so that no cluster is ever built from options it
 /// would refuse. Each message names the property.
 /// </summary>
 internal static partial class KafkaEngineOptionsValidation

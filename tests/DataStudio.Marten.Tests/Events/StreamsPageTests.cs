@@ -216,7 +216,7 @@ public class StreamsPageTests
     public async Task The_recently_active_ordering_is_asked_for_by_the_url()
     {
         using StudioComponentContext context = await NewContextAsync();
-        context.Navigate("marten/events/streams?order=recent&archived=1");
+        context.Navigate("studio/events/streams?order=recent&archived=1");
 
         context.Render<Streams>();
 

@@ -176,37 +176,43 @@ builder.Services
     .AddAsyncDaemon(sample.NoDaemon ? DaemonMode.Disabled : DaemonMode.Solo)
     .InitializeWith<SampleDataSeeder>();
 
-builder.Services.AddMartenStudio(options =>
-{
-    // Who gets in, and who may change anything: the studio evaluates both against the host's own
-    // authorization, and never authenticates anybody itself.
-    //
-    // --anonymous leaves AuthorizationPolicy unset on purpose. AllowAnonymous() on the mapping does win
-    // over a configured policy - the studio's endpoints carry both and AllowAnonymous is what the
-    // authorization middleware honours - but saying "this policy governs the studio" and then "anyone
-    // may open it" in the same application is two answers to one question, and a demo should show the
-    // one it means.
-    options.AuthorizationPolicy = sample.Anonymous ? null : SamplePolicies.Studio;
-    options.WriteAuthorizationPolicy = SamplePolicies.StudioWrite;
-
-    // Every mutating operation is off until the host says otherwise. `All()` is the one-line, greppable
-    // opt-in; `ReadOnly` overrides it whatever it says.
-    options.Capabilities = sample.ReadOnly ? new MartenStudioCapabilities() : MartenStudioCapabilities.All();
-    options.ReadOnly = sample.ReadOnly;
-
-    // The database browser (Capabilities.BrowseDatabase, part of All()) may also show these schemas: the
-    // Quartz.NET job store and the legacy relational schema the sample seeds beside the store. "*" would
-    // open every schema the studio's role can use - fine for a scratch database, not for a shared one.
-    options.BrowsableSchemas.Add(RelationalDemoSchema.QuartzSchemaName);
-    options.BrowsableSchemas.Add(RelationalDemoSchema.LegacySchemaName);
-
-    // The demo's invoices are conjoined multi-tenant. Naming the tenants here is the cheapest of the
-    // three discovery tiers and the only one that can answer before any events have been written.
-    foreach (string tenantId in SampleStore.TenantIds)
+builder.Services
+    .AddDataStudio(studio =>
     {
-        options.KnownTenantIds.Add(tenantId);
-    }
-});
+        // Who gets in: the shell evaluates it against the host's own authorization, and never authenticates anybody itself.
+        //
+        // --anonymous leaves AuthorizationPolicy unset on purpose. AllowAnonymous() on the mapping does win
+        // over a configured policy - the studio's endpoints carry both and AllowAnonymous is what the
+        // authorization middleware honours - but saying "this policy governs the studio" and then "anyone
+        // may open it" in the same application is two answers to one question, and a demo should show the
+        // one it means.
+        studio.AuthorizationPolicy = sample.Anonymous ? null : SamplePolicies.Studio;
+
+        // The master switch: every module's capabilities are off, whatever they say.
+        studio.ReadOnly = sample.ReadOnly;
+    })
+    .AddMarten(options =>
+    {
+        // Who may change anything: the module evaluates it against the host's own authorization.
+        options.WriteAuthorizationPolicy = SamplePolicies.StudioWrite;
+
+        // Every mutating operation is off until the host says otherwise. `All()` is the one-line, greppable
+        // opt-in; the shell's `ReadOnly` overrides it whatever it says.
+        options.Capabilities = sample.ReadOnly ? new MartenStudioCapabilities() : MartenStudioCapabilities.All();
+
+        // The database browser (Capabilities.BrowseDatabase, part of All()) may also show these schemas: the
+        // Quartz.NET job store and the legacy relational schema the sample seeds beside the store. "*" would
+        // open every schema the studio's role can use - fine for a scratch database, not for a shared one.
+        options.BrowsableSchemas.Add(RelationalDemoSchema.QuartzSchemaName);
+        options.BrowsableSchemas.Add(RelationalDemoSchema.LegacySchemaName);
+
+        // The demo's invoices are conjoined multi-tenant. Naming the tenants here is the cheapest of the
+        // three discovery tiers and the only one that can answer before any events have been written.
+        foreach (string tenantId in SampleStore.TenantIds)
+        {
+            options.KnownTenantIds.Add(tenantId);
+        }
+    });
 ```
 <!-- endSnippet -->
 
@@ -215,8 +221,8 @@ and the mapping:
 <!-- snippet: readme_map -->
 ```csharp
 IEndpointConventionBuilder studio = sample.Path is { Length: > 0 } path
-    ? app.MapMartenStudio(path)
-    : app.MapMartenStudio();
+    ? app.MapDataStudio(path)
+    : app.MapDataStudio();
 
 if (sample.Anonymous)
 {
@@ -246,7 +252,7 @@ monitoring gets to alert on it. It is opt-in, and this block is compiled from th
 
 <!-- snippet: readme_health -->
 ```csharp
-// Optional, and AddMartenStudio() does not do it for you: the health advisor's configuration and catalog
+// Optional, and AddMarten() does not do it for you: the health advisor's configuration and catalog
 // checks as one ASP.NET Core health check. It reports codes and counts, never a name, and runs the checks at
 // most once per HealthInterval however often the endpoint is probed.
 builder.Services.AddHealthChecks().AddMartenStudio(tags: ["marten"]);

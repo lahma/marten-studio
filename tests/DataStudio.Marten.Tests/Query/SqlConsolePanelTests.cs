@@ -176,7 +176,7 @@ public class SqlConsolePanelTests
     public void A_deep_link_reaches_the_body_through_the_shared_query_page()
     {
         using StudioComponentContext context = CreateContext(new FakeQueryService().WithType("person"));
-        context.Navigate("marten/query?mode=sql&sql=select+1");
+        context.Navigate("studio/query?mode=sql&sql=select+1");
 
         var page = context.Render<QueryPage>();
 

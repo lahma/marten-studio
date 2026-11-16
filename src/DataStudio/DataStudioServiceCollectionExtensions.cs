@@ -11,7 +11,7 @@ public static class DataStudioServiceCollectionExtensions
 {
     /// <summary>
     /// Registers the shell: its Blazor components, the mount, the layout, the Activity page and the startup guard that refuses an
-    /// unauthorized mapping. Returns the builder every installed module adds itself to: <c>AddPostgres()</c>, <c>AddMarten()</c>, <c>AddKafka()</c>.
+    /// unauthorized mapping. Returns the builder every installed module adds itself to: <c>AddPostgres()</c>, <c>AddMarten()</c> and the others.
     /// </summary>
     /// <remarks>
     /// <para>

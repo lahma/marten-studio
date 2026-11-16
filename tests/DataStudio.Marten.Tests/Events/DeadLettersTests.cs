@@ -486,7 +486,7 @@ public class DeadLettersTests
     public async Task The_filters_in_the_url_reach_the_query()
     {
         using StudioComponentContext context = await NewContextAsync();
-        context.Navigate("marten/events/dead-letters?projection=Orders&shard=Orders:All&exception=Divide&offset=50");
+        context.Navigate("studio/events/dead-letters?projection=Orders&shard=Orders:All&exception=Divide&offset=50");
 
         context.Render<DeadLetters>();
 
@@ -502,7 +502,7 @@ public class DeadLettersTests
     public async Task One_events_dead_letters_by_its_sequence_reach_the_query_and_the_page_says_how_to_see_them_all()
     {
         using StudioComponentContext context = await NewContextAsync();
-        context.Navigate("marten/events/dead-letters?seq=103&projection=Orders");
+        context.Navigate("studio/events/dead-letters?seq=103&projection=Orders");
 
         IRenderedComponent<DeadLetters> page = context.Render<DeadLetters>();
 

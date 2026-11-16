@@ -65,14 +65,23 @@ public class ShellFenceTests
         references.Where(IsForbidden).Should().BeEmpty();
     }
 
+    /// <summary>
+    /// What this suite's output folder may hold beyond the shell: the Kafka module and its engine and client, which this suite references to build a
+    /// Kafka-only host (<c>KafkaOnlyHostTests</c>). Everything else the shell is fenced from stays forbidden at the file level.
+    /// </summary>
+    private static bool IsAllowedHere(string name) =>
+        name.StartsWith("DataStudio.Kafka", StringComparison.OrdinalIgnoreCase)
+        || name.StartsWith("Confluent", StringComparison.OrdinalIgnoreCase)
+        || name.StartsWith("librdkafka", StringComparison.OrdinalIgnoreCase);
+
     [Fact]
-    public void This_suites_output_folder_holds_no_driver_no_Marten_family_no_Kafka_client_and_no_module()
+    public void This_suites_output_folder_holds_no_driver_no_Marten_family_no_Wolverine_and_no_database_module()
     {
         string[] files = [.. Directory.EnumerateFiles(AppContext.BaseDirectory, "*.dll").Select(static x => Path.GetFileNameWithoutExtension(x))];
 
         files.Should().Contain("DataStudio");
-        files.Where(static x => IsForbidden(x) && !x.Equals("DataStudio.Tests", StringComparison.Ordinal))
-            .Should().BeEmpty("the output folder is the proof, at the file level, that the shell brings none of them");
+        files.Where(static x => IsForbidden(x) && !IsAllowedHere(x) && !x.Equals("DataStudio.Tests", StringComparison.Ordinal))
+            .Should().BeEmpty("the output folder is the proof, at the file level, that the shell and the Kafka module bring none of them");
     }
 
     [Theory]

@@ -125,7 +125,7 @@ public class DatabaseObjectsPageTests
         var page = DatabasePageData.RenderBrowser(context);
         string views = page.FindAll(".ms-db-kind-tabs a.ms-tab")[1].GetAttribute("href")!;
 
-        context.Navigate("marten/" + views);
+        context.Navigate("studio/" + views);
 
         page.WaitForAssertion(() => context.DatabaseObjects.Queries[^1].Category.Should().Be(DatabaseObjectCategory.Views));
         page.WaitForAssertion(() => page.Find(".ms-db-kind-tabs a[aria-current=page]").TextContent.Should().Contain("Views"));

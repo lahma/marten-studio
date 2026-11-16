@@ -3,8 +3,10 @@ using DataStudio.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 using DataStudio.Postgres.Services;
+using DataStudio.Postgres.Services.Postgres;
 using DataStudio.Postgres.Services.Settings;
 using DataStudio.Postgres.Tests.Components;
 
@@ -149,26 +151,70 @@ public sealed class StudioPreferencesTests
     }
 
     [Fact]
-    public void The_shell_settings_are_the_studios_settings_and_spell_the_master_switch_as_the_host_does()
+    public void The_shell_settings_are_the_shells_own_and_the_modules_answer_the_shell_members_from_them()
     {
         using PostgresStudioComponentContext context = new();
 
         IShellSettings shell = context.Services.GetRequiredService<IShellSettings>();
+        IStudioSettings module = context.Services.GetRequiredService<IStudioSettings>();
 
-        shell.Should().BeSameAs(context.Services.GetRequiredService<IStudioSettings>(), "one object, two interfaces (D30)");
-        shell.ReadOnlyOptionName.Should().Be("PostgresStudioOptions.ReadOnly");
-        shell.ProductName.Should().Be("Postgres Studio");
+        shell.Should().NotBeSameAs(module, "the DI service IShellSettings is the shell's object, never a module's");
+        shell.ReadOnlyOptionName.Should().Be("DataStudioOptions.ReadOnly");
+        shell.ProductName.Should().Be("Data Studio");
+        module.ProductName.Should().Be("Postgres Studio", "a module's own sentences keep its name until the one wording");
+
+        context.ShellOptions.Path = "/ops/data";
+        context.ShellOptions.RefreshInterval = TimeSpan.FromSeconds(30);
+        module.TrimmedPath.Should().Be("/ops/data");
+        module.RefreshInterval.Should().Be(TimeSpan.FromSeconds(30));
     }
 
-    /// <summary>Shell A1 follow-up F4: the one-object guarantee holds on a container the real <c>AddPostgresStudio()</c> builds, not only on a test context.</summary>
+    /// <summary>The two objects hold on a container the real <c>AddDataStudio().AddPostgres()</c> builds, not only on a test context.</summary>
     [Fact]
-    public void AddPostgresStudio_registers_one_settings_object_under_both_interfaces()
+    public void AddPostgres_leaves_the_shells_settings_the_shells_and_adds_the_modules()
     {
         ServiceCollection services = new();
         services.AddDataStudio().AddPostgres();
         using ServiceProvider provider = services.BuildServiceProvider();
 
-        provider.GetRequiredService<IShellSettings>().Should().BeSameAs(provider.GetRequiredService<IStudioSettings>());
+        provider.GetRequiredService<IShellSettings>().Should().BeOfType<ShellSettings>();
+        provider.GetRequiredService<IStudioSettings>().Should().BeOfType<PostgresStudioSettings>();
+        provider.GetRequiredService<IStudioSettings>().Should().NotBeSameAs(provider.GetRequiredService<IShellSettings>());
+    }
+
+    /// <summary>
+    /// Decision 12: the two switches. The shell's turns every capability of the module off and names <c>DataStudioOptions.ReadOnly</c>; the
+    /// module's own turns only its own off and names its own.
+    /// </summary>
+    [Fact]
+    public void The_shells_read_only_names_the_shells_option_and_the_modules_names_its_own()
+    {
+        ServiceCollection services = new();
+        services.AddDataStudio().AddPostgres(static options => options.Capabilities = PostgresStudioCapabilities.All());
+        using ServiceProvider provider = services.BuildServiceProvider();
+        IStudioSettings settings = provider.GetRequiredService<IStudioSettings>();
+        StudioCapabilityGuard guard = new(settings);
+
+        settings.ReadOnly.Should().BeFalse();
+        guard.IsEnabled(StudioCapability.RunSql).Should().BeTrue();
+        settings.ReadOnlyOptionName.Should().Be("PostgresStudioOptions.ReadOnly", "with neither on, the module's is the switch a host reads to learn which exists");
+
+        provider.GetRequiredService<IOptions<PostgresStudioOptions>>().Value.ReadOnly = true;
+        settings.ReadOnly.Should().BeTrue();
+        settings.ReadOnlyOptionName.Should().Be("PostgresStudioOptions.ReadOnly");
+        PostgresStudioSettings.Offered.Should().OnlyContain(capability => !guard.IsEnabled(capability));
+        FluentActions.Invoking(() => guard.Require(StudioCapability.RunSql)).Should().Throw<StudioCapabilityDeniedException>().WithMessage("*PostgresStudioOptions.ReadOnly*");
+
+        provider.GetRequiredService<IOptions<DataStudioOptions>>().Value.ReadOnly = true;
+        settings.ReadOnlyOptionName.Should().Be("DataStudioOptions.ReadOnly", "the shell's switch is named when it is on");
+        FluentActions.Invoking(() => guard.Require(StudioCapability.RunSql)).Should().Throw<StudioCapabilityDeniedException>().WithMessage("*DataStudioOptions.ReadOnly*");
+
+        provider.GetRequiredService<IOptions<PostgresStudioOptions>>().Value.ReadOnly = false;
+        settings.ReadOnly.Should().BeTrue("the shell's switch alone turns the module's capabilities off");
+        PostgresStudioSettings.Offered.Should().OnlyContain(capability => !guard.IsEnabled(capability));
+
+        provider.GetRequiredService<IOptions<DataStudioOptions>>().Value.ReadOnly = false;
+        guard.IsEnabled(StudioCapability.RunSql).Should().BeTrue("neither switch is on");
     }
 
     private sealed class ListLogger : ILogger<StudioPreferences>

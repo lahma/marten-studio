@@ -12,7 +12,7 @@ public static class KafkaWolverineExtensions
     /// when KStudio first needs its clusters, and starts, connects and writes nothing: no message store, no handler graph, and none of Wolverine's builder
     /// callbacks. It adds no redaction rule, so declare rules for every topic that carries personal data.
     /// </summary>
-    /// <param name="options">KStudio's options: <c>services.AddKafkaStudio(k =&gt; k.UseWolverineKafka())</c>.</param>
+    /// <param name="options">KStudio's options: <c>services.AddKafka(k =&gt; k.UseWolverineKafka())</c>.</param>
     /// <param name="configure">How the clusters are listed.</param>
     /// <returns>These options.</returns>
     /// <exception cref="InvalidOperationException">DataStudio.Kafka.Core is not the build this DataStudio.Kafka.Wolverine was packed with.</exception>
