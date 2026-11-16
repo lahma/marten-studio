@@ -51,6 +51,9 @@ public class PostgresStudioVersionGuardTests
         PostgresStudioVersionGuard.InformationalVersion(Engine).Should().Be(PostgresStudioVersionGuard.InformationalVersion(Marten),
             "and the engine too: one build stamps all three");
 
+        PostgresStudioVersionGuard.InformationalVersion(typeof(DataStudio.Components.StudioRoutes).Assembly).Should().Be(PostgresStudioVersionGuard.InformationalVersion(Marten),
+            "and the shell: one build stamps all four");
+
         FluentActions.Invoking(() => PostgresStudioVersionGuard.Ensure()).Should().NotThrow();
         FluentActions.Invoking(() => new ServiceCollection().AddMartenStudio()).Should().NotThrow();
         FluentActions.Invoking(() => new ServiceCollection().AddHealthChecks().AddMartenStudio()).Should().NotThrow();
@@ -93,6 +96,36 @@ public class PostgresStudioVersionGuardTests
             .And.Contain("CentralPackageTransitivePinningEnabled")
             .And.Contain($"pin DataStudio.Postgres.Diagnostics to {required}")
             .And.Contain("let PostgresStudio bring it");
+    }
+
+    [Fact]
+    public void A_missing_shell_is_refused_and_the_central_pin_is_named()
+    {
+        var missing = new FileNotFoundException("Could not load file or assembly 'DataStudio'.", "DataStudio");
+        string required = PostgresStudioVersionGuard.ReleaseVersion(Marten);
+
+        InvalidOperationException refusal = FluentActions
+            .Invoking(() => PostgresStudioVersionGuard.Ensure(Marten, () => Shared, () => Engine, () => throw missing))
+            .Should().Throw<InvalidOperationException>().Which;
+
+        refusal.InnerException.Should().BeSameAs(missing);
+        refusal.Message.Should()
+            .Contain($"MartenStudio {required} needs DataStudio {required} exactly")
+            .And.Contain("central PackageVersion for DataStudio at another version")
+            .And.Contain("CentralPackageTransitivePinningEnabled")
+            .And.Contain($"pin DataStudio to {required}")
+            .And.Contain("let PostgresStudio bring it");
+    }
+
+    [Fact]
+    public void Another_shell_version_is_refused_and_named()
+    {
+        FluentActions.Invoking(() => PostgresStudioVersionGuard.Ensure(
+                WithVersion("0.5.0"), () => WithVersion("0.5.0"), () => WithVersion("0.5.0"), () => WithVersion("0.5.1")))
+            .Should().Throw<InvalidOperationException>()
+            .Which.Message.Should()
+            .Contain("MartenStudio 0.5.0 needs DataStudio 0.5.0 exactly, and found DataStudio 0.5.1.")
+            .And.Contain("central PackageVersion or a PackageReference for DataStudio must say 0.5.0");
     }
 
     [Fact]
@@ -268,8 +301,9 @@ public class PostgresStudioVersionGuardTests
         MethodInfo ensure = typeof(PostgresStudioVersionGuard).GetMethod(nameof(PostgresStudioVersionGuard.Ensure), Type.EmptyTypes)!;
         MethodInfo load = typeof(PostgresStudioVersionGuard).GetMethod("LoadPostgresStudio", Declared)!;
         MethodInfo loadEngine = typeof(PostgresStudioVersionGuard).GetMethod("LoadDiagnostics", Declared)!;
+        MethodInfo loadShell = typeof(PostgresStudioVersionGuard).GetMethod("LoadShell", Declared)!;
 
-        foreach (MethodInfo method in new[] { services, healthCheck, ensure, load, loadEngine })
+        foreach (MethodInfo method in new[] { services, healthCheck, ensure, load, loadEngine, loadShell })
         {
             method.Should().NotBeNull();
             method.MethodImplementationFlags.HasFlag(MethodImplAttributes.NoInlining).Should().BeTrue(
@@ -398,11 +432,12 @@ public class PostgresStudioVersionGuardTests
     }
 
     /// <summary>
-    /// A type of PostgresStudio - or of DataStudio.Postgres.Diagnostics, the engine it is built on, which a deployment can lack in
+    /// A type of PostgresStudio - or of DataStudio.Postgres.Diagnostics, the engine it is built on, or of DataStudio, the shell, which a deployment can lack in
     /// the same way and which MartenStudio names directly (<c>HealthExportRunner</c>, <c>FreshReadLimiter</c>).
     /// </summary>
     private static bool IsPostgresStudio(Type type) =>
         !type.IsGenericParameter
         && (string.Equals(type.Assembly.GetName().Name, PostgresStudioVersionGuard.PostgresStudioAssemblyName, StringComparison.Ordinal)
-            || string.Equals(type.Assembly.GetName().Name, "DataStudio.Postgres.Diagnostics", StringComparison.Ordinal));
+            || string.Equals(type.Assembly.GetName().Name, "DataStudio.Postgres.Diagnostics", StringComparison.Ordinal)
+            || string.Equals(type.Assembly.GetName().Name, PostgresStudioVersionGuard.ShellAssemblyName, StringComparison.Ordinal));
 }
