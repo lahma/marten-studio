@@ -1,0 +1,644 @@
+using System.Globalization;
+using System.Reflection;
+using System.Text;
+using System.Text.Encodings.Web;
+using System.Text.Json;
+
+using DataStudio.Postgres.Services.Settings;
+
+namespace DataStudio.Postgres.Services.Diagnostics;
+
+/// <summary>
+/// The snapshot as JSON, <c>schemaVersion</c> 1 (API design §4.1): the one writer behind
+/// <see cref="PostgresDiagnosticsSnapshot.ToJson" /> and the studio's own download, so both are one shape.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>Hand-rolled, on purpose.</b> A <see cref="Utf8JsonWriter" /> and nothing else: no reflection, no serializer options of
+/// the host's or a global's, so a host's own <c>JsonSerializerOptions</c> are never touched and never change the shape.
+/// </para>
+/// <para>
+/// <b>The conventions.</b> Property names and enum values are camelCase; times are ISO 8601 in UTC (<c>"O"</c>); durations
+/// are seconds, as numbers, under a name ending in <c>Seconds</c>; byte counts are numbers (exact in JavaScript up to 9 PB)
+/// and <c>queryId</c> is a string, because a 64-bit hash is not; a number that is not finite is <c>null</c>. <b>Every key is
+/// always present</b>, with <c>null</c> for "not asked, not allowed or not known", so a consumer reads one shape whatever was
+/// found. The one regrouping of the public types: the snapshot's four findings properties are one <c>findings</c> object
+/// (<c>items</c>, <c>checks</c>, <c>measuredAt</c>, <c>withheld</c>), and a finding's <c>key</c> is written too.
+/// </para>
+/// <para>
+/// <b>Versioning.</b> Adding a key keeps the version; removing or renaming one, changing its type or what it means bumps
+/// <see cref="SchemaVersion" />. The studio writes only its current version (<c>docs/diagnostics.md#snapshot-json</c>).
+/// </para>
+/// <para>
+/// <b>Written to be read.</b> It is a file attached to a ticket, a page in the studio's JSON viewer, text on a clipboard - never
+/// markup the studio embeds in a page - so characters are written as they are, a time's <c>+00:00</c> and an apostrophe
+/// included, and only what JSON itself requires is escaped: quotes, backslashes and control characters. A host that puts the
+/// text into HTML encodes it there, as it would any text.
+/// </para>
+/// </remarks>
+internal static class DiagnosticsJson
+{
+    /// <summary>The <c>schema</c> value: what makes a file self-describing when it is attached to a ticket.</summary>
+    public const string Schema = "postgresstudio-diagnostics";
+
+    /// <summary>The version this release writes.</summary>
+    public const int SchemaVersion = 1;
+
+    private static readonly JsonWriterOptions Options = new()
+    {
+        Indented = true,
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
+
+    /// <summary>
+    /// What <see cref="PostgresDiagnosticsSnapshot.Producer" /> says: the package and its release, <c>PostgresStudio 0.5.0</c> -
+    /// both studios ship at one version, so PostgresStudio's assembly says it for either. The API's snapshot and the studio's
+    /// download say it the same way.
+    /// </summary>
+    internal static string ProducerFor(StudioProduct product) =>
+        (product == StudioProduct.MartenStudio ? "MartenStudio " : "PostgresStudio ") + Release;
+
+    private static readonly string Release = ReleaseOf(
+        typeof(DiagnosticsJson).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion);
+
+    /// <summary>A release from an informational version: <c>0.5.0+abc</c> is <c>0.5.0</c>.</summary>
+    internal static string ReleaseOf(string? informationalVersion) =>
+        informationalVersion is { Length: > 0 } version ? version.Split('+')[0].Trim() : "0.0.0";
+
+    /// <summary>The snapshot, as indented JSON.</summary>
+    /// <param name="snapshot">The snapshot.</param>
+    public static string Write(PostgresDiagnosticsSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+
+        using MemoryStream stream = new();
+
+        using (Utf8JsonWriter json = new(stream, Options))
+        {
+            WriteSnapshot(json, snapshot);
+        }
+
+        return Encoding.UTF8.GetString(stream.GetBuffer(), 0, (int) stream.Length);
+    }
+
+    /// <summary>An enum value as the JSON spells it: its name, camelCase.</summary>
+    internal static string Name<T>(T value)
+        where T : struct, Enum => JsonNamingPolicy.CamelCase.ConvertName(value.ToString());
+
+    private static void WriteSnapshot(Utf8JsonWriter json, PostgresDiagnosticsSnapshot snapshot)
+    {
+        json.WriteStartObject();
+        json.WriteString("schema", Schema);
+        json.WriteNumber("schemaVersion", snapshot.SchemaVersion);
+        json.WriteString("producer", snapshot.Producer);
+        Time(json, "generatedAt", snapshot.GeneratedAt);
+
+        json.WritePropertyName("database");
+        if (snapshot.Database is { } database)
+        {
+            json.WriteStartObject();
+            json.WriteString("source", database.Source);
+            json.WriteString("database", database.Database);
+            json.WriteEndObject();
+        }
+        else
+        {
+            json.WriteNullValue();
+        }
+
+        json.WriteString("outcome", Name(snapshot.Outcome));
+        Text(json, "reason", snapshot.Reason);
+        Server(json, snapshot.Server);
+        Compute(json, snapshot.Compute);
+
+        json.WriteStartObject("findings");
+        Time(json, "measuredAt", snapshot.FindingsMeasuredAt);
+        json.WriteNumber("withheld", snapshot.FindingsWithheld);
+        json.WriteStartArray("items");
+        foreach (PostgresFinding finding in snapshot.Findings)
+        {
+            Finding(json, finding);
+        }
+
+        json.WriteEndArray();
+        json.WriteStartArray("checks");
+        foreach (PostgresCheck check in snapshot.Checks)
+        {
+            Check(json, check);
+        }
+
+        json.WriteEndArray();
+        json.WriteEndObject();
+
+        Storage(json, snapshot.Storage);
+        Statements(json, snapshot.Statements);
+        Settings(json, snapshot.Settings);
+        Connections(json, snapshot.Connections);
+        Wal(json, snapshot.Wal);
+        ConnectionHistory(json, snapshot.ConnectionHistory);
+        ConnectionSection(json, snapshot.Connection);
+
+        json.WriteStartObject("withheld");
+        foreach (KeyValuePair<string, string> section in snapshot.Withheld.OrderBy(static x => x.Key, StringComparer.Ordinal))
+        {
+            json.WriteString(section.Key, section.Value);
+        }
+
+        json.WriteEndObject();
+        json.WriteEndObject();
+    }
+
+    private static void Server(Utf8JsonWriter json, PostgresServerInfo? server)
+    {
+        json.WritePropertyName("server");
+
+        if (server is null)
+        {
+            json.WriteNullValue();
+            return;
+        }
+
+        json.WriteStartObject();
+        json.WriteNumber("versionNumber", server.VersionNumber);
+        json.WriteString("version", server.Version);
+        json.WriteString("platform", Name(server.Platform));
+        Text(json, "instance", server.Instance);
+        json.WriteBoolean("inRecovery", server.InRecovery);
+        Time(json, "startedAt", server.StartedAt);
+        json.WriteEndObject();
+    }
+
+    private static void Compute(Utf8JsonWriter json, PostgresComputeCapacity? compute)
+    {
+        json.WritePropertyName("compute");
+
+        if (compute is null)
+        {
+            json.WriteNullValue();
+            return;
+        }
+
+        json.WriteStartObject();
+        Number(json, "current", compute.Current);
+        Number(json, "minimum", compute.Minimum);
+        Number(json, "maximum", compute.Maximum);
+        json.WriteString("unit", compute.Unit);
+        Time(json, "measuredAt", compute.MeasuredAt);
+        Boolean(json, "ioOptimized", compute.IoOptimized);
+        json.WriteEndObject();
+    }
+
+    private static void Finding(Utf8JsonWriter json, PostgresFinding finding)
+    {
+        json.WriteStartObject();
+        json.WriteString("code", finding.Code);
+        Text(json, "variant", finding.Variant);
+        Text(json, "subject", finding.Subject);
+        Text(json, "tenantId", finding.TenantId);
+        json.WriteString("severity", Name(finding.Severity));
+        json.WriteString("category", Name(finding.Category));
+        json.WriteString("title", finding.Title);
+        json.WriteString("detail", finding.Detail);
+        Text(json, "caveat", finding.Caveat);
+        Text(json, "action", finding.Action);
+        Text(json, "actionExplanation", finding.ActionExplanation);
+        Text(json, "actionKind", finding.ActionKind is { } kind ? Name(kind) : null);
+        Text(json, "actionRequires", finding.ActionRequires);
+        json.WriteStartArray("evidence");
+        foreach (KeyValuePair<string, string> item in finding.Evidence)
+        {
+            json.WriteStartObject();
+            json.WriteString("label", item.Key);
+            json.WriteString("value", item.Value);
+            json.WriteEndObject();
+        }
+
+        json.WriteEndArray();
+        json.WriteString("docsUrl", finding.DocsUrl);
+        Time(json, "measuredAt", finding.MeasuredAt);
+        json.WriteString("key", finding.Key);
+        json.WriteBoolean("accepted", finding.Accepted);
+        Text(json, "acceptedReason", finding.AcceptedReason);
+        json.WriteEndObject();
+    }
+
+    private static void Check(Utf8JsonWriter json, PostgresCheck check)
+    {
+        json.WriteStartObject();
+        json.WriteString("code", check.Code);
+        json.WriteString("category", Name(check.Category));
+        json.WriteString("title", check.Title);
+        json.WriteStartArray("variants");
+        foreach (string variant in check.Variants)
+        {
+            json.WriteStringValue(variant);
+        }
+
+        json.WriteEndArray();
+        json.WriteBoolean("requiresActivity", check.RequiresActivity);
+        json.WriteString("docsUrl", check.DocsUrl);
+        Text(json, "outcome", check.Outcome is { } outcome ? Name(outcome) : null);
+        Text(json, "reason", check.Reason);
+        Text(json, "sqlState", check.SqlState);
+        json.WriteNumber("findings", check.Findings);
+        json.WriteEndObject();
+    }
+
+    private static void Storage(Utf8JsonWriter json, PostgresStorageSection? storage)
+    {
+        json.WritePropertyName("storage");
+
+        if (storage is null)
+        {
+            json.WriteNullValue();
+            return;
+        }
+
+        json.WriteStartObject();
+        json.WriteString("outcome", Name(storage.Outcome));
+        Text(json, "reason", storage.Reason);
+        Time(json, "measuredAt", storage.MeasuredAt);
+        json.WriteNumber("databaseBytes", storage.DatabaseBytes);
+        json.WriteBoolean("sizesAreEstimates", storage.SizesAreEstimates);
+        Time(json, "statisticsSince", storage.StatisticsSince);
+        Integer(json, "growthBytesPerDay", storage.GrowthBytesPerDay);
+        json.WriteStartArray("largestTables");
+        foreach (PostgresTableStorage table in storage.LargestTables)
+        {
+            json.WriteStartObject();
+            json.WriteString("schema", table.Schema);
+            json.WriteString("name", table.Name);
+            json.WriteString("ownership", Name(table.Ownership));
+            Text(json, "owner", table.Owner);
+            json.WriteNumber("totalBytes", table.TotalBytes);
+            json.WriteNumber("tableBytes", table.TableBytes);
+            json.WriteNumber("indexBytes", table.IndexBytes);
+            json.WriteNumber("toastBytes", table.ToastBytes);
+            json.WriteNumber("estimatedRows", table.EstimatedRows);
+            Number(json, "shareOfDatabase", table.ShareOfDatabase);
+            Number(json, "hotUpdateRatio", table.HotUpdateRatio);
+            Integer(json, "growthBytesPerDay", table.GrowthBytesPerDay);
+            Number(json, "allVisibleRatio", table.AllVisibleRatio);
+            json.WriteEndObject();
+        }
+
+        json.WriteEndArray();
+        json.WriteEndObject();
+    }
+
+    private static void Statements(Utf8JsonWriter json, PostgresStatementsSection? statements)
+    {
+        json.WritePropertyName("statements");
+
+        if (statements is null)
+        {
+            json.WriteNullValue();
+            return;
+        }
+
+        json.WriteStartObject();
+        json.WriteString("outcome", Name(statements.Outcome));
+        Text(json, "reason", statements.Reason);
+        Time(json, "measuredAt", statements.MeasuredAt);
+        Time(json, "statisticsSince", statements.StatisticsSince);
+        Number(json, "windowSeconds", statements.Window?.TotalSeconds);
+        Number(json, "totalMilliseconds", statements.TotalMilliseconds);
+        json.WriteStartArray("top");
+        foreach (PostgresStatement statement in statements.Top)
+        {
+            json.WriteStartObject();
+            json.WriteString("queryId", statement.QueryId.ToString(CultureInfo.InvariantCulture));
+            Text(json, "text", statement.Text);
+            json.WriteBoolean("textTruncated", statement.TextTruncated);
+            Text(json, "textWithheld", statement.TextWithheld);
+            json.WriteNumber("calls", statement.Calls);
+            Number(json, "totalMilliseconds", statement.TotalMilliseconds);
+            Number(json, "meanMilliseconds", statement.MeanMilliseconds);
+            Number(json, "shareOfTime", statement.ShareOfTime);
+            json.WriteNumber("rows", statement.Rows);
+            json.WriteNumber("sharedBlocksHit", statement.SharedBlocksHit);
+            json.WriteNumber("sharedBlocksRead", statement.SharedBlocksRead);
+            json.WriteNumber("tempBlocksWritten", statement.TempBlocksWritten);
+            Integer(json, "storageBlocksRead", statement.StorageBlocksRead);
+            json.WriteEndObject();
+        }
+
+        json.WriteEndArray();
+        json.WriteEndObject();
+    }
+
+    private static void Settings(Utf8JsonWriter json, PostgresSettingsSection? settings)
+    {
+        json.WritePropertyName("settings");
+
+        if (settings is null)
+        {
+            json.WriteNullValue();
+            return;
+        }
+
+        json.WriteStartObject();
+        json.WriteString("outcome", Name(settings.Outcome));
+        Text(json, "reason", settings.Reason);
+        Time(json, "measuredAt", settings.MeasuredAt);
+        json.WriteStartArray("settings");
+        foreach (PostgresSetting setting in settings.Settings)
+        {
+            json.WriteStartObject();
+            json.WriteString("name", setting.Name);
+            json.WriteString("group", setting.Group);
+            Text(json, "value", setting.Value);
+            Text(json, "unit", setting.Unit);
+            Text(json, "source", setting.Source);
+            json.WriteBoolean("pendingRestart", setting.PendingRestart);
+            json.WriteEndObject();
+        }
+
+        json.WriteEndArray();
+        json.WriteStartArray("extensions");
+        foreach (PostgresExtension extension in settings.Extensions)
+        {
+            json.WriteStartObject();
+            json.WriteString("name", extension.Name);
+            Text(json, "installedVersion", extension.InstalledVersion);
+            Text(json, "availableVersion", extension.AvailableVersion);
+            json.WriteBoolean("usable", extension.Usable);
+            Text(json, "note", extension.Note);
+            json.WriteEndObject();
+        }
+
+        json.WriteEndArray();
+        Boolean(json, "dataChecksums", settings.DataChecksums);
+        Integer(json, "checksumFailures", settings.ChecksumFailures);
+        Time(json, "lastChecksumFailure", settings.LastChecksumFailure);
+        json.WriteEndObject();
+    }
+
+    private static void Wal(Utf8JsonWriter json, PostgresWalSection? wal)
+    {
+        json.WritePropertyName("wal");
+
+        if (wal is null)
+        {
+            json.WriteNullValue();
+            return;
+        }
+
+        json.WriteStartObject();
+        json.WriteString("outcome", Name(wal.Outcome));
+        Text(json, "reason", wal.Reason);
+        Time(json, "measuredAt", wal.MeasuredAt);
+        Integer(json, "records", wal.Records);
+        Integer(json, "fullPageImages", wal.FullPageImages);
+        Integer(json, "bytes", wal.Bytes);
+        Integer(json, "writes", wal.Writes);
+        Integer(json, "syncs", wal.Syncs);
+        Number(json, "writeTimeMs", wal.WriteTimeMs);
+        Number(json, "syncTimeMs", wal.SyncTimeMs);
+        Time(json, "statsReset", wal.StatsReset);
+        json.WriteEndObject();
+    }
+
+    private static void ConnectionHistory(Utf8JsonWriter json, PostgresConnectionHistorySection? history)
+    {
+        json.WritePropertyName("connectionHistory");
+
+        if (history is null)
+        {
+            json.WriteNullValue();
+            return;
+        }
+
+        json.WriteStartObject();
+        json.WriteString("outcome", Name(history.Outcome));
+        Text(json, "reason", history.Reason);
+        json.WriteString("server", history.Server);
+        json.WriteNumber("windowSeconds", (long) history.Window.TotalSeconds);
+        Time(json, "since", history.Since);
+        Time(json, "until", history.Until);
+        json.WriteNumber("samples", history.Samples);
+        json.WriteNumber("pendingSamples", history.PendingSamples);
+        json.WriteNumber("instanceChanges", history.InstanceChanges);
+        json.WriteNumber("peak", history.Peak);
+        Time(json, "peakAt", history.PeakAt);
+        json.WriteNumber("clientLimit", history.ClientLimit);
+        json.WriteNumber("clientLimitNow", history.ClientLimitNow);
+        json.WriteStartArray("byApplication");
+        foreach (PostgresConnectionPeak application in history.ByApplication)
+        {
+            json.WriteStartObject();
+            Text(json, "applicationName", application.ApplicationName);
+            json.WriteNumber("peak", application.Peak);
+            Time(json, "at", application.At);
+            json.WriteEndObject();
+        }
+
+        json.WriteEndArray();
+        json.WriteEndObject();
+    }
+
+    /// <summary>
+    /// The Connection page's settings (<c>connection</c>, 1.1): studio-only, so <c>null</c> in every snapshot but the studio's own
+    /// download. A key added to <c>schemaVersion</c> 1, as <c>docs/diagnostics.md</c> allows.
+    /// </summary>
+    private static void ConnectionSection(Utf8JsonWriter json, ConnectionSnapshotSection? connection)
+    {
+        json.WritePropertyName("connection");
+
+        if (connection is null)
+        {
+            json.WriteNullValue();
+            return;
+        }
+
+        json.WriteStartObject();
+        Time(json, "measuredAt", connection.MeasuredAt);
+        json.WriteString("npgsqlVersion", connection.NpgsqlVersion);
+        Text(json, "platform", connection.Platform);
+
+        json.WritePropertyName("pooler");
+        if (connection.Pooler is null)
+        {
+            json.WriteNullValue();
+        }
+        else
+        {
+            json.WriteStartArray();
+            foreach (string pooler in connection.Pooler)
+            {
+                json.WriteStringValue(pooler);
+            }
+
+            json.WriteEndArray();
+        }
+
+        json.WriteString("tls", connection.Tls);
+
+        json.WriteStartArray("settings");
+        foreach (ConnectionSnapshotSetting setting in connection.Settings)
+        {
+            json.WriteStartObject();
+            json.WriteString("keyword", setting.Keyword);
+            json.WriteString("category", setting.Category);
+            json.WriteString("value", setting.Value);
+            json.WriteString("from", setting.From);
+            Text(json, "environmentVariable", setting.EnvironmentVariable);
+            Text(json, "default", setting.Default);
+            Text(json, "obsolete", setting.Obsolete);
+            json.WriteEndObject();
+        }
+
+        json.WriteEndArray();
+
+        json.WriteStartArray("observed");
+        foreach (ConnectionSnapshotValue value in connection.Observed)
+        {
+            json.WriteStartObject();
+            json.WriteString("name", value.Name);
+            json.WriteString("value", value.Value);
+            json.WriteEndObject();
+        }
+
+        json.WriteEndArray();
+
+        json.WriteStartArray("hints");
+        foreach (ConnectionSnapshotHint hint in connection.Hints)
+        {
+            json.WriteStartObject();
+            json.WriteString("id", hint.Id);
+            Text(json, "keyword", hint.Keyword);
+            json.WriteString("text", hint.Text);
+            Text(json, "connectionStringFix", hint.ConnectionStringFix);
+            Text(json, "builderFix", hint.BuilderFix);
+            json.WriteEndObject();
+        }
+
+        json.WriteEndArray();
+
+        json.WritePropertyName("applications");
+        if (connection.Applications is null)
+        {
+            json.WriteNullValue();
+        }
+        else
+        {
+            json.WriteStartArray();
+            foreach (ConnectionSnapshotApplication application in connection.Applications)
+            {
+                json.WriteStartObject();
+                json.WriteString("applicationName", application.Application);
+                json.WriteNumber("sessions", application.Sessions);
+                Time(json, "oldestConnection", application.OldestConnection);
+                json.WriteNumber("tlsKnown", application.TlsKnown);
+                json.WriteNumber("tlsOn", application.TlsOn);
+                json.WriteEndObject();
+            }
+
+            json.WriteEndArray();
+        }
+
+        json.WriteStartArray("notes");
+        foreach (string note in connection.Notes)
+        {
+            json.WriteStringValue(note);
+        }
+
+        json.WriteEndArray();
+        json.WriteEndObject();
+    }
+
+    private static void Connections(Utf8JsonWriter json, PostgresConnectionsSection? connections)
+    {
+        json.WritePropertyName("connections");
+
+        if (connections is null)
+        {
+            json.WriteNullValue();
+            return;
+        }
+
+        json.WriteStartObject();
+        json.WriteString("outcome", Name(connections.Outcome));
+        Text(json, "reason", connections.Reason);
+        Time(json, "measuredAt", connections.MeasuredAt);
+        json.WriteNumber("maxConnections", connections.MaxConnections);
+        json.WriteNumber("reservedConnections", connections.ReservedConnections);
+        json.WriteNumber("serverConnections", connections.ServerConnections);
+        json.WritePropertyName("database");
+        Counts(json, connections.Database ?? new PostgresConnectionCounts());
+        json.WriteStartArray("byApplication");
+        foreach (PostgresConnectionCounts application in connections.ByApplication)
+        {
+            Counts(json, application);
+        }
+
+        json.WriteEndArray();
+        json.WriteBoolean("allSessionsVisible", connections.AllSessionsVisible);
+        json.WriteEndObject();
+    }
+
+    private static void Counts(Utf8JsonWriter json, PostgresConnectionCounts counts)
+    {
+        json.WriteStartObject();
+        Text(json, "applicationName", counts.ApplicationName);
+        json.WriteNumber("total", counts.Total);
+        json.WriteNumber("active", counts.Active);
+        json.WriteNumber("idle", counts.Idle);
+        json.WriteNumber("idleInTransaction", counts.IdleInTransaction);
+        json.WriteNumber("waiting", counts.Waiting);
+        json.WriteNumber("stateUnknown", counts.StateUnknown);
+        Number(json, "oldestTransactionSeconds", counts.OldestTransaction?.TotalSeconds);
+        json.WriteEndObject();
+    }
+
+    private static void Text(Utf8JsonWriter json, string name, string? value)
+    {
+        if (value is null)
+        {
+            json.WriteNull(name);
+        }
+        else
+        {
+            json.WriteString(name, value);
+        }
+    }
+
+    private static void Time(Utf8JsonWriter json, string name, DateTimeOffset? value) =>
+        Text(json, name, value?.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
+
+    private static void Number(Utf8JsonWriter json, string name, double? value)
+    {
+        if (value is { } number && double.IsFinite(number))
+        {
+            json.WriteNumber(name, number);
+        }
+        else
+        {
+            json.WriteNull(name);
+        }
+    }
+
+    private static void Integer(Utf8JsonWriter json, string name, long? value)
+    {
+        if (value is { } number)
+        {
+            json.WriteNumber(name, number);
+        }
+        else
+        {
+            json.WriteNull(name);
+        }
+    }
+
+    private static void Boolean(Utf8JsonWriter json, string name, bool? value)
+    {
+        if (value is { } flag)
+        {
+            json.WriteBoolean(name, flag);
+        }
+        else
+        {
+            json.WriteNull(name);
+        }
+    }
+}
