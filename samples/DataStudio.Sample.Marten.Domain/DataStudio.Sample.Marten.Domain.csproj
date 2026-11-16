@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The demo domain, its StoreOptions configuration and its seeder — shared by the sample host and by
+    the integration tests, which is the whole reason it is a project of its own. It deliberately does
+    NOT reference MartenStudio: the studio must work against a store it knows nothing about, and a
+    reference here would let that invariant rot unnoticed.
+  -->
+  <ItemGroup>
+    <PackageReference Include="Marten" />
+  </ItemGroup>
+
+  <!--
+    The relational demo schemas (Quartz.NET's job store and a hand-made "legacy" schema) that the seeder
+    applies beside the store. They have no Marten in them, so they live in a project of their own that the
+    Postgres Studio sample shares; it references no studio either (D17).
+  -->
+  <ItemGroup>
+    <ProjectReference Include="../DataStudio.Sample.Postgres.Data/DataStudio.Sample.Postgres.Data.csproj" />
+  </ItemGroup>
+
+</Project>
