@@ -176,9 +176,9 @@ Phase A changes no package, no public type and no word. It can ship in any relea
 
 - [x] 1. Before any change, capture the prerendered rail and header of the three samples' pages as a golden file per
       sample, in a test that phase A must keep green.
-- [ ] 2. Split `Services/StudioState.cs` into `StudioPreferences` and the scope state; `StudioLayout` and
+- [x] 2. Split `Services/StudioState.cs` into `StudioPreferences` and the scope state; `StudioLayout` and
       `PreferencesMenu` read the first.
-- [ ] 3. Add `IShellSettings` under `IStudioSettings` and switch the files of the left column above to it.
+- [x] 3. Add `IShellSettings` under `IStudioSettings` and switch the files of the left column above to it.
 - [ ] 4. Split `StudioDescriptor` into the shell's and the database's; `StudioModuleComposition` composes the shell's from
       modules only.
 - [ ] 5. Extend `IStudioModule` (`ScopeGate`, `HeaderSearch`, `HomeRoute`, `IsRoot`) and add `DatabaseStudioModule` in
