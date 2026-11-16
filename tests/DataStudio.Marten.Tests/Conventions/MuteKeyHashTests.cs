@@ -12,7 +12,7 @@ public partial class MuteKeyHashTests
     /// <summary>The plain SHA-256s the studio keeps, each with what it hashes.</summary>
     private static readonly Dictionary<string, string> Allowed = new(StringComparer.Ordinal)
     {
-        ["src/DataStudio.Postgres/Shell/Internal/StudioEndpointMapper.cs"] = "a packaged static asset's content, for its ETag",
+        ["src/DataStudio/Internal/StudioEndpointMapper.cs"] = "a packaged static asset's content, for its ETag",
         ["src/DataStudio.Postgres.Diagnostics/Services/Health/Checks/HorizonHeldCheck.cs"] = "a horizon holder's identity, for a series name the server keeps in memory",
     };
 

@@ -11,8 +11,8 @@ namespace DataStudio.Postgres.Tests.Tables;
 /// </summary>
 public partial class B1StylesheetTests
 {
-    /// <summary>Where the section is: the part until it is folded, then <c>src/DataStudio.Postgres/wwwroot/css/studio.css</c>.</summary>
-    private const string Stylesheet = "src/DataStudio.Postgres/wwwroot/css/studio.css";
+    /// <summary>Where the section is: the part until it is folded, then <c>src/DataStudio/wwwroot/css/studio.css</c>.</summary>
+    private const string Stylesheet = "src/DataStudio/wwwroot/css/studio.css";
 
     private const string Header = "W5-B1. Database browser lints";
 
@@ -48,7 +48,7 @@ public partial class B1StylesheetTests
     public void It_uses_only_tokens_studio_css_defines_and_no_literal_colour()
     {
         string section = Section();
-        string studio = File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio.Postgres", "wwwroot", "css", "studio.css"));
+        string studio = File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio", "wwwroot", "css", "studio.css"));
 
         HexColour().IsMatch(section).Should().BeFalse("colours come from the tokens (hard rule 3)");
         IReadOnlyList<string> tokens = [.. Token().Matches(section).Select(static x => x.Groups[1].Value).Distinct(StringComparer.Ordinal)];

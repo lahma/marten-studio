@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk.Razor">
 
   <!-- The Kafka module's Razor Class Library (AGENTS.md D34, D35): AddKafkaStudio() adds a Kafka section to the studio the host
-       registered. It has no Marten (hard rule 16), no static web assets (its CSS is a section of PostgresStudio's one stylesheet)
+       registered. It has no Marten, no Npgsql and no database module (hard rule 16: it joins the studio through the shell, DataStudio), no static web assets (its CSS is a section of the shell's one stylesheet)
        and it ships as a preview (K8; the label is Directory.Build.props' KafkaPrereleaseLabel). -->
   <PropertyGroup>
     <AssemblyName>DataStudio.Kafka</AssemblyName>
@@ -30,7 +30,7 @@
   <!-- The shell this module joins, and the engine it shows. Confluent.Kafka reaches this project only through DataStudio.Kafka.Core: the
        built DataStudio.Kafka.dll references no Confluent assembly (KStudioFenceTests). -->
   <ItemGroup>
-    <ProjectReference Include="../DataStudio.Postgres/DataStudio.Postgres.csproj" />
+    <ProjectReference Include="../DataStudio/DataStudio.csproj" />
     <ProjectReference Include="../DataStudio.Kafka.Core/DataStudio.Kafka.Core.csproj" />
   </ItemGroup>
 
@@ -67,16 +67,16 @@
     <InternalsVisibleTo Include="DataStudio.Kafka.Integration.Tests" />
   </ItemGroup>
 
-  <!-- Exactly its own build of what sits below it, as MartenStudio's DataStudioMartenPinsPostgresExactly does: `PostgresStudio [x.y.z]` and `DataStudio.Kafka.Core [x.y.z]`
+  <!-- Exactly its own build of what sits below it, as MartenStudio's DataStudioMartenPinsPostgresExactly does: `DataStudio [x.y.z]` and `DataStudio.Kafka.Core [x.y.z]`
        in the nuspec, not NuGet's default `>=`. DataStudio.Kafka.Core's range carries the preview label: the version NuGet reads is that project's PackageVersion. -->
   <Target Name="DataStudioKafkaPinsFamilyExactly" AfterTargets="_GetProjectReferenceVersions">
     <ItemGroup>
-      <_ProjectReferencesWithVersions Condition="'%(Filename)' == 'DataStudio.Postgres' or '%(Filename)' == 'DataStudio.Kafka.Core'">
+      <_ProjectReferencesWithVersions Condition="'%(Filename)' == 'DataStudio' or '%(Filename)' == 'DataStudio.Kafka.Core'">
         <ProjectVersion>[%(ProjectVersion)]</ProjectVersion>
       </_ProjectReferencesWithVersions>
     </ItemGroup>
-    <Error Condition="'@(_ProjectReferencesWithVersions->WithMetadataValue('Filename', 'DataStudio.Postgres'))' == ''"
-           Text="KStudio must depend on exactly its own PostgresStudio build, and pack found no PostgresStudio project reference to pin." />
+    <Error Condition="'@(_ProjectReferencesWithVersions->WithMetadataValue('Filename', 'DataStudio'))' == ''"
+           Text="DataStudio.Kafka must depend on exactly its own DataStudio build, and pack found no DataStudio project reference to pin." />
     <Error Condition="'@(_ProjectReferencesWithVersions->WithMetadataValue('Filename', 'DataStudio.Kafka.Core'))' == ''"
            Text="KStudio must depend on exactly its own DataStudio.Kafka.Core build, and pack found no DataStudio.Kafka.Core project reference to pin." />
   </Target>

@@ -16,7 +16,7 @@ public partial class KStudioAssetsTests
     public void KStudio_ships_no_wwwroot()
     {
         Directory.Exists(RepositoryRoot.Combine("src", "DataStudio.Kafka", "wwwroot")).Should().BeFalse(
-            "StudioEndpointMapper mirrors only _content/DataStudio.Postgres/ under the mount, so a _content/DataStudio.Kafka/ file would be unreachable under a path base");
+            "StudioEndpointMapper mirrors only _content/DataStudio/ under the mount, so a _content/DataStudio.Kafka/ file would be unreachable under a path base");
     }
 
     [Fact]
@@ -36,7 +36,7 @@ public partial class KStudioAssetsTests
     [Fact]
     public void The_shell_section_is_in_the_one_stylesheet_after_the_earlier_ones()
     {
-        string css = File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio.Postgres", "wwwroot", "css", "studio.css"));
+        string css = File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio", "wwwroot", "css", "studio.css"));
 
         css.Should().Contain(Header);
         css.IndexOf(Header, StringComparison.Ordinal).Should().BeGreaterThan(css.IndexOf("/* ===== 1.2-FINAL-FIX-4", StringComparison.Ordinal), "sections are appended in cascade order (D26)");
@@ -49,7 +49,7 @@ public partial class KStudioAssetsTests
     [Fact]
     public void Every_ms_k_class_the_markup_uses_has_a_rule_in_the_stylesheet()
     {
-        string css = File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio.Postgres", "wwwroot", "css", "studio.css"));
+        string css = File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio", "wwwroot", "css", "studio.css"));
         string[] used =
         [
             .. Directory.EnumerateFiles(RepositoryRoot.Combine("src", "DataStudio.Kafka"), "*.razor", SearchOption.AllDirectories)

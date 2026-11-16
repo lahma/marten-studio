@@ -13,12 +13,37 @@ namespace DataStudio.Kafka.Wolverine.Tests.Conventions;
 /// </summary>
 public class KStudioWolverineFenceTests
 {
-    /// <summary>What the adapter may never reference, as assembly or package name prefixes. The UI assembly <c>KStudio</c> is matched exactly below.</summary>
-    private static readonly string[] ForbiddenPrefixes = ["DataStudio.Postgres", "DataStudio.Marten", "Marten", "Weasel", "Npgsql"];
+    /// <summary>What the adapter may never reference, as the third-party families' name prefixes.</summary>
+    private static readonly string[] ForbiddenFamilies = ["Marten", "Weasel", "Npgsql"];
+
+    /// <summary>The studio projects it may never reference, exactly or below (REVIEW-V2-R finding 1): the database module and the engine under it, Marten Studio and the samples.</summary>
+    private static readonly string[] ForbiddenDotted = ["DataStudio.Postgres", "DataStudio.Marten", "DataStudio.Sample"];
+
+    /// <summary>The projects it may never reference, exactly: the shell, and the Kafka module that sits above the engine (its own engine, <c>DataStudio.Kafka.Core</c>, is below it).</summary>
+    private static readonly string[] ForbiddenExact = ["DataStudio", "DataStudio.Kafka"];
 
     private static bool IsForbidden(string name) =>
-        string.Equals(name, "DataStudio.Kafka", StringComparison.OrdinalIgnoreCase)
-        || ForbiddenPrefixes.Any(prefix => name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        ForbiddenExact.Any(forbidden => name.Equals(forbidden, StringComparison.OrdinalIgnoreCase))
+        || ForbiddenDotted.Any(forbidden => name.Equals(forbidden, StringComparison.OrdinalIgnoreCase) || name.StartsWith(forbidden + ".", StringComparison.OrdinalIgnoreCase))
+        || ForbiddenFamilies.Any(prefix => name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>One case per name the fence must catch, and the three the adapter is built on or is itself.</summary>
+    [Theory]
+    [InlineData("DataStudio", true)]
+    [InlineData("DataStudio.Kafka", true)]
+    [InlineData("DataStudio.Marten", true)]
+    [InlineData("DataStudio.Postgres", true)]
+    [InlineData("DataStudio.Postgres.Diagnostics", true)]
+    [InlineData("DataStudio.Sample.Kafka", true)]
+    [InlineData("Npgsql", true)]
+    [InlineData("Weasel.Postgresql", true)]
+    [InlineData("DataStudio.Kafka.Core", false)]
+    [InlineData("DataStudio.Kafka.Wolverine", false)]
+    [InlineData("WolverineFx.Kafka", false)]
+    public void The_fence_catches_each_name_it_forbids_and_no_other(string name, bool forbidden)
+    {
+        IsForbidden(name).Should().Be(forbidden);
+    }
 
     [Fact]
     public void The_project_file_references_KStudio_Core_and_WolverineFx_Kafka_only()

@@ -2,7 +2,7 @@ using System.Collections.Immutable;
 using System.Globalization;
 using System.Text;
 
-using DataStudio.Postgres.Services.Json;
+using DataStudio.Services.Json;
 
 namespace DataStudio.Marten.Services.Documents;
 

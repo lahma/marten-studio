@@ -10,8 +10,8 @@ namespace DataStudio.Postgres.Tests.Replication;
 /// </summary>
 public partial class ReplicationStylesheetTests
 {
-    /// <summary>Where the section is: the part until it is folded, then <c>src/DataStudio.Postgres/wwwroot/css/studio.css</c>.</summary>
-    private const string Stylesheet = "src/DataStudio.Postgres/wwwroot/css/studio.css";
+    /// <summary>Where the section is: the part until it is folded, then <c>src/DataStudio/wwwroot/css/studio.css</c>.</summary>
+    private const string Stylesheet = "src/DataStudio/wwwroot/css/studio.css";
 
     private const string Header = "W5-R2 - Operations › Replication";
 

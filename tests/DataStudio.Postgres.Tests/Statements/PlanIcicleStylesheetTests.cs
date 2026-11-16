@@ -14,7 +14,7 @@ public partial class PlanIcicleStylesheetTests
 {
     private const string Header = "1.0-P3B. The icicle view";
 
-    private static string Css() => File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio.Postgres", "wwwroot", "css", "studio.css"));
+    private static string Css() => File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio", "wwwroot", "css", "studio.css"));
 
     private static string Section()
     {
@@ -124,7 +124,7 @@ public partial class PlanIcicleStylesheetTests
     [Fact]
     public void The_arrows_and_Space_are_stopped_only_when_a_frame_itself_has_the_focus()
     {
-        string script = File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio.Postgres", "wwwroot", "js", "studio.js"));
+        string script = File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio", "wwwroot", "js", "studio.js"));
         int at = script.IndexOf("window.martenStudio.icicleKeys = ", StringComparison.Ordinal);
         at.Should().BeGreaterThanOrEqualTo(0);
 

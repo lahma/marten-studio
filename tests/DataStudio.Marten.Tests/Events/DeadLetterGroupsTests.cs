@@ -418,7 +418,7 @@ public class DeadLetterGroupsTests
     [Fact]
     public void The_stylesheet_section_is_appended_and_owns_every_selector_in_it()
     {
-        string css = File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio.Postgres", "wwwroot", "css", "studio.css")).Replace("\r\n", "\n", StringComparison.Ordinal);
+        string css = File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio", "wwwroot", "css", "studio.css")).Replace("\r\n", "\n", StringComparison.Ordinal);
 
         int start = css.IndexOf("M3. Events > Dead letters, grouped by cause", StringComparison.Ordinal);
         start.Should().BeGreaterThan(css.IndexOf("W5-API. The Health page's Snapshot menu", StringComparison.Ordinal), "appended in D26 order");

@@ -21,7 +21,7 @@ public class KafkaActionLogTests
         using KafkaStudioHarness harness = new();
         CapturingLoggerProvider captured = new();
         KafkaActionLog log = new(harness.Context.ActivityRing, captured.CreateFactory().CreateLogger<KafkaActionLog>(), harness.Visitor);
-        KafkaCapabilityDeniedException denial = new(KafkaCapability.SearchRecords, DataStudio.Postgres.Services.CapabilityDenialReason.Disabled, "PostgresStudioOptions.ReadOnly");
+        KafkaCapabilityDeniedException denial = new(KafkaCapability.SearchRecords, DataStudio.Services.CapabilityDenialReason.Disabled, "PostgresStudioOptions.ReadOnly");
 
         log.RecordCapabilityDenied(KafkaStudioHarness.Primary, ["orders.v1"], denial, "SearchRecords", "orders.v1");
 

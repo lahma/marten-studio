@@ -26,13 +26,18 @@
 
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
-    <PackageReference Include="Microsoft.AspNetCore.App.Internal.Assets" />
   </ItemGroup>
 
   <!-- The diagnostics engine, with Npgsql and the Microsoft.Extensions.* abstractions it needs: Npgsql reaches this
        project through it (0.11-C), and PostgresStudio is packed with an exact dependency on its own build of it. -->
   <ItemGroup>
     <ProjectReference Include="../DataStudio.Postgres.Diagnostics/DataStudio.Postgres.Diagnostics.csproj" />
+  </ItemGroup>
+
+  <!-- The shell this module joins (v2 step 3): the document, the layout, the rail, the JSON toolkit, the studio's one stylesheet and blazor.web.js.
+       DataStudio.Postgres is packed with an exact dependency on its own build of it. -->
+  <ItemGroup>
+    <ProjectReference Include="../DataStudio/DataStudio.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -77,6 +82,19 @@
     </ItemGroup>
     <Error Condition="'@(_ProjectReferencesWithVersions->WithMetadataValue('Filename', 'DataStudio.Postgres.Diagnostics'))' == ''"
            Text="PostgresStudio must depend on exactly its own DataStudio.Postgres.Diagnostics build, and pack found no DataStudio.Postgres.Diagnostics project reference to pin." />
+  </Target>
+
+  <!-- Exactly its own DataStudio, for the same reason and by the same mechanism as DataStudioPostgresPinsDiagnosticsExactly above: the shell grants this
+       assembly its internals (and the other way round), so DataStudio [x.y.z] goes into the nuspec, not NuGet's default >=. A host that ends up with another
+       DataStudio anyway is stopped at startup by Internal/DataStudioShellVersionGuard.cs. -->
+  <Target Name="DataStudioPostgresPinsShellExactly" AfterTargets="_GetProjectReferenceVersions">
+    <ItemGroup>
+      <_ProjectReferencesWithVersions Condition="'%(Filename)' == 'DataStudio'">
+        <ProjectVersion>[%(ProjectVersion)]</ProjectVersion>
+      </_ProjectReferencesWithVersions>
+    </ItemGroup>
+    <Error Condition="'@(_ProjectReferencesWithVersions->WithMetadataValue('Filename', 'DataStudio'))' == ''"
+           Text="DataStudio.Postgres must depend on exactly its own DataStudio build, and pack found no DataStudio project reference to pin." />
   </Target>
 
   <!--

@@ -114,7 +114,7 @@ public class AddKafkaStudioTests
 
         first.Navigation.Select(static x => x.Title).Should().Equal(second.Navigation.Select(static x => x.Title));
         first.Navigation.Select(static x => x.Title).Should().Equal("Data", "Database", "Operations", "Kafka", "System");
-        first.PageAssemblies.Should().HaveCount(2);
+        first.PageAssemblies.Should().HaveCount(3, "the database's, the shell's Activity page and the module's");
         first.Modules.Select(static x => x.Key).Should().Equal("postgres", "kafka");
         first.Navigation.Single(static x => x.Title == "Kafka").ModuleKey.Should().Be("kafka");
     }

@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The shell's own fast suite (AGENTS.md D16, v2 step 3): no Docker, no database and no module. It references the DataStudio project alone, so
+       what it builds against is a host with ASP.NET Core and nothing else, and the output folder proves at the file level that the shell brings no
+       database driver, no Marten and no Kafka client (ShellFenceTests). A test that composes a real database module lives in the module's suite. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <!-- Global usings: `Xunit` comes from Verify.XunitV3's build props. -->
+  <ItemGroup>
+    <Using Include="AwesomeAssertions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="GitHubActionsTestLogger" />
+    <PackageReference Include="AwesomeAssertions" />
+    <PackageReference Include="Verify.XunitV3" />
+    <PackageReference Include="PublicApiGenerator" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/DataStudio/DataStudio.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="../DataStudio.Marten.Tests/Conventions/RepositoryRoot.cs" Link="Support/Linked/RepositoryRoot.cs" />
+  </ItemGroup>
+
+</Project>

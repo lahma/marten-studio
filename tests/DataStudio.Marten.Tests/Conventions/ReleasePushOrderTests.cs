@@ -3,7 +3,7 @@ using System.Text.RegularExpressions;
 namespace DataStudio.Marten.Tests.Conventions;
 
 /// <summary>
-/// <c>Publish</c> pushes DataStudio.Postgres.Diagnostics, then PostgresStudio, then MartenStudio, then (K8) DataStudio.Kafka.Core, KStudio and
+/// <c>Publish</c> pushes DataStudio.Postgres.Diagnostics, then DataStudio (the shell), then DataStudio.Postgres, then DataStudio.Marten, then (K8) DataStudio.Kafka.Core, DataStudio.Kafka and
 /// DataStudio.Kafka.Wolverine, one <c>dotnet nuget push</c> at a time, and the first failure ends the run - so a push that fails never leaves behind a package that depends on
 /// exactly the version that is not there.
 /// </summary>
@@ -28,7 +28,7 @@ public class ReleasePushOrderTests
     }
 
     [Fact]
-    public void The_release_packages_are_the_engine_then_PostgresStudio_then_MartenStudio_then_the_three_KStudio_packages_and_nothing_else()
+    public void The_release_packages_are_the_engine_then_the_shell_then_PostgresStudio_then_MartenStudio_then_the_three_KStudio_packages_and_nothing_else()
     {
         Match list = Regex.Match(PublishSource, @"AbsolutePath\[\] ReleasePackages =>\s*\[(?<items>[^\]]*)\]", RegexOptions.CultureInvariant);
 
@@ -36,20 +36,21 @@ public class ReleasePushOrderTests
 
         string[] items = [.. list.Groups["items"].Value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)];
 
-        items.Should().HaveCount(6);
+        items.Should().HaveCount(7);
         items[0].Should().Contain("DiagnosticsPackageId", "PostgresStudio depends on exactly DataStudio.Postgres.Diagnostics, so the engine is pushed first");
-        items[1].Should().Contain("PostgresStudioPackageId", "MartenStudio depends on exactly PostgresStudio, so PostgresStudio is pushed before it");
-        items[2].Should().Contain("MartenStudioPackageId");
-        items[3].Should().Contain("KStudioCorePackageId", "KStudio and DataStudio.Kafka.Wolverine depend on exactly DataStudio.Kafka.Core, so the Kafka engine is pushed before both");
-        items[4].Should().Contain("KStudioPackageId", "KStudio depends on exactly PostgresStudio and DataStudio.Kafka.Core, both pushed before it");
-        items[5].Should().Contain("KStudioWolverinePackageId");
+        items[1].Should().Contain("ShellPackageId", "PostgresStudio and KStudio depend on exactly DataStudio, so the shell is pushed before both");
+        items[2].Should().Contain("PostgresStudioPackageId", "MartenStudio depends on exactly PostgresStudio, so PostgresStudio is pushed before it");
+        items[3].Should().Contain("MartenStudioPackageId");
+        items[4].Should().Contain("KStudioCorePackageId", "KStudio and DataStudio.Kafka.Wolverine depend on exactly DataStudio.Kafka.Core, so the Kafka engine is pushed before both");
+        items[5].Should().Contain("KStudioPackageId", "KStudio depends on exactly DataStudio and DataStudio.Kafka.Core, both pushed before it");
+        items[6].Should().Contain("KStudioWolverinePackageId");
 
-        foreach (string kstudio in items[3..])
+        foreach (string kstudio in items[4..])
         {
-            kstudio.Should().Contain("KStudioVersion", "the three KStudio packages carry the preview label, the family's three do not");
+            kstudio.Should().Contain("KStudioVersion", "the three KStudio packages carry the preview label, the family's four do not");
         }
 
-        foreach (string family in items[..3])
+        foreach (string family in items[..4])
         {
             family.Should().NotContain("KStudioVersion");
         }

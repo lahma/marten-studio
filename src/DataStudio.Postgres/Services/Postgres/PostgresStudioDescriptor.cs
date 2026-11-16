@@ -41,6 +41,7 @@ internal static class PostgresStudioDescriptor
         PageAssemblies =
         [
             new StudioPageAssembly(typeof(StudioHome).Assembly, PostgresStudioOptions.DefaultPath),
+            StudioDescriptor.ShellPages,
         ],
 
         // The shared checks, which read nothing but Postgres, run against every kind of source this studio has: the engine's

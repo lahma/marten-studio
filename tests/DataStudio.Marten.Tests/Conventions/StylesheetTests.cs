@@ -21,12 +21,12 @@ namespace DataStudio.Marten.Tests.Conventions;
 /// </remarks>
 public partial class StylesheetTests
 {
-    private const string StylesheetPath = "src/DataStudio.Postgres/wwwroot/css/studio.css";
+    private const string StylesheetPath = "src/DataStudio/wwwroot/css/studio.css";
 
     /// <summary>The stylesheet with its comments removed, which is the thing these tests are about.</summary>
     private static readonly Lazy<string> Css = new(static () =>
         CommentExpression().Replace(
-            File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio.Postgres", "wwwroot", "css", "studio.css")),
+            File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio", "wwwroot", "css", "studio.css")),
             string.Empty));
 
     /// <summary>

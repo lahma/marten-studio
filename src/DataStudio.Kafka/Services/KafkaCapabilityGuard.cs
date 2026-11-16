@@ -1,7 +1,7 @@
-using Microsoft.Extensions.Options;
+using DataStudio.Services;
+using DataStudio.Services.Settings;
 
-using DataStudio.Postgres.Services;
-using DataStudio.Postgres.Services.Settings;
+using Microsoft.Extensions.Options;
 
 namespace DataStudio.Kafka.Services;
 
@@ -12,7 +12,7 @@ namespace DataStudio.Kafka.Services;
 /// </summary>
 /// <param name="options">KStudio's options.</param>
 /// <param name="settings">The host studio's settings, whose <c>ReadOnly</c> is the master switch.</param>
-internal sealed class KafkaCapabilityGuard(IOptions<KafkaStudioOptions> options, IStudioSettings settings)
+internal sealed class KafkaCapabilityGuard(IOptions<KafkaStudioOptions> options, IShellSettings settings)
 {
     /// <summary>Every capability KStudio offers.</summary>
     public static IReadOnlyList<KafkaCapability> Offered { get; } = Enum.GetValues<KafkaCapability>();
@@ -70,12 +70,12 @@ internal sealed class KafkaCapabilityGuard(IOptions<KafkaStudioOptions> options,
     {
         if (settings.ReadOnly)
         {
-            throw new KafkaCapabilityDeniedException(capability, CapabilityDenialReason.ReadOnly, settings.ReadOnlyOption());
+            throw new KafkaCapabilityDeniedException(capability, CapabilityDenialReason.ReadOnly, settings.ReadOnlyOptionName);
         }
 
         if (!IsConfigured(capability))
         {
-            throw new KafkaCapabilityDeniedException(capability, CapabilityDenialReason.Disabled, settings.ReadOnlyOption());
+            throw new KafkaCapabilityDeniedException(capability, CapabilityDenialReason.Disabled, settings.ReadOnlyOptionName);
         }
     }
 

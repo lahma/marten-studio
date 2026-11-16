@@ -1,13 +1,10 @@
 @using DataStudio.Kafka.Services
 @using Microsoft.Extensions.Logging
-@using DataStudio.Postgres.Components
-@using DataStudio.Postgres.Services.Live
-@using DataStudio.Postgres.Services.Settings
 @implements IDisposable
 @inject KafkaState State
 @inject NavigationManager Navigation
 @inject StudioShellDescriptor Descriptor
-@inject IStudioSettings Settings
+@inject IShellSettings Settings
 @inject ILogger<ClusterSelector> Logger
 
 @* The header's scope on a Kafka page (D34): the module's own selector, drawn by the shell in place of the host's ScopeSelector, with the

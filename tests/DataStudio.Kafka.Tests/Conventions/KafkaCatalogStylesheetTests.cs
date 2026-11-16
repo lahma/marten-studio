@@ -14,7 +14,7 @@ public partial class KafkaCatalogStylesheetTests
 
     private const string ShellHeader = "/* ===== KS-SHELL: the module seams (cluster selector, the Kafka capability group, the trademark line) ===== */";
 
-    private static string Css => File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio.Postgres", "wwwroot", "css", "studio.css"));
+    private static string Css => File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio", "wwwroot", "css", "studio.css"));
 
     /// <summary>The section: from its header to the next titled section, or the end of the file.</summary>
     private static string Section()

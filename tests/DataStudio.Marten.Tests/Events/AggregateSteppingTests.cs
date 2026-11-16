@@ -8,7 +8,7 @@ using Marten.Events.Aggregation;
 using DataStudio.Marten.Services.Events;
 using DataStudio.Marten.Tests.Sql;
 
-using DataStudio.Postgres.Services.Json;
+using DataStudio.Services.Json;
 
 namespace DataStudio.Marten.Tests.Events;
 

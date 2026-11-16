@@ -4,11 +4,9 @@
 @using DataStudio.Kafka.Core.Decoding
 @using DataStudio.Kafka.Core.Scanning
 @using Microsoft.Extensions.Logging
-@using DataStudio.Postgres.Services
-@using DataStudio.Postgres.Services.Settings
 @inject KafkaRecordService Records
 @inject KafkaCatalogService Catalog
-@inject IStudioSettings Settings
+@inject IShellSettings Settings
 @inject StudioPreferences Preferences
 @inject ILogger<KafkaTailRows> Logger
 

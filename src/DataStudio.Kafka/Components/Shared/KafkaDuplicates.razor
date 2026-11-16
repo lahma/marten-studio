@@ -1,9 +1,7 @@
 @using System.Globalization
 @using DataStudio.Kafka.Core.Correlation
 @using DataStudio.Kafka.Core.Scanning
-@using DataStudio.Postgres.Services
-@using DataStudio.Postgres.Services.Settings
-@inject IStudioSettings Settings
+@inject IShellSettings Settings
 @inject StudioPreferences Preferences
 
 @* Possible duplicates (decision 4 of D-CORR): the records already held that look like one message delivered more than once. It is drawn from the

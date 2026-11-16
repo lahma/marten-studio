@@ -13,7 +13,7 @@ public partial class PlanCompareStylesheetTests
 {
     private const string Header = "0.10-B. Compare plans";
 
-    private static string Css() => File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio.Postgres", "wwwroot", "css", "studio.css"));
+    private static string Css() => File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio", "wwwroot", "css", "studio.css"));
 
     private static string Section()
     {

@@ -4,16 +4,13 @@
 @using DataStudio.Kafka.Core.Clusters
 @using DataStudio.Kafka.Core.Windows
 @using Microsoft.Extensions.Logging
-@using DataStudio.Postgres.Services
-@using DataStudio.Postgres.Services.Live
-@using DataStudio.Postgres.Services.Settings
 @inject KafkaState State
 @inject KafkaCatalogService Catalog
 @inject KafkaCapabilityGuard Capabilities
 @inject KafkaTailService Tail
 @inject NavigationManager Navigation
 @inject StudioLiveUpdatesFactory LiveFactory
-@inject IStudioSettings Settings
+@inject IShellSettings Settings
 @inject StudioPreferences Preferences
 @inject ILogger<KafkaTopicBody> Logger
 

@@ -1,0 +1,55 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <!-- The shell (v2 step 3): the mount, the document, the layout, the rail, the capability chip, the Activity page, the JSON toolkit and the
+       studio's one stylesheet, with no database, no Kafka and no engine. It references ASP.NET Core and nothing else, and ShellFenceTests holds
+       that line at the project file, the restore graph and the built assembly's references. The modules (DataStudio.Postgres,
+       DataStudio.Marten, DataStudio.Kafka) reference it with an exact pin. -->
+  <PropertyGroup>
+    <AssemblyName>DataStudio</AssemblyName>
+    <RootNamespace>DataStudio</RootNamespace>
+    <PackageId>DataStudio</PackageId>
+    <IsPackable>true</IsPackable>
+    <Product>Data Studio</Product>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>blazor;aspnetcore;admin;dashboard;ui;studio</PackageTags>
+    <Description>The shell of Data Studio: an embeddable Blazor Server admin UI a host mounts once, and the modules (PostgreSQL, Marten, Kafka) attach to.</Description>
+    <EnablePackageValidation>true</EnablePackageValidation>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <IsTrimmable>false</IsTrimmable>
+    <IsAotCompatible>false</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="/" />
+    <None Include="../../icon.png" Pack="true" PackagePath="/" Visible="false" />
+  </ItemGroup>
+
+  <!-- blazor.web.js, which as of .NET 10 lives nowhere else (D22). Its buildTransitive targets make it the consuming project's own static web
+       asset, through every module that references this project. -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Microsoft.AspNetCore.App.Internal.Assets" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <SupportedPlatform Include="browser" />
+  </ItemGroup>
+
+  <!-- The modules, and the test projects that read the shell's internals. The shell and its modules are one program split in several files, and
+       each module is packed with an exact dependency on its own build of this one. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="DataStudio.Postgres" />
+    <InternalsVisibleTo Include="DataStudio.Marten" />
+    <InternalsVisibleTo Include="DataStudio.Kafka" />
+    <InternalsVisibleTo Include="DataStudio.Tests" />
+    <InternalsVisibleTo Include="DataStudio.Postgres.Tests" />
+    <InternalsVisibleTo Include="DataStudio.Postgres.Integration.Tests" />
+    <InternalsVisibleTo Include="DataStudio.Marten.Tests" />
+    <InternalsVisibleTo Include="DataStudio.Marten.Integration.Tests" />
+    <InternalsVisibleTo Include="DataStudio.Kafka.Tests" />
+    <InternalsVisibleTo Include="DataStudio.Kafka.Integration.Tests" />
+  </ItemGroup>
+
+</Project>

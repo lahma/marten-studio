@@ -3,6 +3,7 @@
     "path": "data-studio.slnx",
     "projects": [
       "src\\DataStudio.Postgres.Diagnostics\\DataStudio.Postgres.Diagnostics.csproj",
+      "src\\DataStudio\\DataStudio.csproj",
       "src\\DataStudio.Postgres\\DataStudio.Postgres.csproj",
       "samples\\DataStudio.Sample.Postgres.Data\\DataStudio.Sample.Postgres.Data.csproj",
       "samples\\DataStudio.Sample.Postgres\\DataStudio.Sample.Postgres.csproj",

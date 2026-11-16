@@ -463,7 +463,7 @@ internal sealed class SampleHost : IAsyncDisposable
         // Development - outside it, a non-published application has no static web assets at all. Measured
         // here before it was changed: with ASPNETCORE_ENVIRONMENT=Production the host logged "The
         // application is not running against the published output and Static Web Assets are not enabled",
-        // `GET {path}/_content/DataStudio.Postgres/css/studio.css` answered 404 and
+        // `GET {path}/_content/DataStudio/css/studio.css` answered 404 and
         // `GET {path}/_framework/blazor.web.js` answered 200 with an empty body. That is a fact about
         // running a build output rather than a publish, not about the studio, and pretending otherwise
         // would make this suite assert the wrong thing.

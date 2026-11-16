@@ -1,3 +1,4 @@
+using DataStudio.Services;
 using System.Reflection;
 
 using Bunit;
@@ -830,7 +831,7 @@ public class QueryPageTests
         files.Should().NotBeEmpty("scanning nothing would pass for the wrong reason");
 
         // The engine, DataStudio.Postgres.Diagnostics, has no Razor component at all (the fence that says so is PostgresStudioFenceTests).
-        foreach (string project in StudioProjects.Names.Where(static x => x != StudioProjects.Diagnostics))
+        foreach (string project in StudioProjects.Databases.Where(static x => x != StudioProjects.Diagnostics))
         {
             files.Should().Contain(
                 x => StudioProjects.ProjectOf(SourceScanner.Relative(x)) == project,

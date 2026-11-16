@@ -1,6 +1,6 @@
 using AngleSharp.Dom;
 using Bunit;
-using DataStudio.Postgres.Components.Json;
+using DataStudio.Components.Json;
 using Microsoft.AspNetCore.Components;
 
 namespace DataStudio.Marten.Tests.Json;

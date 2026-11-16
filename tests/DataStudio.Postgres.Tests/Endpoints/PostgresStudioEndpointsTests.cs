@@ -55,9 +55,9 @@ public class PostgresStudioEndpointsTests
         builder.Environment.WebRootFileProvider = new TestFileProvider(new Dictionary<string, byte[]>
         {
             ["_framework/blazor.web.js"] = "// blazor.web.js"u8.ToArray(),
-            ["_content/DataStudio.Postgres/css/studio.css"] = ":root { }"u8.ToArray(),
-            ["_content/DataStudio.Postgres/js/studio.js"] = "// studio.js"u8.ToArray(),
-            ["_content/DataStudio.Postgres/favicon.svg"] = "<svg xmlns=\"http://www.w3.org/2000/svg\" />"u8.ToArray(),
+            ["_content/DataStudio/css/studio.css"] = ":root { }"u8.ToArray(),
+            ["_content/DataStudio/js/studio.js"] = "// studio.js"u8.ToArray(),
+            ["_content/DataStudio/favicon.svg"] = "<svg xmlns=\"http://www.w3.org/2000/svg\" />"u8.ToArray(),
         });
 
     [Fact]
@@ -76,19 +76,19 @@ public class PostgresStudioEndpointsTests
             string body = await page.Content.ReadAsStringAsync(Token);
             body.Should().Contain("<base href=\"/postgres/\"");
             body.Should().Contain("<title>Postgres Studio</title>");
-            body.Should().Contain("<link rel=\"stylesheet\" href=\"_content/DataStudio.Postgres/css/studio.css\"");
+            body.Should().Contain("<link rel=\"stylesheet\" href=\"_content/DataStudio/css/studio.css\"");
             body.Should().Contain("<script src=\"_framework/blazor.web.js\">");
-            body.Should().Contain("<link rel=\"icon\" type=\"image/svg+xml\" href=\"_content/DataStudio.Postgres/favicon.svg\"", "the document names its own icon (issue #33)");
+            body.Should().Contain("<link rel=\"icon\" type=\"image/svg+xml\" href=\"_content/DataStudio/favicon.svg\"", "the document names its own icon (issue #33)");
             body.Should().Contain("<h1 class=\"ms-page-title\">Overview</h1>", "the root page renders PostgresStudio's overview");
             body.Should().NotContain("__RequestVerificationToken");
 
-            using HttpResponseMessage css = await client.GetAsync(new Uri("/postgres/_content/DataStudio.Postgres/css/studio.css", UriKind.Relative), Token);
+            using HttpResponseMessage css = await client.GetAsync(new Uri("/postgres/_content/DataStudio/css/studio.css", UriKind.Relative), Token);
             css.StatusCode.Should().Be(HttpStatusCode.OK);
             css.Content.Headers.ContentType!.MediaType.Should().Be("text/css");
 
             // The icon the document names, relative to its studio-rooted <base href>: under the mount path's mirror, so a host
             // that serves no /favicon.ico is asked for nothing.
-            using HttpResponseMessage icon = await client.GetAsync(new Uri("/postgres/_content/DataStudio.Postgres/favicon.svg", UriKind.Relative), Token);
+            using HttpResponseMessage icon = await client.GetAsync(new Uri("/postgres/_content/DataStudio/favicon.svg", UriKind.Relative), Token);
             icon.StatusCode.Should().Be(HttpStatusCode.OK);
             icon.Content.Headers.ContentType!.MediaType.Should().Be("image/svg+xml");
             (await icon.Content.ReadAsByteArrayAsync(Token)).Should().NotBeEmpty();

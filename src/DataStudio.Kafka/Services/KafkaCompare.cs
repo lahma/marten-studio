@@ -7,7 +7,7 @@ using DataStudio.Kafka.Core.Predicates;
 using DataStudio.Kafka.Core.Redaction;
 using DataStudio.Kafka.Core.Scanning;
 
-using DataStudio.Postgres.Services.Json;
+using DataStudio.Services.Json;
 
 namespace DataStudio.Kafka.Services;
 

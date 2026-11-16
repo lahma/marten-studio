@@ -19,6 +19,7 @@
     </Project>
   </Folder>
   <Folder Name="/src/">
+    <Project Path="src/DataStudio/DataStudio.csproj" />
     <Project Path="src/DataStudio.Marten/DataStudio.Marten.csproj" />
     <Project Path="src/DataStudio.Postgres.Diagnostics/DataStudio.Postgres.Diagnostics.csproj" />
     <Project Path="src/DataStudio.Postgres/DataStudio.Postgres.csproj" />
@@ -35,6 +36,7 @@
     <Project Path="samples/DataStudio.Sample.Postgres.Worker/DataStudio.Sample.Postgres.Worker.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/DataStudio.Tests/DataStudio.Tests.csproj" />
     <Project Path="tests/DataStudio.Marten.Tests/DataStudio.Marten.Tests.csproj" />
     <Project Path="tests/DataStudio.Marten.Integration.Tests/DataStudio.Marten.Integration.Tests.csproj" />
     <Project Path="tests/DataStudio.Postgres.Tests/DataStudio.Postgres.Tests.csproj" />

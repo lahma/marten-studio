@@ -17,7 +17,7 @@ public partial class BlockingStylesheetTests
 
     private static string Section()
     {
-        string css = File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio.Postgres", "wwwroot", "css", "studio.css"));
+        string css = File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio", "wwwroot", "css", "studio.css"));
         int start = css.IndexOf(Header, StringComparison.Ordinal);
         start.Should().BeGreaterThanOrEqualTo(0, "the section is there");
 

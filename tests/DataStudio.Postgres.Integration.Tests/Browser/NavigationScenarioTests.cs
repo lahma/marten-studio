@@ -261,13 +261,13 @@ public class NavigationScenarioTests(BrowserSuiteFixture fixture)
                 }
             }
 
-            string file = fixture.Host.StudioUrl("_content/DataStudio.Postgres/favicon.svg");
+            string file = fixture.Host.StudioUrl("_content/DataStudio/favicon.svg");
             page.Request += OnRequest;
 
             try
             {
                 // Outside the root component's region, so Blazor does not own it; the click reaches the framework's own delegator.
-                await page.EvaluateAsync("() => { const a = document.createElement('a'); a.id = 'ms-nav-probe'; a.setAttribute('href', '_content/DataStudio.Postgres/favicon.svg'); a.textContent = 'probe'; document.body.appendChild(a); }");
+                await page.EvaluateAsync("() => { const a = document.createElement('a'); a.id = 'ms-nav-probe'; a.setAttribute('href', '_content/DataStudio/favicon.svg'); a.textContent = 'probe'; document.body.appendChild(a); }");
                 await page.Locator("#ms-nav-probe").ClickAsync();
 
                 await page.WaitForFunctionAsync(

@@ -1,4 +1,4 @@
-using DataStudio.Services.Settings;
+using DataStudio.Services;
 using DataStudio.Postgres.Services.Settings;
 
 namespace DataStudio.Postgres.Services;
@@ -60,16 +60,6 @@ internal enum StudioCapability
     /// (<see cref="BrowseDatabase" /> keeps those, and implies this).
     /// </summary>
     ViewDefinitions
-}
-
-/// <summary>Why a capability was refused.</summary>
-internal enum CapabilityDenialReason
-{
-    /// <summary>The studio's master switch (<see cref="IShellSettings.ReadOnly" />) is on, so every capability is off.</summary>
-    ReadOnly,
-
-    /// <summary>The individual capability is off.</summary>
-    Disabled
 }
 
 /// <summary>

@@ -15,7 +15,7 @@ using Marten.Services;
 using Marten.Storage;
 
 using DataStudio.Marten.Internal.Sql;
-using DataStudio.Postgres.Services.Json;
+using DataStudio.Services.Json;
 
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.Logging;

@@ -10,7 +10,7 @@ namespace DataStudio.Postgres.Tests.Components;
 /// </summary>
 public partial class HeaderStylesheetTests
 {
-    private const string Stylesheet = "src/DataStudio.Postgres/wwwroot/css/studio.css";
+    private const string Stylesheet = "src/DataStudio/wwwroot/css/studio.css";
 
     private const string Header = "/* ===== 1.2-HEADER ";
 

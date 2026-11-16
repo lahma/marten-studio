@@ -8,15 +8,13 @@ using DataStudio.Marten.Tests.Conventions;
 
 using Microsoft.Extensions.DependencyInjection;
 
-using DataStudio.Postgres;
-
 namespace DataStudio.Kafka.Tests.Registration;
 
 /// <summary>
-/// <c>AddKafkaStudio</c> refuses to start beside any PostgresStudio, DataStudio.Postgres.Diagnostics or DataStudio.Kafka.Core but its own build, and says why. In
+/// <c>AddKafkaStudio</c> refuses to start beside any DataStudio (the shell) or DataStudio.Kafka.Core but its own build, and says why. In
 /// this test host all of them are always present and the same build, so each failure is driven through the guard's seam - the loaders are
 /// parameters - and the property that lets the guard run at all when an assembly is missing, that neither it nor the public method calling it
-/// names a PostgresStudio or DataStudio.Kafka.Core member, is checked on the IL (MartenStudio's <c>PostgresStudioVersionGuardTests</c> is this class's model).
+/// names a DataStudio or DataStudio.Kafka.Core member, is checked on the IL (MartenStudio's <c>PostgresStudioVersionGuardTests</c> is this class's model).
 /// </summary>
 public class KStudioVersionGuardTests
 {
@@ -25,9 +23,7 @@ public class KStudioVersionGuardTests
 
     private static readonly Assembly Module = typeof(KafkaStudioOptions).Assembly;
 
-    private static readonly Assembly Shared = typeof(PostgresStudioOptions).Assembly;
-
-    private static readonly Assembly Engine = typeof(PostgresDiagnosticsOptions).Assembly;
+    private static readonly Assembly Shell = typeof(DataStudio.Components.StudioRoutes).Assembly;
 
     private static readonly Assembly Kafka = typeof(KafkaEngineOptions).Assembly;
 
@@ -61,8 +57,7 @@ public class KStudioVersionGuardTests
             family.Should().Be(KStudioVersionGuard.InformationalVersion(Module), "the family version is KStudio's own");
         }
 
-        KStudioVersionGuard.InformationalVersion(Shared).Should().Be(family, "the family beside KStudio is at the version without its preview label");
-        KStudioVersionGuard.InformationalVersion(Engine).Should().Be(family);
+        KStudioVersionGuard.InformationalVersion(Shell).Should().Be(family, "the family beside KStudio is at the version without its preview label");
         KStudioVersionGuard.InformationalVersion(Kafka).Should().Be(KStudioVersionGuard.InformationalVersion(Module), "DataStudio.Kafka.Core is KStudio's own, label and all");
 
         FluentActions.Invoking(KStudioVersionGuard.Ensure).Should().NotThrow();
@@ -70,8 +65,7 @@ public class KStudioVersionGuardTests
     }
 
     [Theory]
-    [InlineData("DataStudio.Postgres", "KStudio")]
-    [InlineData("DataStudio.Postgres.Diagnostics", "PostgresStudio")]
+    [InlineData("DataStudio", "KStudio")]
     [InlineData("DataStudio.Kafka.Core", "KStudio")]
     public void A_missing_assembly_is_refused_and_the_central_pin_is_named(string missing, string bringer)
     {
@@ -84,8 +78,7 @@ public class KStudioVersionGuardTests
         InvalidOperationException refusal = FluentActions
             .Invoking(() => KStudioVersionGuard.Ensure(
                 Module,
-                () => missing == "DataStudio.Postgres" ? throw notFound : Shared,
-                () => missing == "DataStudio.Postgres.Diagnostics" ? throw notFound : Engine,
+                () => missing == "DataStudio" ? throw notFound : Shell,
                 () => missing == "DataStudio.Kafka.Core" ? throw notFound : Kafka))
             .Should().Throw<InvalidOperationException>().Which;
 
@@ -100,8 +93,7 @@ public class KStudioVersionGuardTests
     }
 
     [Theory]
-    [InlineData("DataStudio.Postgres")]
-    [InlineData("DataStudio.Postgres.Diagnostics")]
+    [InlineData("DataStudio")]
     [InlineData("DataStudio.Kafka.Core")]
     public void Another_version_is_refused_and_named(string other)
     {
@@ -109,8 +101,7 @@ public class KStudioVersionGuardTests
 
         FluentActions.Invoking(() => KStudioVersionGuard.Ensure(
                 module,
-                () => other == "DataStudio.Postgres" ? WithVersion("0.5.1") : module,
-                () => other == "DataStudio.Postgres.Diagnostics" ? WithVersion("0.5.1") : module,
+                () => other == "DataStudio" ? WithVersion("0.5.1") : module,
                 () => other == "DataStudio.Kafka.Core" ? WithVersion("0.5.1") : module))
             .Should().Throw<InvalidOperationException>()
             .Which.Message.Should()
@@ -124,7 +115,7 @@ public class KStudioVersionGuardTests
     {
         AssemblyBuilder module = WithVersion("0.5.0+5f1c2a9d", "Release");
 
-        FluentActions.Invoking(() => KStudioVersionGuard.Ensure(module, () => module, () => module, () => WithVersion("0.5.0+0b7e3c41", "Release")))
+        FluentActions.Invoking(() => KStudioVersionGuard.Ensure(module, () => module, () => WithVersion("0.5.0+0b7e3c41", "Release")))
             .Should().Throw<InvalidOperationException>()
             .Which.Message.Should().Contain("KStudio 0.5.0+5f1c2a9d needs DataStudio.Kafka.Core 0.5.0+5f1c2a9d exactly, and found DataStudio.Kafka.Core 0.5.0+0b7e3c41.");
     }
@@ -148,7 +139,7 @@ public class KStudioVersionGuardTests
         KStudioVersionGuard.SameBuild(kStudio, other, bothRelease).Should().Be(passes);
     }
 
-    /// <summary>A correct preview install: KStudio and DataStudio.Kafka.Core carry the label, PostgresStudio and its engine do not.</summary>
+    /// <summary>A correct preview install: KStudio and DataStudio.Kafka.Core carry the label, the shell does not.</summary>
     [Theory]
     [InlineData("1.3.0-preview.1", "1.3.0", "1.3.0-preview.1")]
     [InlineData("1.3.0-preview.1+5f1c2a9d", "1.3.0+5f1c2a9d", "1.3.0-preview.1+5f1c2a9d")]
@@ -160,22 +151,19 @@ public class KStudioVersionGuardTests
         FluentActions.Invoking(() => KStudioVersionGuard.Ensure(
                 module,
                 () => WithVersion(family, "Release"),
-                () => WithVersion(family, "Release"),
                 () => WithVersion(core, "Release", label: "preview.1")))
             .Should().NotThrow();
     }
 
     [Theory]
-    [InlineData("DataStudio.Postgres")]
-    [InlineData("DataStudio.Postgres.Diagnostics")]
+    [InlineData("DataStudio")]
     public void A_family_assembly_of_another_version_is_refused_beside_a_preview(string other)
     {
         AssemblyBuilder module = WithVersion("1.3.0-preview.1", "Release", label: "preview.1");
 
         FluentActions.Invoking(() => KStudioVersionGuard.Ensure(
                 module,
-                () => other == "DataStudio.Postgres" ? WithVersion("1.3.1") : WithVersion("1.3.0"),
-                () => other == "DataStudio.Postgres.Diagnostics" ? WithVersion("1.3.1") : WithVersion("1.3.0"),
+                () => WithVersion("1.3.1"),
                 () => module))
             .Should().Throw<InvalidOperationException>()
             .Which.Message.Should()
@@ -183,15 +171,15 @@ public class KStudioVersionGuardTests
             .And.Contain($"for {other} must say 1.3.0");
     }
 
-    /// <summary>A family assembly carrying the preview label is not the family's build: a preview PostgresStudio never ships, so it is a skew.</summary>
+    /// <summary>A family assembly carrying the preview label is not the family's build: a preview DataStudio never ships, so it is a skew.</summary>
     [Fact]
     public void A_family_assembly_carrying_the_preview_label_is_refused()
     {
         AssemblyBuilder module = WithVersion("1.3.0-preview.1", "Release", label: "preview.1");
 
-        FluentActions.Invoking(() => KStudioVersionGuard.Ensure(module, () => WithVersion("1.3.0-preview.1"), () => WithVersion("1.3.0"), () => module))
+        FluentActions.Invoking(() => KStudioVersionGuard.Ensure(module, () => WithVersion("1.3.0-preview.1"), () => module))
             .Should().Throw<InvalidOperationException>()
-            .Which.Message.Should().Contain("needs DataStudio.Postgres 1.3.0 exactly, and found DataStudio.Postgres 1.3.0-preview.1.");
+            .Which.Message.Should().Contain("needs DataStudio 1.3.0 exactly, and found DataStudio 1.3.0-preview.1.");
     }
 
     [Theory]
@@ -202,15 +190,15 @@ public class KStudioVersionGuardTests
     {
         AssemblyBuilder module = WithVersion("1.3.0-preview.1", "Release", label: "preview.1");
 
-        FluentActions.Invoking(() => KStudioVersionGuard.Ensure(module, () => WithVersion("1.3.0"), () => WithVersion("1.3.0"), () => WithVersion(core)))
+        FluentActions.Invoking(() => KStudioVersionGuard.Ensure(module, () => WithVersion("1.3.0"), () => WithVersion(core)))
             .Should().Throw<InvalidOperationException>()
             .Which.Message.Should().Contain($"KStudio 1.3.0-preview.1 needs DataStudio.Kafka.Core 1.3.0-preview.1 exactly, and found DataStudio.Kafka.Core {core}.");
     }
 
-    /// <summary>After graduation (the label emptied) nothing is stamped and nothing is taken off: all four are one version again.</summary>
+    /// <summary>After graduation (the label emptied) nothing is stamped and nothing is taken off: all three are one version again.</summary>
     /// <summary>A label that is present but empty (the build never stamps one, but a hand-made assembly can) takes nothing off.</summary>
     [Fact]
-    public void An_empty_label_takes_nothing_off_and_all_four_are_one_version()
+    public void An_empty_label_takes_nothing_off_and_all_three_are_one_version()
     {
         AssemblyBuilder module = WithVersion("1.3.0+5f1c2a9d", "Release", label: "");
 
@@ -218,21 +206,20 @@ public class KStudioVersionGuardTests
         FluentActions.Invoking(() => KStudioVersionGuard.Ensure(
                 module,
                 () => WithVersion("1.3.0+5f1c2a9d"),
-                () => WithVersion("1.3.0+5f1c2a9d"),
                 () => WithVersion("1.3.0+5f1c2a9d")))
             .Should().NotThrow();
-        FluentActions.Invoking(() => KStudioVersionGuard.Ensure(module, () => WithVersion("1.3.0-preview.1+5f1c2a9d"), () => module, () => module))
+        FluentActions.Invoking(() => KStudioVersionGuard.Ensure(module, () => WithVersion("1.3.0-preview.1+5f1c2a9d"), () => module))
             .Should().Throw<InvalidOperationException>("with no label to take off, a family assembly carrying one is another version");
     }
 
     [Fact]
-    public void Without_a_label_all_four_are_one_version()
+    public void Without_a_label_all_three_are_one_version()
     {
         AssemblyBuilder module = WithVersion("1.3.0");
 
-        FluentActions.Invoking(() => KStudioVersionGuard.Ensure(module, () => WithVersion("1.3.0"), () => WithVersion("1.3.0"), () => WithVersion("1.3.0")))
+        FluentActions.Invoking(() => KStudioVersionGuard.Ensure(module, () => WithVersion("1.3.0"), () => WithVersion("1.3.0")))
             .Should().NotThrow();
-        FluentActions.Invoking(() => KStudioVersionGuard.Ensure(module, () => WithVersion("1.3.0-preview.1"), () => WithVersion("1.3.0"), () => WithVersion("1.3.0")))
+        FluentActions.Invoking(() => KStudioVersionGuard.Ensure(module, () => WithVersion("1.3.0-preview.1"), () => WithVersion("1.3.0")))
             .Should().Throw<InvalidOperationException>("no label was stamped, so nothing is taken off a family version");
     }
 
@@ -254,7 +241,7 @@ public class KStudioVersionGuardTests
     {
         BadImageFormatException corrupt = new("not an assembly");
 
-        FluentActions.Invoking(() => KStudioVersionGuard.Ensure(Module, () => throw corrupt, () => Engine, () => Kafka))
+        FluentActions.Invoking(() => KStudioVersionGuard.Ensure(Module, () => throw corrupt, () => Kafka))
             .Should().Throw<BadImageFormatException>().Which.Should().BeSameAs(corrupt);
     }
 
@@ -269,15 +256,15 @@ public class KStudioVersionGuardTests
         KStudioVersionGuard.ReleaseVersion(informational).Should().Be(expected);
     }
 
-    /// <summary>The public <c>AddKafkaStudio</c> and the guard name no PostgresStudio or DataStudio.Kafka.Core type or member, so the JIT can compile them when either is absent.</summary>
+    /// <summary>The public <c>AddKafkaStudio</c> and the guard name no DataStudio or DataStudio.Kafka.Core type or member, so the JIT can compile them when either is absent.</summary>
     [Fact]
-    public void Neither_AddKafkaStudio_nor_the_guard_names_a_PostgresStudio_or_engine_member()
+    public void Neither_AddKafkaStudio_nor_the_guard_names_a_shell_or_engine_member()
     {
         MethodBase[] methods = [AddKafkaStudio, .. GuardMethods()];
 
-        methods.Should().HaveCountGreaterThan(4, "the public method, the guard's checks and its three loaders are all scanned");
+        methods.Should().HaveCountGreaterThan(4, "the public method, the guard's checks and its two loaders are all scanned");
         methods.SelectMany(ForbiddenMembersIn).Should().BeEmpty(
-            "a PostgresStudio or DataStudio.Kafka.Core member here is resolved when the method is compiled - before the guard can run - and a deployment "
+            "a DataStudio or DataStudio.Kafka.Core member here is resolved when the method is compiled - before the guard can run - and a deployment "
             + "without it then fails with a bare FileNotFoundException instead of the guard's reason");
     }
 
@@ -302,8 +289,7 @@ public class KStudioVersionGuardTests
         {
             services,
             ensure,
-            typeof(KStudioVersionGuard).GetMethod("LoadPostgresStudio", Declared)!,
-            typeof(KStudioVersionGuard).GetMethod("LoadDiagnostics", Declared)!,
+            typeof(KStudioVersionGuard).GetMethod("LoadShell", Declared)!,
             typeof(KStudioVersionGuard).GetMethod("LoadEngine", Declared)!,
         })
         {
@@ -426,10 +412,9 @@ public class KStudioVersionGuardTests
         }
     }
 
-    /// <summary>A type of PostgresStudio, DataStudio.Postgres.Diagnostics or DataStudio.Kafka.Core: the three assemblies the guard checks.</summary>
+    /// <summary>A type of DataStudio or DataStudio.Kafka.Core: the two assemblies the guard checks.</summary>
     private static bool IsForbidden(Type type) =>
         !type.IsGenericParameter
-        && type.Assembly.GetName().Name is KStudioVersionGuard.PostgresStudioAssemblyName
-            or KStudioVersionGuard.DiagnosticsAssemblyName
+        && type.Assembly.GetName().Name is KStudioVersionGuard.ShellAssemblyName
             or KStudioVersionGuard.EngineAssemblyName;
 }

@@ -41,7 +41,7 @@ public class KafkaEndpointTests
         builder.Environment.WebRootFileProvider = new TestFileProvider(new Dictionary<string, byte[]>
         {
             ["_framework/blazor.web.js"] = "// blazor.web.js"u8.ToArray(),
-            ["_content/DataStudio.Postgres/css/studio.css"] = ":root { }"u8.ToArray(),
+            ["_content/DataStudio/css/studio.css"] = ":root { }"u8.ToArray(),
         });
 
         if (dataSource)

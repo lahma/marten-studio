@@ -12,7 +12,7 @@ namespace DataStudio.Marten.Tests.Projections;
 public partial class LagChartStylesheetTests
 {
     private static readonly Lazy<string> Stylesheet = new(() =>
-        File.ReadAllText(RepositoryRoot.Combine("src/DataStudio.Postgres/wwwroot/css/studio.css")).Replace("\r\n", "\n"));
+        File.ReadAllText(RepositoryRoot.Combine("src/DataStudio/wwwroot/css/studio.css")).Replace("\r\n", "\n"));
 
     private const string Header = "M2. The projections screen's lag chart";
 

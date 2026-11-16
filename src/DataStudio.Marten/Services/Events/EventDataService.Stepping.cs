@@ -11,7 +11,7 @@ using DataStudio.Marten.Internal.Sql;
 using Npgsql;
 
 using DataStudio.Postgres.Services;
-using DataStudio.Postgres.Services.Json;
+using DataStudio.Services.Json;
 
 namespace DataStudio.Marten.Services.Events;
 

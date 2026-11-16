@@ -1,3 +1,4 @@
+using DataStudio.Services;
 using DataStudio.Postgres.Services.ConnectionHistory;
 using DataStudio.Postgres.Services.Settings;
 using DataStudio.Postgres.Services.Sources;

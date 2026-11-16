@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Security.Claims;
 
+using DataStudio.Marten.Tests.Support;
 using DataStudio.Services;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.DependencyInjection;
@@ -69,7 +70,7 @@ public sealed class PostgresStudioWiringTests : IAsyncDisposable
             foreach (FieldInfo field in words)
             {
                 object? value = field.GetValue(owner);
-                (value is StudioProduct.PostgresStudio || ReferenceEquals(value, PostgresStudioText.Instance) || ReferenceEquals(value, DatabaseLiveLogs.PostgresStudio))
+                (value is StudioProduct.PostgresStudio || ReferenceEquals(value, PostgresStudioText.Instance) || SaysPostgresStudio(value as StudioLiveLog))
                     .Should().BeTrue(owner.GetType().Name + "." + field.Name + " is PostgresStudio's, not MartenStudio's");
             }
         }
@@ -78,6 +79,22 @@ public sealed class PostgresStudioWiringTests : IAsyncDisposable
         scope.GetRequiredService<IStudioSettings>().Text.Should().BeSameAs(PostgresStudioText.Instance);
     }
 
+    /// <summary>
+    /// Whether a live-update log speaks in Postgres Studio's words. The log closes over the container's throttle, so it is no longer one shared
+    /// instance to compare by reference: its first line, the Debug one a failed tick writes, names the product.
+    /// </summary>
+    private static bool SaysPostgresStudio(StudioLiveLog? log)
+    {
+        if (log is null)
+        {
+            return false;
+        }
+
+        CapturingLoggerProvider captured = new();
+        log.LiveUpdateFailed(captured.CreateFactory().CreateLogger("probe"), new InvalidOperationException("probe"));
+
+        return captured.Entries.Should().ContainSingle().Which.Message.Contains("Postgres Studio", StringComparison.Ordinal);
+    }
     [Fact]
     public void A_health_check_registered_without_the_studio_names_AddPostgresStudio()
     {

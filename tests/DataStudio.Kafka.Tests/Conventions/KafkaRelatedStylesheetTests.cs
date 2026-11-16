@@ -14,7 +14,7 @@ public partial class KafkaRelatedStylesheetTests
 
     private const string PreviousHeader = "/* ===== KS-UI-C: values, compare and pruning ===== */";
 
-    private static string Css => File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio.Postgres", "wwwroot", "css", "studio.css"));
+    private static string Css => File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio", "wwwroot", "css", "studio.css"));
 
     private static string Section()
     {

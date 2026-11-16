@@ -7,9 +7,6 @@
 @using DataStudio.Kafka.Core.Scanning
 @using DataStudio.Kafka.Core.Decoding
 @using Microsoft.Extensions.Logging
-@using DataStudio.Postgres.Services
-@using DataStudio.Postgres.Services.Live
-@using DataStudio.Postgres.Services.Settings
 @inject KafkaState State
 @inject KafkaSearchService Search
 @inject KafkaRecordService Records
@@ -18,7 +15,7 @@
 @inject KafkaExportService ExportService
 @inject KafkaRecordIndexResolver RecordIndex
 @inject NavigationManager Navigation
-@inject IStudioSettings Settings
+@inject IShellSettings Settings
 @inject StudioPreferences Preferences
 @inject TimeProvider Time
 @inject ILogger<KafkaSearchBody> Logger

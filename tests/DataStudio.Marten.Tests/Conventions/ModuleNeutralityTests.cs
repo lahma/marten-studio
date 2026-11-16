@@ -45,7 +45,7 @@ public partial class ModuleNeutralityTests
     [Fact]
     public void The_stylesheet_is_the_one_place_a_module_has_a_section()
     {
-        File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio.Postgres", "wwwroot", "css", "studio.css")).Should().Contain("KS-SHELL");
+        File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio", "wwwroot", "css", "studio.css")).Should().Contain("KS-SHELL");
     }
 
     private static string[] SourceFiles() =>

@@ -4,7 +4,7 @@ using System.Runtime.CompilerServices;
 namespace DataStudio.Marten.Internal;
 
 /// <summary>
-/// Refuses to start Marten Studio beside any PostgresStudio, or any DataStudio.Postgres.Diagnostics, but its own build - including none at all.
+/// Refuses to start Marten Studio beside any PostgresStudio, DataStudio.Postgres.Diagnostics or DataStudio (the shell) but its own build - including none at all.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -42,6 +42,9 @@ internal static class PostgresStudioVersionGuard
     /// <summary>The engine's assembly name, checked the same way: a string, never a type.</summary>
     internal const string DiagnosticsAssemblyName = "DataStudio.Postgres.Diagnostics";
 
+    /// <summary>The shell's assembly name (v2 step 3), checked the same way: a string, never a type.</summary>
+    internal const string ShellAssemblyName = "DataStudio";
+
     /// <summary>
     /// Throws unless the PostgresStudio and the DataStudio.Postgres.Diagnostics this process loads are the builds this
     /// MartenStudio was packed with.
@@ -49,7 +52,7 @@ internal static class PostgresStudioVersionGuard
     /// <exception cref="InvalidOperationException">Either is missing, or is another version.</exception>
     [MethodImpl(MethodImplOptions.NoInlining)]
     public static void Ensure() =>
-        Ensure(typeof(PostgresStudioVersionGuard).Assembly, LoadPostgresStudio, LoadDiagnostics);
+        Ensure(typeof(PostgresStudioVersionGuard).Assembly, LoadPostgresStudio, LoadDiagnostics, LoadShell);
 
     /// <summary>The check for PostgresStudio alone, with the two assemblies supplied - a seam the tests use.</summary>
     /// <param name="martenStudio">MartenStudio's own assembly, whose version is the one required.</param>
@@ -71,6 +74,25 @@ internal static class PostgresStudioVersionGuard
     {
         EnsureAssembly(PostgresStudioAssemblyName, "MartenStudio", martenStudio, loadPostgresStudio);
         EnsureAssembly(DiagnosticsAssemblyName, "PostgresStudio", martenStudio, loadDiagnostics);
+    }
+
+    /// <summary>
+    /// The whole check, with the four assemblies supplied - the seam the tests use: PostgresStudio, the engine, then the shell
+    /// (<c>DataStudio</c>), which MartenStudio reaches through PostgresStudio and names directly (the layout, the rail and the JSON viewer are its).
+    /// </summary>
+    /// <param name="martenStudio">MartenStudio's own assembly, whose version is the one required.</param>
+    /// <param name="loadPostgresStudio">Loads the shared studio's assembly; may throw <see cref="FileNotFoundException" />.</param>
+    /// <param name="loadDiagnostics">Loads the engine's assembly; may throw <see cref="FileNotFoundException" />.</param>
+    /// <param name="loadShell">Loads the shell's assembly; may throw <see cref="FileNotFoundException" />.</param>
+    /// <exception cref="InvalidOperationException">Any is missing, or is another version.</exception>
+    internal static void Ensure(
+        Assembly martenStudio,
+        Func<Assembly> loadPostgresStudio,
+        Func<Assembly> loadDiagnostics,
+        Func<Assembly> loadShell)
+    {
+        Ensure(martenStudio, loadPostgresStudio, loadDiagnostics);
+        EnsureAssembly(ShellAssemblyName, "PostgresStudio", martenStudio, loadShell);
     }
 
     /// <summary>One required assembly: loaded, and the same build as MartenStudio's own.</summary>
@@ -176,4 +198,8 @@ internal static class PostgresStudioVersionGuard
     /// <summary>Loads the engine by name, for the same reason and from a method of its own.</summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static Assembly LoadDiagnostics() => Assembly.Load(new AssemblyName(DiagnosticsAssemblyName));
+
+    /// <summary>Loads the shell by name, for the same reason and from a method of its own.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static Assembly LoadShell() => Assembly.Load(new AssemblyName(ShellAssemblyName));
 }

@@ -1,6 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using DataStudio.Postgres.Services.Json;
+using DataStudio.Services.Json;
 
 namespace DataStudio.Marten.Tests.Json;
 

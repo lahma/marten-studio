@@ -5,8 +5,6 @@ using DataStudio.Kafka.Core.Logging;
 
 using Microsoft.Extensions.DependencyInjection;
 
-using DataStudio.Postgres.Services.Settings;
-
 namespace DataStudio.Kafka.Services;
 
 /// <summary>
@@ -22,7 +20,7 @@ namespace DataStudio.Kafka.Services;
 /// </remarks>
 /// <param name="services">The container, so that the registry is resolved inside the failure handling.</param>
 /// <param name="settings">The studio's settings, for the base-relative address.</param>
-internal sealed class KafkaRecordSearchLinks(IServiceProvider services, IStudioSettings settings) : IStudioRecordSearchLinks
+internal sealed class KafkaRecordSearchLinks(IServiceProvider services, IShellSettings settings) : IStudioRecordSearchLinks
 {
     /// <inheritdoc />
     public string Label => KafkaStudioText.FindInKafka;

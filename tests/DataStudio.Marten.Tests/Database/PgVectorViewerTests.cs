@@ -1,6 +1,6 @@
 using Bunit;
 
-using DataStudio.Postgres.Components.Json;
+using DataStudio.Components.Json;
 using DataStudio.Postgres.Components.Pages.Database;
 using DataStudio.Postgres.Components.Shared;
 using DataStudio.Postgres.Services.Database;

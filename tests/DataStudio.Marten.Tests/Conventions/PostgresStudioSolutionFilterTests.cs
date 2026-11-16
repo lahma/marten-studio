@@ -5,7 +5,8 @@ namespace DataStudio.Marten.Tests.Conventions;
 
 /// <summary>
 /// <c>data-studio-postgres.slnf</c> - the solution filter the latest-Npgsql pass restores, builds and tests - holds exactly
-/// the projects that set <c>DataStudioPostgresPinsNpgsql</c>, and is closed: nothing it builds reaches a project outside it.
+/// the projects that set <c>DataStudioPostgresPinsNpgsql</c> and the shell they reference (which has no Npgsql to pin), and is
+/// closed: nothing it builds reaches a project outside it.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -21,6 +22,12 @@ public class PostgresStudioSolutionFilterTests
 {
     private const string PinProperty = "DataStudioPostgresPinsNpgsql";
 
+    /// <summary>
+    /// The one project the filter holds without its setting the property (v2 step 3): the shell, which the database module references and which references no
+    /// Npgsql at all (ShellFenceTests), so there is nothing for the pass to hand it. The filter is closed, and a project that is referenced has to be in it.
+    /// </summary>
+    private const string ShellProject = "src/DataStudio/DataStudio.csproj";
+
     private static string FilterFile => RepositoryRoot.Combine("data-studio-postgres.slnf");
 
     [Fact]
@@ -31,10 +38,11 @@ public class PostgresStudioSolutionFilterTests
         // Not vacuous: the shared studio and the engine it is built on set the property, and the scan found both.
         pinning.Should().Contain("src/DataStudio.Postgres/DataStudio.Postgres.csproj").And.Contain("src/DataStudio.Postgres.Diagnostics/DataStudio.Postgres.Diagnostics.csproj");
 
-        FilterProjects().Should().BeEquivalentTo(pinning,
+        FilterProjects().Should().BeEquivalentTo([.. pinning, ShellProject],
             "data-studio-postgres.slnf is what the latest-Npgsql pass builds and tests: a project that sets " +
             $"{PinProperty} and is missing from it is never tested at that Npgsql, and one listed without setting it " +
-            "ignores the version the pass hands it");
+            "ignores the version the pass hands it - the shell alone excepted, which has no Npgsql and is referenced from inside the filter");
+        pinning.Should().NotContain(ShellProject, "the shell references no Npgsql, so it pins none");
     }
 
     [Fact]

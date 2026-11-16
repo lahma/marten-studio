@@ -1,3 +1,4 @@
+using DataStudio.Services;
 using Bunit;
 
 using DataStudio.Marten.Components.Pages.Query;

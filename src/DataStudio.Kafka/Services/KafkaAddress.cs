@@ -1,7 +1,6 @@
 using DataStudio.Components;
+using DataStudio.Services.Settings;
 using Microsoft.AspNetCore.WebUtilities;
-
-using DataStudio.Postgres.Services.Settings;
 
 namespace DataStudio.Kafka.Services;
 
@@ -193,7 +192,7 @@ internal static class KafkaAddress
     /// <param name="route">The route below the studio root (<c>kafka/topic</c>).</param>
     /// <param name="cluster">The cluster entry's key, or <see langword="null" /> to name none.</param>
     /// <param name="parameters">Further parameters in order.</param>
-    public static string Href(IStudioSettings settings, string route, string? cluster, params (string Name, string? Value)[] parameters)
+    public static string Href(IShellSettings settings, string route, string? cluster, params (string Name, string? Value)[] parameters)
     {
         string href = StudioLink.To(settings, route);
 

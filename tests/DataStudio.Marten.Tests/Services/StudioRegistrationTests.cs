@@ -396,7 +396,7 @@ public class StudioRegistrationTests
     }
 
     private static readonly Assembly[] StudioAssemblies =
-        [.. new[] { typeof(MartenStudioOptions).Assembly, typeof(StudioCoreRegistration).Assembly, typeof(DiagnosticsCoreRegistration).Assembly }.Distinct()];
+        [.. new[] { typeof(MartenStudioOptions).Assembly, typeof(StudioCoreRegistration).Assembly, typeof(DiagnosticsCoreRegistration).Assembly, typeof(StudioShellDescriptor).Assembly }.Distinct()];
 
     private static (Type Service, ServiceLifetime Lifetime, How How, Type Implementation) Read(ServiceDescriptor descriptor) =>
         descriptor switch

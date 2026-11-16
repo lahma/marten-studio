@@ -6,7 +6,7 @@ using Marten;
 using DataStudio.Marten.Internal.Sql;
 using DataStudio.Sample.Marten.Domain.Documents;
 using DataStudio.Marten.Services.Documents;
-using DataStudio.Postgres.Services.Json;
+using DataStudio.Services.Json;
 
 using Npgsql;
 using DataStudio.Postgres.Services;

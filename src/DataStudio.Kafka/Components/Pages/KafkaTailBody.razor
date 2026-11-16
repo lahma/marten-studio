@@ -3,11 +3,9 @@
 @using DataStudio.Kafka.Core.Predicates
 @using DataStudio.Kafka.Core.Scanning
 @using DataStudio.Kafka.Core.Decoding
+@using DataStudio.Kafka.Core.Logging
 @using Microsoft.Extensions.DependencyInjection
 @using Microsoft.Extensions.Logging
-@using DataStudio.Postgres.Services
-@using DataStudio.Postgres.Services.Live
-@using DataStudio.Postgres.Services.Settings
 @inject KafkaState State
 @inject KafkaTailService Tail
 @inject KafkaSearchService Search
@@ -15,7 +13,7 @@
 @inject KafkaCatalogService Catalog
 @inject KafkaCapabilityGuard Capabilities
 @inject NavigationManager Navigation
-@inject IStudioSettings Settings
+@inject IShellSettings Settings
 @inject TimeProvider Time
 @inject StudioLiveUpdatesFactory LiveFactory
 @inject ILogger<KafkaTailBody> Logger
@@ -1022,8 +1020,10 @@
     /// <summary>A tick of the live line or a handler of the tab failed: said once in a while, never into the visitor's way (the line redraws on the next tick).</summary>
     private Task OnLiveFailedAsync(Exception exception)
     {
-        LogLevel level = StudioLogThrottle.LevelOrWarning(
-            Services.GetService<StudioLogThrottle>(), "KafkaTail.LiveUpdate", null, null, StudioLogThrottle.KindOf(exception));
+        // The engine's own once-per-window throttle (KafkaLogOnce, ten minutes, as the studios' StudioLogThrottle is): Warning the first time for a kind of failure, Debug after.
+        // A component test's container that registers no engine gets a window of its own, which says Warning the first time, as the studios' helper does without a throttle.
+        LogLevel level = KafkaLogOnce.WarningOrDebug(
+            Services.GetService<KafkaLogOnce>() ?? new KafkaLogOnce(Time), "KafkaTail.LiveUpdate|" + exception.GetType().Name);
         Logger.Log(level, exception, "The Kafka tail page's live update failed");
         return Task.CompletedTask;
     }

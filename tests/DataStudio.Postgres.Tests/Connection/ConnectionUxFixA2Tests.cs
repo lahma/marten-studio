@@ -64,7 +64,7 @@ public sealed class ConnectionUxFixA2Tests
     [Fact]
     public void The_settings_tables_hold_a_tablet_without_scrolling_sideways()
     {
-        string css = File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio.Postgres", "wwwroot", "css", "studio.css"));
+        string css = File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio", "wwwroot", "css", "studio.css"));
         string section = css[css.IndexOf("/* ===== 1.1-UX-FIX-A ", StringComparison.Ordinal)..];
 
         section.Should().Contain(".ms-conn-settings-table,\n.ms-conn-compare-table {\n    table-layout: fixed;\n    min-width: 36rem;");

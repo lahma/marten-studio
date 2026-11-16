@@ -1,5 +1,5 @@
 using DataStudio.Marten.Services.Documents;
-using DataStudio.Postgres.Services.Json;
+using DataStudio.Services.Json;
 using DataStudio.Postgres.Services;
 
 namespace DataStudio.Marten.Tests.Documents;

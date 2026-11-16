@@ -4,7 +4,7 @@ using System.Runtime.CompilerServices;
 namespace DataStudio.Postgres.Internal;
 
 /// <summary>
-/// Refuses to start Postgres Studio beside any DataStudio.Postgres.Diagnostics but its own build - including none at all.
+/// Refuses to start Postgres Studio beside any DataStudio.Postgres.Diagnostics or DataStudio (the shell) but its own build - including none at all.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -19,7 +19,7 @@ namespace DataStudio.Postgres.Internal;
 /// assembly, loaded. The same guard, for the same reason, as <c>DataStudio.Marten.Internal.PostgresStudioVersionGuard</c>.
 /// </para>
 /// <para>
-/// <b>What the split and the scan are for.</b> This type names no DataStudio.Postgres.Diagnostics type, and neither does the
+/// <b>What the split and the scan are for.</b> This type names no DataStudio.Postgres.Diagnostics or DataStudio type, and neither does the
 /// public <c>AddPostgresStudio</c> that calls it first: everything that does is behind a
 /// <see cref="MethodImplOptions.NoInlining" /> method, so the JIT resolves none of it until this guard has passed. The
 /// assembly is loaded by name, from a <see cref="MethodImplOptions.NoInlining" /> method of its own.
@@ -35,7 +35,9 @@ namespace DataStudio.Postgres.Internal;
 /// A deployment with no engine, or an older one, therefore fails in the loader when <c>AddPostgresStudio</c> is first called,
 /// with a <see cref="FileNotFoundException" /> that names <c>DataStudio.Postgres.Diagnostics</c> and the version it wants (measured
 /// on 2026-11-01 against throwaway hosts: the engine missing, and an older 0.9.0 under a 0.10.0 PostgresStudio). This guard
-/// is what answers a <em>newer</em> engine, or another commit of the same version, with the central-pin message.
+/// is what answers a <em>newer</em> engine, or another commit of the same version, with the central-pin message. The shell is the
+/// same case one package down: <c>PostgresStudioOptions</c> implements the shell's <c>IShellSettings</c>, so the loader needs
+/// <c>DataStudio</c> too before the guard's first line, and the guard answers a newer shell or another commit of the same version.
 /// <c>MartenStudio</c>'s <c>PostgresStudioVersionGuard</c> names no options type before it runs and covers all three cases
 /// for a Marten host.
 /// </para>
@@ -52,56 +54,81 @@ internal static class PostgresStudioDiagnosticsVersionGuard
     /// <summary>The engine's assembly name: a string, never a type, for the reason in the remarks.</summary>
     internal const string DiagnosticsAssemblyName = "DataStudio.Postgres.Diagnostics";
 
-    /// <summary>Throws unless the DataStudio.Postgres.Diagnostics this process loads is the build this PostgresStudio was packed with.</summary>
-    /// <exception cref="InvalidOperationException">DataStudio.Postgres.Diagnostics is missing, or is another version.</exception>
-    [MethodImpl(MethodImplOptions.NoInlining)]
-    public static void Ensure() => Ensure(typeof(PostgresStudioDiagnosticsVersionGuard).Assembly, LoadDiagnostics);
+    /// <summary>The shell's assembly name, checked the same way: a string, never a type.</summary>
+    internal const string ShellAssemblyName = "DataStudio";
 
-    /// <summary>The check itself, with the two assemblies supplied - the seam the tests use.</summary>
+    /// <summary>
+    /// Throws unless the DataStudio.Postgres.Diagnostics and the DataStudio this process loads are the builds this PostgresStudio was packed with.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Either is missing, or is another version.</exception>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public static void Ensure() => Ensure(typeof(PostgresStudioDiagnosticsVersionGuard).Assembly, LoadDiagnostics, LoadShell);
+
+    /// <summary>The check for the engine alone, with the two assemblies supplied - a seam the tests use.</summary>
     /// <param name="postgresStudio">PostgresStudio's own assembly, whose version is the one required.</param>
     /// <param name="loadDiagnostics">Loads the engine's assembly; may throw <see cref="FileNotFoundException" />.</param>
     /// <exception cref="InvalidOperationException">DataStudio.Postgres.Diagnostics is missing, or is another version.</exception>
-    internal static void Ensure(Assembly postgresStudio, Func<Assembly> loadDiagnostics)
+    internal static void Ensure(Assembly postgresStudio, Func<Assembly> loadDiagnostics) =>
+        EnsureAssembly(DiagnosticsAssemblyName, postgresStudio, loadDiagnostics);
+
+    /// <summary>
+    /// The whole check, with the three assemblies supplied - a seam the tests use: the engine first, then the shell
+    /// (<c>DataStudio</c>, v2 step 3), which this assembly names in every signature and a deployment can lack or skew in the same way.
+    /// </summary>
+    /// <param name="postgresStudio">PostgresStudio's own assembly, whose version is the one required.</param>
+    /// <param name="loadDiagnostics">Loads the engine's assembly; may throw <see cref="FileNotFoundException" />.</param>
+    /// <param name="loadShell">Loads the shell's assembly; may throw <see cref="FileNotFoundException" />.</param>
+    /// <exception cref="InvalidOperationException">Either is missing, or is another version.</exception>
+    internal static void Ensure(Assembly postgresStudio, Func<Assembly> loadDiagnostics, Func<Assembly> loadShell)
+    {
+        EnsureAssembly(DiagnosticsAssemblyName, postgresStudio, loadDiagnostics);
+        EnsureAssembly(ShellAssemblyName, postgresStudio, loadShell);
+    }
+
+    /// <summary>One required assembly: loaded, and the same build as PostgresStudio's own.</summary>
+    /// <param name="name">The required package, <c>DataStudio.Postgres.Diagnostics</c> or <c>DataStudio</c>.</param>
+    /// <param name="postgresStudio">PostgresStudio's own assembly, whose version is the one required.</param>
+    /// <param name="load">Loads the required assembly; may throw <see cref="FileNotFoundException" />.</param>
+    private static void EnsureAssembly(string name, Assembly postgresStudio, Func<Assembly> load)
     {
         string? postgresStudioVersion = InformationalVersion(postgresStudio);
         string required = ReleaseVersion(postgresStudioVersion);
-        Assembly diagnostics;
+        Assembly loaded;
 
         try
         {
-            diagnostics = loadDiagnostics();
+            loaded = load();
         }
         catch (FileNotFoundException e)
         {
             throw new InvalidOperationException(
-                $"PostgresStudio {required} needs DataStudio.Postgres.Diagnostics {required} exactly, and this application was " +
-                "deployed without DataStudio.Postgres.Diagnostics. The usual cause is a central PackageVersion for " +
-                "DataStudio.Postgres.Diagnostics at another version under CentralPackageTransitivePinningEnabled: NuGet then " +
-                "drops DataStudio.Postgres.Diagnostics from the graph without a warning. The packages are released together: pin " +
-                $"DataStudio.Postgres.Diagnostics to {required}, or remove its PackageVersion row and let PostgresStudio bring it.",
+                $"PostgresStudio {required} needs {name} {required} exactly, and this application was " +
+                $"deployed without {name}. The usual cause is a central PackageVersion for " +
+                $"{name} at another version under CentralPackageTransitivePinningEnabled: NuGet then " +
+                $"drops {name} from the graph without a warning. The packages are released together: pin " +
+                $"{name} to {required}, or remove its PackageVersion row and let PostgresStudio bring it.",
                 e);
         }
 
-        string? diagnosticsVersion = InformationalVersion(diagnostics);
-        bool bothRelease = IsReleaseBuild(postgresStudio) && IsReleaseBuild(diagnostics);
+        string? loadedVersion = InformationalVersion(loaded);
+        bool bothRelease = IsReleaseBuild(postgresStudio) && IsReleaseBuild(loaded);
 
-        if (SameBuild(postgresStudioVersion, diagnosticsVersion, bothRelease))
+        if (SameBuild(postgresStudioVersion, loadedVersion, bothRelease))
         {
             return;
         }
 
         // The commits were compared: name them, since the release version may well be the same on both sides.
-        bool commits = bothRelease && HasBuildMetadata(postgresStudioVersion) && HasBuildMetadata(diagnosticsVersion);
+        bool commits = bothRelease && HasBuildMetadata(postgresStudioVersion) && HasBuildMetadata(loadedVersion);
         string shownRequired = commits ? postgresStudioVersion! : required;
-        string shownFound = commits ? diagnosticsVersion! : ReleaseVersion(diagnosticsVersion);
+        string shownFound = commits ? loadedVersion! : ReleaseVersion(loadedVersion);
 
         throw new InvalidOperationException(
-            $"PostgresStudio {shownRequired} needs DataStudio.Postgres.Diagnostics {shownRequired} exactly, and found " +
-            $"DataStudio.Postgres.Diagnostics {shownFound}. The packages are released together and must be upgraded together: a " +
-            $"central PackageVersion or a PackageReference for DataStudio.Postgres.Diagnostics must say {required}, or be removed " +
+            $"PostgresStudio {shownRequired} needs {name} {shownRequired} exactly, and found " +
+            $"{name} {shownFound}. The packages are released together and must be upgraded together: a " +
+            $"central PackageVersion or a PackageReference for {name} must say {required}, or be removed " +
             "and let PostgresStudio bring it.");
     }
-
     /// <summary>
     /// Whether two informational versions name the same build. When both assemblies are Release builds and both carry
     /// build metadata - the <c>+&lt;commit&gt;</c> SourceLink appends - the whole strings must match, so two packed builds of
@@ -155,4 +182,8 @@ internal static class PostgresStudioDiagnosticsVersionGuard
     /// <summary>Loads the engine by name - the one place its name meets the loader.</summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static Assembly LoadDiagnostics() => Assembly.Load(new AssemblyName(DiagnosticsAssemblyName));
+
+    /// <summary>Loads the shell by name, for the same reason and from a method of its own.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static Assembly LoadShell() => Assembly.Load(new AssemblyName(ShellAssemblyName));
 }

@@ -34,7 +34,7 @@ public class ShellGoldenTests
         builder.Environment.WebRootFileProvider = new TestFileProvider(new Dictionary<string, byte[]>
         {
             ["_framework/blazor.web.js"] = "// blazor.web.js"u8.ToArray(),
-            ["_content/DataStudio.Postgres/css/studio.css"] = ":root { }"u8.ToArray(),
+            ["_content/DataStudio/css/studio.css"] = ":root { }"u8.ToArray(),
         });
         builder.Services.AddSingleton(NpgsqlDataSource.Create(ConnectionString));
         builder.Services.AddPostgresStudio(allCapabilities ? static options => options.Capabilities = PostgresStudioCapabilities.All() : null);

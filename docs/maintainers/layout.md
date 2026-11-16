@@ -26,36 +26,41 @@ src/DataStudio.Postgres.Diagnostics/          The diagnostics engine, with no AS
                                          References no Marten, no MartenStudio and no web stack (PostgresStudioFenceTests,
                                          CoreFenceTests); namespaces stay PostgresStudio.*, and the UI reaches its internals
                                          through InternalsVisibleTo
-src/DataStudio.Postgres/                      The shared studio's Razor Class Library (0.5, PS-2): shell, routes, scope,
-                                         authorization, audit, the database browser, Sessions, the Health page, the SQL
-                                         console, Relationships, the JSON toolkit and wwwroot/. Built on the diagnostics
-                                         engine; references no Marten and no MartenStudio (PostgresStudioFenceTests, CoreFenceTests)
-src/DataStudio.Postgres/Shell/                 The shell (A3): the chrome of the studio, in the DataStudio.* namespaces, which phase B makes an assembly.
-                                         It knows no store, database, tenant, source, SQL, health or Npgsql (ShellFenceTests); its _Imports.razor names only DataStudio
-src/DataStudio.Postgres/Shell/Components/      The shared document every root renders, the routes component, the route table and the links
-src/DataStudio.Postgres/Shell/Components/Layout/ The layout, the rail, the capability chip, the preferences popover, the copy-link button, the
+src/DataStudio/                          The shell (v2 step 3): the chrome of the studio as a Razor Class Library of its own, in the DataStudio.*
+                                         namespaces. It references ASP.NET Core and nothing else - no store, database, tenant, SQL, health, Npgsql,
+                                         Marten or Kafka client (ShellFenceTests holds the reference graph) - and every module references it with an
+                                         exact pin. Its _Imports.razor names only DataStudio, Microsoft and System
+src/DataStudio/Components/               The shared document every root renders, the routes component, the route table and the links
+src/DataStudio/Components/Json/          The JSON toolkit: viewer, raw view, editor, copy menu, diffs
+src/DataStudio/Components/Layout/        The layout, the rail, the capability chip, the preferences popover, the copy-link button, the
                                          back-to-application link and the environment badge
-src/DataStudio.Postgres/Shell/Components/Pages/ Activity: the Activity ring as a page
-src/DataStudio.Postgres/Shell/Components/Shared/ The building blocks every module draws with: TableScroll (D25), CopyButton, the dialogs, menus, the
+src/DataStudio/Components/Pages/         Activity: the Activity ring as a page
+src/DataStudio/Components/Shared/        The building blocks every module draws with: TableScroll (D25), CopyButton, the dialogs, menus, the
                                          empty and error states, pagers, ToastHost, ShortcutSheet
-src/DataStudio.Postgres/Shell/Internal/        The endpoint mapper, its convention builder, the startup authorization guard, the endpoint marker and
+src/DataStudio/Internal/                 The endpoint mapper, its convention builder, the startup authorization guard, the endpoint marker and
                                          mapped-endpoint tracking (D11)
-src/DataStudio.Postgres/Shell/Services/        Preferences, the Activity ring and its audit seam, toasts, the shortcut list, the live-update loop and its log
-                                         words (StudioLiveLog)
-src/DataStudio.Postgres/Shell/Services/Settings/ The module seam: shell settings and descriptor, the module and its rail, route and record links, the
+src/DataStudio/Services/                 Preferences, the Activity ring and its audit seam, toasts, the shortcut list, the live-update loop and its log
+                                         words (StudioLiveLog), the capability denial reason
+src/DataStudio/Services/Json/            Flat model, path expressions, pretty printer, canonicalizer, round-trip differ, C# record generator
+src/DataStudio/Services/Settings/        The module seam: shell settings and descriptor, the module and its rail, route and record links, the
                                          navigation records, the registration marker
-src/DataStudio.Postgres/Components/           the root component and the scope query (the shell's components are in Shell/Components/)
+src/DataStudio/wwwroot/                  static web assets, packed under `_content/DataStudio/`
+src/DataStudio/wwwroot/css/              the one stylesheet, studio.css
+src/DataStudio/wwwroot/js/               the studio's browser helpers, studio.js, loaded by the shell (never a
+                                         Blazor JS initializer - see StudioDocument.razor)
+src/DataStudio.Postgres/                      The database module's Razor Class Library (0.5, PS-2): routes, scope,
+                                         authorization, audit, the database browser, Sessions, the Health page, the SQL
+                                         console and Relationships. Built on the shell and the diagnostics
+                                         engine; references no Marten and no MartenStudio (PostgresStudioFenceTests, CoreFenceTests)
+src/DataStudio.Postgres/Components/           the root component and the scope query (the shell's components are in src/DataStudio/Components/)
 src/DataStudio.Postgres/Components/Shared/    small building-block components that name a database type: the SQL views and disclosure, chips, the
-                                         refusal and not-authorized notices (the neutral ones are in Shell/Components/Shared/)
-src/DataStudio.Postgres/Internal/             the diagnostics version guard (the endpoint mapper and its guard are in Shell/Internal/)
+                                         refusal and not-authorized notices (the neutral ones are in src/DataStudio/Components/Shared/)
+src/DataStudio.Postgres/Internal/             the diagnostics and shell version guard (the endpoint mapper and its guard are in src/DataStudio/Internal/)
 src/DataStudio.Postgres.Diagnostics/Internal/  Nothing but the engine's SQL builders, in Internal/Sql/ (hard rule 4)
 src/DataStudio.Postgres.Diagnostics/Services/  The scope types, the shared log events (StudioLog, PostgresStudioLog), the log throttle and the
                                          capping of a visitor's value in a log line
 src/DataStudio.Postgres/Services/             state, authorization, the capability guard, the action log and toasts
-src/DataStudio.Postgres/wwwroot/              static web assets, packed under `_content/DataStudio.Postgres/`
-src/DataStudio.Postgres/wwwroot/css/          the one stylesheet, studio.css
-src/DataStudio.Postgres/wwwroot/js/           the studio's browser helpers, studio.js, loaded by the shell (never a
-                                         Blazor JS initializer - see StudioDocument.razor)
+
 src/DataStudio.Marten/                        The Marten Razor Class Library: public API, the store-facing services,
                                          pages and checks, and Internal/; references PostgresStudio
 src/DataStudio.Marten/Components/             MartenStudioApp (the root component) and the component bridges
@@ -95,6 +100,10 @@ src/DataStudio.Postgres.Diagnostics/Services/Postgres/  The engine's plain-Postg
 src/DataStudio.Postgres/Services/Postgres/    PostgresStudio's own: the studio's settings and descriptor, the links out of the browser
                                          and the Overview's server read
 tests/DataStudio.Postgres.Tests/              PostgresStudio's fast suite: no Docker, and no Marten anywhere in its graph
+tests/DataStudio.Tests/                       The shell's fast suite (v2 step 3): no Docker, no database, no module. It references the DataStudio project alone
+tests/DataStudio.Tests/Conventions/           ShellFenceTests: the shell's project file, restore graph, built references and this output folder hold no driver, Marten or Kafka
+tests/DataStudio.Tests/Modules/               The route table's module rules (D34), on pages of the test assembly
+tests/DataStudio.Tests/Verify/                The shell's approved API baseline; never hand-edited (hard rule 7)
 tests/DataStudio.Postgres.Tests/Components/   bUnit: PostgresStudioComponentContext and the core pages' smoke tests, the plan view
                                          and the console's Explain buttons
 tests/DataStudio.Postgres.Tests/Components/Json/  The JSON viewer's parameters a host that is not a Postgres studio sets (KStudio): no download, no
@@ -131,7 +140,7 @@ src/DataStudio.Marten/Internal/Sql/           The Marten builders - documents, e
                                          third (hard rule 4); Marten's own DDL for a what-if (X2); the dead-letter
                                          groups (M3)
 src/DataStudio.Postgres/Components/Layout/    The database's part of the chrome: scope selector, find box, the circuit host and the scope gate
-                                         (the layout, rail and chip are in Shell/Components/Layout/)
+                                         (the layout, rail and chip are in src/DataStudio/Components/Layout/)
 src/DataStudio.Postgres/Components/Pages/     The shared routed pages; each @page must be rooted at /postgres
 src/DataStudio.Marten/Components/Pages/       The Marten routed pages; each @page must be rooted at /marten
 samples/DataStudio.Sample.Marten.Domain/Documents/  The demo document types
@@ -145,9 +154,7 @@ tests/DataStudio.Marten.Tests/Services/       Registry, scope resolver, audit lo
 tests/DataStudio.Marten.Tests/Components/     bUnit: StudioComponentContext, StudioMarkup and the page tests
 tests/DataStudio.Marten.Tests/Support/        Test doubles shared by the tiers - never a mocking library
 tests/DataStudio.Marten.Tests/Verify/         The approved API baseline; never hand-edited (hard rule 7)
-src/DataStudio.Postgres/Components/Json/      The JSON toolkit: viewer, raw view, editor, copy menu, diffs
-src/DataStudio.Postgres/Services/Json/        Flat model, path expressions, pretty printer, canonicalizer,
-                                         round-trip differ, C# record generator
+
 src/DataStudio.Marten/Services/Query/         Search grammar, index advisor, the document list request, LINQ mode
 src/DataStudio.Postgres.Diagnostics/Services/Query/  The scan of an EXPLAIN plan for the relations it reads, which the statement checks take
 src/DataStudio.Postgres/Services/Query/       The SQL console service, export, saved queries, error text, index

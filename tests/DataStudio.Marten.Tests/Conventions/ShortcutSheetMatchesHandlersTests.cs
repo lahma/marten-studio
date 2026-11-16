@@ -82,11 +82,11 @@ public class ShortcutSheetMatchesHandlersTests
             .Where(static x => !Modifiers.Contains(x, StringComparer.Ordinal))];
 
     [Theory]
-    [InlineData("src/DataStudio.Postgres/Components/Json/JsonView.razor", "private async Task OnTreeKeyDownAsync", "JSON viewer (a row has focus)", "A letter")]
-    [InlineData("src/DataStudio.Postgres/Components/Json/JsonSearchBar.razor", "private async Task OnKeyDownAsync", "JSON viewer search box", null)]
+    [InlineData("src/DataStudio/Components/Json/JsonView.razor", "private async Task OnTreeKeyDownAsync", "JSON viewer (a row has focus)", "A letter")]
+    [InlineData("src/DataStudio/Components/Json/JsonSearchBar.razor", "private async Task OnKeyDownAsync", "JSON viewer search box", null)]
     [InlineData("src/DataStudio.Postgres/Components/Pages/Query/PlanIcicle.razor", "private async Task KeyAsync", "Plan icicle (a frame has focus)", null)]
     [InlineData("src/DataStudio.Postgres/Components/Pages/Database/RowGrid.razor", "private async Task OnRowKeyAsync", "Table rows (a row has focus)", null)]
-    [InlineData("src/DataStudio.Postgres/Shell/Components/Shared/MenuButton.razor", "private async Task OnKeyDownAsync", "Menus", null)]
+    [InlineData("src/DataStudio/Components/Shared/MenuButton.razor", "private async Task OnKeyDownAsync", "Menus", null)]
     [InlineData("src/DataStudio.Marten/Components/Pages/Documents/DocumentTable.razor", "private async Task OnRowKeyAsync", "Document lists (a row has focus)", null)]
     public void The_sheets_group_lists_the_keys_its_handler_answers_to(string file, string signature, string group, string? typedKey)
     {
@@ -102,7 +102,7 @@ public class ShortcutSheetMatchesHandlersTests
     [Fact]
     public void The_copy_menu_answers_to_a_subset_of_the_menus_keys()
     {
-        HashSet<string> handled = HandlerKeys(Method("src/DataStudio.Postgres/Components/Json/JsonCopyMenu.razor", "private async Task OnKeyDownAsync"));
+        HashSet<string> handled = HandlerKeys(Method("src/DataStudio/Components/Json/JsonCopyMenu.razor", "private async Task OnKeyDownAsync"));
 
         handled.Should().BeSubsetOf(SheetKeys("Menus"));
     }
@@ -123,7 +123,7 @@ public class ShortcutSheetMatchesHandlersTests
     [Fact]
     public void Every_attach_point_in_the_script_is_one_this_test_knows()
     {
-        string script = Source("src/DataStudio.Postgres/wwwroot/js/studio.js");
+        string script = Source("src/DataStudio/wwwroot/js/studio.js");
 
         // A new `enhance*` function binds keys somewhere; it fails here until the test (and the sheet) account for it.
         Regex.Matches(script, @"\n        (enhance[A-Za-z]*): function ")
@@ -134,7 +134,7 @@ public class ShortcutSheetMatchesHandlersTests
     [Fact]
     public void The_scripts_chords_are_the_ones_the_sheet_lists_and_the_sheet_lists_no_other()
     {
-        string script = Source("src/DataStudio.Postgres/wwwroot/js/studio.js");
+        string script = Source("src/DataStudio/wwwroot/js/studio.js");
 
         // The query editor (the SQL console's, and the LINQ predicate box): Ctrl/Cmd+Enter runs, Esc cancels, Ctrl/Cmd+S saves.
         HashSet<string> editor = ScriptKeys(script, "enhanceEditor");

@@ -1,5 +1,5 @@
 using Bunit;
-using DataStudio.Postgres.Components.Json;
+using DataStudio.Components.Json;
 using DataStudio.Marten.Tests.Support;
 
 namespace DataStudio.Marten.Tests.Json;

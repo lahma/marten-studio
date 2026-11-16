@@ -4,19 +4,19 @@ using System.Runtime.CompilerServices;
 namespace DataStudio.Kafka.Internal;
 
 /// <summary>
-/// Refuses to start KStudio beside any PostgresStudio, DataStudio.Postgres.Diagnostics or DataStudio.Kafka.Core but its own build - including none at all.
+/// Refuses to start KStudio beside any DataStudio (the shell) or DataStudio.Kafka.Core but its own build - including none at all.
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Why.</b> KStudio, PostgresStudio, DataStudio.Postgres.Diagnostics and DataStudio.Kafka.Core are one program split in four files: the first two grant
-/// KStudio their internals, and DataStudio.Kafka.Core grants it its own, so one skewed assembly is a <see cref="MissingMethodException" /> on the first
+/// <b>Why.</b> KStudio, DataStudio and DataStudio.Kafka.Core are one program split in three files: the shell grants KStudio its internals,
+/// and DataStudio.Kafka.Core grants it its own, so one skewed assembly is a <see cref="MissingMethodException" /> on the first
 /// internal signature that moved. The nuspec pins the others exactly, and NuGet enforces that pin everywhere but one place: with
 /// <c>CentralPackageTransitivePinningEnabled</c> and a central <c>PackageVersion</c> for one of them at another version, the SDK's resolver
 /// drops it from the graph without a diagnostic - a green build and a <see cref="FileNotFoundException" /> at startup (measured by PS-0,
-/// 2026-10-20, for PostgresStudio; MartenStudio's <c>PostgresStudioVersionGuard</c> is this guard's model).
+/// 2026-10-20, for the database module; MartenStudio's <c>PostgresStudioVersionGuard</c> is this guard's model).
 /// </para>
 /// <para>
-/// <b>How it can run at all when one is missing.</b> This type names no PostgresStudio or DataStudio.Kafka.Core type, and neither does the public
+/// <b>How it can run at all when one is missing.</b> This type names no DataStudio or DataStudio.Kafka.Core type, and neither does the public
 /// <c>AddKafkaStudio</c> that calls it first: everything that does is behind a <see cref="MethodImplOptions.NoInlining" /> method, so the JIT
 /// resolves none of it until this guard has passed. Each assembly is loaded by name, from a <see cref="MethodImplOptions.NoInlining" /> method of
 /// its own. <c>KStudioVersionGuardTests</c> scans the IL of both to keep it that way.
@@ -24,7 +24,7 @@ namespace DataStudio.Kafka.Internal;
 /// <para>
 /// <b>The caveat.</b> <c>KafkaStudioOptions</c> derives from a DataStudio.Kafka.Core type, so the runtime loads DataStudio.Kafka.Core to compile
 /// <c>AddKafkaStudio</c> itself: a <em>missing or older</em> DataStudio.Kafka.Core fails in the loader with a <see cref="FileNotFoundException" /> that
-/// names it, before this guard runs. The guard explains a newer one and another build of the same version. A missing or mismatched PostgresStudio
+/// names it, before this guard runs. The guard explains a newer one and another build of the same version. A missing or mismatched DataStudio
 /// is always the guard's message.
 /// </para>
 /// <para>
@@ -36,18 +36,15 @@ namespace DataStudio.Kafka.Internal;
 /// <para>
 /// <b>The preview label (K8).</b> KStudio, DataStudio.Kafka.Core and DataStudio.Kafka.Wolverine pack at <c>&lt;version&gt;-&lt;label&gt;</c> (<c>1.3.0-preview.1</c>), the
 /// family beside them at <c>&lt;version&gt;</c>. So DataStudio.Kafka.Core is compared with KStudio's own informational version, label and all, and
-/// PostgresStudio and DataStudio.Postgres.Diagnostics with the <em>family version</em>: KStudio's with the label taken off, the label being the
+/// DataStudio with the <em>family version</em>: KStudio's with the label taken off, the label being the
 /// <c>KafkaPrereleaseLabel</c> assembly metadata the three projects stamp. Without that metadata (a build that emptied the label) nothing is
 /// taken off. A different label, or a family assembly of another version, still fails.
 /// </para>
 /// </remarks>
 internal static class KStudioVersionGuard
 {
-    /// <summary>The shared studio's assembly name: a string, never a type, for the reason in the remarks.</summary>
-    internal const string PostgresStudioAssemblyName = "DataStudio.Postgres";
-
-    /// <summary>The diagnostics engine's assembly name, checked the same way.</summary>
-    internal const string DiagnosticsAssemblyName = "DataStudio.Postgres.Diagnostics";
+    /// <summary>The shell's assembly name: a string, never a type, for the reason in the remarks.</summary>
+    internal const string ShellAssemblyName = "DataStudio";
 
     /// <summary>KStudio's engine assembly name, checked the same way.</summary>
     internal const string EngineAssemblyName = "DataStudio.Kafka.Core";
@@ -56,31 +53,27 @@ internal static class KStudioVersionGuard
     internal const string PrereleaseLabelMetadataKey = "KafkaPrereleaseLabel";
 
     /// <summary>
-    /// Throws unless the PostgresStudio, DataStudio.Postgres.Diagnostics and DataStudio.Kafka.Core this process loads are the builds this KStudio was packed
+    /// Throws unless the DataStudio and DataStudio.Kafka.Core this process loads are the builds this KStudio was packed
     /// with.
     /// </summary>
     /// <exception cref="InvalidOperationException">Any is missing, or is another version.</exception>
     [MethodImpl(MethodImplOptions.NoInlining)]
     public static void Ensure() =>
-        Ensure(typeof(KStudioVersionGuard).Assembly, LoadPostgresStudio, LoadDiagnostics, LoadEngine);
+        Ensure(typeof(KStudioVersionGuard).Assembly, LoadShell, LoadEngine);
 
     /// <summary>
-    /// The whole check, with the loaders supplied - the seam the tests use: PostgresStudio first, then the DataStudio.Postgres.Diagnostics it is
-    /// built on, then DataStudio.Kafka.Core.
+    /// The whole check, with the loaders supplied - the seam the tests use: the shell first, then DataStudio.Kafka.Core.
     /// </summary>
     /// <param name="kStudio">KStudio's own assembly, whose version is the one required.</param>
-    /// <param name="loadPostgresStudio">Loads the shared studio's assembly; may throw <see cref="FileNotFoundException" />.</param>
-    /// <param name="loadDiagnostics">Loads the diagnostics engine's assembly; may throw <see cref="FileNotFoundException" />.</param>
+    /// <param name="loadShell">Loads the shell's assembly; may throw <see cref="FileNotFoundException" />.</param>
     /// <param name="loadEngine">Loads DataStudio.Kafka.Core; may throw <see cref="FileNotFoundException" />.</param>
     /// <exception cref="InvalidOperationException">Any is missing, or is another version.</exception>
     internal static void Ensure(
         Assembly kStudio,
-        Func<Assembly> loadPostgresStudio,
-        Func<Assembly> loadDiagnostics,
+        Func<Assembly> loadShell,
         Func<Assembly> loadEngine)
     {
-        EnsureAssembly(PostgresStudioAssemblyName, "KStudio", kStudio, loadPostgresStudio, family: true);
-        EnsureAssembly(DiagnosticsAssemblyName, "PostgresStudio", kStudio, loadDiagnostics, family: true);
+        EnsureAssembly(ShellAssemblyName, "KStudio", kStudio, loadShell, family: true);
         EnsureAssembly(EngineAssemblyName, "KStudio", kStudio, loadEngine, family: false);
     }
 
@@ -209,13 +202,9 @@ internal static class KStudioVersionGuard
         return plus < 0 ? informationalVersion : informationalVersion[..plus];
     }
 
-    /// <summary>Loads the shared studio by name - the one place its name meets the loader.</summary>
+    /// <summary>Loads the shell by name - the one place its name meets the loader.</summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static Assembly LoadPostgresStudio() => Assembly.Load(new AssemblyName(PostgresStudioAssemblyName));
-
-    /// <summary>Loads the diagnostics engine by name, for the same reason and from a method of its own.</summary>
-    [MethodImpl(MethodImplOptions.NoInlining)]
-    private static Assembly LoadDiagnostics() => Assembly.Load(new AssemblyName(DiagnosticsAssemblyName));
+    private static Assembly LoadShell() => Assembly.Load(new AssemblyName(ShellAssemblyName));
 
     /// <summary>Loads KStudio's engine by name, for the same reason and from a method of its own.</summary>
     [MethodImpl(MethodImplOptions.NoInlining)]

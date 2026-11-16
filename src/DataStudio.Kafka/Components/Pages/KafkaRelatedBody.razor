@@ -4,15 +4,12 @@
 @using DataStudio.Kafka.Core.Correlation
 @using DataStudio.Kafka.Core.Scanning
 @using Microsoft.Extensions.Logging
-@using DataStudio.Postgres.Services
-@using DataStudio.Postgres.Services.Live
-@using DataStudio.Postgres.Services.Settings
 @inject KafkaState State
 @inject KafkaCorrelationService Related
 @inject KafkaSearchService Search
 @inject KafkaCapabilityGuard Capabilities
 @inject NavigationManager Navigation
-@inject IStudioSettings Settings
+@inject IShellSettings Settings
 @inject StudioPreferences Preferences
 @inject TimeProvider Time
 @inject ILogger<KafkaRelatedBody> Logger

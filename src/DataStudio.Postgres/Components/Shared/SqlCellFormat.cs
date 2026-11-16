@@ -2,7 +2,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Unicode;
 
-using DataStudio.Postgres.Services.Json;
+using DataStudio.Services.Json;
 
 namespace DataStudio.Postgres.Components.Shared;
 

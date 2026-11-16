@@ -1,13 +1,13 @@
-using Microsoft.Extensions.Logging;
+using DataStudio.Kafka.Core.Logging;
 
-using DataStudio.Postgres.Services;
+using Microsoft.Extensions.Logging;
 
 namespace DataStudio.Kafka.Services;
 
 /// <summary>
 /// KStudio's own log events, 9600 to 9649 (the engine's are 9650 to 9699, <c>KStudioLog</c>): the audit and refusal events of the module
 /// and its shell side. Source-generated with a pinned id each, declared <c>private</c> and called only through the wrappers below, so
-/// that a value a visitor could shape reaches the log only through <see cref="StudioLogValue" /> - control, format and separator
+/// that a value a visitor could shape reaches the log only through <see cref="KafkaLogValue" /> - control, format and separator
 /// characters escaped, a backslash doubled, a name bounded at 256 characters and other text at 4,000 (AGENTS.md hard rule 5).
 /// </summary>
 /// <remarks>
@@ -41,9 +41,9 @@ internal static partial class KafkaStudioLog
         string stopReason,
         string predicate)
     {
-        string tenant = StudioLogValue.Cap(tenantId ?? NoTenant)!;
+        string tenant = KafkaLogValue.Cap(tenantId ?? NoTenant)!;
         (user, topics, cluster, stopReason, predicate) =
-            (StudioLogValue.Cap(user)!, StudioLogValue.Cap(topics)!, StudioLogValue.Cap(cluster)!, StudioLogValue.Cap(stopReason)!, StudioLogValue.CapText(predicate)!);
+            (KafkaLogValue.Cap(user)!, KafkaLogValue.Cap(topics)!, KafkaLogValue.Cap(cluster)!, KafkaLogValue.Cap(stopReason)!, KafkaLogValue.CapText(predicate)!);
 
         SearchRanCore(logger, user, topics, cluster, tenant, from, to, records, bytes, stopReason, predicate);
     }
@@ -51,9 +51,9 @@ internal static partial class KafkaStudioLog
     /// <summary>9601: a search did not run.</summary>
     public static void SearchNotRun(this ILogger logger, string user, string topics, string cluster, string? tenantId, string reason, string predicate)
     {
-        string tenant = StudioLogValue.Cap(tenantId ?? NoTenant)!;
+        string tenant = KafkaLogValue.Cap(tenantId ?? NoTenant)!;
         (user, topics, cluster, reason, predicate) =
-            (StudioLogValue.Cap(user)!, StudioLogValue.Cap(topics)!, StudioLogValue.Cap(cluster)!, StudioLogValue.CapText(reason.TrimEnd('.'))!, StudioLogValue.CapText(predicate)!);
+            (KafkaLogValue.Cap(user)!, KafkaLogValue.Cap(topics)!, KafkaLogValue.Cap(cluster)!, KafkaLogValue.CapText(reason.TrimEnd('.'))!, KafkaLogValue.CapText(predicate)!);
 
         SearchNotRunCore(logger, user, topics, cluster, tenant, reason, predicate);
     }
@@ -61,7 +61,7 @@ internal static partial class KafkaStudioLog
     /// <summary>9602: a capability was refused.</summary>
     public static void CapabilityRefused(this ILogger logger, string user, string capability, string option)
     {
-        (user, capability, option) = (StudioLogValue.Cap(user)!, StudioLogValue.Cap(capability)!, StudioLogValue.Cap(option)!);
+        (user, capability, option) = (KafkaLogValue.Cap(user)!, KafkaLogValue.Cap(capability)!, KafkaLogValue.Cap(option)!);
 
         CapabilityRefusedCore(logger, user, capability, option);
     }
@@ -69,9 +69,9 @@ internal static partial class KafkaStudioLog
     /// <summary>9603: a cluster or topic was refused by a policy.</summary>
     public static void ClusterRefused(this ILogger logger, string user, string cluster, string? tenantId, string? topic, string policy)
     {
-        string tenant = StudioLogValue.Cap(tenantId ?? NoTenant)!;
-        string named = StudioLogValue.Cap(topic ?? "(cluster)")!;
-        (user, cluster, policy) = (StudioLogValue.Cap(user)!, StudioLogValue.Cap(cluster)!, StudioLogValue.Cap(policy)!);
+        string tenant = KafkaLogValue.Cap(tenantId ?? NoTenant)!;
+        string named = KafkaLogValue.Cap(topic ?? "(cluster)")!;
+        (user, cluster, policy) = (KafkaLogValue.Cap(user)!, KafkaLogValue.Cap(cluster)!, KafkaLogValue.Cap(policy)!);
 
         ClusterRefusedCore(logger, user, cluster, tenant, named, policy);
     }
@@ -79,8 +79,8 @@ internal static partial class KafkaStudioLog
     /// <summary>9604: a record was opened.</summary>
     public static void RecordOpened(this ILogger logger, string user, string topic, int partition, long offset, string cluster, string? tenantId)
     {
-        string tenant = StudioLogValue.Cap(tenantId ?? NoTenant)!;
-        (user, topic, cluster) = (StudioLogValue.Cap(user)!, StudioLogValue.Cap(topic)!, StudioLogValue.Cap(cluster)!);
+        string tenant = KafkaLogValue.Cap(tenantId ?? NoTenant)!;
+        (user, topic, cluster) = (KafkaLogValue.Cap(user)!, KafkaLogValue.Cap(topic)!, KafkaLogValue.Cap(cluster)!);
 
         RecordOpenedCore(logger, user, topic, partition, offset, cluster, tenant);
     }
@@ -88,8 +88,8 @@ internal static partial class KafkaStudioLog
     /// <summary>9605: a record's value was shown.</summary>
     public static void RecordValueRead(this ILogger logger, string user, string topic, int partition, long offset, string cluster, string? tenantId)
     {
-        string tenant = StudioLogValue.Cap(tenantId ?? NoTenant)!;
-        (user, topic, cluster) = (StudioLogValue.Cap(user)!, StudioLogValue.Cap(topic)!, StudioLogValue.Cap(cluster)!);
+        string tenant = KafkaLogValue.Cap(tenantId ?? NoTenant)!;
+        (user, topic, cluster) = (KafkaLogValue.Cap(user)!, KafkaLogValue.Cap(topic)!, KafkaLogValue.Cap(cluster)!);
 
         RecordValueReadCore(logger, user, topic, partition, offset, cluster, tenant);
     }
@@ -107,9 +107,9 @@ internal static partial class KafkaStudioLog
         bool values,
         string predicate)
     {
-        string tenant = StudioLogValue.Cap(tenantId ?? NoTenant)!;
+        string tenant = KafkaLogValue.Cap(tenantId ?? NoTenant)!;
         (user, topics, cluster, format, predicate) =
-            (StudioLogValue.Cap(user)!, StudioLogValue.Cap(topics)!, StudioLogValue.Cap(cluster)!, StudioLogValue.Cap(format)!, StudioLogValue.CapText(predicate)!);
+            (KafkaLogValue.Cap(user)!, KafkaLogValue.Cap(topics)!, KafkaLogValue.Cap(cluster)!, KafkaLogValue.Cap(format)!, KafkaLogValue.CapText(predicate)!);
 
         RecordsExportedCore(logger, user, records, topics, cluster, tenant, format, bytes, values ? "; values included" : string.Empty, predicate);
     }
@@ -117,8 +117,8 @@ internal static partial class KafkaStudioLog
     /// <summary>9607: a live tail started (its first segment). The tail's one audit entry is written when it ends (9608).</summary>
     public static void TailStarted(this ILogger logger, string user, string topics, string cluster, string? tenantId, string predicate)
     {
-        string tenant = StudioLogValue.Cap(tenantId ?? NoTenant)!;
-        (user, topics, cluster, predicate) = (StudioLogValue.Cap(user)!, StudioLogValue.Cap(topics)!, StudioLogValue.Cap(cluster)!, StudioLogValue.CapText(predicate)!);
+        string tenant = KafkaLogValue.Cap(tenantId ?? NoTenant)!;
+        (user, topics, cluster, predicate) = (KafkaLogValue.Cap(user)!, KafkaLogValue.Cap(topics)!, KafkaLogValue.Cap(cluster)!, KafkaLogValue.CapText(predicate)!);
 
         TailStartedCore(logger, user, topics, cluster, tenant, predicate);
     }
@@ -138,9 +138,9 @@ internal static partial class KafkaStudioLog
         string stopReason,
         string predicate)
     {
-        string tenant = StudioLogValue.Cap(tenantId ?? NoTenant)!;
+        string tenant = KafkaLogValue.Cap(tenantId ?? NoTenant)!;
         (user, topics, cluster, elapsed, stopReason, predicate) =
-            (StudioLogValue.Cap(user)!, StudioLogValue.Cap(topics)!, StudioLogValue.Cap(cluster)!, StudioLogValue.Cap(elapsed)!, StudioLogValue.Cap(stopReason)!, StudioLogValue.CapText(predicate)!);
+            (KafkaLogValue.Cap(user)!, KafkaLogValue.Cap(topics)!, KafkaLogValue.Cap(cluster)!, KafkaLogValue.Cap(elapsed)!, KafkaLogValue.Cap(stopReason)!, KafkaLogValue.CapText(predicate)!);
 
         TailEndedCore(logger, user, topics, cluster, tenant, elapsed, segments, records, bytes, matches, stopReason, predicate);
     }
@@ -148,9 +148,9 @@ internal static partial class KafkaStudioLog
     /// <summary>9609: an export or a live tail did not run.</summary>
     public static void ActionNotRun(this ILogger logger, string user, string action, string topics, string cluster, string? tenantId, string reason, string predicate)
     {
-        string tenant = StudioLogValue.Cap(tenantId ?? NoTenant)!;
+        string tenant = KafkaLogValue.Cap(tenantId ?? NoTenant)!;
         (user, action, topics, cluster, reason, predicate) =
-            (StudioLogValue.Cap(user)!, StudioLogValue.Cap(action)!, StudioLogValue.Cap(topics)!, StudioLogValue.Cap(cluster)!, StudioLogValue.CapText(reason.TrimEnd('.'))!, StudioLogValue.CapText(predicate)!);
+            (KafkaLogValue.Cap(user)!, KafkaLogValue.Cap(action)!, KafkaLogValue.Cap(topics)!, KafkaLogValue.Cap(cluster)!, KafkaLogValue.CapText(reason.TrimEnd('.'))!, KafkaLogValue.CapText(predicate)!);
 
         ActionNotRunCore(logger, user, action, topics, cluster, tenant, reason, predicate);
     }
@@ -158,7 +158,7 @@ internal static partial class KafkaStudioLog
     /// <summary>9610: the address named a cluster that is unknown or refused, and another was opened.</summary>
     public static void ClusterAddressIgnored(this ILogger logger, string cluster, string opened)
     {
-        (cluster, opened) = (StudioLogValue.Cap(cluster)!, StudioLogValue.Cap(opened)!);
+        (cluster, opened) = (KafkaLogValue.Cap(cluster)!, KafkaLogValue.Cap(opened)!);
 
         ClusterAddressIgnoredCore(logger, cluster, opened);
     }

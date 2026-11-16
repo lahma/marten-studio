@@ -15,7 +15,7 @@ public partial class HoldersStylesheetTests
 
     private static readonly string[] Owned = [".ms-holders-"];
 
-    private static string Css() => File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio.Postgres", "wwwroot", "css", "studio.css"));
+    private static string Css() => File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio", "wwwroot", "css", "studio.css"));
 
     private static string Section()
     {

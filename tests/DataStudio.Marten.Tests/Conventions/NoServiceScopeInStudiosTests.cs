@@ -28,7 +28,7 @@ public class NoServiceScopeInStudiosTests
         RegexOptions.CultureInvariant,
         TimeSpan.FromSeconds(5));
 
-    private static readonly string[] Scanned = [StudioProjects.Shared, StudioProjects.Marten];
+    private static readonly string[] Scanned = [StudioProjects.Shared, StudioProjects.Marten, StudioProjects.Shell];
 
     [Fact]
     public void Neither_studio_assembly_makes_or_asks_for_a_service_scope()

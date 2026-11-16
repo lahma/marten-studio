@@ -81,7 +81,7 @@ public class OneSqlScannerTests
     {
         string[] files = StudioProjects.Files("*.cs", SearchOption.TopDirectoryOnly, "Internal", "Sql");
 
-        foreach (string project in StudioProjects.Names)
+        foreach (string project in StudioProjects.Databases)
         {
             files.Should().Contain(
                 x => StudioProjects.ProjectOf(SourceScanner.Relative(x)) == project,

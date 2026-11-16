@@ -5,8 +5,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 
-using DataStudio.Postgres.Services.Settings;
-
 namespace DataStudio.Kafka.Internal;
 
 /// <summary>
@@ -41,7 +39,7 @@ internal sealed class KafkaStudioStartupGuard(IServiceProvider provider) : IHost
         }
 
         KafkaStudioOptions options = provider.GetRequiredService<IOptions<KafkaStudioOptions>>().Value;
-        IStudioSettings settings = provider.GetRequiredService<IStudioSettings>();
+        IShellSettings settings = provider.GetRequiredService<IShellSettings>();
         IReadOnlyList<KafkaCapability> configured = KafkaCapabilityGuard.ConfiguredIn(options.Capabilities);
 
         if (configured.Count > 0
@@ -50,7 +48,7 @@ internal sealed class KafkaStudioStartupGuard(IServiceProvider provider) : IHost
             && string.IsNullOrWhiteSpace(options.CapabilityAuthorizationPolicy))
         {
             throw new InvalidOperationException(
-                KafkaStudioText.CapabilityWithoutPolicy(string.Join(", ", configured), settings.ReadOnlyOption()));
+                KafkaStudioText.CapabilityWithoutPolicy(string.Join(", ", configured), settings.ReadOnlyOptionName));
         }
 
         return Task.CompletedTask;

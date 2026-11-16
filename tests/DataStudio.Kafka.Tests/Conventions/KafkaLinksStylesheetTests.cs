@@ -14,7 +14,7 @@ public partial class KafkaLinksStylesheetTests
 
     private const string PreviousHeader = "/* ===== KS-UI-D: related records, the time strip and possible duplicates ===== */";
 
-    private static string Css => File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio.Postgres", "wwwroot", "css", "studio.css"));
+    private static string Css => File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio", "wwwroot", "css", "studio.css"));
 
     private static string Section()
     {

@@ -35,7 +35,7 @@ public static class KafkaStudioServiceCollectionExtensions
     /// <returns>The same collection, so calls can be chained.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="services" /> is null.</exception>
     /// <exception cref="InvalidOperationException">
-    /// The application was deployed without the PostgresStudio, DataStudio.Postgres.Diagnostics or DataStudio.Kafka.Core build this one was released
+    /// The application was deployed without the DataStudio (the shell) or DataStudio.Kafka.Core build this one was released
     /// with, or with another version of it.
     /// </exception>
     public static IServiceCollection AddKafkaStudio(
@@ -44,7 +44,7 @@ public static class KafkaStudioServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
 
-        // Before anything that names a PostgresStudio or DataStudio.Kafka.Core type: this body names none, so the JIT can compile it and the
+        // Before anything that names a DataStudio or DataStudio.Kafka.Core type: this body names none, so the JIT can compile it and the
         // guard can say what is wrong even when NuGet left one of them out of the deployment. Everything else is in
         // AddKafkaStudioServices, which is NoInlining so that it is compiled only once the guard has passed.
         // KStudioVersionGuardTests scans this method's IL to keep it that way.

@@ -1,5 +1,6 @@
 using DataStudio.Components;
 using DataStudio.Marten.Services;
+using DataStudio.Services;
 using DataStudio.Postgres.Services.Settings;
 using DataStudio.Postgres.Services.Sources;
 

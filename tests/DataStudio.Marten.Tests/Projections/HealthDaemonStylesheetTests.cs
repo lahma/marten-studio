@@ -9,7 +9,7 @@ namespace DataStudio.Marten.Tests.Projections;
 public class HealthDaemonStylesheetTests
 {
     private static readonly Lazy<string> Stylesheet = new(() =>
-        File.ReadAllText(RepositoryRoot.Combine("src/DataStudio.Postgres/wwwroot/css/studio.css")).Replace("\r\n", "\n"));
+        File.ReadAllText(RepositoryRoot.Combine("src/DataStudio/wwwroot/css/studio.css")).Replace("\r\n", "\n"));
 
     [Fact]
     public void HEALTH_2_is_appended_after_HEALTH_1()

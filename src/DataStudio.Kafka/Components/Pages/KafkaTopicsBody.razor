@@ -2,13 +2,11 @@
 @using DataStudio.Kafka.Core.Catalog
 @using DataStudio.Kafka.Core.Wire
 @using Microsoft.Extensions.Logging
-@using DataStudio.Postgres.Services.Live
-@using DataStudio.Postgres.Services.Settings
 @inject KafkaState State
 @inject KafkaCatalogService Catalog
 @inject NavigationManager Navigation
 @inject StudioLiveUpdatesFactory LiveFactory
-@inject IStudioSettings Settings
+@inject IShellSettings Settings
 @inject ILogger<KafkaTopicsBody> Logger
 
 @* The body of Topics, the home (D-UI decision 7). It lives under KafkaPageFrame and reads only once the frame has released reads, so the

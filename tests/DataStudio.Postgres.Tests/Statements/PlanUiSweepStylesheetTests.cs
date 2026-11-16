@@ -10,7 +10,7 @@ public class PlanUiSweepStylesheetTests
 {
     private const string Header = "UI-0.10. What 0.10's UI sweep found";
 
-    private static string Css() => File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio.Postgres", "wwwroot", "css", "studio.css"));
+    private static string Css() => File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio", "wwwroot", "css", "studio.css"));
 
     [Fact]
     public void The_section_is_appended_after_0_10_B_and_lets_a_node_s_values_wrap_anywhere()

@@ -55,9 +55,12 @@ public class CoreFenceTests
     /// <summary>The engine's folder: the shared studio's, since the 0.11 split, in an assembly of its own - inside the same fence.</summary>
     private const string DiagnosticsRoot = "src/DataStudio.Postgres.Diagnostics/";
 
-    private static readonly string[] SharedRoots = [SharedRoot, DiagnosticsRoot];
+    /// <summary>The shell's folder (v2 step 3): an assembly of its own since then, and inside the same fence - it names no Marten, as nothing beneath the modules does.</summary>
+    private const string ShellRoot = "src/DataStudio/";
 
-    /// <summary>Whether a repository-relative path is a file of the shared studio: the UI's or the engine's.</summary>
+    private static readonly string[] SharedRoots = [SharedRoot, DiagnosticsRoot, ShellRoot];
+
+    /// <summary>Whether a repository-relative path is a file of the shared studio: the UI's, the shell's or the engine's.</summary>
     private static bool IsShared(string file) => SharedRoots.Any(root => file.StartsWith(root, StringComparison.Ordinal));
 
     /// <summary>The path below whichever shared root <paramref name="file" /> is under.</summary>
@@ -249,10 +252,10 @@ public class CoreFenceTests
         return slash < 0 ? root : root + "." + pathBelowRoot[..slash].Replace('/', '.');
     }
 
-    /// <summary>The root namespace of the shell (A3): <c>src/DataStudio.Postgres/Shell/</c> declares <c>DataStudio.*</c> by its folders, as the rest of the shared studio declares <c>PostgresStudio.*</c>.</summary>
+    /// <summary>The root namespace of the shell (A3): <c>src/DataStudio/</c> declares <c>DataStudio.*</c> by its folders, as the rest of the shared studio declares <c>PostgresStudio.*</c>.</summary>
     private const string ShellRootNamespace = "DataStudio";
 
-    private const string ShellFolder = "src/DataStudio.Postgres/Shell/";
+    private const string ShellFolder = ShellRoot;
 
     private static bool IsShell(string file) => file.StartsWith(ShellFolder, StringComparison.Ordinal);
 

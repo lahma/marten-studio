@@ -2,8 +2,7 @@
 @using DataStudio.Kafka.Core.Decoding
 @using DataStudio.Kafka.Core.Redaction
 @using DataStudio.Kafka.Core.Scanning
-@using DataStudio.Postgres.Components.Json
-@using DataStudio.Postgres.Services.Settings
+@using DataStudio.Components.Json
 
 @* A record's value (D-PAYLOAD decision 4.3), drawn from an in-memory KafkaMatch: every part of it was masked inside the engine before it got here, and
    the value is in the match only if the scan or the read had the payload grant. This component reads nothing and records nothing; the handler that

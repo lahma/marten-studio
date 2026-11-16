@@ -29,6 +29,12 @@ internal sealed class StudioDescriptor : DiagnosticsDescriptor
     public required IReadOnlyList<StudioPageAssembly> PageAssemblies { get; init; }
 
     /// <summary>
+    /// The shell's own pages (v2 step 3: Activity), as a page assembly of the database module: <c>/postgres/activity</c> keeps its address
+    /// until step 5 gives the shell its own, so the module whose root it is names the assembly. Both studios list it beside their own.
+    /// </summary>
+    public static StudioPageAssembly ShellPages { get; } = new(typeof(StudioShellDescriptor).Assembly, "/postgres");
+
+    /// <summary>
     /// The sidebar, section by section, built for the settings the studio is registered with: an entry whose condition needs more than the
     /// master switch (<see cref="StudioNavConditions.RunSqlEnabled" />) closes over them, so the navigation is built once per registration
     /// (by <see cref="DatabaseStudioModule" />) and never held in a static.

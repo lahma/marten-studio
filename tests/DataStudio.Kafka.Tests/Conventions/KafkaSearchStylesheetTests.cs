@@ -14,7 +14,7 @@ public partial class KafkaSearchStylesheetTests
 
     private const string PreviousHeader = "/* ===== KS-UI-A: the Kafka catalog (topics, topic overview, cluster settings) ===== */";
 
-    private static string Css => File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio.Postgres", "wwwroot", "css", "studio.css"));
+    private static string Css => File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio", "wwwroot", "css", "studio.css"));
 
     private static string Section()
     {

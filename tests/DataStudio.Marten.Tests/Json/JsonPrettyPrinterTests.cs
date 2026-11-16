@@ -1,5 +1,5 @@
 using System.Text;
-using DataStudio.Postgres.Services.Json;
+using DataStudio.Services.Json;
 
 namespace DataStudio.Marten.Tests.Json;
 

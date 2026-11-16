@@ -53,7 +53,7 @@ public class TableFindingsCarryGatedSchemasTests
         // store (T11's mt_hilo) - so a scan of either folder alone would judge part of the area.
         // The shared studio's UI holds only the Configuration-area posture checks since the 0.11 split: the Tables ones are the
         // engine's, DataStudio.Postgres.Diagnostics.
-        foreach (string project in StudioProjects.Names.Where(static x => x != StudioProjects.Shared))
+        foreach (string project in StudioProjects.Databases.Where(static x => x != StudioProjects.Shared))
         {
             checks.Should().Contain(
                 x => StudioProjects.ProjectOf(SourceScanner.Relative(x)) == project,

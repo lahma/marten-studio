@@ -4,7 +4,7 @@ using System.Text.Json;
 using Npgsql;
 
 using DataStudio.Postgres.Internal.Sql;
-using DataStudio.Postgres.Services.Json;
+using DataStudio.Services.Json;
 
 namespace DataStudio.Marten.Integration.Tests.Sql;
 

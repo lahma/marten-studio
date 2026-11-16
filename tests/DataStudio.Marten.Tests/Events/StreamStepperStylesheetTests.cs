@@ -10,7 +10,7 @@ namespace DataStudio.Marten.Tests.Events;
 /// </summary>
 public partial class StreamStepperStylesheetTests
 {
-    private const string Stylesheet = "src/DataStudio.Postgres/wwwroot/css/studio.css";
+    private const string Stylesheet = "src/DataStudio/wwwroot/css/studio.css";
 
     private const string Header = "M1. The projection stepper";
 

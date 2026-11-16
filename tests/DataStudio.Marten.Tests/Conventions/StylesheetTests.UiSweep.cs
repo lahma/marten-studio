@@ -15,7 +15,7 @@ public partial class StylesheetTests
     /// <summary>The section's rules, comments removed, read out of the file by its header (D26).</summary>
     private static string UiSweepSection()
     {
-        string css = File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio.Postgres", "wwwroot", "css", "studio.css"));
+        string css = File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio", "wwwroot", "css", "studio.css"));
         int start = css.IndexOf(UiSweepHeader, StringComparison.Ordinal);
         start.Should().BeGreaterThanOrEqualTo(0, "the section is there");
 
@@ -29,7 +29,7 @@ public partial class StylesheetTests
     [Fact]
     public void The_UI_sweep_section_is_appended_after_every_0_6_section_and_uses_only_the_tokens()
     {
-        string css = File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio.Postgres", "wwwroot", "css", "studio.css"));
+        string css = File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio", "wwwroot", "css", "studio.css"));
 
         css.IndexOf(UiSweepHeader, StringComparison.Ordinal).Should().BeGreaterThan(
             css.IndexOf("M47. Orphaned progression rows", StringComparison.Ordinal),
@@ -99,7 +99,7 @@ public partial class StylesheetTests
     [Fact]
     public void UI_0_6_1_clamps_the_sessions_statement()
     {
-        string css = File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio.Postgres", "wwwroot", "css", "studio.css"));
+        string css = File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio", "wwwroot", "css", "studio.css"));
         const string header = "UI-0.6.1. Sessions";
 
         int start = css.IndexOf(header, StringComparison.Ordinal);

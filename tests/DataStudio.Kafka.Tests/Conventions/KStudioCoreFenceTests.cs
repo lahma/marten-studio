@@ -8,24 +8,55 @@ namespace DataStudio.Kafka.Tests.Conventions;
 
 /// <summary>
 /// The engine's fences (AGENTS.md D36, hard rule 16): DataStudio.Kafka.Core references no web stack, no studio, no Postgres driver,
-/// no Marten family and no Wolverine; and the three studio projects reference no Kafka client, no Wolverine and no
+/// no Marten family and no Wolverine; and the shell and the three studio projects reference no Kafka client, no Wolverine and no
 /// KStudio.
 /// </summary>
+/// <remarks>
+/// Names are matched exactly or as a dotted prefix (REVIEW-V2-R finding 1), never by a bare <c>DataStudio</c> prefix, which the shell, the module and
+/// the engine itself all satisfy: <c>DataStudio.Marten</c> is <c>DataStudio.Marten</c> and <c>DataStudio.Marten.*</c>. The third-party families stay
+/// prefixes, as their packages are named by them.
+/// </remarks>
 public class KStudioCoreFenceTests
 {
-    /// <summary>What DataStudio.Kafka.Core may never reference, as assembly or package name prefixes.</summary>
-    private static readonly string[] ForbiddenInCore =
-        ["Microsoft.AspNetCore", "Microsoft.JSInterop", "DataStudio.Postgres", "Marten", "JasperFx", "Weasel", "Npgsql", "Wolverine"];
+    /// <summary>What DataStudio.Kafka.Core may never reference, as assembly or package name prefixes: the web stack and the third-party families.</summary>
+    private static readonly string[] ForbiddenFamiliesInCore =
+        ["Microsoft.AspNetCore", "Microsoft.JSInterop", "Marten", "JasperFx", "Weasel", "Npgsql", "Wolverine"];
 
-    /// <summary>What the shared studio, the diagnostics engine and Marten Studio may never reference.</summary>
-    private static readonly string[] ForbiddenInStudios = ["Confluent", "librdkafka", "Wolverine", "DataStudio.Kafka"];
+    /// <summary>
+    /// The projects the engine may never reference, matched exactly: the shell, and the Kafka module that sits above the engine (the engine is
+    /// <c>DataStudio.Kafka.Core</c>, which a dotted rule on <c>DataStudio.Kafka</c> would catch).
+    /// </summary>
+    private static readonly string[] ForbiddenExactInCore = ["DataStudio", "DataStudio.Kafka"];
+
+    /// <summary>The projects the engine may never reference, exactly or below: Marten Studio, the database module and the engine under it, the Kafka adapter and the samples.</summary>
+    private static readonly string[] ForbiddenDottedInCore = ["DataStudio.Marten", "DataStudio.Postgres", "DataStudio.Kafka.Wolverine", "DataStudio.Sample"];
+
+    /// <summary>What the shell and the database and Marten studios may never reference, by prefix: the client and the adapter's package.</summary>
+    private static readonly string[] ForbiddenFamiliesInStudios = ["Confluent", "librdkafka", "Wolverine"];
+
+    /// <summary>Nor any Kafka project of ours, exactly or below: the module, its engine and the adapter.</summary>
+    private static readonly string[] ForbiddenDottedInStudios = ["DataStudio.Kafka"];
+
+    /// <summary>Whether <paramref name="name" /> is one of <paramref name="dotted" />, or below one of them.</summary>
+    private static bool IsOrIsBelow(string name, IEnumerable<string> dotted) =>
+        dotted.Any(forbidden => name.Equals(forbidden, StringComparison.OrdinalIgnoreCase)
+            || name.StartsWith(forbidden + ".", StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsForbiddenInCore(string name) =>
+        ForbiddenFamiliesInCore.Any(prefix => name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        || ForbiddenExactInCore.Any(forbidden => name.Equals(forbidden, StringComparison.OrdinalIgnoreCase))
+        || IsOrIsBelow(name, ForbiddenDottedInCore);
+
+    private static bool IsForbiddenInStudios(string name) =>
+        ForbiddenFamiliesInStudios.Any(prefix => name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        || IsOrIsBelow(name, ForbiddenDottedInStudios);
 
     [Fact]
     public void The_engine_assembly_references_no_web_stack_no_studio_and_no_Postgres_driver()
     {
         var references = Assembly.Load("DataStudio.Kafka.Core").GetReferencedAssemblies().Select(static x => x.Name!);
 
-        references.Where(static name => StartsWithAny(name, ForbiddenInCore)).Should().BeEmpty(
+        references.Where(IsForbiddenInCore).Should().BeEmpty(
             "DataStudio.Kafka.Core is the engine alone: no ASP.NET Core, no studio and no Postgres driver");
     }
 
@@ -36,7 +67,7 @@ public class KStudioCoreFenceTests
 
         project.Descendants().Where(static x => x.Name.LocalName == "FrameworkReference").Should().BeEmpty(
             "DataStudio.Kafka.Core has no FrameworkReference: a worker host must not need ASP.NET Core to load it");
-        References(project).Where(static name => StartsWithAny(name, ForbiddenInCore)).Should().BeEmpty();
+        References(project).Where(IsForbiddenInCore).Should().BeEmpty();
         References(project).Should().Contain("Confluent.Kafka", "the project file read is the real one");
         ((string?) project.Root?.Attribute("Sdk")).Should().Be("Microsoft.NET.Sdk",
             "a Web or Razor SDK brings ASP.NET Core without a FrameworkReference line");
@@ -52,7 +83,7 @@ public class KStudioCoreFenceTests
         using var document = JsonDocument.Parse(File.ReadAllText(assets));
         var libraries = document.RootElement.GetProperty("libraries").EnumerateObject().Select(static x => x.Name.Split('/')[0]).ToArray();
 
-        libraries.Where(static name => StartsWithAny(name, ForbiddenInCore)).Should().BeEmpty(
+        libraries.Where(IsForbiddenInCore).Should().BeEmpty(
             "the restore graph of DataStudio.Kafka.Core must not reach ASP.NET Core, a studio, Npgsql, the Marten family or Wolverine");
         libraries.Should().Contain("Confluent.Kafka", "the restore graph is read");
 
@@ -61,11 +92,12 @@ public class KStudioCoreFenceTests
                 ? references.EnumerateObject().Select(static reference => reference.Name)
                 : Enumerable.Empty<string>())
             .ToArray();
-        frameworks.Where(static name => StartsWithAny(name, ForbiddenInCore)).Should().BeEmpty(
+        frameworks.Where(IsForbiddenInCore).Should().BeEmpty(
             "the engine restores no ASP.NET Core framework reference, whatever imported it");
     }
 
     [Theory]
+    [InlineData("src/DataStudio/DataStudio.csproj")]
     [InlineData("src/DataStudio.Postgres.Diagnostics/DataStudio.Postgres.Diagnostics.csproj")]
     [InlineData("src/DataStudio.Postgres/DataStudio.Postgres.csproj")]
     [InlineData("src/DataStudio.Marten/DataStudio.Marten.csproj")]
@@ -73,12 +105,47 @@ public class KStudioCoreFenceTests
     {
         var document = XDocument.Load(RepositoryRoot.Combine(project.Split('/')));
 
-        References(document).Where(static name => StartsWithAny(name, ForbiddenInStudios)).Should().BeEmpty(
+        References(document).Where(IsForbiddenInStudios).Should().BeEmpty(
             "a host with no Kafka must never get a Kafka client, Wolverine or KStudio through a studio");
     }
 
-    private static bool StartsWithAny(string name, string[] prefixes) =>
-        prefixes.Any(prefix => name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+    /// <summary>One case per name the engine's fence must catch, and those it must let through: itself, the Confluent client it exists for and the framework's abstractions.</summary>
+    [Theory]
+    [InlineData("DataStudio", true)]
+    [InlineData("DataStudio.Kafka", true)]
+    [InlineData("DataStudio.Marten", true)]
+    [InlineData("DataStudio.Marten.Tests", true)]
+    [InlineData("DataStudio.Postgres", true)]
+    [InlineData("DataStudio.Postgres.Diagnostics", true)]
+    [InlineData("DataStudio.Kafka.Wolverine", true)]
+    [InlineData("DataStudio.Sample.Kafka", true)]
+    [InlineData("Microsoft.AspNetCore.Components", true)]
+    [InlineData("Npgsql", true)]
+    [InlineData("WolverineFx.Kafka", true)]
+    [InlineData("DataStudio.Kafka.Core", false)]
+    [InlineData("Confluent.Kafka", false)]
+    [InlineData("Microsoft.Extensions.Logging.Abstractions", false)]
+    public void The_engines_fence_catches_each_name_it_forbids_and_no_other(string name, bool forbidden)
+    {
+        IsForbiddenInCore(name).Should().Be(forbidden);
+    }
+
+    /// <summary>The studios' fence, name by name: every Kafka project, the client and the adapter's package; and not the shell, which is the studios' own.</summary>
+    [Theory]
+    [InlineData("DataStudio.Kafka", true)]
+    [InlineData("DataStudio.Kafka.Core", true)]
+    [InlineData("DataStudio.Kafka.Wolverine", true)]
+    [InlineData("Confluent.Kafka", true)]
+    [InlineData("librdkafka.redist", true)]
+    [InlineData("WolverineFx.Kafka", true)]
+    [InlineData("DataStudio", false)]
+    [InlineData("DataStudio.Postgres", false)]
+    [InlineData("DataStudio.Marten", false)]
+    [InlineData("Npgsql", false)]
+    public void The_studios_fence_catches_each_name_it_forbids_and_no_other(string name, bool forbidden)
+    {
+        IsForbiddenInStudios(name).Should().Be(forbidden);
+    }
 
     private static IEnumerable<string> References(XDocument project) =>
         project.Descendants()

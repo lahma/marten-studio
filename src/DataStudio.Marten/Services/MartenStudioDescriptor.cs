@@ -56,6 +56,7 @@ internal static class MartenStudioDescriptor
         [
             new StudioPageAssembly(typeof(MartenStudioApp).Assembly, MartenStudioOptions.DefaultPath),
             new StudioPageAssembly(typeof(DataStudio.Postgres.Components.Pages.StudioHome).Assembly, "/postgres"),
+            StudioDescriptor.ShellPages,
         ],
         // The shared checks, the diagnostics engine's and PostgresStudio's own (the studio-posture ones), run against any source;
         // MartenStudio's own read the store and only ever run against one. Every source MartenStudio has is a Marten store, so

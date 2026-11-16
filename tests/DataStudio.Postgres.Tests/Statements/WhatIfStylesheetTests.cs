@@ -10,7 +10,7 @@ namespace DataStudio.Postgres.Tests.Statements;
 /// </summary>
 public partial class WhatIfStylesheetTests
 {
-    private const string Stylesheet = "src/DataStudio.Postgres/wwwroot/css/studio.css";
+    private const string Stylesheet = "src/DataStudio/wwwroot/css/studio.css";
 
     private const string Header = "X2. What if? A hypothetical index";
 

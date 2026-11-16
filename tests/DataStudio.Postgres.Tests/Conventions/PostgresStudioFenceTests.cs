@@ -39,10 +39,17 @@ public class PostgresStudioFenceTests
 
     private const string Diagnostics = "DataStudio.Postgres.Diagnostics";
 
+    /// <summary>The shell (v2 step 3): the one project beside the engine that this one references.</summary>
+    private const string Shell = "DataStudio";
+
     private const string TestProject = "DataStudio.Postgres.Tests";
 
-    /// <summary>The prefixes of the Marten family: Marten itself and every package it brings, and MartenStudio.</summary>
-    private static readonly string[] MartenFamily = ["Marten", "JasperFx", "Weasel", "DataStudio.Marten"];
+    /// <summary>
+    /// The prefixes of the Marten family: Marten itself and every package it brings, MartenStudio (<c>DataStudio.Marten</c>, which is also the prefix of its
+    /// tests) and the Marten samples (<c>DataStudio.Sample.Marten</c>, which is also the prefix of the demo domain). Never a bare <c>DataStudio</c>: the shell
+    /// and the module below are named exactly, and a prefix they satisfy would fence them out.
+    /// </summary>
+    private static readonly string[] MartenFamily = ["Marten", "JasperFx", "Weasel", "DataStudio.Marten", "DataStudio.Sample.Marten"];
 
     /// <summary>Whether a package id or an assembly name is in the Marten family - <c>Marten*</c>, <c>JasperFx*</c>, <c>Weasel*</c>.</summary>
     internal static bool IsMartenFamily(string name) =>
@@ -56,7 +63,7 @@ public class PostgresStudioFenceTests
     public static TheoryData<string, string, string> ProjectFiles => new()
     {
         { "src", Diagnostics, "Npgsql,Microsoft.Extensions.Logging.Abstractions,Microsoft.Extensions.Options,Microsoft.Extensions.Diagnostics.HealthChecks" },
-        { "src", Shared, Diagnostics + ",Microsoft.AspNetCore.App.Internal.Assets" },
+        { "src", Shared, Diagnostics + "," + Shell },
         { "tests", TestProject, Shared + ",bunit" },
     };
 
@@ -67,8 +74,8 @@ public class PostgresStudioFenceTests
     public static TheoryData<string, string, string> RestoreGraphs => new()
     {
         { "src", Diagnostics, "Npgsql,Microsoft.Extensions.Logging.Abstractions,Microsoft.Extensions.Options,Microsoft.Extensions.Diagnostics.HealthChecks" },
-        { "src", Shared, "Npgsql,Microsoft.AspNetCore.App.Internal.Assets," + Diagnostics },
-        { "tests", TestProject, "Npgsql,Microsoft.AspNetCore.App.Internal.Assets," + Shared + "," + Diagnostics },
+        { "src", Shared, "Npgsql,Microsoft.AspNetCore.App.Internal.Assets," + Diagnostics + "," + Shell },
+        { "tests", TestProject, "Npgsql,Microsoft.AspNetCore.App.Internal.Assets," + Shared + "," + Diagnostics + "," + Shell },
     };
 
     [Fact]
@@ -216,6 +223,9 @@ public class PostgresStudioFenceTests
     [InlineData("Marten", true)]
     [InlineData("Marten.AspNetCore", true)]
     [InlineData("DataStudio.Marten", true)]
+    [InlineData("DataStudio.Marten.Tests", true)]
+    [InlineData("DataStudio.Sample.Marten", true)]
+    [InlineData("DataStudio.Sample.Marten.Domain", true)]
     [InlineData("JasperFx", true)]
     [InlineData("JasperFx.Events", true)]
     [InlineData("jasperfx.events", true)]
@@ -223,6 +233,9 @@ public class PostgresStudioFenceTests
     [InlineData("Weasel.Postgresql", true)]
     [InlineData("Npgsql", false)]
     [InlineData("DataStudio.Postgres", false)]
+    [InlineData("DataStudio.Postgres.Diagnostics", false)]
+    [InlineData("DataStudio", false)]
+    [InlineData("DataStudio.Sample.Postgres", false)]
     [InlineData("Microsoft.AspNetCore.Components.Web", false)]
     [InlineData("System.Runtime", false)]
     [InlineData("Microsoft.AspNetCore.App.Internal.Assets", false)]

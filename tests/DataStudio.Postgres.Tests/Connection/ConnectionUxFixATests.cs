@@ -166,7 +166,7 @@ public sealed class ConnectionUxFixATests
     [Fact]
     public void The_stylesheet_has_the_ux_fix_a_section_with_the_stacked_cards_below_720_pixels_and_the_column_widths()
     {
-        string css = File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio.Postgres", "wwwroot", "css", "studio.css"));
+        string css = File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio", "wwwroot", "css", "studio.css"));
         int start = css.IndexOf("/* ===== 1.1-UX-FIX-A", StringComparison.Ordinal);
 
         start.Should().BeGreaterThan(0, "D26: the section is appended");

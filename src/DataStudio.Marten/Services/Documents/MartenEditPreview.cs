@@ -3,7 +3,7 @@ using JasperFx.Documents;
 using Marten;
 
 using DataStudio.Postgres.Services;
-using DataStudio.Postgres.Services.Json;
+using DataStudio.Services.Json;
 
 namespace DataStudio.Marten.Services.Documents;
 

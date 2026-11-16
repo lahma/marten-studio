@@ -67,7 +67,7 @@ public class PackReadinessTests
     public void The_pin_targets_pin_the_projects_below_each_package()
     {
         var kstudio = File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio.Kafka", "DataStudio.Kafka.csproj"));
-        kstudio.Should().Contain("Condition=\"'%(Filename)' == 'DataStudio.Postgres' or '%(Filename)' == 'DataStudio.Kafka.Core'\"");
+        kstudio.Should().Contain("Condition=\"'%(Filename)' == 'DataStudio' or '%(Filename)' == 'DataStudio.Kafka.Core'\"");
         kstudio.Should().Contain("<ProjectVersion>[%(ProjectVersion)]</ProjectVersion>");
 
         var wolverine = File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio.Kafka.Wolverine", "DataStudio.Kafka.Wolverine.csproj"));
@@ -93,7 +93,7 @@ public class PackReadinessTests
             .And.Contain("const string KStudioPackageId = \"DataStudio.Kafka\";")
             .And.Contain("const string KStudioWolverinePackageId = \"DataStudio.Kafka.Wolverine\";");
 
-        // Pack's loop runs the six projects in dependency order, the three KStudio ones after the family's.
+        // Pack's loop runs the seven projects in dependency order, the three Kafka ones after the family's.
         publish.Should().MatchRegex(@"StudioProject,\s*KStudioCoreProject, KStudioProject, KStudioWolverineProject");
     }
 

@@ -8,7 +8,7 @@ namespace DataStudio.Marten.Tests.Health;
 /// </summary>
 public class HealthStylesheetTests
 {
-    private static string Css => File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio.Postgres", "wwwroot", "css", "studio.css"));
+    private static string Css => File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio", "wwwroot", "css", "studio.css"));
 
     [Fact]
     public void The_health_section_comes_after_the_last_0_3_section()

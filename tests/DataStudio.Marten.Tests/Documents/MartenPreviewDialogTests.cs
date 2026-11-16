@@ -5,7 +5,7 @@ using Bunit;
 using DataStudio.Marten.Internal.Sql;
 using DataStudio.Marten.Services.Documents;
 
-using DataStudio.Postgres.Services.Json;
+using DataStudio.Services.Json;
 
 using DetailPage = DataStudio.Marten.Components.Pages.Documents.DocumentDetail;
 using DetailModel = DataStudio.Marten.Services.Documents.DocumentDetail;

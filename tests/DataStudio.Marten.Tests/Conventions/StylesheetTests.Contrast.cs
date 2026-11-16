@@ -89,7 +89,7 @@ public partial class StylesheetTests
     /// <summary>The raw stylesheet from the section's banner to the next banner, comments removed.</summary>
     private static string Section(string heading)
     {
-        string raw = File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio.Postgres", "wwwroot", "css", "studio.css"));
+        string raw = File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio", "wwwroot", "css", "studio.css"));
 
         int marker = raw.IndexOf("===== " + heading, StringComparison.Ordinal);
         marker.Should().BeGreaterThan(-1, "the section '{0}' must exist in {1}", heading, StylesheetPath);

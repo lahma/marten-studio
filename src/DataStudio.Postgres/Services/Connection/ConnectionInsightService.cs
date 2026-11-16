@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Npgsql;
 
 using DataStudio.Postgres.Services.ConnectionHistory;
+using DataStudio.Services;
 using DataStudio.Postgres.Services.Database;
 using DataStudio.Postgres.Services.Health;
 using DataStudio.Postgres.Services.Settings;

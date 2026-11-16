@@ -8,7 +8,7 @@ using JasperFx.Events.Aggregation;
 
 using Marten;
 
-using DataStudio.Postgres.Services.Json;
+using DataStudio.Services.Json;
 
 namespace DataStudio.Marten.Services.Events;
 

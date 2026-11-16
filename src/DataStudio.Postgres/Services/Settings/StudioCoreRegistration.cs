@@ -134,7 +134,10 @@ internal static class StudioCoreRegistration
         services.TryAddScoped<ToastService>();
 
         // The words the shell's live-update loop logs in are the studio's: this studio's own log methods, chosen by its product.
-        services.TryAddSingleton(static provider => DatabaseLiveLogs.For(provider.GetRequiredService<IStudioSettings>().Text.Product));
+        // The shell's loop names no throttle: the database side closes over the container's, so event 9220 takes its level where it is logged.
+        services.TryAddSingleton(static provider => DatabaseLiveLogs.For(
+            provider.GetRequiredService<IStudioSettings>().Text.Product,
+            provider.GetService<StudioLogThrottle>()));
 
         // A factory rather than the loop itself: StudioLiveUpdates is IAsyncDisposable, and a transient
         // registration would leave the circuit's container tracking one instance per page visit for the

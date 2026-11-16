@@ -3,13 +3,12 @@
 @using DataStudio.Kafka.Core.Index
 @using DataStudio.Kafka.Core.Scanning
 @using Microsoft.Extensions.Logging
-@using DataStudio.Postgres.Services.Settings
 @inject KafkaState State
 @inject KafkaCatalogService Catalog
 @inject KafkaCapabilityGuard Capabilities
 @inject KafkaExportService ExportService
 @inject KafkaTailService TailService
-@inject IStudioSettings StudioSettings
+@inject IShellSettings StudioSettings
 @inject IKafkaScanner Scanner
 @inject KafkaRecordIndexResolver RecordIndex
 @inject ILogger<KafkaSettingsBody> Logger
@@ -58,7 +57,7 @@
         <h2 class="ms-section-title">Capabilities</h2>
         @if (Capabilities.ReadOnly)
         {
-            <p class="ms-muted"><code>@StudioSettings.ReadOnlyOption()</code> is <code>true</code>, which turns every capability off.</p>
+            <p class="ms-muted"><code>@StudioSettings.ReadOnlyOptionName</code> is <code>true</code>, which turns every capability off.</p>
         }
         <TableScroll Label="Capabilities">
             <table class="ms-table ms-k-capabilities">

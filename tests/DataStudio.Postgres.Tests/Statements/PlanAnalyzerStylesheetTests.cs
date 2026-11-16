@@ -13,7 +13,7 @@ public partial class PlanAnalyzerStylesheetTests
 {
     private const string Header = "0.9-A. Query › Plan";
 
-    private static string Css() => File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio.Postgres", "wwwroot", "css", "studio.css"));
+    private static string Css() => File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio", "wwwroot", "css", "studio.css"));
 
     private static string Section()
     {
@@ -99,7 +99,7 @@ public partial class PlanAnalyzerStylesheetTests
     [Fact]
     public void The_scripts_chunked_hand_over_matches_the_component_that_receives_it()
     {
-        string script = File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio.Postgres", "wwwroot", "js", "studio.js"));
+        string script = File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio", "wwwroot", "js", "studio.js"));
         string component = File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio.Postgres", "Components", "Pages", "Query", "PlanPaste.razor"));
 
         script.Should().Contain("sendInChunks: async function (textarea, dotNetRef, chunkCharacters, maxCharacters)")

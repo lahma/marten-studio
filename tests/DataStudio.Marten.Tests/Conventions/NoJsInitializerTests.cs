@@ -23,7 +23,7 @@ namespace DataStudio.Marten.Tests.Conventions;
 /// </para>
 /// <para>
 /// <b>Two packages since 0.5.</b> The static web assets moved with the shell into the shared studio
-/// (<c>src/DataStudio.Postgres/wwwroot</c>, served as <c>_content/DataStudio.Postgres/</c>), and MartenStudio ships no
+/// (<c>src/DataStudio/wwwroot</c>, served as <c>_content/DataStudio/</c>), and MartenStudio ships no
 /// <c>wwwroot</c> of its own. Both are Razor Class Libraries a host references - MartenStudio directly,
 /// PostgresStudio through it - so the filename rule and the project-file rule hold for both: a
 /// <c>wwwroot</c> MartenStudio grew back would be loaded into the host's app just the same.
@@ -31,11 +31,11 @@ namespace DataStudio.Marten.Tests.Conventions;
 /// </remarks>
 public class NoJsInitializerTests
 {
-    /// <summary>The shared studio's web root, where the shell's assets live.</summary>
-    private static readonly string WebRoot = RepositoryRoot.Combine("src", StudioProjects.Shared, "wwwroot");
+    /// <summary>The shell's web root, where the studio's one stylesheet and script live.</summary>
+    private static readonly string WebRoot = RepositoryRoot.Combine("src", StudioProjects.Shell, "wwwroot");
 
     /// <summary>The script the shell loads instead, as an asset path and as a file.</summary>
-    private const string HelperScript = "_content/DataStudio.Postgres/js/studio.js";
+    private const string HelperScript = "_content/DataStudio/js/studio.js";
 
     [Fact]
     public void No_static_web_asset_is_named_like_a_Blazor_JS_initializer()
@@ -109,7 +109,7 @@ public class NoJsInitializerTests
 
         // The shared document every studio's root component renders (0.5, PS-1a): MartenStudioApp is its root only.
         string shell = File.ReadAllText(
-            RepositoryRoot.Combine("src", "DataStudio.Postgres", "Shell", "Components", "StudioDocument.razor"));
+            RepositoryRoot.Combine("src", "DataStudio", "Components", "StudioDocument.razor"));
 
         shell.Should().Contain($"<script src=\"{HelperScript}\">",
             "the shell is what loads the helpers now that no convention does it");

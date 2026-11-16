@@ -14,7 +14,7 @@ public partial class KafkaTailStylesheetTests
 
     private const string PreviousHeader = "/* ===== KS-UI-EXPORT: the Export menu and the cluster's profile chip ===== */";
 
-    private static string Css => File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio.Postgres", "wwwroot", "css", "studio.css"));
+    private static string Css => File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio", "wwwroot", "css", "studio.css"));
 
     private static string Section()
     {

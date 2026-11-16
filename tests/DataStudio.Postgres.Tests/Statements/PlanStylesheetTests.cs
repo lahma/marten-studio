@@ -10,7 +10,7 @@ namespace DataStudio.Postgres.Tests.Statements;
 /// </summary>
 public partial class PlanStylesheetTests
 {
-    private const string Stylesheet = "src/DataStudio.Postgres/wwwroot/css/studio.css";
+    private const string Stylesheet = "src/DataStudio/wwwroot/css/studio.css";
 
     private const string Header = "X1. The plan view";
 

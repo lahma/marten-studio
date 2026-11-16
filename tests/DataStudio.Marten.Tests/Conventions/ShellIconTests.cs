@@ -15,9 +15,9 @@ namespace DataStudio.Marten.Tests.Conventions;
 /// </remarks>
 public partial class ShellIconTests
 {
-    private const string Icon = "_content/DataStudio.Postgres/favicon.svg";
+    private const string Icon = "_content/DataStudio/favicon.svg";
 
-    private static readonly string IconFile = RepositoryRoot.Combine("src", StudioProjects.Shared, "wwwroot", "favicon.svg");
+    private static readonly string IconFile = RepositoryRoot.Combine("src", StudioProjects.Shell, "wwwroot", "favicon.svg");
 
     [GeneratedRegex(@"<link\s+rel=""icon""[^>]*\shref=""(?<href>[^""]*)""", RegexOptions.None, matchTimeoutMilliseconds: 2000)]
     private static partial Regex IconLink();
@@ -25,7 +25,7 @@ public partial class ShellIconTests
     [Fact]
     public void The_shell_links_the_packaged_icon_by_a_relative_address()
     {
-        string shell = File.ReadAllText(RepositoryRoot.Combine("src", StudioProjects.Shared, "Shell", "Components", "StudioDocument.razor"));
+        string shell = File.ReadAllText(RepositoryRoot.Combine("src", StudioProjects.Shell, "Components", "StudioDocument.razor"));
 
         Match link = IconLink().Match(shell);
 

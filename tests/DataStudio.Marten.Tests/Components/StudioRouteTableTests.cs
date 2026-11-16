@@ -46,11 +46,12 @@ public class StudioRouteTableTests
     /// mount path from its own root (design §2.5) - two assemblies since the move.
     /// </summary>
     [Fact]
-    public void The_descriptor_names_both_studio_assemblies_each_at_its_own_root()
+    public void The_descriptor_names_both_studio_assemblies_and_the_shells_each_at_its_own_root()
     {
         MartenSpine.Descriptor.PageAssemblies.Should().Equal(
             new StudioPageAssembly(typeof(MartenStudioApp).Assembly, "/marten"),
-            new StudioPageAssembly(typeof(StudioHome).Assembly, "/postgres"));
+            new StudioPageAssembly(typeof(StudioHome).Assembly, "/postgres"),
+            new StudioPageAssembly(typeof(Activity).Assembly, "/postgres"));
 
         typeof(StudioHome).Assembly.Should().NotBeSameAs(typeof(MartenStudioApp).Assembly, "the shared pages are an assembly of their own");
     }

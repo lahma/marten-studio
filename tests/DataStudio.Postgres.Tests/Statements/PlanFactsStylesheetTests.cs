@@ -14,7 +14,7 @@ public partial class PlanFactsStylesheetTests
 {
     private const string Header = "0.10-A. Facts beside the plan";
 
-    private static string Css() => File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio.Postgres", "wwwroot", "css", "studio.css"));
+    private static string Css() => File.ReadAllText(RepositoryRoot.Combine("src", "DataStudio", "wwwroot", "css", "studio.css"));
 
     private static string Section()
     {
