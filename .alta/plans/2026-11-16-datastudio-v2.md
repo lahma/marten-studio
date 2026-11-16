@@ -1,6 +1,6 @@
 ---
 title: DataStudio 2.0: one shell, three modules, clean names
-status: approved
+status: in-progress
 created: 2026-11-16
 summary: Ship the family as DataStudio 2.0 with no legacy. Seven packages under one name, one registration call, every module under its own address. It replaces phases B and C of the shell plan; phase A is done and is its starting point.
 ---
@@ -39,7 +39,7 @@ flowchart TD
 |---|---|---|
 | (inside `PostgresStudio`) | `DataStudio` | `DataStudio` |
 | `PostgresStudio` | `DataStudio.Postgres` | `DataStudio.Postgres` |
-| `PostgresStudio.Diagnostics` | `DataStudio.Postgres.Diagnostics` | `DataStudio.Postgres.Diagnostics` |
+| `PostgresStudio.Diagnostics` | `DataStudio.Postgres.Diagnostics` | assembly `DataStudio.Postgres.Diagnostics`, namespace `DataStudio.Postgres` (shared with the module, as today) |
 | `MartenStudio` | `DataStudio.Marten` | `DataStudio.Marten` |
 | `KStudio` | `DataStudio.Kafka` | `DataStudio.Kafka` |
 | `KStudio.Core` | `DataStudio.Kafka.Core` | `DataStudio.Kafka` (as today: one namespace over two assemblies) |
@@ -131,7 +131,7 @@ internal, a visitor's saved theme survives, and renaming 17,000 lines of CSS buy
 
 Each step ends with every suite it can reach green. Steps 1 to 3 change no behaviour; 4 to 7 are the visible 2.0.
 
-- [ ] 1. **Freeze the public API.** Write `docs/maintainers/v2-public-api.md`: every public type and member of the table
+- [x] 1. **Freeze the public API.** Write `docs/maintainers/v2-public-api.md`: every public type and member of the table
       above, with its 1.x name beside it. Review it before step 4; steps 2 and 3 do not depend on it.
 - [ ] 2. **Rename projects, assemblies and namespaces**, one project per commit, mechanically (`git mv`, a scripted
       namespace rewrite, the Roslyn rename tools for types): `src/PostgresStudio.Diagnostics` →
