@@ -10,7 +10,7 @@ namespace DataStudio.Marten.Tests.Conventions;
 /// </summary>
 public partial class ModuleNeutralityTests
 {
-    private static readonly string[] Roots = ["DataStudio.Postgres", "DataStudio.Postgres.Diagnostics", "DataStudio.Marten"];
+    private static readonly string[] Roots = ["DataStudio", "DataStudio.Postgres", "DataStudio.Postgres.Diagnostics", "DataStudio.Marten"];
 
     [Fact]
     public void No_source_file_of_the_studios_names_Kafka_KStudio_or_Confluent()

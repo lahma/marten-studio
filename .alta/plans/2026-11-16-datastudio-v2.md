@@ -142,7 +142,7 @@ Each step ends with every suite it can reach green. Steps 1 to 3 change no behav
       guard, fence, `postgres-studio.slnf` (→ `datastudio-postgres.slnf`), MSBuild property name and
       `docs/maintainers/layout.md` row follows, and `marten-studio.slnx` becomes `data-studio.slnx` (the build scripts,
       the workflows' attributes and the docs that name it follow). Public type names do not change in this step.
-- [ ] 3. **Extract `src/DataStudio`** from `src/DataStudio.Postgres/Shell/`: the folder, `wwwroot/`, the JSON toolkit
+- [x] 3. **Extract `src/DataStudio`** from `src/DataStudio.Postgres/Shell/`: the folder, `wwwroot/`, the JSON toolkit
       (`Components/Json`, `Services/Json`) and the `Microsoft.AspNetCore.App.Internal.Assets` reference. Copy the two
       engine helpers with parity tests. `DataStudio.Postgres` and `DataStudio.Kafka` reference it with an exact pin and
       a version guard. `DataStudio.Kafka` drops its reference to `DataStudio.Postgres`. New `tests/DataStudio.Tests`

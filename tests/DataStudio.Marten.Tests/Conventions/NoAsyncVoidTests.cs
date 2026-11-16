@@ -65,9 +65,10 @@ public class NoAsyncVoidTests
             typeof(MartenStudioOptions).Assembly,
             typeof(DataStudio.Postgres.PostgresStudioOptions).Assembly,
             typeof(DataStudio.Postgres.PostgresDiagnosticsOptions).Assembly,
+            typeof(DataStudio.Components.Layout.StudioLayout).Assembly,
         ];
 
-        assemblies.Select(static x => x.GetName().Name).Should().OnlyHaveUniqueItems("three different assemblies are scanned");
+        assemblies.Select(static x => x.GetName().Name).Should().OnlyHaveUniqueItems("four different assemblies are scanned");
 
         Type[] types = [.. assemblies.SelectMany(static x => x.GetTypes())];
         types.Should().HaveCountGreaterThan(100, "scanning nothing would pass for the wrong reason");

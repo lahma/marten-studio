@@ -1023,7 +1023,7 @@
         // The engine's own once-per-window throttle (KafkaLogOnce, ten minutes, as the studios' StudioLogThrottle is): Warning the first time for a kind of failure, Debug after.
         // A component test's container that registers no engine gets a window of its own, which says Warning the first time, as the studios' helper does without a throttle.
         LogLevel level = KafkaLogOnce.WarningOrDebug(
-            Services.GetService<KafkaLogOnce>() ?? new KafkaLogOnce(Time), "KafkaTail.LiveUpdate|" + exception.GetType().Name);
+            Services.GetService<KafkaLogOnce>() ?? new KafkaLogOnce(Time), "KafkaTail.LiveUpdate|" + exception.GetType().FullName);
         Logger.Log(level, exception, "The Kafka tail page's live update failed");
         return Task.CompletedTask;
     }
