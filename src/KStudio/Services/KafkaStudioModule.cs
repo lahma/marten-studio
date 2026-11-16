@@ -1,8 +1,8 @@
+using DataStudio.Services.Settings;
+using DataStudio.Services;
 using KStudio.Components.Layout;
 
 using Microsoft.Extensions.Options;
-
-using PostgresStudio.Services.Settings;
 
 namespace KStudio.Services;
 

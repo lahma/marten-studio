@@ -1,13 +1,12 @@
 using Bunit;
 
+using DataStudio.Components.Pages;
 using KStudio.Components.Pages;
 using KStudio.Components.Shared;
 using KStudio.Tests.Support;
 
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
-
-using PostgresStudio.Components.Pages;
 
 namespace KStudio.Tests.Components;
 

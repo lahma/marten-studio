@@ -3,6 +3,7 @@ using System.Text;
 
 using Confluent.Kafka;
 
+using DataStudio.Services.Settings;
 using KStudio.Core.Clusters;
 using KStudio.Core.Correlation;
 using KStudio.Core.Scanning;
@@ -21,8 +22,6 @@ using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-
-using PostgresStudio.Services.Settings;
 
 using Wolverine;
 

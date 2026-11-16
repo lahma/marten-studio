@@ -1,6 +1,9 @@
 using System.Reflection;
 using System.Text;
 
+using DataStudio.Internal;
+using DataStudio.Services.Settings;
+using DataStudio.Services;
 using Marten;
 
 using MartenStudio.Internal.Sql;
@@ -22,7 +25,6 @@ using PostgresStudio.Services.Sources;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
-using PostgresStudio.Internal;
 using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services;
 using PostgresStudio.Services.Health;

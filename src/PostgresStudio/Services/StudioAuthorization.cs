@@ -1,5 +1,6 @@
 using System.Security.Claims;
 
+using DataStudio.Services.Settings;
 using PostgresStudio.Services.Settings;
 
 using Microsoft.AspNetCore.Authorization;

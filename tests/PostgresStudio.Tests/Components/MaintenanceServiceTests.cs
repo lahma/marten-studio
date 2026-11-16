@@ -1,5 +1,6 @@
 using Bunit;
 
+using DataStudio.Services;
 using Microsoft.Extensions.DependencyInjection;
 
 using PostgresStudio.Components.Pages.Maintenance;

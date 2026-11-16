@@ -1,5 +1,6 @@
 using System.Text;
 
+using DataStudio.Services;
 using JasperFx.Events.Projections;
 using JasperFx.MultiTenancy;
 

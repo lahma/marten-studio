@@ -1,3 +1,4 @@
+using DataStudio.Services;
 using JasperFx.Events.Daemon;
 
 using MartenStudio.Integration.Tests.Health;
@@ -5,8 +6,6 @@ using MartenStudio.Services.Events;
 using MartenStudio.Services.Projections;
 
 using Microsoft.Extensions.DependencyInjection;
-
-using PostgresStudio.Services;
 
 namespace MartenStudio.Integration.Tests.Projections;
 

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 
+using DataStudio.Services;
 using MartenStudio.Integration.Tests.Logging;
 using PostgresStudio.Services.Database;
 
@@ -8,7 +9,6 @@ using Microsoft.Extensions.DependencyInjection;
 
 using Npgsql;
 using PostgresStudio.Internal.Sql;
-using PostgresStudio.Services;
 using PostgresStudio.Services.Query;
 
 namespace MartenStudio.Integration.Tests.Database;

@@ -1,0 +1,147 @@
+@inject IShellSettings Settings
+@inject StudioShellDescriptor Descriptor
+
+@if (Settings.ReadOnly)
+{
+    <span class="ms-chip ms-chip-warning" title="@($"{Settings.ReadOnlyOptionName} is true, so every capability is off")">
+        Read-only
+    </span>
+}
+else
+{
+    <button type="button"
+            class="ms-chip ms-chip-button"
+            popovertarget="ms-capability-popover"
+            aria-label="@($"{EnabledCount} of {OfferedCount} capabilities enabled")">
+        @EnabledCount / @OfferedCount<span class="ms-chip-word"> capabilities</span>
+    </button>
+
+    @* Native popover: no positioning library, no third-party menu component (AGENTS.md hard rule 3).
+       Groups, because kinds of switch: the reads (the SQL console, the database browser, other
+       sessions' activity, LINQ queries) change nothing, and are still authorized as writes. Each group lists
+       only what its module offers. *@
+    <div id="ms-capability-popover" popover="auto" class="ms-popover ms-capability-popover">
+        @* The chip counts the studio's switches, not the visitor's rights: a viewer the write policy refuses
+           everything still sees "14 / 14". Said once, here, rather than computed per visitor - the policies
+           answer per call and per scope, and a number that tried to sum them would be a guess. *@
+        <p class="ms-popover-lead">What this studio allows. Your account's policies decide what you may do.</p>
+        @* The root's groups first, as they have always been drawn: the reads, and the mutating operations when the studio offers any. *@
+        <p class="ms-popover-title">@RootReads.Heading</p>
+        <ul class="ms-capability-list" aria-label="@RootReads.Heading">
+            @foreach (StudioModuleCapability capability in RootReads.Capabilities)
+            {
+                @Row(capability)
+            }
+        </ul>
+        @foreach (StudioModuleCapabilityGroup group in RootOthers)
+        {
+            <p class="ms-popover-title">@group.Heading</p>
+            <ul class="ms-capability-list" aria-label="@group.Heading">
+                @foreach (StudioModuleCapability capability in group.Capabilities)
+                {
+                    @Row(capability)
+                }
+            </ul>
+        }
+        @* A module's capabilities (D34): one list each, in module order, with the same rows. *@
+        @foreach ((string groupKey, StudioModuleCapabilityGroup group) in ModuleGroups)
+        {
+            <p class="ms-popover-title" @key="groupKey">@group.Heading</p>
+            <ul class="ms-capability-list" aria-label="@group.Heading">
+                @foreach (StudioModuleCapability capability in group.Capabilities)
+                {
+                    <li class="ms-capability @(capability.Configured ? "ms-capability-on" : "ms-capability-off")" @key="capability.Name">
+                        <span class="ms-capability-state" aria-hidden="true">@(capability.Configured ? "on" : "off")</span>
+                        <span class="ms-capability-name">@capability.Name</span>
+                        <code class="ms-capability-option">@OptionParts(capability.Option)</code>
+                    </li>
+                }
+            </ul>
+        }
+        @Footnote
+    </div>
+}
+
+@code {
+    /// <summary>The root module's groups, read live on every render: the studio's own, which come first.</summary>
+    private IReadOnlyList<StudioModuleCapabilityGroup> RootGroups => Descriptor.Root?.CapabilityGroups ?? [];
+
+    /// <summary>The root's first group: the reads authorized like writes, which the studio always lists.</summary>
+    private StudioModuleCapabilityGroup RootReads => RootGroups.Count > 0 ? RootGroups[0] : new StudioModuleCapabilityGroup(string.Empty, []);
+
+    /// <summary>The root's other groups: the mutating operations, when the studio offers any.</summary>
+    private IEnumerable<StudioModuleCapabilityGroup> RootOthers => RootGroups.Skip(1);
+
+    /// <summary>
+    /// The groups of every module that is not the root, in module order, each with its key: the module's key and the group's index in the
+    /// module's own list. Never the heading - the composition proves a module's key unique and says nothing of the words of its groups, so
+    /// two modules whose groups share a heading would throw a duplicate-key error and break the header.
+    /// </summary>
+    private IEnumerable<(string Key, StudioModuleCapabilityGroup Group)> ModuleGroups =>
+        Descriptor.Modules.Where(static x => !x.IsRoot).SelectMany(static module =>
+            module.CapabilityGroups.Select((group, index) => (module.Key + "/" + index.ToString(System.Globalization.CultureInfo.InvariantCulture), group)));
+
+    /// <summary>Every group of every module, in module order.</summary>
+    private IReadOnlyList<StudioModuleCapabilityGroup> Groups => [.. Descriptor.Modules.SelectMany(static x => x.CapabilityGroups)];
+
+    /// <summary>The capabilities on: each module's that its host switched on (the master switch is off here).</summary>
+    private int EnabledCount => Groups.Sum(static x => x.Capabilities.Count(static c => c.Configured));
+
+    /// <summary>The capabilities offered: each module's.</summary>
+    private int OfferedCount => Groups.Sum(static x => x.Capabilities.Count);
+
+    /// <summary>The one-line opt-in that turns every capability on: the root's, else the first module's that has one.</summary>
+    private string? AllCapabilitiesOption =>
+        Descriptor.Root?.AllCapabilitiesOption ?? Descriptor.Modules.Select(static x => x.AllCapabilitiesOption).FirstOrDefault(static x => x is not null);
+
+    /// <summary>One of the studio's own rows. Written as the root's lists have always been, because a text node's whitespace is part of the markup.</summary>
+    private RenderFragment Row(StudioModuleCapability capability) => __builder =>
+    {
+        <li class="ms-capability @(capability.Configured ? "ms-capability-on" : "ms-capability-off")" @key="capability.Name">
+            <span class="ms-capability-state" aria-hidden="true">@(capability.Configured ? "on" : "off")</span>
+            <span class="ms-capability-name">@capability.Name</span>
+            <code class="ms-capability-option">@OptionParts(capability.Option)</code>
+        </li>
+    };
+
+    /// <summary>
+    /// The popover's footnote. Written here, at the indentation its text has in the page, because the whitespace of a text node is part of the
+    /// markup a visitor's browser receives.
+    /// </summary>
+    private RenderFragment Footnote => __builder =>
+    {
+        if (AllCapabilitiesOption is { } allOption)
+        {
+<p class="ms-popover-footnote">
+            Every one of these is off until the host sets it. <code>@allOption</code>
+            turns them all on; <code>@Settings.ReadOnlyOptionName</code> turns them all off again.
+        </p>
+        }
+        else
+        {
+<p class="ms-popover-footnote">
+            Every one of these is off until the host sets it. <code>@Settings.ReadOnlyOptionName</code> turns them all off again.
+        </p>
+        }
+    };
+
+    /// <summary>
+    /// The option's name with a line-break opportunity after each dot, so a popover narrower than the name - a
+    /// phone - wraps it between its parts rather than cutting it off or splitting a word. <c>&lt;wbr&gt;</c>
+    /// adds no character: the name reads, and copies, exactly as it is written.
+    /// </summary>
+    private static RenderFragment OptionParts(string option) => __builder =>
+    {
+        string[] parts = option.Split('.');
+
+        for (int i = 0; i < parts.Length; i++)
+        {
+            if (i > 0)
+            {
+                <text>.</text><wbr />
+            }
+
+            <text>@parts[i]</text>
+        }
+    };
+}

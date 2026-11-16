@@ -1,3 +1,4 @@
+using DataStudio.Services;
 using KStudio.Services;
 using KStudio.Tests.Support;
 
@@ -6,8 +7,6 @@ using MartenStudio.Tests.Support;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-
-using PostgresStudio.Services;
 
 namespace KStudio.Tests.Services;
 

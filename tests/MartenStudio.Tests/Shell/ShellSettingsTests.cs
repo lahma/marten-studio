@@ -1,3 +1,4 @@
+using DataStudio.Services.Settings;
 using MartenStudio.Tests.Components;
 
 using Microsoft.Extensions.DependencyInjection;

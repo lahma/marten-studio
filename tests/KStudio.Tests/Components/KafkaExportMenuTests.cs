@@ -4,6 +4,7 @@ using AngleSharp.Dom;
 
 using Bunit;
 
+using DataStudio.Services;
 using KStudio.Components.Layout;
 using KStudio.Components.Pages;
 using KStudio.Services;
@@ -11,8 +12,6 @@ using KStudio.Tests.Support;
 
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
-
-using PostgresStudio.Services;
 
 namespace KStudio.Tests.Components;
 

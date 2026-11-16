@@ -1,5 +1,6 @@
 using System.Text;
 
+using DataStudio.Components;
 using PostgresStudio.Components;
 using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services.Relationships;

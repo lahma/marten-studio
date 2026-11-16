@@ -1,3 +1,4 @@
+using DataStudio.Services;
 using MartenStudio.Services.Events;
 
 using Microsoft.Extensions.DependencyInjection;

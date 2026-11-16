@@ -1,3 +1,4 @@
+using DataStudio.Services;
 using Marten;
 
 using MartenStudio.SampleDomain;
@@ -8,7 +9,6 @@ using Microsoft.Extensions.DependencyInjection;
 
 using Npgsql;
 using PostgresStudio.Internal.Sql;
-using PostgresStudio.Services;
 using PostgresStudio.Services.Health;
 using PostgresStudio.Services.Health.Checks;
 

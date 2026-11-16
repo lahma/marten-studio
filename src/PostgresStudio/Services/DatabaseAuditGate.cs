@@ -1,5 +1,6 @@
 using System.Security.Claims;
 
+using DataStudio.Services;
 using PostgresStudio.Services.Settings;
 
 namespace PostgresStudio.Services;

@@ -1,5 +1,6 @@
 using System.Text;
 
+using DataStudio.Services;
 using KStudio.Core.Scanning;
 using KStudio.Core.Wire;
 using KStudio.Services;
@@ -10,8 +11,6 @@ using MartenStudio.Tests.Support;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-
-using PostgresStudio.Services;
 
 namespace KStudio.Tests.Support;
 

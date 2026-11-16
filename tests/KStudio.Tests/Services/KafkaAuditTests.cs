@@ -1,9 +1,10 @@
 using Bunit;
 
+using DataStudio.Components.Pages;
+using DataStudio.Services;
 using KStudio.Services;
 using KStudio.Tests.Support;
 
-using PostgresStudio.Components.Pages;
 using PostgresStudio.Services;
 
 namespace KStudio.Tests.Services;

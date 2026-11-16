@@ -1,13 +1,12 @@
 using Bunit;
 
+using DataStudio.Services.Settings;
 using KStudio.Components.Shared;
 using KStudio.Core.Scanning;
 using KStudio.Services;
 using KStudio.Tests.Support;
 
 using Microsoft.Extensions.DependencyInjection;
-
-using PostgresStudio.Services.Settings;
 
 namespace KStudio.Tests.Components;
 

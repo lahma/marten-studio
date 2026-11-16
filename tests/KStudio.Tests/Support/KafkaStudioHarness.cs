@@ -2,6 +2,8 @@ using System.Security.Claims;
 
 using Confluent.Kafka;
 
+using DataStudio.Services.Settings;
+using DataStudio.Services;
 using KStudio.Core.Clusters;
 using KStudio.Services;
 using KStudio.Tests.Contract;
@@ -17,9 +19,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 
 using PostgresStudio;
-using PostgresStudio.Services;
 using PostgresStudio.Services.Postgres;
-using PostgresStudio.Services.Settings;
 using PostgresStudio.Tests.Components;
 using PostgresStudio.Tests.Support;
 
@@ -174,7 +174,7 @@ internal sealed class KafkaStudioHarness : IDisposable
             services.AddSingleton<IStudioModule, KafkaStudioModule>();
             services.RemoveAll<StudioShellDescriptor>();
             services.AddSingleton(static provider =>
-                StudioModuleComposition.Compose(PostgresStudioDescriptor.Instance, provider.GetServices<IStudioModule>()));
+                StudioModuleComposition.Compose(PostgresStudioDescriptor.Instance.ShellIdentity, provider.GetServices<IStudioModule>()));
 
             services.AddSingleton<IKafkaClusterEntrySource>(Entries);
             services.AddSingleton<KafkaCapabilityGuard>();

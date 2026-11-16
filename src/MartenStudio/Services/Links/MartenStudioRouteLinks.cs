@@ -1,3 +1,4 @@
+using DataStudio.Services.Settings;
 using JasperFx.Events;
 using JasperFx.MultiTenancy;
 
@@ -8,8 +9,6 @@ using MartenStudio.Services.Documents;
 using MartenStudio.Services.Events;
 
 using Microsoft.Extensions.Options;
-
-using PostgresStudio.Services.Settings;
 
 namespace MartenStudio.Services.Links;
 

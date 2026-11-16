@@ -1,5 +1,8 @@
 using Bunit;
 
+using DataStudio.Internal;
+using DataStudio.Services.Settings;
+using DataStudio.Services;
 using MartenStudio.Services;
 using MartenStudio.Services.Events;
 using MartenStudio.Services.Projections;
@@ -18,7 +21,6 @@ using Microsoft.AspNetCore.Routing.Patterns;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using PostgresStudio.Internal;
 using PostgresStudio.Services;
 using PostgresStudio.Services.Live;
 
@@ -157,7 +159,7 @@ internal class StudioComponentContext : BunitContext
         Services.AddSingleton<IStudioModule>(static provider => new DatabaseStudioModule(
             provider.GetRequiredService<StudioDescriptor>(), provider.GetRequiredService<IStudioSettings>(), provider.GetRequiredService<StudioCapabilityGuard>()));
         Services.AddSingleton(static provider =>
-            StudioModuleComposition.Compose(provider.GetRequiredService<StudioDescriptor>(), provider.GetServices<IStudioModule>()));
+            StudioModuleComposition.Compose(provider.GetRequiredService<StudioDescriptor>().ShellIdentity, provider.GetServices<IStudioModule>()));
         Services.AddSingleton<DatabaseScopeAccess>();
         Services.AddSingleton<IStudioModuleRail, DatabaseModuleRail>();
         Services.AddSingleton<ToastService>();

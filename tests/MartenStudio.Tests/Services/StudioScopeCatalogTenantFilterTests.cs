@@ -1,5 +1,6 @@
 using Bunit;
 
+using DataStudio.Services;
 using Marten;
 using Marten.Storage;
 

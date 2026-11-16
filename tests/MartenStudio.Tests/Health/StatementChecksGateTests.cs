@@ -1,12 +1,12 @@
 using Bunit;
 
+using DataStudio.Services;
 using PostgresStudio.Components.Pages.Health;
 using MartenStudio.Services;
 using PostgresStudio.Services.Database;
 using MartenStudio.Tests.Components;
 
 using Microsoft.Extensions.DependencyInjection;
-using PostgresStudio.Services;
 using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Tests.Health;

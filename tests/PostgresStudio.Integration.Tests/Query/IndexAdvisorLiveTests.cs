@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 
+using DataStudio.Services;
 using Microsoft.Extensions.DependencyInjection;
 
 using Npgsql;

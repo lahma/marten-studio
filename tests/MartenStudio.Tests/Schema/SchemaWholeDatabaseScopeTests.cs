@@ -1,3 +1,4 @@
+using DataStudio.Services;
 using JasperFx.MultiTenancy;
 
 using Marten;

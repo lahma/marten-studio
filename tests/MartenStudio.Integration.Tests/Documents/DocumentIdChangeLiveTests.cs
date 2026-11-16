@@ -1,9 +1,8 @@
+using DataStudio.Services;
 using Marten;
 using Marten.Schema;
 
 using MartenStudio.Services.Documents;
-
-using PostgresStudio.Services;
 
 namespace MartenStudio.Integration.Tests.Documents;
 

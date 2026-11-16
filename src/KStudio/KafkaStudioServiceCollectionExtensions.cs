@@ -1,5 +1,7 @@
 using System.Runtime.CompilerServices;
 
+using DataStudio.Services.Settings;
+using DataStudio.Services;
 using KStudio.Core.Clusters;
 using KStudio.Internal;
 using KStudio.Services;
@@ -8,9 +10,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
-
-using PostgresStudio.Services;
-using PostgresStudio.Services.Settings;
 
 namespace KStudio;
 

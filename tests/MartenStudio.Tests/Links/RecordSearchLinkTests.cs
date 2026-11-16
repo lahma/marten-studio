@@ -1,5 +1,6 @@
 using Bunit;
 
+using DataStudio.Services.Settings;
 using MartenStudio.Internal.Sql;
 using MartenStudio.Services.Documents;
 using MartenStudio.Tests.Components;
@@ -8,8 +9,6 @@ using MartenStudio.Tests.Support;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-
-using PostgresStudio.Services.Settings;
 
 using DetailModel = MartenStudio.Services.Documents.DocumentDetail;
 using DocumentPage = MartenStudio.Components.Pages.Documents.DocumentDetail;

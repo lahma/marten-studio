@@ -4,6 +4,7 @@ using AngleSharp.Dom;
 
 using Bunit;
 
+using DataStudio.Components.Layout;
 using KStudio.Components.Shared;
 using KStudio.Services;
 using KStudio.Tests.Support;

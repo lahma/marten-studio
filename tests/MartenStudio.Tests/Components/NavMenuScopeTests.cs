@@ -1,11 +1,11 @@
 using Bunit;
 
+using DataStudio.Services.Settings;
 using MartenStudio.Services;
 
 using PostgresStudio.Components.Layout;
 using PostgresStudio.Services;
 using PostgresStudio.Services.Live;
-using PostgresStudio.Services.Settings;
 
 namespace MartenStudio.Tests.Components;
 

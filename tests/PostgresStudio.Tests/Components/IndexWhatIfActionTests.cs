@@ -1,3 +1,4 @@
+using DataStudio.Services;
 using MartenStudio.Tests.Health;
 
 using Microsoft.Extensions.DependencyInjection;

@@ -2,6 +2,7 @@ using System.Net;
 
 using Confluent.Kafka;
 
+using DataStudio.Internal;
 using MartenStudio.Tests.Support;
 
 using Microsoft.AspNetCore.Authentication;
@@ -14,7 +15,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 
 using PostgresStudio;
-using PostgresStudio.Internal;
 
 namespace KStudio.Tests.Endpoints;
 

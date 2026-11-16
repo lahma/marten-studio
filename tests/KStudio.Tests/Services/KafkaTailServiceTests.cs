@@ -1,3 +1,4 @@
+using DataStudio.Services;
 using KStudio.Core.Clusters;
 using KStudio.Core.Scanning;
 using KStudio.Services;
@@ -5,8 +6,6 @@ using KStudio.Tests.Scanning;
 using KStudio.Tests.Support;
 
 using Microsoft.Extensions.DependencyInjection;
-
-using PostgresStudio.Services;
 
 namespace KStudio.Tests.Services;
 

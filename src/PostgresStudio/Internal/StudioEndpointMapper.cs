@@ -22,6 +22,8 @@
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
 
+using DataStudio.Internal;
+using DataStudio.Services.Settings;
 using PostgresStudio.Services.Settings;
 
 using Microsoft.AspNetCore.Authentication;

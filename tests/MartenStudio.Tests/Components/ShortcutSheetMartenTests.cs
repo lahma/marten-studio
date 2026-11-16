@@ -1,10 +1,11 @@
 using Bunit;
 
+using DataStudio.Components.Shared;
+using DataStudio.Services.Settings;
 using MartenStudio.Services;
 
 using Microsoft.Extensions.DependencyInjection;
 
-using PostgresStudio.Components.Shared;
 using PostgresStudio.Services;
 using PostgresStudio.Services.Settings;
 
@@ -20,7 +21,7 @@ public class ShortcutSheetMartenTests
     private static StudioShellDescriptor ShellOf(StudioDescriptor descriptor)
     {
         MartenStudioSettings settings = MartenStudioSettings.Of(new MartenStudioOptions());
-        return StudioModuleComposition.Compose(descriptor, [new DatabaseStudioModule(descriptor, settings, new StudioCapabilityGuard(settings))]);
+        return StudioModuleComposition.Compose(descriptor.ShellIdentity, [new DatabaseStudioModule(descriptor, settings, new StudioCapabilityGuard(settings))]);
     }
 
     [Fact]

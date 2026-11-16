@@ -1,3 +1,4 @@
+using DataStudio.Services;
 using MartenStudio.Services;
 using MartenStudio.Tests.Events;
 using MartenStudio.Tests.Projections;

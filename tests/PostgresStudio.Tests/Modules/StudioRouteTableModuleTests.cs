@@ -1,6 +1,5 @@
+using DataStudio.Components;
 using Microsoft.AspNetCore.Components;
-
-using PostgresStudio.Components;
 
 namespace PostgresStudio.Tests.Modules;
 

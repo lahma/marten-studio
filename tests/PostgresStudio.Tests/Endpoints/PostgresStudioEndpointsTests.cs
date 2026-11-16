@@ -1,6 +1,7 @@
 using System.Net;
 using System.Security.Claims;
 
+using DataStudio.Internal;
 using MartenStudio.Tests.Support;
 
 using Microsoft.AspNetCore.Authentication;
@@ -16,8 +17,6 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Primitives;
 
 using Npgsql;
-
-using PostgresStudio.Internal;
 
 namespace PostgresStudio.Tests.Endpoints;
 

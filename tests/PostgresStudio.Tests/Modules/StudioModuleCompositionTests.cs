@@ -1,10 +1,12 @@
 using System.Reflection;
 
+using DataStudio.Components;
+using DataStudio.Services.Settings;
+using DataStudio.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 
-using PostgresStudio.Components;
 using PostgresStudio.Services;
 using PostgresStudio.Services.Postgres;
 using PostgresStudio.Services.Settings;
@@ -26,7 +28,7 @@ public class StudioModuleCompositionTests
     /// <summary>The database module as <c>AddPostgresStudio()</c> registers it, for a composition that is about the modules beside it.</summary>
     private static DatabaseStudioModule Database() => new(Host, Settings, new StudioCapabilityGuard(Settings));
 
-    private static StudioShellDescriptor Compose(params IStudioModule[] others) => StudioModuleComposition.Compose(Host, [Database(), .. others]);
+    private static StudioShellDescriptor Compose(params IStudioModule[] others) => StudioModuleComposition.Compose(Host.ShellIdentity, [Database(), .. others]);
 
     private sealed class FakeModule(string key, string root, params string[] sections) : IStudioModule
     {

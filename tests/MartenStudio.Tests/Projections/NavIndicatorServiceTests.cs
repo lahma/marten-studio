@@ -1,6 +1,7 @@
+using DataStudio.Services.Settings;
+using DataStudio.Services;
 using MartenStudio.Services;
 using MartenStudio.Services.Events;
-using PostgresStudio.Services.Settings;
 using MartenStudio.Tests.Events;
 using MartenStudio.Tests.Support;
 

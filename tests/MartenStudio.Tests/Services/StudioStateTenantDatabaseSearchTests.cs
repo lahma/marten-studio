@@ -1,3 +1,4 @@
+using DataStudio.Services;
 using MartenStudio.Tests.Support;
 
 using Microsoft.AspNetCore.Http;

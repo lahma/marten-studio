@@ -1,5 +1,6 @@
 using System.Security.Claims;
 
+using DataStudio.Services;
 using KStudio.Services;
 
 using MartenStudio.Tests.Support;
@@ -11,7 +12,6 @@ using Microsoft.Extensions.Logging;
 using Npgsql;
 
 using PostgresStudio;
-using PostgresStudio.Services;
 
 namespace KStudio.Integration.Tests.Support;
 

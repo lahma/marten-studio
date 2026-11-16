@@ -1,9 +1,8 @@
+using DataStudio.Services;
 using KStudio.Services;
 using KStudio.Tests.Support;
 
 using Microsoft.Extensions.DependencyInjection;
-
-using PostgresStudio.Services;
 
 namespace KStudio.Tests.Services;
 

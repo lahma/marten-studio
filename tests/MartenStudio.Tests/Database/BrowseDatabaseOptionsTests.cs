@@ -1,3 +1,4 @@
+using DataStudio.Internal;
 using MartenStudio.Services;
 using PostgresStudio.Services.Database;
 using MartenStudio.Tests.Support;
@@ -9,7 +10,6 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using PostgresStudio.Internal;
 using PostgresStudio.Services;
 
 namespace MartenStudio.Tests.Database;

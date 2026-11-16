@@ -1,9 +1,11 @@
 using System.Reflection;
 
+using DataStudio.Components;
+using DataStudio.Services.Settings;
+using DataStudio.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
-using PostgresStudio.Components;
 using PostgresStudio.Services;
 using PostgresStudio.Services.Settings;
 
@@ -82,7 +84,7 @@ public class MartenModuleCompositionTests
     [Fact]
     public void The_composed_route_table_matches_every_page_of_both_assemblies_as_the_databases_own_does()
     {
-        StudioShellDescriptor shell = StudioModuleComposition.Compose(Host, [Database()]);
+        StudioShellDescriptor shell = StudioModuleComposition.Compose(Host.ShellIdentity, [Database()]);
         StudioRouteTable own = new(Host.PageAssemblies);
         string[] paths = EveryPagePath(Host);
 
@@ -112,7 +114,7 @@ public class MartenModuleCompositionTests
     [Fact]
     public void A_module_section_goes_before_the_roots_last_and_nothing_of_the_roots_moves()
     {
-        StudioShellDescriptor composed = StudioModuleComposition.Compose(Host, [Database(), new FakeModule()]);
+        StudioShellDescriptor composed = StudioModuleComposition.Compose(Host.ShellIdentity, [Database(), new FakeModule()]);
 
         string[] hostTitles = [.. Host.Navigation(Settings).Select(static x => x.Title)];
         composed.Navigation.Select(static x => x.Title).Should().Equal([.. hostTitles[..^1], "Fake section", hostTitles[^1]]);
@@ -132,7 +134,7 @@ public class MartenModuleCompositionTests
         FakeModule module = new();
         StudioNavSection[] colliding = [new StudioNavSection(label.ToUpperInvariant(), [])];
 
-        Action compose = () => StudioModuleComposition.Compose(Host, [Database(), new Colliding(module, colliding)]);
+        Action compose = () => StudioModuleComposition.Compose(Host.ShellIdentity, [Database(), new Colliding(module, colliding)]);
 
         compose.Should().Throw<InvalidOperationException>().WithMessage("*unique, ignoring case*");
     }

@@ -1,6 +1,5 @@
+using DataStudio.Services.Settings;
 using KStudio.Core.Clusters;
-
-using PostgresStudio.Services.Settings;
 
 namespace KStudio.Services;
 

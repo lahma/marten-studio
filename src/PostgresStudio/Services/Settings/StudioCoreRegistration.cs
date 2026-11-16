@@ -1,4 +1,6 @@
-using PostgresStudio.Internal;
+using DataStudio.Internal;
+using DataStudio.Services.Settings;
+using DataStudio.Services;
 using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services.Database;
 using PostgresStudio.Services.Find;
@@ -81,7 +83,7 @@ internal static class StudioCoreRegistration
 
         // The shell's descriptor: the database module composed with the modules registered beside it, when first resolved (D34): after every
         // Add*(), so registration is order-independent.
-        services.TryAddSingleton(provider => StudioModuleComposition.Compose(descriptor, provider.GetServices<IStudioModule>()));
+        services.TryAddSingleton(provider => StudioModuleComposition.Compose(descriptor.ShellIdentity, provider.GetServices<IStudioModule>()));
         services.TryAddSingleton(settings);
 
         // The database as a module of the shell: the root, always there (D34).

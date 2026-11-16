@@ -1,3 +1,4 @@
+using DataStudio.Services;
 using Marten.Storage;
 
 using Microsoft.Extensions.DependencyInjection;

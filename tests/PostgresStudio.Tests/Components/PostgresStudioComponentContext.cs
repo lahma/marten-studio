@@ -1,5 +1,8 @@
 using Bunit;
 
+using DataStudio.Internal;
+using DataStudio.Services.Settings;
+using DataStudio.Services;
 using MartenStudio.Tests.Health;
 using MartenStudio.Tests.Support;
 
@@ -14,7 +17,6 @@ using Microsoft.Extensions.Options;
 
 using Npgsql;
 
-using PostgresStudio.Internal;
 using PostgresStudio.Services;
 using PostgresStudio.Services.Database;
 using PostgresStudio.Services.Health;
@@ -128,7 +130,7 @@ internal sealed class PostgresStudioComponentContext : BunitContext
         Services.AddSingleton<IStudioModule>(static provider => new DatabaseStudioModule(
             provider.GetRequiredService<StudioDescriptor>(), provider.GetRequiredService<IStudioSettings>(), provider.GetRequiredService<StudioCapabilityGuard>()));
         Services.AddSingleton(static provider =>
-            StudioModuleComposition.Compose(provider.GetRequiredService<StudioDescriptor>(), provider.GetServices<IStudioModule>()));
+            StudioModuleComposition.Compose(provider.GetRequiredService<StudioDescriptor>().ShellIdentity, provider.GetServices<IStudioModule>()));
         Services.AddSingleton<DatabaseScopeAccess>();
         Services.AddSingleton<IStudioModuleRail, DatabaseModuleRail>();
         Services.AddSingleton<ToastService>();

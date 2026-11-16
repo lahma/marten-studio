@@ -1,5 +1,7 @@
 using System.Globalization;
 
+using DataStudio.Services.Settings;
+using DataStudio.Services;
 using Microsoft.JSInterop;
 
 using PostgresStudio.Components;

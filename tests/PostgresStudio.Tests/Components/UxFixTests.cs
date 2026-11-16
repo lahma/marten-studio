@@ -2,9 +2,8 @@ using System.Text.RegularExpressions;
 
 using Bunit;
 
+using DataStudio.Components.Shared;
 using MartenStudio.Tests.Conventions;
-
-using PostgresStudio.Components.Shared;
 
 namespace PostgresStudio.Tests.Components;
 

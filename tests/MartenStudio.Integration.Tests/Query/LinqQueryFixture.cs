@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Security.Claims;
 
+using DataStudio.Services;
 using JasperFx;
 
 using Marten;

@@ -1,7 +1,6 @@
+using DataStudio.Services.Settings;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
-
-using PostgresStudio.Services.Settings;
 
 namespace PostgresStudio.Tests.Endpoints;
 

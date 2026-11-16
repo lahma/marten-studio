@@ -1,7 +1,6 @@
+using DataStudio.Services;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.Logging;
-
-using PostgresStudio.Services;
 
 namespace KStudio.Services;
 

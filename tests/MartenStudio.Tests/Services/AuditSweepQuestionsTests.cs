@@ -1,5 +1,6 @@
 using System.Security.Claims;
 
+using DataStudio.Services;
 using MartenStudio.Tests.Components;
 
 using Microsoft.Extensions.DependencyInjection;
@@ -229,6 +230,20 @@ public class AuditSweepQuestionsTests
 
         trace.Should().Be($"{Wide}:- | {Wide}:RunSql ; reads=1");
         kept.Should().Equal("Run SQL", "Search", "Plain");
+    }
+
+    [Fact]
+    public async Task A_database_entry_whose_value_is_not_a_database_scope_is_hidden_and_asks_no_policy_question()
+    {
+        // The fail-closed branch of the database's gate (REVIEW-A2c finding 2): the entry is of the database's kind, so the database's gate judges it,
+        // and what it carries is not a DatabaseAuditScope, so there is nothing to ask a policy about and nothing to recognise it by.
+        using var context = Context(storePolicy: true, writePolicy: true, on: [StudioCapability.RunSql]);
+        context.ActivityRing.Record(new StudioAuditScope(MartenStudio.Services.MartenStudioDescriptor.Key, ["x"], "x", new object()), "Foreign", "target", succeeded: true);
+
+        (string trace, string[] kept) = await SweepAsync(context);
+
+        trace.Should().Be(" ; reads=0");
+        kept.Should().BeEmpty();
     }
 
     [Fact]

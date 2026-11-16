@@ -1,3 +1,4 @@
+using DataStudio.Services.Settings;
 using PostgresStudio.Components.Pages;
 using PostgresStudio.Components.Pages.Query;
 using PostgresStudio.Services.Connection;

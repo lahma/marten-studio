@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 
+using DataStudio.Services.Settings;
 using MartenStudio.Internal;
 using MartenStudio.Internal.Sql;
 using MartenStudio.Services;

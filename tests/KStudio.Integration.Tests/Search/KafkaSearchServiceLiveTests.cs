@@ -74,7 +74,7 @@ public abstract class KafkaSearchServiceLiveTests(KafkaFixture fixture)
         (found.Topic, found.Partition, found.Offset).Should().Be((topic, 0, 7L));
         result.StopReason.Should().Be(KafkaScanStopReason.Completed);
 
-        PostgresStudio.Services.StudioActionLogEntry entry = host.Ring.Should().ContainSingle().Subject;
+        DataStudio.Services.StudioActionLogEntry entry = host.Ring.Should().ContainSingle().Subject;
         entry.Succeeded.Should().BeTrue();
         entry.Message.Should().Contain("stopped by Completed").And.Contain("predicate: header.correlation-id = 'odd-7'");
         entry.Target.Should().StartWith(topic);
@@ -100,7 +100,7 @@ public abstract class KafkaSearchServiceLiveTests(KafkaFixture fixture)
         found.ValueText.Should().Be("{\"n\":7,\"customer\":{\"id\":\"customer-7\"}}", "the match holds the value because the search had the payload grant");
         result.StopReason.Should().Be(KafkaScanStopReason.Completed);
 
-        PostgresStudio.Services.StudioActionLogEntry entry = host.Ring.Should().ContainSingle().Subject;
+        DataStudio.Services.StudioActionLogEntry entry = host.Ring.Should().ContainSingle().Subject;
         entry.Capability.Should().Be("ReadPayloads");
         entry.Message.Should().Contain("predicate: $.customer.id = 'customer-7'").And.EndWith("; values read");
         host.Logs.Entries.Should().ContainSingle(static x => x.EventId.Id == 9600);

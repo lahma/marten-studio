@@ -1,5 +1,6 @@
 using Bunit;
 
+using DataStudio.Services;
 using MartenStudio.Services;
 
 using Microsoft.Extensions.DependencyInjection;

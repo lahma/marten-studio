@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 
+using DataStudio.Services;
 using Microsoft.Extensions.DependencyInjection;
 
 using Npgsql;

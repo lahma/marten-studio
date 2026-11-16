@@ -1,4 +1,4 @@
-using PostgresStudio.Services.Settings;
+using DataStudio.Services;
 
 namespace MartenStudio.Services;
 

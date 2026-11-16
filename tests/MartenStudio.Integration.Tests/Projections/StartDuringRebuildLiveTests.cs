@@ -1,9 +1,8 @@
+using DataStudio.Services;
 using MartenStudio.Integration.Tests.Health;
 using MartenStudio.Services.Projections;
 
 using Microsoft.Extensions.DependencyInjection;
-
-using PostgresStudio.Services;
 
 namespace MartenStudio.Integration.Tests.Projections;
 

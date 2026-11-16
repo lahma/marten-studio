@@ -2,6 +2,7 @@ using AngleSharp.Dom;
 
 using Bunit;
 
+using DataStudio.Services;
 using MartenStudio.Services.Projections;
 using MartenStudio.Tests.Components;
 

@@ -1,5 +1,6 @@
 using Bunit;
 
+using DataStudio.Services;
 using KStudio.Components.Pages;
 using KStudio.Core.Scanning;
 using KStudio.Services;
@@ -11,7 +12,6 @@ using Microsoft.AspNetCore.Components.Web;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.JSInterop;
 
-using PostgresStudio.Services;
 using PostgresStudio.Services.Live;
 
 namespace KStudio.Tests.Components;

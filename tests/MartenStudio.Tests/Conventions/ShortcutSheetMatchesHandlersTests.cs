@@ -1,8 +1,7 @@
 using System.Text.RegularExpressions;
 
+using DataStudio.Services;
 using MartenStudio.Services;
-
-using PostgresStudio.Services.Settings;
 
 namespace MartenStudio.Tests.Conventions;
 

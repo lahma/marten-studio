@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Security.Claims;
 
+using DataStudio.Services;
 using JasperFx;
 using JasperFx.Events;
 using JasperFx.MultiTenancy;

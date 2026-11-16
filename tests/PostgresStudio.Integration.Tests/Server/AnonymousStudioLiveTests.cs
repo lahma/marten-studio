@@ -1,8 +1,8 @@
+using DataStudio.Internal;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 
 using PostgresStudio.Integration.Tests.Health;
-using PostgresStudio.Internal;
 using PostgresStudio.Services.Health;
 
 namespace PostgresStudio.Integration.Tests.Server;

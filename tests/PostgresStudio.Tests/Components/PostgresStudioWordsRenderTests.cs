@@ -1,5 +1,6 @@
 using Bunit;
 
+using DataStudio.Components.Pages;
 using PostgresStudio.Components.Pages;
 using PostgresStudio.Components.Pages.Database;
 using PostgresStudio.Components.Pages.Health;

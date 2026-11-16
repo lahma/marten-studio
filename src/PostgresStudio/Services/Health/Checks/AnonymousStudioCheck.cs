@@ -1,6 +1,5 @@
+using DataStudio.Internal;
 using Microsoft.Extensions.DependencyInjection;
-
-using PostgresStudio.Internal;
 
 namespace PostgresStudio.Services.Health.Checks;
 

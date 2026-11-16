@@ -17,7 +17,7 @@ internal static class StatementLinkBuilder
         {
             ArgumentNullException.ThrowIfNull(settings);
             ArgumentNullException.ThrowIfNull(descriptor);
-            return PostgresStudio.Components.StudioScopeQuery.Append(PostgresStudio.Components.StudioLink.To(settings, StatementLinks.Route), scope, descriptor.SourceQueryParameter);
+            return PostgresStudio.Components.StudioScopeQuery.Append(DataStudio.Components.StudioLink.To(settings, StatementLinks.Route), scope, descriptor.SourceQueryParameter);
         }
 
         /// <summary>
@@ -29,7 +29,7 @@ internal static class StatementLinkBuilder
             ArgumentNullException.ThrowIfNull(settings);
             ArgumentNullException.ThrowIfNull(descriptor);
 
-            string url = PostgresStudio.Components.StudioLink.To(settings, StatementLinks.Route) + "?" + IndexAdvisor.AdviseParameter + "=" + Uri.EscapeDataString(table ?? IndexAdvisor.AdviseAll);
+            string url = DataStudio.Components.StudioLink.To(settings, StatementLinks.Route) + "?" + IndexAdvisor.AdviseParameter + "=" + Uri.EscapeDataString(table ?? IndexAdvisor.AdviseAll);
             return PostgresStudio.Components.StudioScopeQuery.Append(url, scope, descriptor.SourceQueryParameter);
         }
 
@@ -39,7 +39,7 @@ internal static class StatementLinkBuilder
             ArgumentNullException.ThrowIfNull(settings);
             ArgumentNullException.ThrowIfNull(descriptor);
 
-            string url = PostgresStudio.Components.StudioLink.To(settings, StatementLinks.Route) + "?" + StatementLinks.QueryIdParameter + "=" + queryId.ToString(CultureInfo.InvariantCulture);
+            string url = DataStudio.Components.StudioLink.To(settings, StatementLinks.Route) + "?" + StatementLinks.QueryIdParameter + "=" + queryId.ToString(CultureInfo.InvariantCulture);
             return PostgresStudio.Components.StudioScopeQuery.Append(url, scope, descriptor.SourceQueryParameter);
         }
     }

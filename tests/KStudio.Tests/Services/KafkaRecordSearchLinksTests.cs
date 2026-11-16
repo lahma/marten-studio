@@ -1,3 +1,4 @@
+using DataStudio.Services.Settings;
 using KStudio.Core.Clusters;
 using KStudio.Core.Logging;
 using KStudio.Services;

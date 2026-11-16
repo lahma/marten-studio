@@ -387,7 +387,7 @@ public class LogLevelsTests
             "9451 in Postgres Studio's words: the Statements page's read failed for a reason nobody chose, re-read every HealthInterval."),
 
         // ---- Faults ---------------------------------------------------------------------------------
-        ["src/PostgresStudio/Services/StudioPreferences.cs : A studio page failed to handle a preference change"] = (Verdict.Fault,
+        ["src/PostgresStudio/Shell/Services/StudioPreferences.cs : A studio page failed to handle a preference change"] = (Verdict.Fault,
             "Shell A1: a page's preference-change handler threw (a time-zone change that did not redraw): a studio bug, and the page keeps spelling its moments in the old zone. In practice the scope state's relay contains its pages' failures first, so this line is reached only by a handler registered on the preferences directly."),
         ["src/PostgresStudio/Services/StudioState.cs : A Marten Studio page failed to handle a scope change"] = (Verdict.Fault,
             "A page's scope-change handler threw: a studio bug, and a page that missed the switch can show another scope's data."),

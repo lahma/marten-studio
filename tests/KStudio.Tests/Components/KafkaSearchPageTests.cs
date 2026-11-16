@@ -187,7 +187,7 @@ public class KafkaSearchPageTests
         await page.Find("dialog .ms-confirm-actions button:not(.ms-button-danger)").ClickAsync(new MouseEventArgs());
 
         page.WaitForAssertion(() => page.FindAll("dialog").Should().BeEmpty());
-        rig.Ring.Should().ContainSingle().Which.Should().Match<PostgresStudio.Services.StudioActionLogEntry>(static x => !x.Succeeded && x.Message == "not confirmed");
+        rig.Ring.Should().ContainSingle().Which.Should().Match<DataStudio.Services.StudioActionLogEntry>(static x => !x.Succeeded && x.Message == "not confirmed");
         Rows(page).Should().BeEmpty();
     }
 

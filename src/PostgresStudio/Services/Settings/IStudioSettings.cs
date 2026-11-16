@@ -1,3 +1,5 @@
+using DataStudio.Services.Settings;
+
 namespace PostgresStudio.Services.Settings;
 
 /// <summary>

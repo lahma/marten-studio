@@ -602,7 +602,7 @@ public sealed class ConnectionCompareTests
         page.Markup.Should().NotContain(Sentinel);
         string.Join('\n', logs.Lines).Should().NotContain(Sentinel);
 
-        context.Services.GetRequiredService<PostgresStudio.Services.StudioActionLogService>().GetLatest().Should().BeEmpty("a comparison is not audited");
+        context.Services.GetRequiredService<DataStudio.Services.StudioActionLogService>().GetLatest().Should().BeEmpty("a comparison is not audited");
 
         // What .NET sent to the browser: element references, a reference to itself and two numbers - and no local storage write.
         context.JSInterop.Invocations.Should().NotContain(static x => x.Identifier == "martenStudio.prefs.set");

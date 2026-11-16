@@ -2,6 +2,8 @@ using AngleSharp.Dom;
 
 using Bunit;
 
+using DataStudio.Components.Layout;
+using DataStudio.Components.Pages;
 using MartenStudio.Tests.Support;
 
 using PostgresStudio.Components.Layout;

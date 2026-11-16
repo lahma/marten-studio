@@ -1,5 +1,6 @@
 using Confluent.Kafka;
 
+using DataStudio.Services.Settings;
 using KStudio.Core.Clusters;
 using KStudio.Core.Decoding;
 using KStudio.Core.Scanning;
@@ -8,8 +9,6 @@ using KStudio.Tests.Correlation;
 using KStudio.Tests.Support;
 
 using Microsoft.Extensions.DependencyInjection;
-
-using PostgresStudio.Services.Settings;
 
 namespace KStudio.Tests.Services;
 

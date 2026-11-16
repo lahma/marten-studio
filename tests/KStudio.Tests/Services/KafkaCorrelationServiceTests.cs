@@ -1,11 +1,10 @@
+using DataStudio.Services;
 using KStudio.Core.Correlation;
 using KStudio.Core.Decoding;
 using KStudio.Core.Scanning;
 using KStudio.Core.Wire;
 using KStudio.Services;
 using KStudio.Tests.Support;
-
-using PostgresStudio.Services;
 
 namespace KStudio.Tests.Services;
 

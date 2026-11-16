@@ -1,3 +1,4 @@
+using DataStudio.Services.Settings;
 using Marten;
 
 using MartenStudio.Integration.Tests.Database;
@@ -11,7 +12,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 
 using PostgresStudio.Services;
-using PostgresStudio.Services.Settings;
 
 namespace MartenStudio.Integration.Tests.Tenancy;
 

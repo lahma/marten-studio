@@ -2,6 +2,7 @@ using AngleSharp.Dom;
 
 using Bunit;
 
+using DataStudio.Services;
 using Marten;
 
 using PostgresStudio.Components.Pages.Database;

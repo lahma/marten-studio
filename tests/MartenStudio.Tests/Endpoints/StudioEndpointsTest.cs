@@ -1,5 +1,6 @@
 using System.Net;
 
+using DataStudio.Internal;
 using MartenStudio.Tests.Support;
 
 using Microsoft.AspNetCore.Antiforgery;
@@ -11,7 +12,6 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
-using PostgresStudio.Internal;
 
 namespace MartenStudio.Tests.Endpoints;
 

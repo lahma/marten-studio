@@ -1,8 +1,7 @@
+using DataStudio.Services;
 using KStudio.Core.Scanning;
 using KStudio.Services;
 using KStudio.Tests.Support;
-
-using PostgresStudio.Services;
 
 namespace KStudio.Tests.Services;
 

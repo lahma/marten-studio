@@ -1,5 +1,6 @@
 using System.Reflection;
 
+using DataStudio.Services;
 using JasperFx.Descriptors;
 using JasperFx.Events.Daemon;
 

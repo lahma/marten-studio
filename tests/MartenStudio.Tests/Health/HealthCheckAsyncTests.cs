@@ -1,5 +1,5 @@
+using DataStudio.Services;
 using Microsoft.Extensions.DependencyInjection;
-using PostgresStudio.Services;
 using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Tests.Health;

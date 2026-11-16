@@ -204,14 +204,17 @@ public class CoreFenceTests
 
                 if (file.EndsWith(".razor", StringComparison.Ordinal))
                 {
-                    if (RazorNamespace.IsMatch(code))
+                    // The shell's folders give their components a namespace of their own (DataStudio.*) with an @namespace in the folder's
+                    // _Imports.razor, and nowhere else: a component of any other folder never says one.
+                    if (RazorNamespace.IsMatch(code) && !(IsShell(file) && file.EndsWith("/_Imports.razor", StringComparison.Ordinal)
+                        && RazorNamespaceName.Match(code).Groups["name"].Value == SharedNamespace(file)))
                     {
                         problems.Add(file + ": @namespace overrides the folder's namespace");
                     }
                 }
-                else if (declared is not [{ } only] || only != FolderNamespace("PostgresStudio", BelowShared(file)))
+                else if (declared is not [{ } only] || only != SharedNamespace(file))
                 {
-                    problems.Add(file + ": declares [" + string.Join(", ", declared) + "], not " + FolderNamespace("PostgresStudio", BelowShared(file)));
+                    problems.Add(file + ": declares [" + string.Join(", ", declared) + "], not " + SharedNamespace(file));
                 }
             }
             else if (file.StartsWith(MartenRoot, StringComparison.Ordinal))
@@ -246,6 +249,19 @@ public class CoreFenceTests
         return slash < 0 ? root : root + "." + pathBelowRoot[..slash].Replace('/', '.');
     }
 
+    /// <summary>The root namespace of the shell (A3): <c>src/PostgresStudio/Shell/</c> declares <c>DataStudio.*</c> by its folders, as the rest of the shared studio declares <c>PostgresStudio.*</c>.</summary>
+    private const string ShellRootNamespace = "DataStudio";
+
+    private const string ShellFolder = "src/PostgresStudio/Shell/";
+
+    private static bool IsShell(string file) => file.StartsWith(ShellFolder, StringComparison.Ordinal);
+
+    /// <summary>The namespace a file of the shared studio declares by its folder: <c>DataStudio.*</c> below <c>Shell/</c>, <c>PostgresStudio.*</c> elsewhere.</summary>
+    private static string SharedNamespace(string file) =>
+        IsShell(file) ? FolderNamespace(ShellRootNamespace, file[ShellFolder.Length..]) : FolderNamespace("PostgresStudio", BelowShared(file));
+
+    private static readonly Regex RazorNamespaceName = new(@"^\s*@namespace\s+(?<name>[\w.]+)", RegexOptions.Multiline | RegexOptions.CultureInvariant, RegexTimeout);
+
     /// <summary>The one folder below the shared studio's root whose files declare the root namespace: the public read model.</summary>
     private const string PublicReadModelFolder = "Diagnostics";
 
@@ -275,7 +291,7 @@ public class CoreFenceTests
             // A component is a class named for its file in its folder's namespace (neither side overrides it with
             // @namespace - the rule above holds the shared side), so it is read as that declaration.
             string code = file.EndsWith(".razor", StringComparison.Ordinal)
-                ? "namespace " + FolderNamespace(shared ? "PostgresStudio" : "MartenStudio", (shared ? BelowShared(file) : file[MartenRoot.Length..]))
+                ? "namespace " + (shared ? SharedNamespace(file) : FolderNamespace("MartenStudio", file[MartenRoot.Length..]))
                     + ";\ninternal partial class " + Path.GetFileNameWithoutExtension(file) + " { }"
                 : SourceScanner.StripCommentsAndStrings(File.ReadAllText(path));
 

@@ -1,8 +1,8 @@
 using System.Globalization;
 
+using DataStudio.Services.Settings;
 using MartenStudio.Services.Events;
 using MartenStudio.Services.Projections;
-using PostgresStudio.Services.Settings;
 using PostgresStudio.Services.Sources;
 using PostgresStudio.Services;
 

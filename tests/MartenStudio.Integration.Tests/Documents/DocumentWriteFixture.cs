@@ -1,5 +1,6 @@
 using System.Security.Claims;
 
+using DataStudio.Services;
 using Marten;
 
 using MartenStudio.SampleDomain;

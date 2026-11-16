@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text.Json;
 
+using DataStudio.Services;
 using Microsoft.Extensions.DependencyInjection;
 
 using Npgsql;

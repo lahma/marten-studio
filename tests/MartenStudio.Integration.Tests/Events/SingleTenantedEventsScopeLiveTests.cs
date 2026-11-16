@@ -1,3 +1,4 @@
+using DataStudio.Services;
 using JasperFx;
 using JasperFx.Events.Projections;
 using JasperFx.MultiTenancy;

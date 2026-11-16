@@ -1,4 +1,4 @@
-using PostgresStudio.Internal;
+using DataStudio.Internal;
 using PostgresStudio.Services.Settings;
 
 using Microsoft.AspNetCore.Http;

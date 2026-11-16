@@ -1,5 +1,6 @@
 using System.Text.Json;
 
+using DataStudio.Services;
 using Marten;
 
 using MartenStudio.Tests.Health;

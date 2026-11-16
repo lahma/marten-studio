@@ -63,7 +63,7 @@ public class KafkaReadGrantsTests
 
         plan.Should().BeOfType<KafkaSearchPlanResult.Refused>().Which.Text.Should().Be(KafkaStudioText.SearchValuesRefusedTopic).And.NotContain("secret");
         rig.BrokerCalls.Should().Be(callsBefore, "a refused search reads nothing, not even a window");
-        rig.Ring.Should().ContainSingle().Which.Should().Match<PostgresStudio.Services.StudioActionLogEntry>(
+        rig.Ring.Should().ContainSingle().Which.Should().Match<DataStudio.Services.StudioActionLogEntry>(
             static x => !x.Succeeded && x.Capability == "ReadPayloads" && x.Message == KafkaStudioText.RefusedEntry);
         rig.Logs.Entries.Should().ContainSingle(static x => x.EventId.Id == 9603);
     }

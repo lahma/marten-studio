@@ -1,5 +1,6 @@
 using System.Text.Json;
 
+using DataStudio.Services;
 using MartenStudio.Integration.Tests.Logging;
 using PostgresStudio.Services.Database;
 

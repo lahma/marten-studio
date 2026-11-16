@@ -1,5 +1,6 @@
 using System.Collections.Frozen;
 
+using DataStudio.Services.Settings;
 using MartenStudio.Components;
 using MartenStudio.Services.Events;
 using PostgresStudio.Services.Live;

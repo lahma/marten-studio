@@ -96,7 +96,7 @@ public class PlanPageTests
         page.Find(".ms-plan-raw-text").TextContent.ReplaceLineEndings("\n").Should().Be(text.ReplaceLineEndings("\n"));
 
         context.SqlConsole.Plans.Should().BeEmpty("a pasted plan reads nothing and runs nothing");
-        context.Services.GetRequiredService<PostgresStudio.Services.StudioActionLogService>().GetLatest().Should().BeEmpty("a pasted plan is not audited");
+        context.Services.GetRequiredService<DataStudio.Services.StudioActionLogService>().GetLatest().Should().BeEmpty("a pasted plan is not audited");
     }
 
     [Fact]
@@ -723,7 +723,7 @@ public class PlanPageTests
         page.FindAll(".ms-plan-row").Should().HaveCount(5);
 
         context.SqlConsole.Plans.Should().BeEmpty("a pasted plan reads nothing and runs nothing");
-        context.Services.GetRequiredService<PostgresStudio.Services.StudioActionLogService>().GetLatest().Should().BeEmpty("a pasted plan is not audited");
+        context.Services.GetRequiredService<DataStudio.Services.StudioActionLogService>().GetLatest().Should().BeEmpty("a pasted plan is not audited");
     }
 
     [Fact]

@@ -1,3 +1,4 @@
+using DataStudio.Services.Settings;
 using JasperFx.Descriptors;
 
 using MartenStudio.Tests.Support;
@@ -7,7 +8,6 @@ using Microsoft.Extensions.DependencyInjection;
 using PostgresStudio.Services;
 using PostgresStudio.Services.Health;
 using PostgresStudio.Services.Live;
-using PostgresStudio.Services.Settings;
 
 namespace MartenStudio.Tests.Components;
 

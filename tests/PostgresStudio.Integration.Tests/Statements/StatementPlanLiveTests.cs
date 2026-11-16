@@ -1,3 +1,4 @@
+using DataStudio.Services;
 using Npgsql;
 
 using PostgresStudio.Integration.Tests.Health;

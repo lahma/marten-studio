@@ -1,5 +1,6 @@
 using System.Reflection;
 
+using DataStudio.Services;
 using MartenStudio.Tests.Health;
 using MartenStudio.Tests.Support;
 

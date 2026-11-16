@@ -1,3 +1,4 @@
+using DataStudio.Services.Settings;
 using JasperFx.Events;
 using JasperFx.MultiTenancy;
 
@@ -10,8 +11,6 @@ using MartenStudio.Tests.Services;
 
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.DependencyInjection;
-
-using PostgresStudio.Services.Settings;
 
 namespace MartenStudio.Tests.Links;
 

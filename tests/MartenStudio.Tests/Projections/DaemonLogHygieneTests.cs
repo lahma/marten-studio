@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Runtime.ExceptionServices;
 
+using DataStudio.Services;
 using JasperFx.Events.Daemon;
 using JasperFx.Events.Projections;
 

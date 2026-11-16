@@ -1,3 +1,4 @@
+using DataStudio.Components;
 using MartenStudio.Services;
 using PostgresStudio.Services.Settings;
 using PostgresStudio.Services.Sources;
@@ -7,7 +8,6 @@ using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using PostgresStudio.Components;
 using PostgresStudio.Services;
 
 namespace MartenStudio.Tests.Support;

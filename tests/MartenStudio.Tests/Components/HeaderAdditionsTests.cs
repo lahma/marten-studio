@@ -2,6 +2,7 @@ using AngleSharp.Dom;
 
 using Bunit;
 
+using DataStudio.Components.Layout;
 using MartenStudio.Tests.Support;
 
 using Microsoft.AspNetCore.Components;
