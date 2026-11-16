@@ -205,8 +205,15 @@ Phase A changes no package, no public type and no word. It can ship in any relea
       public API baseline, and Kafka-only endpoint tests whose output folder holds no Npgsql.
 - [ ] 14. Generate `CompatibilitySuppressions.xml` for the Razor components that left `PostgresStudio` (not a contract,
       `docs/stability.md`); delete it one release later.
-- [ ] 15. Build: `Pack` and `Publish` handle seven packages (the shell after the engine); assert the new pins in the
-      nuspecs. The nuget.org trusted-publishing policy for the new id is a one-time step of yours.
+- [ ] 15. Package ids (decided 2026-11-16): the assemblies and packages become `DataStudio.Postgres`,
+      `DataStudio.Marten`, `DataStudio.Kafka`, `DataStudio.Kafka.Core` and `DataStudio.Kafka.Wolverine`, namespaces
+      unchanged. `PostgresStudio` and `MartenStudio` stay as packages whose assembly holds only `[TypeForwardedTo]` for
+      each public type, with an exact dependency on the new id; the three `KStudio*` ids are not kept (previews).
+      Every `InternalsVisibleTo`, version guard, fence test, `postgres-studio.slnf` entry and `_content/` path follows
+      the assembly names. Write this step's design before step 8 starts: it decides the project names step 8 creates.
+- [ ] 15b. Build: `Pack` and `Publish` handle nine packages (the engine, the shell, the three modules, the two Kafka
+      companions, the two forwarding packages); assert every pin in the nuspecs. The nuget.org trusted-publishing
+      policy for each new id is a one-time step of yours.
 - [ ] 16. Docs and samples: `samples/KStudio.Sample` uses the composed form; README, `docs/kstudio.md`,
       `docs/upgrading.md`, `docs/stability.md`, `AGENTS.md` (introduction, D11, D12, D16, D30, D34, hard rules 7 and 16,
       the budget table, *Build*), `docs/maintainers/layout.md`, `architecture.md`, `kstudio.md`, and `CHANGELOG.md`.
@@ -232,7 +239,9 @@ Phase A changes no package, no public type and no word. It can ship in any relea
 - [ ] A host with `AddDataStudio().AddKafka()` starts, serves `/studio/kafka`, and its output folder has no `Npgsql.dll`
       and no `PostgresStudio*.dll`.
 - [ ] `samples/MartenStudio.Sample` and `samples/PostgresStudio.Sample` are not edited and their browser suites pass.
-- [ ] `dotnet fallout Pack`, then `dotnet fallout Publish --skip`: seven packages, each pin asserted.
+- [ ] `dotnet fallout Pack`, then `dotnet fallout Publish --skip`: nine packages, each pin asserted.
+- [ ] A host that references only `MartenStudio` (the forwarding package) at the new version builds and runs
+      `samples/MartenStudio.Sample` unchanged; the same for `PostgresStudio`.
 - [ ] `studio-ui-verifier` on the three samples: rail, header, Activity and the capability chip in each shape.
 
 ## Decisions
@@ -249,15 +258,12 @@ Phase A changes no package, no public type and no word. It can ship in any relea
 | Shared helpers | Copied into the shell with parity tests | The alternative is an eighth package, pinned and guarded, for three small static classes. |
 | Order | Phase A first, alone | The risky part (layout, scope, audit) lands with nothing else moving, and is bisectable. |
 | Release | Minor releases; no major | No public member is removed. KStudio stays a preview and may change. |
+| Package ids | `DataStudio`, `DataStudio.Postgres`, `DataStudio.Marten`, `DataStudio.Kafka`, `DataStudio.Kafka.Core`, `DataStudio.Kafka.Wolverine`; `PostgresStudio.Diagnostics` unchanged | Decided 2026-11-16: one family on nuget.org, the shell visibly the base. |
+| The published ids `PostgresStudio` and `MartenStudio` | Kept as packages that depend on the new ids and forward their public types | An existing host upgrades with no source change (`docs/stability.md`). |
+| Namespaces | Unchanged (`MartenStudio`, `PostgresStudio`, `KStudio`) | Decided 2026-11-16: the rename is packaging only. |
 
-The review of 2026-11-14 settled the name, the segment and the mixed host.
-
-> **Open before phase B: the package ids** (raised 2026-11-16). Should the modules ship as `DataStudio.Postgres`,
-> `DataStudio.Marten` and `DataStudio.Kafka`, beside the shell `DataStudio`? Phase A does not depend on the answer.
-> Recommended: yes for Kafka (a preview, so `KStudio` and `KStudio.Core` can simply be renamed); for Postgres and Marten
-> publish the new ids and keep `PostgresStudio` and `MartenStudio` as packages that depend on them and forward their
-> public types, so that an existing host upgrades without a source change. `AddMartenStudio()` and `MapMartenStudio()`
-> stay either way. Phase B's steps 8, 11 and 15 change with the answer.
+No decision is open: the review of 2026-11-14 settled the name, the segment and the mixed host, and the package ids
+were settled on 2026-11-16.
 
 ## Risks
 
@@ -269,7 +275,9 @@ The review of 2026-11-14 settled the name, the segment and the mixed host.
   step 1's golden files and both browser suites are the gate, and each of steps 2 to 6 is a packet reviewed on its own.
 - Moving public Razor components trips package validation (CP0001) against the 1.3 baseline. Step 14 covers it; run
   `Pack` after step 8, not at the release.
-- Seven packages mean two more exact pins and guards to keep true. They follow the one pattern D30 already has.
+- Nine packages mean more exact pins and guards to keep true. They follow the one pattern D30 already has.
+- The forwarding packages make `MartenStudio.dll` a different assembly than the one that holds the types: a host that
+  reflects over it by assembly name finds nothing. `docs/upgrading.md` says so.
 - A host that names `_content/PostgresStudio/` itself (a CSP rule, a proxy rule) breaks at step 12. The mirror under the
   mount is the documented path; `docs/upgrading.md` says so.
 
@@ -279,7 +287,7 @@ The review of 2026-11-14 settled the name, the segment and the mixed host.
 - A public extension API for third-party modules.
 - Two shells in one process, or a shell hosted inside the host's own Blazor application (D11).
 - The JSON API of issue #58.
-- Renaming the existing packages, or moving anything out of `PostgresStudio.Diagnostics` or `KStudio.Core`.
+- Renaming a namespace or a public type, or moving anything out of `PostgresStudio.Diagnostics` or the Kafka engine.
 
 <details><summary>Evidence behind the plan</summary>
 
