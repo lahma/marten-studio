@@ -12,7 +12,7 @@ You run the real application and report what it actually does. Collect evidence;
 ## Procedure
 
 1. `docker info` — if Docker is not running, stop and say so. Never fake a result.
-2. `dotnet run --project samples/MartenStudio.Sample` (it starts its own Postgres when no connection string
+2. `dotnet run --project samples/DataStudio.Sample.Marten` (it starts its own Postgres when no connection string
    is configured). Wait for the listening line; capture the console output including the ephemeral-database
    banner. If the packet names a different mount path or switches (`--anonymous`, `--readonly`), use them.
 3. Drive the app. Prefer a throwaway Playwright script placed in the scratchpad directory (never inside the

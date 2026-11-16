@@ -37,7 +37,7 @@ Two constraints govern every design choice here:
 The original product design — information architecture, every screen, the JSON viewer, the authorization model, the
 phased delivery plan — is the approved plan at `C:\Users\marko\.claude\plans\i-d-like-you-to-composed-galaxy.md`; 0.5's
 split and its public API are designed in `marten-studio-0.5-postgresstudio-design.md` and
-`marten-studio-0.5-public-api-design.md` beside it. `README.md`, `src/PostgresStudio/README.md` and `docs/` are the long
+`marten-studio-0.5-public-api-design.md` beside it. `README.md`, `src/DataStudio.Postgres/README.md` and `docs/` are the long
 form a user reads. Read the design before designing anything; read *this* file before writing anything.
 
 ## Where to read first
@@ -79,11 +79,11 @@ Each rule's full text, with its lists of events, tests and history, is in
    run it again and commit the regenerated YAML. Full text: hard rule 2.
 
 3. **No MudBlazor, and no third-party UI, CSS or icon library, ever.** Styling is hand-rolled, prefixed `ms-`, and
-   driven by the design tokens in `src/PostgresStudio/wwwroot/css/studio.css`. There is still exactly one stylesheet,
+   driven by the design tokens in `src/DataStudio.Postgres/wwwroot/css/studio.css`. There is still exactly one stylesheet,
    and it holds both studios' sections (D26). Full text: hard rule 3.
 
-4. **No raw SQL outside the three builders' folders, `src/PostgresStudio.Diagnostics/Internal/Sql/`,
-   `src/PostgresStudio/Internal/Sql/` and `src/MartenStudio/Internal/Sql/`.** Identifiers are quoted through the builder,
+4. **No raw SQL outside the three builders' folders, `src/DataStudio.Postgres.Diagnostics/Internal/Sql/`,
+   `src/DataStudio.Postgres/Internal/Sql/` and `src/DataStudio.Marten/Internal/Sql/`.** Identifiers are quoted through the builder,
    values are always parameters. The engine's builders, `SqlIdentifier` and `SqlLexer` among them, live in the first; the
    shared studio's own (the console's plans, the browser's rows) in the second; the statements only a Marten store has
    (the document, event, daemon and projection reads) in the third, which calls the first's quoting. The compiled fence in
@@ -296,18 +296,18 @@ have.
 **D15 — Fallout's stable channel (10.5.0), CHANGELOG.md as the version authority, all four workflows generated, trusted publishing
 for nuget.org.** See *Build* and *Release engineering* below. The important half is that the version lives in one file
 that a human edits and no tool rewrites, and that the only credential anywhere in the release path lives for minutes.
-KStudio's three packages add one label to it, `Directory.Build.props`' `KStudioPrereleaseLabel` (`<version>-preview.1`, K8),
+KStudio's three packages add one label to it, `Directory.Build.props`' `KafkaPrereleaseLabel` (`<version>-preview.1`, K8),
 which no other project reads; emptying it graduates them.
 
 **D16 — xunit.v3 3.2.2 and Verify.XunitV3 32.0.0, seven test projects all matching `*.Tests`.**
-`tests/MartenStudio.Tests`, `tests/PostgresStudio.Tests`, `tests/KStudio.Tests` and `tests/KStudio.Wolverine.Tests` are fast
+`tests/DataStudio.Marten.Tests`, `tests/DataStudio.Postgres.Tests`, `tests/DataStudio.Kafka.Tests` and `tests/DataStudio.Kafka.Wolverine.Tests` are fast
 and need no Docker; the three `*.Integration.Tests` need Testcontainers, and MartenStudio's and PostgresStudio's also need
 Playwright. All seven match the
 glob in `ITest.TestProjects`. The pins are load-bearing — see *Package budget*. Full text: [testing.md](docs/maintainers/testing.md#d16).
 
-**D17 — The demo domain lives in `samples/MartenStudio.SampleDomain` and does not reference `MartenStudio`.** The
+**D17 — The demo domain lives in `samples/DataStudio.Sample.Marten.Domain` and does not reference `MartenStudio`.** The
 missing reference is deliberate and structural: the studio must work against a store that knows nothing about it. The
-demo data with no Marten in it is `samples/PostgresStudio.SampleData`, which references no studio either. Full text:
+demo data with no Marten in it is `samples/DataStudio.Sample.Postgres.Data`, which references no studio either. Full text:
 [architecture.md](docs/maintainers/architecture.md#d17).
 
 **D18 — The sample host starts a throwaway Postgres when no connection string is configured.** Zero-config `dotnet run`
@@ -587,28 +587,28 @@ Complete, as of the bootstrap commit. Versions are centrally pinned in `Director
 
 | Where | Package | Version | Why it is here |
 |---|---|---|---|
-| `src/MartenStudio` | `Marten` | `9.57.0` (latest tested `9.57.0`) | One of the two `PackageReference`s the shipped package makes. Floor, not exact pin — a consumer on a newer Marten 9.x must not be dragged back. Since 2026-11-03 the floor follows the latest release (the user's policy of 2026-11-02: consumers keep up with Marten): 9.57.0 fixes #5797, where compacting a stream that folds to null replaced its whole history with an empty snapshot, which `CompactStreams` exposed on every host below it, and it makes the run-time light-ups from 9.31 to 9.53 unconditional (see *Package budget changes*, 2026-11-03; the 9.39.0 security floor of 2026-10-15 is history). Both suites also run at a pinned latest-tested version, `MartenStudioMartenLatest`, which equals the floor until the next Marten release; the package is packed only at the floor. JasperFx / JasperFx.Events 2.98.0, Weasel.Core / Weasel.Postgresql / Weasel.Storage 9.48.0 and Npgsql 9.0.4 arrive transitively at the floor. The studio's own compilation drops the JasperFx source generator Marten bundles (`MartenStudio.csproj`). |
+| `src/MartenStudio` | `Marten` | `9.57.0` (latest tested `9.57.0`) | One of the two `PackageReference`s the shipped package makes. Floor, not exact pin — a consumer on a newer Marten 9.x must not be dragged back. Since 2026-11-03 the floor follows the latest release (the user's policy of 2026-11-02: consumers keep up with Marten): 9.57.0 fixes #5797, where compacting a stream that folds to null replaced its whole history with an empty snapshot, which `CompactStreams` exposed on every host below it, and it makes the run-time light-ups from 9.31 to 9.53 unconditional (see *Package budget changes*, 2026-11-03; the 9.39.0 security floor of 2026-10-15 is history). Both suites also run at a pinned latest-tested version, `DataStudioMartenLatest`, which equals the floor until the next Marten release; the package is packed only at the floor. JasperFx / JasperFx.Events 2.98.0, Weasel.Core / Weasel.Postgresql / Weasel.Storage 9.48.0 and Npgsql 9.0.4 arrive transitively at the floor. The studio's own compilation drops the JasperFx source generator Marten bundles (`MartenStudio.csproj`). |
 | `src/PostgresStudio` | `Microsoft.AspNetCore.App.Internal.Assets` | `10.0.12` | `blazor.web.js`, which as of .NET 10 lives nowhere else (D22); it reaches a MartenStudio host through MartenStudio's `ProjectReference` to PostgresStudio (two hops, measured by PS-0, *Package budget changes* 2026-10-20). Three `.js` files and one MSBuild target: no `lib/`, no `ref/`, no runtime assembly, so it pins no ASP.NET Core patch on the host. Floor, not exact pin — a host whose own SDK already resolves this pack keeps its version, because NuGet takes the higher of the two. Its `buildTransitive` targets are what put the script in the *consumer's* static web assets. MartenStudio no longer references it, but MartenStudio's nuspec still lists it at this version: under `CentralPackageTransitivePinningEnabled` NuGet writes a centrally pinned transitive package into the nuspec (the same line MartenStudio 0.4.0 carried when it referenced the pack directly), and `Pack` asserts the line. |
-| `src/PostgresStudio.Diagnostics` | `Npgsql` | `9.0.4` (latest tested `10.0.3`) | The diagnostics engine's database driver, and the studio's: since 0.11-C `src/PostgresStudio` takes it through its `ProjectReference` to this project and no longer references it directly (*Package budget changes* 2026-11-01). PostgresStudio has no Marten to bring it. A central row that only projects setting `PostgresStudioPinsNpgsql` see, so MartenStudio keeps taking Npgsql through Marten and the two never drift there (D3; *Package budget changes* 2026-10-20). Floor, not exact pin; 9.0.4 is Marten 9.57.0's own Npgsql, so a MartenStudio host resolves Marten's Npgsql, which is never lower (`NpgsqlVersionTests`; *Package budget changes* 2026-11-03, which moved it from the 8.0.3 that PS-7 measured on 2026-10-26). `samples/PostgresStudio.SampleData` references it directly too, and `samples/PostgresStudio.Sample`, both PostgresStudio test projects and `src/PostgresStudio` itself set `PostgresStudioPinsNpgsql` so the same row pins it transitively; all of them are in `postgres-studio.slnf`, so the latest-Npgsql pass builds them at 10.0.3. |
-| `src/PostgresStudio.Diagnostics` | `Microsoft.Extensions.DependencyInjection.Abstractions`, `Microsoft.Extensions.Logging.Abstractions`, `Microsoft.Extensions.Options`, `Microsoft.Extensions.Diagnostics.HealthChecks` | `10.0.0` each | The engine has no `FrameworkReference` to `Microsoft.AspNetCore.App` (hard rule 16), so the abstractions it registers into, logs through and exports a health check with come as packages. Four conditional central rows, visible only to projects that set `PostgresStudioDiagnosticsPinsExtensions` (this one, and the 0.11 worker sample), so Marten's, JasperFx's and Weasel's own Microsoft.Extensions.* stay unpinned in MartenStudio and its tests. Floors, not exact pins. 10.0.0 and not 8.0.x because Npgsql 10.0.3's net10.0 asset asks for `Logging.Abstractions` 10.0.0 and an older pin would silently win (measured: no NU code, 8.0.0 resolved), which is not a floor (D1: the library is net10.0 only). *Package budget changes* 2026-11-01. |
+| `src/PostgresStudio.Diagnostics` | `Npgsql` | `9.0.4` (latest tested `10.0.3`) | The diagnostics engine's database driver, and the studio's: since 0.11-C `src/PostgresStudio` takes it through its `ProjectReference` to this project and no longer references it directly (*Package budget changes* 2026-11-01). PostgresStudio has no Marten to bring it. A central row that only projects setting `DataStudioPostgresPinsNpgsql` see, so MartenStudio keeps taking Npgsql through Marten and the two never drift there (D3; *Package budget changes* 2026-10-20). Floor, not exact pin; 9.0.4 is Marten 9.57.0's own Npgsql, so a MartenStudio host resolves Marten's Npgsql, which is never lower (`NpgsqlVersionTests`; *Package budget changes* 2026-11-03, which moved it from the 8.0.3 that PS-7 measured on 2026-10-26). `samples/DataStudio.Sample.Postgres.Data` references it directly too, and `samples/DataStudio.Sample.Postgres`, both PostgresStudio test projects and `src/PostgresStudio` itself set `DataStudioPostgresPinsNpgsql` so the same row pins it transitively; all of them are in `data-studio-postgres.slnf`, so the latest-Npgsql pass builds them at 10.0.3. |
+| `src/PostgresStudio.Diagnostics` | `Microsoft.Extensions.DependencyInjection.Abstractions`, `Microsoft.Extensions.Logging.Abstractions`, `Microsoft.Extensions.Options`, `Microsoft.Extensions.Diagnostics.HealthChecks` | `10.0.0` each | The engine has no `FrameworkReference` to `Microsoft.AspNetCore.App` (hard rule 16), so the abstractions it registers into, logs through and exports a health check with come as packages. Four conditional central rows, visible only to projects that set `DataStudioDiagnosticsPinsExtensions` (this one, and the 0.11 worker sample), so Marten's, JasperFx's and Weasel's own Microsoft.Extensions.* stay unpinned in MartenStudio and its tests. Floors, not exact pins. 10.0.0 and not 8.0.x because Npgsql 10.0.3's net10.0 asset asks for `Logging.Abstractions` 10.0.0 and an older pin would silently win (measured: no NU code, 8.0.0 resolved), which is not a floor (D1: the library is net10.0 only). *Package budget changes* 2026-11-01. |
 | `src/KStudio.Core` | `Confluent.Kafka` | `2.14.0` (latest tested `2.16.0`) | KStudio's only Kafka client (plan K2), behind the engine's internal wire seam (D36). Floor, not exact pin: 2.14.0 is what WolverineFx.Kafka 6.61 pins, so a Wolverine host is never raised. It brings `librdkafka.redist` (native librdkafka for Windows, Linux and macOS) at its own version, unpinned. Unconditional row: only the KStudio projects reference it, and the KStudio sample transitively, for its seeder. Packed as a preview since 1.3 (K8), with this floor in its nuspec. *Package budget changes* 2026-11-09. |
-| `src/KStudio.Core` | `Microsoft.Extensions.DependencyInjection.Abstractions`, `Microsoft.Extensions.Logging.Abstractions`, `Microsoft.Extensions.Options` | `10.0.0` each | The diagnostics engine's conditional rows, seen by KStudio.Core through `KStudioCorePinsExtensions`: the engine has no ASP.NET Core either (D36). |
-| `tests/KStudio.Integration.Tests`, `samples/KStudio.Sample` | `Testcontainers.Kafka` | `4.15.0` | The live suite's brokers, `apache/kafka:3.9.2` and `4.4.0` in KRaft mode, one per image with SASL/PLAIN and ACLs; and the KStudio sample's throwaway `apache/kafka:4.4.0` (D18). |
-| `src/KStudio.Wolverine` | `WolverineFx.Kafka` | `6.61.0` | Wolverine's Kafka transport, for configuration discovery only (D43): clusters, tenants and topics read from the built `WolverineOptions`, nothing started or written. Floor, not exact pin: 6.61.0 pins Confluent.Kafka 2.14.0, KStudio.Core's floor, so a Wolverine host is never raised. It brings JasperFx 2.99.0, above Marten 9.57.0's 2.98.0. `tests/KStudio.Wolverine.Tests` takes it through the project reference; `tests/KStudio.Integration.Tests` and `samples/KStudio.Sample` reference it for a real Wolverine host. Packed as a preview since 1.3 (K8). *Package budget changes* 2026-11-12. |
-| `samples/KStudio.Sample` | `WolverineFx.RuntimeCompilation` | `6.61.0` | Wolverine's opt-in Roslyn code generation, for the sample's Wolverine application only (D-CORR decision 11): Wolverine 6.61 no longer ships its runtime compiler, and a host with a handler (`PlaceCheckoutHandler`, which stores a Marten document) needs it, or pre-generated code, to start. It matches `WolverineFx.Kafka` 6.61.0 and registers itself when referenced. One central row in `Directory.Packages.props`; no shipped package, `KStudio`, `KStudio.Core`, `KStudio.Wolverine` or test project references it. *Package budget changes* 2026-11-12. |
-| the four sample hosts, `tests/MartenStudio.Integration.Tests`, `tests/PostgresStudio.Integration.Tests` | `Testcontainers.PostgreSql` | `4.15.0` | D18's throwaway Postgres (the Marten, Postgres Studio and KStudio sample hosts and the diagnostics worker), and the container each integration suite runs against. |
-| `samples/PostgresStudio.Worker` | `Microsoft.Extensions.Hosting` | `10.0.0` | The generic host the diagnostics worker sample runs in (*Package budget changes* 2026-11-01). A fifth row of the conditional `PostgresStudioDiagnosticsPinsExtensions` group: no shipped package references it directly. KStudio.Wolverine's nuspec (1.3) carries it as a minimum, through `KStudioCorePinsExtensions` and transitive pinning; it equals WolverineFx 6.61's own net10.0 minimum and raises nothing. |
+| `src/KStudio.Core` | `Microsoft.Extensions.DependencyInjection.Abstractions`, `Microsoft.Extensions.Logging.Abstractions`, `Microsoft.Extensions.Options` | `10.0.0` each | The diagnostics engine's conditional rows, seen by KStudio.Core through `DataStudioKafkaCorePinsExtensions`: the engine has no ASP.NET Core either (D36). |
+| `tests/DataStudio.Kafka.Integration.Tests`, `samples/DataStudio.Sample.Kafka` | `Testcontainers.Kafka` | `4.15.0` | The live suite's brokers, `apache/kafka:3.9.2` and `4.4.0` in KRaft mode, one per image with SASL/PLAIN and ACLs; and the KStudio sample's throwaway `apache/kafka:4.4.0` (D18). |
+| `src/KStudio.Wolverine` | `WolverineFx.Kafka` | `6.61.0` | Wolverine's Kafka transport, for configuration discovery only (D43): clusters, tenants and topics read from the built `WolverineOptions`, nothing started or written. Floor, not exact pin: 6.61.0 pins Confluent.Kafka 2.14.0, KStudio.Core's floor, so a Wolverine host is never raised. It brings JasperFx 2.99.0, above Marten 9.57.0's 2.98.0. `tests/DataStudio.Kafka.Wolverine.Tests` takes it through the project reference; `tests/DataStudio.Kafka.Integration.Tests` and `samples/DataStudio.Sample.Kafka` reference it for a real Wolverine host. Packed as a preview since 1.3 (K8). *Package budget changes* 2026-11-12. |
+| `samples/DataStudio.Sample.Kafka` | `WolverineFx.RuntimeCompilation` | `6.61.0` | Wolverine's opt-in Roslyn code generation, for the sample's Wolverine application only (D-CORR decision 11): Wolverine 6.61 no longer ships its runtime compiler, and a host with a handler (`PlaceCheckoutHandler`, which stores a Marten document) needs it, or pre-generated code, to start. It matches `WolverineFx.Kafka` 6.61.0 and registers itself when referenced. One central row in `Directory.Packages.props`; no shipped package, `KStudio`, `KStudio.Core`, `KStudio.Wolverine` or test project references it. *Package budget changes* 2026-11-12. |
+| the four sample hosts, `tests/DataStudio.Marten.Integration.Tests`, `tests/DataStudio.Postgres.Integration.Tests` | `Testcontainers.PostgreSql` | `4.15.0` | D18's throwaway Postgres (the Marten, Postgres Studio and KStudio sample hosts and the diagnostics worker), and the container each integration suite runs against. |
+| `samples/DataStudio.Sample.Postgres.Worker` | `Microsoft.Extensions.Hosting` | `10.0.0` | The generic host the diagnostics worker sample runs in (*Package budget changes* 2026-11-01). A fifth row of the conditional `DataStudioDiagnosticsPinsExtensions` group: no shipped package references it directly. KStudio.Wolverine's nuspec (1.3) carries it as a minimum, through `DataStudioKafkaCorePinsExtensions` and transitive pinning; it equals WolverineFx 6.61's own net10.0 minimum and raises nothing. |
 | all seven test projects | `Microsoft.NET.Test.Sdk` | `18.10.0` | The VSTest host Fallout's `ITest` drives. |
 | all seven test projects | `xunit.v3` | `3.2.2` | Held — see below. |
 | all seven test projects | `xunit.runner.visualstudio` | `3.1.5` | The VSTest bridge. |
 | all seven test projects | `GitHubActionsTestLogger` | `2.4.1` | Held — see below. |
 | all seven test projects | `AwesomeAssertions` | `9.6.0` | The MIT fork of FluentAssertions. One assertion library, and **no mocking library**: the data seam is our own set of interfaces, and hand-written fakes are smaller and more auditable than a mocking framework's call-matching DSL. Its namespace is `AwesomeAssertions`, not `FluentAssertions` (verified 2026-09-14); every test project declares it as a global using. |
-| the three fast suites (`tests/MartenStudio.Tests`, `tests/PostgresStudio.Tests`, `tests/KStudio.Tests`) | `bunit` | `2.13.3` | Component tests. |
+| the three fast suites (`tests/DataStudio.Marten.Tests`, `tests/DataStudio.Postgres.Tests`, `tests/DataStudio.Kafka.Tests`) | `bunit` | `2.13.3` | Component tests. |
 | the four fast suites | `Verify.XunitV3` | `32.0.0` | Held — see below. Also the source of each fast suite's `global using Xunit;`, which is why none of them declares one. |
 | the four fast suites | `PublicApiGenerator` | `11.5.4` | The public API snapshots (D20), one per package. |
-| `tests/MartenStudio.Tests`, `tests/PostgresStudio.Tests`, `tests/KStudio.Tests` | `Microsoft.AspNetCore.TestHost` | `10.0.12` | `UseTestServer()` for the endpoint-metadata and startup-guard tests. TestHost rather than Mvc.Testing: those tests never need a `WebApplicationFactory`. |
-| `tests/MartenStudio.Integration.Tests` | `Microsoft.AspNetCore.Mvc.Testing` | `10.0.12` | `WebApplicationFactory` over the real sample host. |
-| `tests/MartenStudio.Integration.Tests`, `tests/PostgresStudio.Integration.Tests` | `Microsoft.Playwright` | `1.62.0` | The browser suites (D19). |
+| `tests/DataStudio.Marten.Tests`, `tests/DataStudio.Postgres.Tests`, `tests/DataStudio.Kafka.Tests` | `Microsoft.AspNetCore.TestHost` | `10.0.12` | `UseTestServer()` for the endpoint-metadata and startup-guard tests. TestHost rather than Mvc.Testing: those tests never need a `WebApplicationFactory`. |
+| `tests/DataStudio.Marten.Integration.Tests` | `Microsoft.AspNetCore.Mvc.Testing` | `10.0.12` | `WebApplicationFactory` over the real sample host. |
+| `tests/DataStudio.Marten.Integration.Tests`, `tests/DataStudio.Postgres.Integration.Tests` | `Microsoft.Playwright` | `1.62.0` | The browser suites (D19). |
 | `build/` | `Fallout.Common`, `Fallout.Components` | `10.5.0` | The orchestrator; the build project opts out of CPM. 10.5.0 brings `NuGet.Packaging` and `NuGet.Frameworks` 7.9.0 and `System.Security.Cryptography.Pkcs`/`.Xml` 10.0.13 itself, so `build/` pins nothing else (*Package budget changes* 2026-11-12). |
 
 SourceLink needs no package reference: it is in-SDK on .NET 8 and later.
@@ -628,7 +628,7 @@ The directory tree is in `docs/maintainers/layout.md`: every directory under `sr
 `.claude/` and `docs/`, and what belongs in each. Read it before adding a file. Add a directory to it in the same pull
 request that creates the directory, because `AgentsLayoutTests` fails on a directory the tree misses and on one that no
 longer exists. The roots in brief:
-- `src/PostgresStudio/` is the shared studio, with no Marten; `src/MartenStudio/` holds the Marten screens and checks.
+- `src/DataStudio.Postgres/` is the shared studio, with no Marten; `src/DataStudio.Marten/` holds the Marten screens and checks.
   Each has `Components/`, `Services/` and `Internal/Sql/` (hard rule 4).
 - `samples/` holds both demo hosts and their demo data (D17, D18).
 - `tests/` holds the seven test projects (*Testing*).
@@ -638,8 +638,8 @@ longer exists. The roots in brief:
 
 Outside those roots: `.github/workflows/` holds the four **generated** workflow files (hard rule 2),
 `.config/dotnet-tools.json` pins the Fallout CLI, `.fallout/` holds the parameter file and the generated build schema,
-`postgres-studio.slnf` is the solution filter the latest-Npgsql pass builds (exactly the projects that set
-`PostgresStudioPinsNpgsql`), and `CHANGELOG.md` is the version authority.
+`data-studio-postgres.slnf` is the solution filter the latest-Npgsql pass builds (exactly the projects that set
+`DataStudioPostgresPinsNpgsql`), and `CHANGELOG.md` is the version authority.
 
 `docs/maintainers/` also holds the topic documents the routing table above names.
 
@@ -671,17 +671,17 @@ top version (without a prerelease suffix): a new CHANGELOG section moves it in t
 Keep changelog entries as `- ` bullets with wrapped continuation lines: the GitHub Release body is built from them, and
 anything else ships it empty (*Release engineering*).
 
-The Marten version is `Directory.Packages.props`'s: `MartenStudioMartenFloor` and `MartenStudioMartenLatest`, chosen by
+The Marten version is `Directory.Packages.props`'s: `DataStudioMartenFloor` and `DataStudioMartenLatest`, chosen by
 `--marten-version` (`floor`, `latest` or an exact version, never a range). `Pack` packs at the floors only and refuses
 anything else. PostgresStudio's Npgsql follows the same scheme with `--npgsql-version`; anything but its floor gets a
-pass of its own over `postgres-studio.slnf`, never the `.slnx`. `Pack` packs `src/PostgresStudio.Diagnostics`, then
+pass of its own over `data-studio-postgres.slnf`, never the `.slnx`. `Pack` packs `src/PostgresStudio.Diagnostics`, then
 `src/PostgresStudio`, then `src/MartenStudio`, all at the CHANGELOG version, each depending on exactly the one below it
 (`PostgresStudio.Diagnostics [<version>]`, `PostgresStudio [<version>]`), then `src/KStudio.Core`, `src/KStudio` and
-`src/KStudio.Wolverine` at `<version>-<KStudioPrereleaseLabel>` (KStudio on exactly `PostgresStudio [<version>]` and that
+`src/KStudio.Wolverine` at `<version>-<KafkaPrereleaseLabel>` (KStudio on exactly `PostgresStudio [<version>]` and that
 `KStudio.Core`, KStudio.Wolverine on exactly that `KStudio.Core`), and `Publish` pushes the six in that order. The
-build needs at least one commit. To bump the latest-tested Marten, change `MartenStudioMartenLatest`, run both suites
+build needs at least one commit. To bump the latest-tested Marten, change `DataStudioMartenLatest`, run both suites
 with `--marten-version latest` and fix or record every difference, in a pull request of its own. A project that sets
-`PostgresStudioPinsNpgsql` goes into `postgres-studio.slnf` in the same pull request. Full text:
+`DataStudioPostgresPinsNpgsql` goes into `data-studio-postgres.slnf` in the same pull request. Full text:
 [build-and-release.md](docs/maintainers/build-and-release.md#build).
 
 ## Testing
@@ -689,15 +689,15 @@ with `--marten-version latest` and fix or record every difference, in a pull req
 ```powershell
 .\build.ps1 Test                                          # everything, through the orchestrator
 .\build.ps1 Test --marten-version latest                  # everything, at the latest-tested Marten
-dotnet test tests\MartenStudio.Tests                       # the fast suite alone
+dotnet test tests\DataStudio.Marten.Tests                       # the fast suite alone
 $env:MARTENSTUDIO_PG_REUSE='false'                         # a container of this run's own; see PostgresFixture
-dotnet test tests\MartenStudio.Integration.Tests           # needs Docker - run `docker info` first
-dotnet test tests\MartenStudio.Tests -p:MartenStudioMartenVersion=9.57.0   # one suite at another Marten
-dotnet test tests\MartenStudio.Tests --filter "FullyQualifiedName~ApiSurface"
-dotnet test tests\PostgresStudio.Tests                     # Postgres Studio's fast suite
-dotnet test tests\PostgresStudio.Integration.Tests         # its live suite - needs Docker
+dotnet test tests\DataStudio.Marten.Integration.Tests           # needs Docker - run `docker info` first
+dotnet test tests\DataStudio.Marten.Tests -p:DataStudioMartenVersion=9.57.0   # one suite at another Marten
+dotnet test tests\DataStudio.Marten.Tests --filter "FullyQualifiedName~ApiSurface"
+dotnet test tests\DataStudio.Postgres.Tests                     # Postgres Studio's fast suite
+dotnet test tests\DataStudio.Postgres.Integration.Tests         # its live suite - needs Docker
 .\build.ps1 Test --npgsql-version latest                  # ... and then PostgresStudio's projects at the latest-tested Npgsql
-dotnet test postgres-studio.slnf -p:PostgresStudioNpgsqlVersion=10.0.3   # that pass alone; never the .slnx
+dotnet test data-studio-postgres.slnf -p:DataStudioNpgsqlVersion=10.0.3   # that pass alone; never the .slnx
 ```
 
 **Both suites run at two Marten versions** (both 9.57.0 until the next latest-tested bump): the floor (`build.yml`) and
