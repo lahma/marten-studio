@@ -191,6 +191,14 @@ Phase A changes no package, no public type and no word. It can ship in any relea
 
 **Phase B: the package and the registration**
 
+> **Re-plan before phase B starts** (2026-11-16). Phase B was written to keep 1.x working: legacy registration calls
+> beside the new one, shell settings adapted from each studio's options, old names and addresses kept. With 2.0 and no
+> legacy, steps 8 to 16 get simpler and partly different: one registration (`AddDataStudio().Add…()`), one options
+> object for the shell, every module under its own segment from the start (phase C folds in), namespaces and type
+> names chosen fresh, the rules table of *Registration* reduced to what a new host can write. The steps below are
+> the 1.x-compatible version and are **not** to be executed as written: a v2 design (public API first, then names,
+> then the steps) replaces them and is reviewed before any of it is built.
+
 - [ ] 8. Create `src/DataStudio/` and move `Shell/`, `wwwroot/`, the JSON toolkit and the assets-pack reference into it.
       `PostgresStudio` and `KStudio` reference it, each packed with an exact pin and a version guard, as D30 does.
 - [ ] 9. Give the shell its own copies of the pure helpers it takes from the engine (`StudioLogValue`, `StudioPath`,
@@ -251,16 +259,16 @@ Phase A changes no package, no public type and no word. It can ship in any relea
 | The shell's name | `DataStudio`: `AddDataStudio()`, `MapDataStudio()`, default path `/studio` | Decided in review. The id was unclaimed on nuget.org on 2026-11-14. |
 | Where the shell lives | A package of its own | A Kafka-only host should not ship a database driver, and the modules become symmetric. |
 | Builder shape | `AddDataStudio(o => …)` returns a builder; `.AddMarten()` chained | The ASP.NET Core idiom (`AddAuthentication().AddCookie()`), and each package can add its extension without the shell naming it. |
-| The existing `Add*Studio` / `Map*Studio` | Kept in phase A; phase B's design decides whether they stay beside `AddDataStudio()` | They are the shortest spelling for one studio, but no contract holds them any more. |
+| The existing `Add*Studio` / `Map*Studio` | Removed in 2.0: `AddDataStudio()` and `MapDataStudio()` are the only registration | Decided 2026-11-16: drop legacy, one way to register. Phase A keeps them only because it changes nothing visible. |
 | Seams | Internal, `InternalsVisibleTo`, exact pins | D30: a public plug-in API multiplies the surface for a model nobody asked for. |
 | Database modules per shell | One: Marten or Postgres | Settings, descriptor, source provider and sweep cache are single registrations today. Mixing them is a later plan of its own (decided in review). |
 | A segment for the database module | Yes, in phase C, under `AddDataStudio()` only | Decided in review: `/admin/marten/…` beside `/admin/kafka/…` is what #78 asks for. |
 | Shared helpers | Copied into the shell with parity tests | The alternative is an eighth package, pinned and guarded, for three small static classes. |
 | Order | Phase A first, alone | The risky part (layout, scope, audit) lands with nothing else moving, and is bisectable. |
-| Release | Any release may break; KStudio stays a preview | No public member has to be kept (2026-11-16). |
+| Release | The work ships as **2.0**; nothing of 1.x has to survive | Decided 2026-11-16: "we can do the work as v2 so you have free hands". |
 | Package ids | `DataStudio`, `DataStudio.Postgres`, `DataStudio.Marten`, `DataStudio.Kafka`, `DataStudio.Kafka.Core`, `DataStudio.Kafka.Wolverine`; `PostgresStudio.Diagnostics` unchanged | Decided 2026-11-16: one family on nuget.org, the shell visibly the base. |
 | The published ids `PostgresStudio`, `MartenStudio`, `KStudio*` | Dropped: deprecated on nuget.org with a pointer, no forwarding packages | Decided 2026-11-16: breaking changes are allowed, and a shim only preserves an old name. |
-| Namespaces and type names | May change; phase B's design decides whether they follow the ids | Decided 2026-11-16: the family is still being shaped. |
+| Namespaces and type names | Follow the package ids and are chosen for the best API, not for continuity | Decided 2026-11-16: "aim for optimal APIs and naming". |
 | Stability promises | Reduced: `docs/stability.md` keeps the safety promises and lets the API, ids, addresses and log categories change in any release | Decided 2026-11-16. |
 | Log categories of the moved shell types | `DataStudio.…`, as the types are named | Follows from the above; `docs/upgrading.md` names the prefix. |
 
