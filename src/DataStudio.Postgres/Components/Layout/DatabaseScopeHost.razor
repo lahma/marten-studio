@@ -1,0 +1,347 @@
+@implements IDisposable
+@using Microsoft.Extensions.Logging
+@using DataStudio.Postgres.Services
+@using DataStudio.Postgres.Services.Live
+@using DataStudio.Postgres.Services.Settings
+@inject StudioState State
+@inject StudioAuthorization Authorization
+@inject StudioDescriptor Descriptor
+@inject StudioShellDescriptor Shell
+@inject IShellSettings Settings
+@inject DatabaseScopeAccess Access
+@inject NavigationManager Navigation
+@* The layout's own category, so that nothing a log reader sees moves with the code (D34, the module seam): these lines were the layout's. *@
+@inject ILogger<StudioLayout> Logger
+
+@* No markup. The layout renders this first, before the rail, on every page for the life of the circuit (IStudioModule.CircuitHost), so that
+   its subscription to the scope is the first one: 1.2's N5b window - the address follows the scope before anything else reacts - depends on it. *@
+
+@code {
+    private bool addressScopeApplied;
+    private bool locationSubscribed;
+    private bool interactive;
+    private bool disposed;
+
+    /// <summary>
+    /// Whether the page on screen is the database's (D34), as the layout found it from the matched page's assembly and never from the
+    /// address's text, so that no address can name a page that is not a module's and be treated as one - the database's scope gate is
+    /// skipped only for a module's own pages.
+    /// </summary>
+    [Parameter]
+    public bool Active { get; set; }
+
+    /// <summary>Whether <see cref="Active" /> was true when the parameters were last set.</summary>
+    private bool wasActive;
+
+    /// <summary>
+    /// Whether <see cref="OnInitializedAsync" /> has finished loading the catalog, so that the scope gate has a scope to ask about. A
+    /// module's page left before then is gated by that method's own last step, never by <see cref="OnParametersSet" />, which would ask a gate
+    /// that has no scope yet and take "nothing to be about" for a grant.
+    /// </summary>
+    private bool initialized;
+
+    protected override async Task OnInitializedAsync()
+    {
+        State.ScopeChanged += OnScopeChanged;
+
+        // The answer outlives a layout (it is the circuit's), and a layout is re-created when the matched page goes to "Not found" and back
+        // (StudioRoutes renders the two through different branches): the new host's gate must show the spinner until this host has answered,
+        // never the previous host's answer. A no-op on a fresh circuit, and after the subscription, which stays first.
+        Access.Set(ScopeAccess.Unknown);
+        wasActive = Active;
+
+        // The scope travels in the query string so a pasted link reopens the same thing (plan D9).
+        // Anything the listings do not carry is ignored by StudioState rather than reported.
+        // A module's address names no host scope (D34): its pages are about their own, and the host's scope waits in memory, untouched.
+        (string? storeKey, string? databaseId, string? tenantId) = Active
+            ? StudioScopeQuery.Read(Navigation.Uri, Descriptor.SourceQueryParameter)
+            : (null, null, null);
+
+        // The rail is drawn while the listings load and the scope is applied below, and a link a visitor clicks in that time must
+        // carry the scope the address names, not the one the studio is still on (1.2). Ended whatever happens next.
+        long applying = State.BeginApplying(storeKey, databaseId, tenantId);
+        try
+        {
+            await State.EnsureInitializedAsync();
+
+            if (storeKey is not null || databaseId is not null || tenantId is not null)
+            {
+                await State.SetScopeAsync(storeKey, databaseId, tenantId);
+            }
+        }
+        finally
+        {
+            State.EndApplying(applying);
+        }
+
+        // From here on the address's own scope has been read, so the shell may write its scope into it (1.2, N5a). A no-op until the
+        // circuit is interactive; OnAfterRenderAsync can run while this method is still awaiting the catalog.
+        addressScopeApplied = true;
+        SyncScopeToUrl();
+
+        // From here on a link the visitor clicks may name another scope (1.2, SCOPE-1-FIX).
+        Navigation.LocationChanged += OnLocationChanged;
+        locationSubscribed = true;
+        initialized = true;
+
+        await UpdateAccessAsync();
+    }
+
+    /// <summary>
+    /// Follows the page on screen, on every render the layout causes (D34, D-SHELL 4.1): <see cref="StudioRoutes" /> re-renders the page
+    /// before this host's own <see cref="OnLocationChanged" /> may have run - and for as long as the catalog loads, before it is subscribed
+    /// at all - so whether the page is the database's is the layout's, found from the address the router just matched, never from a handler.
+    /// On the way from a module's page to a database page the scope gate goes back to <see cref="ScopeAccess.Unknown" /> in the same render
+    /// that brings the database's body in, so that body is not rendered until the gate has answered.
+    /// </summary>
+    protected override void OnParametersSet()
+    {
+        bool previous = wasActive;
+        wasActive = Active;
+
+        if (!previous && Active && initialized)
+        {
+            SetAccess(ScopeAccess.Unknown);
+            _ = InvokeAsync(UpdateAccessAfterLeavingModuleAsync);
+        }
+    }
+
+    /// <summary>
+    /// Follows a link the visitor clicked, and nothing else: when the location changed because a link was intercepted
+    /// (<see cref="LocationChangedEventArgs.IsNavigationIntercepted" />) and its address names a store, database or tenant other than
+    /// the active scope's, the shell moves to it - a link to another store (the Overview's strip, a row of the Stores page) would
+    /// otherwise change the address and leave the scope, and with it every page that reads the scope, on the old store (D9).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>A programmatic navigation never changes the scope.</b> A page's own push, <see cref="SyncScopeToUrl" />'s replace and any
+    /// other <c>NavigateTo</c> report <c>IsNavigationIntercepted == false</c>, so none of them is read here. That is what keeps the
+    /// window in which a page's push, built from the address before a picker change, lands after the change (N5b) from turning into a
+    /// scope flip: the address follows the scope, except for a click.
+    /// </para>
+    /// <para>
+    /// An address that names no other scope - nothing, only part of the scope on screen (Back to the entry from before a link to a
+    /// tenant was followed names no tenant), or the scope the shell is already on - makes no <see cref="StudioState.SetScopeAsync" />
+    /// call, and the address follows the scope instead (<see cref="SyncScopeToUrl" />), so the bar names the scope on screen again
+    /// (1.2-UX-FIX; it used to be left as it was). Note that the browser reports Back and Forward as intercepted too (blazor.web.js
+    /// <c>onBrowserInitiatedPopState</c> notifies with <c>interceptedLink: true</c>), so a Back to an address that names <em>another</em>
+    /// store, database or tenant moves the scope to it, as a click would; the window tests that report it as not intercepted prove the
+    /// rewrite for a programmatic push. The handler is synchronous, an
+    /// <see cref="EventHandler{TEventArgs}" /> that starts the async work and does not wait for it, never an <c>async</c> lambda
+    /// (hard rule 6).
+    /// </para>
+    /// </remarks>
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        // A module's page (D34) is rendered and nothing else: no host scope is read from its address, none is applied, and the address is
+        // not rewritten. The host's scope stays in StudioState for the way back, and the rail's host links carry it. Whether the page is the
+        // database's is OnParametersSet's; this handler is the scope's alone.
+        if (!IsMine(e.Location))
+        {
+            return;
+        }
+
+        (string? storeKey, string? databaseId, string? tenantId) = StudioScopeQuery.Read(e.Location, Descriptor.SourceQueryParameter);
+
+        if (e.IsNavigationIntercepted && NamesAnotherScope(State.ActiveScope, storeKey, databaseId, tenantId))
+        {
+            _ = InvokeAsync(() => ApplyAddressScopeAsync(storeKey, databaseId, tenantId));
+            return;
+        }
+
+        // Anything else - a push built from an address before a picker change, an address that names no scope or only part of the scope
+        // on screen (Back to the entry from before a link to a tenant was followed names no tenant, 1.2-UX-FIX), the same scope - leaves
+        // the scope where it is, and the address follows it: the bar names what is on screen. Nothing is written when it already does.
+        SyncScopeToUrl();
+    }
+
+    /// <summary>
+    /// Whether an address names a store, database or tenant that is not the active scope's: each part it names is compared, and a part
+    /// it leaves out says nothing. An address naming no scope, or the scope the shell is on, is not another scope.
+    /// </summary>
+    internal static bool NamesAnotherScope(StudioScope? active, string? storeKey, string? databaseId, string? tenantId)
+    {
+        return (storeKey is not null && !string.Equals(storeKey, active?.StoreKey, StringComparison.OrdinalIgnoreCase))
+            || (databaseId is not null && !string.Equals(databaseId, active?.DatabaseId, StringComparison.OrdinalIgnoreCase))
+            || (tenantId is not null && !string.Equals(tenantId, active?.TenantId, StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The call the first load makes, for a clicked link: a value the listings do not carry, or the policy refuses, is ignored by
+    /// <see cref="StudioState" /> exactly as it is at first load. A failure leaves the scope as it was.
+    /// </summary>
+    private async Task ApplyAddressScopeAsync(string? storeKey, string? databaseId, string? tenantId)
+    {
+        try
+        {
+            await State.SetScopeAsync(storeKey, databaseId, tenantId);
+
+            // A scope the listings do not carry, or the policy refuses, was ignored and the scope did not move: the address stops naming
+            // the refused value and names the scope on screen (1.2-UX-FIX-FU). A no-op when the scope moved, which has already been written.
+            SyncScopeToUrl();
+        }
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
+        {
+            // The circuit went away while the scope was being read: nothing to apply it to.
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            Logger.LogDebug(e, "The studio could not apply the scope a clicked link names; the scope stays as it was");
+        }
+    }
+
+    /// <summary>
+    /// The scope gate, asked now that a page of the database is on screen again. A failure fails closed: the page says the
+    /// scope is not authorized rather than rendering without the gate's answer.
+    /// </summary>
+    private async Task UpdateAccessAfterLeavingModuleAsync()
+    {
+        try
+        {
+            await UpdateAccessAsync();
+        }
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
+        {
+            // The circuit went away while the gate was being asked.
+            return;
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            Logger.LogDebug(e, "The studio could not ask the scope policy after a module's page; the page stays closed");
+            SetAccess(ScopeAccess.Denied);
+        }
+    }
+
+    /// <summary>
+    /// Whether the page <paramref name="uri" /> names is the database's (D34): the route table matches the address, and the matched
+    /// page's assembly decides. An address no page matches is the database's, as it was the host studio's.
+    /// </summary>
+    private bool IsMine(string uri)
+    {
+        if (StudioLink.ToDashboardRelativePath(uri, Navigation.BaseUri, Settings) is not { } relative
+            || Shell.Routes.Match(relative, Settings) is not { } match)
+        {
+            return true;
+        }
+
+        return Shell.ModuleOf(match.PageType) is { } module && string.Equals(module.Key, Descriptor.Key, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Re-asks the policy about whatever the studio is now about. The previous answer stands while the
+    /// new one is being fetched: dropping back to <see cref="ScopeAccess.Unknown" /> would tear the page
+    /// down and build it again on every switch between two stores the visitor may see.
+    /// </summary>
+    private async Task UpdateAccessAsync()
+    {
+        // The gate is not asked on a module's page (D34); it is asked again, below, when the visitor is back on the database's.
+        if (!Active)
+        {
+            return;
+        }
+
+        StudioScope? scope = State.ActiveScope;
+        if (scope is null)
+        {
+            // Nothing to be about. The page renders and says so for itself, which is the honest answer
+            // both when no Marten store is registered and when the visitor may see none of them.
+            SetAccess(ScopeAccess.Granted);
+            return;
+        }
+
+        SetAccess(await Authorization.IsAuthorizedAsync(scope)
+            ? ScopeAccess.Granted
+            : ScopeAccess.Denied);
+    }
+
+    /// <summary>
+    /// Writes the circuit's answer - unless this host has been disposed: the answer belongs to the circuit, a layout that is re-created
+    /// leaves the old host's policy question in flight, and its late answer must not overwrite the new host's.
+    /// </summary>
+    private void SetAccess(ScopeAccess access)
+    {
+        if (!disposed)
+        {
+            Access.Set(access);
+        }
+    }
+
+    private async Task OnScopeChanged()
+    {
+        // The address names the selected scope whatever the policy says, so it is written first (1.2, N5b): the window in which a page's
+        // push and this rewrite, each built from an address the other has not reported yet, can overwrite each other shrinks from the
+        // policy's time plus a round trip to a round trip.
+        SyncScopeToUrl();
+        await UpdateAccessAsync();
+    }
+
+    /// <summary>
+    /// Writes the active scope into the query string, so the address bar names what is on screen and a
+    /// link someone pastes into a chat reopens the same store, database and tenant (plan D9).
+    /// </summary>
+    /// <remarks>
+    /// Only once the circuit exists. During static server-side rendering a <c>NavigateTo</c> is a
+    /// redirect, which would turn the first page load into a round trip; <see cref="OnAfterRender" />
+    /// is the one signal that says "this render is interactive" without needing renderer information a
+    /// test host may not supply.
+    /// </remarks>
+    private void SyncScopeToUrl()
+    {
+        // Not before the address's own scope was read (addressScopeApplied): the catalog may still be loading, ActiveScope is null until
+        // it has, and a rewrite then would strip a pasted ?store=&db= or write the default database over it (D9).
+        if (!interactive || !addressScopeApplied)
+        {
+            return;
+        }
+
+        // Only a studio page is ever rewritten (1.2-UX-FIX-FU4), by every writer - first load, a render, a scope change, a location change:
+        // an address no page matches (a file, an endpoint) is the browser's to load, as it was named (StudioRoutes), and a scope appended
+        // to it would change what is loaded - while a force-load of it is in flight, say.
+        if (StudioLink.ToDashboardRelativePath(Navigation.Uri, Navigation.BaseUri, Settings) is not { } relative
+            || Shell.Routes.Match(relative, Settings) is not { } match
+            || Shell.ModuleOf(match.PageType) is not { } module
+            || !string.Equals(module.Key, Descriptor.Key, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        // The address on screen keeps naming a tenant the studio could not place (ZW38): the scope on screen is the usual database with no
+        // tenant, and rewriting the address to it would drop the tenant, so the page would read its id in the wrong database. Only that
+        // address is kept - judged from the address itself, so an unplaced address elsewhere in the circuit's history changes nothing for any
+        // other (Back to an address that names no database, a link to another store): those are rewritten as in 1.2.0. The next scope
+        // change clears the placement and writes the scope it moved to.
+        (string? addressStore, string? addressDatabase, string? addressTenant) = StudioScopeQuery.Read(Navigation.Uri, Descriptor.SourceQueryParameter);
+        if (State.IsTenantUnplaced(addressStore, addressDatabase, addressTenant))
+        {
+            return;
+        }
+
+        string target = StudioScopeQuery.WithScope(Navigation, State.ActiveScope, Descriptor.SourceQueryParameter);
+        if (!string.Equals(target, Navigation.Uri, StringComparison.Ordinal))
+        {
+            Navigation.NavigateTo(target, forceLoad: false, replace: true);
+        }
+    }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        interactive = true;
+        SyncScopeToUrl();
+    }
+
+    public void Dispose()
+    {
+        disposed = true;
+        State.ScopeChanged -= OnScopeChanged;
+
+        if (locationSubscribed)
+        {
+            Navigation.LocationChanged -= OnLocationChanged;
+        }
+    }
+}

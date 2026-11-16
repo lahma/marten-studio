@@ -1,0 +1,1908 @@
+using System.Globalization;
+
+using DataStudio.Postgres.Internal.Sql;
+using DataStudio.Postgres.Services.Database;
+using DataStudio.Postgres.Services.Health;
+using DataStudio.Postgres.Services.Health.Checks;
+using DataStudio.Postgres.Services.Query;
+using DataStudio.Postgres.Services.Schema;
+using DataStudio.Postgres.Services.Settings;
+using DataStudio.Postgres.Services.Sources;
+
+using Microsoft.Extensions.Logging;
+
+using Npgsql;
+
+namespace DataStudio.Postgres.Services.Statements;
+
+/// <summary>What a statement row is ranked by on the Statements page.</summary>
+internal enum StatementRanking
+{
+    /// <summary>Execution time over the window (issue #8 G6).</summary>
+    TotalTime,
+
+    /// <summary>Aurora's storage-level reads over the window (issue #8 A5) - offered only where they are read.</summary>
+    StorageReads,
+}
+
+/// <summary>What a statement table is sorted by, among the top statements it shows.</summary>
+internal enum StatementSort
+{
+    /// <summary>Execution time.</summary>
+    TotalTime,
+
+    /// <summary>Mean execution time a call.</summary>
+    Mean,
+
+    /// <summary>Calls.</summary>
+    Calls,
+
+    /// <summary>Rows.</summary>
+    Rows,
+
+    /// <summary>Shared blocks read from outside the cache.</summary>
+    SharedRead,
+
+    /// <summary>Temporary blocks written.</summary>
+    Temp,
+
+    /// <summary>Aurora's storage-level reads.</summary>
+    StorageReads,
+}
+
+/// <summary>One statement as one visitor may see it.</summary>
+/// <param name="QueryId">Its <c>queryid</c>.</param>
+/// <param name="Text">Its text, masked for this visitor and capped, or <see langword="null" /> when none is shown.</param>
+/// <param name="TextNote">Why the text is withheld, cut or missing - or <see langword="null" />.</param>
+/// <param name="GroupKey">Its group's identity, as this visitor may see the group.</param>
+/// <param name="GroupLabel">Its group, as this visitor may see it.</param>
+/// <param name="Window">Its counters over the window, or <see langword="null" /> when it was not watched over it.</param>
+/// <param name="SinceBegan">Its counters since they began.</param>
+/// <param name="Share">Its share of the window's execution time, or <see langword="null" />.</param>
+/// <param name="WatchedFrom">When its part of the window began, when later than the window's start.</param>
+/// <param name="ParallelNote">What its parallel workers say (PostgreSQL 18+), when its plans were given fewer than they asked for.</param>
+internal sealed record StatementRowView(
+    long QueryId,
+    string? Text,
+    string? TextNote,
+    string GroupKey,
+    string GroupLabel,
+    StatementCounts? Window,
+    StatementCounts SinceBegan,
+    double? Share,
+    DateTimeOffset? WatchedFrom,
+    string? ParallelNote)
+{
+    /// <summary>Its <c>queryid</c> as the page prints it: a string, because it does not fit a JavaScript number.</summary>
+    public string Key => QueryId.ToString(CultureInfo.InvariantCulture);
+
+    /// <summary>What the page ranks and sorts by: the window's counters.</summary>
+    public StatementCounts? Ranked => Window;
+
+    /// <summary>
+    /// The counters <c>pg_stat_statements</c> 1.12 adds (PostgreSQL 18+), since this statement's counters began - or
+    /// <see langword="null" /> where the installed extension is older, and where the statement has nothing to show of them.
+    /// </summary>
+    public StatementServerCounters? ServerCounters { get; init; }
+
+    /// <summary>
+    /// When this statement's counters began, as the extension knows it (PostgreSQL 17+: its entry's own <c>stats_since</c>; before,
+    /// the extension's <c>stats_reset</c>) - what a since-mark (1.2-H-A) tells an entry started after it from one it saw.
+    /// </summary>
+    public DateTimeOffset? CountersSince { get; init; }
+
+    /// <summary>
+    /// Why a since-mark counts nothing for this statement - it was not among the kept statements at the mark, or its counters
+    /// went down since - or <see langword="null" />. Set only by <see cref="StatementsSinceMark.Apply" />.
+    /// </summary>
+    public string? MarkNote { get; init; }
+}
+
+/// <summary>
+/// What <c>pg_stat_statements</c> 1.12 (PostgreSQL 18) counts for one statement beyond the window's columns: the parallel
+/// workers its plans asked for and were given, and how often the WAL buffers were full. All since its counters began - the
+/// page's window is made of the series the statement history keeps, and these three are not among them.
+/// </summary>
+/// <param name="WorkersPlanned"><c>parallel_workers_to_launch</c>: the workers its parallel plans asked for.</param>
+/// <param name="WorkersLaunched"><c>parallel_workers_launched</c>: the workers it was given.</param>
+/// <param name="WalBuffersFull"><c>wal_buffers_full</c>: how often it wrote WAL because the buffers were full.</param>
+internal sealed record StatementServerCounters(long? WorkersPlanned, long? WorkersLaunched, long? WalBuffersFull)
+{
+    /// <summary>
+    /// What the counters say, or <see langword="null" /> when all of them are zero or unread: a statement that never ran a
+    /// parallel plan and never filled the WAL buffers has nothing to add to its row.
+    /// </summary>
+    public string? Text
+    {
+        get
+        {
+            List<string> parts = [];
+
+            if (WorkersPlanned is > 0 and { } planned)
+            {
+                parts.Add(
+                    "parallel workers: asked for " + TableText.Count(planned)
+                    + (WorkersLaunched is { } launched ? ", given " + TableText.Count(launched) : string.Empty));
+            }
+
+            if (WalBuffersFull is > 0 and { } full)
+            {
+                parts.Add("WAL buffers full " + TableText.Count(full) + (full == 1 ? " time" : " times"));
+            }
+
+            return parts.Count == 0
+                ? null
+                : "Since its counters began (PostgreSQL 18): " + string.Join("; ", parts) + ".";
+        }
+    }
+}
+
+/// <summary>One group of statements, summed - the page's group view.</summary>
+/// <param name="Key">The group's identity.</param>
+/// <param name="Label">What it is called.</param>
+/// <param name="Statements">How many statements of the top ones are in it.</param>
+/// <param name="Counts">Their window counters, summed.</param>
+/// <param name="Share">Their share of the window's execution time, summed.</param>
+internal sealed record StatementGroupRowView(string Key, string Label, int Statements, StatementCounts Counts, double? Share);
+
+/// <summary>What the Statements page draws for one visitor.</summary>
+internal sealed record StatementsView
+{
+    /// <summary>The page's choices of "top N".</summary>
+    public static IReadOnlyList<int> TopChoices { get; } = [10, 25, 50, StatementReads.PageTop];
+
+    /// <summary>Why nothing is shown, or <see cref="DatabaseRefusal.None" />.</summary>
+    public DatabaseRefusal Refusal { get; init; }
+
+    /// <summary>The sentence for a refusal.</summary>
+    public string? Reason { get; init; }
+
+    /// <summary>When the statement sweep read them.</summary>
+    public DateTimeOffset? MeasuredAt { get; init; }
+
+    /// <summary>Whether the read read, or which state stopped it.</summary>
+    public StatementsState State { get; init; }
+
+    /// <summary>What the extension's status is in words - not installed, not preloaded, too old - naming who can fix it on this platform.</summary>
+    public string? Status { get; init; }
+
+    /// <summary>Whether the window is one the statement history watched.</summary>
+    public bool Watched { get; init; }
+
+    /// <summary>The window, in words: "over the last 25 min the statement checks watched (…)", or since when the counters count.</summary>
+    public string? WindowText { get; init; }
+
+    /// <summary>What the statistics window says about the server's counters, when it bounds the window - or <see langword="null" />.</summary>
+    public string? Basis { get; init; }
+
+    /// <summary>What the numbers are and are not.</summary>
+    public string? Caveat { get; init; }
+
+    /// <summary>The window's execution time over every statement of the reading role here.</summary>
+    public double TotalExecMs { get; init; }
+
+    /// <summary>Every statement's execution time since the counters began (1.2-H-A): what a since-mark's total is subtracted from.</summary>
+    public double AllExecMsSinceBegan { get; init; }
+
+    /// <summary>Entries the extension evicted over the advisor's window (or since its last reset, before a window), when it says; for the caveat's sentence.</summary>
+    public double? Evicted { get; init; }
+
+    /// <summary>Whether <see cref="Evicted" /> is over a window the statement history watched.</summary>
+    public bool EvictedOverWatchedWindow { get; init; }
+
+    /// <summary>When a since-mark is counting (1.2-H-A), the moment of the read it counts from - the page's window line says so; otherwise <see langword="null" />.</summary>
+    public DateTimeOffset? MarkedAt { get; init; }
+
+    /// <summary>How long ago the mark's read was, as of this read, while a since-mark is counting.</summary>
+    public TimeSpan? MarkSpan { get; init; }
+
+    /// <summary><c>pg_stat_statements_info.stats_reset</c> (14+), or <see langword="null" />.</summary>
+    public DateTimeOffset? StatsReset { get; init; }
+
+    /// <summary>The statistics window the statement history is bounded by, when the sweep read its signals.</summary>
+    public StatisticsWindow? Statistics { get; init; }
+
+    /// <summary>When the window began (or, when it was not watched, when the counters began, if the extension says).</summary>
+    public DateTimeOffset? From { get; init; }
+
+    /// <summary>The span the window covers, when it was watched or its start is known.</summary>
+    public TimeSpan? Span { get; init; }
+
+    /// <summary>Every statement the read kept, the most execution time over the window first.</summary>
+    public IReadOnlyList<StatementRowView> Rows { get; init; } = [];
+
+    /// <summary>Whether Aurora's storage-level reads are read, so "rank by storage reads" is offered (A5).</summary>
+    public bool StorageReads { get; init; }
+
+    /// <summary>Why every statement's text is withheld from this visitor, when it is - or <see langword="null" />.</summary>
+    public string? TextsWithheld { get; init; }
+
+    /// <summary>The studio's own cost in this database, from the one meter the Health page reads too.</summary>
+    public StudioCost? StudioCost { get; init; }
+
+    /// <summary>The studio's own share, in words: what the meter counts, and which of the studio's statements the list holds.</summary>
+    public string? StudioCostText { get; init; }
+
+    /// <summary>What the read ran, for "Show SQL".</summary>
+    public IReadOnlyList<HealthStatement> Statements { get; init; } = [];
+
+    /// <summary>A refusal: nothing but the sentence.</summary>
+    public static StatementsView Refused(DatabaseRefusal refusal, string reason) => new() { Refusal = refusal, Reason = reason };
+
+    /// <summary>
+    /// The top <paramref name="count" /> rows by <paramref name="ranking" />, then sorted by <paramref name="sort" />: what the
+    /// statements table draws. A row not watched over the window ranks after every watched one. Pure.
+    /// </summary>
+    public IReadOnlyList<StatementRowView> Top(int count, StatementRanking ranking, StatementSort sort)
+    {
+        IOrderedEnumerable<StatementRowView> ranked = ranking == StatementRanking.StorageReads && StorageReads
+            ? Rows.Where(static x => x.Window?.StorageBlocksRead > 0).OrderByDescending(static x => x.Window!.StorageBlocksRead ?? 0)
+            : Rows.OrderByDescending(static x => x.Window?.ExecMs ?? double.MinValue);
+
+        List<StatementRowView> top = [.. ranked.ThenBy(static x => x.QueryId).Take(Math.Max(count, 0))];
+
+        return [.. top.OrderByDescending(x => SortKey(x, sort) ?? double.MinValue).ThenBy(static x => x.QueryId)];
+    }
+
+    /// <summary>
+    /// The top <paramref name="count" /> rows by <paramref name="ranking" />, summed by group, the most execution time first:
+    /// the page's group view. Pure.
+    /// </summary>
+    public IReadOnlyList<StatementGroupRowView> Groups(int count, StatementRanking ranking)
+    {
+        return
+        [
+            .. Top(count, ranking, StatementSort.TotalTime)
+                .Where(static x => x.Window is not null)
+                .GroupBy(static x => x.GroupKey, StringComparer.Ordinal)
+                .Select(static group => new StatementGroupRowView(
+                    group.Key,
+                    group.First().GroupLabel,
+                    group.Count(),
+                    new StatementCounts(
+                        group.Sum(static x => x.Window!.Calls),
+                        group.Sum(static x => x.Window!.ExecMs),
+                        group.Sum(static x => x.Window!.Rows),
+                        group.Sum(static x => x.Window!.SharedBlocksHit),
+                        group.Sum(static x => x.Window!.SharedBlocksRead),
+                        group.Sum(static x => x.Window!.TempBlocksWritten),
+                        group.Sum(static x => x.Window!.IoReadMs),
+                        group.Any(static x => x.Window!.StorageBlocksRead is not null) ? group.Sum(static x => x.Window!.StorageBlocksRead ?? 0) : null),
+                    group.Any(static x => x.Share is not null) ? group.Sum(static x => x.Share ?? 0) : null))
+                .OrderByDescending(static x => x.Counts.ExecMs)
+                .ThenBy(static x => x.Label, StringComparer.Ordinal),
+        ];
+    }
+
+    private static double? SortKey(StatementRowView row, StatementSort sort) => row.Window is not { } counts ? null : sort switch
+    {
+        StatementSort.Mean => counts.MeanMs,
+        StatementSort.Calls => counts.Calls,
+        StatementSort.Rows => counts.Rows,
+        StatementSort.SharedRead => counts.SharedBlocksRead,
+        StatementSort.Temp => counts.TempBlocksWritten,
+        StatementSort.StorageReads => counts.StorageBlocksRead,
+        _ => counts.ExecMs,
+    };
+}
+
+/// <summary>What the Statements page reads: one database's statements, as one visitor may see them.</summary>
+/// <remarks>An interface so a page can be rendered in a component test with a fake behind it (D12).</remarks>
+internal interface IStatementsService
+{
+    /// <summary>
+    /// The statements of the scope's database, for a visitor through the activity gate - the statement sweep's read, run now
+    /// when the last one is more than five minutes old: the page's load and its Refresh. Never throws but for cancellation; a
+    /// refusal or a failed read is a value.
+    /// </summary>
+    /// <param name="scope">The visitor's scope; its tenant is dropped, because a statement belongs to no tenant.</param>
+    /// <param name="cancellationToken">Cancels this caller's wait.</param>
+    Task<StatementsView> GetAsync(StudioScope scope, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// As <see cref="GetAsync" />, behind the same gate, but from the last statement sweep that finished, however old - never
+    /// starting one: the page's poll (W5-Q1-fix F6). With none finished, <see cref="StatementsState.NotRun" />.
+    /// </summary>
+    /// <param name="scope">The visitor's scope; its tenant is dropped, because a statement belongs to no tenant.</param>
+    /// <param name="cancellationToken">Cancels this caller's wait.</param>
+    Task<StatementsView> GetLatestAsync(StudioScope scope, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The drill-in (X1): one statement the statement sweep read, as this visitor may see it, and its generic plan - planned
+    /// now, behind the same gate as the page, and audited. Never throws but for cancellation; a refusal, a statement with no
+    /// plan and a plan Postgres refused are values.
+    /// </summary>
+    /// <param name="scope">The visitor's scope; its tenant is dropped, because a statement belongs to no tenant.</param>
+    /// <param name="queryId">The statement's <c>queryid</c>.</param>
+    /// <param name="cancellationToken">Cancels the plan.</param>
+    Task<StatementPlanView> PlanAsync(StudioScope scope, long queryId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// X2: the drill-in's generic plan of one statement now and under one hypothetical index - behind the same gate as the
+    /// drill-in, planned the same way, masked the same way, and audited by <c>queryid</c>. Only an index the plan itself suggests
+    /// is imagined. Never throws but for cancellation.
+    /// </summary>
+    /// <param name="scope">The visitor's scope; its tenant is dropped.</param>
+    /// <param name="queryId">The statement's <c>queryid</c>.</param>
+    /// <param name="index">The index to imagine, as the drill-in's plan suggested it.</param>
+    /// <param name="cancellationToken">Cancels the what-if; never the reset after it.</param>
+    Task<WhatIfResult> WhatIfAsync(StudioScope scope, long queryId, HypotheticalIndex index, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 1.2-INDEX-A: the index advisor - the statements with the most execution time that this visitor may see, planned now and again
+    /// under each index their plans suggest, imagined one at a time with hypopg, ranked by the planner's cost saved times calls.
+    /// Behind the Statements page's own gate, asked again here; one audit entry per run. Nothing is created, and nothing is applied.
+    /// Never throws but for cancellation: a refusal, hypopg's absence and every failure are values.
+    /// </summary>
+    /// <param name="scope">The visitor's scope; its tenant is dropped.</param>
+    /// <param name="request">Every table, or one - and the visitor's own index on it.</param>
+    /// <param name="cancellationToken">Cancels the run; hypopg is reset and the connection cleaned up first.</param>
+    Task<IndexAdviceView> AdviseIndexesAsync(StudioScope scope, IndexAdviceRequest request, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// As <see cref="AdviseIndexesAsync(StudioScope, IndexAdviceRequest, CancellationToken)" />, for a caller that records the press
+    /// itself: a card action's runner writes the one audit entry, with this run's counts (<see cref="IndexAdviceView.AuditOutcome" />),
+    /// so a press is one entry and not two. The gate is asked all the same.
+    /// </summary>
+    /// <param name="scope">The visitor's scope; its tenant is dropped.</param>
+    /// <param name="request">Every table, or one - and the visitor's own index on it.</param>
+    /// <param name="recordAudit">Whether this run writes its own audit entry; the Statements page's does, a card action's does not.</param>
+    /// <param name="cancellationToken">Cancels the run.</param>
+    Task<IndexAdviceView> AdviseIndexesAsync(StudioScope scope, IndexAdviceRequest request, bool recordAudit, CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// The Statements page's per-visitor half (W5-Q1): the shared facts (<see cref="IStatementFacts" />), shown through this
+/// visitor's gates.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>The activity gate, and only then the facts</b> (D29). Statements are other programs' source text and other sessions'
+/// work, so the page is <see cref="HealthGate.Activity" />'s, asked as Database › Sessions asks its details: the capability
+/// (<c>ViewDatabaseActivity</c>, off under <c>ReadOnly</c>) before anybody is asked who is asking; then the scope, resolved
+/// with no tenant - the store policy, asked by the resolver; then the store policy again about the store's registered key and
+/// the database's own identity when the visitor spelt either otherwise; then the write policy with the capability named,
+/// against the same tenant-less resource. The facts are read only past all four, so a visitor short of the gate never causes
+/// a statement sweep. A refusal is event 9450 at Debug and the page's sentence, never an audit entry: the page asks once per
+/// load and poll, and a closed gate refuses nothing a person did.
+/// </para>
+/// <para>
+/// <b>The first exception, inherited, and its fence unchanged.</b> The statements are the statement checks' own read
+/// (D29's first exception): <c>pg_stat_statements</c> as the store's own role, <c>userid = current_user</c> and this database
+/// (<c>StatementChecksFenceTests</c>). A text still carrying a string constant as written, or that is not a plain query or
+/// write, is withheld (T02's rule); every other is shown with its comments masked, then through this visitor's own mask -
+/// Database › Sessions' rule (<see cref="SessionQueryText" />), with the database browser's gate for the schemas they may not
+/// see, a hidden document type and another store's tables - capped at the 4,096 characters the read reads. A group that names
+/// a table in a schema this visitor may not see is shown without it.
+/// </para>
+/// <para>
+/// <b>Audited by signature, never per poll.</b> The first read of a store's database in a circuit is one Activity entry under
+/// <c>ViewDatabaseActivity</c> and one event 9452; the page's interval reads and its Refresh repeat that signature and
+/// record nothing, as Database › Sessions' details do.
+/// </para>
+/// <para>
+/// <b>A poll never runs the checks</b> (W5-Q1-fix F6). <see cref="GetAsync" /> - the page's load and Refresh - runs a statement
+/// sweep when the last is more than five minutes old; <see cref="GetLatestAsync" /> - its interval read - shows the last one
+/// that finished and starts none, so a tab left open does not plan T02's statements every five minutes on nobody's behalf.
+/// Both pass the same gate first.
+/// </para>
+/// <para>
+/// <b>The drill-in (X1).</b> <see cref="PlanAsync" /> passes the same gate, finds the statement among those the statement sweep
+/// read, and plans it only when this visitor may read its text and T02 would plan it: never a text withheld at read or by the
+/// visitor's mask, never one that names a schema they may not see (<see cref="TextNamesWithheld" />), never a write or a
+/// locking read, never a cut text. The plan is the generic plan, planned as
+/// <c>SqlConsoleRole</c> under the visitor's own <c>search_path</c> (<see cref="StatementPlanReader" />); a plan that reads a
+/// table in a schema the visitor may not see, or a table the statement rules withhold, is not shown; every other plan is masked
+/// as the text is. Each plan is one Activity entry, naming the <c>queryid</c> and never the text.
+/// </para>
+/// </remarks>
+internal sealed class StatementsService : IStatementsService
+{
+    /// <summary>What the audit ring calls reading the Statements page.</summary>
+    internal const string Action = "Read database statements";
+
+    /// <summary>What the audit ring calls the drill-in's plan of a statement (X1).</summary>
+    internal const string PlanAction = "Plan database statement";
+
+    /// <summary>What the drill-in says of a <c>queryid</c> the statement sweep did not read.</summary>
+    internal const string NotAmong =
+        "This statement is not among the ones the statement checks read for this database - the most expensive "
+        + "statements of its role, and the checks' own picks. It may have dropped out since the link was made, or been "
+        + "evicted from pg_stat_statements.";
+
+    /// <summary>What the drill-in says of a plan that reads a table in a schema the visitor may not see.</summary>
+    internal const string PlanReadsWithheldSchema =
+        "Not shown: its plan reads a table in a schema you may not see - through a view, or a function with a SQL-standard body.";
+
+    /// <summary>
+    /// 1.0-HARD: what the drill-in says of a text that names a view or a SQL function, in a schema the visitor may see, that reaches
+    /// into one they may not - a function there the planner would inline, a view there it would expand (<c>StatementPlanReader</c>).
+    /// </summary>
+    internal const string ReachesWithheldSchema =
+        "Not planned: it names a view or a SQL function that reads into a schema you may not see, and its plan would show what "
+        + "that schema's views and functions are made of.";
+
+    /// <summary>What the drill-in says of a text that names a schema the visitor may not see (<see cref="TextNamesWithheld" />).</summary>
+    internal const string NamesWithheldSchema =
+        "Not planned: it names a schema you may not see, and its plan would show what that schema's views and SQL functions are made of.";
+
+    /// <summary>What the drill-in says of a text that spells a name in Unicode escapes while a schema is withheld from the visitor.</summary>
+    internal const string NamesEscapedIdentifier =
+        "Not planned: it spells a name in Unicode escapes (U&\"…\"), which the studio cannot check against the schemas you may not see.";
+
+    /// <summary>What the audit ring says was read.</summary>
+    internal const string Target = "top statements by execution time (pg_stat_statements)";
+
+    /// <summary>What a statement whose text the extension did not return says.</summary>
+    internal const string TextNotReturned = "Not read: pg_stat_statements did not return its text - it may have been evicted since its counters were read.";
+
+    /// <summary>What a poll says when no statement sweep has finished for the database, since a poll starts none.</summary>
+    internal const string NotRun =
+        "The statement checks have not finished a read of this database yet, and the page does not start one on its own: "
+        + "Refresh reads pg_stat_statements now.";
+
+    /// <summary>What every statement says when this visitor's mask could not be read.</summary>
+    internal const string TextsUnchecked =
+        "Every statement's text is withheld: the schemas it may name could not be checked against the ones you may see.";
+
+    // The audit ledger is keyed by store, database and what was read, as the Sessions page's is; these name "what".
+    private const string LedgerSchema = "(activity)";
+    private const string LedgerRelation = "statements";
+    private const string LedgerKind = "top";
+    private const string Signature = "top";
+
+    private readonly IStudioSettings settings;
+    private readonly StudioCapabilityGuard capabilities;
+    private readonly StudioAuthorization authorization;
+    private readonly StudioSourceResolver resolver;
+    private readonly IStatementFacts facts;
+    private readonly StudioActionLog audit;
+    private readonly StudioLogThrottle throttle;
+    private readonly ILogger<StatementsService> logger;
+    private readonly DatabaseAccess? access;
+    private readonly StudioDatabaseTime meter;
+    private readonly StatementPlanReader planner;
+    private readonly TimeProvider timeProvider;
+    private readonly HypotheticalIndexReader hypothetical;
+    private readonly IReadOnlyList<IIndexCandidateContributor> contributors;
+    private readonly IndexAdvisorFlights flights;
+    private readonly TableRowAuditLedger ledger = new();
+
+    // 1.2-INDEX-A: one index-advice run at a time in this tab (the service is the circuit's).
+    private int advising;
+
+    public StatementsService(
+        IStudioSettings settings,
+        StudioCapabilityGuard capabilities,
+        StudioAuthorization authorization,
+        StudioSourceResolver resolver,
+        IStatementFacts facts,
+        StudioActionLog audit,
+        StudioLogThrottle throttle,
+        ILogger<StatementsService> logger,
+        DatabaseAccess? access = null,
+        StudioDatabaseTime? meter = null,
+        StatementPlanReader? planner = null,
+        TimeProvider? timeProvider = null,
+        HypotheticalIndexReader? hypothetical = null,
+        IEnumerable<IIndexCandidateContributor>? contributors = null,
+        IndexAdvisorFlights? flights = null)
+    {
+        this.settings = settings;
+        this.capabilities = capabilities;
+        this.authorization = authorization;
+        this.resolver = resolver;
+        this.facts = facts;
+        this.audit = audit;
+        this.throttle = throttle;
+        this.logger = logger;
+        this.access = access;
+        this.meter = meter ?? StudioDatabaseTime.Shared;
+        this.planner = planner ?? new StatementPlanReader(settings, Microsoft.Extensions.Logging.Abstractions.NullLogger<StatementPlanReader>.Instance);
+        this.timeProvider = timeProvider ?? TimeProvider.System;
+        this.hypothetical = hypothetical ?? new HypotheticalIndexReader(settings, Microsoft.Extensions.Logging.Abstractions.NullLogger<HypotheticalIndexReader>.Instance);
+        this.contributors = [.. contributors ?? []];
+        this.flights = flights ?? new IndexAdvisorFlights();
+    }
+
+    /// <summary>How many first reads this circuit has recorded, for a test.</summary>
+    internal int RecordedReads => ledger.Count;
+
+    /// <inheritdoc />
+    public Task<StatementsView> GetAsync(StudioScope scope, CancellationToken cancellationToken = default) =>
+        GetCoreAsync(scope, run: true, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<StatementsView> GetLatestAsync(StudioScope scope, CancellationToken cancellationToken = default) =>
+        GetCoreAsync(scope, run: false, cancellationToken);
+
+    /// <summary>The gate, then the facts: a sweep's, run when stale if <paramref name="run" />, the last finished one if not.</summary>
+    private async Task<StatementsView> GetCoreAsync(StudioScope scope, bool run, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+
+        (StatementsView? refused, ResolvedSource? passed, StudioScope whole) = await PassAsync(scope, cancellationToken).ConfigureAwait(false);
+
+        if (refused is not null || passed is not { } database)
+        {
+            return refused ?? StatementsView.Refused(DatabaseRefusal.Unavailable, "The database could not be resolved.");
+        }
+
+        // 4. Only now anything about the database: the statement sweep's read, joined or taken while it is fresh - or, for a
+        // poll, the last one that finished, which starts nothing.
+        StatementFacts? latest;
+
+        try
+        {
+            latest = run ? await facts.ReadAsync(database, cancellationToken).ConfigureAwait(false) : facts.Latest(database);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return StatementsView.Refused(DatabaseRefusal.Unavailable, Failure(exception, database));
+        }
+
+        if (latest is not { } read)
+        {
+            return new StatementsView
+            {
+                State = StatementsState.NotRun,
+                Status = NotRun,
+                StudioCost = meter.Total(CostKey(database.Target)),
+                StudioCostText = StudioCostText(),
+            };
+        }
+
+        DatabaseGateRead? gate = read.Statements.Count == 0 ? null : await GateAsync(whole, database, cancellationToken).ConfigureAwait(false);
+
+        StatementsView view = Show(read, gate) with
+        {
+            StudioCost = meter.Total(CostKey(database.Target)),
+        };
+
+        if (read.State == StatementsState.Read)
+        {
+            await RecordFirstReadAsync(whole, read).ConfigureAwait(false);
+        }
+
+        return view;
+    }
+
+    /// <summary>
+    /// The page's gate, in its order (the remarks): the capability, the scope resolved with no tenant, then the store policy and
+    /// the write policy of the store and database it resolved to. A refusal, or the database resolved for the whole of it.
+    /// </summary>
+    private async Task<(StatementsView? Refused, ResolvedSource? Database, StudioScope Whole)> PassAsync(StudioScope scope, CancellationToken cancellationToken)
+    {
+        StudioScope asked = scope with { TenantId = null };
+        StudioText text = settings.Text;
+
+        // 1. The capability, before anybody is asked who is asking.
+        if (!capabilities.IsEnabled(StudioCapability.ViewDatabaseActivity))
+        {
+            return (Refuse(asked, capabilities.ReadOnly ? DatabaseRefusal.ReadOnly : DatabaseRefusal.CapabilityOff,
+                capabilities.ReadOnly ? text.StatementsReadOnlyDenial : text.StatementsCapabilityDenial), null, asked);
+        }
+
+        // 2. The scope, resolved with no tenant: the store policy, which the resolver asks before it looks anything up.
+        ResolvedSource resolved;
+
+        try
+        {
+            resolved = await resolver.ResolveAsync(asked, null, cancellationToken).ConfigureAwait(false);
+        }
+        catch (StudioNotAuthorizedException)
+        {
+            return (Refuse(asked, DatabaseRefusal.StorePolicy, text.StatementsStorePolicyDenial), null, asked);
+        }
+        catch (Exception exception) when (exception is KeyNotFoundException or StudioStoreUnavailableException)
+        {
+            return (StatementsView.Refused(DatabaseRefusal.Unavailable, exception.Message), null, asked);
+        }
+
+        // 3. The two policies, of the store and database it resolved to, by their own names (D29).
+        StudioScope whole = new(resolved.Source.Key, resolved.Target.Identity, null);
+
+        bool samePlace = string.Equals(asked.StoreKey, whole.StoreKey, StringComparison.Ordinal)
+            && string.Equals(asked.DatabaseId, whole.DatabaseId, StringComparison.Ordinal);
+
+        if (!samePlace && !await authorization.IsAuthorizedAsync(whole, capability: null, cancellationToken).ConfigureAwait(false))
+        {
+            return (Refuse(whole, DatabaseRefusal.StorePolicy, text.StatementsStorePolicyDenial), null, whole);
+        }
+
+        if (!await authorization.IsAuthorizedAsync(whole, StudioCapability.ViewDatabaseActivity, cancellationToken).ConfigureAwait(false))
+        {
+            return (Refuse(whole, DatabaseRefusal.WritePolicy, text.StatementsWritePolicyDenial), null, whole);
+        }
+
+        return (null, resolved with { Scope = whole }, whole);
+    }
+
+    /// <inheritdoc />
+    public async Task<StatementPlanView> PlanAsync(StudioScope scope, long queryId, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+
+        // 1-3. The page's own gate: nothing is read, and nothing planned, for a visitor short of it.
+        (StatementsView? refused, ResolvedSource? passed, StudioScope whole) = await PassAsync(scope, cancellationToken).ConfigureAwait(false);
+
+        if (refused is not null || passed is not { } database)
+        {
+            return StatementPlanView.Refused(queryId, refused?.Refusal ?? DatabaseRefusal.Unavailable, refused?.Reason ?? "The database could not be resolved.");
+        }
+
+        // 4. The statement, among those the statement sweep read - its read, joined or taken while fresh, as the page's load.
+        StatementFacts read;
+
+        try
+        {
+            read = await facts.ReadAsync(database, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return StatementPlanView.Refused(queryId, DatabaseRefusal.Unavailable, Failure(exception, database));
+        }
+
+        StudioText text = settings.Text;
+
+        if (read.State != StatementsState.Read)
+        {
+            return new StatementPlanView { QueryId = queryId, NoPlan = Status(read, text) ?? NotAmong };
+        }
+
+        if (!read.Statements.Any(x => x.QueryId == queryId))
+        {
+            return new StatementPlanView { QueryId = queryId, NoPlan = NotAmong };
+        }
+
+        // 5. As this visitor may see it: the text through their mask, which also decides whether a plan of it may be shown.
+        DatabaseGateRead? gate = await GateAsync(whole, database, cancellationToken).ConfigureAwait(false);
+        StatementScreen screen = StatementScreen.Of(gate, settings.IsDocumentTypeVisible is not null);
+        StatementFact fact = read.Statements.First(x => x.QueryId == queryId);
+        StatementRowView row = Show(read, gate).Rows.First(x => x.QueryId == queryId);
+
+        StatementPlanView view = new() { QueryId = queryId, Statement = row };
+
+        if (fact.Text is not { } statementText || row.Text is null || screen.Withheld is not { } withheld)
+        {
+            return view with { NoPlan = ExpensiveStatementsCheck.NotPlannedWithheld };
+        }
+
+        // A text that names a schema the visitor may not see is never planned: the plan of a view or a SQL function there is
+        // made of that schema's definitions, over tables the visitor may see (TextNamesWithheld). Before anything is prepared.
+        if (TextNamesWithheld(statementText, withheld) is { } named)
+        {
+            return view with { NoPlan = named };
+        }
+
+        StatementPlanRefusal refusal = HealthStatementQueries.Refusal(statementText, fact.TextTruncated);
+
+        if (refusal != StatementPlanRefusal.None)
+        {
+            return view with { NoPlan = ExpensiveStatementsCheck.RefusalText(refusal) };
+        }
+
+        // 6. The plan, as SqlConsoleRole under the visitor's search_path; audited, planned or not.
+        string target = "queryid " + queryId.ToString(CultureInfo.InvariantCulture);
+        StatementPlanRead planned;
+
+        try
+        {
+            planned = await planner.ReadAsync(database.Target, queryId, statementText, fact.TextTruncated, withheld, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            string failed = PostgresFailure.IsConnectionFailure(exception)
+                ? "Not planned: " + PostgresFailure.CouldNotConnectClause(exception) + "."
+                : "Not planned: the plan failed (" + exception.GetType().Name + ").";
+
+            audit.Record(PlanAction, target, succeeded: false, failed, StudioCapability.ViewDatabaseActivity, whole);
+            return view with { NoPlan = failed };
+        }
+
+        if (planned.Json is not { } json)
+        {
+            audit.Record(PlanAction, target, succeeded: false, planned.NotPlanned, StudioCapability.ViewDatabaseActivity, whole);
+            return view with { NoPlan = planned.NotPlanned, Statements = planned.Statements };
+        }
+
+        // 7. Shown only when it reads nothing the visitor may not see - and then masked as the text is.
+        if (WithheldPlan(json, screen, withheld) is { } withholding)
+        {
+            audit.Record(PlanAction, target, succeeded: true, "Planned, and not shown: it reads what this visitor may not see.", StudioCapability.ViewDatabaseActivity, whole);
+            return view with { NoPlan = withholding, Statements = planned.Statements };
+        }
+
+        QueryPlanRead parsed = QueryPlanReader.Read(json, name => PostgresErrorText.Redact(name, withheld) ?? name);
+
+        audit.Record(
+            PlanAction,
+            target,
+            succeeded: true,
+            parsed.Plan is { } plan ? "Planned: " + TableText.Count(plan.NodeCount) + (plan.NodeCount == 1 ? " node." : " nodes.") : parsed.Failure,
+            StudioCapability.ViewDatabaseActivity,
+            whole);
+
+        return view with
+        {
+            Plan = parsed.Plan,
+            NoPlan = parsed.Failure,
+            Caveat = ExpensiveStatementsCheck.GenericPlanCaveat(text).Trim(),
+            PlannedAt = timeProvider.GetUtcNow(),
+            Statements = planned.Statements,
+        };
+    }
+
+    /// <summary>What the audit ring calls a what-if on the drill-in (X2).</summary>
+    internal const string WhatIfAction = "What-if database statement";
+
+    /// <summary>What the drill-in says of an index its own plan does not suggest.</summary>
+    internal const string NotSuggested =
+        "Not compared: that index is not one this statement's plan suggests now - the plan may have changed since it was drawn.";
+
+    /// <inheritdoc />
+    public async Task<WhatIfResult> WhatIfAsync(StudioScope scope, long queryId, HypotheticalIndex index, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        ArgumentNullException.ThrowIfNull(index);
+
+        // 1-3. The drill-in's own gate, which is the page's.
+        (StatementsView? refused, ResolvedSource? passed, StudioScope whole) = await PassAsync(scope, cancellationToken).ConfigureAwait(false);
+
+        if (refused is not null || passed is not { } database)
+        {
+            return WhatIfResult.Refused(index, refused?.Refusal ?? DatabaseRefusal.Unavailable, refused?.Reason ?? "The database could not be resolved.");
+        }
+
+        // 4-5. The statement, among those read, as this visitor may see it - the drill-in's own refusals, in its words.
+        StatementFacts read;
+
+        try
+        {
+            read = await facts.ReadAsync(database, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return WhatIfResult.Refused(index, DatabaseRefusal.Unavailable, Failure(exception, database));
+        }
+
+        if (read.State != StatementsState.Read || read.Statements.FirstOrDefault(x => x.QueryId == queryId) is not { } fact)
+        {
+            return WhatIfResult.NotCompared(index, NotAmong);
+        }
+
+        DatabaseGateRead? gate = await GateAsync(whole, database, cancellationToken).ConfigureAwait(false);
+        StatementScreen screen = StatementScreen.Of(gate, settings.IsDocumentTypeVisible is not null);
+        StatementRowView row = Show(read, gate).Rows.First(x => x.QueryId == queryId);
+
+        if (fact.Text is not { } statementText || row.Text is null || screen.Withheld is not { } withheld)
+        {
+            return WhatIfResult.NotCompared(index, ExpensiveStatementsCheck.NotPlannedWithheld);
+        }
+
+        // The drill-in's own refusal of a text that names a schema the visitor may not see, before anything is imagined.
+        if (TextNamesWithheld(statementText, withheld) is { } named)
+        {
+            return WhatIfResult.NotCompared(index, named);
+        }
+
+        StatementPlanRefusal refusal = HealthStatementQueries.Refusal(statementText, fact.TextTruncated);
+
+        if (refusal != StatementPlanRefusal.None)
+        {
+            return WhatIfResult.NotCompared(index, ExpensiveStatementsCheck.RefusalText(refusal));
+        }
+
+        // 6. The two plans, as SqlConsoleRole under the visitor's search_path, with only an index this plan suggests imagined.
+        string target = "queryid " + queryId.ToString(CultureInfo.InvariantCulture);
+        string Mask(string name) => PostgresErrorText.Redact(name, withheld) ?? name;
+
+        string? Vet(string json) =>
+            WithheldPlan(json, screen, withheld)
+            ?? (QueryPlanReader.Read(json, Mask).Plan is { } plan && HypotheticalIndexCandidates.FromPlan(plan).Any(x => x.Same(index))
+                ? null
+                : NotSuggested);
+
+        WhatIfResult result;
+
+        try
+        {
+            (HypotheticalIndexRead? hypothetical, string? notPlanned) = await planner
+                .WhatIfAsync(database.Target, queryId, statementText, fact.TextTruncated, withheld, index, Vet, cancellationToken)
+                .ConfigureAwait(false);
+
+            result = hypothetical is null
+                ? WhatIfResult.NotCompared(index, notPlanned ?? "Not planned.")
+                : hypothetical.AfterJson is { } after && WithheldPlan(after, screen, withheld) is { } withholding
+                    ? WhatIfResult.NotCompared(index, withholding, hypothetical.Availability.State)
+                    : WhatIfResult.From(index, hypothetical, Mask);
+        }
+        catch (PostgresException exception)
+        {
+            result = WhatIfResult.NotCompared(index, WhatIfResult.Failed(exception.SqlState), HypotheticalIndexState.Available);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            result = WhatIfResult.NotCompared(index, PostgresFailure.IsConnectionFailure(exception)
+                ? "Not compared: " + PostgresFailure.CouldNotConnectClause(exception) + "."
+                : "Not compared: the what-if failed (" + exception.GetType().Name + ").");
+        }
+
+        audit.Record(WhatIfAction, target, succeeded: result.Before is not null, result.Outcome(), StudioCapability.ViewDatabaseActivity, whole);
+        return result;
+    }
+
+    /// <summary>What the audit ring calls a run of the index advisor (1.2-INDEX-A).</summary>
+    internal const string IndexAdviceAction = "Advise indexes for database statements";
+
+    /// <inheritdoc />
+    public Task<IndexAdviceView> AdviseIndexesAsync(StudioScope scope, IndexAdviceRequest request, CancellationToken cancellationToken = default) =>
+        AdviseIndexesAsync(scope, request, recordAudit: true, cancellationToken);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// <para>
+    /// <b>The page's gate, asked here.</b> <see cref="PassAsync" /> first - <c>ViewDatabaseActivity</c>, the scope with no tenant, the
+    /// store policy, the write policy with the capability named - then one run per tab and one per database in the process
+    /// (<see cref="IndexAdvisorFlights" />, refused and never joined: two visitors' masks differ), then hypopg (not installed, or not
+    /// usable by the role the studio plans as, and nothing at all is planned), then the statement sweep's own statements: the advisor
+    /// never reads <c>pg_stat_statements</c>, so T02's fence holds and no other role's statement can be among them.
+    /// </para>
+    /// <para>
+    /// <b>Only what the drill-in would plan and show to this visitor.</b> Each statement kept is one <see cref="IndexAdvisor.Select" />
+    /// accepts; each is planned as the drill-in plans it (<see cref="StatementPlanReader.ReadAsync" />: <c>SqlConsoleRole</c>, the
+    /// visitor's <c>search_path</c>, the crossing walk) and admitted only if its plan reads nothing the visitor may not see. Candidates
+    /// come from admitted plans alone; every plan under an imagined index is held to <see cref="WithheldPlan" /> again; the view holds
+    /// no plan and no text, only <c>queryid</c>s, captions built from visible plans, costs and remedies.
+    /// </para>
+    /// <para>
+    /// <b>Bounded</b> (<see cref="IndexAdvisor.MaxStatements" />, <see cref="IndexAdvisor.MaxCandidates" />,
+    /// <see cref="IndexAdvisor.MaxTrialPlans" />, <see cref="IndexAdvisor.RunBudget" />), and run only on a press. <b>One audit entry</b>
+    /// per run, success or failure, with counts alone - unless the caller records the press itself (<paramref name="recordAudit" />).
+    /// </para>
+    /// </remarks>
+    public async Task<IndexAdviceView> AdviseIndexesAsync(StudioScope scope, IndexAdviceRequest request, bool recordAudit, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        ArgumentNullException.ThrowIfNull(request);
+
+        // 1. The page's own gate. A refusal is the page's: not audited, as the page's own is not.
+        (StatementsView? refused, ResolvedSource? passed, StudioScope whole) = await PassAsync(scope, cancellationToken).ConfigureAwait(false);
+
+        if (refused is not null || passed is not { } database)
+        {
+            return IndexAdviceView.Refused(refused?.Refusal ?? DatabaseRefusal.Unavailable, refused?.Reason ?? "The database could not be resolved.");
+        }
+
+        // 2. One run at a time in this tab.
+        if (Interlocked.CompareExchange(ref advising, 1, 0) != 0)
+        {
+            return new IndexAdviceView { Reason = IndexAdvisor.AlreadyRunningInTab };
+        }
+
+        try
+        {
+            // 3. One run at a time on this database, in the process: refused, never joined.
+            string flight = whole.StoreKey + "\u001f" + whole.DatabaseId;
+
+            if (!flights.TryEnter(flight))
+            {
+                const string Busy = "Not run: another run holds this database.";
+
+                RecordAdvice(recordAudit, request, selected: 0, succeeded: false, Busy, whole);
+                return new IndexAdviceView { Reason = IndexAdvisor.AlreadyRunningForDatabase, Table = request.Table, AuditOutcome = Busy };
+            }
+
+            try
+            {
+                return await AdviseCoreAsync(database, whole, request, recordAudit, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                flights.Exit(flight);
+            }
+        }
+        finally
+        {
+            Interlocked.Exchange(ref advising, 0);
+        }
+    }
+
+    /// <summary>Counts the audit entry names and a run fills in as it goes.</summary>
+    private sealed class AdviceRun
+    {
+        public int Selected { get; set; }
+    }
+
+    /// <summary>One run, from hypopg's state to the ranked view, and its one audit entry: success, failure and cancellation alike.</summary>
+    private async Task<IndexAdviceView> AdviseCoreAsync(
+        ResolvedSource database,
+        StudioScope whole,
+        IndexAdviceRequest request,
+        bool recordAudit,
+        CancellationToken cancellationToken)
+    {
+        long started = timeProvider.GetTimestamp();
+        DateTimeOffset deadline = timeProvider.GetUtcNow() + IndexAdvisor.RunBudget;
+        AdviceRun run = new();
+        IndexAdviceView view;
+        bool succeeded;
+
+        try
+        {
+            (view, succeeded) = await RunAdviceAsync(database, whole, request, deadline, run, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // The tab left or Cancel was pressed: hypopg was reset and the connection cleaned up by the engine on the way out.
+            RecordAdvice(recordAudit, request, run.Selected, succeeded: false, "Stopped: the run was cancelled.", whole);
+            throw;
+        }
+        catch (Exception exception)
+        {
+            if (logger.IsEnabled(LogLevel.Debug))
+            {
+                logger.LogDebug(exception, "The index advisor failed for {DatabaseId}", database.Target.Identity);
+            }
+
+            string reason = PostgresFailure.IsConnectionFailure(exception)
+                ? "Index advice failed: " + PostgresFailure.CouldNotConnectClause(exception) + "."
+                : "Index advice failed (" + (exception is PostgresException postgres ? "SQLSTATE " + postgres.SqlState : exception.GetType().Name) + ").";
+
+            view = new IndexAdviceView { Reason = reason, Table = request.Table, AuditOutcome = reason };
+            succeeded = false;
+        }
+
+        view = view with { RanAt = timeProvider.GetUtcNow(), Took = timeProvider.GetElapsedTime(started) };
+
+        RecordAdvice(recordAudit, request, run.Selected, succeeded, view.AuditOutcome ?? view.Reason ?? view.Unavailable, whole);
+        return view;
+    }
+
+    /// <summary>The run's one audit entry: the table is named through <see cref="StudioLogValue" /> and nothing else read is.</summary>
+    private void RecordAdvice(bool recordAudit, IndexAdviceRequest request, int selected, bool succeeded, string? outcome, StudioScope whole)
+    {
+        if (!recordAudit)
+        {
+            return;
+        }
+
+        string target = request.Table is { } table
+            ? "statements on " + StudioLogValue.Cap(table)
+            : selected > 0 ? "the top " + selected.ToString(CultureInfo.InvariantCulture) + " statements" : "the top statements";
+
+        audit.Record(IndexAdviceAction, target, succeeded, outcome, StudioCapability.ViewDatabaseActivity, whole);
+    }
+
+    private async Task<(IndexAdviceView View, bool Succeeded)> RunAdviceAsync(
+        ResolvedSource database,
+        StudioScope whole,
+        IndexAdviceRequest request,
+        DateTimeOffset deadline,
+        AdviceRun run,
+        CancellationToken cancellationToken)
+    {
+        IStudioDatabase target = database.Target;
+        StudioText text = settings.Text;
+
+        // 4. hypopg, before anything is planned: an unevaluated list of CREATE INDEX lines is the guess this tool exists to replace.
+        HypotheticalIndexAvailability usable = await hypothetical.GetAvailabilityAsync(target, cancellationToken).ConfigureAwait(false);
+
+        if (usable.Sentence is { } unavailable)
+        {
+            return (new IndexAdviceView
+            {
+                Unavailable = unavailable,
+                Table = request.Table,
+                AuditOutcome = usable.State == HypotheticalIndexState.NotInstalled
+                    ? "Not run: hypopg is not installed."
+                    : "Not run: the role the studio plans as may not use hypopg.",
+            }, false);
+        }
+
+        // 5. The statements, as this visitor may see them: the statement sweep's read, joined or taken while fresh.
+        StatementFacts read;
+
+        try
+        {
+            read = await facts.ReadAsync(database, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            string failure = Failure(exception, database);
+            return (new IndexAdviceView { Reason = failure, Table = request.Table, AuditOutcome = "Not run: the statements could not be read." }, false);
+        }
+
+        if (read.State != StatementsState.Read)
+        {
+            return (new IndexAdviceView { Reason = Status(read, text) ?? NotAmong, Table = request.Table, AuditOutcome = "Not run: the statements were not read." }, false);
+        }
+
+        DatabaseGateRead? gate = await GateAsync(whole, database, cancellationToken).ConfigureAwait(false);
+        StatementScreen screen = StatementScreen.Of(gate, settings.IsDocumentTypeVisible is not null);
+        Dictionary<long, StatementRowView> rows = [];
+
+        foreach (StatementRowView row in Show(read, gate).Rows)
+        {
+            rows.TryAdd(row.QueryId, row);
+        }
+
+        // 6. Selection.
+        WorkloadStatements selection = IndexAdvisor.Select(read.Statements, rows, screen.Withheld, request.Table, read.Watched);
+        run.Selected = selection.Kept.Count;
+
+        if (selection.Kept.Count == 0 || screen.Withheld is not { } withheld)
+        {
+            return (new IndexAdviceView
+            {
+                Reason = request.Table is null ? "No statement that the studio can plan is among the ones you may see." : IndexAdvisor.NoStatementNamesTable,
+                Table = request.Table,
+                Skipped = selection.Skipped,
+                AuditOutcome = "Not run: no statement to plan.",
+            }, false);
+        }
+
+        StudioTable? table = request.Table is null
+            ? null
+            : selection.Kept.SelectMany(static x => x.Tables).First(x => string.Equals(x.Key, request.Table, StringComparison.Ordinal));
+
+        TimeSpan statementTimeout = settings.QueryTimeout < HealthSweeper.MaxStatementTimeout ? settings.QueryTimeout : HealthSweeper.MaxStatementTimeout;
+        int commandTimeout = (int) Math.Ceiling(statementTimeout.TotalSeconds) + 5;
+
+        // Phase 1: the plans now, the drill-in's own. A statement is admitted only when its plan reads nothing this visitor may not see.
+        List<AdvisedStatement> admitted = [];
+        int noParameterType = 0, crossing = 0, withheldPlan = 0, refusedByPostgres = 0, noPlan = 0, unreadable = 0, failed = 0;
+        IReadOnlyList<HealthStatement> planStatements = [];
+        string? stopped = null;
+
+        foreach (SelectedStatement statement in selection.Kept)
+        {
+            if (timeProvider.GetUtcNow() >= deadline)
+            {
+                stopped = "Stopped after " + ((int) IndexAdvisor.RunBudget.TotalSeconds).ToString(CultureInfo.InvariantCulture) + " seconds: planned "
+                    + admitted.Count.ToString(CultureInfo.InvariantCulture) + " of " + selection.Kept.Count.ToString(CultureInfo.InvariantCulture) + " statements.";
+                break;
+            }
+
+            StatementPlanRead planned;
+
+            try
+            {
+                planned = await planner.ReadAsync(target, statement.QueryId, statement.Text, statement.Truncated, withheld, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException && !PostgresFailure.IsConnectionFailure(exception))
+            {
+                failed++;
+                continue;
+            }
+
+            if (planStatements.Count == 0)
+            {
+                planStatements = planned.Statements;
+            }
+
+            if (planned.Json is not { } json)
+            {
+                if (planned.NotPlanned == ReachesWithheldSchema || planned.NotPlanned == NamesWithheldSchema)
+                {
+                    crossing++;
+                }
+                else if (planned.SqlState == PostgresErrorCodes.IndeterminateDatatype)
+                {
+                    noParameterType++;
+                }
+                else if (planned.SqlState is not null)
+                {
+                    refusedByPostgres++;
+                }
+                else
+                {
+                    noPlan++;
+                }
+
+                continue;
+            }
+
+            if (WithheldPlan(json, screen, withheld) is not null)
+            {
+                withheldPlan++;
+                continue;
+            }
+
+            QueryPlan? plan = QueryPlanReader.Read(json).Plan;
+
+            if (plan?.Root.TotalCost is not { } before || StatementPlanQueries.GenericPlan(statement.Text, statement.Truncated) is not { } batch)
+            {
+                unreadable++;
+                continue;
+            }
+
+            admitted.Add(new AdvisedStatement(statement.QueryId, statement.Text, statement.Truncated, statement.Calls, before, plan, batch));
+        }
+
+        IReadOnlyList<string> skipped =
+        [
+            .. selection.Skipped,
+            .. IndexAdvisor.Counted(
+                (noParameterType, "statement whose placeholders' types Postgres cannot infer", "statements whose placeholders' types Postgres cannot infer"),
+                (crossing, "statement that reaches a schema you may not see", "statements that reach a schema you may not see"),
+                (withheldPlan, "statement whose plan reads a table you may not see", "statements whose plans read a table you may not see"),
+                (refusedByPostgres, "statement Postgres refused to plan", "statements Postgres refused to plan"),
+                (noPlan, "statement with no plan to read (too long, or none returned)", "statements with no plan to read (too long, or none returned)"),
+                (unreadable, "statement whose plan could not be read", "statements whose plans could not be read"),
+                (failed, "statement whose plan failed", "statements whose plans failed")),
+        ];
+
+        IndexAdviceView Base(IndexAdviceView view) => view with
+        {
+            Table = request.Table,
+            Skipped = skipped,
+            StatementsSelected = selection.Kept.Count,
+            StatementsTried = admitted.Count,
+            Workload = admitted.Sum(static x => x.Calls * x.Before),
+            Stopped = view.Stopped ?? stopped,
+            Ranking = selection.Ranking,
+            ComparedColumns = table is null ? [] : IndexAdvisor.ComparedColumns(admitted.Select(static x => x.Plan), table.Schema, table.Table),
+            Statements = Shown(planStatements, usable.Schema, view.Statements),
+        };
+
+        if (admitted.Count == 0)
+        {
+            return (Base(new IndexAdviceView
+            {
+                Reason = "None of the " + IndexAdvisor.Statements(selection.Kept.Count) + " could be planned.",
+                AuditOutcome = "Planned 0 of " + selection.Kept.Count.ToString(CultureInfo.InvariantCulture) + " statements.",
+            }), false);
+        }
+
+        // The visitor's own index: only a column these runs' plans compare on that table.
+        List<HypotheticalIndex> own = [];
+        List<string> notTried = [];
+
+        if (request.Columns.Count > 0)
+        {
+            IReadOnlyList<string> compared = IndexAdvisor.ComparedColumns(admitted.Select(static x => x.Plan), table?.Schema ?? string.Empty, table?.Table ?? string.Empty);
+            string[] columns = [.. request.Columns.Distinct(StringComparer.Ordinal)];
+
+            if (table is null || columns.Length is 0 or > HypotheticalIndexCandidates.MaxColumns)
+            {
+                return (Base(new IndexAdviceView
+                {
+                    Reason = "Not tried: your own index needs a table, and one to " + HypotheticalIndexCandidates.MaxColumns.ToString(CultureInfo.InvariantCulture) + " different columns.",
+                    AuditOutcome = "Not run: the column list was not one the studio tries.",
+                }), false);
+            }
+
+            if (columns.FirstOrDefault(x => !compared.Contains(x, StringComparer.Ordinal)) is { } unknown)
+            {
+                return (Base(new IndexAdviceView
+                {
+                    Reason = "Not tried: " + StudioLogValue.Cap(unknown) + " is not a column these statements compare.",
+                    AuditOutcome = "Not run: a column was not one these statements compare.",
+                }), false);
+            }
+
+            if (PlanWhatIfCandidates.Candidate(table.Schema, table.Table, columns) is { } yours)
+            {
+                own.AddRange(await OwnAsync(yours with { Key = "visitor:" + yours.Key }, admitted, table, whole, cancellationToken).ConfigureAwait(false));
+
+                if (own.Count == 0)
+                {
+                    notTried.Add(yours.Caption + ": No StoreOptions line declares that index on a document table.");
+                }
+            }
+        }
+
+        // The indexes the admitted plans suggest, through the studio's contributors, and merged.
+        List<CandidateSource> sources = [];
+
+        for (int i = 0; i < admitted.Count; i++)
+        {
+            IReadOnlyList<HypotheticalIndex> offered = await ContributeAsync(
+                    admitted[i].Plan, WorkloadIndexCandidates.FromPlan(admitted[i].Plan), whole, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (table is not null)
+            {
+                offered = [.. offered.Where(x => string.Equals(x.Schema, table.Schema, StringComparison.Ordinal) && string.Equals(x.Table, table.Table, StringComparison.Ordinal))];
+            }
+
+            sources.Add(new CandidateSource(i, admitted[i].Calls, admitted[i].Plan, offered));
+        }
+
+        IReadOnlyList<AdvisedCandidate> merged = IndexAdvisor.Merge(sources, own);
+
+        // Which tables may have an index imagined: one catalog read, for the candidates' tables only.
+        IReadOnlyList<IndexAdvisorRelation> relations = merged.Count == 0
+            ? []
+            : await ReadRelationsAsync(target, merged, statementTimeout, commandTimeout, cancellationToken).ConfigureAwait(false);
+
+        Dictionary<string, IndexAdvisorRelation> relationByTable = new(StringComparer.Ordinal);
+
+        foreach (IndexAdvisorRelation relation in relations)
+        {
+            relationByTable[SchemaKey.For(relation.Schema, relation.Table)] = relation;
+        }
+
+        List<AdvisedCandidate> eligible = [];
+
+        foreach (AdvisedCandidate candidate in merged)
+        {
+            string key = SchemaKey.For(candidate.Index.Schema ?? string.Empty, candidate.Index.Table);
+
+            if (!relationByTable.TryGetValue(key, out IndexAdvisorRelation? relation))
+            {
+                notTried.Add(candidate.Index.Caption + ": the table could not be found when the studio looked.");
+            }
+            else if (relation.Kind == 'p' || relation.IsPartition)
+            {
+                notTried.Add(candidate.Index.Caption + ": a partition's index is declared on its partitioned table, which the studio does not imagine an index on.");
+            }
+            else if (relation.Kind != 'r')
+            {
+                notTried.Add(candidate.Index.Caption + ": only an ordinary table can have an index imagined on it.");
+            }
+            else
+            {
+                eligible.Add(candidate);
+            }
+        }
+
+        IReadOnlyList<AdvisedCandidate> capped = IndexAdvisor.Cap(eligible, out int overCap);
+        IReadOnlyList<HypotheticalIndexTrial> trials = IndexAdvisor.Trials(capped, admitted, out int overPlans);
+
+        if (overCap > 0)
+        {
+            notTried.Add(overCap.ToString(CultureInfo.InvariantCulture) + (overCap == 1 ? " more index was" : " more indexes were") + " not tried: the cap is "
+                + IndexAdvisor.MaxCandidates.ToString(CultureInfo.InvariantCulture) + " indexes.");
+        }
+
+        if (overPlans > 0)
+        {
+            notTried.Add(overPlans.ToString(CultureInfo.InvariantCulture) + (overPlans == 1 ? " more index was" : " more indexes were") + " not tried: the cap is "
+                + IndexAdvisor.MaxTrialPlans.ToString(CultureInfo.InvariantCulture) + " plans under imagined indexes.");
+        }
+
+        // Phase 2: each index alone, in a read-only transaction of its own, hypopg reset last; every plan under it held to the mask again.
+        HypotheticalWorkloadPlanner workloadPlanner = new(
+            PrepareAsync: async (connection, transaction, token) =>
+            {
+                IReadOnlyList<string> path = await StatementPlanQueries.ReadSearchPathAsync(connection, transaction, commandTimeout, token).ConfigureAwait(false);
+                await StatementPlanQueries
+                    .SetSearchPathAsync(connection, transaction, StatementPlanQueries.SearchPath(path.Where(x => !withheld.Contains(x))), commandTimeout, token)
+                    .ConfigureAwait(false);
+            },
+            PlanAsync: async (statement, connection, transaction, token) =>
+            {
+                (string? json, _) = await StatementPlanQueries
+                    .ReadPlanAsync(connection, transaction, admitted[statement].Batch, ExplainStatements.MaxPlanCharacters, commandTimeout, token)
+                    .ConfigureAwait(false);
+                return json;
+            },
+            AfterFailureAsync: planner.ForgetAsync)
+        {
+            StatementTimeout = statementTimeout,
+        };
+
+        HypotheticalWorkloadRead workload = trials.Count == 0
+            ? new HypotheticalWorkloadRead { Availability = usable }
+            : await hypothetical.ReadTrialsAsync(target, trials, workloadPlanner, deadline, timeProvider, cancellationToken).ConfigureAwait(false);
+
+        if (workload.Availability.Sentence is { } gone)
+        {
+            return (Base(new IndexAdviceView { Unavailable = gone, AuditOutcome = "Not run: hypopg is no longer usable." }), false);
+        }
+
+        List<IndexTrialResult> results = [];
+        int plansRun = 0;
+
+        foreach (HypotheticalTrialRead made in workload.Trials)
+        {
+            AdvisedCandidate candidate = capped.First(x => IndexAdvisor.Identity(x.Index) == IndexAdvisor.Identity(made.Index));
+
+            if (made.SqlState is { } sqlState)
+            {
+                results.Add(new IndexTrialResult(candidate, sqlState, []));
+                continue;
+            }
+
+            List<IndexTrialStatement> compared = [];
+
+            foreach ((int statement, string? json) in made.After)
+            {
+                plansRun++;
+                double? after = null;
+                bool used = false;
+
+                if (json is not null && WithheldPlan(json, screen, withheld) is null && QueryPlanReader.Read(json).Plan is { } underIndex)
+                {
+                    after = underIndex.Root.TotalCost;
+                    used = WhatIfResult.Reads(underIndex, made.Made?.Name);
+                }
+
+                compared.Add(new IndexTrialStatement(statement, after, used));
+            }
+
+            results.Add(new IndexTrialResult(candidate, null, compared));
+        }
+
+        IndexRanking ranking = IndexAdvisor.Rank(
+            admitted,
+            results,
+            index => index.Schema is { } schema && relationByTable.TryGetValue(SchemaKey.For(schema, index.Table), out IndexAdvisorRelation? relation) && (relation.Inserts is not null || relation.Updates is not null)
+                ? (relation.Inserts ?? 0) + (relation.Updates ?? 0)
+                : null);
+
+        notTried.AddRange(ranking.NotTried);
+
+        string? ended = workload.Stopped switch
+        {
+            HypotheticalWorkloadStop.Budget => "Stopped after " + ((int) IndexAdvisor.RunBudget.TotalSeconds).ToString(CultureInfo.InvariantCulture) + " seconds: "
+                + workload.Trials.Count.ToString(CultureInfo.InvariantCulture) + " of " + trials.Count.ToString(CultureInfo.InvariantCulture) + " indexes tried.",
+            HypotheticalWorkloadStop.SessionEnded => "Stopped: hypopg could not be reset on the studio's session, so the studio ended it, after "
+                + workload.Trials.Count.ToString(CultureInfo.InvariantCulture) + " of " + trials.Count.ToString(CultureInfo.InvariantCulture) + " indexes.",
+            _ => null,
+        };
+
+        string outcome = "Planned " + admitted.Count.ToString(CultureInfo.InvariantCulture) + " of " + selection.Kept.Count.ToString(CultureInfo.InvariantCulture)
+            + " statements; tried " + workload.Trials.Count.ToString(CultureInfo.InvariantCulture) + " of " + merged.Count.ToString(CultureInfo.InvariantCulture)
+            + (merged.Count == 1 ? " index" : " indexes") + " in " + plansRun.ToString(CultureInfo.InvariantCulture) + " plans; "
+            + ranking.Recommended.Count.ToString(CultureInfo.InvariantCulture) + " would help."
+            + ((ended ?? stopped) is { } why ? " " + why : string.Empty);
+
+        return (Base(new IndexAdviceView
+        {
+            Recommended = ranking.Recommended,
+            NotUsed = ranking.NotUsed,
+            NotTried = notTried,
+            CandidatesFound = merged.Count,
+            CandidatesTried = workload.Trials.Count,
+            PlansRun = plansRun,
+            Stopped = ended,
+            AuditOutcome = outcome,
+        }), true);
+    }
+
+    /// <summary>
+    /// The visitor's own index as the studio offers it: through the contributors, against the first admitted plan that reads its
+    /// table - what a contributor adds for that plan's own sake is not "the visitor's", so it is told apart by asking twice. With no
+    /// contributor, the index itself.
+    /// </summary>
+    private async Task<IReadOnlyList<HypotheticalIndex>> OwnAsync(
+        HypotheticalIndex yours,
+        IReadOnlyList<AdvisedStatement> admitted,
+        StudioTable table,
+        StudioScope whole,
+        CancellationToken cancellationToken)
+    {
+        if (contributors.Count == 0)
+        {
+            return [yours];
+        }
+
+        AdvisedStatement? reading = admitted.FirstOrDefault(x => WorkloadIndexCandidates.Reads(x.Plan, table.Schema, table.Table));
+
+        if (reading is null)
+        {
+            return [];
+        }
+
+        IReadOnlyList<HypotheticalIndex> fromPlan = WorkloadIndexCandidates.FromPlan(reading.Plan);
+        IReadOnlyList<HypotheticalIndex> without = await ContributeAsync(reading.Plan, fromPlan, whole, cancellationToken).ConfigureAwait(false);
+        IReadOnlyList<HypotheticalIndex> with = await ContributeAsync(reading.Plan, [.. fromPlan, yours], whole, cancellationToken).ConfigureAwait(false);
+
+        HashSet<string> already = [.. without.Select(IndexAdvisor.Identity)];
+
+        // Added by asking about it - its own, or a Marten replacement of it - or already offered by the plan: then it is that one.
+        List<HypotheticalIndex> added = [.. with.Where(x => !already.Contains(IndexAdvisor.Identity(x)))];
+
+        if (added.Count == 0 && already.Contains(IndexAdvisor.Identity(yours)))
+        {
+            added.Add(yours);
+        }
+
+        return added;
+    }
+
+    /// <summary>The indexes a plan offers once every contributor has been through them, each given the previous one's output.</summary>
+    private async Task<IReadOnlyList<HypotheticalIndex>> ContributeAsync(
+        QueryPlan plan,
+        IReadOnlyList<HypotheticalIndex> fromPlan,
+        StudioScope whole,
+        CancellationToken cancellationToken)
+    {
+        IReadOnlyList<HypotheticalIndex> current = fromPlan;
+
+        foreach (IIndexCandidateContributor contributor in contributors)
+        {
+            try
+            {
+                current = await contributor.ContributeAsync(plan, current, whole, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                // A studio that cannot say what its tables declare offers none of its tables' indexes - fail closed.
+                if (logger.IsEnabled(LogLevel.Debug))
+                {
+                    logger.LogDebug(exception, "An index candidate contributor failed; the plan offers no index");
+                }
+
+                return [];
+            }
+        }
+
+        return current;
+    }
+
+    /// <summary>The one catalog read of a run: which of the candidates' tables are ordinary tables, and what has been written to them.</summary>
+    private async Task<IReadOnlyList<IndexAdvisorRelation>> ReadRelationsAsync(
+        IStudioDatabase target,
+        IReadOnlyList<AdvisedCandidate> candidates,
+        TimeSpan statementTimeout,
+        int commandTimeout,
+        CancellationToken cancellationToken)
+    {
+        List<(string Schema, string Table)> pairs =
+        [
+            .. candidates
+                .Where(static x => x.Index.Schema is { Length: > 0 })
+                .Select(static x => (x.Index.Schema!, x.Index.Table))
+                .Distinct(),
+        ];
+
+        ReadOnlySqlSession session = new(new ReadOnlySqlOptions { StatementTimeout = statementTimeout, Role = settings.SqlConsoleRole });
+
+        await using NpgsqlConnection connection = target.CreateConnection(StudioConnectionUsage.Read);
+        await connection.OpenStudioAsync(cancellationToken).ConfigureAwait(false);
+
+        return await session.InTransactionAsync(
+                connection,
+                (transaction, token) => IndexAdvisorQueries.ReadRelationsAsync(
+                    connection, transaction, [.. pairs.Select(static x => x.Schema)], [.. pairs.Select(static x => x.Table)], commandTimeout, token),
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// A drill-in statement as the advisor's "Show SQL" prints it. The drill-in's batch stands in for the recorded text with "shown masked
+    /// above"; the advisor shows no text above, so the stand-in says it is each statement's, and not shown.
+    /// </summary>
+    private static HealthStatement ForAdvisor(HealthStatement statement)
+    {
+        int start = statement.Sql.IndexOf(StatementPlanQueries.StatementShown, StringComparison.Ordinal);
+        int end = start < 0 ? -1 : statement.Sql.IndexOf('>', start);
+
+        string sql = end < 0
+            ? statement.Sql
+            : statement.Sql[..start] + "<the text pg_stat_statements recorded for each statement; the advisor does not show it>" + statement.Sql[(end + 1)..];
+
+        return statement with { Sql = sql, Label = statement.Label ?? "each statement's plan, as the drill-in plans it" };
+    }
+
+    /// <summary>"Show SQL": the drill-in's statements, the relation read and hypopg's two calls - shapes, never a text or a value.</summary>
+    private static List<HealthStatement> Shown(IReadOnlyList<HealthStatement> plan, string? hypopgSchema, IReadOnlyList<HealthStatement> more)
+    {
+        List<HealthStatement> shown =
+        [
+            .. plan.Select(static x => ForAdvisor(x)),
+            new(IndexAdvisorQueries.RelationsSql, [IndexAdvisorQueries.SchemasParameter, IndexAdvisorQueries.TablesParameter]) { Label = "the tables the candidates are on" },
+        ];
+
+        if (hypopgSchema is not null)
+        {
+            if (HypotheticalIndexQueries.Create(hypopgSchema) is { } create)
+            {
+                shown.Add(new HealthStatement(create, [HypotheticalIndexQueries.DefinitionParameter]) { Label = "hypopg's create call" });
+            }
+
+            if (HypotheticalIndexQueries.Reset(hypopgSchema) is { } reset)
+            {
+                shown.Add(new HealthStatement(reset, []) { Label = "hypopg's reset" });
+            }
+        }
+
+        shown.AddRange(more);
+        return shown;
+    }
+
+    /// <summary>
+    /// Why a recorded text may not be planned for a visitor who may not see <paramref name="withheld" />, or
+    /// <see langword="null" />: it names one of those schemas (<see cref="NamesWithheldSchema" />), or it spells a name in
+    /// Unicode escapes while any schema is withheld (<see cref="NamesEscapedIdentifier" />). Pure, and asked before anything is
+    /// prepared - by the drill-in's plan and its what-if, and by <see cref="StatementPlanReader" /> again.
+    /// </summary>
+    /// <param name="text">The text <c>pg_stat_statements</c> recorded, as the statement sweep read it (its comments masked).</param>
+    /// <param name="withheld">The schemas the visitor may not see (<see cref="DatabaseGate.WithheldSchemas" />).</param>
+    /// <remarks>
+    /// <para>
+    /// <b>Why the plan alone cannot judge it.</b> <see cref="WithheldPlan" /> refuses a plan that <em>scans</em> a table in a
+    /// withheld schema. But the planner expands a view, and inlines a <c>LANGUAGE sql</c> function, into nodes over the tables
+    /// they read, and <c>VERBOSE</c> prints their conditions and constants: <c>select … from hr.v_vip</c>, where
+    /// <c>hr.v_vip</c> is <c>select … from public.orders where tier = 'vip'</c>, plans as a scan of <c>public.orders</c> with
+    /// <c>Filter: (orders.tier = 'vip'::text)</c> - the definition of a view the database browser never shows this visitor.
+    /// The <c>search_path</c> the plan runs under has every withheld schema taken off it, so only a schema-qualified name
+    /// reaches one; and even a <c>plpgsql</c> function's call prints its default arguments (<c>hr.graded(o.id, 7)</c>). So a
+    /// text that names a withheld schema is not planned at all.
+    /// </para>
+    /// <para>
+    /// <b>Found by the text's own mask.</b> The visitor reads the text through <see cref="PostgresErrorText.Redact" /> (<see
+    /// cref="SessionQueryText.Present(string?, bool, StatementScreen, int)" />), and a text that mask changes is not planned:
+    /// the drill-in plans only a text the visitor reads unmasked. That mask finds a schema as a qualifier, bare or
+    /// double-quoted, with whitespace or a comment before its dot, and as every whole token that spells it - so it also
+    /// refuses a text that names the schema only in a string literal or a comment, or as a word that happens to spell it (a
+    /// column named <c>hr</c>), where the visitor's text shows <c>‹withheld›</c> already. Deliberately: a literal can be a
+    /// reference (<c>'hr.v_vip'::regclass</c>, <c>to_regclass</c>, <c>nextval</c>) that only Postgres' parse tells apart, and a
+    /// comment never reaches here anyway, because the statement sweep masks every comment when it reads the text.
+    /// </para>
+    /// <para>
+    /// <b>Unicode escapes.</b> Postgres decodes <c>U&amp;"\0068\0072"</c> to <c>hr</c>; the mask does not decode it. So while any
+    /// schema is withheld, a text with a <c>U&amp;"</c> anywhere in it is not planned.
+    /// </para>
+    /// </remarks>
+    internal static string? TextNamesWithheld(string text, IReadOnlySet<string> withheld)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        ArgumentNullException.ThrowIfNull(withheld);
+
+        if (withheld.Count == 0)
+        {
+            return null;
+        }
+
+        if (!string.Equals(PostgresErrorText.Redact(text, withheld), text, StringComparison.Ordinal))
+        {
+            return NamesWithheldSchema;
+        }
+
+        // Postgres' lexer reads u&" as the start of a Unicode-escaped identifier wherever it stands outside a literal or a
+        // comment; inside one it names nothing, and refusing it there too costs a plan and leaks nothing.
+        return text.Contains("u&\"", StringComparison.OrdinalIgnoreCase) ? NamesEscapedIdentifier : null;
+    }
+
+    /// <summary>
+    /// Why a plan may not be shown to the visitor <paramref name="screen" /> describes, or <see langword="null" />: it reads a
+    /// table in a schema they may not see (its schema, under <c>VERBOSE</c>), or a name in it is one the statement rules withhold
+    /// - a hidden type's table, a document table no store declares while types may be hidden, a store they may not see. Pure.
+    /// </summary>
+    internal static string? WithheldPlan(string json, StatementScreen screen, IReadOnlySet<string> withheld)
+    {
+        ArgumentNullException.ThrowIfNull(json);
+        ArgumentNullException.ThrowIfNull(screen);
+        ArgumentNullException.ThrowIfNull(withheld);
+
+        IReadOnlyList<(string? Schema, string Relation)> relations = QueryPlanReader.Relations(json);
+
+        if (relations.Any(x => x.Schema is { } schema && withheld.Contains(schema)))
+        {
+            return PlanReadsWithheldSchema;
+        }
+
+        // Every name the plan prints - its relations, qualified, and the rest of its text - under the statement's own rules.
+        string names = string.Join("\n", relations.Select(static x => x.Schema is { } schema ? schema + "." + x.Relation : x.Relation)) + "\n" + json;
+
+        return SessionQueryText.WithholdingNote(names, screen) switch
+        {
+            null => null,
+            SessionQueryText.HiddenTypeNote => "Not shown: its plan reads the table of a document type the studio does not show.",
+            SessionQueryText.UndeclaredTableNote =>
+                "Not shown: its plan reads a Marten document table no registered store declares, which may be a document type the studio does not show.",
+            SessionQueryText.RefusedStoreNote => "Not shown: its plan reads a document table of a registered Marten store your account may not see.",
+            { } note => "Not shown. " + note,
+        };
+    }
+
+    /// <summary>
+    /// <paramref name="read" /> as one visitor may see it - pure: every text masked through <paramref name="gate" />, the
+    /// database browser's gate for this visitor (or <see langword="null" /> when it could not be read, which withholds every
+    /// text and names no gated table), and the extension's status worded for the server's platform.
+    /// </summary>
+    internal StatementsView Show(StatementFacts read, DatabaseGateRead? gate)
+    {
+        ArgumentNullException.ThrowIfNull(read);
+
+        StudioText text = settings.Text;
+        StatementScreen screen = StatementScreen.Of(gate, settings.IsDocumentTypeVisible is not null);
+        DatabaseGate? browser = gate is { Succeeded: true } ? gate.Gate : null;
+
+        List<StatementRowView> rows = new(read.Statements.Count);
+
+        foreach (StatementFact fact in read.Statements)
+        {
+            (string? shown, string? note) = Text(fact, screen);
+            (string key, string label) = Group(fact.Group, fact.TextRead, browser);
+
+            string? parallelNote = ParallelNote(fact);
+
+            rows.Add(new StatementRowView(
+                fact.QueryId,
+                shown,
+                note,
+                key,
+                label,
+                fact.Window,
+                fact.SinceBegan,
+                fact.Share,
+                fact.WatchedFrom,
+                parallelNote)
+            {
+                // The shortfall note already says what the parallel workers came to; the counters line does not repeat it.
+                ServerCounters = new StatementServerCounters(
+                    parallelNote is null ? fact.ParallelWorkersToLaunch : null,
+                    parallelNote is null ? fact.ParallelWorkersLaunched : null,
+                    fact.WalBuffersFull),
+                CountersSince = fact.CountersSince,
+            });
+        }
+
+        return new StatementsView
+        {
+            MeasuredAt = read.MeasuredAt,
+            State = read.State,
+            Status = Status(read, text),
+            Watched = read.Watched,
+            WindowText = read.State == StatementsState.Read ? WindowText(read) : null,
+            Basis = BasisText(read),
+            Caveat = read.State == StatementsState.Read ? Caveat(read, text) : null,
+            TotalExecMs = read.TotalExecMs,
+            AllExecMsSinceBegan = read.AllExecMsSinceBegan,
+            Evicted = read.Evicted,
+            EvictedOverWatchedWindow = read.Watched,
+            StatsReset = read.StatsReset,
+            Statistics = read.Statistics,
+            From = read.From,
+            Span = read.Span,
+            Rows = rows,
+            StorageReads = read.StorageReads,
+            TextsWithheld = rows.Count > 0 && screen.Withheld is null ? TextsUnchecked : null,
+            StudioCostText = StudioCostText(),
+            Statements = read.Ran,
+        };
+    }
+
+    /// <summary>
+    /// The extension's status when the read did not read, in words that name who can fix it on this platform (A7):
+    /// <see cref="StatementStatusText.Of" />.
+    /// </summary>
+    internal static string? Status(StatementFacts read, StudioText text) => StatementStatusText.Of(read, text);
+
+    /// <summary>The window, in words.</summary>
+    internal static string WindowText(StatementFacts read)
+    {
+        ArgumentNullException.ThrowIfNull(read);
+
+        if (read.Watched && read.From is { } from && read.To is { } to)
+        {
+            return "Over the last " + TableText.Span(to - from) + " the statement checks watched (" + TableText.When(from) + " to "
+                + TableText.When(to) + "): each statement's change between their first and latest samples, and its share of every "
+                + "statement's.";
+        }
+
+        string since = read.From is { } began
+            ? "since its counters began - " + TableText.Ago(began, read.MeasuredAt) + " for pg_stat_statements as a whole "
+              + "(pg_stat_statements_info.stats_reset), later for a statement it evicted and saw again"
+            : "since its counters began, at a time this pg_stat_statements does not record (it is older than 1.9)";
+
+        return "Each statement's totals " + since + ". A window appears once the statement checks have run twice: they run when "
+            + "this page is opened or refreshed, or the Health page's statement checks are run, and a run is reused for five "
+            + "minutes.";
+    }
+
+    /// <summary>What the statistics window says about the server's counters, when it bounds the window.</summary>
+    internal static string? BasisText(StatementFacts read)
+    {
+        ArgumentNullException.ThrowIfNull(read);
+
+        if (read.Statistics is not { } statistics || !StatementFacts.RestartsTheCounters(statistics.Reason))
+        {
+            return null;
+        }
+
+        return statistics.LooksReset
+            ? "The server's counters look reset since the last check (" + (statistics.Signal ?? statistics.ReasonText)
+              + "), so the window starts again from here."
+            : "The server's counters began " + statistics.SinceText + " (" + statistics.BasisText + "), "
+              + statistics.ReasonText + ": the window never reaches back past then.";
+    }
+
+    /// <summary>What the numbers are and are not.</summary>
+    internal static string Caveat(StatementFacts read, StudioText text)
+    {
+        ArgumentNullException.ThrowIfNull(read);
+        ArgumentNullException.ThrowIfNull(text);
+
+        string evicted = EvictedSentence(read.Evicted, read.Watched, marked: false);
+
+        return "Read from pg_stat_statements as " + text.SourcePossessive + " own Postgres role, which holds that role's statements in "
+            + "this database and only the ones that completed: another role's statements are not among them, and another "
+            + "application's are when it connects as the same role. " + Nested(read) + " The "
+            + TableText.Count(read.Statements.Count) + " statements kept are the " + TableText.Count(StatementReads.PageTop)
+            + " with the most execution time per second since their counters began"
+            + (read.StorageReads ? ", the " + TableText.Count(StatementReads.PageTop) + " with the most storage reads" : string.Empty)
+            + " and the statement checks' own picks, of the " + TableText.Count(read.AllStatements) + " it holds." + evicted;
+    }
+
+    /// <summary>
+    /// The eviction sentence of <see cref="Caveat" />, or an empty string when nothing was evicted. While a since-mark counts
+    /// (<paramref name="marked" />) it says the evictions are over the advisor's window, which is not the mark's.
+    /// </summary>
+    /// <param name="evicted">How many entries the extension evicted over the window (or since its reset, before a window), when it says.</param>
+    /// <param name="watched">Whether the advisor's window was one the statement history watched.</param>
+    /// <param name="marked">Whether a since-mark is counting.</param>
+    internal static string EvictedSentence(double? evicted, bool watched, bool marked) => evicted is > 0 and { } count
+        ? " pg_stat_statements evicted " + TableText.Count(count) + " entries "
+          + (watched ? (marked ? "in the advisor's window (not since your mark)" : "in the window") : "since its last reset")
+          + " (pg_stat_statements.max), so some statements' counters are younger than that."
+        : string.Empty;
+
+    /// <summary>What a statement a function runs counts as, for the installed extension's version.</summary>
+    private static string Nested(StatementFacts read) => read.FoldsNested
+        ? "pg_stat_statements " + read.ExtensionVersion + " has no toplevel column, so a statement a function runs is summed into "
+          + "its own row - its top-level and nested runs together, under pg_stat_statements.track = all - as well as counted inside "
+          + "its caller's time; ALTER EXTENSION pg_stat_statements UPDATE in this database keeps only top-level runs."
+        : "Top-level statements only: a statement a function runs is inside its caller's time.";
+
+    /// <summary>What the studio's own line says beside its number: what the meter counts, and which of the studio's statements the list holds.</summary>
+    internal string StudioCostText()
+    {
+        // Which of the studio's statements this page can list depends on the role each read runs as: pg_stat_statements is
+        // read for the source's own role alone (D29), and the reads SqlConsoleRole narrows run as that role instead.
+        string listed = settings.SqlConsoleRole is { Length: > 0 } role
+            ? "SqlConsoleRole is " + role + ". " + settings.Text.StatementsStudioRoles
+            : "With no SqlConsoleRole set, every statement the studio runs here runs as " + settings.Text.SourcePossessive
+              + " own role, as the application's do, so the studio's statements are among those above when they rank among the "
+              + "ones kept, and not otherwise.";
+
+        return "Counted from open to close of every connection the studio opens to this database (" + settings.Text.StudioCostCovers
+            + "), over the last " + ((int) StudioDatabaseTime.Window.TotalMinutes).ToString(CultureInfo.InvariantCulture)
+            + " minutes - the Health page's studio cost line, from the same meter. " + listed;
+    }
+
+    /// <summary>A statement's text as this visitor may read it, or why not.</summary>
+    private static (string? Text, string? Note) Text(StatementFact fact, StatementScreen screen)
+    {
+        if (fact.TextWithheld is { } withheld)
+        {
+            return (null, withheld);
+        }
+
+        if (fact.Text is not { } text)
+        {
+            return (null, fact.TextRead ? null : TextNotReturned);
+        }
+
+        SessionStatementText shown = SessionQueryText.Present(text, fact.TextTruncated, screen, HealthStatementQueries.MaxTextCharacters);
+        return (shown.Text, shown.Note);
+    }
+
+    /// <summary>
+    /// A statement's group as this visitor may see it: a group that names a table in a schema they may not see - or that
+    /// cannot be checked - is shown by its verb alone, under one key for all of them, never half-named (D27).
+    /// </summary>
+    private static (string Key, string Label) Group(StatementGroup? group, bool textRead, DatabaseGate? browser)
+    {
+        if (group is null)
+        {
+            // No text to group by, or a text that does not start with a word (a parenthesised union, say).
+            return textRead ? ("|ungrouped", "not grouped") : ("|unread", "its text was not read");
+        }
+
+        if (group.Table is { GatedSchemas.Count: > 0 } table && (browser is null || table.GatedSchemas.Any(browser.IsWithheld)))
+        {
+            string verb = group.Verb ?? "statement";
+            return (verb + "|withheld", verb + " · a table in a schema you may not see");
+        }
+
+        return (group.Key, group.Label);
+    }
+
+    /// <summary>What a statement's parallel workers say, when its plans were given fewer than they asked for (PostgreSQL 18+).</summary>
+    private static string? ParallelNote(StatementFact fact) =>
+        fact is { ParallelWorkersToLaunch: > 0 and { } planned, ParallelWorkersLaunched: { } launched } && launched < planned
+            ? "Since its counters began, its plans asked for " + TableText.Count(planned) + " parallel workers and were given "
+              + TableText.Count(launched) + " (max_parallel_workers or max_worker_processes ran out)."
+            : null;
+
+    /// <summary>A refusal, logged at Debug (event 9450) and never audited.</summary>
+    private StatementsView Refuse(StudioScope scope, DatabaseRefusal refusal, string reason)
+    {
+        if (logger.IsEnabled(LogLevel.Debug))
+        {
+            logger.StatementsPageRefused(settings.Text.Product, scope.StoreKey, scope.DatabaseId, refusal.ToString());
+        }
+
+        return StatementsView.Refused(refusal, reason);
+    }
+
+    /// <summary>The database browser's gate for this visitor and the database as a whole, or <see langword="null" />.</summary>
+    private async Task<DatabaseGateRead?> GateAsync(StudioScope whole, ResolvedSource resolved, CancellationToken cancellationToken)
+    {
+        if (access is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return await access.GateAsync(whole, resolved, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            if (logger.IsEnabled(LogLevel.Debug))
+            {
+                if (settings.Text.Product == StudioProduct.PostgresStudio)
+                {
+                    logger.LogDebug(exception, "Postgres Studio could not read the schema gate to mask the statements of {DatabaseId}", resolved.Target.Identity);
+                }
+                else
+                {
+                    logger.LogDebug(exception, "Marten Studio could not read the schema gate to mask the statements of {DatabaseId}", resolved.Target.Identity);
+                }
+            }
+
+            return null;
+        }
+    }
+
+    /// <summary>One ring entry and one event 9452 for the first read of this database's statements in this circuit.</summary>
+    private async Task RecordFirstReadAsync(StudioScope whole, StatementFacts read)
+    {
+        if (!ledger.TryRecord(TableRowAuditLedger.Key(whole.StoreKey, whole.DatabaseId, LedgerSchema, LedgerRelation, LedgerKind), Signature, out _))
+        {
+            return;
+        }
+
+        audit.Record(
+            Action,
+            Target,
+            succeeded: true,
+            "Statements read: " + TableText.Count(read.Statements.Count) + " statements.",
+            StudioCapability.ViewDatabaseActivity,
+            whole);
+
+        if (logger.IsEnabled(LogLevel.Information))
+        {
+            logger.StatementsRead(
+                settings.Text.Product,
+                await authorization.UserNameAsync().ConfigureAwait(false),
+                whole.StoreKey,
+                whole.DatabaseId,
+                read.Statements.Count);
+        }
+    }
+
+    /// <summary>The key the studio's cost meter files this database under - read off an unopened connection, which costs no I/O.</summary>
+    private static string CostKey(IStudioDatabase database)
+    {
+        using NpgsqlConnection connection = database.CreateConnection(StudioConnectionUsage.ReadWrite);
+        return StudioDatabaseTime.KeyOf(connection);
+    }
+
+    /// <summary>
+    /// The sentence for a read that failed - the studio's words and the SQLSTATE, never Postgres' own - and the log line: a
+    /// throttled Warning (event 9451), because the page polls.
+    /// </summary>
+    private string Failure(Exception exception, ResolvedSource resolved)
+    {
+        string storeKey = resolved.Source.Key;
+        string databaseId = resolved.Target.Identity;
+        PostgresException? postgres = exception as PostgresException ?? exception.InnerException as PostgresException;
+
+        // Each studio's own template, called with the throttle's level right here, as every other throttled event's caller
+        // does: LogLevelsTests follows a level back to where it was computed, and cannot through a dispatcher's parameter.
+        LogLevel level = throttle.WarningOrDebug("Statements.Read", storeKey, databaseId, StudioLogThrottle.KindOf(exception));
+        if (settings.Text.Product == StudioProduct.PostgresStudio)
+        {
+            logger.PostgresStudioStatementsReadFailed(level, exception, storeKey, databaseId, postgres?.SqlState);
+        }
+        else
+        {
+            logger.StatementsReadFailed(level, exception, storeKey, databaseId, postgres?.SqlState);
+        }
+
+        return PostgresFailure.IsConnectionFailure(exception)
+            ? PostgresFailure.CouldNotConnect(exception)
+            : "The statements could not be read" + (postgres is null
+                ? " (" + exception.GetType().Name + ")."
+                : " (SQLSTATE " + postgres.SqlState + ").");
+    }
+}

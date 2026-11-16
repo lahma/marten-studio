@@ -1,0 +1,240 @@
+@using Microsoft.Extensions.DependencyInjection
+@using Microsoft.Extensions.Logging
+@using DataStudio.Postgres.Components.Json
+@using DataStudio.Postgres.Components.Shared
+@using DataStudio.Postgres.Services
+@using DataStudio.Postgres.Services.Diagnostics
+@using DataStudio.Postgres.Services.Live
+@implements IDisposable
+@inject IServiceProvider Services
+@inject StudioState State
+@inject IJSRuntime JsRuntime
+@inject ILogger<SnapshotMenu> Logger
+
+@*
+    The Health page's Snapshot menu (W5-API, API design §2.4 and §4.3): what this visitor's pages show of the database, as one
+    schemaVersion 1 file - viewed here, copied, or downloaded. It is built in this circuit, on click, by VisitorSnapshotBuilder
+    from each page's own service as this visitor, handed to the browser and dropped: no file, no cache entry, no endpoint. It
+    never reaches the diagnostics API, which is for host code alone (DiagnosticsApiIsNotServedTests).
+
+    The builder is resolved on click rather than injected, so a Health page nobody asks a snapshot of builds none of the six
+    page services it reads.
+
+    1.2-H-B: the same view is also written as a Markdown report for a ticket (copied or downloaded), and an earlier snapshot file
+    is compared with it in a drawer of its own (SnapshotCompare). The Markdown is written from the very snapshot the JSON is, so
+    it holds nothing the JSON does not; the compare asks the visitor's gate first and reads the file after.
+*@
+
+<MenuButton Items="items"
+            Text="Snapshot"
+            Label="Snapshot of this database, as you see it"
+            Title="What your pages show of this database, as JSON or a Markdown report - or compare an earlier snapshot"
+            WrapperClass="ms-menu-button ms-snapshot-menu"
+            ButtonClass="ms-button ms-snapshot-menu-button"
+            PopoverClass="ms-menu-popover ms-snapshot-menu-popover" />
+
+@if (message is not null)
+{
+    <span class="ms-snapshot-message" role="status">@message</span>
+}
+
+@if (comparing)
+{
+    <SnapshotCompare OnClose="CloseCompare" />
+}
+
+@if (viewed is { } snapshot)
+{
+    <section class="ms-snapshot-view" aria-label="Snapshot JSON">
+        <header class="ms-snapshot-view-header">
+            <h2 class="ms-snapshot-view-title">Snapshot</h2>
+            <code class="ms-snapshot-view-name">@snapshot.FileName</code>
+            <button type="button" class="ms-btn ms-btn-sm ms-snapshot-view-close" @onclick="Close">Close</button>
+        </header>
+        <p class="ms-snapshot-view-note">
+            What your pages show of this database, masked as they mask it. A section you may not see is named under
+            <code>withheld</code>, with what it would take.
+        </p>
+        <JsonView Json="@snapshot.Json" Label="Snapshot JSON" DownloadFileName="@snapshot.FileName" />
+    </section>
+}
+
+@code {
+    private readonly CancellationTokenSource lifetime = new();
+    private IReadOnlyList<(string Label, string? Detail, Func<Task> OnSelect)> items = [];
+    private VisitorSnapshot? viewed;
+    private bool comparing;
+    private bool disposed;
+    private string? message;
+
+    /// <summary>
+    /// What the drawer shows is about the database it was built for: another scope shows none of it. The compare drawer clears its own
+    /// comparison; the JSON the viewer holds is cleared here.
+    /// </summary>
+    private async Task OnScopeChangedAsync()
+    {
+        viewed = null;
+        message = null;
+
+        if (!disposed)
+        {
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    protected override void OnInitialized()
+    {
+        State.ScopeChanged += OnScopeChangedAsync;
+
+        items =
+        [
+            ("View JSON", "Open it here, in the JSON viewer", () => RunAsync(ViewAsync)),
+            ("Copy JSON", "Put it on the clipboard", () => RunAsync(CopyAsync)),
+            ("Download JSON", "Save it as a file", () => RunAsync(DownloadAsync)),
+            ("Copy Markdown", "A readable report on the clipboard, for a ticket", () => RunAsync(CopyMarkdownAsync)),
+            ("Download Markdown", "A readable report as a .md file", () => RunAsync(DownloadMarkdownAsync)),
+            ("Compare with an earlier snapshot", "Choose a JSON file this menu saved", () => RunAsync(OpenCompareAsync)),
+        ];
+    }
+
+    /// <summary>
+    /// One item, then this component's render: the menu's items are plain delegates the MenuButton runs, not event callbacks,
+    /// so nothing re-renders the menu's owner on their behalf.
+    /// </summary>
+    private async Task RunAsync(Func<Task> action)
+    {
+        await action();
+        StateHasChanged();
+    }
+
+    private Task<VisitorSnapshot?> BuildAsync() =>
+        BuildAsync(static (builder, scope, token) => builder.BuildAsync(scope, token));
+
+    private async Task<T?> BuildAsync<T>(Func<VisitorSnapshotBuilder, StudioScope, CancellationToken, Task<T>> build)
+        where T : class
+    {
+        if (State.ActiveScope is not { } scope)
+        {
+            message = "Choose a database first.";
+            return null;
+        }
+
+        message = null;
+
+        try
+        {
+            return await build(Services.GetRequiredService<VisitorSnapshotBuilder>(), scope, lifetime.Token);
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
+        {
+            return null;
+        }
+        catch (Exception exception)
+        {
+            // The page services answer a failure as a value; anything that still escapes is a bug, and its words are not
+            // the visitor's to read - the server log has it, once per click.
+            Logger.LogWarning(exception, "The Health page's snapshot of store {StoreKey}, database {DatabaseId} could not be built", StudioLogValue.Cap(scope.StoreKey), StudioLogValue.Cap(scope.DatabaseId));
+            message = "The snapshot could not be built; the server log has why.";
+            return null;
+        }
+    }
+
+    private async Task ViewAsync()
+    {
+        comparing = false;
+        viewed = await BuildAsync();
+    }
+
+    private Task OpenCompareAsync()
+    {
+        // One drawer at a time.
+        viewed = null;
+        message = null;
+        comparing = true;
+        return Task.CompletedTask;
+    }
+
+    private async Task CopyMarkdownAsync()
+    {
+        if (await BuildAsync(static (builder, scope, token) => builder.BuildMarkdownAsync(scope, token)) is not { } report)
+        {
+            return;
+        }
+
+        try
+        {
+            bool copied = await JsRuntime.InvokeAsync<bool>("martenStudio.clipboard.copyText", lifetime.Token, report.Markdown);
+            message = copied ? "Copied the report." : "The browser did not allow the copy.";
+        }
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
+        {
+            message = "The copy did not reach the browser.";
+        }
+    }
+
+    private async Task DownloadMarkdownAsync()
+    {
+        if (await BuildAsync(static (builder, scope, token) => builder.BuildMarkdownAsync(scope, token)) is not { } report)
+        {
+            return;
+        }
+
+        try
+        {
+            bool saved = await JsRuntime.InvokeAsync<bool>("martenStudio.download.text", lifetime.Token, report.FileName, "text/markdown", report.Markdown);
+            message = saved ? "Saved " + report.FileName + "." : "The browser did not save the file.";
+        }
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
+        {
+            message = "The download did not reach the browser.";
+        }
+    }
+
+    private async Task CopyAsync()
+    {
+        if (await BuildAsync() is not { } snapshot)
+        {
+            return;
+        }
+
+        try
+        {
+            bool copied = await JsRuntime.InvokeAsync<bool>("martenStudio.clipboard.copyText", lifetime.Token, snapshot.Json);
+            message = copied ? "Copied the snapshot." : "The browser did not allow the copy.";
+        }
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
+        {
+            message = "The copy did not reach the browser.";
+        }
+    }
+
+    private async Task DownloadAsync()
+    {
+        if (await BuildAsync() is not { } snapshot)
+        {
+            return;
+        }
+
+        try
+        {
+            bool saved = await JsRuntime.InvokeAsync<bool>("martenStudio.download.text", lifetime.Token, snapshot.FileName, "application/json", snapshot.Json);
+            message = saved ? "Saved " + snapshot.FileName + "." : "The browser did not save the file.";
+        }
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
+        {
+            message = "The download did not reach the browser.";
+        }
+    }
+
+    private void Close() => viewed = null;
+
+    private void CloseCompare() => comparing = false;
+
+    public void Dispose()
+    {
+        disposed = true;
+        State.ScopeChanged -= OnScopeChangedAsync;
+        lifetime.Cancel();
+        lifetime.Dispose();
+    }
+}
