@@ -23,7 +23,9 @@ internal static class MartenSpine
     public static StudioDescriptor Descriptor => MartenStudioDescriptor.Instance;
 
     /// <summary>MartenStudio's route table.</summary>
-    public static StudioRouteTable Routes => Descriptor.Routes;
+    public static StudioRouteTable Routes => RouteTable.Value;
+
+    private static readonly Lazy<StudioRouteTable> RouteTable = new(static () => new StudioRouteTable(Descriptor.PageAssemblies));
 
     /// <summary>The settings over <paramref name="options" />, or over the defaults.</summary>
     public static MartenStudioSettings Settings(MartenStudioOptions? options = null) => MartenStudioSettings.Of(options ?? new MartenStudioOptions());

@@ -259,6 +259,74 @@ public class StudioLayoutTests
     }
 
     /// <summary>
+    /// A time-zone change reaches every page that listens to <see cref="StudioState.ScopeChanged" /> exactly once (Shell A1 follow-up F3): the
+    /// layout calls <c>StudioPreferences.NotifyChangedAsync()</c>, whose one subscriber is the scope state. Without this a later packet could drop
+    /// that call with every other test still green.
+    /// </summary>
+    [Fact]
+    public async Task The_time_zone_picker_raises_the_scope_changed_event_once()
+    {
+        using var context = new StudioComponentContext();
+        var layout = RenderLayout(context);
+        int raised = 0;
+        context.State.ScopeChanged += () =>
+        {
+            Interlocked.Increment(ref raised);
+            return Task.CompletedTask;
+        };
+
+        string other = layout.SelectorOptions("ms-timezone-select")
+            .First(id => !string.Equals(id, context.Preferences.SelectedTimeZoneId, StringComparison.Ordinal));
+
+        // The dispatch task completes only once the handler and its render have, so nothing is still in flight when the count is read.
+        await layout.Find("#ms-timezone-select").ChangeAsync(other);
+
+        raised.Should().Be(1);
+    }
+
+    /// <summary>The stored zone read on the first render moves the zone the same way (follow-up F3, second half): once.</summary>
+    [Fact]
+    public void A_stored_time_zone_that_differs_raises_the_scope_changed_event_once()
+    {
+        using var context = new StudioComponentContext();
+        string stored = TimeZoneInfo.GetSystemTimeZones().First(x => !string.Equals(x.Id, context.Preferences.SelectedTimeZoneId, StringComparison.Ordinal)).Id;
+        context.JSInterop.Setup<string?>("martenStudio.prefs.get", StudioPreferences.ThemePreferenceKey).SetResult(null);
+        context.JSInterop.Setup<string?>("martenStudio.prefs.get", StudioPreferences.TimeZonePreferenceKey).SetResult(stored);
+        int raised = 0;
+        context.State.ScopeChanged += () =>
+        {
+            Interlocked.Increment(ref raised);
+            return Task.CompletedTask;
+        };
+
+        var layout = RenderLayout(context);
+
+        context.Preferences.SelectedTimeZoneId.Should().Be(stored);
+        raised.Should().Be(1);
+        layout.Instance.PreferencesLoaded.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// The database's circuit host is the first subscriber to the scope (Shell A2a, DESIGN-A 5.4): <c>StudioLayout</c> renders it before the rail,
+    /// so its handler - which writes the scope into the address, then asks the scope policy - runs before the rail's, which 1.2's N5b window
+    /// depends on. Read from the event's invocation list after a real render of the layout, with the rail and the header in it.
+    /// </summary>
+    [Fact]
+    public void The_database_host_is_subscribed_to_the_scope_before_the_rail_and_the_header()
+    {
+        using var context = new StudioComponentContext();
+        context.Catalog.WithStore("default", "Default", databaseIdentities: "localhost.marten");
+
+        RenderLayout(context);
+
+        System.Reflection.FieldInfo field = typeof(StudioState).GetField(nameof(StudioState.ScopeChanged), System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        string[] subscribers = [.. ((Delegate)field.GetValue(context.State)!).GetInvocationList().Select(static x => x.Target!.GetType().Name)];
+
+        subscribers.Should().Contain([nameof(DatabaseScopeHost), nameof(NavMenu), nameof(ScopeSelector)]);
+        subscribers[0].Should().Be(nameof(DatabaseScopeHost), "it is the first statement of the host's initialization, and the host is the first component the layout renders");
+    }
+
+    /// <summary>
     /// The first render reads <c>localStorage</c> through <c>martenStudio.prefs.get</c>, and a closed
     /// browser tab throws <see cref="Microsoft.JSInterop.JSDisconnectedException" /> out of that call - a
     /// type that derives from <see cref="Exception" /> rather than from

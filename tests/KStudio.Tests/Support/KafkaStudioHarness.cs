@@ -172,7 +172,7 @@ internal sealed class KafkaStudioHarness : IDisposable
 
             services.AddSingleton<IOptions<KafkaStudioOptions>>(Microsoft.Extensions.Options.Options.Create(Options));
             services.AddSingleton<IStudioModule, KafkaStudioModule>();
-            services.RemoveAll<StudioDescriptor>();
+            services.RemoveAll<StudioShellDescriptor>();
             services.AddSingleton(static provider =>
                 StudioModuleComposition.Compose(PostgresStudioDescriptor.Instance, provider.GetServices<IStudioModule>()));
 
@@ -230,7 +230,7 @@ internal sealed class KafkaStudioHarness : IDisposable
 
     public KafkaActionLog ActionLog => Context.Services.GetRequiredService<KafkaActionLog>();
 
-    public StudioDescriptor Descriptor => Context.Services.GetRequiredService<StudioDescriptor>();
+    public StudioShellDescriptor Descriptor => Context.Services.GetRequiredService<StudioShellDescriptor>();
 
     public TestAuthenticationStateProvider Visitor => Context.AuthenticationState;
 

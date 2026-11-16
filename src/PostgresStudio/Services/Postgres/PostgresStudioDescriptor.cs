@@ -49,7 +49,7 @@ internal static class PostgresStudioDescriptor
             new StudioHealthCheckAssembly(typeof(PostgresDiagnosticsDescriptor).Assembly),
             new StudioHealthCheckAssembly(typeof(StudioHome).Assembly),
         ],
-        Navigation = Navigation(),
+        Navigation = Navigation,
         OverviewComponent = typeof(PostgresOverview),
         QueryComponent = typeof(PostgresQuery),
         SourceQueryParameter = "store",
@@ -69,7 +69,7 @@ internal static class PostgresStudioDescriptor
     };
 
     /// <summary>The sidebar: Overview and Query, the database section, Health, Replication and Activity.</summary>
-    private static IReadOnlyList<StudioNavSection> Navigation() =>
+    private static IReadOnlyList<StudioNavSection> Navigation(IStudioSettings studio) =>
     [
         new("Data",
         [
@@ -79,7 +79,7 @@ internal static class PostgresStudioDescriptor
             // host, so it is not drawn then (issue #37). A visitor who reaches it by address still reads the notice.
             new("Query", "query", "query", Title: "The SQL console")
             {
-                IsShown = StudioNavConditions.RunSqlEnabled,
+                IsShown = _ => StudioNavConditions.RunSqlEnabled(studio),
             },
 
             // X3 (issue #28): a statement's plan drawn every way, and what to fix. Running one is the console's gate; pasting one reads

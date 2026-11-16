@@ -17,7 +17,7 @@ internal sealed class KafkaStudioModule(IOptions<KafkaStudioOptions> options) : 
     /// <summary>The compile-time root every Kafka page's <c>@page</c> starts with.</summary>
     internal const string PageRoot = "/kafka";
 
-    private readonly StudioPageAssembly pages = new(typeof(KafkaStudioModule).Assembly, PageRoot) { KeepsRoot = true };
+    private readonly IReadOnlyList<StudioPageAssembly> pages = [new(typeof(KafkaStudioModule).Assembly, PageRoot) { KeepsRoot = true }];
     private readonly IReadOnlyList<StudioNavSection> navigation = Rail(options);
 
     /// <inheritdoc />
@@ -27,7 +27,10 @@ internal sealed class KafkaStudioModule(IOptions<KafkaStudioOptions> options) : 
     public string ProductName => KafkaStudioText.ProductName;
 
     /// <inheritdoc />
-    public StudioPageAssembly Pages => pages;
+    public bool IsRoot => false;
+
+    /// <inheritdoc />
+    public IReadOnlyList<StudioPageAssembly> PageAssemblies => pages;
 
     /// <inheritdoc />
     public IReadOnlyList<StudioNavSection> Navigation => navigation;
@@ -58,22 +61,38 @@ internal sealed class KafkaStudioModule(IOptions<KafkaStudioOptions> options) : 
     ];
 
     /// <inheritdoc />
-    public Type ScopeSelector => typeof(ClusterSelector);
+    public Type? ScopeSelector => typeof(ClusterSelector);
 
     /// <inheritdoc />
-    public string ExposedSentence => KafkaStudioText.ExposedSentence;
+    public Type? HeaderSearch => null;
 
     /// <inheritdoc />
-    public string CapabilitiesHeading => KafkaStudioText.CapabilitiesHeading;
+    public Type? CircuitHost => null;
 
     /// <inheritdoc />
-    public IReadOnlyList<StudioModuleCapability> Capabilities =>
+    public Type? ScopeGate => null;
+
+    /// <inheritdoc />
+    public string HomeRoute => "kafka";
+
+    /// <inheritdoc />
+    public string? ExposedSentence => KafkaStudioText.ExposedSentence;
+
+    /// <inheritdoc />
+    public IReadOnlyList<StudioModuleCapabilityGroup> CapabilityGroups =>
     [
-        .. KafkaCapabilityGuard.Offered.Select(capability => new StudioModuleCapability(
-            capability.ToString(),
-            KafkaCapabilityGuard.OptionFor(capability),
-            KafkaCapabilityGuard.ConfiguredIn(options.Value.Capabilities).Contains(capability))),
+        new StudioModuleCapabilityGroup(
+            KafkaStudioText.CapabilitiesHeading,
+            [
+                .. KafkaCapabilityGuard.Offered.Select(capability => new StudioModuleCapability(
+                    capability.ToString(),
+                    KafkaCapabilityGuard.OptionFor(capability),
+                    KafkaCapabilityGuard.ConfiguredIn(options.Value.Capabilities).Contains(capability))),
+            ]),
     ];
+
+    /// <inheritdoc />
+    public string? AllCapabilitiesOption => null;
 
     /// <inheritdoc />
     public IReadOnlyList<StudioShortcutGroup> Shortcuts { get; } = [];

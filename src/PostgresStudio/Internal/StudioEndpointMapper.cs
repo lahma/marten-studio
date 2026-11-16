@@ -53,7 +53,7 @@ namespace PostgresStudio.Internal;
 /// </para>
 /// <para>
 /// <b>Pages are re-rooted per assembly.</b> A page endpoint is rebased when its component's assembly is one of
-/// <see cref="StudioDescriptor.PageAssemblies" />, from <em>that</em> assembly's compile-time root - so a studio whose
+/// <see cref="StudioShellDescriptor.PageAssemblies" />, from <em>that</em> assembly's compile-time root - so a studio whose
 /// pages live in two assemblies, each with its own root, mounts both under one path.
 /// </para>
 /// <para>
@@ -134,7 +134,7 @@ internal static class StudioEndpointMapper
         ArgumentNullException.ThrowIfNull(builder);
 
         IShellSettings settings = builder.ServiceProvider.GetRequiredService<IShellSettings>();
-        StudioDescriptor descriptor = builder.ServiceProvider.GetRequiredService<StudioDescriptor>();
+        StudioShellDescriptor descriptor = builder.ServiceProvider.GetRequiredService<StudioShellDescriptor>();
 
         // Built here, before anything is mapped, so that a page template outside its assembly's root or a relative
         // route two pages claim makes Map*Studio() throw at startup - not the first request for a page, and not an

@@ -1,10 +1,10 @@
 namespace PostgresStudio.Services.Settings;
 
 /// <summary>
-/// A section of the shell that is not about the host studio's source: its pages, its rail section, its scope selector, its
-/// words and its capabilities (D34). Registered by the module's own <c>Add*()</c> with <c>TryAddEnumerable</c>, read once by
-/// the descriptor composition (<see cref="StudioModuleComposition" />, a singleton), so every member is pure, does no IO and
-/// reads only the module's own options.
+/// A section of the shell: its pages, its rail section, its scope selector, its words and its capabilities (D34). The database - Postgres
+/// Studio's pages or Marten Studio's - is one (<see cref="IsRoot" />, <see cref="DatabaseStudioModule" />), and a module added beside it is another. Registered
+/// by the module's own <c>Add*()</c> with <c>TryAddEnumerable</c>, read once by the composition (<see cref="StudioModuleComposition" />, a
+/// singleton), so every member is pure, does no IO and reads only the module's own options.
 /// </summary>
 internal interface IStudioModule
 {
@@ -14,23 +14,57 @@ internal interface IStudioModule
     /// <summary>The module's product name in a sentence and on the rail's credit.</summary>
     string ProductName { get; }
 
-    /// <summary>The module's page assembly. <see cref="StudioPageAssembly.KeepsRoot" /> must be <see langword="true" />: a module's pages never land over the host's.</summary>
-    StudioPageAssembly Pages { get; }
+    /// <summary>
+    /// Whether the module's pages sit directly under the mount: the studio itself rather than a section added to it. Exactly one module of a
+    /// composition may be the root, and the database is.
+    /// </summary>
+    bool IsRoot { get; }
+
+    /// <summary>
+    /// The module's page assemblies. A module that is not the root keeps its root (<see cref="StudioPageAssembly.KeepsRoot" /> must be
+    /// <see langword="true" />): its pages never land over the root's. Marten Studio's root has two.
+    /// </summary>
+    IReadOnlyList<StudioPageAssembly> PageAssemblies { get; }
 
     /// <summary>The module's rail sections, in order. Titles and labels must be unique across the composed rail.</summary>
     IReadOnlyList<StudioNavSection> Navigation { get; }
 
-    /// <summary>The header component drawn in place of <c>ScopeSelector</c> on the module's pages: a component with no parameters.</summary>
-    Type ScopeSelector { get; }
+    /// <summary>The header component drawn on the module's pages, a component with no parameters; <see langword="null" /> for none.</summary>
+    Type? ScopeSelector { get; }
 
-    /// <summary>One sentence the anonymous banner adds after the host's.</summary>
-    string ExposedSentence { get; }
+    /// <summary>The component the header draws in its centre on the module's pages, a component with no parameters; <see langword="null" /> for none.</summary>
+    Type? HeaderSearch { get; }
 
-    /// <summary>The capability chip and banner's heading for the module's capabilities.</summary>
-    string CapabilitiesHeading { get; }
+    /// <summary>
+    /// A component with no markup that the layout renders first, on every page, for the life of the circuit - one per module that has one - with
+    /// one parameter, <c>bool Active</c>: the page on screen is this module's. It holds what must outlive a page of the module, and subscribes
+    /// before the rail does. <see langword="null" /> for none.
+    /// </summary>
+    Type? CircuitHost { get; }
 
-    /// <summary>The module's capabilities as the chip lists them, read live on every render.</summary>
-    IReadOnlyList<StudioModuleCapability> Capabilities { get; }
+    /// <summary>
+    /// A component the layout renders in <c>main</c> around the body of a page of this module, with one parameter, <c>ChildContent</c> (the
+    /// body): the module's own frame, which may refuse the page. <see langword="null" /> renders the body as it is.
+    /// </summary>
+    Type? ScopeGate { get; }
+
+    /// <summary>
+    /// The module's front page below the mount: <c>""</c> for the root, the module's own segment for any other. Nothing reads it in phase A; it is on the seam
+    /// now so that the package split adds no member.
+    /// </summary>
+    string HomeRoute { get; }
+
+    /// <summary>
+    /// One sentence the anonymous banner adds after the shell's own, or <see langword="null" /> for none: the root's is the shell's
+    /// <see cref="StudioShellDescriptor.ExposedContent" />.
+    /// </summary>
+    string? ExposedSentence { get; }
+
+    /// <summary>The module's capabilities as the chip lists them, one heading each, read live on every render; empty for a module with none.</summary>
+    IReadOnlyList<StudioModuleCapabilityGroup> CapabilityGroups { get; }
+
+    /// <summary>The one-line opt-in that turns all of the module's capabilities on (<c>MartenStudioCapabilities.All()</c>), or <see langword="null" /> for a module with none.</summary>
+    string? AllCapabilitiesOption { get; }
 
     /// <summary>The module's keyboard shortcuts for the sheet; empty for a module with none.</summary>
     IReadOnlyList<StudioShortcutGroup> Shortcuts { get; }
@@ -42,47 +76,62 @@ internal interface IStudioModule
     string AuditEventIds { get; }
 }
 
-/// <summary>One module capability as the chip lists it. Whether it is on is computed by the shell: not read-only, and configured.</summary>
+/// <summary>One module capability as the chip lists it. Whether it is on is computed by the module: not read-only, and configured.</summary>
 /// <param name="Name">The capability's name.</param>
 /// <param name="Option">The option that switches it on, as a host would write it.</param>
 /// <param name="Configured">Whether the host switched it on, without the master switch.</param>
 internal sealed record StudioModuleCapability(string Name, string Option, bool Configured);
 
+/// <summary>A heading and the capabilities listed under it in the chip's popover.</summary>
+/// <param name="Heading">The group's heading, and its list's accessible name.</param>
+/// <param name="Capabilities">The group's capabilities, in order.</param>
+internal sealed record StudioModuleCapabilityGroup(string Heading, IReadOnlyList<StudioModuleCapability> Capabilities);
+
 /// <summary>
-/// Composes the registered modules into the host studio's descriptor (D34). With no module the result is the host's descriptor
-/// itself, the very instance, so a host that never registered a module is byte for byte what it was.
+/// Composes the registered modules into the shell's descriptor (D34): the root first, then the others in key order. A module's page
+/// assemblies, rail sections and shortcuts follow the root's, and the shell's identity is the database descriptor's.
 /// </summary>
 internal static class StudioModuleComposition
 {
-    /// <summary>The compile-time roots of the host studios' own pages, which no module may claim.</summary>
+    /// <summary>The compile-time roots of the host studios' own pages, which no module that is not the root may claim.</summary>
     private static readonly string[] HostRoots = ["/postgres", "/marten"];
 
-    /// <summary>Composes <paramref name="host" /> with <paramref name="modules" />.</summary>
-    /// <param name="host">The studio's static descriptor.</param>
+    /// <summary>Composes the shell's descriptor from <paramref name="database" />'s words and <paramref name="modules" />.</summary>
+    /// <param name="database">The studio's static descriptor: the shell's name, its anonymous banner's clause and its startup guard's words.</param>
     /// <param name="modules">The registered modules, in any order.</param>
     /// <exception cref="InvalidOperationException">
-    /// Two modules share a key, a module's pages do not keep their root, a root is another assembly's or a host studio's, or a
-    /// section title or item label of a module collides with another one on the composed rail.
+    /// Two modules share a key, two are the root, a module that is not the root has pages that do not keep their root, a root is another
+    /// assembly's or a host studio's, or a section title or item label of a module collides with another one on the composed rail.
     /// </exception>
-    public static StudioDescriptor Compose(StudioDescriptor host, IEnumerable<IStudioModule> modules)
+    public static StudioShellDescriptor Compose(StudioDescriptor database, IEnumerable<IStudioModule> modules)
     {
-        ArgumentNullException.ThrowIfNull(host);
+        ArgumentNullException.ThrowIfNull(database);
         ArgumentNullException.ThrowIfNull(modules);
 
-        IStudioModule[] ordered = [.. modules.OrderBy(static x => x.Key, StringComparer.Ordinal)];
-        if (ordered.Length == 0)
-        {
-            return host;
-        }
+        IStudioModule[] ordered =
+        [
+            .. modules.Where(static x => x.IsRoot).OrderBy(static x => x.Key, StringComparer.Ordinal),
+            .. modules.Where(static x => !x.IsRoot).OrderBy(static x => x.Key, StringComparer.Ordinal),
+        ];
 
-        Validate(host, ordered);
-        return host.WithModules(ordered);
+        Validate(ordered);
+
+        return new StudioShellDescriptor
+        {
+            ProductName = database.ProductName,
+            ExposedContent = database.ExposedContent,
+            Surface = database.Surface,
+            Exposure = database.Exposure,
+            Remedies = database.Remedies,
+            Modules = ordered,
+        };
     }
 
-    private static void Validate(StudioDescriptor host, IStudioModule[] modules)
+    private static void Validate(IStudioModule[] modules)
     {
         HashSet<string> keys = new(StringComparer.Ordinal);
-        List<string> roots = [.. HostRoots, .. host.PageAssemblies.Select(static x => Normalized(x.CompileTimeRoot))];
+        List<string> roots = [];
+        IStudioModule? root = null;
 
         foreach (IStudioModule module in modules)
         {
@@ -91,27 +140,45 @@ internal static class StudioModuleComposition
                 throw new InvalidOperationException($"Two modules are registered under the key '{module.Key}'. Each module has a key of its own.");
             }
 
-            if (!module.Pages.KeepsRoot)
+            if (module.IsRoot)
             {
-                throw new InvalidOperationException(
-                    $"The pages of module '{module.Key}' do not keep their root (StudioPageAssembly.KeepsRoot). A module's pages are served below "
-                    + "its own segment under the mount, so that they never land over the host studio's.");
-            }
+                if (root is not null)
+                {
+                    throw new InvalidOperationException(
+                        $"Modules '{root.Key}' and '{module.Key}' are both the root (IStudioModule.IsRoot). Exactly one module's pages sit directly under the mount.");
+                }
 
-            string root = Normalized(module.Pages.CompileTimeRoot);
-            if (roots.Contains(root, StringComparer.OrdinalIgnoreCase))
+                root = module;
+                roots.AddRange(module.PageAssemblies.Select(static x => Normalized(x.CompileTimeRoot)));
+            }
+        }
+
+        foreach (IStudioModule module in modules.Where(static x => !x.IsRoot))
+        {
+            foreach (StudioPageAssembly pages in module.PageAssemblies)
             {
-                throw new InvalidOperationException(
-                    $"The pages of module '{module.Key}' are rooted at '{module.Pages.CompileTimeRoot}', which another page assembly of the studio already uses.");
-            }
+                if (!pages.KeepsRoot)
+                {
+                    throw new InvalidOperationException(
+                        $"The pages of module '{module.Key}' do not keep their root (StudioPageAssembly.KeepsRoot). A module's pages are served below "
+                        + "its own segment under the mount, so that they never land over the host studio's.");
+                }
 
-            roots.Add(root);
+                string pageRoot = Normalized(pages.CompileTimeRoot);
+                if (HostRoots.Contains(pageRoot, StringComparer.OrdinalIgnoreCase) || roots.Contains(pageRoot, StringComparer.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException(
+                        $"The pages of module '{module.Key}' are rooted at '{pages.CompileTimeRoot}', which another page assembly of the studio already uses.");
+                }
+
+                roots.Add(pageRoot);
+            }
         }
 
         // Every title and label on the composed rail is a sibling @key in one list (NavMenu), so a module's may collide with
-        // nothing: not the host's, not another module's, and not another of its own. The host's own rail is not judged here.
+        // nothing: not the root's, not another module's, and not another of its own. The root's own are not judged here.
         HashSet<string> names = new(StringComparer.OrdinalIgnoreCase);
-        foreach (StudioNavSection section in host.Navigation)
+        foreach (StudioNavSection section in root?.Navigation ?? [])
         {
             names.Add(section.Title);
             foreach (StudioNavItem item in section.Items)
@@ -120,7 +187,7 @@ internal static class StudioModuleComposition
             }
         }
 
-        foreach (IStudioModule module in modules)
+        foreach (IStudioModule module in modules.Where(static x => !x.IsRoot))
         {
             foreach (StudioNavSection section in module.Navigation)
             {

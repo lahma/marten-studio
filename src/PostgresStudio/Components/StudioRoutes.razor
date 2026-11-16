@@ -6,7 +6,7 @@
 @inject INavigationInterception NavigationInterception
 @inject IScrollToLocationHash ScrollToLocationHash
 @inject IShellSettings Settings
-@inject StudioDescriptor Descriptor
+@inject StudioShellDescriptor Descriptor
 
 @* The built-in Blazor Router can only match the compile-time page templates, so the studio matches routes
    itself - against its descriptor's route table - to honour a custom mount path. Since 1.2 it also does what the

@@ -72,8 +72,13 @@ public class StudioRegistrationTests
         (typeof(DiagnosticsRegistrationMarker), ServiceLifetime.Singleton, How.Instance, typeof(DiagnosticsRegistrationMarker)),
         (typeof(DiagnosticsDescriptor), ServiceLifetime.Singleton, How.Instance, typeof(StudioDescriptor)),
         (typeof(IDiagnosticsSettings), ServiceLifetime.Singleton, How.Factory, typeof(IDiagnosticsSettings)),
-        (typeof(StudioDescriptor), ServiceLifetime.Singleton, How.Factory, typeof(StudioDescriptor)),
+
+        // Shell A2a: the database's own descriptor is registered as itself, never composed; the shell's is composed from the registered modules,
+        // of which the database is one (the root), registered beside the settings it is built from.
+        (typeof(StudioDescriptor), ServiceLifetime.Singleton, How.Instance, typeof(StudioDescriptor)),
+        (typeof(StudioShellDescriptor), ServiceLifetime.Singleton, How.Factory, typeof(StudioShellDescriptor)),
         (typeof(IStudioSettings), ServiceLifetime.Singleton, How.Factory, typeof(IStudioSettings)),
+        (typeof(IStudioModule), ServiceLifetime.Singleton, How.Type, typeof(DatabaseStudioModule)),
 
         // Shell A1: the shell's view of the very same settings object, and the circuit's preferences beside the scope state.
         (typeof(IShellSettings), ServiceLifetime.Singleton, How.Factory, typeof(IShellSettings)),
@@ -85,6 +90,7 @@ public class StudioRegistrationTests
         (typeof(ColumnCatalog), ServiceLifetime.Singleton, How.Type, typeof(ColumnCatalog)),
         (typeof(StudioPreferences), ServiceLifetime.Scoped, How.Type, typeof(StudioPreferences)),
         (typeof(StudioState), ServiceLifetime.Scoped, How.Type, typeof(StudioState)),
+        (typeof(DatabaseScopeAccess), ServiceLifetime.Scoped, How.Type, typeof(DatabaseScopeAccess)),
         (typeof(IStudioScopeCatalog), ServiceLifetime.Scoped, How.Type, typeof(StudioScopeCatalog)),
         (typeof(StudioAuthorization), ServiceLifetime.Scoped, How.Type, typeof(StudioAuthorization)),
         (typeof(StudioSourceResolver), ServiceLifetime.Scoped, How.Type, typeof(StudioSourceResolver)),
@@ -306,8 +312,8 @@ public class StudioRegistrationTests
         [typeof(StudioLogThrottle)] = typeof(StudioLogThrottle),
         [typeof(IStudioRuntime)] = typeof(MartenStudioRuntime),
 
-        // D34: the shell's descriptor is the host studio's composed with the registered modules when first resolved - the very instance with none.
-        [typeof(StudioDescriptor)] = typeof(StudioDescriptor),
+        // D34: the shell's descriptor is composed from the registered modules, the database among them, when first resolved.
+        [typeof(StudioShellDescriptor)] = typeof(StudioShellDescriptor),
         [typeof(ISqlConsoleService)] = typeof(SqlConsoleService),
         [typeof(HealthMuteKeys)] = typeof(HealthMuteKeys),
 

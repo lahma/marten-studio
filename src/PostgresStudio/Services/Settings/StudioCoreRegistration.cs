@@ -76,10 +76,16 @@ internal static class StudioCoreRegistration
             marker.RegisteredBy,
             byStudio: true);
 
-        // The host studio's static descriptor composed with the modules registered beside it, when first resolved (D34): after every
-        // Add*(), so registration is order-independent. With no module that is the very instance registered here.
+        // The database's own descriptor, as itself: the static instance, never composed.
+        services.TryAddSingleton(descriptor);
+
+        // The shell's descriptor: the database module composed with the modules registered beside it, when first resolved (D34): after every
+        // Add*(), so registration is order-independent.
         services.TryAddSingleton(provider => StudioModuleComposition.Compose(descriptor, provider.GetServices<IStudioModule>()));
         services.TryAddSingleton(settings);
+
+        // The database as a module of the shell: the root, always there (D34).
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IStudioModule, DatabaseStudioModule>());
 
         // The shell's view of the same object (D30: one object, two interfaces).
         services.TryAddSingleton<IShellSettings>(static provider => provider.GetRequiredService<IStudioSettings>());
@@ -112,6 +118,9 @@ internal static class StudioCoreRegistration
         // what it has been told.
         services.TryAddScoped<StudioPreferences>();
         services.TryAddScoped<StudioState>();
+
+        // What the database's scope gate answered for this circuit: written by the module's circuit host, read by its frame.
+        services.TryAddScoped<DatabaseScopeAccess>();
         services.TryAddScoped<IStudioScopeCatalog, StudioScopeCatalog>();
         services.TryAddScoped<StudioAuthorization>();
         services.TryAddScoped<StudioSourceResolver>();

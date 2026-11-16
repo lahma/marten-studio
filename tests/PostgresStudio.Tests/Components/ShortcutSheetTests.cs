@@ -5,9 +5,10 @@ using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 
 using PostgresStudio.Components.Shared;
+using PostgresStudio.Services;
 using PostgresStudio.Services.Postgres;
 using PostgresStudio.Services.Settings;
-// ShortcutSheet reads StudioDescriptor; the Marten half is MartenStudio.Tests' (ShortcutSheetMartenTests).
+// ShortcutSheet reads StudioShellDescriptor; the Marten half is MartenStudio.Tests' (ShortcutSheetMartenTests).
 
 namespace PostgresStudio.Tests.Components;
 
@@ -21,7 +22,8 @@ public class ShortcutSheetTests
     private static IRenderedComponent<ShortcutSheet> Render(StudioDescriptor descriptor)
     {
         BunitContext context = new();
-        context.Services.AddSingleton(descriptor);
+        PostgresStudioSettings settings = new(Microsoft.Extensions.Options.Options.Create(new PostgresStudioOptions()));
+        context.Services.AddSingleton(StudioModuleComposition.Compose(descriptor, [new DatabaseStudioModule(descriptor, settings, new StudioCapabilityGuard(settings))]));
         return context.Render<ShortcutSheet>();
     }
 

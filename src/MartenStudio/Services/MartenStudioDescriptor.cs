@@ -64,7 +64,7 @@ internal static class MartenStudioDescriptor
             new StudioHealthCheckAssembly(typeof(StudioDescriptor).Assembly),
             new StudioHealthCheckAssembly(typeof(MartenStudioApp).Assembly, MartenStoreOnly),
         ],
-        Navigation = Navigation(),
+        Navigation = Navigation,
         OverviewComponent = typeof(Components.Pages.Overview),
         QueryComponent = typeof(Components.Pages.Query.Query),
         SourceQueryParameter = SourceQueryParameter,
@@ -86,7 +86,7 @@ internal static class MartenStudioDescriptor
     };
 
     /// <summary>The sidebar, as it has been since 0.3.0's database section.</summary>
-    private static IReadOnlyList<StudioNavSection> Navigation() =>
+    private static IReadOnlyList<StudioNavSection> Navigation(IStudioSettings studio) =>
     [
         new("Data",
         [
@@ -139,7 +139,7 @@ internal static class MartenStudioDescriptor
             // is absent (D27), as the Overview's tile is, and the page it would link to says why if reached by address.
             new("Dead letters", "events/dead-letters", "alert", DeadLettersBadge)
             {
-                IsShown = static settings => DeadLetterVisibility.IsVisible(settings.IsDocumentTypeVisible, out _),
+                IsShown = shell => DeadLetterVisibility.IsVisible(studio.IsDocumentTypeVisible, out _),
             },
         ]),
         new("Operations",

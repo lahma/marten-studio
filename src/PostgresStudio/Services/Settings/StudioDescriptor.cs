@@ -1,7 +1,4 @@
-using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
-
-using PostgresStudio.Components;
 
 namespace PostgresStudio.Services.Settings;
 
@@ -39,87 +36,19 @@ internal sealed record StudioPageAssembly(Assembly Assembly, string CompileTimeR
 /// </remarks>
 internal sealed class StudioDescriptor : DiagnosticsDescriptor
 {
-    private readonly Lazy<StudioRouteTable> routes;
-
-    /// <summary>Creates a descriptor; the route table is built on first use and validated then.</summary>
-    public StudioDescriptor()
-    {
-        routes = new Lazy<StudioRouteTable>(BuildRoutes);
-    }
-
     /// <summary>
-    /// Copies <paramref name="source" /> - every property of this class and of <see cref="DiagnosticsDescriptor" /> - and adds
-    /// <paramref name="modules" /> (D34): their page assemblies after the host's, their rail sections before the host's last, and
-    /// their shortcuts after the host's. <c>StudioDescriptorCopyTests</c> fails on a property added without a copy here.
-    /// </summary>
-    [SetsRequiredMembers]
-    private StudioDescriptor(StudioDescriptor source, IReadOnlyList<IStudioModule> modules)
-        : this()
-    {
-        Key = source.Key;
-        ProductName = source.ProductName;
-        HealthCheckAssemblies = source.HealthCheckAssemblies;
-        SourceQueryParameter = source.SourceQueryParameter;
-        SourceNoun = source.SourceNoun;
-        SourceLabel = source.SourceLabel;
-        CheckCodeOwner = source.CheckCodeOwner;
-        RetiredCheckCodes = source.RetiredCheckCodes;
-
-        OverviewComponent = source.OverviewComponent;
-        QueryComponent = source.QueryComponent;
-        ExposedContent = source.ExposedContent;
-        CreateResource = source.CreateResource;
-        Surface = source.Surface;
-        Exposure = source.Exposure;
-        Remedies = source.Remedies;
-
-        PageAssemblies = [.. source.PageAssemblies, .. modules.Select(static x => x.Pages)];
-        ExtraShortcuts = [.. source.ExtraShortcuts, .. modules.SelectMany(static x => x.Shortcuts)];
-        Modules = modules;
-
-        // The modules' sections go immediately before the host's last section (System, which holds Activity), in key order.
-        List<StudioNavSection> navigation = [.. source.Navigation];
-        int at = Math.Max(navigation.Count - 1, 0);
-        navigation.InsertRange(
-            at,
-            modules.SelectMany(static module => module.Navigation.Select(section => section with { ModuleKey = module.Key })));
-        Navigation = navigation;
-    }
-
-    private StudioRouteTable BuildRoutes() => new(PageAssemblies);
-
-    /// <summary>This descriptor composed with <paramref name="modules" />, already validated and in key order (<see cref="StudioModuleComposition" />).</summary>
-    /// <param name="modules">The modules.</param>
-    internal StudioDescriptor WithModules(IReadOnlyList<IStudioModule> modules) => new(this, modules);
-
-    /// <summary>The modules composed into this descriptor, in key order; empty for the host studio's own static descriptor.</summary>
-    public IReadOnlyList<IStudioModule> Modules { get; private init; } = [];
-
-    /// <summary>The module whose pages are <paramref name="pageType" />'s assembly, or <see langword="null" /> for a page of the host studio.</summary>
-    /// <param name="pageType">A routed page component.</param>
-    public IStudioModule? ModuleOf(Type pageType)
-    {
-        ArgumentNullException.ThrowIfNull(pageType);
-
-        foreach (IStudioModule module in Modules)
-        {
-            if (module.Pages.Assembly == pageType.Assembly)
-            {
-                return module;
-            }
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// Every assembly whose pages this studio serves, each with its compile-time root. The route table and the endpoint
-    /// re-rooting are built from this list and nothing else; a relative route two of them claim is an error.
+    /// Every assembly whose pages this studio serves, each with its compile-time root: the database module's own
+    /// (<see cref="DatabaseStudioModule" />). The shell's route table and the endpoint re-rooting are built from every module's
+    /// list (<see cref="StudioShellDescriptor.PageAssemblies" />); a relative route two of them claim is an error.
     /// </summary>
     public required IReadOnlyList<StudioPageAssembly> PageAssemblies { get; init; }
 
-    /// <summary>The sidebar, section by section.</summary>
-    public required IReadOnlyList<StudioNavSection> Navigation { get; init; }
+    /// <summary>
+    /// The sidebar, section by section, built for the settings the studio is registered with: an entry whose condition needs more than the
+    /// master switch (<see cref="StudioNavConditions.RunSqlEnabled" />) closes over them, so the navigation is built once per registration
+    /// (by <see cref="DatabaseStudioModule" />) and never held in a static.
+    /// </summary>
+    public required Func<IStudioSettings, IReadOnlyList<StudioNavSection>> Navigation { get; init; }
 
     /// <summary>
     /// The body the studio's shared root page (<c>StudioHome</c>) renders - MartenStudio's store overview. A component
@@ -163,12 +92,6 @@ internal sealed class StudioDescriptor : DiagnosticsDescriptor
     /// Postgres Studio host is never told about a key that does nothing on its pages.
     /// </summary>
     public IReadOnlyList<StudioShortcutGroup> ExtraShortcuts { get; init; } = [];
-
-    /// <summary>
-    /// The route table built from <see cref="PageAssemblies" />, once. Building it validates every page: a template
-    /// outside its assembly's root, or a relative route two pages claim, throws on first use.
-    /// </summary>
-    public StudioRouteTable Routes => routes.Value;
 }
 
 /// <summary>One section of the sidebar.</summary>
@@ -201,9 +124,10 @@ internal sealed record StudioNavItem(
 {
     /// <summary>
     /// Whether the entry is drawn, or <see langword="null" /> for always. Pure and cheap: it is asked on every render of
-    /// the sidebar, and the answer must fail closed - an entry for something the host hides is absent (D27).
+    /// the sidebar, and the answer must fail closed - an entry for something the host hides is absent (D27). It sees the shell's
+    /// settings; a condition that needs more closes over the studio's own settings where the entry is built.
     /// </summary>
-    public Func<IStudioSettings, bool>? IsShown { get; init; }
+    public Func<IShellSettings, bool>? IsShown { get; init; }
 
     /// <summary>
     /// Whether the entry is drawn for the visitor's scope state, or <see langword="null" /> for always (1.2): MartenStudio's Stores

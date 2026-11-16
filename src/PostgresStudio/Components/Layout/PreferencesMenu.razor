@@ -108,7 +108,7 @@
     /// <remarks>
     /// The handlers stay in <c>StudioLayout</c> rather than moving here with the markup. They write
     /// the browser's stored preference and they are one half of the race that
-    /// <c>StudioState.PreferenceVersion</c> exists to settle - a visitor who moves a picker while the
+    /// <c>StudioPreferences.PreferenceVersion</c> exists to settle - a visitor who moves a picker while the
     /// first-render read of <c>localStorage</c> is still in flight - and that logic belongs with the
     /// read it is racing, which is the layout's.
     /// </remarks>

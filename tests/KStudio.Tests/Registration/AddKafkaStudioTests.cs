@@ -108,13 +108,13 @@ public class AddKafkaStudioTests
             services.AddKafkaStudio();
         });
 
-        StudioDescriptor first = before.GetRequiredService<StudioDescriptor>();
-        StudioDescriptor second = after.GetRequiredService<StudioDescriptor>();
+        StudioShellDescriptor first = before.GetRequiredService<StudioShellDescriptor>();
+        StudioShellDescriptor second = after.GetRequiredService<StudioShellDescriptor>();
 
         first.Navigation.Select(static x => x.Title).Should().Equal(second.Navigation.Select(static x => x.Title));
         first.Navigation.Select(static x => x.Title).Should().Equal("Data", "Database", "Operations", "Kafka", "System");
         first.PageAssemblies.Should().HaveCount(2);
-        first.Modules.Should().ContainSingle().Which.Key.Should().Be("kafka");
+        first.Modules.Select(static x => x.Key).Should().Equal("postgres", "kafka");
         first.Navigation.Single(static x => x.Title == "Kafka").ModuleKey.Should().Be("kafka");
     }
 
@@ -126,7 +126,7 @@ public class AddKafkaStudioTests
         services.AddKafkaStudio();
         services.AddKafkaStudio();
 
-        services.Count(static x => x.ServiceType == typeof(IStudioModule)).Should().Be(1);
+        services.Count(static x => x.ServiceType == typeof(IStudioModule) && x.ImplementationType == typeof(KStudio.Services.KafkaStudioModule)).Should().Be(1);
         services.Count(static x => x.ServiceType == typeof(IHostedService) && x.ImplementationType == typeof(KafkaStudioStartupGuard)).Should().Be(1);
     }
 
@@ -136,6 +136,7 @@ public class AddKafkaStudioTests
         using ServiceProvider provider = Build(static services => services.AddPostgresStudio());
 
         provider.GetRequiredService<StudioDescriptor>().Should().BeSameAs(PostgresStudio.Services.Postgres.PostgresStudioDescriptor.Instance);
+        provider.GetRequiredService<StudioShellDescriptor>().Modules.Should().ContainSingle().Which.IsRoot.Should().BeTrue("the database is the one module");
     }
 
     [Fact]
@@ -147,12 +148,14 @@ public class AddKafkaStudioTests
             services.AddKafkaStudio(static o => o.Capabilities.SearchRecords = true);
         });
 
-        IStudioModule module = provider.GetRequiredService<StudioDescriptor>().Modules.Single();
+        IStudioModule module = provider.GetRequiredService<StudioShellDescriptor>().Modules.Single(static x => x.Key == "kafka");
 
-        module.Pages.KeepsRoot.Should().BeTrue();
-        module.Pages.CompileTimeRoot.Should().Be("/kafka");
+        module.IsRoot.Should().BeFalse();
+        module.PageAssemblies.Should().ContainSingle().Which.KeepsRoot.Should().BeTrue();
+        module.PageAssemblies.Single().CompileTimeRoot.Should().Be("/kafka");
         module.ProductName.Should().Be("KStudio for Apache Kafka®");
-        module.Capabilities.Should().Equal(
+        module.CapabilityGroups.Should().ContainSingle().Which.Heading.Should().Be("KStudio for Apache Kafka® reads");
+        module.CapabilityGroups.Single().Capabilities.Should().Equal(
             new StudioModuleCapability("SearchRecords", "KafkaStudioOptions.Capabilities.SearchRecords", Configured: true),
             new StudioModuleCapability("ReadPayloads", "KafkaStudioOptions.Capabilities.ReadPayloads", Configured: false),
             new StudioModuleCapability("ExportRecords", "KafkaStudioOptions.Capabilities.ExportRecords", Configured: false),

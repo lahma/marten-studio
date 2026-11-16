@@ -151,6 +151,14 @@ internal class StudioComponentContext : BunitContext
         Services.AddSingleton<StudioState>();
 
         Services.AddSingleton<StudioCapabilityGuard>();
+
+        // The shell as AddMartenStudio() leaves a circuit: the database as the root module, the shell's descriptor composed from the modules
+        // registered, and what the module's scope gate answered. The context's one root is the one circuit, so all three are singletons here.
+        Services.AddSingleton<IStudioModule>(static provider => new DatabaseStudioModule(
+            provider.GetRequiredService<StudioDescriptor>(), provider.GetRequiredService<IStudioSettings>(), provider.GetRequiredService<StudioCapabilityGuard>()));
+        Services.AddSingleton(static provider =>
+            StudioModuleComposition.Compose(provider.GetRequiredService<StudioDescriptor>(), provider.GetServices<IStudioModule>()));
+        Services.AddSingleton<DatabaseScopeAccess>();
         Services.AddSingleton<ToastService>();
         Services.AddSingleton<StudioActionLogService>();
         Services.AddSingleton<StudioActionLog>();

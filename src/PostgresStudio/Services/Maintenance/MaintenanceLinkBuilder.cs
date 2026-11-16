@@ -20,7 +20,7 @@ internal static class MaintenanceLinkBuilder
             ArgumentNullException.ThrowIfNull(settings);
             ArgumentNullException.ThrowIfNull(descriptor);
 
-            bool offered = descriptor.Navigation
+            bool offered = descriptor.Navigation(settings)
                 .SelectMany(static x => x.Items)
                 .Any(x => string.Equals(x.Route, MaintenanceLinks.Route, StringComparison.Ordinal) && (x.IsShown?.Invoke(settings) ?? true));
 

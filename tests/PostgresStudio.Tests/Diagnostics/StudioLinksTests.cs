@@ -98,7 +98,7 @@ public class StudioLinksTests
         // Issue #55: the one spelling the page's own link (ConnectionLinks) and the diagnostics API share, so a host's link and a
         // visitor's cannot drift; both studios mount it (Marten Studio's navigation names the same route).
         path.Should().StartWith(PostgresStudio.Services.Connection.ConnectionLinks.Route + "?").And.Contain("store=main").And.Contain("db=db1");
-        PostgresStudioDescriptor.Instance.Navigation.SelectMany(static x => x.Items).Should().Contain(x => x.Route == "database/connection");
+        PostgresStudioDescriptor.Instance.Navigation(new PostgresStudioSettings(Microsoft.Extensions.Options.Options.Create(new PostgresStudioOptions()))).SelectMany(static x => x.Items).Should().Contain(x => x.Route == "database/connection");
     }
 
     [Fact]

@@ -6,6 +6,7 @@
 @inject NavigationManager Navigation
 @inject IStudioSettings Settings
 @inject StudioDescriptor Descriptor
+@inject StudioShellDescriptor Shell
 @inject StudioState State
 @inject StudioPreferences Preferences
 @inject INavIndicatorService Indicators
@@ -32,7 +33,7 @@
 
     <nav>
         <ul class="ms-sidebar-nav">
-            @foreach (StudioNavSection section in Descriptor.Navigation)
+            @foreach (StudioNavSection section in Shell.Navigation)
             {
                 <li class="ms-sidebar-section" @key="section.Title">@section.Title</li>
 
@@ -78,9 +79,9 @@
 
     <p class="ms-rail-credit">
         <span class="ms-rail-credit-line">@Settings.ProductName @StudioVersion</span>
-        @foreach (IStudioModule module in Descriptor.Modules)
+        @foreach (IStudioModule module in Shell.Modules.Where(static x => !x.IsRoot))
         {
-            @* A module is named where the product is (D34); with none the markup is what it was. *@
+            @* A module is named where the product is (D34); the root is the studio itself, which the line above names; with none the markup is what it was. *@
             <span class="ms-rail-credit-line" @key="module.Key">@module.ProductName</span>
         }
         <span class="ms-rail-credit-line"><a href="https://github.com/lahma/marten-studio/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT licensed</a></span>
@@ -350,7 +351,7 @@
         // ResolveLeaf applies the same prefix-strip retry as route matching so highlighting is correct
         // even when the application path base ends with the custom studio path.
         string? relative = StudioLink.ToDashboardRelativePath(uri, Navigation.BaseUri, Settings);
-        currentRelativePath = relative is null ? null : Descriptor.Routes.ResolveLeaf(relative, Settings);
+        currentRelativePath = relative is null ? null : Shell.Routes.ResolveLeaf(relative, Settings);
     }
 
     private string NavClass(string route)
@@ -370,7 +371,7 @@
         // The most specific entry wins: under a studio whose sidebar has both "database" and "database/sessions", the
         // Sessions page lights Sessions alone. A sidebar with no entry nested in another - MartenStudio's - is unchanged.
         bool isActive = Covers(route, relativePath)
-            && !Descriptor.Navigation.Any(section => section.Items.Any(item =>
+            && !Shell.Navigation.Any(section => section.Items.Any(item =>
                 item.Route is { Length: > 0 } other && other.Length > route.Length && Covers(other, relativePath)));
 
         return isActive ? "ms-nav-active" : string.Empty;

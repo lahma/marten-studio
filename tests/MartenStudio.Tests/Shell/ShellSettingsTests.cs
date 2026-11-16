@@ -21,4 +21,15 @@ public sealed class ShellSettingsTests
         shell.ProductName.Should().Be("Marten Studio");
         context.Services.GetRequiredService<IStudioSettings>().ReadOnlyOption().Should().Be("MartenStudioOptions.ReadOnly");
     }
+
+    /// <summary>Shell A1 follow-up F4: the one-object guarantee holds on a container the real <c>AddMartenStudio()</c> builds, not only on a test context.</summary>
+    [Fact]
+    public void AddMartenStudio_registers_one_settings_object_under_both_interfaces()
+    {
+        ServiceCollection services = new();
+        services.AddMartenStudio();
+        using ServiceProvider provider = services.BuildServiceProvider();
+
+        provider.GetRequiredService<IShellSettings>().Should().BeSameAs(provider.GetRequiredService<IStudioSettings>());
+    }
 }

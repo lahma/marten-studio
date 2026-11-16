@@ -292,12 +292,12 @@ public class ScopeFollowsClickedLinkTests
     [InlineData("default", "db-a", "acme", null, null, "acme", false)]
     public void An_address_names_another_scope_only_for_a_part_it_names_that_differs(
         string store, string database, string? tenant, string? namedStore, string? namedDatabase, string? namedTenant, bool another) =>
-        StudioLayout.NamesAnotherScope(new StudioScope(store, database, tenant), namedStore, namedDatabase, namedTenant).Should().Be(another);
+        DatabaseScopeHost.NamesAnotherScope(new StudioScope(store, database, tenant), namedStore, namedDatabase, namedTenant).Should().Be(another);
 
     [Fact]
     public void With_no_scope_yet_any_named_part_is_another_scope()
     {
-        StudioLayout.NamesAnotherScope(null, "default", null, null).Should().BeTrue();
-        StudioLayout.NamesAnotherScope(null, null, null, null).Should().BeFalse();
+        DatabaseScopeHost.NamesAnotherScope(null, "default", null, null).Should().BeTrue();
+        DatabaseScopeHost.NamesAnotherScope(null, null, null, null).Should().BeFalse();
     }
 }

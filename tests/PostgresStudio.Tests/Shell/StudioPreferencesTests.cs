@@ -158,6 +158,17 @@ public sealed class StudioPreferencesTests
         shell.ProductName.Should().Be("Postgres Studio");
     }
 
+    /// <summary>Shell A1 follow-up F4: the one-object guarantee holds on a container the real <c>AddPostgresStudio()</c> builds, not only on a test context.</summary>
+    [Fact]
+    public void AddPostgresStudio_registers_one_settings_object_under_both_interfaces()
+    {
+        ServiceCollection services = new();
+        services.AddPostgresStudio();
+        using ServiceProvider provider = services.BuildServiceProvider();
+
+        provider.GetRequiredService<IShellSettings>().Should().BeSameAs(provider.GetRequiredService<IStudioSettings>());
+    }
+
     private sealed class ListLogger : ILogger<StudioPreferences>
     {
         public List<string> Messages { get; } = [];

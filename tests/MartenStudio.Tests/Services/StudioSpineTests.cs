@@ -119,19 +119,22 @@ public class StudioSpineTests
         StudioDescriptor descriptor = MartenSpine.Descriptor;
 
         descriptor.SourceQueryParameter.Should().Be("store");
-        descriptor.Navigation.SelectMany(static x => x.Items).Select(static x => x.Label).Should().Equal(
+        descriptor.Navigation(MartenSpine.Settings()).SelectMany(static x => x.Items).Select(static x => x.Label).Should().Equal(
             "Overview", "Stores", "Tenants", "Documents", "Query", "Plan", "Tables", "Connection", "Relationships", "Streams", "Feed", "Event types", "Event flow", "Dead letters",
             "Health", "Statements", "Maintenance", "Storage", "Replication", "Projections", "Schema", "Server", "Configuration", "Activity");
 
-        StudioNavItem deadLetters = descriptor.Navigation.SelectMany(static x => x.Items).Single(static x => x.Label == "Dead letters");
+        // The navigation is built for the settings the studio is registered with, so a condition that reads them closes over them (5.6).
+        MartenStudioSettings visible = MartenSpine.Settings();
+        MartenStudioSettings hidden = MartenSpine.Settings(new MartenStudioOptions { IsDocumentTypeVisible = static _ => false });
+        StudioNavItem deadLetters = descriptor.Navigation(visible).SelectMany(static x => x.Items).Single(static x => x.Label == "Dead letters");
         deadLetters.IsShown.Should().NotBeNull();
-        deadLetters.IsShown!(MartenSpine.Settings()).Should().BeTrue();
-        deadLetters.IsShown(MartenSpine.Settings(new MartenStudioOptions { IsDocumentTypeVisible = static _ => false }))
+        deadLetters.IsShown!(visible).Should().BeTrue();
+        descriptor.Navigation(hidden).SelectMany(static x => x.Items).Single(static x => x.Label == "Dead letters").IsShown!(hidden)
             .Should().BeFalse("a hidden DeadLetterEvent takes its entry with it, failing closed (D27)");
 
         // Issue #37: Query also hosts Mode A and LINQ mode, which need no RunSql, so it carries no condition; and since 1.0-P3A Plan
         // carries none either - pasting a plan reads nothing, and running one keeps the console's gate on the page.
-        StudioNavItem[] items = [.. descriptor.Navigation.SelectMany(static x => x.Items)];
+        StudioNavItem[] items = [.. descriptor.Navigation(MartenSpine.Settings()).SelectMany(static x => x.Items)];
         items.Single(static x => x.Label == "Query").IsShown.Should().BeNull();
         items.Single(static x => x.Label == "Plan").IsShown.Should().BeNull();
     }

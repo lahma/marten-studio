@@ -39,7 +39,7 @@ public class DiagnosticsServiceTests
 
         // Issue #55: the same page, the same route and the store's scope, in both studios; Marten Studio re-roots it under /marten.
         path.Should().StartWith("database/connection?store=default&db=");
-        MartenStudio.Services.MartenStudioDescriptor.Instance.Navigation.SelectMany(static x => x.Items)
+        MartenStudio.Services.MartenStudioDescriptor.Instance.Navigation(MartenStudio.Tests.Support.MartenSpine.Settings()).SelectMany(static x => x.Items)
             .Should().Contain(x => x.Route == "database/connection");
     }
 

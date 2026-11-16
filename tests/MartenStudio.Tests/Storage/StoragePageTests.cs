@@ -279,9 +279,9 @@ public class StoragePageTests
             ProductName = descriptor.ProductName,
             PageAssemblies = descriptor.PageAssemblies,
             HealthCheckAssemblies = descriptor.HealthCheckAssemblies,
-            Navigation =
+            Navigation = settings =>
             [
-                .. descriptor.Navigation.Select(section => section with
+                .. descriptor.Navigation(settings).Select(section => section with
                 {
                     Items =
                     [

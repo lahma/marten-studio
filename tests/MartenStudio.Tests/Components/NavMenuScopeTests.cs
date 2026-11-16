@@ -97,7 +97,7 @@ public class NavMenuScopeTests
     [Fact]
     public void The_stores_entry_carries_a_scope_condition_and_the_overview_does_not()
     {
-        StudioNavItem[] items = [.. MartenStudioDescriptor.Instance.Navigation.SelectMany(static x => x.Items)];
+        StudioNavItem[] items = [.. MartenStudioDescriptor.Instance.Navigation(MartenStudio.Tests.Support.MartenSpine.Settings()).SelectMany(static x => x.Items)];
 
         items.Single(static x => x.Label == "Stores").IsShownInScope.Should().NotBeNull();
         items.Single(static x => x.Label == "Overview").IsShownInScope.Should().BeNull();
