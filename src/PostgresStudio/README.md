@@ -340,8 +340,8 @@ same API alone. See
 
 The long form is [`docs/postgresstudio.md`](https://github.com/lahma/marten-studio/blob/main/docs/postgresstudio.md),
 and the security model in full is
-[`docs/security.md`](https://github.com/lahma/marten-studio/blob/main/docs/security.md). From 1.0 the packages follow
-Semantic Versioning over the contract in
+[`docs/security.md`](https://github.com/lahma/marten-studio/blob/main/docs/security.md). A release of any size may break the
+public API; what is promised is in
 [`docs/stability.md`](https://github.com/lahma/marten-studio/blob/main/docs/stability.md).
 
 ## License

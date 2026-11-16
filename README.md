@@ -1209,9 +1209,10 @@ missing browser has to be a failure rather than a silent skip.
 
 ## Versioning and support
 
-From 1.0 the three packages follow Semantic Versioning, over what [`docs/stability.md`](docs/stability.md) lists as the
-contract - the public API baselines, the finding codes, the snapshot JSON, the capabilities and their defaults, the log
-event ids - and say there what is not one (page addresses, markup, wording). The same page has the support matrix.
+The family is still being shaped, and a release of any size may break what a host compiles against:
+[`docs/stability.md`](docs/stability.md) says what is promised (capabilities off by default, authorization never widened,
+finding codes and log event ids that keep their meaning) and what is not. Pin the version you tested. The same page has
+the support matrix.
 Upgrading from 0.x: [`docs/upgrading.md`](docs/upgrading.md). Reporting a vulnerability: [`SECURITY.md`](SECURITY.md).
 
 ## Contributing
