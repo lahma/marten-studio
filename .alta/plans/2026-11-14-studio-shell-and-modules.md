@@ -250,7 +250,14 @@ Phase A changes no package, no public type and no word. It can ship in any relea
 | Order | Phase A first, alone | The risky part (layout, scope, audit) lands with nothing else moving, and is bisectable. |
 | Release | Minor releases; no major | No public member is removed. KStudio stays a preview and may change. |
 
-No decision is open: the review of 2026-11-14 settled the name, the segment and the mixed host.
+The review of 2026-11-14 settled the name, the segment and the mixed host.
+
+> **Open before phase B: the package ids** (raised 2026-11-16). Should the modules ship as `DataStudio.Postgres`,
+> `DataStudio.Marten` and `DataStudio.Kafka`, beside the shell `DataStudio`? Phase A does not depend on the answer.
+> Recommended: yes for Kafka (a preview, so `KStudio` and `KStudio.Core` can simply be renamed); for Postgres and Marten
+> publish the new ids and keep `PostgresStudio` and `MartenStudio` as packages that depend on them and forward their
+> public types, so that an existing host upgrades without a source change. `AddMartenStudio()` and `MapMartenStudio()`
+> stay either way. Phase B's steps 8, 11 and 15 change with the answer.
 
 ## Risks
 
