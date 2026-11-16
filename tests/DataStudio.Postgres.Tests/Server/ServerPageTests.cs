@@ -75,7 +75,7 @@ public class ServerPageTests
 
         page.Find(".ms-s2-facts").TextContent.Should().Contain("PostgreSQL 17.11").And.Contain("self-hosted");
         page.Find(".ms-s2-grants").TextContent.Should().Contain("pg_read_all_stats");
-        page.Find(".ms-s2-reading").TextContent.Should().Contain("probe (MartenStudioOptions.SqlConsoleRole)");
+        page.Find(".ms-s2-reading").TextContent.Should().Contain("probe (MartenOptions.SqlConsoleRole)");
 
         page.FindAll(".ms-s2-settings-table").Should().NotBeEmpty();
         page.Markup.Should().Contain("4 MB").And.Contain("pending restart");

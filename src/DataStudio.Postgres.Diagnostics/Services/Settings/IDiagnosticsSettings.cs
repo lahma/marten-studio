@@ -20,7 +20,7 @@ internal interface IDiagnosticsSettings
     /// <summary>The product's name in a sentence: <c>Marten Studio</c>.</summary>
     string ProductName { get; }
 
-    /// <summary>The public options type's name, as a host's registration spells it: <c>MartenStudioOptions</c>.</summary>
+    /// <summary>The public options type's name, as a host's registration spells it: <c>MartenOptions</c>.</summary>
     string OptionsTypeName { get; }
 
     /// <summary>
@@ -80,8 +80,8 @@ internal interface IDiagnosticsSettings
     string? SourceLabel => null;
 
     /// <summary>
-    /// <paramref name="member" /> spelled the way a host's registration spells it: <c>MartenStudioOptions.ReadOnly</c>,
-    /// <c>MartenStudioOptions.Capabilities.RunSql</c>.
+    /// <paramref name="member" /> spelled the way a host's registration spells it: <c>MartenOptions.ReadOnly</c>,
+    /// <c>MartenOptions.Capabilities.RunSql</c>.
     /// </summary>
     /// <param name="member">The member path below the options type, such as <c>ReadOnly</c> or <c>Capabilities.RunSql</c>.</param>
     string OptionName(string member) => OptionsTypeName + "." + member;

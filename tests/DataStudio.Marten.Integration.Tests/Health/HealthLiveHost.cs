@@ -74,7 +74,7 @@ internal sealed class HealthLiveHost : IAsyncDisposable
         string schema,
         string? environment = "Development",
         Action<StoreOptions>? store = null,
-        Action<MartenStudioOptions>? studio = null,
+        Action<MartenOptions>? studio = null,
         Action<IServiceCollection>? services = null)
     {
         await postgres.CreateSchemaAsync(schema);
@@ -101,7 +101,7 @@ internal sealed class HealthLiveHost : IAsyncDisposable
         string connectionString,
         string? environment = "Development",
         Action<StoreOptions>? store = null,
-        Action<MartenStudioOptions>? studio = null,
+        Action<MartenOptions>? studio = null,
         Action<IServiceCollection>? services = null) =>
         Build(connectionString, SampleStore.DocumentSchema, environment, store, studio, services);
 
@@ -110,7 +110,7 @@ internal sealed class HealthLiveHost : IAsyncDisposable
         string schema,
         string? environment,
         Action<StoreOptions>? store,
-        Action<MartenStudioOptions>? studio,
+        Action<MartenOptions>? studio,
         Action<IServiceCollection>? services)
     {
         LogCapture logs = new();

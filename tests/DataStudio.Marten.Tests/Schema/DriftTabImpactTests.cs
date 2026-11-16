@@ -39,13 +39,13 @@ public class DriftTabImpactTests
             footprints,
             withSessions ? [new TableSessionRow(1, "idle in transaction", Granted: true, 1)] : null) with
         {
-            SessionsNotice = withSessions ? null : "Sessions on these tables are not shown: they need MartenStudioOptions.Capabilities.ViewDatabaseActivity.",
+            SessionsNotice = withSessions ? null : "Sessions on these tables are not shown: they need MartenOptions.Capabilities.ViewDatabaseActivity.",
         };
     }
 
     private static async Task<IRenderedComponent<DriftTab>> RenderAsync(StudioComponentContext context, MigrationPreview preview)
     {
-        context.Options.Capabilities = MartenStudioCapabilities.All();
+        context.Options.Capabilities = MartenCapabilities.All();
         context.Catalog.WithStore("default", "Default", DatabaseCardinality.Single, "db");
         await context.State.EnsureInitializedAsync(Token);
 

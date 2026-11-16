@@ -309,7 +309,7 @@ internal sealed class DatabaseGate
     /// <summary>What a view over a hidden type's table says.</summary>
     public const string HiddenDependencyDenial =
         "This view reads a table whose document type the host hides from the studio " +
-        "(MartenStudioOptions.IsDocumentTypeVisible), so its rows and its query are not shown.";
+        "(MartenOptions.IsDocumentTypeVisible), so its rows and its query are not shown.";
 
     /// <summary>What a partitioned table with a foreign partition, or a table with a foreign child, says.</summary>
     public const string ForeignDescendantDenial =
@@ -347,17 +347,17 @@ internal sealed class DatabaseGate
     /// <summary>What a view over a document table no store declares says, while hiding is configured.</summary>
     public const string UndeclaredDocumentDenial =
         "This view reads a Marten document table that no registered store declares yet, and the host hides " +
-        "some document types from the studio (MartenStudioOptions.IsDocumentTypeVisible), so the studio " +
+        "some document types from the studio (MartenOptions.IsDocumentTypeVisible), so the studio " +
         "cannot tell whether this one is hidden.";
 
     /// <summary>What another store's refused store policy says about that store's rows.</summary>
     public const string OtherStorePolicyDenial =
-        "It belongs to another Marten store, and the store policy (MartenStudioOptions.StoreAuthorizationPolicy) " +
+        "It belongs to another Marten store, and the store policy (MartenOptions.StoreAuthorizationPolicy) " +
         "refused your account that store, with no tenant selected.";
 
     /// <summary>What another store's refused write policy says about that store's rows.</summary>
     public const string OtherStoreWritePolicyDenial =
-        "It belongs to another Marten store, and the write policy (MartenStudioOptions.WriteAuthorizationPolicy, " +
+        "It belongs to another Marten store, and the write policy (MartenOptions.WriteAuthorizationPolicy, " +
         "or StoreAuthorizationPolicy when no write policy is set) refused BrowseDatabase for that store, with " +
         "no tenant selected.";
 

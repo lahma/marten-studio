@@ -73,7 +73,7 @@ public sealed class RelationshipsDemoFixture(PostgresFixture postgres) : IAsyncL
 
         open = await MartenFixture.CreateAsync(ConnectionString, SampleStore.DocumentSchema, configureStudio: static options =>
         {
-            options.Capabilities = MartenStudioCapabilities.All();
+            options.Capabilities = MartenCapabilities.All();
             options.BrowsableSchemas.Add("quartz");
             options.BrowsableSchemas.Add("legacy");
         });
@@ -83,7 +83,7 @@ public sealed class RelationshipsDemoFixture(PostgresFixture postgres) : IAsyncL
 
         quartzOnly = await MartenFixture.CreateAsync(ConnectionString, SampleStore.DocumentSchema, configureStudio: static options =>
         {
-            options.Capabilities = MartenStudioCapabilities.All();
+            options.Capabilities = MartenCapabilities.All();
             options.BrowsableSchemas.Add("quartz");
         });
 
@@ -546,7 +546,7 @@ public class RelationshipsDemoLiveTests(RelationshipsDemoFixture fixture) : ICla
         services.AddDataStudio().AddMarten(options =>
         {
             options.ReadOnly = false;
-            options.Capabilities = MartenStudioCapabilities.All();
+            options.Capabilities = MartenCapabilities.All();
             options.BrowsableSchemas.Add("quartz");
             options.BrowsableSchemas.Add("legacy");
             options.WriteAuthorizationPolicy = "writers";

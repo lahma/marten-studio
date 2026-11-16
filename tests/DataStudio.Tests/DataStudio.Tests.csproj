@@ -3,7 +3,7 @@
   <!-- The shell's own fast suite (AGENTS.md D16, v2 steps 3 and 4): no Docker and no database. It references the DataStudio project and the one
        module that needs no database, DataStudio.Kafka (v2 step 4: a Kafka-only host), so that a host with the shell and that module is built and
        mapped for real, and its output folder is the file-level proof that such a host holds no Npgsql and no DataStudio.Postgres*
-       (KafkaOnlyHostTests). The shell's own purity is held at the project file, the restore graph and the built assembly (ShellFenceTests), which
+       (MapDataStudioTests). The shell's own purity is held at the project file, the restore graph and the built assembly (ShellFenceTests), which
        the reference does not touch. A test that composes a database module lives in the module's suite. -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>

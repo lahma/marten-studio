@@ -9,7 +9,7 @@ using Npgsql;
 namespace DataStudio.Postgres.Integration.Tests.Health;
 
 /// <summary>
-/// The opt-in ASP.NET Core health check (<c>AddHealthChecks().AddPostgresStudio()</c>) over a host's database source that
+/// The opt-in ASP.NET Core health check (<c>AddHealthChecks().AddPostgresDiagnostics()</c>) over a host's database source that
 /// lists more databases than one run checks: the first twenty-five are swept, the rest are counted and never opened, and
 /// what the probe reports is codes and counts - never a name.
 /// </summary>
@@ -44,7 +44,7 @@ public class HealthExportLiveTests(PostgresFixture postgres)
         await using StudioHost studio = StudioHost.Create(services =>
         {
             services.AddSingleton(host);
-            services.AddHealthChecks().AddPostgresStudio();
+            services.AddHealthChecks().AddPostgresDiagnostics();
         }, static options => options.AddDatabaseSource("tenants", static services => services.GetRequiredService<ThirtyDatabases>()));
 
         HealthReport report = await studio.Services.GetRequiredService<HealthCheckService>().CheckHealthAsync(Token);

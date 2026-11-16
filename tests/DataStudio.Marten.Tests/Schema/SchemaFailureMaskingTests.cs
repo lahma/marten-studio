@@ -118,7 +118,7 @@ public class SchemaFailureMaskingTests
             var services = new ServiceCollection();
             services.AddLogging();
             services.AddMarten(static options => options.Connection(SqlTestStore.Unreachable));
-            services.AddDataStudio().AddMarten(static options => options.Capabilities = MartenStudioCapabilities.All());
+            services.AddDataStudio().AddMarten(static options => options.Capabilities = MartenCapabilities.All());
             services.AddSingleton<IAuthorizationService>(new TestStoreAuthorizationService());
             services.AddScoped<AuthenticationStateProvider>(_ => users);
 

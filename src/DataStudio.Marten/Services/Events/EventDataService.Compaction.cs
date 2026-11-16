@@ -100,7 +100,7 @@ internal sealed partial class EventDataService
     /// studio's SQL and Marten's own selector, never <c>session.Events</c>) and are folded by
     /// <see cref="IAggregateFolder.FoldAsync" /> - the path time travel and the stepper use - so nothing here ensures
     /// storage (hard rule 14). The read is time travel's, with its limits: the command timeout, and here the whole call
-    /// under <see cref="MartenStudioOptions.QueryTimeout" /> as the stepper's is.
+    /// under <see cref="MartenOptions.QueryTimeout" /> as the stepper's is.
     /// </para>
     /// <para>
     /// <b>Never an error.</b> A stream the studio cannot read the way Marten would, one that takes longer than the budget, or

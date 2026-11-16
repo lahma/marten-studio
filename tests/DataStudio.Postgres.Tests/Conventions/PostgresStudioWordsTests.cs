@@ -22,7 +22,7 @@ public partial class PostgresStudioWordsTests
     /// <summary>What only MartenStudio's configuration and API are called: never in a PostgresStudio sentence.</summary>
     private static readonly string[] MartenStudioNames =
     [
-        "MartenStudioOptions", "MartenStudioCapabilities", "StoreOptions", "AddMartenStudio", "LightweightSession", "Marten-managed",
+        "MartenOptions", "MartenCapabilities", "StoreOptions", "AddMarten", "LightweightSession", "Marten-managed",
         "StoreAuthorizationPolicy",
     ];
 
@@ -131,7 +131,7 @@ public partial class PostgresStudioWordsTests
     [Fact]
     public void PostgresStudios_settings_answer_its_own_words()
     {
-        PostgresStudioSettings settings = PostgresStudioSettings.Of(new PostgresStudioOptions());
+        PostgresStudioSettings settings = PostgresStudioSettings.Of(new PostgresOptions());
 
         settings.Text.Should().BeSameAs(PostgresStudioText.Instance);
         settings.Text.Product.Should().Be(StudioProduct.PostgresStudio);

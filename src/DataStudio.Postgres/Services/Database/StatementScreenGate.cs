@@ -10,7 +10,7 @@ internal static class StatementScreenGate
     {
         /// <summary>One visitor's screen, from the database browser's gate as <c>DatabaseAccess.GateAsync</c> read it.</summary>
         /// <param name="read">The gate, or <see langword="null" /> when it could not be asked.</param>
-        /// <param name="hidesDocumentTypes">Whether <c>MartenStudioOptions.IsDocumentTypeVisible</c> is set at all.</param>
+        /// <param name="hidesDocumentTypes">Whether <c>MartenOptions.IsDocumentTypeVisible</c> is set at all.</param>
         public static StatementScreen Of(DatabaseGateRead? read, bool hidesDocumentTypes) =>
             read is not null && read.Succeeded
                 ? new StatementScreen(read.Gate.WithheldSchemas, read.Gate.Classifier, hidesDocumentTypes, read.Gate.RefusedStoreDocumentTables())

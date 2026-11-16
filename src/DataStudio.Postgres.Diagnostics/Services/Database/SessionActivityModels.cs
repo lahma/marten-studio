@@ -335,7 +335,7 @@ internal sealed record SessionConnectionBudget(int MaxConnections, int Reserved,
 
 /// <summary>Whether this visitor may see session details, and the sentence when not.</summary>
 /// <param name="CapabilityEnabled">Whether <c>ViewDatabaseActivity</c> is on and <c>ReadOnly</c> is off.</param>
-/// <param name="ReadOnly">Whether <c>MartenStudioOptions.ReadOnly</c> is the reason.</param>
+/// <param name="ReadOnly">Whether <c>MartenOptions.ReadOnly</c> is the reason.</param>
 /// <param name="Authorized">The write policy's answer, or <see langword="null" /> when nobody was asked.</param>
 /// <param name="Refusal">Which gate is shut, or <see cref="DatabaseRefusal.None" />.</param>
 /// <param name="Denial">What it would take, naming the option or the policy.</param>

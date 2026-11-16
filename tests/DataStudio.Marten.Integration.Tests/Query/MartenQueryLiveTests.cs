@@ -301,7 +301,7 @@ public class MartenQueryLiveTests(PostgresFixture fixture) : IAsyncLifetime
         result.Rows.Should().ContainSingle();
 
         result.Plan!.HasPlan.Should().BeFalse();
-        result.Plan.UnavailableReason.Should().Contain("MartenStudioOptions.Capabilities.RunSql");
+        result.Plan.UnavailableReason.Should().Contain("MartenOptions.Capabilities.RunSql");
     }
 
     /// <summary>
@@ -383,7 +383,7 @@ public class MartenQueryLiveTests(PostgresFixture fixture) : IAsyncLifetime
 
         result.Succeeded.Should().BeFalse();
         result.Rejection.Should().NotBeNull();
-        result.Rejection!.Message.Should().Contain("MartenStudioOptions.Capabilities.RunSql");
+        result.Rejection!.Message.Should().Contain("MartenOptions.Capabilities.RunSql");
         result.Rejection.Token.Should().Be("select");
         result.Rows.Should().BeEmpty();
         result.Error.Should().BeNull("nothing was sent, so Postgres never saw it");
@@ -428,7 +428,7 @@ public class MartenQueryLiveTests(PostgresFixture fixture) : IAsyncLifetime
             harness.Scope, new MartenQueryRequest(alias, "select current_user"), Token);
 
         result.Rejection.Should().NotBeNull();
-        result.Rejection!.Message.Should().Contain("MartenStudioOptions.Capabilities.RunSql");
+        result.Rejection!.Message.Should().Contain("MartenOptions.Capabilities.RunSql");
         result.Rows.Should().BeEmpty();
     }
 
@@ -1060,7 +1060,7 @@ public class MartenQueryLiveTests(PostgresFixture fixture) : IAsyncLifetime
 
     /// <summary>
     /// <b>A behaviour change worth pinning:</b> Mode A now honours
-    /// <see cref="MartenStudioOptions.SqlConsoleRole" />, because it runs the same preamble the console
+    /// <see cref="MartenOptions.SqlConsoleRole" />, because it runs the same preamble the console
     /// does and that preamble ends in <c>SET LOCAL ROLE</c>. A host that configured a narrow role for the
     /// console gets the ungated <c>where</c> box narrowed to the same thing - which is the direction a
     /// surprise should go, since Mode A needs no capability and the console needs one.

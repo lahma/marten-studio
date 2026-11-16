@@ -54,7 +54,7 @@ public class ConnectionCompareLiveTests(PostgresFixture postgres)
 
             await using StudioHost host = StudioHost.Create(
                 services => services.AddSingleton(_ => NpgsqlDataSource.Create(application.ConnectionString)),
-                static options => options.Capabilities = PostgresStudioCapabilities.All());
+                static options => options.Capabilities = PostgresCapabilities.All());
 
             await using StudioCircuit circuit = host.Circuit("admin");
             await circuit.Get<StudioState>().EnsureInitializedAsync(Token);
@@ -115,7 +115,7 @@ public class ConnectionCompareLiveTests(PostgresFixture postgres)
         {
             await using StudioHost host = StudioHost.Create(
                 services => services.AddSingleton(_ => NpgsqlDataSource.Create(owned[0])),
-                static options => options.Capabilities = PostgresStudioCapabilities.All(),
+                static options => options.Capabilities = PostgresCapabilities.All(),
                 sourcePolicy: static (_, user) => user.Identity?.Name == "friend");
 
             await using StudioCircuit circuit = host.Circuit("stranger");
@@ -125,7 +125,7 @@ public class ConnectionCompareLiveTests(PostgresFixture postgres)
                 .CompareAsync(new StudioScope("default", "default", "acme"), "Host=a;Password=" + Sentinel, Token);
 
             view.Outcome.Should().Be(ConnectionCompareOutcome.Refused);
-            view.Reason.Should().Contain("PostgresStudioOptions.SourceAuthorizationPolicy");
+            view.Reason.Should().Contain("PostgresOptions.SourceAuthorizationPolicy");
             view.Rows.Should().BeEmpty();
             host.Calls.All.Should().NotBeEmpty().And.OnlyContain(static x => x.Resource.Capability == null, "no capability: the page's own gate");
             string.Join('\n', host.Logs.Lines.Select(static x => x.Message)).Should().NotContain(Sentinel);

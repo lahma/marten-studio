@@ -21,7 +21,7 @@ public class SchemaScriptGateTests
 
         sentence.Should().StartWith(noun)
             .And.Contain("spans every tenant")
-            .And.Contain("MartenStudioOptions.StoreAuthorizationPolicy")
+            .And.Contain("MartenOptions.StoreAuthorizationPolicy")
             .And.Contain("no tenant selected");
     }
 
@@ -30,9 +30,9 @@ public class SchemaScriptGateTests
     {
         string sentence = SchemaScriptGate.HiddenTypesDenial(SchemaScript.Ddl, DatabaseRefusal.CapabilityOff, null);
 
-        sentence.Should().Contain("MartenStudioOptions.Capabilities.BrowseDatabase")
+        sentence.Should().Contain("MartenOptions.Capabilities.BrowseDatabase")
             .And.Contain("document types the host hides")
-            .And.Contain("MartenStudioOptions.IsDocumentTypeVisible");
+            .And.Contain("MartenOptions.IsDocumentTypeVisible");
     }
 
     [Fact]
@@ -40,7 +40,7 @@ public class SchemaScriptGateTests
     {
         string sentence = SchemaScriptGate.HiddenTypesDenial(SchemaScript.Preview, DatabaseRefusal.WritePolicy, null);
 
-        sentence.Should().Contain("MartenStudioOptions.WriteAuthorizationPolicy")
+        sentence.Should().Contain("MartenOptions.WriteAuthorizationPolicy")
             .And.Contain("BrowseDatabase")
             .And.Contain("no tenant selected");
     }
@@ -49,7 +49,7 @@ public class SchemaScriptGateTests
     public void ReadOnly_is_named_as_ReadOnly_rather_than_as_the_capability()
     {
         SchemaScriptGate.HiddenTypesDenial(SchemaScript.Check, DatabaseRefusal.ReadOnly, null)
-            .Should().Contain("MartenStudioOptions.ReadOnly is true");
+            .Should().Contain("MartenOptions.ReadOnly is true");
     }
 
     [Fact]

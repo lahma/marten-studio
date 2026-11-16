@@ -15,7 +15,8 @@
 @inject StudioAuthorization Authorization
 @inject ToastService Toasts
 @inject NavigationManager Navigation
-@inject IOptions<MartenStudioOptions> Options
+@inject IOptions<MartenOptions> Options
+@inject IStudioSettings Settings
 
 <PageTitle>Dead letters</PageTitle>
 
@@ -424,7 +425,7 @@
     private bool Hidden => !DeadLetterVisibility.IsVisible(Options.Value.IsDocumentTypeVisible, out _) || page?.IsHidden == true;
 
     /// <summary>
-    /// Whether <see cref="MartenStudioOptions.WriteAuthorizationPolicy" /> lets <em>this</em> visitor
+    /// Whether <see cref="MartenOptions.WriteAuthorizationPolicy" /> lets <em>this</em> visitor
     /// discard, skip or rewind in the scope on screen.
     /// </summary>
     /// <remarks>
@@ -1155,7 +1156,7 @@
 
     private string PageHref(int offset) =>
         EventLinks.To(
-            Options.Value,
+            Settings,
             EventLinks.DeadLettersRoute,
             State.ActiveScope,
             [
@@ -1170,7 +1171,7 @@
     /// <summary>The same filters without the event's, back to every dead letter they match.</summary>
     private string WithoutSequenceHref =>
         EventLinks.To(
-            Options.Value,
+            Settings,
             EventLinks.DeadLettersRoute,
             State.ActiveScope,
             [new("projection", Projection), new("shard", Shard), new("exception", Exception), new("group", Group)]);
@@ -1182,7 +1183,7 @@
     /// </summary>
     private string StepHref(EventRow offending, string projection) =>
         EventLinks.ToStep(
-            Options.Value,
+            Settings,
             State.ActiveScope is { TenantId: null } all && shape is { EventsConjoined: true } && !string.IsNullOrEmpty(offending.TenantId)
                 ? all with { TenantId = offending.TenantId }
                 : State.ActiveScope,
@@ -1197,7 +1198,7 @@
     /// </summary>
     private string StreamHref(string streamId, string? eventTenantId) =>
         EventLinks.ToStream(
-            Options.Value,
+            Settings,
             State.ActiveScope is { TenantId: null } all && shape is { EventsConjoined: true } && !string.IsNullOrEmpty(eventTenantId)
                 ? all with { TenantId = eventTenantId }
                 : State.ActiveScope,

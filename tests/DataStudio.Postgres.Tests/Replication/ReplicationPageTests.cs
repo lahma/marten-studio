@@ -175,7 +175,7 @@ public class ReplicationPageTests
         var page = context.Render<ReplicationPage>();
         page.WaitForAssertion(() => page.FindAll(".ms-repl-section").Should().HaveCount(7));
 
-        page.Find(".ms-capability-disabled").TextContent.Should().Contain("PostgresStudioOptions.Capabilities.ViewDatabaseActivity");
+        page.Find(".ms-capability-disabled").TextContent.Should().Contain("PostgresOptions.Capabilities.ViewDatabaseActivity");
     }
 
     [Fact]

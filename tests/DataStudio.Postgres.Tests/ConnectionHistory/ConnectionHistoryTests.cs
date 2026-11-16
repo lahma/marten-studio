@@ -343,7 +343,7 @@ public class ConnectionHistoryTests
         ConnectionHistoryReader reader = new(
             counting,
             Options.Create(new PostgresConnectionHistoryOptions()),
-            PostgresStudioSettings.Of(new PostgresStudioOptions { QueryTimeout = TimeSpan.FromMilliseconds(200) }));
+            PostgresStudioSettings.Of(new PostgresOptions { QueryTimeout = TimeSpan.FromMilliseconds(200) }));
 
         await reader.ReadAsync("db:5432", Token);
         await reader.ReadAsync("DB:5432", Token);
@@ -352,7 +352,7 @@ public class ConnectionHistoryTests
         ConnectionHistoryReader hanging = new(
             new HangingStore(),
             Options.Create(new PostgresConnectionHistoryOptions()),
-            PostgresStudioSettings.Of(new PostgresStudioOptions { QueryTimeout = TimeSpan.FromMilliseconds(200) }));
+            PostgresStudioSettings.Of(new PostgresOptions { QueryTimeout = TimeSpan.FromMilliseconds(200) }));
 
         Func<Task> read = () => hanging.ReadAsync("db:5432", Token);
         await read.Should().ThrowAsync<OperationCanceledException>("a store that hangs is cut off at QueryTimeout");
@@ -416,7 +416,7 @@ public class ConnectionHistoryTests
             provider.GetRequiredService<IServiceScopeFactory>(),
             options,
             new InMemoryConnectionHistoryStore(options, clock),
-            PostgresStudioSettings.Of(new PostgresStudioOptions()),
+            PostgresStudioSettings.Of(new PostgresOptions()),
             NullLogger<ConnectionHistorySampler>.Instance,
             new StudioLogThrottle(clock),
             clock);

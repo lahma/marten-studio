@@ -16,19 +16,19 @@ using Page = DataStudio.Marten.Components.Pages.Projections.Projections;
 namespace DataStudio.Marten.Tests.Projections;
 
 /// <summary>
-/// 1.2-PROJ (c): <c>MartenStudioOptions.ProjectionThresholds</c> - its validation at startup, its precedence over a progression
+/// 1.2-PROJ (c): <c>MartenOptions.ProjectionThresholds</c> - its validation at startup, its precedence over a progression
 /// row's columns and the studio's defaults for every consumer of a shard's lag thresholds, and the disclosure that says which
 /// one applies to each projection. D03's recorded series and D04's judgement are in <c>ShardStalledCheckTests</c> and
 /// <c>ProjectionFallingBehindCheckTests</c>.
 /// </summary>
 public class ProjectionThresholdOptionTests
 {
-    private static MartenStudioOptions Resolve(Action<MartenStudioOptions> configure)
+    private static MartenOptions Resolve(Action<MartenOptions> configure)
     {
         ServiceCollection services = new();
         services.AddDataStudio().AddMarten(configure);
         using ServiceProvider provider = services.BuildServiceProvider();
-        return provider.GetRequiredService<IOptions<MartenStudioOptions>>().Value;
+        return provider.GetRequiredService<IOptions<MartenOptions>>().Value;
     }
 
     private static Dictionary<string, ProjectionLagThreshold> Option(string name, long warning, long critical) =>
@@ -43,7 +43,7 @@ public class ProjectionThresholdOptionTests
     [Fact]
     public void The_dictionary_is_never_null_empty_by_default_and_compared_exactly()
     {
-        MartenStudioOptions options = new();
+        MartenOptions options = new();
 
         options.ProjectionThresholds.Should().NotBeNull().And.BeEmpty();
 
@@ -56,7 +56,7 @@ public class ProjectionThresholdOptionTests
     [Fact]
     public void A_valid_entry_starts_and_an_unknown_projection_name_is_not_an_error()
     {
-        MartenStudioOptions options = Resolve(static x =>
+        MartenOptions options = Resolve(static x =>
         {
             x.ProjectionThresholds["Trips"] = new(WarningBehind: 5_000, CriticalBehind: 50_000);
             x.ProjectionThresholds["NotRegisteredHere"] = new(1, 1);
@@ -76,7 +76,7 @@ public class ProjectionThresholdOptionTests
         Action starting = () => Resolve(x => x.ProjectionThresholds["Trips"] = new ProjectionLagThreshold(warning, critical));
 
         starting.Should().Throw<OptionsValidationException>()
-            .Which.Message.Should().Contain("MartenStudioOptions.ProjectionThresholds['Trips']");
+            .Which.Message.Should().Contain("MartenOptions.ProjectionThresholds['Trips']");
     }
 
     [Fact]
@@ -115,7 +115,7 @@ public class ProjectionThresholdOptionTests
     [Fact]
     public void Changing_the_dictionary_after_startup_changes_nothing_and_cannot_break_an_enumeration()
     {
-        MartenStudioOptions options = Resolve(static x => x.ProjectionThresholds["Trips"] = new ProjectionLagThreshold(5_000, 50_000));
+        MartenOptions options = Resolve(static x => x.ProjectionThresholds["Trips"] = new ProjectionLagThreshold(5_000, 50_000));
 
         IReadOnlyDictionary<string, ProjectionLagThreshold> seen = options.ProjectionLagThresholdsByName;
         using IEnumerator<KeyValuePair<string, ProjectionLagThreshold>> enumerating = seen.GetEnumerator();
@@ -136,7 +136,7 @@ public class ProjectionThresholdOptionTests
     [Fact]
     public void Accepted_checks_are_read_once_too()
     {
-        MartenStudioOptions options = Resolve(static x => x.AcceptedChecks["K05"] = "managed roles");
+        MartenOptions options = Resolve(static x => x.AcceptedChecks["K05"] = "managed roles");
 
         IReadOnlyDictionary<string, string> seen = options.AcceptedCheckReasons;
         using IEnumerator<KeyValuePair<string, string>> enumerating = seen.GetEnumerator();
@@ -304,12 +304,12 @@ public class ProjectionThresholdOptionTests
         IElement thresholds = page.Find("details.ms-projection-thresholds");
         string text = Regex.Replace(thresholds.TextContent, @"\s+", " ");
 
-        text.Should().Contain("MartenStudioOptions.ProjectionThresholds names a shard's projection");
+        text.Should().Contain("MartenOptions.ProjectionThresholds names a shard's projection");
 
         IElement trips = page.Find("li[data-threshold-projection='DailySales']");
         trips.GetAttribute("data-threshold-source").Should().Be("option");
         Regex.Replace(trips.TextContent, @"\s+", " ").Should()
-            .Contain("DailySales: amber above 5,000, red above 50,000 (MartenStudioOptions.ProjectionThresholds)");
+            .Contain("DailySales: amber above 5,000, red above 50,000 (MartenOptions.ProjectionThresholds)");
 
         page.FindAll("li[data-threshold-projection='Plain']").Should().BeEmpty("it runs on the studio's defaults");
         text.Should().Contain("Every other projection runs on the studio's defaults.");
@@ -355,7 +355,7 @@ public class ProjectionThresholdOptionTests
 
         IElement lag = context.Render<Page>().Find("[data-shard='DailySales:All'] .ms-shard-lag");
 
-        lag.GetAttribute("title").Should().Contain("Amber above 5,000, red above 50,000 (MartenStudioOptions.ProjectionThresholds for DailySales).");
+        lag.GetAttribute("title").Should().Contain("Amber above 5,000, red above 50,000 (MartenOptions.ProjectionThresholds for DailySales).");
         lag.ClassList.Should().Contain("ms-lag-ok");
     }
 }

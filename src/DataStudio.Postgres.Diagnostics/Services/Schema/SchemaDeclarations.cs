@@ -131,7 +131,7 @@ internal enum MartenObjectKind
 /// </param>
 /// <param name="Visible">
 /// <see langword="false" /> only for a document table whose type
-/// <c>MartenStudioOptions.IsDocumentTypeVisible</c> hides.
+/// <c>MartenOptions.IsDocumentTypeVisible</c> hides.
 /// </param>
 internal sealed record MartenDeclaredObject(string Schema, string Name, MartenObjectKind Kind, string? Alias = null, bool Visible = true)
 {

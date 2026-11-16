@@ -41,7 +41,7 @@ namespace DataStudio.Marten.Integration.Tests.Health;
 public class ExtendedTableHealthLiveTests(PostgresFixture postgres)
 {
     /// <summary>The reason a report gives for a finding withheld for its schema, in MartenStudio's words.</summary>
-    private static string WithheldSchemaReason => HealthService.WithheldSchemaReasonFor(MartenStudioSettings.Of(new MartenStudioOptions()));
+    private static string WithheldSchemaReason => HealthService.WithheldSchemaReasonFor(MartenStudioSettings.Of(new MartenOptions()));
 
     /// <summary>The extended table's name, in whichever schema a test gives it.</summary>
     private const string ThingsTable = "xso_things";
@@ -286,7 +286,7 @@ public class ExtendedTableHealthLiveTests(PostgresFixture postgres)
     }
 
     /// <summary>Opens the database browser's gate for <paramref name="schema" />, so its findings are this visitor's to see.</summary>
-    private static void Admit(MartenStudioOptions options, string schema)
+    private static void Admit(MartenOptions options, string schema)
     {
         options.Capabilities.BrowseDatabase = true;
         options.BrowsableSchemas.Add(schema);

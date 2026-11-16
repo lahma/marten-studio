@@ -64,7 +64,7 @@ internal interface IStudioModule
     /// <summary>The module's capabilities as the chip lists them, one heading each, read live on every render; empty for a module with none.</summary>
     IReadOnlyList<StudioModuleCapabilityGroup> CapabilityGroups { get; }
 
-    /// <summary>The one-line opt-in that turns all of the module's capabilities on (<c>MartenStudioCapabilities.All()</c>), or <see langword="null" /> for a module with none.</summary>
+    /// <summary>The one-line opt-in that turns all of the module's capabilities on (<c>MartenCapabilities.All()</c>), or <see langword="null" /> for a module with none.</summary>
     string? AllCapabilitiesOption { get; }
 
     /// <summary>The module's keyboard shortcuts for the sheet; empty for a module with none.</summary>

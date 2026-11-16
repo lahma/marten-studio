@@ -92,7 +92,7 @@ public class DocumentWriteUiTests
     {
         using var context = new DocumentsComponentContext();
         context.Options.ReadOnly = true;
-        context.Options.Capabilities = MartenStudioCapabilities.All();
+        context.Options.Capabilities = MartenCapabilities.All();
         context.Data.Detail = DocumentDetailResult.Ok(Detail());
 
         var page = Render(context);
@@ -112,11 +112,11 @@ public class DocumentWriteUiTests
         var edit = Action(page, ".ms-doc-edit-btn");
         edit.Should().NotBeNull();
         edit!.HasAttribute("disabled").Should().BeTrue();
-        edit.GetAttribute("title").Should().Be("Requires MartenStudioOptions.Capabilities.EditDocuments");
+        edit.GetAttribute("title").Should().Be("Requires MartenOptions.Capabilities.EditDocuments");
 
         var delete = Action(page, ".ms-doc-delete-btn");
         delete!.HasAttribute("disabled").Should().BeTrue();
-        delete.GetAttribute("title").Should().Be("Requires MartenStudioOptions.Capabilities.DeleteDocuments");
+        delete.GetAttribute("title").Should().Be("Requires MartenOptions.Capabilities.DeleteDocuments");
     }
 
     [Fact]

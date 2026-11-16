@@ -39,7 +39,7 @@ public class ConnectionSweepNoDdlLiveTests(PostgresFixture postgres)
 
         await using ConnectionsLiveHost host = await ConnectionsLiveHost.CreateAsync(
             database,
-            studio: static options => options.Capabilities = MartenStudioCapabilities.All(),
+            studio: static options => options.Capabilities = MartenCapabilities.All(),
             services: services => services
                 .AddSingleton<IHealthStatementObserver>(probe)
                 .AddSingleton(HealthCheckRegistry.ForTypes(ConnectionChecks)));

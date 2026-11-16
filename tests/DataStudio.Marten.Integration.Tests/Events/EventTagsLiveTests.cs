@@ -124,7 +124,7 @@ public sealed class EventTagsFixture(PostgresFixture postgres) : IAsyncLifetime
 
         services.AddDataStudio().AddMarten(options =>
         {
-            options.Capabilities = MartenStudioCapabilities.All();
+            options.Capabilities = MartenCapabilities.All();
             options.DiscoverTenantIds = false;
             options.KnownTenantIds.Add(TenantA);
             options.KnownTenantIds.Add(TenantB);

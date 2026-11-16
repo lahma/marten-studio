@@ -17,7 +17,7 @@ public class KafkaDiscoveredFactsTests
 {
     private static KafkaCatalogRig Rig(params KafkaSourceNote[] notes) => Rig(null, notes);
 
-    private static KafkaCatalogRig Rig(Action<KafkaStudioOptions>? studio, params KafkaSourceNote[] notes) =>
+    private static KafkaCatalogRig Rig(Action<KafkaOptions>? studio, params KafkaSourceNote[] notes) =>
         new(
             engine: o => o.ClusterSources.Add(_ => new FakeClusterSource(new KafkaClusterContribution(
                 [FakeClusterSource.Cluster("wolverine", null, FakeClusterSource.Topic("orders", KafkaTopicRole.ListenerAndSender), FakeClusterSource.Topic("wolverine-dlq", KafkaTopicRole.DeadLetter))],

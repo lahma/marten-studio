@@ -153,7 +153,7 @@ public abstract class DatabaseBrowserFixture(PostgresFixture postgres) : IAsyncL
     /// <param name="autoCreate">Marten's <c>AutoCreate</c>; none, unless the fixture itself is building the schema.</param>
     /// <param name="services">More registrations - a second store, for the cross-store tests.</param>
     internal BrowserHost Host(
-        Action<MartenStudioOptions>? configure = null,
+        Action<MartenOptions>? configure = null,
         IAuthorizationService? authorization = null,
         AutoCreate autoCreate = AutoCreate.None,
         Action<IServiceCollection>? services = null)
@@ -166,7 +166,7 @@ public abstract class DatabaseBrowserFixture(PostgresFixture postgres) : IAsyncL
 
     private BrowserHost Host(
         ServiceCollection services,
-        Action<MartenStudioOptions>? configure,
+        Action<MartenOptions>? configure,
         IAuthorizationService? authorization,
         AutoCreate autoCreate)
     {

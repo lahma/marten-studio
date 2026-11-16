@@ -7,7 +7,7 @@ namespace DataStudio.Sample.Marten.Auth;
 /// </summary>
 /// <remarks>
 /// <see cref="Studio" /> decides who gets in at all - it is what the mapping requires and what
-/// <c>MartenStudioOptions.AuthorizationPolicy</c> would name. <see cref="StudioWrite" /> decides each
+/// <c>MartenOptions.AuthorizationPolicy</c> would name. <see cref="StudioWrite" /> decides each
 /// mutating call. The third layer, <c>StoreAuthorizationPolicy</c>, would decide which store, database
 /// and tenant; the demo has one store and leaves it unset, which is the "everything passes" case.
 /// </remarks>

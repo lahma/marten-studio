@@ -38,7 +38,7 @@ internal sealed record ProjectionFallingBehindFacts(DaemonCheckConfiguration Con
 /// moved too.
 /// </para>
 /// <para>
-/// <b>Thresholds.</b> The host's <c>MartenStudioOptions.ProjectionThresholds</c> for the shard's projection win; then a
+/// <b>Thresholds.</b> The host's <c>MartenOptions.ProjectionThresholds</c> for the shard's projection win; then a
 /// progression row's <c>warning_behind_threshold</c> and <c>critical_behind_threshold</c> when set. Marten creates those
 /// columns and writes nothing to them (#5173, at V9.39.0 and V9.50.2), so without an option it is in practice the
 /// projections screen's 1,000 and 100,000; a host that writes its own is honoured.
@@ -148,11 +148,11 @@ internal sealed class ProjectionFallingBehindCheck : HealthCheck<ProjectionFalli
                 new HealthEvidence("Measured over", DaemonCheckConfiguration.Format(trend.Watched) + ", "
                     + trend.Samples.ToString(System.Globalization.CultureInfo.InvariantCulture) + " samples"),
                 new HealthEvidence("Warning threshold", DaemonCheckConfiguration.Number(trend.EffectiveWarning)
-                    + (trend.ThresholdsFromOption ? " (MartenStudioOptions.ProjectionThresholds)"
+                    + (trend.ThresholdsFromOption ? " (MartenOptions.ProjectionThresholds)"
                         : trend.WarningThreshold is null ? " (the studio's default; Marten writes no per-shard threshold)" : " (warning_behind_threshold)")),
                 new HealthEvidence("Critical threshold", DaemonCheckConfiguration.Number(trend.EffectiveCritical)
                     + (pastCritical ? ", passed" : string.Empty)
-                    + (trend.ThresholdsFromOption ? " (MartenStudioOptions.ProjectionThresholds)"
+                    + (trend.ThresholdsFromOption ? " (MartenOptions.ProjectionThresholds)"
                         : trend.CriticalThreshold is null ? " (the studio's default)" : " (critical_behind_threshold)")),
             ],
             Caveat =

@@ -48,7 +48,7 @@ public class ConnectionPageLiveTests(PostgresFixture postgres)
 
             await using StudioHost host = StudioHost.Create(
                 services => services.AddSingleton(_ => NpgsqlDataSource.Create(application.ConnectionString)),
-                static options => options.Capabilities = PostgresStudioCapabilities.All());
+                static options => options.Capabilities = PostgresCapabilities.All());
 
             // A second application of the same login, held open while the page reads.
             await using NpgsqlConnection extra = new(other.ConnectionString);

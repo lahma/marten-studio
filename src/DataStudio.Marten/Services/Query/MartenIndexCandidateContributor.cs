@@ -41,9 +41,9 @@ namespace DataStudio.Marten.Services.Query;
 internal sealed class MartenIndexCandidateContributor : IIndexCandidateContributor
 {
     private readonly StudioScopeResolver resolver;
-    private readonly IOptions<MartenStudioOptions> options;
+    private readonly IOptions<MartenOptions> options;
 
-    public MartenIndexCandidateContributor(StudioScopeResolver resolver, IOptions<MartenStudioOptions> options)
+    public MartenIndexCandidateContributor(StudioScopeResolver resolver, IOptions<MartenOptions> options)
     {
         this.resolver = resolver;
         this.options = options;

@@ -13,7 +13,7 @@ namespace DataStudio.Marten;
 /// <summary>
 /// Adds Marten Studio's health advisor to the host's own ASP.NET Core health checks.
 /// </summary>
-public static class MartenStudioHealthChecksBuilderExtensions
+public static class MartenHealthChecksBuilderExtensions
 {
     /// <summary>
     /// Registers one health check that runs the advisor's configuration and catalog checks over every
@@ -21,10 +21,10 @@ public static class MartenStudioHealthChecksBuilderExtensions
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>Opt-in, and nothing else registers it.</b> <c>AddMartenStudio()</c> does not call this, and a host
+    /// <b>Opt-in, and nothing else registers it.</b> <c>AddMarten()</c> on the shell's builder does not call this, and a host
     /// that never does is exactly the application it was: no health check, no hosted service, no timer.
     /// Once registered, the check runs only when the host's health endpoint is probed - there is still no
-    /// background work of the studio's own. <c>services.AddMartenStudio()</c> must be called as well; without
+    /// background work of the studio's own. <c>services.AddDataStudio().AddMarten()</c> must be called as well; without
     /// it the check reports <see cref="HealthStatus.Degraded" /> and says so.
     /// </para>
     /// <para>
@@ -44,7 +44,7 @@ public static class MartenStudioHealthChecksBuilderExtensions
     /// </para>
     /// <para>
     /// <b>Cost.</b> Concurrent probes share one run, and once a run has completed every probe is answered with
-    /// the latest result at once; a probe that finds it older than <c>MartenStudioOptions.HealthInterval</c> (a
+    /// the latest result at once; a probe that finds it older than <c>MartenOptions.HealthInterval</c> (a
     /// minute by default) starts the next run for the probes after it, and a result two intervals old is not
     /// served - that probe waits for a fresh run, as the first one does. So an orchestrator probing every ten
     /// seconds costs one run per interval, not six. A run checks at most 25 databases, in the order the studio
@@ -79,7 +79,7 @@ public static class MartenStudioHealthChecksBuilderExtensions
     /// The application was deployed without the PostgresStudio package this one was released with, or with
     /// another version of it.
     /// </exception>
-    public static IHealthChecksBuilder AddMartenStudio(
+    public static IHealthChecksBuilder AddMartenDiagnostics(
         this IHealthChecksBuilder builder,
         string name = "marten-studio",
         HealthStatus? failureStatus = null,
@@ -89,18 +89,18 @@ public static class MartenStudioHealthChecksBuilderExtensions
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
 
-        // The same guard, for the same reason, as services.AddMartenStudio(): a host may register its health checks
+        // The same guard, for the same reason, as services.AddDataStudio().AddMarten(): a host may register its health checks
         // first, and this body names no PostgresStudio type so the guard can explain a missing or mismatched
         // PostgresStudio before the JIT meets one. The rest is in a NoInlining method; PostgresStudioVersionGuardTests
         // scans this method's IL.
         PostgresStudioVersionGuard.Ensure();
 
-        return AddMartenStudioHealthCheck(builder, name, failureStatus, tags, timeout);
+        return AddMartenDiagnosticsHealthCheck(builder, name, failureStatus, tags, timeout);
     }
 
-    /// <summary>The body of <see cref="AddMartenStudio" />, once the shared studio is known to be the right one.</summary>
+    /// <summary>The body of <see cref="AddMartenDiagnostics" />, once the shared studio is known to be the right one.</summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static IHealthChecksBuilder AddMartenStudioHealthCheck(
+    private static IHealthChecksBuilder AddMartenDiagnosticsHealthCheck(
         IHealthChecksBuilder builder,
         string name,
         HealthStatus? failureStatus,

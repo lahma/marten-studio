@@ -10,8 +10,8 @@ namespace DataStudio.Sample.Postgres.Auth;
 /// <remarks>
 /// <para>
 /// <see cref="Studio" /> decides who gets in at all - it is what the mapping requires and what
-/// <c>PostgresStudioOptions.AuthorizationPolicy</c> names. <see cref="StudioCapability" /> is the write policy: the
-/// studio asks it before every read authorized like a write, against a <see cref="PostgresStudioResource" /> naming the
+/// <c>PostgresOptions.AuthorizationPolicy</c> names. <see cref="StudioCapability" /> is the write policy: the
+/// studio asks it before every read authorized like a write, against a <see cref="PostgresResource" /> naming the
 /// capability, and <see cref="StudioCapabilityHandler" /> answers from the user's scopes - <c>BrowseDatabase</c>,
 /// <c>ViewDatabaseActivity</c> and <c>RunSql</c> each have their own. The third layer, <c>SourceAuthorizationPolicy</c>,
 /// would decide which source and database - a tenant database's name is in the same resource - and the demo leaves it
@@ -32,9 +32,9 @@ internal static class SamplePolicies
     /// <summary>The scope each of Postgres Studio's capabilities needs, by the name the studio puts on the resource.</summary>
     private static readonly Dictionary<string, string> ScopeByCapability = new(StringComparer.Ordinal)
     {
-        [nameof(PostgresStudioCapabilities.BrowseDatabase)] = DevUsers.BrowseScope,
-        [nameof(PostgresStudioCapabilities.ViewDatabaseActivity)] = DevUsers.ActivityScope,
-        [nameof(PostgresStudioCapabilities.RunSql)] = DevUsers.SqlScope,
+        [nameof(PostgresCapabilities.BrowseDatabase)] = DevUsers.BrowseScope,
+        [nameof(PostgresCapabilities.ViewDatabaseActivity)] = DevUsers.ActivityScope,
+        [nameof(PostgresCapabilities.RunSql)] = DevUsers.SqlScope,
     };
 
     /// <summary>Registers both policies and the handler the capability policy needs.</summary>
@@ -67,20 +67,20 @@ internal static class SamplePolicies
 internal sealed class StudioCapabilityRequirement : IAuthorizationRequirement;
 
 /// <summary>
-/// Answers <see cref="StudioCapabilityRequirement" /> from the <see cref="PostgresStudioResource" /> the studio passes:
+/// Answers <see cref="StudioCapabilityRequirement" /> from the <see cref="PostgresResource" /> the studio passes:
 /// the capability it names, mapped to the scope the user must hold.
 /// </summary>
 /// <remarks>
 /// It fails closed. A capability the demo does not know - one a later Postgres Studio adds - needs a scope nobody has,
 /// and a call without the resource, or without a capability, is not one this policy was written for.
 /// </remarks>
-internal sealed class StudioCapabilityHandler : AuthorizationHandler<StudioCapabilityRequirement, PostgresStudioResource>
+internal sealed class StudioCapabilityHandler : AuthorizationHandler<StudioCapabilityRequirement, PostgresResource>
 {
     /// <inheritdoc />
     protected override Task HandleRequirementAsync(
         AuthorizationHandlerContext context,
         StudioCapabilityRequirement requirement,
-        PostgresStudioResource resource)
+        PostgresResource resource)
     {
         if (SamplePolicies.ScopeFor(resource.Capability) is { } scope && context.User.HasClaim(SamplePolicies.ScopeClaim, scope))
         {

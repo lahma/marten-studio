@@ -85,7 +85,7 @@ internal static class SchemaDeclarationReader
     /// </summary>
     /// <param name="storeOptions">The store's read-only options.</param>
     /// <param name="isDocumentTypeVisible">
-    /// <c>MartenStudioOptions.IsDocumentTypeVisible</c>, applied only to the collection names and the
+    /// <c>MartenOptions.IsDocumentTypeVisible</c>, applied only to the collection names and the
     /// index attribution — never to the schema list, because a hidden type's table still occupies the
     /// schema and a Tables tab that silently omitted a schema would be lying about disk.
     /// </param>
@@ -215,7 +215,7 @@ internal static class SchemaDeclarationReader
     /// </para>
     /// </remarks>
     /// <param name="storeOptions">The store's read-only options.</param>
-    /// <param name="isDocumentTypeVisible"><c>MartenStudioOptions.IsDocumentTypeVisible</c>.</param>
+    /// <param name="isDocumentTypeVisible"><c>MartenOptions.IsDocumentTypeVisible</c>.</param>
     public static SchemaDeclarationRead ReadForClassification(
         IReadOnlyStoreOptions storeOptions,
         Func<Type, bool>? isDocumentTypeVisible = null)

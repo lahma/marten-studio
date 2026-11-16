@@ -59,7 +59,7 @@ internal sealed record ShardTrend(
 
     /// <summary>
     /// Whether <see cref="WarningThreshold" /> and <see cref="CriticalThreshold" /> are the host's
-    /// <c>MartenStudioOptions.ProjectionThresholds</c> (<see cref="LagThresholdResolver" />) rather than the samples' row values.
+    /// <c>MartenOptions.ProjectionThresholds</c> (<see cref="LagThresholdResolver" />) rather than the samples' row values.
     /// </summary>
     public bool ThresholdsFromOption { get; init; }
 

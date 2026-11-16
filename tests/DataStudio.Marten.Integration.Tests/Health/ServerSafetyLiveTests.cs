@@ -103,7 +103,7 @@ public class ServerSafetyLiveTests(ServerSafetyServerFixture server) : IClassFix
             ManualClock clock = new(DateTimeOffset.UtcNow);
             await using ConnectionsLiveHost open = await ConnectionsLiveHost.CreateAsync(
                 database,
-                studio: static options => options.Capabilities = MartenStudioCapabilities.All(),
+                studio: static options => options.Capabilities = MartenCapabilities.All(),
                 clock: clock);
             await using ConnectionsLiveHost closed = await ConnectionsLiveHost.CreateAsync(database, clock: clock);
 
@@ -184,7 +184,7 @@ public class ServerSafetyLiveTests(ServerSafetyServerFixture server) : IClassFix
                 TimeSpan.FromSeconds(60),
                 "a checkpoint to remove the WAL database B's slot holds past max_slot_wal_keep_size");
 
-            await using ConnectionsLiveHost host = await ConnectionsLiveHost.CreateAsync(swept, studio: static options => options.Capabilities = MartenStudioCapabilities.All());
+            await using ConnectionsLiveHost host = await ConnectionsLiveHost.CreateAsync(swept, studio: static options => options.Capabilities = MartenCapabilities.All());
             HealthReport report = await host.ReportAsync();
 
             HealthReportFinding finding = report.Findings.Should().ContainSingle(static x => x.Code == "R01").Subject;
@@ -233,7 +233,7 @@ public class ServerSafetyLiveTests(ServerSafetyServerFixture server) : IClassFix
                 TimeSpan.FromSeconds(60),
                 "a checkpoint to remove the WAL the slot holds past max_slot_wal_keep_size");
 
-            await using ConnectionsLiveHost host = await ConnectionsLiveHost.CreateAsync(database, studio: static options => options.Capabilities = MartenStudioCapabilities.All());
+            await using ConnectionsLiveHost host = await ConnectionsLiveHost.CreateAsync(database, studio: static options => options.Capabilities = MartenCapabilities.All());
 
             HealthReportFinding finding = (await host.ReportAsync()).Findings.Should().ContainSingle(static x => x.Code == "R01").Subject;
             finding.Severity.Should().Be(HealthSeverity.Info);

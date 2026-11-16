@@ -166,7 +166,7 @@ public class OrphanProgressionRemovalTests
 
             services.AddDataStudio().AddMarten(options =>
             {
-                options.Capabilities = new MartenStudioCapabilities { CorrectProgression = correctProgression };
+                options.Capabilities = new MartenCapabilities { CorrectProgression = correctProgression };
                 options.StoreAuthorizationPolicy = StorePolicy;
                 options.WriteAuthorizationPolicy = WritePolicy;
                 options.KnownTenantIds.Add(PrimaryTenant);

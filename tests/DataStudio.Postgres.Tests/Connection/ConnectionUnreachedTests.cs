@@ -196,7 +196,7 @@ public sealed class ConnectionUnreachedTests
 
         HealthCheckContext context = new(
             resolved,
-            new PostgresStudioSettings(Microsoft.Extensions.Options.Options.Create(new PostgresStudioOptions())),
+            PostgresStudioSettings.Of(Microsoft.Extensions.Options.Options.Create(new PostgresOptions())),
             NoStudioRuntime.Instance,
             services,
             new HealthSqlRunner(connection, new ReadOnlySqlOptions(), null),

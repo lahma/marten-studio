@@ -6,7 +6,7 @@ using DataStudio.Services.Settings;
 namespace DataStudio.Postgres.Services.Postgres;
 
 /// <summary>
-/// The Postgres module's <see cref="IStudioSettings" />: a live adapter over <see cref="PostgresStudioOptions" /> and the shell's settings.
+/// The Postgres module's <see cref="IStudioSettings" />: a live adapter over <see cref="PostgresOptions" /> and the shell's settings.
 /// </summary>
 /// <remarks>
 /// Every member reads its options again, so <c>MapDataStudio(pattern)</c>'s write of <c>DataStudioOptions.Path</c> onto the resolved instance after
@@ -24,16 +24,11 @@ internal sealed class PostgresStudioSettings : IStudioSettings
         StudioCapability.ViewDatabaseActivity,
     ];
 
-    private readonly IOptions<PostgresStudioOptions> options;
+    private readonly IOptions<PostgresOptions> options;
     private readonly IShellSettings shell;
 
-    /// <summary>The settings over <paramref name="options" /> and a default shell, for a caller that builds the services by hand and has no shell of its own.</summary>
-    public PostgresStudioSettings(IOptions<PostgresStudioOptions> options)
-        : this(options, DefaultShell())
-    {
-    }
-
-    public PostgresStudioSettings(IOptions<PostgresStudioOptions> options, IShellSettings shell)
+    /// <summary>The settings over <paramref name="options" />, answering the shell's members from <paramref name="shell" />, the container's own.</summary>
+    public PostgresStudioSettings(IOptions<PostgresOptions> options, IShellSettings shell)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(shell);
@@ -41,28 +36,16 @@ internal sealed class PostgresStudioSettings : IStudioSettings
         this.shell = shell;
     }
 
-    /// <summary>The adapter over <paramref name="options" /> and the shell's <paramref name="shell" /> settings, for a caller that builds the services by hand.</summary>
-    public static PostgresStudioSettings Of(PostgresStudioOptions options, IShellSettings shell)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        return new PostgresStudioSettings(Options.Create(options), shell);
-    }
-
-    /// <summary>The adapter over <paramref name="options" /> and a default shell, for a caller that builds the services by hand.</summary>
-    public static PostgresStudioSettings Of(PostgresStudioOptions options) => Of(options, DefaultShell());
-
-    private static ShellSettings DefaultShell() => new(Options.Create(new DataStudioOptions()));
-
-    private PostgresStudioOptions Value => options.Value;
+    private PostgresOptions Value => options.Value;
 
     /// <inheritdoc />
     public string ProductName => "Postgres Studio";
 
     /// <inheritdoc />
-    public string OptionsTypeName => nameof(PostgresStudioOptions);
+    public string OptionsTypeName => nameof(PostgresOptions);
 
     /// <inheritdoc />
-    public string CapabilitiesTypeName => nameof(PostgresStudioCapabilities);
+    public string CapabilitiesTypeName => nameof(PostgresCapabilities);
 
     /// <inheritdoc />
     public StudioText Text => PostgresStudioText.Instance;
@@ -118,9 +101,6 @@ internal sealed class PostgresStudioSettings : IStudioSettings
     public int MaxInlineValueBytes => Value.MaxInlineValueBytes;
 
     /// <inheritdoc />
-    public string MaxInlineValueBytesMember => nameof(PostgresStudioOptions.MaxInlineValueBytes);
-
-    /// <inheritdoc />
     public TimeSpan QueryTimeout => Value.QueryTimeout;
 
     /// <inheritdoc />
@@ -162,11 +142,11 @@ internal sealed class PostgresStudioSettings : IStudioSettings
     public Func<Type, bool>? IsDocumentTypeVisible => null;
 
     /// <summary>
-    /// The <see cref="PostgresStudioCapabilities" /> property behind <paramref name="capability" />. The default arm throws
+    /// The <see cref="PostgresCapabilities" /> property behind <paramref name="capability" />. The default arm throws
     /// rather than answering <see langword="false" />, as MartenStudio's does: a capability this studio does not have is
     /// never asked about by shared code, and one asked by mistake must fail a test rather than be silently off.
     /// </summary>
-    internal static bool IsConfigured(PostgresStudioCapabilities capabilities, StudioCapability capability)
+    internal static bool IsConfigured(PostgresCapabilities capabilities, StudioCapability capability)
     {
         ArgumentNullException.ThrowIfNull(capabilities);
 
@@ -179,7 +159,7 @@ internal sealed class PostgresStudioSettings : IStudioSettings
             _ => throw new ArgumentOutOfRangeException(
                 nameof(capability),
                 capability,
-                "PostgresStudioCapabilities has no property for this capability: Postgres Studio does not offer it."),
+                "PostgresCapabilities has no property for this capability: Postgres Studio does not offer it."),
         };
     }
 }

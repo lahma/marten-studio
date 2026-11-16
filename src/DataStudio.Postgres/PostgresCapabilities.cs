@@ -4,9 +4,9 @@ namespace DataStudio.Postgres;
 /// The reads Postgres Studio authorizes like writes. Postgres Studio changes nothing in any database; each of these is
 /// a read that reaches past a schema's structure - into rows and definitions, into whatever SQL can read, into other
 /// people's sessions - and so is off until the host enables it, one switch at a time or with <see cref="All" />.
-/// <see cref="PostgresStudioOptions.ReadOnly" /> overrides every property here.
+/// <see cref="PostgresOptions.ReadOnly" /> overrides every property here.
 /// </summary>
-public sealed class PostgresStudioCapabilities
+public sealed class PostgresCapabilities
 {
     /// <summary>
     /// Run read-only SQL from the Query page. The statement runs inside a read-only transaction under a statement
@@ -21,8 +21,8 @@ public sealed class PostgresStudioCapabilities
     /// the schemas <see cref="PostgresDiagnosticsOptions.BrowsableSchemas" /> admits, and see the structure of a schema only
     /// <c>"*"</c> admits. The structure of the schemas it names exactly is visible without it. It implies
     /// <see cref="ViewDefinitions" />: a visitor it admits reads definitions exactly as before. It is a read treated as
-    /// a write for authorization: <see cref="PostgresStudioOptions.WriteAuthorizationPolicy" /> is asked, against the
-    /// database as a whole, and <see cref="PostgresStudioOptions.ReadOnly" /> turns it off with everything else. A
+    /// a write for authorization: <see cref="PostgresOptions.WriteAuthorizationPolicy" /> is asked, against the
+    /// database as a whole, and <see cref="PostgresOptions.ReadOnly" /> turns it off with everything else. A
     /// Marten table (<c>mt_</c>) is never read this way.
     /// </summary>
     public bool BrowseDatabase { get; set; }
@@ -35,8 +35,8 @@ public sealed class PostgresStudioCapabilities
     /// only <c>"*"</c> admits. A definition is schema the
     /// application's own migrations wrote, but it can carry a literal - a function body with a constant in it - which is
     /// why it is a switch of its own rather than part of structure. A read treated as a write for authorization, like
-    /// <see cref="BrowseDatabase" />: <see cref="PostgresStudioOptions.WriteAuthorizationPolicy" /> is asked with this
-    /// capability's name, against the database as a whole, and <see cref="PostgresStudioOptions.ReadOnly" /> turns it off
+    /// <see cref="BrowseDatabase" />: <see cref="PostgresOptions.WriteAuthorizationPolicy" /> is asked with this
+    /// capability's name, against the database as a whole, and <see cref="PostgresOptions.ReadOnly" /> turns it off
     /// with everything else. <see cref="BrowseDatabase" /> implies it.
     /// </summary>
     public bool ViewDefinitions { get; set; }
@@ -49,8 +49,8 @@ public sealed class PostgresStudioCapabilities
     /// </summary>
     public bool ViewDatabaseActivity { get; set; }
 
-    /// <summary>Every capability enabled. Still subject to <see cref="PostgresStudioOptions.ReadOnly" />.</summary>
-    public static PostgresStudioCapabilities All() => new()
+    /// <summary>Every capability enabled. Still subject to <see cref="PostgresOptions.ReadOnly" />.</summary>
+    public static PostgresCapabilities All() => new()
     {
         RunSql = true,
         BrowseDatabase = true,

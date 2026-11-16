@@ -182,13 +182,13 @@ public class TenantsPageTests
         {
             Rows = [FakeTenantOverviewService.Row("acme")],
             VolumesShown = false,
-            VolumesWithheldReason = "Row estimates and last events compare tenants with one another, so they are shown with ViewDatabaseActivity: MartenStudioOptions.Capabilities.ViewDatabaseActivity.",
+            VolumesWithheldReason = "Row estimates and last events compare tenants with one another, so they are shown with ViewDatabaseActivity: MartenOptions.Capabilities.ViewDatabaseActivity.",
         });
         await using StudioComponentContext owned = context;
 
         IRenderedComponent<Tenants> page = context.Render<Tenants>();
 
-        page.WaitForAssertion(() => page.Find(".ms-tenants-withheld").TextContent.Should().Contain("MartenStudioOptions.Capabilities.ViewDatabaseActivity"));
+        page.WaitForAssertion(() => page.Find(".ms-tenants-withheld").TextContent.Should().Contain("MartenOptions.Capabilities.ViewDatabaseActivity"));
     }
 
     [Fact]

@@ -134,7 +134,7 @@ internal static class StatementsLive
     /// <param name="connectionString">The application's database.</param>
     /// <param name="observer">The sweep probe, when a test watches the statements.</param>
     /// <param name="studio">Anything else the test sets on the options - the schemas it may browse, say.</param>
-    public static StudioHost Host(string connectionString, IHealthStatementObserver? observer = null, Action<PostgresStudioOptions>? studio = null) =>
+    public static StudioHost Host(string connectionString, IHealthStatementObserver? observer = null, Action<PostgresOptions>? studio = null) =>
         StudioHost.Create(
             services =>
             {
@@ -147,7 +147,7 @@ internal static class StatementsLive
             },
             options =>
             {
-                options.Capabilities = PostgresStudioCapabilities.All();
+                options.Capabilities = PostgresCapabilities.All();
                 studio?.Invoke(options);
             });
 

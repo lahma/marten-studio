@@ -22,7 +22,7 @@ namespace DataStudio.Marten.Services;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Tier 1 is <see cref="MartenStudioOptions.KnownTenantIds" />: a host that knows its tenants says so and
+/// Tier 1 is <see cref="MartenOptions.KnownTenantIds" />: a host that knows its tenants says so and
 /// nothing is discovered. Tier 2 is what Marten itself lists for the database
 /// (<see cref="ListedTenantsAsync" />). On a master-table or sharded tenancy that is the <c>TenantIds</c> of
 /// every instance with the database's identity, which the caller's <c>AllDatabases()</c> has just
@@ -30,7 +30,7 @@ namespace DataStudio.Marten.Services;
 /// (AGENTS.md D27). On every other
 /// tenancy it is <c>Tenancy.DescribeDatabasesAsync</c>, which answers from configuration for a static or
 /// single-server multi-tenancy. Tier 3 is a bounded <c>select distinct tenant_id</c> over every table in the
-/// store that has a tenant column, run only when <see cref="MartenStudioOptions.DiscoverTenantIds" />
+/// store that has a tenant column, run only when <see cref="MartenOptions.DiscoverTenantIds" />
 /// allows it.
 /// </para>
 /// <para>
@@ -54,19 +54,19 @@ internal sealed class TenantDiscovery
 
     private static readonly TimeSpan CacheWindow = TimeSpan.FromSeconds(60);
 
-    private readonly IOptions<MartenStudioOptions> options;
+    private readonly IOptions<MartenOptions> options;
     private readonly ILogger<TenantDiscovery> logger;
     private readonly TimeProvider timeProvider;
     private readonly Lock gate = new();
     private readonly Dictionary<(string StoreKey, string DatabaseId), (DateTimeOffset At, TenantList List)> cache = [];
     private long generation;
 
-    public TenantDiscovery(IOptions<MartenStudioOptions> options, ILogger<TenantDiscovery> logger)
+    public TenantDiscovery(IOptions<MartenOptions> options, ILogger<TenantDiscovery> logger)
         : this(options, logger, TimeProvider.System)
     {
     }
 
-    public TenantDiscovery(IOptions<MartenStudioOptions> options, ILogger<TenantDiscovery> logger, TimeProvider timeProvider)
+    public TenantDiscovery(IOptions<MartenOptions> options, ILogger<TenantDiscovery> logger, TimeProvider timeProvider)
     {
         this.options = options;
         this.logger = logger;
@@ -109,7 +109,7 @@ internal sealed class TenantDiscovery
         ArgumentNullException.ThrowIfNull(database);
         ArgumentNullException.ThrowIfNull(enumerated);
 
-        MartenStudioOptions value = options.Value;
+        MartenOptions value = options.Value;
 
         // Tier 1. A host that listed its tenants has answered, and nothing is discovered - which is also
         // the only tier that works for a store whose tenants exist but have no streams yet.
@@ -205,7 +205,7 @@ internal sealed class TenantDiscovery
         IDocumentStore store,
         IMartenDatabase database,
         IReadOnlyList<IMartenDatabase> enumerated,
-        MartenStudioOptions value,
+        MartenOptions value,
         CancellationToken cancellationToken)
     {
         // Tier 2: what Marten itself lists for this database. It answers for tenants that are configured or
@@ -257,7 +257,7 @@ internal sealed class TenantDiscovery
     /// Every table of <paramref name="store" /> that carries a <c>tenant_id</c>, quoted, event store
     /// first.
     /// </summary>
-    private static List<(string Schema, string Table)> TenantedTables(IDocumentStore store, MartenStudioOptions value)
+    private static List<(string Schema, string Table)> TenantedTables(IDocumentStore store, MartenOptions value)
     {
         List<(string Schema, string Table)> tables = [];
 
@@ -504,14 +504,14 @@ internal sealed class TenantDiscovery
     /// Each branch is capped at <see cref="MaxListedTenants" /> + 1 rows of its own, so the union can
     /// never carry more than the number of tables times that however large the tables are, and the whole
     /// statement is capped again on the way out - "more than two hundred" is then answerable without
-    /// counting. <c>CommandTimeout</c> is the studio's <see cref="MartenStudioOptions.QueryTimeout" />,
+    /// counting. <c>CommandTimeout</c> is the studio's <see cref="MartenOptions.QueryTimeout" />,
     /// because a <c>select distinct</c> over a table with no index on <c>tenant_id</c> is a scan and this
     /// runs behind a page that someone is looking at.
     /// </remarks>
     private static async ValueTask<TenantList> QueryAsync(
         IReadOnlyList<(string Schema, string Table)> tables,
         IMartenDatabase database,
-        MartenStudioOptions value,
+        MartenOptions value,
         CancellationToken cancellationToken)
     {
         await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(database, ConnectionUsage.Read);

@@ -1,3 +1,4 @@
+using DataStudio.Marten.Services;
 using DataStudio.Marten.Services.Events;
 using DataStudio.Postgres.Services;
 
@@ -9,7 +10,7 @@ namespace DataStudio.Marten.Tests.Events;
 /// </summary>
 public class EventLinksTests
 {
-    private static readonly MartenStudioOptions DefaultPath = new();
+    private static readonly MartenOptions DefaultPath = new();
 
     private static readonly StudioScope Scope = new("default", "localhost.marten", "acme");
 
@@ -17,7 +18,7 @@ public class EventLinksTests
     public void A_stream_link_carries_the_id_in_the_query_string_and_never_in_a_segment()
     {
         // A Marten stream key is frequently a string containing '/', which a route segment cannot hold.
-        string link = EventLinks.ToStream(DefaultPath, Scope, "orders/2026/17");
+        string link = EventLinks.ToStream(MartenStudioSettings.Of(DefaultPath), Scope, "orders/2026/17");
 
         link.Should().StartWith("events/streams/s?id=");
         link.Should().Contain("id=orders%2F2026%2F17");
@@ -26,7 +27,7 @@ public class EventLinksTests
     [Fact]
     public void Every_link_carries_the_active_scope()
     {
-        string link = EventLinks.ToStream(DefaultPath, Scope, "abc");
+        string link = EventLinks.ToStream(MartenStudioSettings.Of(DefaultPath), Scope, "abc");
 
         link.Should().Contain("store=default");
         link.Should().Contain("db=localhost.marten");
@@ -36,7 +37,7 @@ public class EventLinksTests
     [Fact]
     public void A_scope_with_no_tenant_does_not_put_an_empty_tenant_in_the_url()
     {
-        string link = EventLinks.ToStream(DefaultPath, new StudioScope("default", "localhost.marten", null), "abc");
+        string link = EventLinks.ToStream(MartenStudioSettings.Of(DefaultPath), new StudioScope("default", "localhost.marten", null), "abc");
 
         link.Should().NotContain("tenant=");
     }
@@ -45,7 +46,7 @@ public class EventLinksTests
     public void A_filter_that_is_not_set_is_left_out_entirely()
     {
         string link = EventLinks.To(
-            DefaultPath,
+            MartenStudioSettings.Of(DefaultPath),
             EventLinks.FeedRoute,
             scope: null,
             [new("types", "OrderPlaced"), new("stream", null), new("range", "   ")]);
@@ -56,16 +57,16 @@ public class EventLinksTests
     [Fact]
     public void A_link_is_relative_to_the_studio_root_whatever_the_mount_path_is()
     {
-        var options = new MartenStudioOptions();
+        var options = new MartenOptions();
 
-        EventLinks.To(options, EventLinks.FeedRoute, scope: null).Should().Be("events/feed");
+        EventLinks.To(MartenStudioSettings.Of(options), EventLinks.FeedRoute, scope: null).Should().Be("events/feed");
     }
 
     [Fact]
     public void A_value_with_an_ampersand_cannot_become_a_second_parameter()
     {
         string link = EventLinks.To(
-            DefaultPath, EventLinks.FeedRoute, scope: null, [new("stream", "a&follow=1")]);
+            MartenStudioSettings.Of(DefaultPath), EventLinks.FeedRoute, scope: null, [new("stream", "a&follow=1")]);
 
         link.Should().Be("events/feed?stream=a%26follow%3D1");
     }

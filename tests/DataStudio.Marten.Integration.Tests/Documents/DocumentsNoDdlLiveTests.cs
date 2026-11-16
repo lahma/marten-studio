@@ -222,7 +222,7 @@ public class DocumentsNoDdlLiveTests(PostgresFixture fixture)
             "Marten's own read still writes DDL on this setup - if it no longer does, the first test above proves nothing");
     }
 
-    private async Task<Host> StartAsync(string name, Action<MartenStudioOptions>? studio = null)
+    private async Task<Host> StartAsync(string name, Action<MartenOptions>? studio = null)
     {
         string schema = "p2n_" + name.ToLowerInvariant()[..Math.Min(name.Length, 40)];
 

@@ -144,7 +144,7 @@ internal static class MartenPlanTables
     /// Every visible document type's table. <c>AllKnownDocumentTypes()</c> reads the store's configuration and touches no connection.
     /// </summary>
     /// <param name="store">The store in scope.</param>
-    /// <param name="isVisible"><c>MartenStudioOptions.IsDocumentTypeVisible</c>.</param>
+    /// <param name="isVisible"><c>MartenOptions.IsDocumentTypeVisible</c>.</param>
     public static IReadOnlyList<MartenPlanTable> Read(global::Marten.IDocumentStore store, Func<Type, bool>? isVisible)
     {
         ArgumentNullException.ThrowIfNull(store);

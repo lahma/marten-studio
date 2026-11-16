@@ -465,7 +465,7 @@ internal static class PostgresTenancy
     /// policy it asked first was asked about the empty id - so a handler that allows <c>""</c> (which the studio asks
     /// only to list a source that would not build) would be answered with whichever database the source lists first,
     /// one it refuses by name included. Every scope the studio builds names its database; one that does not is refused
-    /// here, for a host's database source and for a single data source alike (PostgresStudioResource's remarks).
+    /// here, for a host's database source and for a single data source alike (PostgresResource's remarks).
     /// </para>
     /// </remarks>
     /// <remarks>

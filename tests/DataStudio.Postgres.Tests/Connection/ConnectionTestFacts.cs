@@ -108,7 +108,7 @@ internal static class ConnectionTestFacts
     public static SessionDetailsAccess GateOpen { get; } = new(true, false, true, DatabaseRefusal.None, null);
 
     /// <summary>The activity gate shut because the capability is off.</summary>
-    public static SessionDetailsAccess GateClosed { get; } = new(false, false, null, DatabaseRefusal.CapabilityOff, "Process ids need PostgresStudioOptions.Capabilities.ViewDatabaseActivity.");
+    public static SessionDetailsAccess GateClosed { get; } = new(false, false, null, DatabaseRefusal.CapabilityOff, "Process ids need PostgresOptions.Capabilities.ViewDatabaseActivity.");
 
     /// <summary>The page's model for these facts.</summary>
     public static ConnectionPageView View(

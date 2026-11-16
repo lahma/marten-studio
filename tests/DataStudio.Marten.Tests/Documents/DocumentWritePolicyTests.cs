@@ -18,7 +18,7 @@ using DataStudio.Postgres.Services;
 namespace DataStudio.Marten.Tests.Documents;
 
 /// <summary>
-/// The write controls against <see cref="MartenStudioOptions.WriteAuthorizationPolicy" />, which is asked
+/// The write controls against <see cref="MartenOptions.WriteAuthorizationPolicy" />, which is asked
 /// about the visitor rather than about the process.
 /// </summary>
 /// <remarks>
@@ -189,7 +189,7 @@ public class DocumentWritePolicyTests
         var page = RenderDetail(context);
 
         page.Find(".ms-doc-edit-btn").GetAttribute("title")
-            .Should().Be("Requires MartenStudioOptions.Capabilities.EditDocuments");
+            .Should().Be("Requires MartenOptions.Capabilities.EditDocuments");
         page.FindAll(".ms-write-refusal").Should().BeEmpty();
     }
 
@@ -318,7 +318,7 @@ public class DocumentWritePolicyTests
 
     private static StudioAuthorization Authorization(TestStoreAuthorizationService policies, string? writePolicy)
     {
-        MartenStudioOptions options = new() { WriteAuthorizationPolicy = writePolicy };
+        MartenOptions options = new() { WriteAuthorizationPolicy = writePolicy };
         TestAuthenticationStateProvider visitor = new();
         visitor.SignIn("tester");
 

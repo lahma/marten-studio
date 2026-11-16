@@ -7,9 +7,10 @@
 @inject IEventDataService EventData
 @inject StudioState State
 @inject StudioPreferences Preferences
-@inject IOptions<MartenStudioOptions> Options
+@inject IOptions<MartenOptions> Options
 @inject NavigationManager Navigation
 @inject IServiceProvider Services
+@inject IStudioSettings Settings
 
 @*
     Check shapes, for the event types on the Event types page (D-SHAPE S10). It exists only after a click, so it never runs during
@@ -399,7 +400,7 @@
         }
 
         return EventLinks.To(
-            Options.Value,
+            Settings,
             EventLinks.StreamDetailRoute,
             scope,
             [new("id", id), new("v", EventLinks.Number(version))]);

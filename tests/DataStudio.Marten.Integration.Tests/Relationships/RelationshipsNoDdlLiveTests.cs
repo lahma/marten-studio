@@ -163,7 +163,7 @@ public class RelationshipsNoDdlLiveTests(PostgresFixture fixture)
         {
             if (browse)
             {
-                options.Capabilities = MartenStudioCapabilities.All();
+                options.Capabilities = MartenCapabilities.All();
                 options.BrowsableSchemas.Add(extra);
             }
         });

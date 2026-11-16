@@ -381,7 +381,7 @@ internal sealed record ProjectionThresholds(TimeSpan SlowPollingTime, TimeSpan H
 /// <param name="WarningThreshold">The row's own <c>warning_behind_threshold</c>, when the host wrote one.</param>
 /// <param name="CriticalThreshold">The row's own <c>critical_behind_threshold</c>, likewise.</param>
 /// <param name="ThresholdsFromOption">
-/// Whether the two thresholds are the host's <c>MartenStudioOptions.ProjectionThresholds</c> for the shard's projection
+/// Whether the two thresholds are the host's <c>MartenOptions.ProjectionThresholds</c> for the shard's projection
 /// (<see cref="LagThresholdResolver" />) rather than the row's.
 /// </param>
 internal sealed record ShardLagContext(
@@ -433,7 +433,7 @@ internal sealed record ShardLagHistory(string ShardName, IReadOnlyList<LagPoint>
     public long? CriticalThreshold { get; init; }
 
     /// <summary>
-    /// Whether the two thresholds are the host's <c>MartenStudioOptions.ProjectionThresholds</c> rather than the row's.
+    /// Whether the two thresholds are the host's <c>MartenOptions.ProjectionThresholds</c> rather than the row's.
     /// </summary>
     public bool ThresholdsFromOption { get; init; }
 
@@ -569,7 +569,7 @@ internal sealed record ShardLagHistory(string ShardName, IReadOnlyList<LagPoint>
         if (ThresholdsFromOption)
         {
             return "Thresholds: warning above " + Number(EffectiveWarning) + ", critical above " + Number(EffectiveCritical)
-                + " (MartenStudioOptions.ProjectionThresholds).";
+                + " (MartenOptions.ProjectionThresholds).";
         }
 
         return "Thresholds: warning above " + Number(EffectiveWarning) + (WarningThreshold is null ? " (the studio's)" : " (its progression row's)")

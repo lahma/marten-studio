@@ -16,7 +16,7 @@ namespace DataStudio.Marten.Tests.Conventions;
 /// manifest is needed for scope: every file under it is fenced, a file added there tomorrow included. A lean in code no
 /// longer compiles, and <c>PostgresStudioFenceTests</c> (in DataStudio.Postgres.Tests since PS-3a) holds the assembly and
 /// package half of that. What the
-/// compiler cannot see is text it does not bind: Razor markup text - <c>&lt;code&gt;MartenStudioOptions.ReadOnly&lt;/code&gt;</c>
+/// compiler cannot see is text it does not bind: Razor markup text - <c>&lt;code&gt;MartenOptions.ReadOnly&lt;/code&gt;</c>
 /// builds with 0 warnings, and would tell a host of the shared studio to set an option it does not have - and an
 /// attribute value Razor takes as a literal. Those are the residual this fence exists for; the rest it keeps because it
 /// costs nothing and fails by name where the compiler would fail by error number.
@@ -41,7 +41,7 @@ namespace DataStudio.Marten.Tests.Conventions;
 /// </para>
 /// <para>
 /// <b>Not on it, and not fenced here:</b> C# string literals. Several shared services still name
-/// <c>MartenStudioOptions.*</c> in refusal and log text; routing those through the settings is PostgresStudio's own
+/// <c>MartenOptions.*</c> in refusal and log text; routing those through the settings is PostgresStudio's own
 /// packet's work, and a string pass here would fail on every one of them at once.
 /// </para>
 /// </remarks>
@@ -408,9 +408,9 @@ public class CoreFenceTests
         StayBehindNames stayBehind = StayBehind.Value;
 
         stayBehind.Types.Should().Contain(
-            ["MartenStudioOptions", "MartenStoreResource", "MartenStoreRegistry", "MartenStoreRegistration", "ResolvedScope",
+            ["MartenOptions", "MartenStoreResource", "MartenStoreRegistry", "MartenStoreRegistration", "ResolvedScope",
              "StudioScopeResolver", "TenantDiscovery", "MartenStudioSettings", "MartenStudioDescriptor", "MartenLog",
-             "MartenServiceBridges", "MartenComponentBridges", "DocumentComponentModel", "MartenTable"],
+             "MartenServiceBridges", "DocumentComponentModel", "MartenTable"],
             "each is declared in a .cs file under src/DataStudio.Marten/ - MartenTable as a global alias");
 
         stayBehind.Components.Should().Contain(
@@ -448,10 +448,10 @@ public class CoreFenceTests
     // Found: a stay-behind type, in code, in markup and in a cref - and a stay-behind global alias, which is matched as one.
     [InlineData("class C { MartenStoreRegistry? registry; }", "identifier")]
     [InlineData("class C { MartenTable? table; }", "identifier")]
-    [InlineData("@inject IOptions<MartenStudioOptions> Options\n<p>x</p>", "identifier")]
-    [InlineData("<p><code>MartenStudioOptions.ReadOnly</code></p>", "identifier")]
+    [InlineData("@inject IOptions<MartenOptions> Options\n<p>x</p>", "identifier")]
+    [InlineData("<p><code>MartenOptions.ReadOnly</code></p>", "identifier")]
     [InlineData("<p>@MartenStoreRegistry.DefaultStoreKey</p>", "identifier")]
-    [InlineData("/// <see cref=\"MartenStudioOptions.Path\" />\nclass C { }", "cref")]
+    [InlineData("/// <see cref=\"MartenOptions.Path\" />\nclass C { }", "cref")]
     // Found: a MartenStudio component, named as a component.
     [InlineData("<div><Overview /></div>", "component")]
     [InlineData("class C { Type t = typeof(Overview); }", "component")]
@@ -464,8 +464,8 @@ public class CoreFenceTests
     [InlineData("// using Marten;\nclass C { }", null)]
     [InlineData("/// <c>MartenStoreRegistry</c> used to do this.\nclass C { }", null)]
     [InlineData("class C { string s = \"Marten.IDocumentStore\"; }", null)]
-    [InlineData("class C { string s = \"MartenStudioOptions.ReadOnly\"; }", null)]
-    [InlineData("@* MartenStudioOptions.ReadOnly *@\n<p>x</p>", null)]
+    [InlineData("class C { string s = \"MartenOptions.ReadOnly\"; }", null)]
+    [InlineData("@* MartenOptions.ReadOnly *@\n<p>x</p>", null)]
     [InlineData("using DataStudio.Postgres.Services;\nnamespace DataStudio.Postgres.Components;\nclass C { DataStudio.Postgres.Services.StudioScope? s; }", null)]
     [InlineData("<p>registered with Marten.</p>", null)]
     [InlineData("<p>MartenStudio's Query page renders it.</p>", null)]
@@ -473,7 +473,7 @@ public class CoreFenceTests
     [InlineData("internal enum Owner { MartenDocument, MartenEventStore }", null)]
     public void The_scanner_finds_each_kind_of_lean_and_ignores_prose(string source, string? expected)
     {
-        StayBehindNames stayBehind = StayBehindNames.OfTypes("MartenStoreRegistry", "MartenStudioOptions", "MartenTable");
+        StayBehindNames stayBehind = StayBehindNames.OfTypes("MartenStoreRegistry", "MartenOptions", "MartenTable");
 
         IReadOnlyList<string> found = Leans(source, stayBehind);
 
@@ -492,10 +492,10 @@ public class CoreFenceTests
     /// and a comment or plain attribute text still is not.
     /// </summary>
     [Theory]
-    [InlineData("<span title=\"@MartenStudioOptions.Title\">x</span>", "identifier")]
+    [InlineData("<span title=\"@MartenOptions.Title\">x</span>", "identifier")]
     [InlineData("<CapabilityDisabled Capability=\"@nameof(MartenStoreRegistry)\" />", "identifier")]
     [InlineData("<StatCard Value=\"MartenStoreRegistry.DefaultStoreKey\" />", "identifier")]
-    [InlineData("<span title=\"Set MartenStudioOptions.ReadOnly to false\">x</span>", "identifier")]
+    [InlineData("<span title=\"Set MartenOptions.ReadOnly to false\">x</span>", "identifier")]
     [InlineData("<a href=\"@Marten.Links.To(x)\">x</a>", "qualified")]
     [InlineData("<a href=\"@($\"{JasperFx.Core.Paths.Root}/x\")\">x</a>", "qualified")]
     [InlineData("<a href=\"@DataStudio.Marten.Services.Links.To(x)\">x</a>", "qualified")]
@@ -506,7 +506,7 @@ public class CoreFenceTests
     [InlineData("<p>x</p>\n@code {\n    // <a href=\"@MartenStoreRegistry.X\">\n}", null)]
     public void The_scanner_reads_a_razor_attribute_value_as_code(string source, string? expected)
     {
-        IReadOnlyList<string> found = Leans(source, StayBehindNames.OfTypes("MartenStoreRegistry", "MartenStudioOptions"), razor: true);
+        IReadOnlyList<string> found = Leans(source, StayBehindNames.OfTypes("MartenStoreRegistry", "MartenOptions"), razor: true);
 
         if (expected is null)
         {

@@ -22,7 +22,7 @@
 @inject StudioState State
 @inject StudioActivity ActivityRing
 @inject StudioLiveUpdatesFactory LiveFactory
-@inject IOptions<MartenStudioOptions> Options
+@inject IOptions<MartenOptions> Options
 @inject IStudioSettings StudioSettings
 
 @*
@@ -106,7 +106,7 @@
                 </a>
             }
 
-            <a class="ms-stat-link ms-overview-health-tile" href="@HealthLinks.ToPage(Options.Value, State.ActiveScope)">
+            <a class="ms-stat-link ms-overview-health-tile" href="@HealthLinks.ToPage(StudioSettings, State.ActiveScope)">
                 <StatCard Title="Health" Value="@HealthValue" Color="@HealthColor" />
             </a>
         </div>
@@ -145,7 +145,7 @@
                     {
                         <span class="ms-overview-health-failed">@(HealthPresentation.Count(FailedChecks, "check") + " could not run.")</span>
                     }
-                    <a href="@HealthLinks.ToPage(Options.Value, State.ActiveScope)">See what was checked</a>
+                    <a href="@HealthLinks.ToPage(StudioSettings, State.ActiveScope)">See what was checked</a>
                 </p>
             }
             else
@@ -155,7 +155,7 @@
                     {
                         <li class="ms-overview-list-item" @key="finding.MuteKey">
                             <span class="@HealthPresentation.ChipClass(finding.Severity)">@HealthPresentation.Label(finding.Severity)</span>
-                            <a class="ms-overview-list-name" href="@HealthLinks.ToFinding(Options.Value, State.ActiveScope, finding)">@finding.Finding.Title</a>
+                            <a class="ms-overview-list-name" href="@HealthLinks.ToFinding(StudioSettings, State.ActiveScope, finding)">@finding.Finding.Title</a>
                         </li>
                     }
                 </ul>
@@ -166,7 +166,7 @@
                 }
 
                 <p class="ms-muted">
-                    <a href="@HealthLinks.ToPage(Options.Value, State.ActiveScope)">Open the Health page</a>
+                    <a href="@HealthLinks.ToPage(StudioSettings, State.ActiveScope)">Open the Health page</a>
                 </p>
             }
 
@@ -429,7 +429,7 @@
             <p class="ms-empty-description">
                 This application registered no Marten store that you are authorized to see. Marten Studio
                 renders the stores the host configured - add <code>AddMarten(...)</code> to the container,
-                or check the policy named by <code>MartenStudioOptions.StoreAuthorizationPolicy</code>.
+                or check the policy named by <code>MartenOptions.StoreAuthorizationPolicy</code>.
             </p>
         </div>
     }
@@ -1125,18 +1125,18 @@
         return await ActivityRing.GetVisibleAsync(RecentCount, cancellationToken);
     }
 
-    private string Link(string route) => EventLinks.To(Options.Value, route, State.ActiveScope);
+    private string Link(string route) => EventLinks.To(StudioSettings, route, State.ActiveScope);
 
     /// <summary>The strip's link for a store: its Overview, scoped to the store alone (the layout settles the database).</summary>
     private string StoreOverviewHref(string storeKey) =>
-        EventLinks.To(Options.Value, string.Empty, new StudioScope(storeKey, string.Empty, null));
+        EventLinks.To(StudioSettings, string.Empty, new StudioScope(storeKey, string.Empty, null));
 
     private bool IsActiveStore(string storeKey) =>
         string.Equals(State.ActiveScope?.StoreKey, storeKey, StringComparison.OrdinalIgnoreCase);
 
-    private string StreamHref(string streamId) => EventLinks.ToStream(Options.Value, State.ActiveScope, streamId);
+    private string StreamHref(string streamId) => EventLinks.ToStream(StudioSettings, State.ActiveScope, streamId);
 
-    private string TypeHref(string eventType) => EventLinks.ToFeedForType(Options.Value, State.ActiveScope, eventType);
+    private string TypeHref(string eventType) => EventLinks.ToFeedForType(StudioSettings, State.ActiveScope, eventType);
 
     public async ValueTask DisposeAsync()
     {

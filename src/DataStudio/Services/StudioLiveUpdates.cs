@@ -136,7 +136,7 @@ internal sealed class StudioLiveUpdates : IAsyncDisposable
     /// <summary>
     /// Starts polling.
     /// </summary>
-    /// <param name="interval">How often to tick - <c>MartenStudioOptions.RefreshInterval</c>.</param>
+    /// <param name="interval">How often to tick - <c>DataStudioOptions.RefreshInterval</c>.</param>
     /// <param name="tick">What to do on each tick. Its cancellation token is cancelled on dispose.</param>
     /// <param name="cancellationToken">Cancels the start itself, not the loop.</param>
     /// <remarks>

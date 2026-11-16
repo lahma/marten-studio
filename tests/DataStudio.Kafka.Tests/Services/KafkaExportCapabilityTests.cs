@@ -25,12 +25,12 @@ public class KafkaExportCapabilityTests
     [Fact]
     public void The_two_new_flags_default_to_false_and_All_turns_them_on()
     {
-        new KafkaStudioCapabilities().ExportRecords.Should().BeFalse();
-        new KafkaStudioCapabilities().LiveTail.Should().BeFalse();
-        KafkaStudioCapabilities.None().ExportRecords.Should().BeFalse();
-        new KafkaStudioOptions().Capabilities.LiveTail.Should().BeFalse();
-        KafkaStudioCapabilities.All().ExportRecords.Should().BeTrue();
-        KafkaStudioCapabilities.All().LiveTail.Should().BeTrue();
+        new KafkaCapabilities().ExportRecords.Should().BeFalse();
+        new KafkaCapabilities().LiveTail.Should().BeFalse();
+        KafkaCapabilities.None().ExportRecords.Should().BeFalse();
+        new KafkaOptions().Capabilities.LiveTail.Should().BeFalse();
+        KafkaCapabilities.All().ExportRecords.Should().BeTrue();
+        KafkaCapabilities.All().LiveTail.Should().BeTrue();
     }
 
     [Fact]
@@ -73,13 +73,13 @@ public class KafkaExportCapabilityTests
         Action export = () => guard.Require(KafkaCapability.ExportRecords);
 
         export.Should().Throw<KafkaCapabilityDeniedException>().WithMessage(
-            "KStudio refused 'ExportRecords' because KafkaStudioOptions.Capabilities.ExportRecords is false.");
+            "KStudio refused 'ExportRecords' because KafkaOptions.Capabilities.ExportRecords is false.");
     }
 
     [Fact]
     public void ReadOnly_turns_all_four_off()
     {
-        using KafkaStudioHarness harness = new(static o => o.Capabilities = KafkaStudioCapabilities.All());
+        using KafkaStudioHarness harness = new(static o => o.Capabilities = KafkaCapabilities.All());
         KafkaCapabilityGuard guard = harness.Context.Services.GetRequiredService<KafkaCapabilityGuard>();
         guard.Offered().Should().HaveCount(4);
         guard.Offered().Should().OnlyContain(c => guard.IsEnabled(c));

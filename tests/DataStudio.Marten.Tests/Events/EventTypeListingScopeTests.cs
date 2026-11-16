@@ -42,7 +42,7 @@ public sealed class EventTypeListingScopeTests : IAsyncDisposable
         // Before AddMartenStudio, whose registration only fills what is missing: the counted read is a fake, there is no database.
         services.AddSingleton(sp => new EventTypeListingCache(
             sp.GetRequiredService<ColumnCatalog>(),
-            sp.GetRequiredService<IOptions<MartenStudioOptions>>(),
+            sp.GetRequiredService<IOptions<MartenOptions>>(),
             TimeProvider.System,
             (_, _) =>
             {

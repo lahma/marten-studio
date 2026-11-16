@@ -35,7 +35,7 @@ public class DiagnosticsServiceTests
     {
         await using HealthHarness harness = HealthHarness.Create();
 
-        string path = Diagnostics(harness).GetStudioPath(Database(harness), PostgresStudioPage.Connection);
+        string path = Diagnostics(harness).GetStudioPath(Database(harness), PostgresPage.Connection);
 
         // Issue #55: the same page, the same route and the store's scope, in both studios; Marten Studio re-roots it under /marten.
         path.Should().StartWith("database/connection?store=default&db=");

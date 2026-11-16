@@ -15,9 +15,10 @@
 @inject ILinqQueryService Linq
 @inject StudioState State
 @inject ToastService Toasts
-@inject IOptions<MartenStudioOptions> Options
+@inject IOptions<MartenOptions> Options
 @inject ILogger<LinqQueryPanel> Logger
 @inject IJSRuntime JsRuntime
+@inject IStudioSettings Settings
 
 @*
     LINQ mode (F7): the predicate the host's own code would write, parsed by JasperFx's Dynamic LINQ under the
@@ -294,8 +295,8 @@
                                                DotNetType="@row.DotNetTypeName"
                                                Timestamp="@(row.Timestamp ?? default)"
                                                StreamId="@row.StreamId"
-                                               StreamHref="@EventLinks.ToStream(Options.Value, rowScope, row.StreamId)"
-                                               TypeHref="@EventLinks.ToFeedForType(Options.Value, rowScope, row.EventTypeName)"
+                                               StreamHref="@EventLinks.ToStream(Settings, rowScope, row.StreamId)"
+                                               TypeHref="@EventLinks.ToFeedForType(Settings, rowScope, row.EventTypeName)"
                                                ShowStream="true"
                                                ShowVersion="true"
                                                IsArchived="row.IsArchived"
@@ -1057,7 +1058,7 @@
     private string Describe(LinqQueryError error)
     {
         string text = error.SqlState == "57014"
-            ? "The query ran past MartenStudioOptions.QueryTimeout (" +
+            ? "The query ran past MartenOptions.QueryTimeout (" +
               Options.Value.QueryTimeout.TotalSeconds.ToString("0.#", CultureInfo.InvariantCulture) + " s) and Postgres cancelled it."
             : error.Message;
 
@@ -1065,7 +1066,7 @@
     }
 
     private string DocumentLink(string documentAlias, string id) =>
-        StudioLink.To(Options.Value, "documents/" + Uri.EscapeDataString(documentAlias) + "/doc") + "?id=" + Uri.EscapeDataString(id);
+        StudioLink.To(Settings, "documents/" + Uri.EscapeDataString(documentAlias) + "/doc") + "?id=" + Uri.EscapeDataString(id);
 
     private static string OptionLabel(LinqDocumentTypeInfo type) =>
         type.Alias + " - " + type.TypeName + (type.RootAlias is { } root ? " (subclass of " + root + ")" : string.Empty);

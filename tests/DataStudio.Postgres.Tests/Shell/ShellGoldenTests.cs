@@ -23,7 +23,7 @@ public class ShellGoldenTests
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
-    private static WebApplication CreateApp(Action<PostgresStudioOptions>? configure = null)
+    private static WebApplication CreateApp(Action<PostgresOptions>? configure = null)
     {
         WebApplicationBuilder builder = WebApplication.CreateBuilder();
         builder.WebHost.UseTestServer();
@@ -51,7 +51,7 @@ public class ShellGoldenTests
     [Fact]
     public async Task The_capability_chip_of_the_front_page_lists_every_capability()
     {
-        await using WebApplication app = CreateApp(static options => options.Capabilities = PostgresStudioCapabilities.All());
+        await using WebApplication app = CreateApp(static options => options.Capabilities = PostgresCapabilities.All());
 
         string golden = await ShellGolden.GoldenAsync(app, "/studio", Token);
 

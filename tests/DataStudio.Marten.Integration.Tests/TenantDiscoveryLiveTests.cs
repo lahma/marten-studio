@@ -55,9 +55,9 @@ public class TenantDiscoveryLiveTests(PostgresFixture fixture) : PostgresTestBas
         });
     }
 
-    private static TenantDiscovery CreateDiscovery(Action<MartenStudioOptions>? configure = null)
+    private static TenantDiscovery CreateDiscovery(Action<MartenOptions>? configure = null)
     {
-        MartenStudioOptions options = new();
+        MartenOptions options = new();
         configure?.Invoke(options);
 
         // No KnownTenantIds: the point is that nothing was configured.
@@ -149,7 +149,7 @@ public class TenantDiscoveryLiveTests(PostgresFixture fixture) : PostgresTestBas
 
     private static TenantDiscovery CreateDiscoveryWithKnownTenants(params string[] tenantIds)
     {
-        MartenStudioOptions options = new();
+        MartenOptions options = new();
         foreach (string tenantId in tenantIds)
         {
             options.KnownTenantIds.Add(tenantId);

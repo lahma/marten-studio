@@ -33,7 +33,7 @@ public class RelationshipsVisibilityLiveTests(RelationshipsVisibilityLiveTests.F
         public Guid CustomerId { get; private set; }
 
         /// <inheritdoc />
-        protected override void ConfigureStudio(MartenStudioOptions options) =>
+        protected override void ConfigureStudio(MartenOptions options) =>
             options.IsDocumentTypeVisible = static type => type != typeof(Order);
 
         /// <inheritdoc />

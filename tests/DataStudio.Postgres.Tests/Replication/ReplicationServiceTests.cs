@@ -35,7 +35,7 @@ public class ReplicationServiceTests
     [Fact]
     public async Task Through_every_gate_names_are_shown_and_the_first_view_is_audited_once_per_circuit()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = PostgresStudioCapabilities.All(), policies: true);
+        await using Harness harness = Harness.Create(static options => options.Capabilities = PostgresCapabilities.All(), policies: true);
 
         ReplicationView first = await harness.Service.GetAsync(Scope, Token);
         ReplicationView second = await harness.Service.GetAsync(Scope, Token);
@@ -63,7 +63,7 @@ public class ReplicationServiceTests
     public async Task A_view_without_names_is_never_audited()
     {
         // Nothing to name: no standby, no slot of this database, no archive command text.
-        await using Harness harness = Harness.Create(static options => options.Capabilities = PostgresStudioCapabilities.All());
+        await using Harness harness = Harness.Create(static options => options.Capabilities = PostgresCapabilities.All());
         harness.Reader.Facts = Nameless();
 
         ReplicationView view = await harness.Service.GetAsync(Scope, Token);
@@ -75,13 +75,13 @@ public class ReplicationServiceTests
     [Fact]
     public async Task With_the_capability_off_names_are_withheld_and_naming_the_option_and_nothing_is_audited()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = new PostgresStudioCapabilities(), policies: true);
+        await using Harness harness = Harness.Create(static options => options.Capabilities = new PostgresCapabilities(), policies: true);
 
         ReplicationView view = await harness.Service.GetAsync(Scope, Token);
 
         view.Refusal.Should().Be(ReplicationRefusal.None, "the numbers are the database-wide gate's");
         view.NamesShown.Should().BeFalse();
-        view.NamesWithheld.Should().Contain("PostgresStudioOptions.Capabilities.ViewDatabaseActivity");
+        view.NamesWithheld.Should().Contain("PostgresOptions.Capabilities.ViewDatabaseActivity");
         view.Standbys.Value!.Rows.Single().Name.Should().BeNull();
         harness.Policies.Calls.Should().NotContain(static x => x.Resource.Capability != null, "a capability that is off is answered before the write policy is asked");
         harness.Ring.Should().BeEmpty();
@@ -92,21 +92,21 @@ public class ReplicationServiceTests
     {
         await using Harness harness = Harness.Create(static options =>
         {
-            options.Capabilities = PostgresStudioCapabilities.All();
+            options.Capabilities = PostgresCapabilities.All();
             options.ReadOnly = true;
         });
 
         ReplicationView view = await harness.Service.GetAsync(Scope, Token);
 
         view.NamesShown.Should().BeFalse();
-        view.NamesWithheld.Should().Contain("PostgresStudioOptions.ReadOnly is true");
+        view.NamesWithheld.Should().Contain("PostgresOptions.ReadOnly is true");
         harness.Ring.Should().BeEmpty();
     }
 
     [Fact]
     public async Task A_write_policy_that_refuses_ViewDatabaseActivity_withholds_names_and_shows_the_numbers()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = PostgresStudioCapabilities.All(), policies: true);
+        await using Harness harness = Harness.Create(static options => options.Capabilities = PostgresCapabilities.All(), policies: true);
         harness.Policies.Allow(static resource => resource.Capability is null);
 
         ReplicationView view = await harness.Service.GetAsync(Scope, Token);
@@ -122,14 +122,14 @@ public class ReplicationServiceTests
     [Fact]
     public async Task A_store_policy_that_refuses_the_database_refuses_everything_and_reads_nothing()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = PostgresStudioCapabilities.All(), policies: true);
+        await using Harness harness = Harness.Create(static options => options.Capabilities = PostgresCapabilities.All(), policies: true);
         harness.Policies.Allow(static _ => false);
 
         ReplicationView view = await harness.Service.GetAsync(Scope, Token);
         TablespaceSize size = await harness.Service.MeasureTablespaceAsync(Scope, "pg_default", Token);
 
         view.Refusal.Should().Be(ReplicationRefusal.StorePolicy);
-        view.Reason.Should().Contain("PostgresStudioOptions.SourceAuthorizationPolicy");
+        view.Reason.Should().Contain("PostgresOptions.SourceAuthorizationPolicy");
         size.Bytes.Should().BeNull();
         size.Problem.Should().Be(view.Reason);
         harness.Reader.Reads.Should().Be(0);
@@ -143,7 +143,7 @@ public class ReplicationServiceTests
     [Fact]
     public async Task The_numbers_for_the_snapshot_download_are_the_pages_and_record_no_names_as_shown()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = PostgresStudioCapabilities.All(), policies: true);
+        await using Harness harness = Harness.Create(static options => options.Capabilities = PostgresCapabilities.All(), policies: true);
 
         ReplicationView view = await harness.Service.GetNumbersAsync(Scope, Token);
 
@@ -162,20 +162,20 @@ public class ReplicationServiceTests
     [Fact]
     public async Task A_store_policy_that_refuses_the_database_refuses_the_snapshot_downloads_numbers_and_reads_nothing()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = PostgresStudioCapabilities.All(), policies: true);
+        await using Harness harness = Harness.Create(static options => options.Capabilities = PostgresCapabilities.All(), policies: true);
         harness.Policies.Allow(static _ => false);
 
         ReplicationView view = await harness.Service.GetNumbersAsync(Scope, Token);
 
         view.Refusal.Should().Be(ReplicationRefusal.StorePolicy);
-        view.Reason.Should().Contain("PostgresStudioOptions.SourceAuthorizationPolicy");
+        view.Reason.Should().Contain("PostgresOptions.SourceAuthorizationPolicy");
         harness.Reader.Reads.Should().Be(0);
     }
 
     [Fact]
     public async Task A_visitors_spelling_that_is_not_the_resolved_identity_is_asked_again_by_the_resolved_names()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = PostgresStudioCapabilities.All(), policies: true);
+        await using Harness harness = Harness.Create(static options => options.Capabilities = PostgresCapabilities.All(), policies: true);
         string identity = await harness.IdentityAsync();
 
         // The resolver's own question takes the visitor's spelling (a database matches in any case); the store policy
@@ -193,7 +193,7 @@ public class ReplicationServiceTests
     [Fact]
     public async Task One_tablespace_is_measured_at_a_time_per_database_for_the_whole_process()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = PostgresStudioCapabilities.All());
+        await using Harness harness = Harness.Create(static options => options.Capabilities = PostgresCapabilities.All());
         TaskCompletionSource<long?> hold = new(TaskCreationOptions.RunContinuationsAsynchronously);
         harness.Reader.Size = hold.Task;
 
@@ -215,7 +215,7 @@ public class ReplicationServiceTests
     [Fact]
     public async Task A_tablespace_the_role_may_not_size_is_not_readable_by_this_role()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = PostgresStudioCapabilities.All());
+        await using Harness harness = Harness.Create(static options => options.Capabilities = PostgresCapabilities.All());
         harness.Reader.Size = Task.FromException<long?>(new PostgresException("permission denied for tablespace pg_global", "ERROR", "ERROR", PostgresErrorCodes.InsufficientPrivilege));
 
         TablespaceSize size = await harness.Service.MeasureTablespaceAsync(Scope, "pg_global", Token);
@@ -296,7 +296,7 @@ public class ReplicationServiceTests
             return resolved.Target.Identity;
         }
 
-        public static Harness Create(Action<PostgresStudioOptions> configure, bool policies = false)
+        public static Harness Create(Action<PostgresOptions> configure, bool policies = false)
         {
             TestAuthenticationStateProvider users = new();
             users.SignIn("operator");

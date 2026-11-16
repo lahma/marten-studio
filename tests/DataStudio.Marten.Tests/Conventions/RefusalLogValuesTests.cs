@@ -137,7 +137,7 @@ public partial class RefusalLogValuesTests
     [Fact]
     public void A_refused_scope_the_visitor_typed_is_logged_escaped_and_bounded()
     {
-        var options = Options.Create(new MartenStudioOptions());
+        var options = Options.Create(new MartenOptions());
         var services = new ServiceCollection();
         services.AddMarten(static x => x.Connection("Host=marten-studio-refusal-test.invalid;Database=none;Username=none;Password=none"));
         using ServiceProvider provider = services.BuildServiceProvider();
@@ -161,7 +161,7 @@ public partial class RefusalLogValuesTests
 
         log.RecordScopeDenied(new StudioScope(HostileStoreKey, HostileDatabaseId, "acme\nforged"), "studio-store", "Read rows", HostileStatement);
         log.RecordCapabilityDenied(
-            new StudioCapabilityDeniedException(StudioCapability.RunSql, CapabilityDenialReason.Disabled, MartenStudioSettings.Of(new MartenStudioOptions())),
+            new StudioCapabilityDeniedException(StudioCapability.RunSql, CapabilityDenialReason.Disabled, MartenStudioSettings.Of(new MartenOptions())),
             "Run SQL",
             HostileStatement);
 

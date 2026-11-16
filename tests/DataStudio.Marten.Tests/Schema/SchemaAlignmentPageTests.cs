@@ -129,7 +129,7 @@ public class SchemaAlignmentPageTests
 
         page.Find(".ms-schema-partitions").TextContent.Trim().Should().Be("partitioned");
         page.Find(".ms-schema-partition-note").TextContent.Should()
-            .Contain("MartenStudioOptions.Capabilities.BrowseDatabase")
+            .Contain("MartenOptions.Capabilities.BrowseDatabase")
             .And.Contain("number of tenants");
         page.FindAll("tbody tr").Should().ContainSingle("a partitioned table is one row, whatever its partitions");
     }
@@ -245,7 +245,7 @@ public class SchemaAlignmentPageTests
         var row = Row(page, "studio.host_touch");
         row.QuerySelector(".ms-schema-owner-other")!.TextContent.Should().Be("not Marten");
         row.QuerySelector(".ms-function-withheld")!.TextContent.Should().Be("body withheld");
-        row.QuerySelector(".ms-function-refusal")!.TextContent.Should().Contain("MartenStudioOptions.Capabilities.BrowseDatabase");
+        row.QuerySelector(".ms-function-refusal")!.TextContent.Should().Contain("MartenOptions.Capabilities.BrowseDatabase");
 
         await row.TriggerEventAsync("ontoggle", EventArgs.Empty);
 
@@ -316,7 +316,7 @@ public class SchemaAlignmentPageTests
         context.DatabaseObjects.Definition = DatabaseObjectDefinition.Unavailable(
             new DatabaseObjectRef(DatabaseObjectKind.Function, "studio", "host_touch", string.Empty),
             DatabaseRefusal.SchemaNotBrowsable,
-            "Schema 'studio' is not one MartenStudioOptions.BrowsableSchemas admits.");
+            "Schema 'studio' is not one MartenOptions.BrowsableSchemas admits.");
 
         var page = RenderTab(context, "functions");
         await Row(page, "studio.host_touch").TriggerEventAsync("ontoggle", EventArgs.Empty);

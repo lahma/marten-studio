@@ -174,7 +174,7 @@ internal sealed class LinqQueryHarness : IAsyncDisposable
 
     public static StudioScope For(string tenantId) => new(MartenStoreRegistry.DefaultStoreKey, string.Empty, tenantId);
 
-    public static async Task<LinqQueryHarness> CreateAsync(PostgresFixture fixture, string schema, Action<MartenStudioOptions>? configure = null)
+    public static async Task<LinqQueryHarness> CreateAsync(PostgresFixture fixture, string schema, Action<MartenOptions>? configure = null)
     {
         await fixture.CreateSchemaAsync(schema);
 

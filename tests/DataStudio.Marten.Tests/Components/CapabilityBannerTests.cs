@@ -70,7 +70,7 @@ public class CapabilityBannerTests
 
         banner.Find(".ms-chip").TextContent.Trim().Should().StartWith("0 / 14");
         banner.FindAll(".ms-capability-on").Should().BeEmpty("every one of the module's rows is off while its own switch is on");
-        context.Services.GetRequiredService<DataStudio.Postgres.Services.Settings.IStudioSettings>().ReadOnlyOptionName.Should().Be("MartenStudioOptions.ReadOnly");
+        context.Services.GetRequiredService<DataStudio.Postgres.Services.Settings.IStudioSettings>().ReadOnlyOptionName.Should().Be("MartenOptions.ReadOnly");
     }
 
     /// <summary>
@@ -86,7 +86,7 @@ public class CapabilityBannerTests
     public void The_popover_says_it_describes_the_studio_and_not_the_visitor()
     {
         using var context = new StudioComponentContext();
-        context.Options.Capabilities = MartenStudioCapabilities.All();
+        context.Options.Capabilities = MartenCapabilities.All();
 
         var banner = context.Render<CapabilityBanner>();
 
@@ -107,7 +107,7 @@ public class CapabilityBannerTests
         banner.FindAll(".ms-capability").Should().HaveCount(14);
         banner.TextOfAll(".ms-capability-option").Should().Equal(
             StudioCapabilityGuard.ReadsBeyondTheStore.Concat(StudioCapabilityGuard.Mutating)
-                .Select(x => "MartenStudioOptions.Capabilities." + x));
+                .Select(x => "MartenOptions.Capabilities." + x));
 
         var edit = banner.FindAll(".ms-capability").Single(x =>
             x.QuerySelector(".ms-capability-name")!.TextContent.Trim() == nameof(StudioCapability.EditDocuments));
@@ -178,7 +178,7 @@ public class CapabilityBannerTests
         IElement option = banner.FindAll(".ms-capability-option").Single(static x =>
             x.TextContent.EndsWith(nameof(StudioCapability.ApplySchemaChanges), StringComparison.Ordinal));
 
-        option.TextContent.Should().Be("MartenStudioOptions.Capabilities.ApplySchemaChanges");
-        option.InnerHtml.Should().Be("MartenStudioOptions.<wbr>Capabilities.<wbr>ApplySchemaChanges");
+        option.TextContent.Should().Be("MartenOptions.Capabilities.ApplySchemaChanges");
+        option.InnerHtml.Should().Be("MartenOptions.<wbr>Capabilities.<wbr>ApplySchemaChanges");
     }
 }

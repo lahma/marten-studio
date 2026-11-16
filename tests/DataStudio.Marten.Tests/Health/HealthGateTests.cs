@@ -25,7 +25,7 @@ public class HealthGateTests
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
-    private static HealthHarness Scripted(Action<MartenStudioOptions>? studio = null)
+    private static HealthHarness Scripted(Action<MartenOptions>? studio = null)
     {
         HealthHarness harness = HealthHarness.Create(studio: studio, policies: true);
 
@@ -49,7 +49,7 @@ public class HealthGateTests
 
         report.Findings.Select(static x => x.Code).Should().BeEquivalentTo(["K90", "T90"]);
         report.WithheldCount.Should().Be(1);
-        report.WithheldReason.Should().Contain("MartenStudioOptions.Capabilities.ViewDatabaseActivity");
+        report.WithheldReason.Should().Contain("MartenOptions.Capabilities.ViewDatabaseActivity");
 
         HealthEvidence pid = report.Findings.Single(static x => x.Code == "K90").Evidence.Single(static x => x.Label == "Oldest session");
         pid.Value.Should().NotContain(Pid).And.StartWith("withheld");
@@ -65,14 +65,14 @@ public class HealthGateTests
     {
         await using HealthHarness harness = Scripted(static options =>
         {
-            options.Capabilities = MartenStudioCapabilities.All();
+            options.Capabilities = MartenCapabilities.All();
             options.ReadOnly = true;
         });
 
         HealthReport report = await harness.Health.GetReportAsync(harness.Scope, HealthReportRequest.Regular, Token);
 
         report.Findings.Select(static x => x.Code).Should().NotContain("C90");
-        report.WithheldReason.Should().Contain("MartenStudioOptions.ReadOnly");
+        report.WithheldReason.Should().Contain("MartenOptions.ReadOnly");
     }
 
     [Fact]

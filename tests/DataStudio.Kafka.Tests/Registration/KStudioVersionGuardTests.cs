@@ -21,7 +21,7 @@ public class KStudioVersionGuardTests
     private const BindingFlags Declared =
         BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly;
 
-    private static readonly Assembly Module = typeof(KafkaStudioOptions).Assembly;
+    private static readonly Assembly Module = typeof(KafkaOptions).Assembly;
 
     private static readonly Assembly Shell = typeof(DataStudio.Components.StudioRoutes).Assembly;
 
@@ -301,7 +301,7 @@ public class KStudioVersionGuardTests
     private static MethodInfo AddKafka =>
         typeof(KafkaDataStudioBuilderExtensions).GetMethod(
             nameof(KafkaDataStudioBuilderExtensions.AddKafka),
-            [typeof(DataStudioBuilder), typeof(Action<KafkaStudioOptions>)])!;
+            [typeof(DataStudioBuilder), typeof(Action<KafkaOptions>)])!;
 
     private static AssemblyBuilder WithVersion(string informationalVersion, string? configuration = "Release", string? label = null)
     {

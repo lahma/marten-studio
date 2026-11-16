@@ -92,7 +92,7 @@ builder.Services
         // All four are off until the host says otherwise: reading rows and definitions, reading definitions alone, other
         // sessions' statements, and the SQL console. `All()` is the one-line, greppable opt-in; the shell's `ReadOnly` overrides it
         // whatever it says.
-        options.Capabilities = PostgresStudioCapabilities.All();
+        options.Capabilities = PostgresCapabilities.All();
 
         // `public` is browsable only while nothing names a schema: a list replaces that default rather than adding to it, so
         // `public` - where every tenant database keeps its tables - is named first. The others are the admin database's:
@@ -131,7 +131,7 @@ The health advisor can also answer an ASP.NET Core health check, which is how yo
 // Optional, and AddPostgres() does not do it for you: the health advisor's checks as one ASP.NET Core health
 // check. It reports codes and counts, never a name, and runs the checks at most once per HealthInterval however often
 // the endpoint is probed.
-builder.Services.AddHealthChecks().AddPostgresStudio(tags: ["postgres"]);
+builder.Services.AddHealthChecks().AddPostgresDiagnostics(tags: ["postgres"]);
 ```
 <!-- endSnippet -->
 

@@ -20,10 +20,10 @@ public class FindServiceTests
     private static FindService Service(
         TimeProvider? time = null,
         TestSourceAuthorizationService? authorization = null,
-        PostgresStudioOptions? options = null,
+        PostgresOptions? options = null,
         params IFindContributor[] contributors)
     {
-        PostgresStudioSettings settings = new(Microsoft.Extensions.Options.Options.Create(options ?? new PostgresStudioOptions()));
+        PostgresStudioSettings settings = PostgresStudioSettings.Of(Microsoft.Extensions.Options.Options.Create(options ?? new PostgresOptions()));
         StudioAuthorization gate = new(settings, PostgresStudioDescriptor.Instance, authorization ?? new TestSourceAuthorizationService(), new TestAuthenticationStateProvider());
 
         return new FindService(contributors, gate, NullLogger<FindService>.Instance, time);
@@ -101,7 +101,7 @@ public class FindServiceTests
 
         FindResult result = await Service(
                 authorization: authorization,
-                options: new PostgresStudioOptions { SourceAuthorizationPolicy = "Studio" },
+                options: new PostgresOptions { SourceAuthorizationPolicy = "Studio" },
                 contributors: [contributor])
             .FindAsync(Scope, "abc", TestContext.Current.CancellationToken);
 

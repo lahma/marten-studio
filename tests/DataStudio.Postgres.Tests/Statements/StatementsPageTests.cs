@@ -103,7 +103,7 @@ public class StatementsPageTests
 
     private static StatementsView Shown(StatementFacts facts) =>
         new StatementsService(
-                new PostgresStudioSettings(Microsoft.Extensions.Options.Options.Create(new PostgresStudioOptions())),
+                PostgresStudioSettings.Of(Microsoft.Extensions.Options.Options.Create(new PostgresOptions())),
                 null!, null!, null!, null!, null!, new StudioLogThrottle(TimeProvider.System), NullLogger<StatementsService>.Instance)
             .Show(facts, AllSchemas()) with
         {
@@ -140,7 +140,7 @@ public class StatementsPageTests
         page.WaitForAssertion(() => page.FindAll(".ms-capability-disabled").Should().ContainSingle());
 
         page.Find(".ms-capability-disabled").TextContent.Should().Contain("Statements is not enabled")
-            .And.Contain("PostgresStudioOptions.Capabilities.ViewDatabaseActivity");
+            .And.Contain("PostgresOptions.Capabilities.ViewDatabaseActivity");
         page.FindAll("table").Should().BeEmpty();
         service.Reads.Should().ContainSingle();
     }

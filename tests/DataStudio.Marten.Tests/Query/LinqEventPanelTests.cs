@@ -368,7 +368,7 @@ public class LinqEventPanelTests
     public async Task A_body_that_was_not_inlined_says_why_beside_its_card()
     {
         var linq = WithEvents(new FakeLinqQueryService());
-        LinqEventRow big = Row(1) with { Json = null, NotInlined = "Not shown: it is larger than MartenStudioOptions.MaxInlineDocumentBytes (1 KiB). Open its stream page." };
+        LinqEventRow big = Row(1) with { Json = null, NotInlined = "Not shown: it is larger than MartenOptions.MaxInlineValueBytes (1 KiB). Open its stream page." };
         linq.Result = Result(new LinqEventScope(null, CrossTenant: true, ArchivedFilter.Exclude, WholeDatabase: false, PerTenantSequences: false), big);
 
         using StudioComponentContext context = CreateContext(linq);
@@ -495,14 +495,14 @@ public class LinqEventPanelTests
     [Fact]
     public void The_link_to_the_events_query_carries_the_target_the_predicate_the_archived_choice_and_the_scope()
     {
-        var options = new MartenStudioOptions();
+        var options = new MartenOptions();
         var scope = new StudioScope("default", "main", "acme");
 
-        string href = EventLinks.ToLinqQuery(options, scope, "Version > 3", ArchivedFilter.Include);
+        string href = EventLinks.ToLinqQuery(MartenStudioSettings.Of(options), scope, "Version > 3", ArchivedFilter.Include);
 
         href.Should().Contain("query?mode=linq").And.Contain("target=events").And.Contain("predicate=Version%20%3E%203")
             .And.Contain("archived=include").And.Contain("store=default").And.Contain("db=main").And.Contain("tenant=acme");
-        EventLinks.ToLinqQuery(options, null, null).Should().NotContain("predicate=").And.NotContain("archived=");
+        EventLinks.ToLinqQuery(MartenStudioSettings.Of(options), null, null).Should().NotContain("predicate=").And.NotContain("archived=");
     }
 
     [Theory]

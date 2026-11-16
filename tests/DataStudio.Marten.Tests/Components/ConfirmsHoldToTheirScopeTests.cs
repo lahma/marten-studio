@@ -172,7 +172,7 @@ public class ConfirmsHoldToTheirScopeTests
         };
         using StudioComponentContext context = new(services => services.AddSingleton<ISchemaDataService>(schema));
         await TwoDatabasesAsync(context);
-        context.Options.Capabilities = MartenStudioCapabilities.All();
+        context.Options.Capabilities = MartenCapabilities.All();
 
         IRenderedComponent<DataStudio.Marten.Components.Pages.Schema.DriftTab> tab = context.Render<DataStudio.Marten.Components.Pages.Schema.DriftTab>();
         tab.FindAll("button").First(static x => x.TextContent.Contains("Preview migration", StringComparison.Ordinal)).Click();

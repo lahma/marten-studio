@@ -53,9 +53,9 @@ public class WholeDatabaseTableSetTests
         options.Schema.For<HealthLongDoc>();
     });
 
-    private static MartenStudioOptions Options(bool browse = true, bool hide = false, bool readOnly = false, params string[] browsable)
+    private static MartenOptions Options(bool browse = true, bool hide = false, bool readOnly = false, params string[] browsable)
     {
-        MartenStudioOptions options = new() { ReadOnly = readOnly };
+        MartenOptions options = new() { ReadOnly = readOnly };
         options.Capabilities.BrowseDatabase = browse;
 
         foreach (string schema in browsable.Length == 0 ? [Legacy] : browsable)
@@ -71,7 +71,7 @@ public class WholeDatabaseTableSetTests
         return options;
     }
 
-    private static HealthCheckContext Context(DocumentStore store, MartenStudioOptions options, IServiceProvider services) => new(
+    private static HealthCheckContext Context(DocumentStore store, MartenOptions options, IServiceProvider services) => new(
         new ResolvedScope(
             new StudioScope("default", string.Empty, null),
             new MartenStoreRegistration("default", "Default", typeof(IDocumentStore)),
@@ -85,7 +85,7 @@ public class WholeDatabaseTableSetTests
         new HealthSweepMemo(),
         CancellationToken.None);
 
-    private static DatabaseObjectClassifier Classifier(MartenStudioOptions options, params (string Key, DocumentStore Store)[] stores) =>
+    private static DatabaseObjectClassifier Classifier(MartenOptions options, params (string Key, DocumentStore Store)[] stores) =>
         new(
             [.. stores.Select(x => new StoreDeclarations(
                 x.Key,
@@ -97,7 +97,7 @@ public class WholeDatabaseTableSetTests
 
     /// <summary>The set a sweep would build from <paramref name="rows" />, the swept store's and the other store's declarations read.</summary>
     private static (MartenDatabaseTableSet Set, MartenTableScope Scope) Build(
-        MartenStudioOptions options,
+        MartenOptions options,
         IReadOnlyList<HealthRelationalTableRow> rows,
         int tableCap = MartenHealthTableSource.TableCap)
     {
@@ -322,7 +322,7 @@ public class WholeDatabaseTableSetTests
         twin.OtherStoresDeclareInOwnSchemas.Should().BeFalse();
 
         // Its only table of its own a hidden type's, in a schema the read admits; its event tables are the swept store's.
-        MartenStudioOptions hiding = Options();
+        MartenOptions hiding = Options();
         hiding.IsDocumentTypeVisible = static type => type != typeof(HealthOrderDoc);
 
         MartenTableScope hidden = BuildWith(hiding, static () => DocumentStore.For(options =>
@@ -340,7 +340,7 @@ public class WholeDatabaseTableSetTests
     }
 
     /// <summary>The scope a sweep would read with, the swept store's and <paramref name="other" />'s declarations read.</summary>
-    private static MartenTableScope BuildWith(MartenStudioOptions options, Func<DocumentStore> other)
+    private static MartenTableScope BuildWith(MartenOptions options, Func<DocumentStore> other)
     {
         using ServiceProvider services = new ServiceCollection().BuildServiceProvider();
         using DocumentStore store = Store();
@@ -372,7 +372,7 @@ public class WholeDatabaseTableSetTests
         open.Names.Should().Equal([StoreSchema, EventSchema, Legacy]);
         open.Everything.Should().BeTrue();
 
-        foreach (MartenStudioOptions closed in new[] { Options(browse: false, browsable: [Legacy, "*"]), Options(readOnly: true, browsable: [Legacy, "*"]) })
+        foreach (MartenOptions closed in new[] { Options(browse: false, browsable: [Legacy, "*"]), Options(readOnly: true, browsable: [Legacy, "*"]) })
         {
             MartenTableScope scope = Build(closed, []).Scope;
             scope.Names.Should().Equal([StoreSchema, EventSchema], "D27 admits nothing outside the store's own schemas without the browser");
@@ -408,7 +408,7 @@ public class WholeDatabaseTableSetTests
     public async Task Another_registration_that_will_not_build_leaves_the_declared_tables_alone_judged()
     {
         using DocumentStore store = Store();
-        MartenStudioOptions options = Options();
+        MartenOptions options = Options();
 
         ServiceCollection collection = new();
         collection.AddSingleton<IDocumentStore>(store);

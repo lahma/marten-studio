@@ -285,7 +285,7 @@ public class PgVectorViewerTests
 
         value.WaitForAssertion(() => value.Find(".ms-vector-whole").TextContent.Should().Be("[0.1,0.2,0.3,0.4,0.5"));
         value.FindAll(".ms-copy-button").Should().BeEmpty();
-        value.Find(".ms-row-value-note").TextContent.Should().Contain("MaxInlineDocumentBytes");
+        value.Find(".ms-row-value-note").TextContent.Should().Contain("MaxInlineValueBytes");
     }
 
     [Fact]

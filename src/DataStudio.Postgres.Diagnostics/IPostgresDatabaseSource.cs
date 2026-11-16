@@ -18,7 +18,7 @@ namespace DataStudio.Postgres;
 /// data source per call would leak a pool per call.
 /// </para>
 /// <para>
-/// <b>Names are identities.</b> A name keys authorization (<c>PostgresStudioResource.DatabaseIdentifier</c>),
+/// <b>Names are identities.</b> A name keys authorization (<c>PostgresResource.DatabaseIdentifier</c>),
 /// the health history, mutes and caches, so it must stay the same for the same database, including if it moves server.
 /// It must match <c>^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$</c> and be unique, case-insensitively, within the source and
 /// across every other source's database names. A name that is not is left out and logged.

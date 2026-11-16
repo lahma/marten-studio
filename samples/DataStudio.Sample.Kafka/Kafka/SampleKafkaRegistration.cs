@@ -24,7 +24,7 @@ internal static class SampleKafkaRegistration
     /// <param name="o">KStudio's options.</param>
     /// <param name="bootstrapServers">The cluster's bootstrap servers.</param>
     /// <param name="configuration">The host's configuration, for <see cref="TailPauseAfterSetting" /> and <see cref="CapabilitiesSetting" />; <see langword="null" /> for neither.</param>
-    public static void Configure(KafkaStudioOptions o, string bootstrapServers, IConfiguration? configuration = null)
+    public static void Configure(KafkaOptions o, string bootstrapServers, IConfiguration? configuration = null)
     {
         ArgumentNullException.ThrowIfNull(o);
 
@@ -60,8 +60,8 @@ internal static class SampleKafkaRegistration
             .Redact(r => r.Pattern(@"\+[0-9]{3} [0-9]{2} [0-9]{3} [0-9]{4}", "phone")));
 
         o.Capabilities = string.Equals(configuration?[CapabilitiesSetting], "search", StringComparison.OrdinalIgnoreCase)
-            ? new KafkaStudioCapabilities { SearchRecords = true }
-            : KafkaStudioCapabilities.All();
+            ? new KafkaCapabilities { SearchRecords = true }
+            : KafkaCapabilities.All();
         o.ClusterAuthorizationPolicy = SampleKafkaPolicies.Topics;
         o.CapabilityAuthorizationPolicy = SampleKafkaPolicies.Search;
 
@@ -89,7 +89,7 @@ internal static class SampleKafkaRegistration
     /// can be seen.
     /// </remarks>
     /// <param name="o">KStudio's options.</param>
-    public static void ConfigureWolverine(KafkaStudioOptions o)
+    public static void ConfigureWolverine(KafkaOptions o)
     {
         ArgumentNullException.ThrowIfNull(o);
 

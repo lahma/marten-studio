@@ -15,7 +15,7 @@ namespace DataStudio.Marten.Services.Query;
 /// <para>
 /// The asymmetry between this mode and the SQL console is the point. A <c>where</c> clause is a read against one
 /// document type the host registered and needs no capability; the SQL console is arbitrary SQL against the whole
-/// database, gated on <see cref="MartenStudioCapabilities.RunSql" />, resolved with write-policy semantics and
+/// database, gated on <see cref="MartenCapabilities.RunSql" />, resolved with write-policy semantics and
 /// audited statement by statement (D13) - and it is the shared <see cref="DataStudio.Postgres.Services.Sources.ISqlConsoleService" />, not a
 /// member of this interface.
 /// </para>
@@ -24,7 +24,7 @@ internal interface IQueryService
 {
     /// <summary>
     /// The document types the visitor may filter, honouring
-    /// <see cref="MartenStudioOptions.IsDocumentTypeVisible" />.
+    /// <see cref="MartenOptions.IsDocumentTypeVisible" />.
     /// </summary>
     Task<IReadOnlyList<QueryDocumentTypeInfo>> ListDocumentTypesAsync(
         StudioScope scope,

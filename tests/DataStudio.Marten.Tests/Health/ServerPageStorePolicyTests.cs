@@ -24,7 +24,7 @@ public class ServerPageStorePolicyTests
             .GetAsync(new StudioScope("default", harness.Store.Storage.Database.Id.Identity, "a-tenant"), Token);
 
         view.Refusal.Should().Be(ServerRefusal.StorePolicy);
-        view.Reason.Should().Contain("MartenStudioOptions.StoreAuthorizationPolicy").And.Contain("with no tenant selected");
+        view.Reason.Should().Contain("MartenOptions.StoreAuthorizationPolicy").And.Contain("with no tenant selected");
         harness.Policies.Calls.Should().NotBeEmpty().And.OnlyContain(
             static x => x.Policy == HealthHarness.StorePolicy && x.Resource.TenantId == null && x.Resource.Capability == null,
             "the page's gate is the database as a whole, not the tenant the visitor selected");

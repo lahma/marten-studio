@@ -648,16 +648,16 @@ public class MartenStudioRouteLinksTests
             });
         });
 
-    private static MartenStudioRouteLinks Links(Action<IServiceCollection> register, Action<MartenStudioOptions>? configure = null)
+    private static MartenStudioRouteLinks Links(Action<IServiceCollection> register, Action<MartenOptions>? configure = null)
     {
         ServiceCollection services = new();
         register(services);
 
-        MartenStudioOptions options = new();
+        MartenOptions options = new();
         configure?.Invoke(options);
 
         ServiceProvider provider = services.BuildServiceProvider();
-        return new MartenStudioRouteLinks(Microsoft.Extensions.Options.Options.Create(options), new MartenStoreRegistry(services), provider);
+        return new MartenStudioRouteLinks(Microsoft.Extensions.Options.Options.Create(options), MartenStudioSettings.Of(options), new MartenStoreRegistry(services), provider);
     }
 
     /// <summary>The query string of a studio-relative link, decoded.</summary>

@@ -60,7 +60,7 @@ public sealed class LargeRowsBrowserFactAttribute : FactAttribute
 /// </para>
 /// <para>
 /// <b>More than a hundred thousand rows, on purpose.</b> A filter no index serves is withheld until "Run
-/// anyway" when the relation holds <em>more</em> than <c>MartenStudioOptions.ExactCountThreshold</c> rows,
+/// anyway" when the relation holds <em>more</em> than <c>MartenOptions.ExactCountThreshold</c> rows,
 /// which is 100 000 by default; a table of exactly that many would never be withheld. So the table holds a
 /// fifth more, and is <c>ANALYZE</c>d, because the verdict reads <c>pg_class.reltuples</c> and a table
 /// Postgres has never analysed has none.

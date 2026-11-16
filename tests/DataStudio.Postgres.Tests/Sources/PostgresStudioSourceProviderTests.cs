@@ -55,7 +55,7 @@ public class PostgresStudioSourceProviderTests
 
     private sealed class Harness : IAsyncDisposable
     {
-        public Harness(IServiceCollection services, PostgresStudioOptions options, TimeProvider? time = null, ILogger<PostgresStudioSourceProvider>? logger = null)
+        public Harness(IServiceCollection services, PostgresOptions options, TimeProvider? time = null, ILogger<PostgresStudioSourceProvider>? logger = null)
         {
             Options = options;
             Root = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
@@ -66,7 +66,7 @@ public class PostgresStudioSourceProviderTests
                 logger ?? NullLogger<PostgresStudioSourceProvider>.Instance);
         }
 
-        public PostgresStudioOptions Options { get; }
+        public PostgresOptions Options { get; }
 
         public PostgresSourceRegistry Registry { get; }
 
@@ -93,7 +93,7 @@ public class PostgresStudioSourceProviderTests
         AddNpgsqlDataSourceShape(services, Cs);
         AddNpgsqlDataSourceShape(services, Cs, key: "k");
 
-        await using Harness harness = new(services, new PostgresStudioOptions());
+        await using Harness harness = new(services, new PostgresOptions());
 
         harness.Provider.Registrations().Should().Equal(new StudioSourceRegistration("default", "Default", StudioSourceKind.DataSource));
 
@@ -117,7 +117,7 @@ public class PostgresStudioSourceProviderTests
 
         ServiceCollection scoped = new();
         scoped.AddScoped<NpgsqlDataSource>(_ => NpgsqlDataSource.Create(Cs));
-        await using Harness first = new(scoped, new PostgresStudioOptions(), logger: factory.CreateLogger<PostgresStudioSourceProvider>());
+        await using Harness first = new(scoped, new PostgresOptions(), logger: factory.CreateLogger<PostgresStudioSourceProvider>());
         first.Provider.Registrations().Should().BeEmpty();
         first.Provider.Registrations().Should().BeEmpty();
 
@@ -126,7 +126,7 @@ public class PostgresStudioSourceProviderTests
 
         ServiceCollection transient = new();
         transient.AddTransient<NpgsqlDataSource>(_ => NpgsqlDataSource.Create(Cs));
-        await using Harness second = new(transient, new PostgresStudioOptions());
+        await using Harness second = new(transient, new PostgresOptions());
         second.Provider.Registrations().Should().BeEmpty();
     }
 
@@ -136,13 +136,13 @@ public class PostgresStudioSourceProviderTests
         ServiceCollection singletonThenTransient = new();
         singletonThenTransient.AddSingleton(NpgsqlDataSource.Create(Cs));
         singletonThenTransient.AddTransient<NpgsqlDataSource>(_ => NpgsqlDataSource.Create(Cs));
-        await using Harness transientLast = new(singletonThenTransient, new PostgresStudioOptions());
+        await using Harness transientLast = new(singletonThenTransient, new PostgresOptions());
         transientLast.Provider.Registrations().Should().BeEmpty("resolving the last registration would build a pool per resolution");
 
         ServiceCollection transientThenSingleton = new();
         transientThenSingleton.AddTransient<NpgsqlDataSource>(_ => NpgsqlDataSource.Create(Cs));
         transientThenSingleton.AddSingleton(NpgsqlDataSource.Create(Cs));
-        await using Harness singletonLast = new(transientThenSingleton, new PostgresStudioOptions());
+        await using Harness singletonLast = new(transientThenSingleton, new PostgresOptions());
         singletonLast.Provider.Registrations().Select(static x => x.Key).Should().Equal("default");
         singletonLast.Resolve("default");
     }
@@ -153,7 +153,7 @@ public class PostgresStudioSourceProviderTests
         ServiceCollection services = new();
         services.AddSingleton(NpgsqlDataSource.Create(Cs));
 
-        await using Harness harness = new(services, new PostgresStudioOptions { IncludeDefaultDataSource = false });
+        await using Harness harness = new(services, new PostgresOptions { IncludeDefaultDataSource = false });
 
         harness.Provider.Registrations().Should().BeEmpty();
         harness.Provider.Find("default").Should().BeNull();
@@ -169,7 +169,7 @@ public class PostgresStudioSourceProviderTests
 
         int calls = 0;
         bool scopedResolvable = true;
-        PostgresStudioOptions options = new PostgresStudioOptions().AddDataSource("orders", sp =>
+        PostgresOptions options = new PostgresOptions().AddDataSource("orders", sp =>
         {
             calls++;
 
@@ -211,7 +211,7 @@ public class PostgresStudioSourceProviderTests
         NpgsqlDataSource reporting = NpgsqlDataSource.Create(Cs);
         int calls = 0;
 
-        PostgresStudioOptions options = new PostgresStudioOptions().AddDataSource("reporting", _ =>
+        PostgresOptions options = new PostgresOptions().AddDataSource("reporting", _ =>
         {
             Interlocked.Increment(ref calls);
             entered.Set();
@@ -244,7 +244,7 @@ public class PostgresStudioSourceProviderTests
         services.AddKeyedTransient<NpgsqlDataSource>("each", (_, _) => NpgsqlDataSource.Create(Cs));
         services.AddTransient<IPostgresDatabaseSource>(_ => new FakeDatabaseSource("acme"));
 
-        PostgresStudioOptions options = new PostgresStudioOptions()
+        PostgresOptions options = new PostgresOptions()
             .AddDataSource("visitor", static sp => sp.GetRequiredKeyedService<NpgsqlDataSource>("visitor"))
             .AddDataSource("each", static sp => sp.GetRequiredKeyedService<NpgsqlDataSource>("each"))
             .AddDatabaseSource("tenants", static sp => sp.GetRequiredService<IPostgresDatabaseSource>());
@@ -266,7 +266,7 @@ public class PostgresStudioSourceProviderTests
         services.AddSingleton(NpgsqlDataSource.Create(Cs));
         FakeDatabaseSource tenants = new("acme", "globex");
 
-        PostgresStudioOptions options = new PostgresStudioOptions()
+        PostgresOptions options = new PostgresOptions()
             .AddDatabaseSource("tenants", _ => tenants)
             .AddDataSource("reporting", _ => NpgsqlDataSource.Create(Cs))
             .AddDataSource("admin", _ => NpgsqlDataSource.Create(Cs));
@@ -287,7 +287,7 @@ public class PostgresStudioSourceProviderTests
         await using NpgsqlDataSource acme = NpgsqlDataSource.Create("Host=acme.example;Database=acme;Username=app");
         FakeDatabaseSource tenants = new("acme", "globex") { DataSources = { ["acme"] = acme } };
 
-        await using Harness harness = new(services, new PostgresStudioOptions().AddDatabaseSource("tenants", _ => tenants));
+        await using Harness harness = new(services, new PostgresOptions().AddDatabaseSource("tenants", _ => tenants));
 
         IStudioSource source = harness.Resolve("tenants");
         source.Cardinality.Should().Be(StudioDatabaseCardinality.DynamicMultiple);
@@ -332,7 +332,7 @@ public class PostgresStudioSourceProviderTests
             OpenFailures = { [HostileName] = new InvalidOperationException("down\r\nforged line\u0007") },
         };
 
-        await using Harness harness = new(services, new PostgresStudioOptions().AddDatabaseSource("tenants", _ => tenants));
+        await using Harness harness = new(services, new PostgresOptions().AddDatabaseSource("tenants", _ => tenants));
 
         IStudioSource source = harness.Resolve("tenants");
         IReadOnlyList<IStudioDatabase> listed = await source.DatabasesAsync(Token);
@@ -370,7 +370,7 @@ public class PostgresStudioSourceProviderTests
         await using NpgsqlDataSource acme = NpgsqlDataSource.Create("Host=acme.example;Database=acme;Username=app");
         FakeDatabaseSource tenants = new("globex", "acme") { DataSources = { ["globex"] = globex, ["acme"] = acme } };
 
-        PostgresStudioOptions options = new PostgresStudioOptions { SourceAuthorizationPolicy = "src" }
+        PostgresOptions options = new PostgresOptions { SourceAuthorizationPolicy = "src" }
             .AddDatabaseSource("tenants", _ => tenants);
         await using Harness harness = new(services, options);
 
@@ -409,7 +409,7 @@ public class PostgresStudioSourceProviderTests
         ServiceCollection services = new();
         await using NpgsqlDataSource admin = NpgsqlDataSource.Create("Host=admin.example;Database=admin;Username=app");
 
-        PostgresStudioOptions options = new PostgresStudioOptions { SourceAuthorizationPolicy = "src" }
+        PostgresOptions options = new PostgresOptions { SourceAuthorizationPolicy = "src" }
             .AddDataSource("admin", _ => admin);
         await using Harness harness = new(services, options);
 
@@ -421,8 +421,8 @@ public class PostgresStudioSourceProviderTests
         var refused = await resolve.Should().ThrowAsync<StudioNotAuthorizedException>();
 
         policy.Calls.Select(static x => x.Resource).Should().Equal(
-            new PostgresStudioResource("ADMIN", "ADMIN", null),
-            new PostgresStudioResource("admin", "admin", null));
+            new PostgresResource("ADMIN", "ADMIN", null),
+            new PostgresResource("admin", "admin", null));
         refused.Which.Scope.Should().Be(new StudioScope("admin", "admin", null), "the audit names the scope that was refused");
     }
 
@@ -437,7 +437,7 @@ public class PostgresStudioSourceProviderTests
         await using NpgsqlDataSource acme = NpgsqlDataSource.Create("Host=acme.example;Database=acme;Username=app");
         FakeDatabaseSource tenants = new("acme") { DataSources = { ["acme"] = acme } };
 
-        PostgresStudioOptions options = new PostgresStudioOptions { SourceAuthorizationPolicy = "src", WriteAuthorizationPolicy = "write" }
+        PostgresOptions options = new PostgresOptions { SourceAuthorizationPolicy = "src", WriteAuthorizationPolicy = "write" }
             .AddDatabaseSource("tenants", _ => tenants);
         await using Harness harness = new(services, options);
 
@@ -449,9 +449,9 @@ public class PostgresStudioSourceProviderTests
         await resolve.Should().ThrowAsync<StudioNotAuthorizedException>();
 
         policy.Calls.Should().Equal(
-            ("src", new PostgresStudioResource("Tenants", "ACME", null)),
-            ("write", new PostgresStudioResource("Tenants", "ACME", "RunSql")),
-            ("src", new PostgresStudioResource("tenants", "acme", null)));
+            ("src", new PostgresResource("Tenants", "ACME", null)),
+            ("write", new PostgresResource("Tenants", "ACME", "RunSql")),
+            ("src", new PostgresResource("tenants", "acme", null)));
         tenants.Opened.Should().BeEmpty("a refused database is never opened");
     }
 
@@ -463,7 +463,7 @@ public class PostgresStudioSourceProviderTests
         await using NpgsqlDataSource acme = NpgsqlDataSource.Create("Host=acme.example;Database=acme;Username=app");
         FakeDatabaseSource tenants = new("acme") { DataSources = { ["acme"] = acme } };
 
-        PostgresStudioOptions options = new PostgresStudioOptions { SourceAuthorizationPolicy = "src", WriteAuthorizationPolicy = "write" }
+        PostgresOptions options = new PostgresOptions { SourceAuthorizationPolicy = "src", WriteAuthorizationPolicy = "write" }
             .AddDatabaseSource("tenants", _ => tenants);
         await using Harness harness = new(services, options);
 
@@ -471,13 +471,13 @@ public class PostgresStudioSourceProviderTests
         StudioSourceResolver resolver = Resolver(harness, options, policy);
 
         (await resolver.ResolveAsync(new StudioScope("tenants", "acme", null), cancellationToken: Token)).Target.DataSource.Should().BeSameAs(acme);
-        policy.Calls.Should().ContainSingle().Which.Should().Be(("src", new PostgresStudioResource("tenants", "acme", null)));
+        policy.Calls.Should().ContainSingle().Which.Should().Be(("src", new PostgresResource("tenants", "acme", null)));
 
         policy.Calls.Clear();
         await resolver.ResolveAsync(new StudioScope("tenants", "acme", null), "RunSql", Token);
         policy.Calls.Should().Equal(
-            ("src", new PostgresStudioResource("tenants", "acme", null)),
-            ("write", new PostgresStudioResource("tenants", "acme", "RunSql")));
+            ("src", new PostgresResource("tenants", "acme", null)),
+            ("write", new PostgresResource("tenants", "acme", "RunSql")));
     }
 
     [Fact]
@@ -487,7 +487,7 @@ public class PostgresStudioSourceProviderTests
         await using NpgsqlDataSource acme = NpgsqlDataSource.Create("Host=acme.example;Database=acme;Username=app");
         FakeDatabaseSource tenants = new("acme") { DataSources = { ["acme"] = acme } };
 
-        await using Harness harness = new(services, new PostgresStudioOptions().AddDatabaseSource("tenants", _ => tenants));
+        await using Harness harness = new(services, new PostgresOptions().AddDatabaseSource("tenants", _ => tenants));
 
         IStudioSource source = harness.Resolve("tenants");
         IReadOnlyList<IStudioDatabase> listed = await source.DatabasesAsync(Token);
@@ -504,7 +504,7 @@ public class PostgresStudioSourceProviderTests
         services.AddSingleton(NpgsqlDataSource.Create(Cs));
         FakeDatabaseSource tenants = new("acme", "ACME", "has space", "a/b", "", "-leading", "admin", "default", "globex");
 
-        PostgresStudioOptions options = new PostgresStudioOptions()
+        PostgresOptions options = new PostgresOptions()
             .AddDataSource("admin", _ => NpgsqlDataSource.Create(Cs))
             .AddDatabaseSource("tenants", _ => tenants);
 
@@ -531,7 +531,7 @@ public class PostgresStudioSourceProviderTests
 
         await using Harness harness = new(
             services,
-            new PostgresStudioOptions().AddDatabaseSource("tenants", _ => tenants),
+            new PostgresOptions().AddDatabaseSource("tenants", _ => tenants),
             logger: factory.CreateLogger<PostgresStudioSourceProvider>());
 
         IReadOnlyList<IStudioDatabase> listed = await harness.Resolve("tenants").DatabasesAsync(Token);
@@ -549,7 +549,7 @@ public class PostgresStudioSourceProviderTests
         FakeDatabaseSource tenants = new("acme");
         ManualTimeProvider time = new();
 
-        await using Harness harness = new(services, new PostgresStudioOptions().AddDatabaseSource("tenants", _ => tenants), time);
+        await using Harness harness = new(services, new PostgresOptions().AddDatabaseSource("tenants", _ => tenants), time);
 
         IStudioSource source = harness.Resolve("tenants");
         await source.DatabasesAsync(Token);
@@ -570,7 +570,7 @@ public class PostgresStudioSourceProviderTests
         ServiceCollection services = new();
         FakeDatabaseSource tenants = new("acme");
 
-        await using Harness harness = new(services, new PostgresStudioOptions().AddDatabaseSource("tenants", _ => tenants), new ManualTimeProvider());
+        await using Harness harness = new(services, new PostgresOptions().AddDatabaseSource("tenants", _ => tenants), new ManualTimeProvider());
 
         IStudioSource source = harness.Resolve("tenants");
         await source.DatabasesAsync(Token);
@@ -592,7 +592,7 @@ public class PostgresStudioSourceProviderTests
         ServiceCollection services = new();
         FakeDatabaseSource tenants = new("acme") { ListFailure = new InvalidOperationException("admin database down") };
 
-        await using Harness harness = new(services, new PostgresStudioOptions().AddDatabaseSource("tenants", _ => tenants));
+        await using Harness harness = new(services, new PostgresOptions().AddDatabaseSource("tenants", _ => tenants));
 
         IStudioSource source = harness.Resolve("tenants");
         Func<Task> list = async () => await source.DatabasesAsync(Token);
@@ -611,7 +611,7 @@ public class PostgresStudioSourceProviderTests
 
         await using Harness harness = new(
             services,
-            new PostgresStudioOptions { QueryTimeout = TimeSpan.FromSeconds(5) }.AddDatabaseSource("tenants", _ => tenants),
+            new PostgresOptions { QueryTimeout = TimeSpan.FromSeconds(5) }.AddDatabaseSource("tenants", _ => tenants),
             time);
 
         IStudioSource source = harness.Resolve("tenants");
@@ -633,7 +633,7 @@ public class PostgresStudioSourceProviderTests
 
         await using Harness harness = new(
             services,
-            new PostgresStudioOptions { QueryTimeout = TimeSpan.FromSeconds(5) }.AddDatabaseSource("tenants", _ => tenants),
+            new PostgresOptions { QueryTimeout = TimeSpan.FromSeconds(5) }.AddDatabaseSource("tenants", _ => tenants),
             time);
 
         IStudioSource source = harness.Resolve("tenants");
@@ -657,7 +657,7 @@ public class PostgresStudioSourceProviderTests
 
         await using Harness harness = new(
             services,
-            new PostgresStudioOptions().AddDatabaseSource("tenants", _ => tenants),
+            new PostgresOptions().AddDatabaseSource("tenants", _ => tenants),
             logger: factory.CreateLogger<PostgresStudioSourceProvider>());
 
         IReadOnlyList<IStudioDatabase> listed = await harness.Resolve("tenants").DatabasesAsync(Token);
@@ -673,7 +673,7 @@ public class PostgresStudioSourceProviderTests
     {
         ServiceCollection services = new();
         int calls = 0;
-        PostgresStudioOptions options = new PostgresStudioOptions().AddDataSource("broken", _ =>
+        PostgresOptions options = new PostgresOptions().AddDataSource("broken", _ =>
         {
             calls++;
             throw new InvalidOperationException("no such data source");
@@ -698,7 +698,7 @@ public class PostgresStudioSourceProviderTests
         ServiceCollection services = new();
         await using NpgsqlDataSource own = NpgsqlDataSource.Create(Cs);
 
-        await using (Harness harness = new(services, new PostgresStudioOptions().AddDataSource("again", _ => own)))
+        await using (Harness harness = new(services, new PostgresOptions().AddDataSource("again", _ => own)))
         {
             foreach (StudioSourceRegistration registration in harness.Provider.Registrations())
             {
@@ -723,7 +723,7 @@ public class PostgresStudioSourceProviderTests
             OpenFailures = { ["broken"] = new InvalidOperationException("tenant database down") },
         };
 
-        await using Harness harness = new(services, new PostgresStudioOptions().AddDatabaseSource("tenants", _ => tenants));
+        await using Harness harness = new(services, new PostgresOptions().AddDatabaseSource("tenants", _ => tenants));
 
         List<StudioListedDatabase> listed = [];
         await foreach (StudioListedDatabase entry in harness.Provider.ListUnattendedAsync(Token))
@@ -751,7 +751,7 @@ public class PostgresStudioSourceProviderTests
             OpenFailures = { ["broken"] = new InvalidOperationException("tenant database down") },
         };
 
-        await using Harness harness = new(services, new PostgresStudioOptions().AddDatabaseSource("tenants", _ => tenants));
+        await using Harness harness = new(services, new PostgresOptions().AddDatabaseSource("tenants", _ => tenants));
 
         StudioUnattendedResolution opened = await harness.Provider.ResolveUnattendedAsync("TENANTS", "ACME", Token);
         opened.Outcome.Should().Be(StudioUnattendedOutcome.Resolved);
@@ -775,13 +775,13 @@ public class PostgresStudioSourceProviderTests
     {
         object resource = PostgresStudioDescriptor.Instance.CreateResource(new StudioScope("tenants", "acme", null), "RunSql");
 
-        resource.Should().Be(new PostgresStudioResource("tenants", "acme", "RunSql"));
+        resource.Should().Be(new PostgresResource("tenants", "acme", "RunSql"));
     }
 
     /// <summary>The shared resolver over the harness's provider, a test policy and no signed-in visitor.</summary>
     private static StudioSourceResolver Resolver(
         Harness harness,
-        PostgresStudioOptions options,
+        PostgresOptions options,
         IAuthorizationService policy,
         ILogger<StudioSourceResolver>? logger = null,
         StudioLogThrottle? throttle = null)
@@ -811,7 +811,7 @@ public class PostgresStudioSourceProviderTests
         ServiceCollection services = new();
         FakeDatabaseSource tenants = new("acme") { ListFailure = (Exception) Activator.CreateInstance(thrown, HostWords)! };
 
-        PostgresStudioOptions options = new PostgresStudioOptions().AddDatabaseSource("tenants", _ => tenants);
+        PostgresOptions options = new PostgresOptions().AddDatabaseSource("tenants", _ => tenants);
         await using Harness harness = new(services, options);
         StudioSourceResolver resolver = Resolver(harness, options, new TestSourceAuthorizationService(), factory.CreateLogger<StudioSourceResolver>(), new StudioLogThrottle());
 
@@ -837,7 +837,7 @@ public class PostgresStudioSourceProviderTests
         ServiceCollection services = new();
         FakeDatabaseSource tenants = new("acme") { HangListing = true };
         ManualTimeProvider time = new();
-        PostgresStudioOptions options = new PostgresStudioOptions { QueryTimeout = TimeSpan.FromSeconds(5) }.AddDatabaseSource("tenants", _ => tenants);
+        PostgresOptions options = new PostgresOptions { QueryTimeout = TimeSpan.FromSeconds(5) }.AddDatabaseSource("tenants", _ => tenants);
         await using Harness harness = new(services, options, time);
         StudioSourceResolver resolver = Resolver(harness, options, new TestSourceAuthorizationService());
 
@@ -861,7 +861,7 @@ public class PostgresStudioSourceProviderTests
         ServiceCollection services = new();
         FakeDatabaseSource tenants = new("acme") { OpenFailures = { ["acme"] = (Exception) Activator.CreateInstance(thrown, HostWords)! } };
 
-        PostgresStudioOptions options = new PostgresStudioOptions().AddDatabaseSource("tenants", _ => tenants);
+        PostgresOptions options = new PostgresOptions().AddDatabaseSource("tenants", _ => tenants);
         await using Harness harness = new(services, options);
         StudioSourceResolver resolver = Resolver(harness, options, new TestSourceAuthorizationService(), factory.CreateLogger<StudioSourceResolver>(), new StudioLogThrottle());
 
@@ -881,7 +881,7 @@ public class PostgresStudioSourceProviderTests
     {
         ServiceCollection services = new();
         FakeDatabaseSource tenants = new("acme") { HangListing = true };
-        PostgresStudioOptions options = new PostgresStudioOptions().AddDatabaseSource("tenants", _ => tenants);
+        PostgresOptions options = new PostgresOptions().AddDatabaseSource("tenants", _ => tenants);
         await using Harness harness = new(services, options);
         StudioSourceResolver resolver = Resolver(harness, options, new TestSourceAuthorizationService());
 

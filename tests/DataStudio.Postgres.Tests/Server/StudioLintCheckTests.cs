@@ -1,6 +1,7 @@
 using DataStudio.Postgres.Services;
 using DataStudio.Postgres.Services.Health;
 using DataStudio.Postgres.Services.Health.Checks;
+using DataStudio.Postgres.Services.Postgres;
 using DataStudio.Postgres.Services.Settings;
 
 using static DataStudio.Postgres.Tests.Server.ServerTestFacts;
@@ -21,9 +22,10 @@ public class StudioLintCheckTests
             on ?? [],
             consoleRole,
             everySchema,
-            postgres ? "PostgresStudioOptions" : "MartenStudioOptions",
-            postgres ? "AddPostgresStudio" : "AddMartenStudio",
-            postgres ? "PostgresStudioCapabilities" : "MartenStudioCapabilities");
+            postgres ? "PostgresOptions" : "MartenOptions",
+            postgres ? "AddPostgres" : "AddMarten",
+            postgres ? "PostgresCapabilities" : "MartenCapabilities",
+            postgres ? "PostgresOptions.ReadOnly" : "MartenOptions.ReadOnly");
 
     // ---- K05 ----------------------------------------------------------------------------------------------------------
 
@@ -35,10 +37,10 @@ public class StudioLintCheckTests
             .Findings.Should().ContainSingle().Subject;
 
         finding.Severity.Should().Be(HealthSeverity.Warning);
-        finding.WhyItMatters.Should().Contain("MartenStudioOptions.Capabilities.RunSql").And.Contain("MartenStudioOptions.SqlConsoleRole");
+        finding.WhyItMatters.Should().Contain("MartenOptions.Capabilities.RunSql").And.Contain("MartenOptions.SqlConsoleRole");
         finding.Remedy!.Kind.Should().Be(HealthRemedyKind.Configuration);
-        finding.Remedy.Code.Should().Contain("AddMartenStudio(").And.Contain("options.SqlConsoleRole = ");
-        finding.Remedy.Explanation.Should().Contain("MartenStudioOptions.SqlConsoleRole");
+        finding.Remedy.Code.Should().Contain("// In AddMarten(options => ...)").And.Contain("options.SqlConsoleRole = ");
+        finding.Remedy.Explanation.Should().Contain("MartenOptions.SqlConsoleRole");
     }
 
     [Fact]
@@ -47,8 +49,8 @@ public class StudioLintCheckTests
         HealthFinding finding = new ConsoleWithoutRoleCheck().Evaluate(Options(on: [StudioCapability.RunSql], postgres: true), Evaluation(postgres: true))
             .Findings.Single();
 
-        finding.WhyItMatters.Should().Contain("PostgresStudioOptions.SqlConsoleRole").And.NotContain("Marten");
-        finding.Remedy!.Code.Should().Contain("AddPostgresStudio(");
+        finding.WhyItMatters.Should().Contain("PostgresOptions.SqlConsoleRole").And.NotContain("Marten");
+        finding.Remedy!.Code.Should().Contain("// In AddPostgres(options => ...)");
     }
 
     [Theory]
@@ -85,7 +87,7 @@ public class StudioLintCheckTests
             .Findings.Should().ContainSingle().Subject;
 
         finding.Severity.Should().Be(HealthSeverity.Warning);
-        finding.WhyItMatters.Should().Contain("event 9230").And.Contain("MartenStudioOptions.BrowsableSchemas");
+        finding.WhyItMatters.Should().Contain("event 9230").And.Contain("MartenOptions.BrowsableSchemas");
         finding.Remedy!.Code.Should().Contain("options.SqlConsoleRole = ");
     }
 
@@ -117,7 +119,7 @@ public class StudioLintCheckTests
 
         finding.Severity.Should().Be(severity);
         finding.Evidence.Should().Contain(x => x.Label == "Capabilities on" && x.Value == "RunSql, EditDocuments");
-        finding.Remedy!.Code.Should().Contain("app.MapMartenStudio().RequireAuthorization();").And.Contain("new MartenStudioCapabilities()");
+        finding.Remedy!.Code.Should().Contain("app.MapDataStudio().RequireAuthorization();").And.Contain("new MartenCapabilities()");
     }
 
     [Fact]
@@ -125,14 +127,14 @@ public class StudioLintCheckTests
     {
         new AnonymousStudioCheck()
             .Evaluate(new AnonymousStudioFacts(Options(on: [StudioCapability.RunSql], postgres: true), true, "Production"), Evaluation(postgres: true))
-            .Findings.Single().Remedy!.Code.Should().Contain("app.MapPostgresStudio()").And.Contain("new PostgresStudioCapabilities()");
+            .Findings.Single().Remedy!.Code.Should().Contain("app.MapDataStudio()").And.Contain("new PostgresCapabilities()");
     }
 
     [Theory]
     [InlineData(null, false, false, "no record")]
     [InlineData(false, false, false, "not served anonymously")]
     [InlineData(true, false, true, "every capability off")]
-    [InlineData(true, true, false, "every capability off (MartenStudioOptions.ReadOnly)")]
+    [InlineData(true, true, false, "every capability off (MartenOptions.ReadOnly)")]
     public void K07_is_quiet_without_anonymous_pages_without_a_capability_and_under_ReadOnly(bool? anonymous, bool readOnly, bool noCapability, string why)
     {
         HealthVerdict verdict = new AnonymousStudioCheck().Evaluate(
@@ -141,6 +143,46 @@ public class StudioLintCheckTests
 
         verdict.Findings.Should().BeEmpty();
         verdict.Note.Should().Contain(why);
+    }
+
+    // ---- the switch that is on ----------------------------------------------------------------------------------------
+
+    [Fact]
+    public void The_three_quiet_verdicts_name_the_switch_that_is_on_not_always_the_modules()
+    {
+        StudioLintFacts facts = Options(readOnly: true, on: [StudioCapability.RunSql, StudioCapability.BrowseDatabase]) with { ReadOnlyOptionName = "DataStudioOptions.ReadOnly" };
+
+        new ConsoleWithoutRoleCheck().Evaluate(facts, Evaluation()).Note.Should().StartWith("DataStudioOptions.ReadOnly is true").And.NotContain("MartenOptions.ReadOnly");
+        new BrowserWithoutRoleCheck().Evaluate(facts, Evaluation()).Note.Should().StartWith("DataStudioOptions.ReadOnly is true").And.NotContain("MartenOptions.ReadOnly");
+        new AnonymousStudioCheck().Evaluate(new AnonymousStudioFacts(facts, true, "Production"), Evaluation()).Note
+            .Should().Contain("(DataStudioOptions.ReadOnly)").And.NotContain("MartenOptions.ReadOnly");
+    }
+
+    [Theory]
+    [InlineData(true, false, "DataStudioOptions.ReadOnly")]
+    [InlineData(false, true, "PostgresOptions.ReadOnly")]
+    [InlineData(true, true, "DataStudioOptions.ReadOnly")]
+    public void The_facts_read_the_effective_switchs_name_off_the_registered_settings(bool shellReadOnly, bool moduleReadOnly, string expected)
+    {
+        PostgresStudioSettings settings = PostgresStudioSettings.Of(
+            new PostgresOptions { ReadOnly = moduleReadOnly },
+            new DataStudio.Services.Settings.ShellSettings(Microsoft.Extensions.Options.Options.Create(new DataStudioOptions { ReadOnly = shellReadOnly })));
+
+        StudioLintFacts facts = StudioLintFacts.Of(settings);
+
+        facts.ReadOnly.Should().BeTrue();
+        facts.ReadOnlyOptionName.Should().Be(expected);
+    }
+
+    [Fact]
+    public void K07_names_the_one_map_call_and_the_shells_policy_option_whichever_module_registered()
+    {
+        StudioLintFacts.MapMethod.Should().Be("MapDataStudio");
+        StudioLintFacts.AuthorizationPolicyOptionName.Should().Be("DataStudioOptions.AuthorizationPolicy");
+
+        new AnonymousStudioCheck()
+            .Evaluate(new AnonymousStudioFacts(Options(on: [StudioCapability.RunSql]), true, "Production"), Evaluation())
+            .Findings.Single().Remedy!.Explanation.Should().Contain("DataStudioOptions.AuthorizationPolicy names another").And.NotContain("MartenOptions.AuthorizationPolicy");
     }
 
     [Fact]

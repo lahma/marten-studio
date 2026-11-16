@@ -14,7 +14,7 @@ using DataStudio.Postgres.Services;
 namespace DataStudio.Marten.Tests.Schema;
 
 /// <summary>
-/// The Schema page's Apply against <see cref="MartenStudioOptions.WriteAuthorizationPolicy" />, which is
+/// The Schema page's Apply against <see cref="MartenOptions.WriteAuthorizationPolicy" />, which is
 /// asked about the visitor rather than about the process.
 /// </summary>
 /// <remarks>
@@ -116,7 +116,7 @@ public class SchemaWritePolicyTests
         var page = context.Render<SchemaPage>();
 
         page.Find(".ms-capability-disabled").TextContent
-            .Should().Contain("MartenStudioOptions.Capabilities.ApplySchemaChanges");
+            .Should().Contain("MartenOptions.Capabilities.ApplySchemaChanges");
         page.FindAll(".ms-write-refusal").Should().BeEmpty();
         page.FindAll(".ms-schema-apply").Should().BeEmpty();
     }

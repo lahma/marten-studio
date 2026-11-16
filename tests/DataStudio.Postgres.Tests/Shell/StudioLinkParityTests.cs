@@ -13,7 +13,7 @@ namespace DataStudio.Postgres.Tests.Shell;
 /// </summary>
 public class StudioLinkParityTests
 {
-    private static readonly PostgresStudioSettings Settings = new(Options.Create(new PostgresStudioOptions()));
+    private static readonly PostgresStudioSettings Settings = PostgresStudioSettings.Of(Options.Create(new PostgresOptions()));
 
     [Theory]
     [InlineData("")]

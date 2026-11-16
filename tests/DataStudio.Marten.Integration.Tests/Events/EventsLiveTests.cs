@@ -492,7 +492,7 @@ public class EventsLiveTests(EventsStoreFixture fixture) : IClassFixture<EventsS
             Events.Scope, id.ToString(), TestContext.Current.CancellationToken);
 
         (await archive.Should().ThrowAsync<StudioCapabilityDeniedException>())
-            .Which.Message.Should().Contain("MartenStudioOptions.Capabilities.ArchiveStreams");
+            .Which.Message.Should().Contain("MartenOptions.Capabilities.ArchiveStreams");
 
         StreamState after = await Events.Service.GetStreamAsync(
             Events.Scope, id.ToString(), TestContext.Current.CancellationToken);

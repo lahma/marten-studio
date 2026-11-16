@@ -255,8 +255,8 @@ internal sealed class EventsFixture : IAsyncDisposable
         var fixture = new EventsFixture(
             store,
             schema,
-            BuildProvider(store, MartenStudioCapabilities.All()),
-            BuildProvider(store, new MartenStudioCapabilities()));
+            BuildProvider(store, MartenCapabilities.All()),
+            BuildProvider(store, new MartenCapabilities()));
 
         await fixture.SeedAsync(withPoisonProjection);
 
@@ -348,7 +348,7 @@ internal sealed class EventsFixture : IAsyncDisposable
         }
     }
 
-    private static ServiceProvider BuildProvider(IDocumentStore store, MartenStudioCapabilities capabilities)
+    private static ServiceProvider BuildProvider(IDocumentStore store, MartenCapabilities capabilities)
     {
         var services = new ServiceCollection();
 

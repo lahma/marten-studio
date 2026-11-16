@@ -132,7 +132,7 @@ public class ObjectDetailPageTests
 
         var page = DatabasePageData.RenderObject(context, FakeDatabaseObjects.StoreSchema, "host_settings", "rows");
 
-        page.Find(".ms-db-rows-card").TextContent.Should().Contain("MartenStudioOptions.Capabilities.BrowseDatabase");
+        page.Find(".ms-db-rows-card").TextContent.Should().Contain("MartenOptions.Capabilities.BrowseDatabase");
     }
 
     [Fact]

@@ -23,9 +23,9 @@ namespace DataStudio.Marten.Services.Query;
 internal sealed class MartenPlanInsightContributor : IPlanInsightContributor
 {
     private readonly StudioScopeResolver resolver;
-    private readonly IOptions<MartenStudioOptions> options;
+    private readonly IOptions<MartenOptions> options;
 
-    public MartenPlanInsightContributor(StudioScopeResolver resolver, IOptions<MartenStudioOptions> options)
+    public MartenPlanInsightContributor(StudioScopeResolver resolver, IOptions<MartenOptions> options)
     {
         this.resolver = resolver;
         this.options = options;

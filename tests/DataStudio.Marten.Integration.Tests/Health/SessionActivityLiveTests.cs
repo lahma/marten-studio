@@ -24,7 +24,7 @@ public class SessionActivityLiveTests(PostgresFixture postgres)
 {
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
-    private static void Everything(MartenStudioOptions options) => options.Capabilities = MartenStudioCapabilities.All();
+    private static void Everything(MartenOptions options) => options.Capabilities = MartenCapabilities.All();
 
     [PostgresFact]
     [HealthFires("C04")]
@@ -87,7 +87,7 @@ public class SessionActivityLiveTests(PostgresFixture postgres)
 
             HealthReportFinding idleUnnamed = unnamed.Findings.Should().ContainSingle(static x => x.Code == "C04").Subject;
             idleUnnamed.Evidence.Single(static x => x.Label == "Session 1 (longest)").Value.Should().StartWith("withheld - ")
-                .And.Contain("MartenStudioOptions.Capabilities.ViewDatabaseActivity");
+                .And.Contain("MartenOptions.Capabilities.ViewDatabaseActivity");
             idleUnnamed.Evidence.Single(static x => x.Label == "Longest idle").Value.Should().EndWith("min", "an age is the database's");
 
             // C06: what is waited for, in Marten's terms; who waits and who holds it, only through the gate.

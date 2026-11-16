@@ -27,7 +27,7 @@ public class PostgresStudioVersionGuardTests
     private const BindingFlags Declared =
         BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly;
 
-    private static readonly Assembly Marten = typeof(MartenStudioOptions).Assembly;
+    private static readonly Assembly Marten = typeof(MartenOptions).Assembly;
 
     private static readonly Assembly Shared = typeof(StudioCoreRegistration).Assembly;
 
@@ -56,7 +56,7 @@ public class PostgresStudioVersionGuardTests
 
         FluentActions.Invoking(() => PostgresStudioVersionGuard.Ensure()).Should().NotThrow();
         FluentActions.Invoking(() => new ServiceCollection().AddDataStudio().AddMarten()).Should().NotThrow();
-        FluentActions.Invoking(() => new ServiceCollection().AddHealthChecks().AddMartenStudio()).Should().NotThrow();
+        FluentActions.Invoking(() => new ServiceCollection().AddHealthChecks().AddMartenDiagnostics()).Should().NotThrow();
     }
 
     [Fact]
@@ -270,7 +270,7 @@ public class PostgresStudioVersionGuardTests
         MethodBase[] methods =
         [
             AddMarten,
-            AddMartenStudioHealthCheck,
+            AddMartenDiagnosticsHealthCheck,
             .. GuardMethods(),
         ];
 
@@ -285,7 +285,7 @@ public class PostgresStudioVersionGuardTests
     public void The_scan_finds_PostgresStudio_members_where_they_are_meant_to_be()
     {
         MethodInfo services = typeof(MartenDataStudioBuilderExtensions).GetMethod("AddMartenServices", Declared)!;
-        MethodInfo healthCheck = typeof(MartenStudioHealthChecksBuilderExtensions).GetMethod("AddMartenStudioHealthCheck", Declared)!;
+        MethodInfo healthCheck = typeof(MartenHealthChecksBuilderExtensions).GetMethod("AddMartenDiagnosticsHealthCheck", Declared)!;
 
         services.Should().NotBeNull();
         healthCheck.Should().NotBeNull();
@@ -297,7 +297,7 @@ public class PostgresStudioVersionGuardTests
     public void What_names_PostgresStudio_is_never_inlined_into_what_runs_before_the_guard()
     {
         MethodInfo services = typeof(MartenDataStudioBuilderExtensions).GetMethod("AddMartenServices", Declared)!;
-        MethodInfo healthCheck = typeof(MartenStudioHealthChecksBuilderExtensions).GetMethod("AddMartenStudioHealthCheck", Declared)!;
+        MethodInfo healthCheck = typeof(MartenHealthChecksBuilderExtensions).GetMethod("AddMartenDiagnosticsHealthCheck", Declared)!;
         MethodInfo ensure = typeof(PostgresStudioVersionGuard).GetMethod(nameof(PostgresStudioVersionGuard.Ensure), Type.EmptyTypes)!;
         MethodInfo load = typeof(PostgresStudioVersionGuard).GetMethod("LoadPostgresStudio", Declared)!;
         MethodInfo loadEngine = typeof(PostgresStudioVersionGuard).GetMethod("LoadDiagnostics", Declared)!;
@@ -314,11 +314,11 @@ public class PostgresStudioVersionGuardTests
     private static MethodInfo AddMarten =>
         typeof(MartenDataStudioBuilderExtensions).GetMethod(
             nameof(MartenDataStudioBuilderExtensions.AddMarten),
-            [typeof(DataStudioBuilder), typeof(Action<MartenStudioOptions>)])!;
+            [typeof(DataStudioBuilder), typeof(Action<MartenOptions>)])!;
 
-    private static MethodInfo AddMartenStudioHealthCheck =>
-        typeof(MartenStudioHealthChecksBuilderExtensions).GetMethod(
-            nameof(MartenStudioHealthChecksBuilderExtensions.AddMartenStudio),
+    private static MethodInfo AddMartenDiagnosticsHealthCheck =>
+        typeof(MartenHealthChecksBuilderExtensions).GetMethod(
+            nameof(MartenHealthChecksBuilderExtensions.AddMartenDiagnostics),
             [typeof(IHealthChecksBuilder), typeof(string), typeof(HealthStatus?), typeof(IEnumerable<string>), typeof(TimeSpan?)])!;
 
     /// <summary>

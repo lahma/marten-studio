@@ -29,7 +29,7 @@ public partial class PostgresStudioWordsTests
         (new Regex("mt_", RegexOptions.CultureInvariant), "Marten's table prefix, never said of a table that does not carry it"),
         (Word("daemon|projections?"), "the async daemon and its projections are Marten's"),
         (new Regex("Weasel", RegexOptions.CultureInvariant), "Marten's schema library"),
-        (new Regex(@"\bopts\.|IDocumentSession|LightweightSession|SaveChanges|ToListAsync|MartenStudioOptions|AddMartenStudio|StoreAuthorizationPolicy",
+        (new Regex(@"\bopts\.|IDocumentSession|LightweightSession|SaveChanges|ToListAsync|MartenOptions|AddMarten|StoreAuthorizationPolicy",
             RegexOptions.CultureInvariant), "Marten Studio's configuration, or Marten's API"),
         (new Regex(@"\b[DETCRSK][0-9]{2}\b", RegexOptions.CultureInvariant), "a check code - flagged only when Postgres Studio has no such check"),
     ];
@@ -198,7 +198,7 @@ public partial class PostgresStudioWordsTests
         HealthCheckRegistry registry = new(
             PostgresStudioDescriptor.Instance,
             runtime: null,
-            PostgresStudioSettings.Of(new PostgresStudioOptions()));
+            PostgresStudioSettings.Of(new PostgresOptions()));
         registry.All.Single(x => x.Info.CheckType == check).Info.Title.Should().Be(postgres, "the container hands the registry the studio's settings");
         registry.All.Should().OnlyContain(static x => !Word(@"stores?|store's").IsMatch(x.Info.Title), "no check of Postgres Studio's is titled with a store");
     }

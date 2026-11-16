@@ -89,7 +89,7 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
     private readonly StudioOperationTracker operations;
     private readonly DaemonControlState controlState;
     private readonly ColumnCatalog catalog;
-    private readonly IOptions<MartenStudioOptions> options;
+    private readonly IOptions<MartenOptions> options;
     private readonly IStudioSettings settings;
     private readonly StudioLogThrottle throttle;
     private readonly ILogger<ProjectionDataService> logger;
@@ -109,7 +109,7 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
         StudioOperationTracker operations,
         DaemonControlState controlState,
         ColumnCatalog catalog,
-        IOptions<MartenStudioOptions> options,
+        IOptions<MartenOptions> options,
         IStudioSettings settings,
         StudioLogThrottle throttle,
         ILogger<ProjectionDataService> logger,
@@ -137,7 +137,7 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
         reach = new DatabaseReachAuthorization(authorization, logger);
     }
 
-    /// <summary>The budget every read here runs under - <c>MartenStudioOptions.QueryTimeout</c>.</summary>
+    /// <summary>The budget every read here runs under - <c>MartenOptions.QueryTimeout</c>.</summary>
     private TimeSpan CommandTimeout => options.Value.QueryTimeout;
 
     /// <inheritdoc />
@@ -167,7 +167,7 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
 
         DaemonStatus daemon = await DescribeDaemonAsync(resolved, cancellationToken).ConfigureAwait(false);
 
-        // The host's per-projection thresholds (MartenStudioOptions.ProjectionThresholds) win over the row's columns, which win
+        // The host's per-projection thresholds (MartenOptions.ProjectionThresholds) win over the row's columns, which win
         // over the studio's defaults; from here every colour, chart line and summary reads the shard's own numbers.
         List<ShardProgress> merged = LagThresholdResolver.Apply(
             MergeProgress(resolved, stored), options.Value.ProjectionLagThresholdsByName);
@@ -684,7 +684,7 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
     /// projection's tables happens <em>before</em> that budget starts applying to the replay, so on a
     /// production-sized store the five minutes expire with the tables already emptied and the operation
     /// recorded as failed. The studio therefore always names its own budget
-    /// (<c>MartenStudioOptions.RebuildShardTimeout</c>, one hour by default), and the rebuild dialog
+    /// (<c>MartenOptions.RebuildShardTimeout</c>, one hour by default), and the rebuild dialog
     /// states it next to the number of events.
     /// </remarks>
     internal static Task RebuildWithTimeoutAsync(
@@ -1738,7 +1738,7 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
     /// <b>Which is exactly why one resolved scope is not enough to authorize it.</b>
     /// <see cref="StudioScopeResolver" /> authorizes the store, database and tenant in the URL; the
     /// operation reaches <em>every</em> database of the store. A host whose
-    /// <see cref="MartenStudioOptions.StoreAuthorizationPolicy" /> scopes by database - which the scope
+    /// <see cref="MartenOptions.StoreAuthorizationPolicy" /> scopes by database - which the scope
     /// selector honours, so it is a shape hosts are expected to have - would otherwise let a visitor
     /// allowed only database A stop the projections of database B, and the confirm dialog would name B
     /// while doing it. So the policies are asked for every coordinated database before the coordinator

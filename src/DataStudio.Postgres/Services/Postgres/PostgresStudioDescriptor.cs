@@ -59,7 +59,7 @@ internal static class PostgresStudioDescriptor
         SourceNoun = "data source",
         SourceLabel = "Database",
         ExposedContent = "the structure of every database this application registered, and whatever its capabilities read,",
-        CreateResource = static (scope, capability) => new PostgresStudioResource(scope.StoreKey, scope.DatabaseId, capability),
+        CreateResource = static (scope, capability) => new PostgresResource(scope.StoreKey, scope.DatabaseId, capability),
     };
 
     /// <summary>The sidebar: Overview and Query, the database section, Health, Replication and Activity.</summary>

@@ -149,7 +149,7 @@ public class LargeDataSetLiveTests(LargeDataSetFixture fixture) : IClassFixture<
 
         asked.IsExactRefused.Should().BeTrue();
         asked.IsEstimate.Should().BeTrue("the estimate is still the answer, and it says why");
-        asked.ExactRefusedAbove.Should().Be(new MartenStudioOptions().ExactCountThreshold);
+        asked.ExactRefusedAbove.Should().Be(new MartenOptions().ExactCountThreshold);
         asked.Reason.Should().Contain("ExactCountThreshold");
         asked.Value.Should().NotBe(
             Plan.Customers + 25, "a count(*) would have answered exactly that; none ran");

@@ -113,7 +113,7 @@ builder.Services
 
         // Every mutating operation is off until the host says otherwise. `All()` is the one-line, greppable
         // opt-in; the shell's `ReadOnly` overrides it whatever it says.
-        options.Capabilities = sample.ReadOnly ? new MartenStudioCapabilities() : MartenStudioCapabilities.All();
+        options.Capabilities = sample.ReadOnly ? new MartenCapabilities() : MartenCapabilities.All();
 
         // The database browser (Capabilities.BrowseDatabase, part of All()) may also show these schemas: the
         // Quartz.NET job store and the legacy relational schema the sample seeds beside the store. "*" would
@@ -138,14 +138,14 @@ if (consoleRole)
 {
     // Outside the README's snippet on purpose: what a host's SqlConsoleRole is depends on its own database's roles.
     // K05 - "SQL console without a narrowed role" - is then the remedy applied, not a Warning.
-    builder.Services.Configure<MartenStudioOptions>(static options => options.SqlConsoleRole = SampleConsoleRole.Name);
+    builder.Services.Configure<MartenOptions>(static options => options.SqlConsoleRole = SampleConsoleRole.Name);
 }
 
 #region readme_health
 // Optional, and AddMarten() does not do it for you: the health advisor's configuration and catalog
 // checks as one ASP.NET Core health check. It reports codes and counts, never a name, and runs the checks at
 // most once per HealthInterval however often the endpoint is probed.
-builder.Services.AddHealthChecks().AddMartenStudio(tags: ["marten"]);
+builder.Services.AddHealthChecks().AddMartenDiagnostics(tags: ["marten"]);
 #endregion
 
 WebApplication app = builder.Build();

@@ -6,7 +6,7 @@ namespace DataStudio.Postgres;
 /// <c>$"{options.Path}/{link.Path}"</c> - the <c>Path</c> the host passed to its studio options - opens it. The route and
 /// query are the studio's own and may change between releases; take them from here rather than building them.
 /// </remarks>
-public sealed record PostgresStudioLink
+public sealed record PostgresPageLink
 {
     /// <summary>What the link says, in English (<c>Open the index advisor</c>).</summary>
     public string Label { get; init; } = "";

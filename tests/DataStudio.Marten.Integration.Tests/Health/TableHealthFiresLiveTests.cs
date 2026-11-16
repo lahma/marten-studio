@@ -312,7 +312,7 @@ public class TableHealthFiresLiveTests(PostgresFixture postgres)
                 new MartenStoreRegistration("default", "Default", typeof(IDocumentStore)),
                 host.Store,
                 host.Store.Storage.Database),
-            MartenStudioSettings.Of(new MartenStudioOptions()),
+            MartenStudioSettings.Of(new MartenOptions()),
             MartenStudioRuntime.Current,
             services,
             new HealthSqlRunner(connection, new ReadOnlySqlOptions(), null),

@@ -13,28 +13,28 @@ using DataStudio.Postgres.Services.Sources;
 namespace DataStudio.Postgres.Tests.Support;
 
 /// <summary>
-/// An <see cref="IAuthorizationService" /> that answers for <see cref="PostgresStudioResource" />: everything by default,
+/// An <see cref="IAuthorizationService" /> that answers for <see cref="PostgresResource" />: everything by default,
 /// or what a test allows. Every question is recorded.
 /// </summary>
 public sealed class TestSourceAuthorizationService : IAuthorizationService
 {
-    private Func<PostgresStudioResource, bool> rule = static _ => true;
+    private Func<PostgresResource, bool> rule = static _ => true;
 
-    public List<(string Policy, PostgresStudioResource Resource)> Calls { get; } = [];
+    public List<(string Policy, PostgresResource Resource)> Calls { get; } = [];
 
-    public void Allow(Func<PostgresStudioResource, bool> predicate) => rule = predicate;
+    public void Allow(Func<PostgresResource, bool> predicate) => rule = predicate;
 
     public Task<AuthorizationResult> AuthorizeAsync(ClaimsPrincipal user, object? resource, IEnumerable<IAuthorizationRequirement> requirements) =>
-        Task.FromResult(resource is PostgresStudioResource source && rule(source) ? AuthorizationResult.Success() : AuthorizationResult.Failed());
+        Task.FromResult(resource is PostgresResource source && rule(source) ? AuthorizationResult.Success() : AuthorizationResult.Failed());
 
     public Task<AuthorizationResult> AuthorizeAsync(ClaimsPrincipal user, object? resource, string policyName)
     {
-        if (resource is PostgresStudioResource source)
+        if (resource is PostgresResource source)
         {
             Calls.Add((policyName, source));
         }
 
-        return Task.FromResult(resource is PostgresStudioResource allowed && rule(allowed) ? AuthorizationResult.Success() : AuthorizationResult.Failed());
+        return Task.FromResult(resource is PostgresResource allowed && rule(allowed) ? AuthorizationResult.Success() : AuthorizationResult.Failed());
     }
 }
 
@@ -74,7 +74,7 @@ internal sealed class FakeStorage : DataStudio.Postgres.Services.Storage.IStorag
             ]);
 
         DataStudio.Postgres.Services.Storage.StorageService service = new(
-            new PostgresStudioSettings(Microsoft.Extensions.Options.Options.Create(new PostgresStudioOptions())),
+            new PostgresStudioSettings(Microsoft.Extensions.Options.Options.Create(new PostgresOptions()), new DataStudio.Services.Settings.ShellSettings(Microsoft.Extensions.Options.Options.Create(new DataStudioOptions()))),
             PostgresStudioDescriptor.Instance,
             authorization: null!,
             resolver: null!,

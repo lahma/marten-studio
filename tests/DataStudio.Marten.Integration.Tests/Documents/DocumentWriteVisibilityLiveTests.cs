@@ -4,7 +4,7 @@ using DataStudio.Marten.Services.Documents;
 namespace DataStudio.Marten.Integration.Tests.Documents;
 
 /// <summary>
-/// <see cref="MartenStudioOptions.IsDocumentTypeVisible" /> as a security gate rather than as a filter.
+/// <see cref="MartenOptions.IsDocumentTypeVisible" /> as a security gate rather than as a filter.
 /// </summary>
 /// <remarks>
 /// <para>

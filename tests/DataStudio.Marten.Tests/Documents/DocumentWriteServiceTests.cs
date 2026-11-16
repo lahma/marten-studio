@@ -54,19 +54,19 @@ public class DocumentWriteServiceTests
         TestAuthenticationStateProvider Users,
         StudioActionLogService Ring,
         CapturingLoggerProvider Captured,
-        MartenStudioOptions Options,
+        MartenOptions Options,
         ServiceProvider Provider) : IDisposable
     {
         public void Dispose() => Provider.Dispose();
     }
 
-    private static Harness CreateHarness(Action<MartenStudioOptions>? configure = null, Action<StoreOptions>? configureStore = null)
+    private static Harness CreateHarness(Action<MartenOptions>? configure = null, Action<StoreOptions>? configureStore = null)
     {
-        var options = new MartenStudioOptions
+        var options = new MartenOptions
         {
             StoreAuthorizationPolicy = StorePolicy,
             WriteAuthorizationPolicy = WritePolicy,
-            Capabilities = MartenStudioCapabilities.All(),
+            Capabilities = MartenCapabilities.All(),
         };
         configure?.Invoke(options);
 
@@ -118,7 +118,7 @@ public class DocumentWriteServiceTests
     [Fact]
     public async Task The_capability_is_refused_before_the_policy_is_asked()
     {
-        using var harness = CreateHarness(static options => options.Capabilities = new MartenStudioCapabilities());
+        using var harness = CreateHarness(static options => options.Capabilities = new MartenCapabilities());
         harness.Users.SignIn("viewer");
 
         var denial = await harness.Service
@@ -132,7 +132,7 @@ public class DocumentWriteServiceTests
     }
 
     /// <summary>
-    /// <see cref="MartenStudioOptions.ReadOnly" /> turns every capability off, and the refusal names the
+    /// <see cref="MartenOptions.ReadOnly" /> turns every capability off, and the refusal names the
     /// master switch rather than the individual property — that is the difference between a person
     /// finding the option and a person filing a bug.
     /// </summary>
@@ -201,7 +201,7 @@ public class DocumentWriteServiceTests
     [Fact]
     public async Task A_capability_refusal_is_audited_as_9202_and_lands_in_the_ring()
     {
-        using var harness = CreateHarness(static options => options.Capabilities = new MartenStudioCapabilities());
+        using var harness = CreateHarness(static options => options.Capabilities = new MartenCapabilities());
         harness.Users.SignIn("viewer");
 
         await harness.Service

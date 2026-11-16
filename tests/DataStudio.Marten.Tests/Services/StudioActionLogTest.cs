@@ -35,7 +35,7 @@ public class StudioActionLogTest
 
     private static Harness CreateHarness()
     {
-        var options = Options.Create(new MartenStudioOptions());
+        var options = Options.Create(new MartenOptions());
         var services = new ServiceCollection();
         services.AddMarten(x => x.Connection(DummyConnectionString));
         var provider = services.BuildServiceProvider();
@@ -118,7 +118,7 @@ public class StudioActionLogTest
 
         var warning = harness.Captured.Entries.Should().ContainSingle(x => x.EventId.Id == 9202).Which;
         warning.Level.Should().Be(LogLevel.Warning);
-        warning.Message.Should().Contain("MartenStudioOptions.Capabilities.EditDocuments");
+        warning.Message.Should().Contain("MartenOptions.Capabilities.EditDocuments");
     }
 
     /// <summary>

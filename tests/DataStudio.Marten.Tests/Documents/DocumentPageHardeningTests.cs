@@ -93,7 +93,7 @@ public class DocumentPageHardeningTests
     [InlineData("query?mode=sql")]
     public void A_return_link_the_studio_did_not_write_is_not_rendered(string from)
     {
-        SafeReturnLink.Sanitize(from, MartenStudioSettings.Of(new MartenStudioOptions())).Should().BeNull();
+        SafeReturnLink.Sanitize(from, MartenStudioSettings.Of(new MartenOptions())).Should().BeNull();
     }
 
     [Theory]
@@ -103,7 +103,7 @@ public class DocumentPageHardeningTests
     [InlineData("studio/documents/customer?page=2")]
     public void A_return_link_into_the_documents_area_is_kept_exactly_as_it_was(string from)
     {
-        SafeReturnLink.Sanitize(from, MartenStudioSettings.Of(new MartenStudioOptions())).Should().Be(from);
+        SafeReturnLink.Sanitize(from, MartenStudioSettings.Of(new MartenOptions())).Should().Be(from);
     }
 
     [Fact]

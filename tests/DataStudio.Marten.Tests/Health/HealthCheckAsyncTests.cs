@@ -103,7 +103,7 @@ public class HealthCheckAsyncTests
     [Fact]
     public async Task Check_records_nothing_in_the_action_log()
     {
-        await using HealthHarness harness = HealthHarness.Create(studio: static options => options.Capabilities = MartenStudioCapabilities.All());
+        await using HealthHarness harness = HealthHarness.Create(studio: static options => options.Capabilities = MartenCapabilities.All());
         harness.Script.Finds("C90", HealthSeverity.Warning, "Activity-gated");
         StudioActionLogService log = harness.Services.GetRequiredService<StudioActionLogService>();
 

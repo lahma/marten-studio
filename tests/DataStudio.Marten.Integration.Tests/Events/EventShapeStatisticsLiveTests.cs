@@ -144,7 +144,7 @@ public class EventShapeStatisticsLiveTests(EventShapeStatisticsLiveTests.Fixture
 
         ClockAt clock = new(Now);
         EventShapeCheckService service = new(
-            provider.GetRequiredService<IOptions<MartenStudioOptions>>(),
+            provider.GetRequiredService<IOptions<MartenOptions>>(),
             resolver,
             provider.GetRequiredService<ColumnCatalog>(),
             provider.GetRequiredService<IndexCatalog>(),

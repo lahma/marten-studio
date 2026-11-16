@@ -76,7 +76,7 @@ public class SchemaLiveTests(PostgresFixture fixture)
 
         SchemaFixture.StudioHost drifted = schema.Drifted(options =>
         {
-            options.Capabilities = MartenStudioCapabilities.All();
+            options.Capabilities = MartenCapabilities.All();
             options.WriteAuthorizationPolicy = SchemaFixture.AllowPolicy;
         });
 
@@ -120,7 +120,7 @@ public class SchemaLiveTests(PostgresFixture fixture)
 
         StudioCapabilityDeniedException denied = (await apply.Should().ThrowAsync<StudioCapabilityDeniedException>()).Which;
         denied.Capability.Should().Be(StudioCapability.ApplySchemaChanges);
-        denied.Message.Should().Contain("MartenStudioOptions.Capabilities.ApplySchemaChanges");
+        denied.Message.Should().Contain("MartenOptions.Capabilities.ApplySchemaChanges");
 
         (await schema.IndexNamesAsync("mt_doc_customer")).Should().NotContain(SchemaFixture.DriftIndexName);
     }
@@ -132,7 +132,7 @@ public class SchemaLiveTests(PostgresFixture fixture)
 
         SchemaFixture.StudioHost drifted = schema.Drifted(options =>
         {
-            options.Capabilities = MartenStudioCapabilities.All();
+            options.Capabilities = MartenCapabilities.All();
             options.WriteAuthorizationPolicy = SchemaFixture.DenyPolicy;
         });
 
@@ -150,7 +150,7 @@ public class SchemaLiveTests(PostgresFixture fixture)
     {
         await using SchemaFixture schema = await Start(nameof(Applying_is_refused_when_the_typed_confirmation_does_not_match_the_database));
 
-        SchemaFixture.StudioHost drifted = schema.Drifted(options => options.Capabilities = MartenStudioCapabilities.All());
+        SchemaFixture.StudioHost drifted = schema.Drifted(options => options.Capabilities = MartenCapabilities.All());
 
         Func<Task> apply = () => drifted.SchemaAsync(x => x.ApplyAsync(SchemaFixture.Scope, "not-the-database"));
 
@@ -179,7 +179,7 @@ public class SchemaLiveTests(PostgresFixture fixture)
 
         SchemaFixture.StudioHost host = schema.Drifted(options =>
         {
-            options.Capabilities = MartenStudioCapabilities.All();
+            options.Capabilities = MartenCapabilities.All();
             options.WriteAuthorizationPolicy = SchemaFixture.AllowPolicy;
         });
 
@@ -227,7 +227,7 @@ public class SchemaLiveTests(PostgresFixture fixture)
         SchemaFixture.StudioHost host = schema.Drifted(
             options =>
             {
-                options.Capabilities = MartenStudioCapabilities.All();
+                options.Capabilities = MartenCapabilities.All();
                 options.WriteAuthorizationPolicy = SchemaFixture.AllowPolicy;
             },
             ignoredIndex: Kept);
@@ -263,7 +263,7 @@ public class SchemaLiveTests(PostgresFixture fixture)
 
         SchemaFixture.StudioHost host = schema.Drifted(options =>
         {
-            options.Capabilities = MartenStudioCapabilities.All();
+            options.Capabilities = MartenCapabilities.All();
             options.WriteAuthorizationPolicy = SchemaFixture.AllowAndSignalPolicy;
         });
 
@@ -307,7 +307,7 @@ public class SchemaLiveTests(PostgresFixture fixture)
     {
         await using SchemaFixture schema = await Start(nameof(A_refused_typed_confirmation_is_audited_as_a_failure));
 
-        SchemaFixture.StudioHost drifted = schema.Drifted(options => options.Capabilities = MartenStudioCapabilities.All());
+        SchemaFixture.StudioHost drifted = schema.Drifted(options => options.Capabilities = MartenCapabilities.All());
 
         Func<Task> apply = () => drifted.SchemaAsync(x => x.ApplyAsync(SchemaFixture.Scope, "not-the-database"));
 

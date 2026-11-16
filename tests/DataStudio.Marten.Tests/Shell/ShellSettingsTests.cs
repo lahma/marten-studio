@@ -24,7 +24,7 @@ public sealed class ShellSettingsTests
         shell.ReadOnlyOptionName.Should().Be("DataStudioOptions.ReadOnly");
         shell.ProductName.Should().Be("Data Studio");
         module.ProductName.Should().Be("Marten Studio");
-        module.ReadOnlyOption().Should().Be("MartenStudioOptions.ReadOnly", "with neither switch on, the module's is the one a host reads to learn which exists");
+        module.ReadOnlyOption().Should().Be("MartenOptions.ReadOnly", "with neither switch on, the module's is the one a host reads to learn which exists");
     }
 
     /// <summary>The two objects hold on a container the real <c>AddDataStudio().AddMarten()</c> builds, not only on a test context.</summary>
@@ -42,27 +42,27 @@ public sealed class ShellSettingsTests
 
     /// <summary>
     /// Decision 12: the shell's read-only switch turns every capability of the module off and names <c>DataStudioOptions.ReadOnly</c>; the
-    /// module's own turns only its own off and names <c>MartenStudioOptions.ReadOnly</c>.
+    /// module's own turns only its own off and names <c>MartenOptions.ReadOnly</c>.
     /// </summary>
     [Fact]
     public void The_shells_read_only_names_the_shells_option_and_the_modules_names_its_own()
     {
         ServiceCollection services = new();
-        services.AddDataStudio().AddMarten(static options => options.Capabilities = MartenStudioCapabilities.All());
+        services.AddDataStudio().AddMarten(static options => options.Capabilities = MartenCapabilities.All());
         using ServiceProvider provider = services.BuildServiceProvider();
         IStudioSettings settings = provider.GetRequiredService<IStudioSettings>();
         StudioCapabilityGuard guard = new(settings);
 
         guard.IsEnabled(StudioCapability.EditDocuments).Should().BeTrue();
 
-        provider.GetRequiredService<IOptions<MartenStudioOptions>>().Value.ReadOnly = true;
+        provider.GetRequiredService<IOptions<MartenOptions>>().Value.ReadOnly = true;
         StudioCapabilityGuard.All.Should().OnlyContain(capability => !guard.IsEnabled(capability), "the module's switch turns every capability of the module off");
-        FluentActions.Invoking(() => guard.Require(StudioCapability.EditDocuments)).Should().Throw<StudioCapabilityDeniedException>().WithMessage("*MartenStudioOptions.ReadOnly*");
+        FluentActions.Invoking(() => guard.Require(StudioCapability.EditDocuments)).Should().Throw<StudioCapabilityDeniedException>().WithMessage("*MartenOptions.ReadOnly*");
 
         provider.GetRequiredService<IOptions<DataStudioOptions>>().Value.ReadOnly = true;
         FluentActions.Invoking(() => guard.Require(StudioCapability.EditDocuments)).Should().Throw<StudioCapabilityDeniedException>().WithMessage("*DataStudioOptions.ReadOnly*");
 
-        provider.GetRequiredService<IOptions<MartenStudioOptions>>().Value.ReadOnly = false;
+        provider.GetRequiredService<IOptions<MartenOptions>>().Value.ReadOnly = false;
         StudioCapabilityGuard.All.Should().OnlyContain(capability => !guard.IsEnabled(capability), "the shell's switch alone turns the module's capabilities off");
 
         provider.GetRequiredService<IOptions<DataStudioOptions>>().Value.ReadOnly = false;

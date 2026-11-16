@@ -24,7 +24,7 @@ namespace DataStudio.Marten.Integration.Tests.Browser;
 /// </para>
 /// <para>
 /// <b>What the sample's policies decide.</b> <c>admin</c> and <c>ops</c> carry <c>studio:write</c>, which is
-/// what <c>MartenStudioOptions.WriteAuthorizationPolicy</c> asks for, and <c>BrowseDatabase</c> is asked of
+/// what <c>MartenOptions.WriteAuthorizationPolicy</c> asks for, and <c>BrowseDatabase</c> is asked of
 /// that policy (D27); <c>viewer</c> carries <c>studio:read</c> alone, so the policy refuses it - and a
 /// refused visitor sees the structure of the store's own schemas and nothing of any other.
 /// </para>
@@ -219,7 +219,7 @@ public class DatabaseBrowserScenarioTests(BrowserSuiteFixture fixture)
             ILocator notice = page.Locator(".ms-db-access[data-refusal='WritePolicy']");
             await notice.WaitForAsync();
             (await notice.InnerTextAsync()).Should().Contain(
-                "MartenStudioOptions.WriteAuthorizationPolicy", "a refusal names the exact thing a host would change (D4)");
+                "MartenOptions.WriteAuthorizationPolicy", "a refusal names the exact thing a host would change (D4)");
 
             await page.Locator(".ms-db-rail-schemas .ms-db-rail-name").First.WaitForAsync();
             IReadOnlyList<string> schemas = await page.Locator(".ms-db-rail-schemas .ms-db-rail-name").AllTextContentsAsync();
@@ -234,7 +234,7 @@ public class DatabaseBrowserScenarioTests(BrowserSuiteFixture fixture)
             ILocator panel = page.Locator(".ms-db-not-found");
             await panel.WaitForAsync();
             (await panel.InnerTextAsync()).Should().Contain(
-                "MartenStudioOptions.WriteAuthorizationPolicy", "the page says which gate is shut rather than only that it is");
+                "MartenOptions.WriteAuthorizationPolicy", "the page says which gate is shut rather than only that it is");
             (await page.Locator(".ms-db-object-tabs").CountAsync()).Should().Be(
                 0, "nothing of a schema this visitor is not shown is drawn, not even its structure");
             (await page.Locator(".ms-row-grid").CountAsync()).Should().Be(0);
@@ -250,7 +250,7 @@ public class DatabaseBrowserScenarioTests(BrowserSuiteFixture fixture)
 
             string refusal = await card.InnerTextAsync();
             refusal.Should().Contain("Your account may not read rows here");
-            refusal.Should().Contain("MartenStudioOptions.WriteAuthorizationPolicy", "the card names the policy that said no");
+            refusal.Should().Contain("MartenOptions.WriteAuthorizationPolicy", "the card names the policy that said no");
             (await page.Locator(".ms-row-grid").CountAsync()).Should().Be(0, "no row of it is read for this visitor");
 
             ILocator tabs = page.Locator(".ms-db-object-tabs a");

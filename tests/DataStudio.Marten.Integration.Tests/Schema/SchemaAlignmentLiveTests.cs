@@ -119,7 +119,7 @@ public class SchemaAlignmentLiveTests(PostgresFixture fixture)
         TableStats parent = tables.Tables.Single(x => x.Table == Partitioned);
         parent.IsPartitioned.Should().BeTrue();
         parent.PartitionCount.Should().BeNull("a per-tenant partition count is the number of tenants");
-        tables.PartitionCountsWithheld.Should().Contain("MartenStudioOptions.Capabilities.BrowseDatabase");
+        tables.PartitionCountsWithheld.Should().Contain("MartenOptions.Capabilities.BrowseDatabase");
 
         // The partitions' figures are in the parent's row: 300 rows analysed in each of three partitions,
         // and pages on disk that a partitioned table of its own does not have.
@@ -459,7 +459,7 @@ public class SchemaAlignmentLiveTests(PostgresFixture fixture)
         FunctionInfo touch = functions.Functions.Single(x => x.Name == "host_touch");
         touch.Ownership.IsMarten.Should().BeFalse();
         touch.DefinitionAvailable.Should().BeFalse();
-        touch.DefinitionRefusal.Should().Contain("MartenStudioOptions.Capabilities.BrowseDatabase");
+        touch.DefinitionRefusal.Should().Contain("MartenOptions.Capabilities.BrowseDatabase");
 
         FunctionInfo procedure = functions.Functions.Single(x => x.Name == "host_proc");
         procedure.Kind.Should().Be(DatabaseObjectKind.Procedure);
@@ -577,7 +577,7 @@ public class SchemaAlignmentLiveTests(PostgresFixture fixture)
 
             if (open)
             {
-                options.Capabilities = MartenStudioCapabilities.All();
+                options.Capabilities = MartenCapabilities.All();
                 options.BrowsableSchemas.Add(schema);
             }
         });

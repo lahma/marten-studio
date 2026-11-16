@@ -28,7 +28,7 @@ public class AnonymousStudioLiveTests(PostgresFixture postgres)
         HealthFinding finding = PostureHost.Result(await host.SweepAsync(), "K07").Findings.Should().ContainSingle().Subject;
         finding.Severity.Should().Be(HealthSeverity.Critical);
         finding.Evidence.Should().Contain(x => x.Label == "Capabilities on" && x.Value == "RunSql");
-        finding.Remedy!.Code.Should().Contain("app.MapPostgresStudio().RequireAuthorization();");
+        finding.Remedy!.Code.Should().Contain("app.MapDataStudio().RequireAuthorization();");
     }
 
     [PostgresFact]

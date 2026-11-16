@@ -84,8 +84,8 @@ public class PublicApiTest
             .Select(static type => type.FullName!)
             .Order(StringComparer.Ordinal)
             .Should().Equal(
-                "DataStudio.Kafka.KafkaStudioCapabilities",
-                "DataStudio.Kafka.KafkaStudioOptions",
+                "DataStudio.Kafka.KafkaCapabilities",
+                "DataStudio.Kafka.KafkaOptions",
                 "DataStudio.Kafka.KafkaTopicResource",
                 "DataStudio.KafkaDataStudioBuilderExtensions");
     }

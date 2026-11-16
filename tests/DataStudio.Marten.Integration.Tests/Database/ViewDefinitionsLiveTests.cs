@@ -47,7 +47,7 @@ public class ViewDefinitionsLiveTests(ViewDefinitionsLiveTests.Fixture fixture) 
     private DatabaseObjectRef QuartzFunction => new(DatabaseObjectKind.Function, fixture.QuartzSchema, "next_fire", string.Empty);
 
     /// <summary>A studio with <c>ViewDefinitions</c> alone: the legacy schema named exactly, the Quartz one admitted by <c>"*"</c>.</summary>
-    private BrowserHost ViewDefinitionsOnly(ResourcePolicy policy, Action<MartenStudioOptions>? more = null) =>
+    private BrowserHost ViewDefinitionsOnly(ResourcePolicy policy, Action<MartenOptions>? more = null) =>
         fixture.Host(
             options =>
             {
@@ -98,7 +98,7 @@ public class ViewDefinitionsLiveTests(ViewDefinitionsLiveTests.Fixture fixture) 
         DatabaseSequenceValue sequence = await host.ObjectsAsync(x => x.GetSequenceValueAsync(BrowserHost.Scope, fixture.LegacySchema, "standalone_numbers", Token));
         sequence.Found.Should().BeFalse();
         sequence.Refusal.Should().Be(DatabaseRefusal.CapabilityOff, sequence.Reason);
-        sequence.Reason.Should().Contain("MartenStudioOptions.Capabilities.BrowseDatabase");
+        sequence.Reason.Should().Contain("MartenOptions.Capabilities.BrowseDatabase");
 
         DatabaseObjectList sequences = await host.ObjectsAsync(x => x.ListAsync(
             BrowserHost.Scope, new DatabaseObjectQuery(DatabaseObjectCategory.Sequences, fixture.LegacySchema), Token));
@@ -115,9 +115,9 @@ public class ViewDefinitionsLiveTests(ViewDefinitionsLiveTests.Fixture fixture) 
         lock (policy.Calls)
         {
             policy.Calls.Should().Contain(static x =>
-                x.Policy == WritePolicy && x.Resource.Capability == nameof(MartenStudioCapabilities.ViewDefinitions) && x.Resource.TenantId == null,
+                x.Policy == WritePolicy && x.Resource.Capability == nameof(MartenCapabilities.ViewDefinitions) && x.Resource.TenantId == null,
                 "the write policy was asked with ViewDefinitions, about the database as a whole, with no tenant");
-            policy.Calls.Should().NotContain(static x => x.Resource.Capability == nameof(MartenStudioCapabilities.BrowseDatabase),
+            policy.Calls.Should().NotContain(static x => x.Resource.Capability == nameof(MartenCapabilities.BrowseDatabase),
                 "BrowseDatabase is off, so nobody was asked about it");
         }
     }
@@ -134,11 +134,11 @@ public class ViewDefinitionsLiveTests(ViewDefinitionsLiveTests.Fixture fixture) 
 
             rows.Allowed.Should().BeFalse(name);
             rows.Refusal.Should().Be(DatabaseRefusal.CapabilityOff, rows.Reason);
-            rows.Reason.Should().Contain("MartenStudioOptions.Capabilities.BrowseDatabase", "a refusal names the property a host would set");
+            rows.Reason.Should().Contain("MartenOptions.Capabilities.BrowseDatabase", "a refusal names the property a host would set");
         }
 
         host.Ring.GetLatest().Where(static x => x.Action == DatabaseAccess.RowsAction).Should().HaveCount(2)
-            .And.OnlyContain(static x => !x.Succeeded && x.Capability == nameof(MartenStudioCapabilities.BrowseDatabase));
+            .And.OnlyContain(static x => !x.Succeeded && x.Capability == nameof(MartenCapabilities.BrowseDatabase));
     }
 
     [PostgresFact]
@@ -161,7 +161,7 @@ public class ViewDefinitionsLiveTests(ViewDefinitionsLiveTests.Fixture fixture) 
         list.Refusal.Should().Be(DatabaseRefusal.NotFound, list.Reason);
 
         host.Ring.GetLatest().Where(static x => x.Action == DatabaseAccess.DefinitionAction).Should().HaveCount(2)
-            .And.OnlyContain(static x => !x.Succeeded && x.Capability == nameof(MartenStudioCapabilities.ViewDefinitions));
+            .And.OnlyContain(static x => !x.Succeeded && x.Capability == nameof(MartenCapabilities.ViewDefinitions));
     }
 
     [PostgresFact]
@@ -175,7 +175,7 @@ public class ViewDefinitionsLiveTests(ViewDefinitionsLiveTests.Fixture fixture) 
 
             refused.Found.Should().BeFalse();
             refused.Refusal.Should().Be(DatabaseRefusal.MartenOwned, refused.Reason);
-            refused.Reason.Should().Contain("MartenStudioOptions.Capabilities.BrowseDatabase");
+            refused.Reason.Should().Contain("MartenOptions.Capabilities.BrowseDatabase");
         }
 
         await using BrowserHost browser = fixture.Host(options =>
@@ -214,14 +214,14 @@ public class ViewDefinitionsLiveTests(ViewDefinitionsLiveTests.Fixture fixture) 
         lock (policy.Calls)
         {
             policy.Calls.Where(static x => x.Resource.Capability is not null).Select(static x => x.Resource.Capability)
-                .Distinct().Should().Equal(nameof(MartenStudioCapabilities.BrowseDatabase));
+                .Distinct().Should().Equal(nameof(MartenCapabilities.BrowseDatabase));
         }
     }
 
     [PostgresFact]
     public async Task A_write_policy_that_refuses_ViewDefinitions_refuses_the_definition_and_audits_it()
     {
-        var policy = new ResourcePolicy(static resource => resource.Capability != nameof(MartenStudioCapabilities.ViewDefinitions));
+        var policy = new ResourcePolicy(static resource => resource.Capability != nameof(MartenCapabilities.ViewDefinitions));
 
         await using BrowserHost host = ViewDefinitionsOnly(policy);
 
@@ -233,7 +233,7 @@ public class ViewDefinitionsLiveTests(ViewDefinitionsLiveTests.Fixture fixture) 
 
         StudioActionLogEntry entry = host.Ring.GetLatest().Should().ContainSingle(static x => x.Action == DatabaseAccess.DefinitionAction).Subject;
         entry.Succeeded.Should().BeFalse();
-        entry.Capability.Should().Be(nameof(MartenStudioCapabilities.ViewDefinitions));
+        entry.Capability.Should().Be(nameof(MartenCapabilities.ViewDefinitions));
         entry.DatabaseScope()!.TenantId.Should().BeNull("the refused scope is the database as a whole");
         entry.Target.Should().Be(fixture.LegacySchema + ".populated_stats");
 
@@ -247,14 +247,14 @@ public class ViewDefinitionsLiveTests(ViewDefinitionsLiveTests.Fixture fixture) 
     [PostgresFact]
     public async Task A_visitor_the_policy_admits_to_ViewDefinitions_and_not_BrowseDatabase_reads_definitions_and_no_rows()
     {
-        var policy = new ResourcePolicy(static resource => resource.Capability != nameof(MartenStudioCapabilities.BrowseDatabase));
+        var policy = new ResourcePolicy(static resource => resource.Capability != nameof(MartenCapabilities.BrowseDatabase));
 
         await using BrowserHost host = fixture.Host(
             options =>
             {
                 options.StoreAuthorizationPolicy = StorePolicy;
                 options.WriteAuthorizationPolicy = WritePolicy;
-                options.Capabilities = MartenStudioCapabilities.All();
+                options.Capabilities = MartenCapabilities.All();
                 options.BrowsableSchemas.Clear();
                 options.BrowsableSchemas.Add(fixture.LegacySchema);
                 options.BrowsableSchemas.Add("*");
@@ -282,14 +282,14 @@ public class ViewDefinitionsLiveTests(ViewDefinitionsLiveTests.Fixture fixture) 
             new ResourcePolicy(static _ => true),
             static options =>
             {
-                options.Capabilities = MartenStudioCapabilities.All();
+                options.Capabilities = MartenCapabilities.All();
                 options.ReadOnly = true;
             });
 
         DatabaseObjectDefinition refused = await host.ObjectsAsync(x => x.GetDefinitionAsync(BrowserHost.Scope, LegacyView, Token));
 
         refused.Refusal.Should().Be(DatabaseRefusal.ReadOnly, refused.Reason);
-        refused.Reason.Should().Contain("MartenStudioOptions.Capabilities.ViewDefinitions").And.Contain("MartenStudioOptions.Capabilities.BrowseDatabase");
+        refused.Reason.Should().Contain("MartenOptions.Capabilities.ViewDefinitions").And.Contain("MartenOptions.Capabilities.BrowseDatabase");
 
         (await host.ObjectsAsync(x => x.GetSequenceValueAsync(BrowserHost.Scope, fixture.LegacySchema, "standalone_numbers", Token)))
             .Refusal.Should().Be(DatabaseRefusal.ReadOnly);
@@ -312,7 +312,7 @@ public class ViewDefinitionsLiveTests(ViewDefinitionsLiveTests.Fixture fixture) 
 
         refused.Found.Should().BeFalse("the host's own function in the store's schema is a definition read, whichever way");
         refused.Refusal.Should().Be(DatabaseRefusal.CapabilityOff, refused.Reason);
-        refused.Reason.Should().Contain("MartenStudioOptions.Capabilities.ViewDefinitions")
-            .And.Contain("MartenStudioOptions.Capabilities.BrowseDatabase");
+        refused.Reason.Should().Contain("MartenOptions.Capabilities.ViewDefinitions")
+            .And.Contain("MartenOptions.Capabilities.BrowseDatabase");
     }
 }

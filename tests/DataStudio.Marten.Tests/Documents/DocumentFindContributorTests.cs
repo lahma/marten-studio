@@ -1,3 +1,4 @@
+using DataStudio.Marten.Services;
 using DataStudio.Marten.Services.Documents;
 using DataStudio.Marten.Services.Find;
 using DataStudio.Marten.Tests.Support;
@@ -18,7 +19,7 @@ public class DocumentFindContributorTests
     private static readonly StudioScope Matched = new("default", "primary", null);
 
     private static DocumentFindContributor Contributor(FakeDocumentDataService documents, FakeFindScopes? scopes = null) =>
-        new(documents, scopes ?? new FakeFindScopes(FakeFindScopes.Context(Matched)), Microsoft.Extensions.Options.Options.Create(new MartenStudioOptions()));
+        new(documents, scopes ?? new FakeFindScopes(FakeFindScopes.Context(Matched)), MartenStudioSettings.Of(new MartenOptions()));
 
     private static DocumentFindHit Hit(string alias, string id, params DocumentFindRow[] rows) =>
         new(alias, 120, id, rows, 0, false);

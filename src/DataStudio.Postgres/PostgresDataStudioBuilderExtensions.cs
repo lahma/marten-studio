@@ -50,7 +50,7 @@ public static class PostgresDataStudioBuilderExtensions
     /// </exception>
     public static DataStudioBuilder AddPostgres(
         this DataStudioBuilder builder,
-        Action<PostgresStudioOptions>? configure = null)
+        Action<PostgresOptions>? configure = null)
     {
         ArgumentNullException.ThrowIfNull(builder);
 
@@ -71,7 +71,7 @@ public static class PostgresDataStudioBuilderExtensions
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void AddPostgresServices(
         DataStudioBuilder builder,
-        Action<PostgresStudioOptions>? configure)
+        Action<PostgresOptions>? configure)
     {
         IServiceCollection services = builder.Services;
 
@@ -81,18 +81,18 @@ public static class PostgresDataStudioBuilderExtensions
             PostgresStudioDescriptor.Marker,
             PostgresStudioDescriptor.Instance,
             static provider => new PostgresStudioSettings(
-                provider.GetRequiredService<IOptions<PostgresStudioOptions>>(),
+                provider.GetRequiredService<IOptions<PostgresOptions>>(),
                 provider.GetRequiredService<IShellSettings>()));
 
         // The bounds and sentences the Marten module has, from the one shared chain, in this module's own names; then the
         // source names, which only this module has.
-        OptionsBuilder<PostgresStudioOptions> optionsBuilder = services
-            .AddOptions<PostgresStudioOptions>()
-            .ValidateSharedBounds(nameof(PostgresStudioOptions), nameof(PostgresStudioOptions.MaxInlineValueBytes), Shape)
-            .ValidateSharedCapabilities(nameof(PostgresStudioOptions), nameof(PostgresStudioCapabilities), Shape)
-            .ValidateSharedSchemas(nameof(PostgresStudioOptions), Shape)
-            .ValidateSharedAcceptedChecks(nameof(PostgresStudioOptions), PostgresStudioDescriptor.Instance, static options => options.AcceptedCheckReasons)
-            .ValidateSourceNames(nameof(PostgresStudioOptions), SourceNames);
+        OptionsBuilder<PostgresOptions> optionsBuilder = services
+            .AddOptions<PostgresOptions>()
+            .ValidateSharedBounds(nameof(PostgresOptions), nameof(PostgresOptions.MaxInlineValueBytes), Shape)
+            .ValidateSharedCapabilities(nameof(PostgresOptions), nameof(PostgresCapabilities), Shape)
+            .ValidateSharedSchemas(nameof(PostgresOptions), Shape)
+            .ValidateSharedAcceptedChecks(nameof(PostgresOptions), PostgresStudioDescriptor.Instance, static options => options.AcceptedCheckReasons)
+            .ValidateSourceNames(nameof(PostgresOptions), SourceNames);
 
         if (configure is not null)
         {
@@ -105,7 +105,7 @@ public static class PostgresDataStudioBuilderExtensions
 
         // The engine's seams, answered for plain PostgreSQL - the source registry and provider, the lock labeler, the
         // declarations, the health table source and the statement classifier - over the options this module configured.
-        PostgresSeamRegistration.Add<PostgresStudioOptions>(services);
+        PostgresSeamRegistration.Add<PostgresOptions>(services);
 
         // The shared seams only a UI has, answered for plain PostgreSQL.
         services.TryAddSingleton<IStudioLinks, PostgresStudioLinks>();
@@ -114,11 +114,11 @@ public static class PostgresDataStudioBuilderExtensions
         services.TryAddScoped<IPostgresServerReader, PostgresServerReader>();
     }
 
-    private static IEnumerable<string> SourceNames(PostgresStudioOptions options) =>
+    private static IEnumerable<string> SourceNames(PostgresOptions options) =>
         options.DataSources.Concat(options.DatabaseSources).Select(static x => x.Name);
 
     /// <summary>The options the Postgres and Marten modules share, as the shared validation reads them.</summary>
-    private static StudioOptionsShape Shape(PostgresStudioOptions options) => new(
+    private static StudioOptionsShape Shape(PostgresOptions options) => new(
         options.DefaultPageSize,
         options.MaxPageSize,
         options.QueryTimeout,

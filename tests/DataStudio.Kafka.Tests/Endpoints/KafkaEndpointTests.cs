@@ -33,8 +33,8 @@ public class KafkaEndpointTests
         bool kafka = true,
         bool dataSource = true,
         Action<DataStudioOptions>? configureShell = null,
-        Action<PostgresStudioOptions>? configureStudio = null,
-        Action<KafkaStudioOptions>? configureKafka = null,
+        Action<PostgresOptions>? configureStudio = null,
+        Action<KafkaOptions>? configureKafka = null,
         Action<WebApplicationBuilder>? configureBuilder = null)
     {
         WebApplicationBuilder builder = WebApplication.CreateBuilder();
@@ -71,7 +71,7 @@ public class KafkaEndpointTests
     private static bool IsPageMarker(RouteEndpoint endpoint) => endpoint.Metadata.GetMetadata<StudioEndpointMarker>() is { IsPage: true };
 
     private static bool IsKafkaPage(RouteEndpoint endpoint) =>
-        endpoint.Metadata.GetMetadata<Microsoft.AspNetCore.Components.Endpoints.ComponentTypeMetadata>()?.Type.Assembly == typeof(KafkaStudioOptions).Assembly;
+        endpoint.Metadata.GetMetadata<Microsoft.AspNetCore.Components.Endpoints.ComponentTypeMetadata>()?.Type.Assembly == typeof(KafkaOptions).Assembly;
 
     [Theory]
     [InlineData("/studio", "/studio/kafka")]
@@ -144,7 +144,7 @@ public class KafkaEndpointTests
     }
 
     [Fact]
-    public async Task A_host_without_AddKafkaStudio_serves_no_kafka_route()
+    public async Task A_host_without_AddKafka_serves_no_kafka_route()
     {
         await using WebApplication app = CreateApp(kafka: false);
         app.MapDataStudio().AllowAnonymous();

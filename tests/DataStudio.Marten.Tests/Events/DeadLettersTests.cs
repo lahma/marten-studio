@@ -39,7 +39,7 @@ public class DeadLettersTests
         IRenderedComponent<DeadLetters> page = context.Render<DeadLetters>();
 
         page.Find(".ms-dead-letters-hidden").TextContent.Trim()
-            .Should().Be("Dead letters are hidden by MartenStudioOptions.IsDocumentTypeVisible.");
+            .Should().Be("Dead letters are hidden by MartenOptions.IsDocumentTypeVisible.");
         page.Markup.Should().NotContain("no collection called").And.NotContain("deadletterevent");
         page.FindAll("tbody tr").Should().BeEmpty();
         page.FindAll("#ms-dl-projection").Should().BeEmpty("no filter for a list that is not read");
@@ -173,7 +173,7 @@ public class DeadLettersTests
         IRenderedComponent<DeadLetters> page = context.Render<DeadLetters>();
 
         page.Find(".ms-capability-disabled").TextContent.Should()
-            .Contain("MartenStudioOptions.Capabilities.ManageDeadLetters");
+            .Contain("MartenOptions.Capabilities.ManageDeadLetters");
 
         await page.Find("tbody tr td.ms-table-cell-actions button").ClickAsync(new());
 

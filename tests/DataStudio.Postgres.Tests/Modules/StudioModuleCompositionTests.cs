@@ -23,7 +23,7 @@ public class StudioModuleCompositionTests
 {
     private static readonly StudioDescriptor Host = PostgresStudioDescriptor.Instance;
 
-    private static readonly PostgresStudioSettings Settings = new(Options.Create(new PostgresStudioOptions()));
+    private static readonly PostgresStudioSettings Settings = PostgresStudioSettings.Of(Options.Create(new PostgresOptions()));
 
     /// <summary>The database module as <c>AddPostgresStudio()</c> registers it, for a composition that is about the modules beside it.</summary>
     private static DatabaseStudioModule Database() => new(Host, Settings, new StudioCapabilityGuard(Settings));
@@ -214,7 +214,7 @@ public class StudioModuleCompositionTests
         StudioShellDescriptor composed = Compose(new FakeModule("fake", "/fake", "Fake"));
 
         composed.ModuleOf(typeof(StudioModuleCompositionTests))!.Key.Should().Be("fake");
-        composed.ModuleOf(typeof(PostgresStudioOptions))!.Key.Should().Be("postgres", "a page of the database's own assembly");
+        composed.ModuleOf(typeof(PostgresOptions))!.Key.Should().Be("postgres", "a page of the database's own assembly");
         composed.ModuleOf(typeof(string))!.Key.Should().Be("postgres", "a page of no module's assembly is the root's");
     }
 

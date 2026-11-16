@@ -137,7 +137,7 @@ internal sealed class ReplicationServer : IAsyncDisposable
                 });
                 services.AddSingleton(clock);
             },
-            options => options.Capabilities = PostgresStudioCapabilities.All());
+            options => options.Capabilities = PostgresCapabilities.All());
 
     internal static async Task Execute(string connectionString, string sql)
     {

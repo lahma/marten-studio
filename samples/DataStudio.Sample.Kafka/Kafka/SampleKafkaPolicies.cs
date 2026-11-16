@@ -105,7 +105,7 @@ internal sealed class KafkaSearchHandler : AuthorizationHandler<KafkaSearchRequi
         bool support = context.User.HasClaim(SamplePolicies.ScopeClaim, DevUsers.KafkaOrdersScope);
 
         // A value is the payload gate's: admin only, whatever support may search.
-        if (string.Equals(resource.Capability, nameof(KafkaStudioCapabilities.ReadPayloads), StringComparison.Ordinal))
+        if (string.Equals(resource.Capability, nameof(KafkaCapabilities.ReadPayloads), StringComparison.Ordinal))
         {
             if (admin)
             {

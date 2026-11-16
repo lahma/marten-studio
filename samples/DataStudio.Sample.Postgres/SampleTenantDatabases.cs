@@ -13,7 +13,7 @@ namespace DataStudio.Sample.Postgres;
 /// <summary>
 /// This application's tenant databases, as the application itself knows them: listed from the admin database's tenant
 /// directory, each opened through a data source the application builds once and keeps. Registered with
-/// <c>PostgresStudioOptions.AddDatabaseSource("tenants", …)</c>.
+/// <c>PostgresOptions.AddDatabaseSource("tenants", …)</c>.
 /// </summary>
 /// <remarks>
 /// <para>

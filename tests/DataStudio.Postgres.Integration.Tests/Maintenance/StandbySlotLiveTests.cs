@@ -116,7 +116,7 @@ public class StandbySlotLiveTests
             options =>
             {
                 options.BrowsableSchemas.Add("ps_t14");
-                options.Capabilities = PostgresStudioCapabilities.All();
+                options.Capabilities = PostgresCapabilities.All();
             });
 
         HealthReport first = await AutovacuumServer.ReportAsync(host);

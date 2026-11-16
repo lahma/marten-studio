@@ -50,7 +50,7 @@ public class ServerFindingGatesTests
     [Fact]
     public async Task Without_the_capability_the_slots_and_the_processes_are_withheld_and_the_findings_are_still_shown()
     {
-        await using HealthHarness harness = HealthHarness.Create(checks: Stated, studio: static options => options.Capabilities = new MartenStudioCapabilities());
+        await using HealthHarness harness = HealthHarness.Create(checks: Stated, studio: static options => options.Capabilities = new MartenCapabilities());
 
         HealthReport report = await ReportAsync(harness);
 
@@ -71,7 +71,7 @@ public class ServerFindingGatesTests
         report.Findings.Where(static x => x.Code is "R91" or "C96").SelectMany(static x => x.Evidence)
             .Where(static x => x.Value.StartsWith("withheld - ", StringComparison.Ordinal))
             .Should().NotBeEmpty()
-            .And.OnlyContain(static x => x.Value.Contains("MartenStudioOptions.Capabilities.ViewDatabaseActivity", StringComparison.Ordinal));
+            .And.OnlyContain(static x => x.Value.Contains("MartenOptions.Capabilities.ViewDatabaseActivity", StringComparison.Ordinal));
 
         HealthReportFinding inactive = report.Findings.Single(static x => x.Finding.Variant == "inactive");
         inactive.Evidence.Should().Contain(new HealthEvidence("WAL they hold", "5.0 GiB"), "a size is the database's, another database's slot's included");
@@ -80,7 +80,7 @@ public class ServerFindingGatesTests
     [Fact]
     public async Task With_the_capability_and_the_write_policy_every_slot_and_process_is_shown()
     {
-        await using HealthHarness harness = HealthHarness.Create(checks: Stated, studio: static options => options.Capabilities = MartenStudioCapabilities.All());
+        await using HealthHarness harness = HealthHarness.Create(checks: Stated, studio: static options => options.Capabilities = MartenCapabilities.All());
 
         HealthReport report = await ReportAsync(harness);
 
@@ -100,7 +100,7 @@ public class ServerFindingGatesTests
     [Fact]
     public async Task Another_databases_logical_slot_is_never_named_even_through_the_activity_gate()
     {
-        await using HealthHarness harness = HealthHarness.Create(checks: Stated, studio: static options => options.Capabilities = MartenStudioCapabilities.All());
+        await using HealthHarness harness = HealthHarness.Create(checks: Stated, studio: static options => options.Capabilities = MartenCapabilities.All());
 
         HealthReport report = await ReportAsync(harness);
 
@@ -127,7 +127,7 @@ public class ServerFindingGatesTests
             studio: static options =>
             {
                 options.KnownTenantIds.Add("acme");
-                options.Capabilities = MartenStudioCapabilities.All();
+                options.Capabilities = MartenCapabilities.All();
             },
             policies: true);
 

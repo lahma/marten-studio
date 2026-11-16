@@ -329,8 +329,8 @@ public class TenantOverviewLiveTests(PostgresFixture postgres)
         overview.HasNext.Should().BeTrue();
     }
 
-    private static void Activity(MartenStudioOptions options) =>
-        options.Capabilities = new MartenStudioCapabilities { ViewDatabaseActivity = true };
+    private static void Activity(MartenOptions options) =>
+        options.Capabilities = new MartenCapabilities { ViewDatabaseActivity = true };
 
     private static void Documents(StoreOptions options)
     {

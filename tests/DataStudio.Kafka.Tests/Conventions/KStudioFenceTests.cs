@@ -76,7 +76,7 @@ public class KStudioFenceTests
     [Fact]
     public void The_built_assembly_references_the_shell_and_the_engine_and_no_database_module_Marten_family_Npgsql_Wolverine_or_Confluent()
     {
-        string[] references = [.. typeof(KafkaStudioOptions).Assembly.GetReferencedAssemblies().Select(static x => x.Name!)];
+        string[] references = [.. typeof(KafkaOptions).Assembly.GetReferencedAssemblies().Select(static x => x.Name!)];
 
         references.Should().Contain("DataStudio.Kafka.Core").And.Contain("DataStudio");
         references.Where(IsForbiddenInAssembly).Should().BeEmpty(

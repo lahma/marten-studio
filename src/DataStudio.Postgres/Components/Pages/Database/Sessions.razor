@@ -22,7 +22,7 @@
     Two audiences (decision 4). Anybody the store policy passes for the database as a whole sees counts, ages,
     states, wait classes, lock modes and the Marten label of what is locked; the details - process ids, roles,
     client addresses, application names, connection times and statements - need
-    MartenStudioOptions.Capabilities.ViewDatabaseActivity and the write policy, and the service refuses them
+    MartenOptions.Capabilities.ViewDatabaseActivity and the write policy, and the service refuses them
     otherwise. The page asks for details only when the summary says the gate is open, so a closed gate refuses
     nothing; and only once interactive, so a prerender reads nothing and audits nothing.
 
@@ -626,7 +626,7 @@
 
     /// <summary>
     /// What the details would add and what it takes, when they are not shown: the capability's own notice, naming
-    /// <c>MartenStudioOptions.Capabilities.ViewDatabaseActivity</c>, or the policy's sentence.
+    /// <c>MartenOptions.Capabilities.ViewDatabaseActivity</c>, or the policy's sentence.
     /// </summary>
     private RenderFragment DetailsNotice(SessionDetailsAccess access) => __builder =>
     {

@@ -28,7 +28,7 @@ internal sealed class EventFlowCache
 
     /// <summary>The model for <paramref name="store" />, rebuilt when its configuration moved or the delegate changed.</summary>
     /// <param name="store">The store; only its options are read.</param>
-    /// <param name="isVisible"><c>MartenStudioOptions.IsDocumentTypeVisible</c>, or <see langword="null" />.</param>
+    /// <param name="isVisible"><c>MartenOptions.IsDocumentTypeVisible</c>, or <see langword="null" />.</param>
     public EventFlowModel Get(IDocumentStore store, Func<Type, bool>? isVisible)
     {
         ArgumentNullException.ThrowIfNull(store);

@@ -87,7 +87,7 @@ internal interface ITableRowService
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// One cell's whole value, up to <c>MaxInlineDocumentBytes</c>: the JSON, the bytes, the long text a grid
+    /// One cell's whole value, up to <c>MaxInlineValueBytes</c>: the JSON, the bytes, the long text a grid
     /// cell was cut from. A relation with no key is read by the row's <c>ctid</c>, passed as the key
     /// <c>ctid</c>.
     /// </summary>

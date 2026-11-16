@@ -109,7 +109,7 @@ internal sealed class StudioCapabilityDeniedException : InvalidOperationExceptio
     public CapabilityDenialReason Reason { get; }
 
     /// <summary>
-    /// The capability's own option - <c>MartenStudioOptions.Capabilities.EditDocuments</c> - which would have to be set
+    /// The capability's own option - <c>MartenOptions.Capabilities.EditDocuments</c> - which would have to be set
     /// whichever switch refused it: what event 9202 names.
     /// </summary>
     public string CapabilityOption { get; }

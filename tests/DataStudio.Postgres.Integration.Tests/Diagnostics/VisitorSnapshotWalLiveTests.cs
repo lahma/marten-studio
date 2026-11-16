@@ -59,7 +59,7 @@ public class VisitorSnapshotWalLiveTests(VisitorSnapshotWalLiveTests.Fixture dat
 
         await using StudioHost host = StudioHost.Create(
             services => services.AddSingleton(_ => NpgsqlDataSource.Create(database.ConnectionString)),
-            static options => options.Capabilities = PostgresStudioCapabilities.All());
+            static options => options.Capabilities = PostgresCapabilities.All());
 
         VisitorSnapshot snapshot = await host.CircuitAsync("admin", services => services.GetRequiredService<VisitorSnapshotBuilder>().BuildAsync(Scope, Token));
 

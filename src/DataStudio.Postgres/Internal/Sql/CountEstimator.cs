@@ -82,7 +82,7 @@ internal readonly record struct DocumentCount(long Value, bool IsEstimate, bool 
     /// person reading it knows which knob turns it.
     /// </remarks>
     public string? Reason => IsExactRefused
-        ? ExactRefusedNote ?? RefusedAboveNote(ExactRefusedAbove, "MartenStudioOptions.ExactCountThreshold")
+        ? ExactRefusedNote ?? RefusedAboveNote(ExactRefusedAbove, "MartenOptions.ExactCountThreshold")
         : null;
 
     /// <summary>
@@ -90,7 +90,7 @@ internal readonly record struct DocumentCount(long Value, bool IsEstimate, bool 
     /// count carries no note of its own, which is what <see cref="Reason" /> says for its documents.
     /// </summary>
     /// <param name="threshold">The threshold that declined the upgrade.</param>
-    /// <param name="option">The option that sets it: <c>PostgresStudioOptions.ExactCountThreshold</c>.</param>
+    /// <param name="option">The option that sets it: <c>PostgresOptions.ExactCountThreshold</c>.</param>
     public static string RefusedAboveNote(long threshold, string option) =>
         "Estimate only: an exact count is refused above " +
         threshold.ToString("N0", System.Globalization.CultureInfo.InvariantCulture) +

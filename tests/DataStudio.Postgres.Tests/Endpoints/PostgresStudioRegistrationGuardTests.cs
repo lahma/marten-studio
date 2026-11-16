@@ -130,8 +130,8 @@ public class PostgresStudioRegistrationGuardTests
         ServiceCollection services = new();
         services.AddDataStudio().AddPostgres();
         services.AddHealthChecks()
-            .AddPostgresStudio(tags: ["ready"])
-            .AddPostgresStudio("postgres-studio-live", failureStatus: HealthStatus.Degraded);
+            .AddPostgresDiagnostics(tags: ["ready"])
+            .AddPostgresDiagnostics("postgres-studio-live", failureStatus: HealthStatus.Degraded);
 
         using ServiceProvider provider = services.BuildServiceProvider();
         HealthCheckRegistration[] registrations = [.. provider.GetRequiredService<IOptions<HealthCheckServiceOptions>>().Value.Registrations];

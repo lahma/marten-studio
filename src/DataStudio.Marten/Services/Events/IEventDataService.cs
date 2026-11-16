@@ -145,7 +145,7 @@ internal interface IEventDataService
     /// <para>
     /// Bounded: the window is at most twenty events; the events before it are streamed past the fold and never held,
     /// except for a projection that is folded from the start (<see cref="AggregateWalk.FromTheStartLimit" />). The whole
-    /// call runs under <see cref="MartenStudioOptions.QueryTimeout" />, and running past it is a value.
+    /// call runs under <see cref="MartenOptions.QueryTimeout" />, and running past it is a value.
     /// </para>
     /// </remarks>
     /// <param name="scope">The store, database and tenant.</param>
@@ -179,7 +179,7 @@ internal interface IEventDataService
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// One page of dead letters - or, when <see cref="MartenStudioOptions.IsDocumentTypeVisible" /> hides
+    /// One page of dead letters - or, when <see cref="MartenOptions.IsDocumentTypeVisible" /> hides
     /// <c>DeadLetterEvent</c> (or throws for it), <see cref="DeadLetterPage.Hidden" />, read from nothing.
     /// </summary>
     Task<DeadLetterPage> ListDeadLettersAsync(
@@ -285,7 +285,7 @@ internal interface IEventDataService
     /// <remarks>
     /// A read, gated as time travel is (the store policy for the scope, no capability), and the same fold
     /// (<see cref="IAggregateFolder.FoldAsync" />) on the studio's own event read, under
-    /// <see cref="MartenStudioOptions.QueryTimeout" />: it opens no storage-ensuring Marten call (hard rule 14). A stream
+    /// <see cref="MartenOptions.QueryTimeout" />: it opens no storage-ensuring Marten call (hard rule 14). A stream
     /// the fold cannot reach in time, or whose projection throws, is a value (<see cref="CompactionFoldOutcome.NotChecked" />),
     /// never an error: the service reports the real outcome after the save either way.
     /// </remarks>
@@ -314,7 +314,7 @@ internal interface IEventDataService
     /// <exception cref="StudioCapabilityDeniedException">The capability is not enabled.</exception>
     /// <exception cref="StudioNotAuthorizedException">The write policy refused this scope.</exception>
     /// <exception cref="InvalidOperationException">
-    /// The host hides <c>DeadLetterEvent</c> (<see cref="MartenStudioOptions.IsDocumentTypeVisible" />); audited as refused.
+    /// The host hides <c>DeadLetterEvent</c> (<see cref="MartenOptions.IsDocumentTypeVisible" />); audited as refused.
     /// </exception>
     Task DiscardDeadLetterAsync(StudioScope scope, Guid id, CancellationToken cancellationToken = default);
 

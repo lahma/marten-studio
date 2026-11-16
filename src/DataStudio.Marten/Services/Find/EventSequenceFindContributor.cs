@@ -1,8 +1,8 @@
+using DataStudio.Services.Settings;
 using System.Globalization;
 
 using DataStudio.Marten.Services.Events;
 
-using Microsoft.Extensions.Options;
 
 using DataStudio.Postgres.Services;
 using DataStudio.Postgres.Services.Find;
@@ -28,13 +28,13 @@ internal sealed class EventSequenceFindContributor : IFindContributor
 {
     private readonly IEventDataService events;
     private readonly IFindScopes scopes;
-    private readonly IOptions<MartenStudioOptions> options;
+    private readonly IShellSettings settings;
 
-    public EventSequenceFindContributor(IEventDataService events, IFindScopes scopes, IOptions<MartenStudioOptions> options)
+    public EventSequenceFindContributor(IEventDataService events, IFindScopes scopes, IShellSettings settings)
     {
         this.events = events;
         this.scopes = scopes;
-        this.options = options;
+        this.settings = settings;
     }
 
     /// <inheritdoc />
@@ -88,7 +88,7 @@ internal sealed class EventSequenceFindContributor : IFindContributor
                 new FindHit(
                     Kind: "Event",
                     Title: "Event #" + number,
-                    Url: EventLinks.ToStreamAt(options.Value, at, row.StreamId, row.Version),
+                    Url: EventLinks.ToStreamAt(settings, at, row.StreamId, row.Version),
                     Scope: at,
                     Id: number,
                     TenantChip: rowTenant is null ? null : "tenant " + rowTenant,

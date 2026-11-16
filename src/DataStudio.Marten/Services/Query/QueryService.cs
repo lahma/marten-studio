@@ -45,7 +45,7 @@ namespace DataStudio.Marten.Services.Query;
 /// <see cref="ReadOnlySqlSession.InTransactionAsync{T}" />, and reads the rows itself because a document's
 /// <c>data</c> column must arrive whole where a console cell is capped for a grid. It did not used to, and
 /// that was the defect: a plain command on a read connection, with no <c>SET TRANSACTION READ ONLY</c>, no
-/// server-side <c>statement_timeout</c> and no <see cref="MartenStudioOptions.SqlConsoleRole" />, reached
+/// server-side <c>statement_timeout</c> and no <see cref="MartenOptions.SqlConsoleRole" />, reached
 /// by a mode that needs no capability at all. The transaction is not the whole guard - an advisory lock
 /// and a <c>setval</c> are both "reads" as far as SQLSTATE 25006 is concerned, which is why
 /// <see cref="QuerySqlComposer.DisallowedFunctions" /> applies here whatever capabilities the visitor
@@ -90,7 +90,7 @@ internal sealed class QueryService : IQueryService
     private readonly StudioActionLog audit;
     private readonly ColumnCatalog columnCatalog;
     private readonly SqlConsoleService console;
-    private readonly IOptions<MartenStudioOptions> options;
+    private readonly IOptions<MartenOptions> options;
     private readonly ILogger<QueryService> logger;
     private readonly AuthenticationStateProvider authenticationStateProvider;
 
@@ -101,7 +101,7 @@ internal sealed class QueryService : IQueryService
         StudioActionLog audit,
         ColumnCatalog columnCatalog,
         SqlConsoleService console,
-        IOptions<MartenStudioOptions> options,
+        IOptions<MartenOptions> options,
         ILogger<QueryService> logger,
         AuthenticationStateProvider authenticationStateProvider)
     {
@@ -157,7 +157,7 @@ internal sealed class QueryService : IQueryService
         ArgumentNullException.ThrowIfNull(scope);
         ArgumentNullException.ThrowIfNull(request);
 
-        MartenStudioOptions value = options.Value;
+        MartenOptions value = options.Value;
         string user = UserName();
         string clause = request.WhereClause ?? string.Empty;
         string target = Target(clause);
@@ -433,7 +433,7 @@ internal sealed class QueryService : IQueryService
     /// tenant-less scope (<see cref="SqlScope" />): the process-wide capability (D4), then the store
     /// policy and the write policy with <c>RunSql</c> on the resource - which is exactly what
     /// the shared resolver asks when <see cref="SqlConsoleService.ExecuteAsync" /> resolves it. Asking only the capability would hand subqueries to somebody the
-    /// <see cref="MartenStudioOptions.WriteAuthorizationPolicy" /> refuses the console to; asking only the
+    /// <see cref="MartenOptions.WriteAuthorizationPolicy" /> refuses the console to; asking only the
     /// write policy would hand them to somebody the store policy allows one tenant of the database and not
     /// the database - and a subquery reads beyond the tenant exactly as the console does.
     /// </para>
@@ -546,7 +546,7 @@ internal sealed class QueryService : IQueryService
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(index);
 
-        MartenStudioOptions value = options.Value;
+        MartenOptions value = options.Value;
         string target = Target(request.WhereClause);
         ResolvedScope resolved;
 
@@ -767,7 +767,7 @@ internal sealed class QueryService : IQueryService
     /// policy that answered is the store policy - naming the write policy in the log would send whoever
     /// reads 9203 to the wrong setting.
     /// </summary>
-    private static string ReadPolicyName(MartenStudioOptions value) =>
+    private static string ReadPolicyName(MartenOptions value) =>
         value.StoreAuthorizationPolicy ?? "(none)";
 
     /// <summary>

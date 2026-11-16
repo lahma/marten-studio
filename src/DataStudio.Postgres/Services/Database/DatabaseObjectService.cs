@@ -670,7 +670,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
     /// <summary>What a routine's or trigger's definition says when its text names a hidden type's table.</summary>
     internal const string HiddenTableNamedDenial =
         "Its definition names a table whose document type the host hides from the studio " +
-        "(MartenStudioOptions.IsDocumentTypeVisible), so it is not shown.";
+        "(MartenOptions.IsDocumentTypeVisible), so it is not shown.";
 
     /// <summary>What an aggregate's definition says.</summary>
     internal const string AggregateHasNoBody =

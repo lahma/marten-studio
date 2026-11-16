@@ -16,8 +16,8 @@ public class OptionsParityTests
     /// <summary>PostgresStudio's name on the left, MartenStudio's on the right.</summary>
     private static readonly Dictionary<string, string> Renames = new(StringComparer.Ordinal)
     {
-        ["SourceAuthorizationPolicy"] = nameof(MartenStudioOptions.StoreAuthorizationPolicy),
-        ["MaxInlineValueBytes"] = nameof(MartenStudioOptions.MaxInlineDocumentBytes),
+        ["SourceAuthorizationPolicy"] = nameof(MartenOptions.StoreAuthorizationPolicy),
+        ["MaxInlineValueBytes"] = nameof(MartenOptions.MaxInlineValueBytes),
     };
 
     /// <summary>The same name and a studio's own type: each studio's capabilities class.</summary>
@@ -34,14 +34,14 @@ public class OptionsParityTests
 
     private static readonly string[] MartenOnly =
     [
-        nameof(MartenStudioOptions.DiscoverTenantIds),
-        nameof(MartenStudioOptions.IncludeAncillaryStores),
-        nameof(MartenStudioOptions.IsDocumentTypeVisible),
-        nameof(MartenStudioOptions.KnownTenantIds),
+        nameof(MartenOptions.DiscoverTenantIds),
+        nameof(MartenOptions.IncludeAncillaryStores),
+        nameof(MartenOptions.IsDocumentTypeVisible),
+        nameof(MartenOptions.KnownTenantIds),
 
         // 1.2-PROJ: projection lag thresholds by projection name - a projection is a Marten idea.
-        nameof(MartenStudioOptions.ProjectionThresholds),
-        nameof(MartenStudioOptions.RebuildShardTimeout),
+        nameof(MartenOptions.ProjectionThresholds),
+        nameof(MartenOptions.RebuildShardTimeout),
     ];
 
     private static PropertyInfo[] Public(Type type) =>
@@ -50,13 +50,13 @@ public class OptionsParityTests
     [Fact]
     public void Every_PostgresStudio_option_has_a_MartenStudio_twin_with_the_same_type_and_default()
     {
-        PostgresStudioOptions postgres = new();
-        MartenStudioOptions marten = new();
-        Dictionary<string, PropertyInfo> twins = Public(typeof(MartenStudioOptions)).ToDictionary(static x => x.Name, StringComparer.Ordinal);
+        PostgresOptions postgres = new();
+        MartenOptions marten = new();
+        Dictionary<string, PropertyInfo> twins = Public(typeof(MartenOptions)).ToDictionary(static x => x.Name, StringComparer.Ordinal);
         List<string> problems = [];
         int compared = 0;
 
-        foreach (PropertyInfo option in Public(typeof(PostgresStudioOptions)))
+        foreach (PropertyInfo option in Public(typeof(PostgresOptions)))
         {
             if (PostgresOnly.Contains(option.Name))
             {
@@ -66,7 +66,7 @@ public class OptionsParityTests
             string twinName = Renames.GetValueOrDefault(option.Name, option.Name);
             if (!twins.TryGetValue(twinName, out PropertyInfo? twin))
             {
-                problems.Add(option.Name + ": no MartenStudioOptions." + twinName);
+                problems.Add(option.Name + ": no MartenOptions." + twinName);
                 continue;
             }
 
@@ -108,20 +108,20 @@ public class OptionsParityTests
     {
         HashSet<string> shared =
         [
-            .. Public(typeof(PostgresStudioOptions)).Select(static x => Renames.GetValueOrDefault(x.Name, x.Name)),
+            .. Public(typeof(PostgresOptions)).Select(static x => Renames.GetValueOrDefault(x.Name, x.Name)),
         ];
 
-        Public(typeof(MartenStudioOptions)).Select(static x => x.Name).Where(x => !shared.Contains(x))
+        Public(typeof(MartenOptions)).Select(static x => x.Name).Where(x => !shared.Contains(x))
             .Should().Equal(MartenOnly, "a shared option added to one studio needs its twin in the other, or a line here saying why not");
     }
 
     [Fact]
     public void Both_capabilities_classes_name_the_four_shared_reads_alike()
     {
-        string[] postgres = [.. Public(typeof(PostgresStudioCapabilities)).Select(static x => x.Name)];
+        string[] postgres = [.. Public(typeof(PostgresCapabilities)).Select(static x => x.Name)];
 
         postgres.Should().Equal("BrowseDatabase", "RunSql", "ViewDatabaseActivity", "ViewDefinitions");
-        Public(typeof(MartenStudioCapabilities)).Select(static x => x.Name).Should().Contain(postgres);
+        Public(typeof(MartenCapabilities)).Select(static x => x.Name).Should().Contain(postgres);
     }
 
     private static bool SameDefault(object? left, object? right) =>

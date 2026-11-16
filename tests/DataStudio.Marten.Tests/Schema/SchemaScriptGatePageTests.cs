@@ -37,7 +37,7 @@ public class SchemaScriptGatePageTests
         ClickButton(page, "Generate script");
 
         page.Find(".ms-schema-refusal").TextContent.Should()
-            .Contain("MartenStudioOptions.StoreAuthorizationPolicy")
+            .Contain("MartenOptions.StoreAuthorizationPolicy")
             .And.Contain("spans every tenant");
         page.FindAll(".ms-error-alert").Should().BeEmpty("a refusal is not an error, and a retry would change nothing");
         page.FindAll(".ms-sql-text").Should().BeEmpty();
@@ -54,7 +54,7 @@ public class SchemaScriptGatePageTests
         ClickButton(page, "Check schema");
 
         page.Find(".ms-schema-refusal").TextContent.Should()
-            .Contain("MartenStudioOptions.Capabilities.BrowseDatabase")
+            .Contain("MartenOptions.Capabilities.BrowseDatabase")
             .And.Contain("document types the host hides");
         page.Find(".ms-drift-badge").TextContent.Trim().Should().Be("Withheld");
         page.Markup.Should().NotContain("Could not report");
@@ -71,7 +71,7 @@ public class SchemaScriptGatePageTests
         var page = RenderTab(context, "drift");
         ClickButton(page, "Preview migration");
 
-        page.Find(".ms-schema-refusal").TextContent.Should().Contain("MartenStudioOptions.WriteAuthorizationPolicy");
+        page.Find(".ms-schema-refusal").TextContent.Should().Contain("MartenOptions.WriteAuthorizationPolicy");
         page.FindAll(".ms-sql-text").Should().BeEmpty();
         page.Find(".ms-schema-apply").HasAttribute("disabled").Should().BeTrue();
     }
@@ -135,7 +135,7 @@ public class SchemaScriptGatePageTests
             .Equal("withheld", "withheld", "withheld", "withheld", "withheld", "withheld", "withheld");
         page.Markup.Should().NotContain("not analyzed", "the estimate is withheld, not missing");
         page.Find(".ms-schema-partition-note").TextContent.Should()
-            .Contain("MartenStudioOptions.Capabilities.BrowseDatabase")
+            .Contain("MartenOptions.Capabilities.BrowseDatabase")
             .And.Contain("number of tenants");
     }
 
@@ -241,7 +241,7 @@ public class SchemaScriptGatePageTests
         var page = RenderTab(context, "tables");
 
         page.Find(".ms-schema-object-link").GetAttribute("href").Should().Be(
-            DatabaseLinks.ToObject(context.Options, new DataStudio.Postgres.Services.StudioScope("default", "localhost.marten", null), "studio", "host settings"));
+            DatabaseLinks.ToObject(context.Services.GetRequiredService<DataStudio.Postgres.Services.Settings.IStudioSettings>(), new DataStudio.Postgres.Services.StudioScope("default", "localhost.marten", null), "studio", "host settings"));
     }
 
     // ------------------------------------------------------------------------------------------------

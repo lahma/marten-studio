@@ -70,7 +70,7 @@ public static class MartenDataStudioBuilderExtensions
     /// </exception>
     public static DataStudioBuilder AddMarten(
         this DataStudioBuilder builder,
-        Action<MartenStudioOptions>? configure = null)
+        Action<MartenOptions>? configure = null)
     {
         ArgumentNullException.ThrowIfNull(builder);
 
@@ -90,7 +90,7 @@ public static class MartenDataStudioBuilderExtensions
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void AddMartenServices(
         DataStudioBuilder builder,
-        Action<MartenStudioOptions>? configure)
+        Action<MartenOptions>? configure)
     {
         IServiceCollection services = builder.Services;
 
@@ -102,27 +102,27 @@ public static class MartenDataStudioBuilderExtensions
             MartenStudioDescriptor.Marker,
             MartenStudioDescriptor.Instance,
             static provider => new MartenStudioSettings(
-                provider.GetRequiredService<IOptions<MartenStudioOptions>>(),
+                provider.GetRequiredService<IOptions<MartenOptions>>(),
                 provider.GetRequiredService<IShellSettings>()));
 
         // The options both studios share are validated by one chain (StudioOptionsValidation), in MartenStudio's names and
         // with its sentences unchanged; MartenStudio's own validations sit between its parts, where they always were, so the
-        // failures an OptionsValidationException lists keep their order (pinned by MartenStudioOptionsTest).
-        OptionsBuilder<MartenStudioOptions> optionsBuilder = services
-            .AddOptions<MartenStudioOptions>()
-            .ValidateSharedBounds(nameof(MartenStudioOptions), nameof(MartenStudioOptions.MaxInlineDocumentBytes), Shape)
+        // failures an OptionsValidationException lists keep their order (pinned by MartenOptionsTest).
+        OptionsBuilder<MartenOptions> optionsBuilder = services
+            .AddOptions<MartenOptions>()
+            .ValidateSharedBounds(nameof(MartenOptions), nameof(MartenOptions.MaxInlineValueBytes), Shape)
             .Validate(
                 static options => options.RebuildShardTimeout >= TimeSpan.FromMinutes(1),
-                "MartenStudioOptions.RebuildShardTimeout must be at least one minute: it is the per-shard replay budget, and a rebuild that exceeds it stops with the projection's tables already emptied")
-            .ValidateSharedCapabilities(nameof(MartenStudioOptions), nameof(MartenStudioCapabilities), Shape)
+                "MartenOptions.RebuildShardTimeout must be at least one minute: it is the per-shard replay budget, and a rebuild that exceeds it stops with the projection's tables already emptied")
+            .ValidateSharedCapabilities(nameof(MartenOptions), nameof(MartenCapabilities), Shape)
             .Validate(
                 static options => options.KnownTenantIds.All(static tenantId => !string.IsNullOrWhiteSpace(tenantId)),
-                "MartenStudioOptions.KnownTenantIds cannot contain an empty or whitespace tenant id")
-            .ValidateSharedSchemas(nameof(MartenStudioOptions), Shape)
-            .ValidateSharedAcceptedChecks(nameof(MartenStudioOptions), MartenStudioDescriptor.Instance, static options => options.AcceptedCheckReasons);
+                "MartenOptions.KnownTenantIds cannot contain an empty or whitespace tenant id")
+            .ValidateSharedSchemas(nameof(MartenOptions), Shape)
+            .ValidateSharedAcceptedChecks(nameof(MartenOptions), MartenStudioDescriptor.Instance, static options => options.AcceptedCheckReasons);
 
         // 1.2-PROJ: the per-projection lag thresholds (a type of its own: a failure names the projection).
-        services.AddSingleton<IValidateOptions<MartenStudioOptions>, ProjectionThresholdsValidator>();
+        services.AddSingleton<IValidateOptions<MartenOptions>, ProjectionThresholdsValidator>();
 
         if (configure is not null)
         {
@@ -236,11 +236,11 @@ public static class MartenDataStudioBuilderExtensions
     }
 
     /// <summary>The options the Postgres and Marten modules share, as the shared validation reads them.</summary>
-    private static StudioOptionsShape Shape(MartenStudioOptions options) => new(
+    private static StudioOptionsShape Shape(MartenOptions options) => new(
         options.DefaultPageSize,
         options.MaxPageSize,
         options.QueryTimeout,
-        options.MaxInlineDocumentBytes,
+        options.MaxInlineValueBytes,
         options.MaxSqlConsoleRows,
         options.SqlConsoleRole,
         options.ExactCountThreshold,

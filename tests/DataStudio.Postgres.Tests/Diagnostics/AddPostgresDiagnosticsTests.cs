@@ -48,7 +48,7 @@ public class AddPostgresDiagnosticsTests
         provider.GetRequiredService<IOptions<PostgresDiagnosticsOptions>>().Value.BrowsableSchemas.Should().Equal("public");
 
         // The studio's paths are relative, as they always were, and meaningless where no UI is mounted.
-        diagnostics.GetStudioPath(new PostgresDatabaseRef("default", "app"), PostgresStudioPage.Health)
+        diagnostics.GetStudioPath(new PostgresDatabaseRef("default", "app"), PostgresPage.Health)
             .Should().Be("health?store=default&db=app");
     }
 
@@ -210,13 +210,13 @@ public class AddPostgresDiagnosticsTests
         await using ServiceProvider provider = services.BuildServiceProvider();
 
         // The one options object: what the engine reads is what the studio's options hold, live.
-        provider.GetRequiredService<IOptions<PostgresDiagnosticsOptions>>().Value.Should().BeSameAs(provider.GetRequiredService<IOptions<PostgresStudioOptions>>().Value);
+        provider.GetRequiredService<IOptions<PostgresDiagnosticsOptions>>().Value.Should().BeSameAs(provider.GetRequiredService<IOptions<PostgresOptions>>().Value);
         provider.GetRequiredService<DataStudio.Postgres.Services.Settings.IDiagnosticsSettings>().Should().BeSameAs(provider.GetRequiredService<DataStudio.Postgres.Services.Settings.IStudioSettings>());
         provider.GetRequiredService<DataStudio.Postgres.Services.Settings.IDiagnosticsSettings>().QueryTimeout.Should().Be(TimeSpan.FromSeconds(12));
     }
 
     /// <summary>
-    /// A host with no studio has no <c>PostgresStudioOptions</c>: the words its settings carry name the option on
+    /// A host with no studio has no <c>PostgresOptions</c>: the words its settings carry name the option on
     /// <c>PostgresDiagnosticsOptions</c>, and a studio's host keeps the sentence it always had.
     /// </summary>
     [Fact]
@@ -228,10 +228,10 @@ public class AddPostgresDiagnosticsTests
 
         words.Should().BeSameAs(DataStudio.Postgres.Services.Postgres.PostgresStudioText.DiagnosticsInstance);
         words.OptionsTypeName.Should().Be("PostgresDiagnosticsOptions");
-        words.UnjudgedOldest.Should().Contain("a schema PostgresDiagnosticsOptions.BrowsableSchemas does not admit").And.NotContain("PostgresStudioOptions");
+        words.UnjudgedOldest.Should().Contain("a schema PostgresDiagnosticsOptions.BrowsableSchemas does not admit").And.NotContain("PostgresOptions");
 
         DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance.UnjudgedOldest
-            .Should().Contain("a schema PostgresStudioOptions.BrowsableSchemas does not admit", "a studio host's sentence is unchanged")
+            .Should().Contain("a schema PostgresOptions.BrowsableSchemas does not admit", "a studio host's sentence is unchanged")
             .And.NotContain("PostgresDiagnosticsOptions");
 
         // Only the option's owner differs: every other word is the studio's.

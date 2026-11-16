@@ -71,7 +71,7 @@ internal sealed class SchemaFixture : IAsyncDisposable
     public static async Task<SchemaFixture> StartAsync(
         PostgresFixture postgres,
         string schema,
-        Action<MartenStudioOptions>? configure = null,
+        Action<MartenOptions>? configure = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(postgres);
@@ -98,7 +98,7 @@ internal sealed class SchemaFixture : IAsyncDisposable
     /// An index name to pass to <c>Schema.For&lt;SchemaCustomer&gt;().IgnoreIndex(...)</c>, which is how
     /// a host keeps a hand-made index that the migration would otherwise drop.
     /// </param>
-    public StudioHost Drifted(Action<MartenStudioOptions>? configure = null, string? ignoredIndex = null) =>
+    public StudioHost Drifted(Action<MartenOptions>? configure = null, string? ignoredIndex = null) =>
         BuildHost(extraIndex: true, configure, ignoredIndex);
 
     /// <summary>The name of the index the drifted configuration asks for and the database does not have.</summary>
@@ -161,7 +161,7 @@ internal sealed class SchemaFixture : IAsyncDisposable
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    private StudioHost BuildHost(bool extraIndex, Action<MartenStudioOptions>? configure, string? ignoredIndex = null)
+    private StudioHost BuildHost(bool extraIndex, Action<MartenOptions>? configure, string? ignoredIndex = null)
     {
         var services = new ServiceCollection();
 

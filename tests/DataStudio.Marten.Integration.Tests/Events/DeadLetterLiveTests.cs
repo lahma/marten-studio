@@ -122,7 +122,7 @@ public class DeadLetterLiveTests(PoisonStoreFixture fixture) : IClassFixture<Poi
         Func<Task> discard = () => Events.ReadOnlyService.DiscardDeadLetterAsync(Events.Scope, id, token);
 
         (await discard.Should().ThrowAsync<StudioCapabilityDeniedException>())
-            .Which.Message.Should().Contain("MartenStudioOptions.Capabilities.ManageDeadLetters");
+            .Which.Message.Should().Contain("MartenOptions.Capabilities.ManageDeadLetters");
 
         DeadLetterPage after = await Events.Service.ListDeadLettersAsync(Events.Scope, new DeadLetterQuery(), token);
         after.Rows.Should().Contain(x => x.Id == id, "a refusal must not have changed anything");
@@ -245,7 +245,7 @@ public class DeadLetterLiveTests(PoisonStoreFixture fixture) : IClassFixture<Poi
 
         Func<Task> discard = () => hidden.DiscardDeadLetterAsync(Events.Scope, id, token);
         (await discard.Should().ThrowAsync<InvalidOperationException>())
-            .Which.Message.Should().Be("Dead letters are hidden by MartenStudioOptions.IsDocumentTypeVisible.");
+            .Which.Message.Should().Be("Dead letters are hidden by MartenOptions.IsDocumentTypeVisible.");
 
         StudioActionLogEntry refused = provider.GetRequiredService<StudioActionLogService>().GetLatest().Should().ContainSingle().Subject;
         refused.Action.Should().Be("Discard dead letter");
@@ -254,7 +254,7 @@ public class DeadLetterLiveTests(PoisonStoreFixture fixture) : IClassFixture<Poi
 
         Func<Task> rewind = () => hidden.RewindSubscriptionAsync(Events.Scope, shown.Rows[0].ProjectionName, shown.Rows[0].EventSequence, token);
         (await rewind.Should().ThrowAsync<InvalidOperationException>())
-            .Which.Message.Should().Be("Dead letters are hidden by MartenStudioOptions.IsDocumentTypeVisible.", "refused before the daemon is asked");
+            .Which.Message.Should().Be("Dead letters are hidden by MartenOptions.IsDocumentTypeVisible.", "refused before the daemon is asked");
         provider.GetRequiredService<StudioActionLogService>().GetLatest().Should().HaveCount(2)
             .And.OnlyContain(static x => !x.Succeeded);
 
@@ -285,7 +285,7 @@ public class DeadLetterLiveTests(PoisonStoreFixture fixture) : IClassFixture<Poi
 
         services.AddDataStudio().AddMarten(options =>
         {
-            options.Capabilities = MartenStudioCapabilities.All();
+            options.Capabilities = MartenCapabilities.All();
             options.DiscoverTenantIds = false;
             options.IsDocumentTypeVisible = static type => type != typeof(JasperFx.Events.Daemon.DeadLetterEvent);
         });

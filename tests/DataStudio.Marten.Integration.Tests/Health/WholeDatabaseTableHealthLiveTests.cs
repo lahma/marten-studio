@@ -97,7 +97,7 @@ public class WholeDatabaseTableHealthLiveTests(WholeDatabaseTablesFixture fixtur
 
     private HealthLiveHost Host(
         ManualClock clock,
-        Action<MartenStudioOptions>? studio = null,
+        Action<MartenOptions>? studio = null,
         Action<IServiceCollection>? services = null,
         Action<StoreOptions>? store = null) =>
         HealthLiveHost.CreateOverDatabase(

@@ -3,7 +3,7 @@ using Npgsql;
 namespace DataStudio.Postgres;
 
 /// <summary>
-/// Options for the Postgres module of Data Studio, configured through <c>AddPostgres(Action&lt;PostgresStudioOptions&gt;)</c>.
+/// Options for the Postgres module of Data Studio, configured through <c>AddPostgres(Action&lt;PostgresOptions&gt;)</c>.
 /// Validation runs when the options are first read, which <c>MapDataStudio()</c> does at startup.
 /// </summary>
 /// <remarks>
@@ -15,21 +15,21 @@ namespace DataStudio.Postgres;
 /// application's own data sources, with their role, TLS and settings, and adds no new place that holds credentials.
 /// </para>
 /// <para>
-/// The members mirror <c>MartenStudioOptions</c> where both modules have the setting, with the same defaults and the
+/// The members mirror <c>MartenOptions</c> where both modules have the setting, with the same defaults and the
 /// same bounds, so a host that knows one knows the other. Where the studio is mounted, what it is called, who gets in and how often a
 /// live page polls are the shell's (<c>DataStudioOptions</c>); <see cref="ReadOnly" /> here turns only this module's capabilities off.
 /// </para>
 /// </remarks>
-public sealed class PostgresStudioOptions : PostgresDiagnosticsOptions
+public sealed class PostgresOptions : PostgresDiagnosticsOptions
 {
     /// <summary>
-    /// When set, evaluated against a <see cref="PostgresStudioResource" /> (with a <see langword="null" /> capability)
+    /// When set, evaluated against a <see cref="PostgresResource" /> (with a <see langword="null" /> capability)
     /// before a source or database is listed, framed or read.
     /// </summary>
     public string? SourceAuthorizationPolicy { get; set; }
 
     /// <summary>
-    /// When set, evaluated against a <see cref="PostgresStudioResource" /> carrying the capability name before every
+    /// When set, evaluated against a <see cref="PostgresResource" /> carrying the capability name before every
     /// read authorized like a write. When <see langword="null" />, <see cref="SourceAuthorizationPolicy" /> is used for
     /// those as well.
     /// </summary>
@@ -42,7 +42,7 @@ public sealed class PostgresStudioOptions : PostgresDiagnosticsOptions
     public bool ReadOnly { get; set; }
 
     /// <summary>Which reads authorized like writes are enabled. All off by default.</summary>
-    public PostgresStudioCapabilities Capabilities { get; set; } = new();
+    public PostgresCapabilities Capabilities { get; set; } = new();
 
     /// <summary>Rows per page when a list is first shown. Between 1 and <see cref="MaxPageSize" />.</summary>
     public int DefaultPageSize { get; set; } = 50;
@@ -76,7 +76,7 @@ public sealed class PostgresStudioOptions : PostgresDiagnosticsOptions
     /// <returns>These options, so calls can be chained.</returns>
     /// <exception cref="ArgumentException"><paramref name="name" /> is null, empty or whitespace.</exception>
     /// <exception cref="ArgumentNullException"><paramref name="resolve" /> is null.</exception>
-    public new PostgresStudioOptions AddDataSource(string name, Func<IServiceProvider, NpgsqlDataSource> resolve)
+    public new PostgresOptions AddDataSource(string name, Func<IServiceProvider, NpgsqlDataSource> resolve)
     {
         base.AddDataSource(name, resolve);
         return this;
@@ -92,7 +92,7 @@ public sealed class PostgresStudioOptions : PostgresDiagnosticsOptions
     /// <returns>These options, so calls can be chained.</returns>
     /// <exception cref="ArgumentException"><paramref name="name" /> is null, empty or whitespace.</exception>
     /// <exception cref="ArgumentNullException"><paramref name="resolve" /> is null.</exception>
-    public new PostgresStudioOptions AddDatabaseSource(string name, Func<IServiceProvider, IPostgresDatabaseSource> resolve)
+    public new PostgresOptions AddDatabaseSource(string name, Func<IServiceProvider, IPostgresDatabaseSource> resolve)
     {
         base.AddDatabaseSource(name, resolve);
         return this;

@@ -25,7 +25,7 @@ public class PublicApiTest
     [Fact]
     public async Task The_public_api_has_not_changed_unintentionally()
     {
-        var assembly = typeof(MartenStudioOptions).Assembly;
+        var assembly = typeof(MartenOptions).Assembly;
 
         var options = new ApiGeneratorOptions
         {

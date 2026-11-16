@@ -150,7 +150,7 @@ public class SampleWolverineLiveTests(SampleHostFixture fixture) : IClassFixture
         Say($"2. Search checkout.v1, last hour, no predicate: {found.Count} records ({result.StopReason}); opened {command.Topic}/{command.Partition}/{command.Offset}, key {command.Key.Text}");
 
         // The Traces link of the record page (a placeholder per value the visitor sees): the trace id of the command's parent-id header, escaped.
-        IReadOnlyList<KafkaExternalLink> links = KafkaMatchView.ExternalLinks(engine.Services.GetRequiredService<IOptions<KafkaStudioOptions>>().Value.ExternalLinks, command);
+        IReadOnlyList<KafkaExternalLink> links = KafkaMatchView.ExternalLinks(engine.Services.GetRequiredService<IOptions<KafkaOptions>>().Value.ExternalLinks, command);
         KafkaExternalLink traces = links.Should().ContainSingle(static x => x.Label == "Traces").Subject;
         traces.Href.Should().StartWith("https://tracing.example.invalid/trace/").And.MatchRegex("/trace/[0-9a-f]{32}$");
         Say($"   record page, external link: {traces.Label} -> {traces.Href}");

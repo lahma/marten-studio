@@ -221,7 +221,7 @@ public class HorizonServerLiveTests(HorizonServerFixture server) : IClassFixture
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
-    private static void Everything(MartenStudioOptions options) => options.Capabilities = MartenStudioCapabilities.All();
+    private static void Everything(MartenOptions options) => options.Capabilities = MartenCapabilities.All();
 
     /// <summary>
     /// Acceptance 1, T12's forecast on a stepped clock with real transaction-id consumption: a session holds a snapshot, so
@@ -546,7 +546,7 @@ public class HorizonServerLiveTests(HorizonServerFixture server) : IClassFixture
         string asOther = new NpgsqlConnectionStringBuilder(database) { Username = "h9_other", Password = "h9_other" }.ConnectionString;
         (NpgsqlConnection other, NpgsqlTransaction held) = await HorizonLive.HoldSnapshotAsync(asOther, HolderApplication);
 
-        static void Narrowed(MartenStudioOptions options) => options.SqlConsoleRole = "h9_narrow";
+        static void Narrowed(MartenOptions options) => options.SqlConsoleRole = "h9_narrow";
 
         await using ConnectionsLiveHost open = await ConnectionsLiveHost.CreateAsync(
             HorizonLive.Unpooled(database),
@@ -851,7 +851,7 @@ public class HorizonLiveTests(PostgresFixture postgres)
 
         ManualClock clock = new(Start);
         await using ConnectionsLiveHost host = await ConnectionsLiveHost.CreateAsync(
-            database, studio: static options => options.Capabilities = MartenStudioCapabilities.All(), clock: clock);
+            database, studio: static options => options.Capabilities = MartenCapabilities.All(), clock: clock);
 
         await new SampleDataSeeder().Populate(host.Store, Token);
 

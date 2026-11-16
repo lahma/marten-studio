@@ -55,7 +55,7 @@ internal static class HealthLinks
 
     /// <summary>
     /// The same link as <see cref="To" />, relative to the studio's mount path rather than to its <c>&lt;base href&gt;</c>:
-    /// the form the diagnostics API hands a host (<see cref="PostgresStudioLink" />).
+    /// the form the diagnostics API hands a host (<see cref="PostgresPageLink" />).
     /// </summary>
     /// <param name="sourceParameter">The studio's source parameter.</param>
     /// <param name="route">The page, relative to the studio root, with no leading slash.</param>

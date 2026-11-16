@@ -130,7 +130,7 @@ internal static class IndexAdvice
     /// <paramref name="managedTables" /> names it.
     /// </param>
     /// <param name="hiddenTables">
-    /// The tables of document types <c>MartenStudioOptions.IsDocumentTypeVisible</c> hides. Their indexes,
+    /// The tables of document types <c>MartenOptions.IsDocumentTypeVisible</c> hides. Their indexes,
     /// their declared-but-missing indexes and their collections are left out altogether: an index name is
     /// the table's name with a suffix.
     /// </param>

@@ -28,7 +28,7 @@ public sealed class PostgresSeamTests : IDisposable
 
     private static PostgresDatabaseDeclarationsSource Declarations(params string[] browsable)
     {
-        PostgresStudioOptions options = new();
+        PostgresOptions options = new();
         options.BrowsableSchemas.Clear();
 
         foreach (string schema in browsable)

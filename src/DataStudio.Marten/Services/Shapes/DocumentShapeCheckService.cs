@@ -38,7 +38,7 @@ internal sealed class DocumentShapeCheckService : IDocumentShapeCheck
 {
     private const string Kind = "documents";
 
-    private readonly IOptions<MartenStudioOptions> options;
+    private readonly IOptions<MartenOptions> options;
     private readonly StudioScopeResolver resolver;
     private readonly ColumnCatalog columnCatalog;
     private readonly ShapeCheckCache cache;
@@ -47,7 +47,7 @@ internal sealed class DocumentShapeCheckService : IDocumentShapeCheck
 
     /// <summary>The service a host's container builds.</summary>
     public DocumentShapeCheckService(
-        IOptions<MartenStudioOptions> options,
+        IOptions<MartenOptions> options,
         StudioScopeResolver resolver,
         ColumnCatalog columnCatalog,
         ShapeCheckCache cache,
@@ -57,7 +57,7 @@ internal sealed class DocumentShapeCheckService : IDocumentShapeCheck
     }
 
     internal DocumentShapeCheckService(
-        IOptions<MartenStudioOptions> options,
+        IOptions<MartenOptions> options,
         StudioScopeResolver resolver,
         ColumnCatalog columnCatalog,
         ShapeCheckCache cache,

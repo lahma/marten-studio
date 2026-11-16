@@ -25,7 +25,7 @@ public class TenantDiscoveryTest
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
-    private static TenantDiscovery Create(MartenStudioOptions options, TimeProvider? time = null) =>
+    private static TenantDiscovery Create(MartenOptions options, TimeProvider? time = null) =>
         new(Options.Create(options), NullLogger<TenantDiscovery>.Instance, time ?? TimeProvider.System);
 
     private static (IDocumentStore Store, ServiceProvider Provider) BuildStore(Action<StoreOptions> configure)
@@ -43,7 +43,7 @@ public class TenantDiscoveryTest
     [Fact]
     public async Task Configured_tenant_ids_are_used_and_nothing_is_discovered()
     {
-        var options = new MartenStudioOptions();
+        var options = new MartenOptions();
         options.KnownTenantIds.Add("acme");
         options.KnownTenantIds.Add("globex");
 
@@ -60,7 +60,7 @@ public class TenantDiscoveryTest
     [Fact]
     public async Task Discovery_turned_off_and_nothing_configured_is_unavailable_rather_than_empty()
     {
-        var options = new MartenStudioOptions { DiscoverTenantIds = false };
+        var options = new MartenOptions { DiscoverTenantIds = false };
 
         var (store, provider) = BuildStore(x => x.Connection(DummyConnectionString));
         using var _ = provider;
@@ -95,7 +95,7 @@ public class TenantDiscoveryTest
         var databases = await store.Storage.AllDatabases();
         var first = databases.Single(x => x.Id.Server.Equals("h1.invalid", StringComparison.OrdinalIgnoreCase));
 
-        var tenants = await Create(new MartenStudioOptions()).DiscoverAsync("default", store, first, databases, Token);
+        var tenants = await Create(new MartenOptions()).DiscoverAsync("default", store, first, databases, Token);
 
         tenants.Source.Should().Be(TenantListSource.Descriptor);
         tenants.Ids.Should().Equal("acme", "globex");
@@ -115,7 +115,7 @@ public class TenantDiscoveryTest
         var databases = await store.Storage.AllDatabases();
         var second = databases.Single(x => x.Id.Server.Equals("h2.invalid", StringComparison.OrdinalIgnoreCase));
 
-        var tenants = await Create(new MartenStudioOptions()).DiscoverAsync("default", store, second, databases, Token);
+        var tenants = await Create(new MartenOptions()).DiscoverAsync("default", store, second, databases, Token);
 
         tenants.Ids.Should().Equal("initech");
     }
@@ -131,7 +131,7 @@ public class TenantDiscoveryTest
         var (store, provider) = BuildStore(x => x.Connection(DummyConnectionString));
         using var _ = provider;
 
-        var tenants = await Create(new MartenStudioOptions()).DiscoverAsync("default", store, store.Storage.Database, [store.Storage.Database], Token);
+        var tenants = await Create(new MartenOptions()).DiscoverAsync("default", store, store.Storage.Database, [store.Storage.Database], Token);
 
         tenants.Source.Should().Be(TenantListSource.Unavailable);
     }
@@ -140,7 +140,7 @@ public class TenantDiscoveryTest
     public async Task The_answer_is_cached_for_a_minute_per_store_and_database()
     {
         var time = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
-        var options = new MartenStudioOptions();
+        var options = new MartenOptions();
 
         var (store, provider) = BuildStore(x => x.MultiTenantedDatabases(databases =>
             databases.AddMultipleTenantDatabase(FirstConnectionString, "tenants-a").ForTenants("acme")));
@@ -164,7 +164,7 @@ public class TenantDiscoveryTest
     [Fact]
     public async Task Invalidate_forgets_the_cache_for_the_refresh_button()
     {
-        var options = new MartenStudioOptions();
+        var options = new MartenOptions();
         var (store, provider) = BuildStore(x => x.MultiTenantedDatabases(databases =>
             databases.AddMultipleTenantDatabase(FirstConnectionString, "tenants-a").ForTenants("acme")));
         using var _ = provider;

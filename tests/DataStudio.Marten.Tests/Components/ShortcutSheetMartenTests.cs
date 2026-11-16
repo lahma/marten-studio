@@ -20,7 +20,7 @@ public class ShortcutSheetMartenTests
     /// <summary>The shell's descriptor as <c>AddMarten()</c> leaves it: the database as the one module.</summary>
     private static StudioShellDescriptor ShellOf(StudioDescriptor descriptor)
     {
-        MartenStudioSettings settings = MartenStudioSettings.Of(new MartenStudioOptions());
+        MartenStudioSettings settings = MartenStudioSettings.Of(new MartenOptions());
         return StudioModuleComposition.Compose([new DatabaseStudioModule(descriptor, settings, new StudioCapabilityGuard(settings))]);
     }
 

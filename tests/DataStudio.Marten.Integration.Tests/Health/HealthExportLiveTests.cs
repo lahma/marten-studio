@@ -162,7 +162,7 @@ public class HealthExportLiveTests(PostgresFixture postgres)
                 "health_export_mt",
                 Environments.Development,
                 store: options => MasterTable(options, master),
-                services: static services => services.AddHealthChecks().AddMartenStudio(name: Name));
+                services: static services => services.AddHealthChecks().AddMartenDiagnostics(name: Name));
 
             // The application resolves one tenant, as its own traffic would: no apply, no seed, one row read.
             ITenancy tenancy = host.Store.Options.Tenancy;
@@ -224,7 +224,7 @@ public class HealthExportLiveTests(PostgresFixture postgres)
                     });
                     options.TenantIdStyle = TenantIdStyle.ForceLowerCase;
                 },
-                services: static services => services.AddHealthChecks().AddMartenStudio(name: Name));
+                services: static services => services.AddHealthChecks().AddMartenDiagnostics(name: Name));
 
             // The application's own enumeration, as its daemon or its startup would make it: the pool, loaded.
             _ = await host.Store.Storage.AllDatabases();
@@ -269,7 +269,7 @@ public class HealthExportLiveTests(PostgresFixture postgres)
         string environment,
         Action<StoreOptions>? store = null,
         Action<IServiceCollection>? services = null,
-        Action<MartenStudioOptions>? studio = null)
+        Action<MartenOptions>? studio = null)
     {
         // A pool that is this test's alone: two pools with one connection string are one pool to Postgres, and
         // a connections check would be counting another test's sessions as this store's.
@@ -290,7 +290,7 @@ public class HealthExportLiveTests(PostgresFixture postgres)
             studio: studio,
             services: collection =>
             {
-                collection.AddHealthChecks().AddMartenStudio(name: Name, tags: ["marten"]);
+                collection.AddHealthChecks().AddMartenDiagnostics(name: Name, tags: ["marten"]);
 
                 // After AddMartenStudio's own registration, so a test's narrower registry is the one resolved.
                 services?.Invoke(collection);

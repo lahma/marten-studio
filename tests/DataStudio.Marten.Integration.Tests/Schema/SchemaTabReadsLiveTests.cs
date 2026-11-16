@@ -283,7 +283,7 @@ public class SchemaTabReadsLiveTests(SchemaTabReadsLiveTests.Fixture fixture) : 
     /// <summary>The fixture's studio, with an ancillary store registered whose factory throws.</summary>
     private BrowserHost BrokenHost(
         Microsoft.AspNetCore.Authorization.IAuthorizationService? authorization = null,
-        Action<MartenStudioOptions>? configure = null) =>
+        Action<MartenOptions>? configure = null) =>
         fixture.Host(
             configure,
             authorization,

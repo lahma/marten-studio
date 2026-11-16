@@ -35,7 +35,7 @@ internal static class MartenRelationshipGraph
 {
     /// <summary>The store's nodes, its hidden tables, its own schemas and the members behind its columns.</summary>
     /// <param name="storeOptions">The scoped store's read-only options.</param>
-    /// <param name="isVisible"><c>MartenStudioOptions.IsDocumentTypeVisible</c>, or <see langword="null" />.</param>
+    /// <param name="isVisible"><c>MartenOptions.IsDocumentTypeVisible</c>, or <see langword="null" />.</param>
     /// <param name="estimates">
     /// <c>reltuples</c> per table, keyed as <c>DocumentBrowseQueries.Key</c> spells it. Empty is a valid argument -
     /// the referenced-by read builds the same graph and has no use for the counts.
@@ -75,7 +75,7 @@ internal static class MartenRelationshipGraph
     /// document type where the configuration says which.
     /// </summary>
     /// <param name="storeOptions">The scoped store's read-only options.</param>
-    /// <param name="isVisible"><c>MartenStudioOptions.IsDocumentTypeVisible</c>, or <see langword="null" />.</param>
+    /// <param name="isVisible"><c>MartenOptions.IsDocumentTypeVisible</c>, or <see langword="null" />.</param>
     public static IReadOnlyList<RelationshipDeclaredKey> DeclaredKeys(IReadOnlyStoreOptions storeOptions, Func<Type, bool>? isVisible)
     {
         ArgumentNullException.ThrowIfNull(storeOptions);
@@ -141,7 +141,7 @@ internal static class MartenRelationshipGraph
     /// with no database.
     /// </summary>
     /// <param name="storeOptions">The scoped store's read-only options.</param>
-    /// <param name="isVisible"><c>MartenStudioOptions.IsDocumentTypeVisible</c>, or <see langword="null" />.</param>
+    /// <param name="isVisible"><c>MartenOptions.IsDocumentTypeVisible</c>, or <see langword="null" />.</param>
     /// <param name="physicalKeys">The foreign keys Postgres has around the store's schemas.</param>
     /// <param name="estimates"><c>reltuples</c> per document table; empty is valid.</param>
     /// <param name="readAt">When the reads happened.</param>

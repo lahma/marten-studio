@@ -305,6 +305,6 @@ internal static class SessionEvidence
     /// visitor may read of another application's statement depends on which schemas they may see.
     /// </summary>
     public const string StatementsOnSessionsPage =
-        "The statements themselves are on Database › Sessions, behind MartenStudioOptions.Capabilities.ViewDatabaseActivity, "
+        "The statements themselves are on Database › Sessions, behind MartenOptions.Capabilities.ViewDatabaseActivity, "
         + "masked for the schemas you may not see.";
 }

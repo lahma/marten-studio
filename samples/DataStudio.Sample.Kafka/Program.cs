@@ -104,7 +104,7 @@ DataStudioBuilder studio = builder.Services.AddDataStudio(options =>
 studio.AddMarten(options =>
 {
     options.WriteAuthorizationPolicy = SamplePolicies.StudioWrite;
-    options.Capabilities = MartenStudioCapabilities.All();
+    options.Capabilities = MartenCapabilities.All();
 
     foreach (string tenantId in SampleStore.TenantIds)
     {

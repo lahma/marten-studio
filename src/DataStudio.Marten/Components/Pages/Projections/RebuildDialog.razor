@@ -98,7 +98,7 @@
     <p class="ms-muted ms-rebuild-timeout-note">
         The tables are emptied first and then replayed, so a shard that has not finished within
         @TimeoutText stops with them still empty. Raise
-        <code>MartenStudioOptions.RebuildShardTimeout</code> if this store needs longer.
+        <code>MartenOptions.RebuildShardTimeout</code> if this store needs longer.
     </p>
 
     @if (Warnings.Count > 0)
@@ -205,7 +205,7 @@
     public string? Tenant { get; set; }
 
     /// <summary>
-    /// How long each shard is given to replay - <c>MartenStudioOptions.RebuildShardTimeout</c>.
+    /// How long each shard is given to replay - <c>MartenOptions.RebuildShardTimeout</c>.
     /// </summary>
     /// <remarks>
     /// Shown because it is not a retry budget: Marten tears the projection's tables down before the

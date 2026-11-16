@@ -1,10 +1,10 @@
+using DataStudio.Services.Settings;
 using System.Globalization;
 
 using JasperFx.Events;
 
 using DataStudio.Marten.Services.Events;
 
-using Microsoft.Extensions.Options;
 
 using DataStudio.Postgres.Services;
 using DataStudio.Postgres.Services.Find;
@@ -42,13 +42,13 @@ internal sealed class StreamFindContributor : IFindContributor
 
     private readonly IEventDataService events;
     private readonly IFindScopes scopes;
-    private readonly IOptions<MartenStudioOptions> options;
+    private readonly IShellSettings settings;
 
-    public StreamFindContributor(IEventDataService events, IFindScopes scopes, IOptions<MartenStudioOptions> options)
+    public StreamFindContributor(IEventDataService events, IFindScopes scopes, IShellSettings settings)
     {
         this.events = events;
         this.scopes = scopes;
-        this.options = options;
+        this.settings = settings;
     }
 
     /// <inheritdoc />
@@ -178,7 +178,7 @@ internal sealed class StreamFindContributor : IFindContributor
             hits.Add(new FindHit(
                 Kind: kind,
                 Title: title(row),
-                Url: EventLinks.ToStream(options.Value, at, row.Id),
+                Url: EventLinks.ToStream(settings, at, row.Id),
                 Scope: at,
                 Id: identity + "\u001f" + row.Id,
                 TenantChip: rowTenant is null ? null : "tenant " + rowTenant,

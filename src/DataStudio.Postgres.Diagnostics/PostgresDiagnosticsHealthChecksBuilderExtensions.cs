@@ -10,7 +10,7 @@ namespace DataStudio.Postgres;
 /// <summary>
 /// Adds Postgres Studio's health advisor to the host's own ASP.NET Core health checks.
 /// </summary>
-public static class PostgresStudioHealthChecksBuilderExtensions
+public static class PostgresDiagnosticsHealthChecksBuilderExtensions
 {
     /// <summary>
     /// Registers one health check that runs the advisor's configuration and catalog checks over every database the
@@ -18,10 +18,10 @@ public static class PostgresStudioHealthChecksBuilderExtensions
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>Opt-in, and nothing else registers it.</b> <c>AddPostgresDiagnostics()</c> and <c>AddPostgresStudio()</c> do not call this, and a host that
+    /// <b>Opt-in, and nothing else registers it.</b> <c>services.AddPostgresDiagnostics()</c> and <c>AddPostgres()</c> on the shell's builder do not call this, and a host that
     /// never does is exactly the application it was: no health check, no hosted service, no timer. Once registered, the
     /// check runs only when the host's health endpoint is probed. <c>services.AddPostgresDiagnostics()</c> or
-    /// <c>services.AddPostgresStudio()</c> must be called as well; without either the check reports
+    /// <c>services.AddDataStudio().AddPostgres()</c> must be called as well; without either the check reports
     /// <see cref="HealthStatus.Degraded" /> and says so.
     /// </para>
     /// <para>
@@ -58,7 +58,7 @@ public static class PostgresStudioHealthChecksBuilderExtensions
     /// <returns>The same builder, so calls can be chained.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="builder" /> or <paramref name="name" /> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="name" /> is empty or whitespace.</exception>
-    public static IHealthChecksBuilder AddPostgresStudio(
+    public static IHealthChecksBuilder AddPostgresDiagnostics(
         this IHealthChecksBuilder builder,
         string name = "postgres-studio",
         HealthStatus? failureStatus = null,
@@ -70,7 +70,7 @@ public static class PostgresStudioHealthChecksBuilderExtensions
 
         // One runner per process however many registrations name it, so a liveness and a readiness check over the same
         // studio still cost one run per interval between them. Built with Postgres Studio's words, which are the ones it
-        // says "call services.AddPostgresDiagnostics() or services.AddPostgresStudio()" in when neither was added.
+        // says "call services.AddPostgresDiagnostics() or services.AddDataStudio().AddPostgres()" in when neither was added.
         builder.Services.TryAddSingleton(static services =>
             ActivatorUtilities.CreateInstance<HealthExportRunner>(services, PostgresStudioText.Instance));
 

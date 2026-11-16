@@ -269,7 +269,7 @@ public class ConnectionHoldersLiveTests(HoldersServerFixture server) : IClassFix
             {
                 if (capabilities)
                 {
-                    options.Capabilities = PostgresStudioCapabilities.All();
+                    options.Capabilities = PostgresCapabilities.All();
                 }
 
                 if (registerB)

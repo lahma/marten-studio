@@ -63,7 +63,7 @@ internal class StudioComponentContext : BunitContext
     /// </remarks>
     public StudioComponentContext(Action<IServiceCollection>? configure = null)
     {
-        Options = new MartenStudioOptions();
+        Options = new MartenOptions();
         ShellOptions = new DataStudioOptions();
         Catalog = new FakeStudioScopeCatalog();
         StoreInfo = new FakeStoreInfoService();
@@ -82,7 +82,7 @@ internal class StudioComponentContext : BunitContext
         JSInterop.Mode = JSRuntimeMode.Loose;
 
         Services.AddLogging(static builder => builder.SetMinimumLevel(LogLevel.Warning));
-        Services.AddSingleton<IOptions<MartenStudioOptions>>(Microsoft.Extensions.Options.Options.Create(Options));
+        Services.AddSingleton<IOptions<MartenOptions>>(Microsoft.Extensions.Options.Options.Create(Options));
 
         // What the shared shell reads in place of the options: the live settings adapter over the same options
         // instance - so WithPolicy, WithReadOnly and every test that sets an option after construction are seen - the
@@ -90,7 +90,7 @@ internal class StudioComponentContext : BunitContext
         Services.AddSingleton<IOptions<DataStudioOptions>>(Microsoft.Extensions.Options.Options.Create(ShellOptions));
         Services.AddSingleton<IShellSettings, ShellSettings>();
         Services.AddSingleton<IStudioSettings>(static provider =>
-            new MartenStudioSettings(provider.GetRequiredService<IOptions<MartenStudioOptions>>(), provider.GetRequiredService<IShellSettings>()));
+            new MartenStudioSettings(provider.GetRequiredService<IOptions<MartenOptions>>(), provider.GetRequiredService<IShellSettings>()));
         Services.AddSingleton(MartenStudioDescriptor.Instance);
         Services.AddSingleton<IStudioLinks, MartenStudioLinks>();
         Services.AddSingleton<IHttpContextAccessor>(new HttpContextAccessor());
@@ -187,7 +187,7 @@ internal class StudioComponentContext : BunitContext
     }
 
     /// <summary>The options an application would have configured.</summary>
-    public MartenStudioOptions Options { get; }
+    public MartenOptions Options { get; }
 
     /// <summary>The shell's options: the mount, the title, the entry policy, the application path and the poll interval are its, not the module's.</summary>
     public DataStudioOptions ShellOptions { get; }
@@ -288,14 +288,14 @@ internal class StudioComponentContext : BunitContext
     /// <summary>Enables every mutating capability, the way a host opts in with one line.</summary>
     public StudioComponentContext WithAllCapabilities()
     {
-        Options.Capabilities = MartenStudioCapabilities.All();
+        Options.Capabilities = MartenCapabilities.All();
         return this;
     }
 
     /// <summary>Turns the master switch on, which turns every capability off however they were set.</summary>
     public StudioComponentContext WithReadOnly()
     {
-        Options.Capabilities = MartenStudioCapabilities.All();
+        Options.Capabilities = MartenCapabilities.All();
         Options.ReadOnly = true;
         return this;
     }

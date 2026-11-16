@@ -100,7 +100,7 @@ public class StreamCompactionPageTests
         IRenderedComponent<StreamDetail> page = Render(context);
 
         page.Find(".ms-stream-compact .ms-capability-disabled").TextContent.Should()
-            .Contain("MartenStudioOptions.Capabilities.CompactStreams");
+            .Contain("MartenOptions.Capabilities.CompactStreams");
         page.FindAll(CompactButton).Should().BeEmpty();
     }
 

@@ -9,7 +9,7 @@ namespace DataStudio.Postgres.Services.Settings;
 /// <param name="DefaultPageSize">The page size a grid opens with.</param>
 /// <param name="MaxPageSize">The largest page size.</param>
 /// <param name="QueryTimeout">The statement timeout.</param>
-/// <param name="MaxInlineBytes">The inline-value cap: MartenStudio's <c>MaxInlineDocumentBytes</c>, PostgresStudio's <c>MaxInlineValueBytes</c>.</param>
+/// <param name="MaxInlineBytes">The inline-value cap: MartenStudio's <c>MaxInlineValueBytes</c>, PostgresStudio's <c>MaxInlineValueBytes</c>.</param>
 /// <param name="MaxSqlConsoleRows">The console's row cap.</param>
 /// <param name="SqlConsoleRole">The console's role.</param>
 /// <param name="ExactCountThreshold">The exact-count threshold.</param>
@@ -45,8 +45,8 @@ internal static class StudioOptionsValidation
 {
     /// <summary>The page sizes, the timeouts, the inline cap, the console's rows and role, the count threshold and the health interval.</summary>
     /// <param name="builder">The studio's options builder.</param>
-    /// <param name="optionsType">The options type's name: <c>MartenStudioOptions</c>.</param>
-    /// <param name="inlineMember">The inline cap's member name: <c>MaxInlineDocumentBytes</c>.</param>
+    /// <param name="optionsType">The options type's name: <c>MartenOptions</c>.</param>
+    /// <param name="inlineMember">The inline cap's member name: <c>MaxInlineValueBytes</c>.</param>
     /// <param name="shape">The shared options of one instance.</param>
     public static OptionsBuilder<TOptions> ValidateSharedBounds<TOptions>(
         this OptionsBuilder<TOptions> builder,
@@ -94,7 +94,7 @@ internal static class StudioOptionsValidation
     /// <summary>The capabilities object, which a host may set to <see langword="null" /> by mistake.</summary>
     /// <param name="builder">The studio's options builder.</param>
     /// <param name="optionsType">The options type's name.</param>
-    /// <param name="capabilitiesType">The capabilities type's name: <c>MartenStudioCapabilities</c>.</param>
+    /// <param name="capabilitiesType">The capabilities type's name: <c>MartenCapabilities</c>.</param>
     /// <param name="shape">The shared options of one instance.</param>
     public static OptionsBuilder<TOptions> ValidateSharedCapabilities<TOptions>(
         this OptionsBuilder<TOptions> builder,

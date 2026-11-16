@@ -57,7 +57,7 @@ public class HealthExportEndpointTests
             options.DatabaseSchemaName = "health_export_endpoint";
         });
         builder.Services.AddDataStudio().AddMarten();
-        builder.Services.AddHealthChecks().AddMartenStudio();
+        builder.Services.AddHealthChecks().AddMartenDiagnostics();
 
         WebApplication app = builder.Build();
         app.MapHealthChecks("/healthz");

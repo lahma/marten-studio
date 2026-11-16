@@ -11,7 +11,7 @@ namespace DataStudio.Marten.Services.Query;
 /// <remarks>
 /// <para>
 /// A separate seam from <see cref="IQueryService" /> because its gate is separate:
-/// <see cref="MartenStudioCapabilities.RunLinqQueries" />, asked like a write (D13), where a Marten
+/// <see cref="MartenCapabilities.RunLinqQueries" />, asked like a write (D13), where a Marten
 /// <c>where</c> clause needs no capability and the console needs <c>RunSql</c>. It is an interface for the
 /// same reason every data seam is (D12): the page tests drive every refusal without a Postgres.
 /// </para>
@@ -31,7 +31,7 @@ internal interface ILinqQueryService
 
     /// <summary>Runs one page of a LINQ query.</summary>
     /// <exception cref="StudioCapabilityDeniedException">
-    /// <see cref="MartenStudioCapabilities.RunLinqQueries" /> is off, or the studio is read-only. Nothing is parsed.
+    /// <see cref="MartenCapabilities.RunLinqQueries" /> is off, or the studio is read-only. Nothing is parsed.
     /// </exception>
     /// <exception cref="StudioNotAuthorizedException">
     /// The store policy, or the write policy asked with <c>RunLinqQueries</c>, refused this scope. Nothing is parsed.

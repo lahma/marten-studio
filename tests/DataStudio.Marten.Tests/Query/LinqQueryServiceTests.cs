@@ -31,7 +31,7 @@ public class LinqQueryServiceTests
     [Fact]
     public async Task A_capability_that_is_off_refuses_before_anything_is_resolved_or_parsed()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = new MartenStudioCapabilities());
+        await using Harness harness = Harness.Create(static options => options.Capabilities = new MartenCapabilities());
 
         Func<Task> run = () => harness.Linq.RunAsync(Scope, new LinqQueryRequest("linqorder", "Name == \"a\""), Token);
 
@@ -47,7 +47,7 @@ public class LinqQueryServiceTests
     {
         await using Harness harness = Harness.Create(static options =>
         {
-            options.Capabilities = MartenStudioCapabilities.All();
+            options.Capabilities = MartenCapabilities.All();
             options.ReadOnly = true;
         });
 
@@ -60,7 +60,7 @@ public class LinqQueryServiceTests
     [Fact]
     public async Task The_write_policy_is_asked_with_RunLinqQueries_and_its_refusal_is_audited()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All());
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenCapabilities.All());
         harness.Policies.Allow(static resource => resource.Capability is null);
 
         Func<Task> run = () => harness.Linq.RunAsync(Scope, new LinqQueryRequest("linqorder", "Name == \"a\""), Token);
@@ -74,12 +74,12 @@ public class LinqQueryServiceTests
     [Fact]
     public async Task A_capability_that_is_off_is_what_the_page_is_told_before_the_version()
     {
-        await using Harness off = Harness.Create(static options => options.Capabilities = new MartenStudioCapabilities());
+        await using Harness off = Harness.Create(static options => options.Capabilities = new MartenCapabilities());
         (await off.Linq.DescribeAsync(Scope, Token)).Availability.Should().Be(LinqAvailability.CapabilityOff);
 
         await using Harness readOnly = Harness.Create(static options =>
         {
-            options.Capabilities = MartenStudioCapabilities.All();
+            options.Capabilities = MartenCapabilities.All();
             options.ReadOnly = true;
         });
         (await readOnly.Linq.DescribeAsync(Scope, Token)).Availability.Should().Be(LinqAvailability.ReadOnly);
@@ -94,7 +94,7 @@ public class LinqQueryServiceTests
     {
         await using Harness harness = Harness.Create(static options =>
         {
-            options.Capabilities = MartenStudioCapabilities.All();
+            options.Capabilities = MartenCapabilities.All();
             options.IsDocumentTypeVisible = static type => type != typeof(LinqSecret);
         });
 
@@ -113,7 +113,7 @@ public class LinqQueryServiceTests
     [DynamicLinqFact]
     public async Task A_screened_predicate_is_a_value_with_a_caret_and_an_audit_entry()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All());
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenCapabilities.All());
 
         LinqQueryResult result = await harness.Linq.RunAsync(
             Scope, new LinqQueryRequest("linqorder", "Name == System.IO.File.ReadAllText(\"c:/x\")"), Token);
@@ -129,7 +129,7 @@ public class LinqQueryServiceTests
     [DynamicLinqFact]
     public async Task A_page_past_the_offset_cap_is_refused()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All());
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenCapabilities.All());
 
         LinqQueryResult result = await harness.Linq.RunAsync(
             Scope, new LinqQueryRequest("linqorder", "Rush", Offset: LinqQueryLimits.MaxOffset + 1), Token);
@@ -140,7 +140,7 @@ public class LinqQueryServiceTests
     [DynamicLinqFact]
     public async Task An_accepted_query_is_built_by_Marten_and_only_then_reaches_for_the_database()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All());
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenCapabilities.All());
 
         LinqQueryResult result = await harness.Linq.RunAsync(
             Scope, new LinqQueryRequest("linqorder", "Name == \"a\" and Total > 100", "Total desc"), Token);
@@ -157,7 +157,7 @@ public class LinqQueryServiceTests
     {
         await using Harness harness = Harness.Create(static options =>
         {
-            options.Capabilities = MartenStudioCapabilities.All();
+            options.Capabilities = MartenCapabilities.All();
             options.IsDocumentTypeVisible = static type => type != typeof(LinqSecret);
         });
 
@@ -179,7 +179,7 @@ public class LinqQueryServiceTests
     [DynamicLinqFact]
     public async Task The_pages_hints_are_asked_by_the_registered_key_and_the_databases_identity()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All());
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenCapabilities.All());
         harness.Policies.Allow(static resource =>
             !(resource.Capability == nameof(StudioCapability.RunLinqQueries) && resource.StoreName == "default"));
 
@@ -220,7 +220,7 @@ public class LinqQueryServiceTests
         /// <summary>The store's one database's own identity, which an empty <c>?db=</c> resolves to.</summary>
         public string Identity => provider.GetRequiredService<IDocumentStore>().Storage.Database.Id.Identity;
 
-        public static Harness Create(Action<MartenStudioOptions> configure)
+        public static Harness Create(Action<MartenOptions> configure)
         {
             var users = new TestAuthenticationStateProvider();
             users.SignIn("tester");

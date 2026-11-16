@@ -12,7 +12,7 @@ namespace DataStudio.Marten.Tests.Projections;
 
 /// <summary>
 /// The projections screen's mutating controls against
-/// <see cref="MartenStudioOptions.WriteAuthorizationPolicy" />, which is asked about the visitor rather
+/// <see cref="MartenOptions.WriteAuthorizationPolicy" />, which is asked about the visitor rather
 /// than about the process.
 /// </summary>
 /// <remarks>
@@ -137,7 +137,7 @@ public class ProjectionsWritePolicyTests
 
         var page = context.Render<Page>();
 
-        page.Markup.Should().Contain("MartenStudioOptions.Capabilities.ControlDaemon");
+        page.Markup.Should().Contain("MartenOptions.Capabilities.ControlDaemon");
         page.FindAll(".ms-write-refusal").Should().BeEmpty();
     }
 

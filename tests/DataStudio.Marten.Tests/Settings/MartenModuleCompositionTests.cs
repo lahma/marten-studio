@@ -54,7 +54,7 @@ public class MartenModuleCompositionTests
 
     private static readonly StudioDescriptor Host = DataStudio.Marten.Services.MartenStudioDescriptor.Instance;
 
-    private static readonly DataStudio.Marten.Services.MartenStudioSettings Settings = DataStudio.Marten.Services.MartenStudioSettings.Of(Options.Create(new MartenStudioOptions()));
+    private static readonly DataStudio.Marten.Services.MartenStudioSettings Settings = DataStudio.Marten.Services.MartenStudioSettings.Of(Options.Create(new MartenOptions()));
 
     private static DatabaseStudioModule Database() => new(Host, Settings, new StudioCapabilityGuard(Settings));
 

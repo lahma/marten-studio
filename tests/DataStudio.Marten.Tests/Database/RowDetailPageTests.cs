@@ -73,8 +73,8 @@ public class RowDetailPageTests
         row = page.FindAll(".ms-row-kv-row")[calendar];
         row.QuerySelector(".ms-row-value-text")!.TextContent.Should().HaveLength(600);
         // MartenStudio's own spelling, unchanged since the option became a settings member (PS-3a); PostgresStudio's
-        // sentence names PostgresStudioOptions.MaxInlineValueBytes instead.
-        row.QuerySelector(".ms-row-value-note")!.TextContent.Should().Contain("(MartenStudioOptions.MaxInlineDocumentBytes)");
+        // sentence names PostgresOptions.MaxInlineValueBytes instead.
+        row.QuerySelector(".ms-row-value-note")!.TextContent.Should().Contain("(MartenOptions.MaxInlineValueBytes)");
     }
 
     [Fact]
@@ -234,7 +234,7 @@ public class RowDetailPageTests
         context.TableRows.ReferencesAsked.Should().BeEmpty("nothing is read about a row that is not there");
         string notThere = page.Find(".ms-row-not-found").TextContent;
 
-        context.TableRows.Detail = TableRowDetail.Refused(DatabaseRefusal.SchemaNotBrowsable, "Schema 'quartz' is not one MartenStudioOptions.BrowsableSchemas admits.");
+        context.TableRows.Detail = TableRowDetail.Refused(DatabaseRefusal.SchemaNotBrowsable, "Schema 'quartz' is not one MartenOptions.BrowsableSchemas admits.");
         page = Render(context, TriggerRow.Replace("trigger-00", "trigger-01", StringComparison.Ordinal));
 
         page.Find(".ms-row-not-found").TextContent.Should().Be(notThere, "outside the gate reads exactly like not there");
@@ -299,7 +299,7 @@ public class RowDetailPageTests
         await using var context = await RowUiData.ContextAsync();
         context.TableRows.Detail = new TableRowDetail
         {
-            Error = new TableRowError("57014", "The read took longer than MartenStudioOptions.QueryTimeout (30 s) and Postgres cancelled it.", null),
+            Error = new TableRowError("57014", "The read took longer than MartenOptions.QueryTimeout (30 s) and Postgres cancelled it.", null),
         };
 
         var page = Render(context, TriggerRow);

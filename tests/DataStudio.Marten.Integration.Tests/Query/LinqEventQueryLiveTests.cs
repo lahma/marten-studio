@@ -75,7 +75,7 @@ internal sealed class LinqEventHarness : IAsyncDisposable
 
     public static async Task<LinqEventHarness> CreateAsync(
         Action<StoreOptions> store,
-        Action<MartenStudioOptions>? studio = null,
+        Action<MartenOptions>? studio = null,
         Func<IDocumentStore, Task>? seed = null,
         bool apply = true)
     {

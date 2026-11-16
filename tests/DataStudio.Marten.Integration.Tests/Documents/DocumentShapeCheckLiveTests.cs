@@ -56,7 +56,7 @@ public class DocumentShapeCheckLiveTests(DocumentShapeCheckLiveTests.Fixture fix
         }
 
         /// <inheritdoc />
-        protected override void ConfigureStudio(MartenStudioOptions options) =>
+        protected override void ConfigureStudio(MartenOptions options) =>
             options.IsDocumentTypeVisible = static type => type != typeof(ShapeLiveHidden);
 
         /// <inheritdoc />
@@ -304,7 +304,7 @@ public class DocumentShapeCheckLiveTests(DocumentShapeCheckLiveTests.Fixture fix
         IServiceProvider provider = scope.ServiceProvider;
 
         DocumentShapeCheckService service = new(
-            provider.GetRequiredService<IOptions<MartenStudioOptions>>(),
+            provider.GetRequiredService<IOptions<MartenOptions>>(),
             provider.GetRequiredService<StudioScopeResolver>(),
             provider.GetRequiredService<ColumnCatalog>(),
             new ShapeCheckCache(),

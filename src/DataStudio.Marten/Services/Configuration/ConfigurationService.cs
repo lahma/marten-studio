@@ -27,7 +27,7 @@ namespace DataStudio.Marten.Services.Configuration;
 /// </remarks>
 internal sealed class ConfigurationService : IConfigurationService
 {
-    private readonly IOptions<MartenStudioOptions> options;
+    private readonly IOptions<MartenOptions> options;
     private readonly StudioScopeResolver resolver;
     private readonly StudioAuthorization authorization;
     private readonly IStoreInfoService storeInfo;
@@ -36,7 +36,7 @@ internal sealed class ConfigurationService : IConfigurationService
     private readonly IHostEnvironment? hostEnvironment;
 
     public ConfigurationService(
-        IOptions<MartenStudioOptions> options,
+        IOptions<MartenOptions> options,
         StudioScopeResolver resolver,
         StudioAuthorization authorization,
         IStoreInfoService storeInfo,

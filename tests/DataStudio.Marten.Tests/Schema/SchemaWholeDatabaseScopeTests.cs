@@ -141,7 +141,7 @@ public class SchemaWholeDatabaseScopeTests
             });
             services.AddDataStudio().AddMarten(options =>
             {
-                options.Capabilities = MartenStudioCapabilities.All();
+                options.Capabilities = MartenCapabilities.All();
                 options.StoreAuthorizationPolicy = StorePolicy;
                 options.WriteAuthorizationPolicy = WritePolicy;
                 options.KnownTenantIds.Add("acme");

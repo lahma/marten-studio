@@ -38,7 +38,7 @@ internal sealed class BrowserWithoutRoleCheck : HealthCheck<StudioLintFacts>
 
         if (facts.ReadOnly)
         {
-            return HealthVerdict.Quiet(facts.OptionName("ReadOnly") + " is true, so the database browser reads nothing past " + evaluation.Text.SourcePossessive + " own structure.");
+            return HealthVerdict.Quiet(facts.ReadOnlyOptionName + " is true, so the database browser reads nothing past " + evaluation.Text.SourcePossessive + " own structure.");
         }
 
         if (!facts.IsEnabled(StudioCapability.BrowseDatabase))

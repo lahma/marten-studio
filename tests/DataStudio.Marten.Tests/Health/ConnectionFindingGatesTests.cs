@@ -40,7 +40,7 @@ public class ConnectionFindingGatesTests
     [Fact]
     public async Task Without_the_capability_every_detail_is_withheld_and_the_findings_are_still_shown()
     {
-        await using HealthHarness harness = HealthHarness.Create(checks: Stated, studio: static options => options.Capabilities = new MartenStudioCapabilities());
+        await using HealthHarness harness = HealthHarness.Create(checks: Stated, studio: static options => options.Capabilities = new MartenCapabilities());
 
         HealthReport report = await ReportAsync(harness);
 
@@ -62,14 +62,14 @@ public class ConnectionFindingGatesTests
 
             finding.Evidence.Where(x => gated.Any(g => g.Label == x.Label))
                 .Should().OnlyContain(static x => x.Value.StartsWith("withheld - ", StringComparison.Ordinal)
-                    && x.Value.Contains("MartenStudioOptions.Capabilities.ViewDatabaseActivity", StringComparison.Ordinal));
+                    && x.Value.Contains("MartenOptions.Capabilities.ViewDatabaseActivity", StringComparison.Ordinal));
         }
     }
 
     [Fact]
     public async Task With_the_capability_and_the_write_policy_every_detail_is_shown()
     {
-        await using HealthHarness harness = HealthHarness.Create(checks: Stated, studio: static options => options.Capabilities = MartenStudioCapabilities.All());
+        await using HealthHarness harness = HealthHarness.Create(checks: Stated, studio: static options => options.Capabilities = MartenCapabilities.All());
 
         HealthReport report = await ReportAsync(harness);
 
@@ -86,7 +86,7 @@ public class ConnectionFindingGatesTests
     {
         await using HealthHarness harness = HealthHarness.Create(checks: Stated, studio: static options =>
         {
-            options.Capabilities = MartenStudioCapabilities.All();
+            options.Capabilities = MartenCapabilities.All();
             options.ReadOnly = true;
         });
 
@@ -102,7 +102,7 @@ public class ConnectionFindingGatesTests
     {
         await using HealthHarness harness = HealthHarness.Create(
             checks: Stated,
-            studio: static options => options.Capabilities = MartenStudioCapabilities.All(),
+            studio: static options => options.Capabilities = MartenCapabilities.All(),
             policies: true);
 
         harness.Policies.Allow(static resource => resource.Capability is null);
@@ -130,7 +130,7 @@ public class ConnectionFindingGatesTests
     [Fact]
     public async Task Session_details_shown_in_findings_are_audited_once_per_circuit_and_a_poll_records_nothing()
     {
-        await using HealthHarness harness = HealthHarness.Create(checks: Stated, studio: static options => options.Capabilities = MartenStudioCapabilities.All());
+        await using HealthHarness harness = HealthHarness.Create(checks: Stated, studio: static options => options.Capabilities = MartenCapabilities.All());
 
         await ReportAsync(harness);
         await ReportAsync(harness);
@@ -157,7 +157,7 @@ public class ConnectionFindingGatesTests
     [Fact]
     public async Task Session_details_withheld_from_a_visitor_are_not_audited_as_shown()
     {
-        await using HealthHarness harness = HealthHarness.Create(checks: Stated, studio: static options => options.Capabilities = new MartenStudioCapabilities());
+        await using HealthHarness harness = HealthHarness.Create(checks: Stated, studio: static options => options.Capabilities = new MartenCapabilities());
 
         await ReportAsync(harness);
 
@@ -169,7 +169,7 @@ public class ConnectionFindingGatesTests
     {
         await using HealthHarness harness = HealthHarness.Create(
             checks: [typeof(StatedIdleCheck), typeof(StatedConfigurationOnlyCheck)],
-            studio: static options => options.Capabilities = MartenStudioCapabilities.All());
+            studio: static options => options.Capabilities = MartenCapabilities.All());
 
         await ReportAsync(harness);
 

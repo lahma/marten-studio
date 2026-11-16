@@ -21,7 +21,7 @@ internal static class MartenServiceBridges
     extension(StudioCapabilityGuard)
     {
         /// <summary>
-        /// <c>MartenStudioOptions.Capabilities.X</c>. Shared code asks <see cref="StudioCapabilityGuard.OptionFor" />,
+        /// <c>MartenOptions.Capabilities.X</c>. Shared code asks <see cref="StudioCapabilityGuard.OptionFor" />,
         /// which reads the studio's settings. Callers, all MartenStudio's own: <c>DocumentWriteActions.razor</c>,
         /// <c>Projections.razor</c>, <c>ProjectionDataService.Health</c> and <c>LinqQueryService</c>.
         /// </summary>

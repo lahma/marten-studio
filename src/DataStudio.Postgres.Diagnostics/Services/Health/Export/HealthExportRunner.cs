@@ -51,7 +51,7 @@ internal sealed record HealthExportLimits(int MaxDatabases, TimeSpan? Budget = n
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Registered only by <c>AddHealthChecks().AddMartenStudio()</c></b>, never by <c>AddMarten()</c>,
+/// <b>Registered only by <c>AddHealthChecks().AddMartenDiagnostics()</c></b>, never by <c>AddMarten()</c>,
 /// and it runs nothing on its own: no timer, no hosted service. A run starts when a probe asks and there is no
 /// result yet, or the one there is has been held for an interval.
 /// </para>

@@ -47,7 +47,7 @@ public class LinqQueryAuditTests
     [Fact]
     public async Task A_refusal_logs_the_predicate_and_the_ordering_capped_exactly_as_the_audit_target_is()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All());
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenCapabilities.All());
 
         string where = "Name == \"" + new string('w', 4_000) + "\"";
         string orderBy = string.Join(", ", Enumerable.Repeat("Total desc", 60));
@@ -73,7 +73,7 @@ public class LinqQueryAuditTests
     [Fact]
     public async Task A_short_predicate_is_logged_as_it_was_typed()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All());
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenCapabilities.All());
 
         await harness.Linq.RunAsync(Scope, new LinqQueryRequest("nosuchtype", "Name == \"ada\"", "Total desc"), Token);
 
@@ -84,7 +84,7 @@ public class LinqQueryAuditTests
     [Fact]
     public async Task An_alias_is_visitor_text_too_and_is_capped_in_the_refusal_and_the_log()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All());
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenCapabilities.All());
 
         string alias = new('a', 3_000);
 
@@ -99,7 +99,7 @@ public class LinqQueryAuditTests
     [Fact]
     public async Task A_capability_refusal_writes_none_of_the_text_to_the_ring_or_the_log()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = new MartenStudioCapabilities());
+        await using Harness harness = Harness.Create(static options => options.Capabilities = new MartenCapabilities());
 
         const string Secret = "sec1-capability-predicate";
         const string SecretOrder = "Sec1CapabilityOrdering";
@@ -132,7 +132,7 @@ public class LinqQueryAuditTests
     [InlineData("default", "nosuchdb", "has no database with identity 'nosuchdb'")]
     public async Task A_scope_the_policies_passed_that_names_nothing_here_is_a_recorded_refusal(string storeKey, string databaseId, string said)
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All());
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenCapabilities.All());
 
         LinqQueryResult result = await harness.Linq.RunAsync(
             new StudioScope(storeKey, databaseId, null), new LinqQueryRequest("linqorder", "Name == \"a\""), Token);
@@ -155,7 +155,7 @@ public class LinqQueryAuditTests
     public async Task A_store_that_will_not_build_is_a_recorded_refusal()
     {
         await using Harness harness = Harness.Create(
-            static options => options.Capabilities = MartenStudioCapabilities.All(),
+            static options => options.Capabilities = MartenCapabilities.All(),
             static services => services.AddSingleton<MartenStoreRegistryTest.IBrokenStore>(
                 static _ => throw new InvalidOperationException("no connection string was configured")));
 
@@ -184,7 +184,7 @@ public class LinqQueryAuditTests
     {
         await using Harness harness = Harness.Create(options =>
         {
-            options.Capabilities = MartenStudioCapabilities.All();
+            options.Capabilities = MartenCapabilities.All();
             options.IsDocumentTypeVisible = type => forTheQueriedType || type == typeof(LinqSecret)
                 ? throw new InvalidOperationException("the host's delegate is broken")
                 : true;
@@ -224,7 +224,7 @@ public class LinqQueryAuditTests
 
         public ILinqQueryService Linq => scope.ServiceProvider.GetRequiredService<ILinqQueryService>();
 
-        public static Harness Create(Action<MartenStudioOptions> configure, Action<IServiceCollection>? services = null)
+        public static Harness Create(Action<MartenOptions> configure, Action<IServiceCollection>? services = null)
         {
             var users = new TestAuthenticationStateProvider();
             users.SignIn("tester");

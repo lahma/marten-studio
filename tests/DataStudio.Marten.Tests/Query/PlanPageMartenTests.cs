@@ -74,7 +74,7 @@ public class PlanPageMartenTests
 
         IRenderedComponent<PlanPage> page = context.Render<PlanPage>();
 
-        page.Find(".ms-capability-disabled").TextContent.Should().Contain("MartenStudioOptions.Capabilities.RunSql");
+        page.Find(".ms-capability-disabled").TextContent.Should().Contain("MartenOptions.Capabilities.RunSql");
         page.FindAll("#ms-plan-sql").Should().BeEmpty();
     }
 }

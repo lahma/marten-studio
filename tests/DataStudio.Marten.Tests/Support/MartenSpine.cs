@@ -17,7 +17,7 @@ namespace DataStudio.Marten.Tests.Support;
 /// <summary>
 /// The shared studio's services in MartenStudio's terms, for a test that builds them by hand rather than through
 /// <c>AddMarten()</c> - so that the shared services' constructors, which take the studio's settings and
-/// descriptor rather than <see cref="MartenStudioOptions" />, are spelled once.
+/// descriptor rather than <see cref="MartenOptions" />, are spelled once.
 /// </summary>
 internal static class MartenSpine
 {
@@ -30,23 +30,23 @@ internal static class MartenSpine
     private static readonly Lazy<StudioRouteTable> RouteTable = new(static () => new StudioRouteTable([.. Descriptor.PageAssemblies, StudioShellDescriptor.ShellPages]));
 
     /// <summary>The settings over <paramref name="options" />, or over the defaults.</summary>
-    public static MartenStudioSettings Settings(MartenStudioOptions? options = null) => MartenStudioSettings.Of(options ?? new MartenStudioOptions());
+    public static MartenStudioSettings Settings(MartenOptions? options = null) => MartenStudioSettings.Of(options ?? new MartenOptions());
 
     /// <summary>The settings over <paramref name="options" />.</summary>
-    public static MartenStudioSettings Settings(IOptions<MartenStudioOptions> options) => MartenStudioSettings.Of(options);
+    public static MartenStudioSettings Settings(IOptions<MartenOptions> options) => MartenStudioSettings.Of(options);
 
     /// <summary>The scope and write policies, over <paramref name="options" />.</summary>
     public static StudioAuthorization Authorization(
-        IOptions<MartenStudioOptions> options,
+        IOptions<MartenOptions> options,
         IAuthorizationService policies,
         AuthenticationStateProvider visitor) =>
         new(Settings(options), Descriptor, policies, visitor);
 
     /// <summary>The capability guard, over <paramref name="options" />.</summary>
-    public static StudioCapabilityGuard Guard(IOptions<MartenStudioOptions> options) => new(Settings(options));
+    public static StudioCapabilityGuard Guard(IOptions<MartenOptions> options) => new(Settings(options));
 
     /// <summary>The capability guard, over <paramref name="options" />.</summary>
-    public static StudioCapabilityGuard Guard(MartenStudioOptions options) => new(Settings(options));
+    public static StudioCapabilityGuard Guard(MartenOptions options) => new(Settings(options));
 
     /// <summary>A capability refusal worded as MartenStudio words it.</summary>
     public static StudioCapabilityDeniedException Denied(StudioCapability capability, CapabilityDenialReason reason) =>
@@ -57,7 +57,7 @@ internal static class MartenSpine
     /// them for one circuit.
     /// </summary>
     public static (MartenStudioSourceProvider Sources, StudioScopeCatalog Catalog, StudioScopeResolver Resolver) Scope(
-        IOptions<MartenStudioOptions> options,
+        IOptions<MartenOptions> options,
         MartenStoreRegistry registry,
         StudioAuthorization authorization,
         TenantDiscovery tenants,

@@ -297,13 +297,13 @@ public class ServerPostureLiveTests(PostgresVersionMatrix matrix)
 
         await using PostureHost host = await PostureHost.CreateAsync(server.ConnectionString(MatrixRole.App), options =>
         {
-            options.Capabilities = PostgresStudioCapabilities.All();
+            options.Capabilities = PostgresCapabilities.All();
             options.BrowsableSchemas.Add("*");
         });
 
         HealthSweep sweep = await host.SweepAsync();
 
-        PostureHost.Result(sweep, "K05").Findings.Should().ContainSingle().Which.WhyItMatters.Should().Contain("PostgresStudioOptions.SqlConsoleRole");
+        PostureHost.Result(sweep, "K05").Findings.Should().ContainSingle().Which.WhyItMatters.Should().Contain("PostgresOptions.SqlConsoleRole");
         PostureHost.Result(sweep, "K06").Findings.Should().ContainSingle().Which.Severity.Should().Be(HealthSeverity.Warning);
     }
 
@@ -317,7 +317,7 @@ public class ServerPostureLiveTests(PostgresVersionMatrix matrix)
 
         await using PostureHost host = await PostureHost.CreateAsync(server.ConnectionString(MatrixRole.ConsoleLogin), options =>
         {
-            options.Capabilities = PostgresStudioCapabilities.All();
+            options.Capabilities = PostgresCapabilities.All();
             options.BrowsableSchemas.Add("*");
             options.SqlConsoleRole = "console_role";
         });
@@ -342,7 +342,7 @@ public class ServerPostureLiveTests(PostgresVersionMatrix matrix)
 
         await using PostureHost host = await PostureHost.CreateAsync(server.ConnectionString(MatrixRole.App), options =>
         {
-            options.Capabilities = PostgresStudioCapabilities.All();
+            options.Capabilities = PostgresCapabilities.All();
             options.BrowsableSchemas.Add("*");
             options.ReadOnly = true;
         });

@@ -46,7 +46,7 @@ internal sealed class PostgresStudioComponentContext : BunitContext
 
     public PostgresStudioComponentContext(Action<IServiceCollection>? configure = null)
     {
-        Options = new PostgresStudioOptions();
+        Options = new PostgresOptions();
         ShellOptions = new DataStudioOptions();
         DataSource = NpgsqlDataSource.Create(ConnectionString);
         DatabaseObjects = new FakeDatabaseObjectService();
@@ -63,12 +63,12 @@ internal sealed class PostgresStudioComponentContext : BunitContext
 
         Services.AddLogging(static builder => builder.SetMinimumLevel(LogLevel.Warning));
         Services.AddSingleton(DataSource);
-        Services.AddSingleton<IOptions<PostgresStudioOptions>>(Microsoft.Extensions.Options.Options.Create(Options));
+        Services.AddSingleton<IOptions<PostgresOptions>>(Microsoft.Extensions.Options.Options.Create(Options));
         Services.AddSingleton<IOptions<PostgresDiagnosticsOptions>>(Microsoft.Extensions.Options.Options.Create<PostgresDiagnosticsOptions>(Options));
         Services.AddSingleton<IOptions<DataStudioOptions>>(Microsoft.Extensions.Options.Options.Create(ShellOptions));
         Services.AddSingleton<IShellSettings, ShellSettings>();
         Services.AddSingleton<IStudioSettings>(static provider =>
-            new PostgresStudioSettings(provider.GetRequiredService<IOptions<PostgresStudioOptions>>(), provider.GetRequiredService<IShellSettings>()));
+            new PostgresStudioSettings(provider.GetRequiredService<IOptions<PostgresOptions>>(), provider.GetRequiredService<IShellSettings>()));
         Services.AddSingleton(PostgresStudioDescriptor.Instance);
         Services.AddSingleton<IStudioLinks, PostgresStudioLinks>();
         Services.AddSingleton<IHttpContextAccessor>(new HttpContextAccessor());
@@ -152,7 +152,7 @@ internal sealed class PostgresStudioComponentContext : BunitContext
         configure?.Invoke(Services);
     }
 
-    public PostgresStudioOptions Options { get; }
+    public PostgresOptions Options { get; }
 
     /// <summary>The shell's options: the mount, the title, the entry policy, the application path and the poll interval are its, not the module's.</summary>
     public DataStudioOptions ShellOptions { get; }
@@ -206,7 +206,7 @@ internal sealed class PostgresStudioComponentContext : BunitContext
     /// <summary>Every capability on.</summary>
     public PostgresStudioComponentContext WithAllCapabilities()
     {
-        Options.Capabilities = PostgresStudioCapabilities.All();
+        Options.Capabilities = PostgresCapabilities.All();
         return this;
     }
 

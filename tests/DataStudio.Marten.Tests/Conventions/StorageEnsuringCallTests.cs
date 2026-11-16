@@ -268,7 +268,7 @@ public class StorageEnsuringCallTests
 
         commit.Should().NotBeNull("the one method both skips end in");
 
-        IlScan.Result scan = IlScan.Scan(typeof(MartenStudioOptions).Assembly, target => target == commit);
+        IlScan.Result scan = IlScan.Scan(typeof(MartenOptions).Assembly, target => target == commit);
 
         scan.Unresolved.Should().BeEmpty();
         scan.Calls.Should().ContainSingle("only EventDataService calls it").Which.Value.Should().BeEquivalentTo(
@@ -295,7 +295,7 @@ public class StorageEnsuringCallTests
         AllowedSites.Select(static x => x.File).Should().NotContain(routeLinks, "a read path never ensures storage");
         SourceCalls().Keys.Select(static x => x.File).Should().NotContain(routeLinks);
 
-        IlScan.Result scan = IlScan.Scan(typeof(MartenStudioOptions).Assembly, IlScan.EnsuresStorage);
+        IlScan.Result scan = IlScan.Scan(typeof(MartenOptions).Assembly, IlScan.EnsuresStorage);
 
         scan.Unresolved.Should().BeEmpty();
         scan.Calls.Keys.Select(static x => x.Type).Should().NotContain(typeof(DataStudio.Marten.Services.Links.MartenStudioRouteLinks).FullName);
@@ -333,7 +333,7 @@ public class StorageEnsuringCallTests
     [Fact]
     public void The_compiled_assembly_makes_exactly_the_allowed_calls_in_the_allowed_methods()
     {
-        IlScan.Result scan = IlScan.Scan(typeof(MartenStudioOptions).Assembly, IlScan.EnsuresStorage);
+        IlScan.Result scan = IlScan.Scan(typeof(MartenOptions).Assembly, IlScan.EnsuresStorage);
 
         scan.Unresolved.Should().BeEmpty("a call whose target the scan cannot resolve is a call it cannot judge, so it must not be skipped");
         scan.Calls.Should().NotBeEmpty("the allowed writes are compiled calls of these members, so the scan read nothing if it found none");
@@ -344,7 +344,7 @@ public class StorageEnsuringCallTests
 
         foreach (string type in allowed.Keys.Select(static x => x.Type).Distinct())
         {
-            typeof(MartenStudioOptions).Assembly.GetType(type).Should().NotBeNull(
+            typeof(MartenOptions).Assembly.GetType(type).Should().NotBeNull(
                 "an allowed file has to declare the type its name says - {0} - for the compiled count to be its count", type);
         }
 
@@ -363,7 +363,7 @@ public class StorageEnsuringCallTests
     [Fact]
     public void The_studio_calls_nothing_on_JasperFxs_event_store_unless_it_is_allowed()
     {
-        IlScan.Result scan = IlScan.Scan(typeof(MartenStudioOptions).Assembly, IlScan.IsOnTheEventStore);
+        IlScan.Result scan = IlScan.Scan(typeof(MartenOptions).Assembly, IlScan.IsOnTheEventStore);
 
         scan.Unresolved.Should().BeEmpty();
 
@@ -387,7 +387,7 @@ public class StorageEnsuringCallTests
         IlScan.DocumentDiagnosticsInterfaces.Should().NotBeEmpty(
             "IDocumentStoreDiagnostics is in JasperFx from 2.74.0, the floor's, so the fence has something to fence");
 
-        IlScan.Result scan = IlScan.Scan(typeof(MartenStudioOptions).Assembly, IlScan.IsOnTheDocumentDiagnostics);
+        IlScan.Result scan = IlScan.Scan(typeof(MartenOptions).Assembly, IlScan.IsOnTheDocumentDiagnostics);
 
         scan.Unresolved.Should().BeEmpty();
 

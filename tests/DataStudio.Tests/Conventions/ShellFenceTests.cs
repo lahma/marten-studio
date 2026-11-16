@@ -67,7 +67,7 @@ public class ShellFenceTests
 
     /// <summary>
     /// What this suite's output folder may hold beyond the shell: the Kafka module and its engine and client, which this suite references to build a
-    /// Kafka-only host (<c>KafkaOnlyHostTests</c>). Everything else the shell is fenced from stays forbidden at the file level.
+    /// Kafka-only host (<c>MapDataStudioTests</c>). Everything else the shell is fenced from stays forbidden at the file level.
     /// </summary>
     private static bool IsAllowedHere(string name) =>
         name.StartsWith("DataStudio.Kafka", StringComparison.OrdinalIgnoreCase)

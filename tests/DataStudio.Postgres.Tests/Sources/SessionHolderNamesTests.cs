@@ -82,7 +82,7 @@ public class SessionHolderNamesTests
         private readonly ServiceProvider provider;
         private readonly AsyncServiceScope circuit;
 
-        public Harness(bool policies, Action<PostgresStudioOptions>? configure = null)
+        public Harness(bool policies, Action<PostgresOptions>? configure = null)
         {
             Policy = new TestSourceAuthorizationService();
             Tenants = new FakeTenants();
@@ -208,7 +208,7 @@ public class SessionHolderNamesTests
     [Fact]
     public async Task Past_the_gate_every_database_is_named_and_the_write_policy_is_asked_about_this_database_alone()
     {
-        await using Harness harness = new(policies: true, static options => options.Capabilities = PostgresStudioCapabilities.All());
+        await using Harness harness = new(policies: true, static options => options.Capabilities = PostgresCapabilities.All());
         harness.Policy.Allow(static resource => resource.Capability is null || resource.DatabaseIdentifier == "default");
 
         SessionActivitySummary summary = await harness.Sessions.GetSummaryAsync(Default, Token);

@@ -8,7 +8,7 @@ using DataStudio.Postgres.Internal.Sql;
 namespace DataStudio.Marten.Integration.Tests.Documents;
 
 /// <summary>
-/// <c>MartenStudioOptions.ExactCountThreshold</c> against a real database: above it, nothing counts.
+/// <c>MartenOptions.ExactCountThreshold</c> against a real database: above it, nothing counts.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -104,7 +104,7 @@ public class DocumentCountThresholdLiveTests(DocumentCountThresholdLiveTests.Fix
         }
 
         /// <inheritdoc />
-        protected override void ConfigureStudio(MartenStudioOptions options) =>
+        protected override void ConfigureStudio(MartenOptions options) =>
             options.ExactCountThreshold = Threshold;
 
         /// <inheritdoc />

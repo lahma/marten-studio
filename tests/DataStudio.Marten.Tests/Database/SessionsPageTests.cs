@@ -96,7 +96,7 @@ public class SessionsPageTests
         var page = context.Render<Sessions>();
         page.WaitForAssertion(() => page.FindAll(".ms-sessions-stats").Should().ContainSingle());
 
-        page.Find(".ms-capability-disabled").TextContent.Should().Contain("MartenStudioOptions.Capabilities.ViewDatabaseActivity");
+        page.Find(".ms-capability-disabled").TextContent.Should().Contain("MartenOptions.Capabilities.ViewDatabaseActivity");
         sessions.DetailsRequests.Should().BeEmpty("a page whose gate is closed refuses - and audits - nothing");
 
         page.TextOfAll(".ms-sessions-table thead th").Should().NotContain("pid").And.NotContain("Statement");

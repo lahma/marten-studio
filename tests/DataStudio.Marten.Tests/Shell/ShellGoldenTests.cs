@@ -21,7 +21,7 @@ public class ShellGoldenTests
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
-    private static WebApplication CreateApp(Action<MartenStudioOptions>? configure = null)
+    private static WebApplication CreateApp(Action<MartenOptions>? configure = null)
     {
         WebApplicationBuilder builder = WebApplication.CreateBuilder();
         builder.WebHost.UseTestServer();
@@ -50,7 +50,7 @@ public class ShellGoldenTests
     [Fact]
     public async Task The_capability_chip_of_the_front_page_lists_every_capability()
     {
-        await using WebApplication app = CreateApp(static options => options.Capabilities = MartenStudioCapabilities.All());
+        await using WebApplication app = CreateApp(static options => options.Capabilities = MartenCapabilities.All());
 
         string golden = await ShellGolden.GoldenAsync(app, "/studio", Token);
 

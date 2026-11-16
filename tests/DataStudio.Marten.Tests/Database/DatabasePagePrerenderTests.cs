@@ -191,7 +191,7 @@ public class DatabasePagePrerenderTests
         await using RealStudio real = RealStudio.Create(
             static options =>
             {
-                options.Capabilities = MartenStudioCapabilities.All();
+                options.Capabilities = MartenCapabilities.All();
                 options.ReadOnly = true;
                 options.BrowsableSchemas.Add("quartz");
             },
@@ -280,7 +280,7 @@ public class DatabasePagePrerenderTests
             listsOnly);
 
         public static RealStudio Create(
-            Action<MartenStudioOptions> configure,
+            Action<MartenOptions> configure,
             Func<MartenStoreResource, bool> rule,
             bool listsOnly = false)
         {

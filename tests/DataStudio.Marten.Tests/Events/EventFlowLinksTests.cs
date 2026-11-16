@@ -1,3 +1,4 @@
+using DataStudio.Marten.Services;
 using AngleSharp.Dom;
 
 using Bunit;
@@ -92,7 +93,7 @@ public class EventFlowLinksTests
     [Fact]
     public void A_link_to_a_projection_carries_the_scope_and_ends_in_its_anchor()
     {
-        string link = EventLinks.ToProjection(new MartenStudioOptions(), new DataStudio.Postgres.Services.StudioScope("default", "db1", null), "DailySales");
+        string link = EventLinks.ToProjection(MartenStudioSettings.Of(new MartenOptions()), new DataStudio.Postgres.Services.StudioScope("default", "db1", null), "DailySales");
 
         link.Should().Be("projections?store=default&db=db1#projection-DailySales");
     }
@@ -293,7 +294,7 @@ public class EventFlowLinksTests
     [Fact]
     public void A_flow_link_for_one_projection_filters_by_its_name_alone()
     {
-        EventLinks.ToFlow(new MartenStudioOptions(), null, "Orders").Should().Be("events/flow?projection=Orders");
+        EventLinks.ToFlow(MartenStudioSettings.Of(new MartenOptions()), null, "Orders").Should().Be("events/flow?projection=Orders");
     }
 
     [Fact]

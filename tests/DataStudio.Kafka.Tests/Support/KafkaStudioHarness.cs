@@ -26,13 +26,13 @@ namespace DataStudio.Kafka.Tests.Support;
 
 /// <summary>
 /// An <see cref="IAuthorizationService" /> that answers for both resources a Postgres Studio host with KStudio is asked about -
-/// <see cref="PostgresStudioResource" /> (the host's) and <see cref="KafkaTopicResource" /> (KStudio's) - and records every question, so a test can
+/// <see cref="PostgresResource" /> (the host's) and <see cref="KafkaTopicResource" /> (KStudio's) - and records every question, so a test can
 /// say which resource reached which policy.
 /// </summary>
 public sealed class RecordingAuthorizationService : IAuthorizationService
 {
     private Func<KafkaTopicResource, bool> kafka = static _ => true;
-    private Func<PostgresStudioResource, bool> host = static _ => true;
+    private Func<PostgresResource, bool> host = static _ => true;
     private TaskCompletionSource<bool>? hostGate;
     private TaskCompletionSource<bool>? kafkaGate;
     private Func<KafkaTopicResource, bool> kafkaHeld = static _ => false;
@@ -45,8 +45,8 @@ public sealed class RecordingAuthorizationService : IAuthorizationService
         Calls.Where(static x => x.Resource is KafkaTopicResource).Select(static x => (x.Policy, (KafkaTopicResource) x.Resource!));
 
     /// <summary>The questions about the host studio's resource.</summary>
-    public IEnumerable<(string Policy, PostgresStudioResource Resource)> HostCalls =>
-        Calls.Where(static x => x.Resource is PostgresStudioResource).Select(static x => (x.Policy, (PostgresStudioResource) x.Resource!));
+    public IEnumerable<(string Policy, PostgresResource Resource)> HostCalls =>
+        Calls.Where(static x => x.Resource is PostgresResource).Select(static x => (x.Policy, (PostgresResource) x.Resource!));
 
     /// <summary>What KStudio's policies allow; everything by default.</summary>
     public void AllowKafka(Func<KafkaTopicResource, bool> predicate) => kafka = predicate;
@@ -65,7 +65,7 @@ public sealed class RecordingAuthorizationService : IAuthorizationService
     }
 
     /// <summary>What the host studio's policies allow; everything by default.</summary>
-    public void AllowHost(Func<PostgresStudioResource, bool> predicate) => host = predicate;
+    public void AllowHost(Func<PostgresResource, bool> predicate) => host = predicate;
 
     /// <inheritdoc />
     public Task<AuthorizationResult> AuthorizeAsync(ClaimsPrincipal user, object? resource, IEnumerable<IAuthorizationRequirement> requirements) =>
@@ -93,7 +93,7 @@ public sealed class RecordingAuthorizationService : IAuthorizationService
         bool allowed = resource switch
         {
             KafkaTopicResource topic => kafka(topic) && await KafkaOpenAsync(topic).ConfigureAwait(false),
-            PostgresStudioResource source => host(source) && await HostOpenAsync().ConfigureAwait(false),
+            PostgresResource source => host(source) && await HostOpenAsync().ConfigureAwait(false),
             _ => false,
         };
 
@@ -126,7 +126,7 @@ internal sealed class KafkaStudioHarness : IDisposable
     /// <summary>A second cluster, so the selector draws its picker.</summary>
     public static readonly KafkaClusterEntry Secondary = new("secondary", null, "Secondary", null);
 
-    public KafkaStudioHarness(Action<KafkaStudioOptions>? configure = null, params KafkaClusterEntry[] clusters)
+    public KafkaStudioHarness(Action<KafkaOptions>? configure = null, params KafkaClusterEntry[] clusters)
         : this(configure, null, clusters)
     {
     }
@@ -136,9 +136,9 @@ internal sealed class KafkaStudioHarness : IDisposable
     /// service is <paramref name="engine" />, or - for a test that is about the shell and not about what a page reads - an empty fake cluster
     /// that lists every entry as a registered cluster.
     /// </summary>
-    public KafkaStudioHarness(Action<KafkaStudioOptions>? configure, Action<IServiceCollection>? extra, KafkaClusterEntry[] clusters, EngineHarness? engine = null)
+    public KafkaStudioHarness(Action<KafkaOptions>? configure, Action<IServiceCollection>? extra, KafkaClusterEntry[] clusters, EngineHarness? engine = null)
     {
-        Options = new KafkaStudioOptions();
+        Options = new KafkaOptions();
         configure?.Invoke(Options);
         KafkaClusterEntry[] entries = clusters.Length == 0 ? [Primary] : clusters;
 
@@ -169,7 +169,7 @@ internal sealed class KafkaStudioHarness : IDisposable
             services.RemoveAll<IAuthorizationService>();
             services.AddSingleton<IAuthorizationService>(Authorization);
 
-            services.AddSingleton<IOptions<KafkaStudioOptions>>(Microsoft.Extensions.Options.Options.Create(Options));
+            services.AddSingleton<IOptions<KafkaOptions>>(Microsoft.Extensions.Options.Options.Create(Options));
             services.AddSingleton<IStudioModule, KafkaStudioModule>();
             services.RemoveAll<StudioShellDescriptor>();
             services.AddSingleton(static provider =>
@@ -209,7 +209,7 @@ internal sealed class KafkaStudioHarness : IDisposable
 
     private readonly bool ownedEngine;
 
-    public KafkaStudioOptions Options { get; }
+    public KafkaOptions Options { get; }
 
     /// <summary>The engine the catalog service reads through.</summary>
     public EngineHarness Engine { get; }

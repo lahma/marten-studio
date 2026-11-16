@@ -244,7 +244,7 @@ internal static class ConfigurationDescriber
     /// <summary>Describes every document type the store knows about, alias order.</summary>
     /// <param name="options">The store's read-only options.</param>
     /// <param name="isVisible">
-    /// <c>MartenStudioOptions.IsDocumentTypeVisible</c>, or <see langword="null" /> when the host set none.
+    /// <c>MartenOptions.IsDocumentTypeVisible</c>, or <see langword="null" /> when the host set none.
     /// </param>
     public static IReadOnlyList<DocumentTypeConfiguration> DescribeDocumentTypes(
         IReadOnlyStoreOptions options,

@@ -29,7 +29,7 @@ namespace DataStudio.Marten.Services;
 /// (<see cref="DatabaseAccess.DescribeFailureAsync" />), because another store's key is not everybody's.
 /// </para>
 /// <para>
-/// Every registration, ancillary stores included whatever <see cref="MartenStudioOptions.IncludeAncillaryStores" />
+/// Every registration, ancillary stores included whatever <see cref="MartenOptions.IncludeAncillaryStores" />
 /// says: a store the studio does not show is still a store whose tables are Marten's. Only options are read; no store's
 /// databases are enumerated for a declaration. A failure is asked again next time.
 /// </para>
@@ -52,7 +52,7 @@ internal sealed class MartenDatabaseDeclarationsSource : IDatabaseDeclarationsSo
 
     private readonly MartenStoreRegistry registry;
     private readonly IServiceProvider provider;
-    private readonly IOptions<MartenStudioOptions> options;
+    private readonly IOptions<MartenOptions> options;
 
     /// <summary>
     /// Resolved on the first policy question, never by the constructor: the health sweep resolves this source in a scope
@@ -76,7 +76,7 @@ internal sealed class MartenDatabaseDeclarationsSource : IDatabaseDeclarationsSo
     public MartenDatabaseDeclarationsSource(
         MartenStoreRegistry registry,
         IServiceProvider provider,
-        IOptions<MartenStudioOptions> options)
+        IOptions<MartenOptions> options)
     {
         this.registry = registry;
         this.provider = provider;
@@ -160,7 +160,7 @@ internal sealed class MartenDatabaseDeclarationsSource : IDatabaseDeclarationsSo
     /// <param name="provider">What the other stores are resolved from.</param>
     /// <param name="registration">The resolved store's registration.</param>
     /// <param name="resolvedStore">The resolved store.</param>
-    /// <param name="isDocumentTypeVisible"><see cref="MartenStudioOptions.IsDocumentTypeVisible" />.</param>
+    /// <param name="isDocumentTypeVisible"><see cref="MartenOptions.IsDocumentTypeVisible" />.</param>
     internal static DatabaseDeclarations DeclareEveryStore(
         MartenStoreRegistry registry,
         IServiceProvider provider,

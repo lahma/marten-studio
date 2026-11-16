@@ -30,7 +30,7 @@ public class PostgresServerReaderTests
             services.AddSingleton(NpgsqlDataSource.Create("Host=127.0.0.1;Port=1;Database=app;Username=app"));
             Root = services.BuildServiceProvider();
 
-            PostgresStudioOptions options = new() { HealthInterval = TimeSpan.FromSeconds(60) };
+            PostgresOptions options = new() { HealthInterval = TimeSpan.FromSeconds(60) };
             IStudioSettings settings = PostgresStudioSettings.Of(options);
             PostgresStudioSourceProvider provider = new(
                 Microsoft.Extensions.Options.Options.Create(options),

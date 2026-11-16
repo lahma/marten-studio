@@ -170,7 +170,7 @@ public class PerTenantSequenceWritesTests
             });
             services.AddDataStudio().AddMarten(static options =>
             {
-                options.Capabilities = MartenStudioCapabilities.All();
+                options.Capabilities = MartenCapabilities.All();
                 options.DiscoverTenantIds = false;
                 options.KnownTenantIds.Add("acme");
                 options.KnownTenantIds.Add("a:b");

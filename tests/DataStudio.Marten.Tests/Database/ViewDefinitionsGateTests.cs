@@ -43,7 +43,7 @@ public class ViewDefinitionsGateTests
         DatabaseRowAccess rows = gate.DataAccess("quartz");
         rows.Allowed.Should().BeFalse("rows are BrowseDatabase's alone");
         rows.Refusal.Should().Be(DatabaseRefusal.CapabilityOff);
-        rows.Reason.Should().Contain("MartenStudioOptions.Capabilities.BrowseDatabase");
+        rows.Reason.Should().Contain("MartenOptions.Capabilities.BrowseDatabase");
 
         DatabaseRowAccess table = gate.RowsFor(Relation("quartz", "qrtz_triggers"), Other, dependsOnHidden: false);
         table.Allowed.Should().BeFalse();
@@ -78,8 +78,8 @@ public class ViewDefinitionsGateTests
         starred.Allowed.Should().BeFalse();
         starred.Refusal.Should().Be(DatabaseRefusal.SchemaNotBrowsable);
         starred.Reason.Should().Contain("only through \"*\"")
-            .And.Contain("MartenStudioOptions.Capabilities.BrowseDatabase")
-            .And.Contain("MartenStudioOptions.Capabilities.ViewDefinitions");
+            .And.Contain("MartenOptions.Capabilities.BrowseDatabase")
+            .And.Contain("MartenOptions.Capabilities.ViewDefinitions");
     }
 
     [Fact]
@@ -111,7 +111,7 @@ public class ViewDefinitionsGateTests
         DatabaseRowAccess elsewhere = gate.DefinitionAccess("quartz", Marten);
         elsewhere.Allowed.Should().BeFalse("today's rule: Marten's own objects outside the store's schemas follow BrowseDatabase");
         elsewhere.Refusal.Should().Be(DatabaseRefusal.MartenOwned);
-        elsewhere.Reason.Should().Contain("MartenStudioOptions.Capabilities.BrowseDatabase");
+        elsewhere.Reason.Should().Contain("MartenOptions.Capabilities.BrowseDatabase");
 
         Gate(browse: true, browseAuthorized: true, ["quartz"], DefinitionsOff).DefinitionAccess("quartz", Marten).Allowed
             .Should().BeTrue("BrowseDatabase reads it, as it did before ViewDefinitions existed");
@@ -125,7 +125,7 @@ public class ViewDefinitionsGateTests
         DatabaseRowAccess refused = definitionsOnly.SequenceValueAccess("quartz", Other);
         refused.Allowed.Should().BeFalse("a value says how many rows a table has had: data, not a definition");
         refused.Refusal.Should().Be(DatabaseRefusal.CapabilityOff);
-        refused.Reason.Should().Be(StudioText.Marten.BrowseCapabilityDenial).And.Contain("MartenStudioOptions.Capabilities.BrowseDatabase");
+        refused.Reason.Should().Be(StudioText.Marten.BrowseCapabilityDenial).And.Contain("MartenOptions.Capabilities.BrowseDatabase");
 
         definitionsOnly.DefinitionAccess("quartz", Other).Allowed.Should().BeTrue("while its definition is shown, as the rest of the schema's");
 
@@ -195,8 +195,8 @@ public class ViewDefinitionsGateTests
         access.Allowed.Should().BeFalse();
         access.Refusal.Should().Be(DatabaseRefusal.CapabilityOff);
         access.Reason.Should().Be(StudioText.Marten.DefinitionCapabilityDenial)
-            .And.Contain("MartenStudioOptions.Capabilities.ViewDefinitions")
-            .And.Contain("MartenStudioOptions.Capabilities.BrowseDatabase");
+            .And.Contain("MartenOptions.Capabilities.ViewDefinitions")
+            .And.Contain("MartenOptions.Capabilities.BrowseDatabase");
 
         gate.State.DefinitionRefusal.Should().Be(DatabaseRefusal.CapabilityOff);
         gate.State.DefinitionDenial.Should().Be(StudioText.Marten.DefinitionCapabilityDenial);
@@ -213,8 +213,8 @@ public class ViewDefinitionsGateTests
         gate.DefinitionAccess("quartz", Other).Allowed.Should().BeFalse();
         gate.State.DefinitionRefusal.Should().Be(DatabaseRefusal.ReadOnly);
         gate.State.DefinitionDenial.Should().Be(StudioText.Marten.DefinitionReadOnlyDenial)
-            .And.Contain("MartenStudioOptions.Capabilities.ViewDefinitions")
-            .And.Contain("MartenStudioOptions.Capabilities.BrowseDatabase");
+            .And.Contain("MartenOptions.Capabilities.ViewDefinitions")
+            .And.Contain("MartenOptions.Capabilities.BrowseDatabase");
         gate.State.Denial.Should().Be(StudioText.Marten.BrowseReadOnlyDenial, "the rows' sentence is 0.4's, unchanged");
     }
 

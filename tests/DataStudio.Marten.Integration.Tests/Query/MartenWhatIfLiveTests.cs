@@ -169,7 +169,7 @@ public class MartenWhatIfLiveTests(MartenHypopgServer server) : IClassFixture<Ma
         });
         services.AddDataStudio().AddMarten(options =>
         {
-            options.Capabilities = MartenStudioCapabilities.All();
+            options.Capabilities = MartenCapabilities.All();
             options.QueryTimeout = TimeSpan.FromSeconds(30);
         });
 

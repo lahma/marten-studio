@@ -214,7 +214,7 @@ internal sealed record FunctionBodyRow(string Schema, string Name, string Identi
 /// <b>Every read takes the transaction it runs in.</b> The service runs them inside
 /// <c>ReadOnlySqlSession.InTransactionAsync</c>, as the database browser runs its catalog reads: a read-only
 /// transaction, <c>statement_timeout</c>, a three-second <c>lock_timeout</c> and <c>SET LOCAL ROLE</c> to
-/// <c>MartenStudioOptions.SqlConsoleRole</c>. The size functions open each listed table with an
+/// <c>MartenOptions.SqlConsoleRole</c>. The size functions open each listed table with an
 /// <c>AccessShareLock</c>, which queues behind an <c>ACCESS EXCLUSIVE</c> lock on it - Marten adding a
 /// tenant's partition to a parent, say - and without the lock timeout a Schema tab would sit in that queue
 /// for the whole of <c>QueryTimeout</c> and hold up every session queued behind it.
@@ -666,7 +666,7 @@ internal static class SchemaStatsQueries
     /// <param name="connection">An open connection to the database in scope.</param>
     /// <param name="transaction">The read-only transaction to run in, or <see langword="null" /> for none.</param>
     /// <param name="schemas">The schemas the store owns, derived from its options.</param>
-    /// <param name="commandTimeoutSeconds">The command timeout, from <c>MartenStudioOptions.QueryTimeout</c>.</param>
+    /// <param name="commandTimeoutSeconds">The command timeout, from <c>MartenOptions.QueryTimeout</c>.</param>
     /// <param name="cancellationToken">Cancels the read.</param>
     public static async Task<IReadOnlyList<TableStatsRow>> ReadTablesAsync(
         NpgsqlConnection connection,
@@ -712,7 +712,7 @@ internal static class SchemaStatsQueries
     /// <param name="connection">An open connection to the database in scope.</param>
     /// <param name="transaction">The read-only transaction to run in, or <see langword="null" /> for none.</param>
     /// <param name="schemas">The schemas the store owns.</param>
-    /// <param name="commandTimeoutSeconds">The command timeout, from <c>MartenStudioOptions.QueryTimeout</c>.</param>
+    /// <param name="commandTimeoutSeconds">The command timeout, from <c>MartenOptions.QueryTimeout</c>.</param>
     /// <param name="cancellationToken">Cancels the read.</param>
     public static async Task<IReadOnlyList<IndexStatsRow>> ReadIndexesAsync(
         NpgsqlConnection connection,
@@ -762,7 +762,7 @@ internal static class SchemaStatsQueries
     /// <param name="schema">The index's schema.</param>
     /// <param name="table">The table it is on.</param>
     /// <param name="name">The index name.</param>
-    /// <param name="commandTimeoutSeconds">The command timeout, from <c>MartenStudioOptions.QueryTimeout</c>.</param>
+    /// <param name="commandTimeoutSeconds">The command timeout, from <c>MartenOptions.QueryTimeout</c>.</param>
     /// <param name="cancellationToken">Cancels the read.</param>
     /// <returns>The statement, or <see langword="null" /> when no such index is in those schemas.</returns>
     public static async Task<string?> ReadIndexDefinitionAsync(
@@ -787,7 +787,7 @@ internal static class SchemaStatsQueries
     /// <param name="connection">An open connection to the database in scope.</param>
     /// <param name="transaction">The read-only transaction to run in, or <see langword="null" /> for none.</param>
     /// <param name="schemas">The schemas the store owns.</param>
-    /// <param name="commandTimeoutSeconds">The command timeout, from <c>MartenStudioOptions.QueryTimeout</c>.</param>
+    /// <param name="commandTimeoutSeconds">The command timeout, from <c>MartenOptions.QueryTimeout</c>.</param>
     /// <param name="cancellationToken">Cancels the read.</param>
     public static async Task<IReadOnlyList<VectorColumnRow>> ReadVectorColumnsAsync(
         NpgsqlConnection connection,
@@ -818,7 +818,7 @@ internal static class SchemaStatsQueries
     /// <param name="connection">An open connection to the database in scope.</param>
     /// <param name="transaction">The read-only transaction to run in, or <see langword="null" /> for none.</param>
     /// <param name="schemas">The schemas the store owns.</param>
-    /// <param name="commandTimeoutSeconds">The command timeout, from <c>MartenStudioOptions.QueryTimeout</c>.</param>
+    /// <param name="commandTimeoutSeconds">The command timeout, from <c>MartenOptions.QueryTimeout</c>.</param>
     /// <param name="cancellationToken">Cancels the read.</param>
     public static async Task<IReadOnlyList<FunctionStatsRow>> ReadFunctionsAsync(
         NpgsqlConnection connection,
@@ -849,7 +849,7 @@ internal static class SchemaStatsQueries
     /// <param name="transaction">The read-only transaction to run in, its <c>search_path</c> already pinned.</param>
     /// <param name="schemas">The schemas the store owns.</param>
     /// <param name="names">The routine names to read - only ones the caller has classified as Marten's.</param>
-    /// <param name="commandTimeoutSeconds">The command timeout, from <c>MartenStudioOptions.QueryTimeout</c>.</param>
+    /// <param name="commandTimeoutSeconds">The command timeout, from <c>MartenOptions.QueryTimeout</c>.</param>
     /// <param name="cancellationToken">Cancels the read.</param>
     public static async Task<IReadOnlyList<FunctionBodyRow>> ReadFunctionBodiesAsync(
         NpgsqlConnection connection,
@@ -891,7 +891,7 @@ internal static class SchemaStatsQueries
     /// <summary>The size of the whole database, for the Tables tab's footer.</summary>
     /// <param name="connection">An open connection to the database in scope.</param>
     /// <param name="transaction">The read-only transaction to run in, or <see langword="null" /> for none.</param>
-    /// <param name="commandTimeoutSeconds">The command timeout, from <c>MartenStudioOptions.QueryTimeout</c>.</param>
+    /// <param name="commandTimeoutSeconds">The command timeout, from <c>MartenOptions.QueryTimeout</c>.</param>
     /// <param name="cancellationToken">Cancels the read.</param>
     public static async Task<long> ReadDatabaseSizeAsync(
         NpgsqlConnection connection,

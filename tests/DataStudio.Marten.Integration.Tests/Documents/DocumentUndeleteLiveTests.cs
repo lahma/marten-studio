@@ -78,7 +78,7 @@ public class DocumentUndeleteLiveTests(PostgresFixture postgres) : DocumentWrite
     public async Task Undelete_is_refused_without_DeleteDocuments_even_with_EditDocuments_on()
     {
         Users.SignIn("ops");
-        StudioOptions.Capabilities = new MartenStudioCapabilities { EditDocuments = true };
+        StudioOptions.Capabilities = new MartenCapabilities { EditDocuments = true };
 
         try
         {
@@ -90,7 +90,7 @@ public class DocumentUndeleteLiveTests(PostgresFixture postgres) : DocumentWrite
                 .Which;
 
             denied.Capability.Should().Be(StudioCapability.DeleteDocuments);
-            denied.CapabilityOption.Should().Be("MartenStudioOptions.Capabilities.DeleteDocuments");
+            denied.CapabilityOption.Should().Be("MartenOptions.Capabilities.DeleteDocuments");
 
             (await IsDeletedAsync(MemoTable, id)).Should().BeTrue();
             Logs.EventIds.Should().Contain(9202);
@@ -100,7 +100,7 @@ public class DocumentUndeleteLiveTests(PostgresFixture postgres) : DocumentWrite
         }
         finally
         {
-            StudioOptions.Capabilities = MartenStudioCapabilities.All();
+            StudioOptions.Capabilities = MartenCapabilities.All();
         }
     }
 

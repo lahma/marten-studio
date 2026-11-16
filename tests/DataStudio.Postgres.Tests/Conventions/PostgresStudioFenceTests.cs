@@ -81,7 +81,7 @@ public class PostgresStudioFenceTests
     [Fact]
     public void The_shared_assembly_references_no_Marten_JasperFx_or_Weasel_assembly()
     {
-        string[] references = [.. typeof(PostgresStudioOptions).Assembly.GetReferencedAssemblies().Select(static x => x.Name!)];
+        string[] references = [.. typeof(PostgresOptions).Assembly.GetReferencedAssemblies().Select(static x => x.Name!)];
 
         // Not vacuous: the list is the real one - the shared framework is on it, and Npgsql is reached through the engine.
         references.Should().Contain(Diagnostics, "the shared studio is built on the diagnostics engine")

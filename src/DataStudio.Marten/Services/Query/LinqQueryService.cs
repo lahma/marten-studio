@@ -80,10 +80,10 @@ namespace DataStudio.Marten.Services.Query;
 /// <para>
 /// <b>Run where the studio controls it.</b> Marten's statement and a copy of its parameters go to
 /// <see cref="ReadOnlySqlSession" />: <c>SET TRANSACTION READ ONLY</c>, <c>statement_timeout</c> =
-/// <see cref="MartenStudioOptions.QueryTimeout" />, the lock and idle timeouts, the optional
-/// <see cref="MartenStudioOptions.SqlConsoleRole" />, and a rollback whatever happened. Rows are read with
+/// <see cref="MartenOptions.QueryTimeout" />, the lock and idle timeouts, the optional
+/// <see cref="MartenOptions.SqlConsoleRole" />, and a rollback whatever happened. Rows are read with
 /// sequential access, the JSON as text and never deserialized, each document capped at
-/// <see cref="MartenStudioOptions.MaxInlineDocumentBytes" /> characters and the page at
+/// <see cref="MartenOptions.MaxInlineValueBytes" /> characters and the page at
 /// <see cref="LinqQueryLimits.PageTextBudget" />.
 /// </para>
 /// <para>
@@ -169,7 +169,7 @@ internal sealed class LinqQueryService : ILinqQueryService
     private readonly StudioActionLog audit;
     private readonly ColumnCatalog columnCatalog;
     private readonly IndexCatalog indexCatalog;
-    private readonly IOptions<MartenStudioOptions> options;
+    private readonly IOptions<MartenOptions> options;
     private readonly ILogger<LinqQueryService> logger;
     private readonly IServiceProvider services;
     private readonly DatabaseReachAuthorization reach;
@@ -185,7 +185,7 @@ internal sealed class LinqQueryService : ILinqQueryService
         StudioActionLog audit,
         ColumnCatalog columnCatalog,
         IndexCatalog indexCatalog,
-        IOptions<MartenStudioOptions> options,
+        IOptions<MartenOptions> options,
         ILogger<LinqQueryService> logger,
         IServiceProvider services,
         HypotheticalIndexReader hypothetical)
@@ -336,7 +336,7 @@ internal sealed class LinqQueryService : ILinqQueryService
 
     private async Task<Run> NewRunAsync(StudioScope scope, LinqQueryRequest request)
     {
-        MartenStudioOptions value = options.Value;
+        MartenOptions value = options.Value;
 
         // An event run is identified by its target and by nothing the visitor typed: whatever alias came with it is dropped.
         if (request.Target == LinqQueryTarget.Events)
@@ -357,7 +357,7 @@ internal sealed class LinqQueryService : ILinqQueryService
     {
         StudioScope scope = run.Scope;
         LinqQueryRequest request = run.Request;
-        MartenStudioOptions value = options.Value;
+        MartenOptions value = options.Value;
 
         // 1. The capability: refused before anything is resolved, parsed or asked of a policy - and with none of the
         //    text recorded. The page offers no Run button while the capability is off, so a run that gets here was
@@ -629,7 +629,7 @@ internal sealed class LinqQueryService : ILinqQueryService
         ComposedLinqQuery composed,
         string sql,
         IReadOnlyList<LinqParameterInfo> parameters,
-        MartenStudioOptions value,
+        MartenOptions value,
         HypotheticalIndex index,
         CancellationToken cancellationToken)
     {
@@ -718,7 +718,7 @@ internal sealed class LinqQueryService : ILinqQueryService
         string sql,
         IReadOnlyList<LinqParameterInfo> parameters,
         MartenQueryScope scopeFacts,
-        MartenStudioOptions value,
+        MartenOptions value,
         CancellationToken cancellationToken,
         LinqEventScope? eventScope = null)
     {
@@ -753,8 +753,8 @@ internal sealed class LinqQueryService : ILinqQueryService
                             .ExecuteReaderAsync(CommandBehavior.SequentialAccess, token).ConfigureAwait(false);
 
                         LinqPage read = eventScope is null
-                            ? await ReadPageAsync(reader, run.PageSize, value.MaxInlineDocumentBytes, token).ConfigureAwait(false)
-                            : await ReadEventPageAsync(reader, run.PageSize, value.MaxInlineDocumentBytes, token).ConfigureAwait(false);
+                            ? await ReadPageAsync(reader, run.PageSize, value.MaxInlineValueBytes, token).ConfigureAwait(false)
+                            : await ReadEventPageAsync(reader, run.PageSize, value.MaxInlineValueBytes, token).ConfigureAwait(false);
 
                         stopwatch.Stop();
                         return read;
@@ -922,7 +922,7 @@ internal sealed class LinqQueryService : ILinqQueryService
                             spent |= limit < documentCap;
                             notInlined = limit < documentCap
                                 ? "Not shown in full: this page's budget for document text ran out inside it. Open it in Documents."
-                                : "Not shown: it is larger than MartenStudioOptions.MaxInlineDocumentBytes (" + Kibibytes(documentCap) +
+                                : "Not shown: it is larger than MartenOptions.MaxInlineValueBytes (" + Kibibytes(documentCap) +
                                   "). Open it in Documents.";
                             budget -= limit;
                         }
@@ -1098,7 +1098,7 @@ internal sealed class LinqQueryService : ILinqQueryService
                             spent |= limit < documentCap;
                             notInlined = limit < documentCap
                                 ? "Not shown in full: this page's budget for event text ran out inside it. Open its stream page."
-                                : "Not shown: it is larger than MartenStudioOptions.MaxInlineDocumentBytes (" + Kibibytes(documentCap) +
+                                : "Not shown: it is larger than MartenOptions.MaxInlineValueBytes (" + Kibibytes(documentCap) +
                                   "). Open its stream page.";
                             budget -= limit;
                         }
@@ -1508,7 +1508,7 @@ internal sealed class LinqQueryService : ILinqQueryService
             elapsed, rows, run.LoggedWhere, run.LoggedOrderBy);
     }
 
-    private static string WritePolicyName(MartenStudioOptions value) =>
+    private static string WritePolicyName(MartenOptions value) =>
         value.WriteAuthorizationPolicy ?? value.StoreAuthorizationPolicy ?? "(none)";
 
     // ---------------------------------------------------------------------------------------------------

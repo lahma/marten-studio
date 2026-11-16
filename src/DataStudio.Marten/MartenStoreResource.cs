@@ -2,8 +2,8 @@ namespace DataStudio.Marten;
 
 /// <summary>
 /// The resource Marten Studio passes to <c>IAuthorizationService.AuthorizeAsync(user, resource, policy)</c>
-/// when evaluating <see cref="MartenStudioOptions.StoreAuthorizationPolicy"/> and
-/// <see cref="MartenStudioOptions.WriteAuthorizationPolicy"/>. A host writes one
+/// when evaluating <see cref="MartenOptions.StoreAuthorizationPolicy"/> and
+/// <see cref="MartenOptions.WriteAuthorizationPolicy"/>. A host writes one
 /// <c>AuthorizationHandler&lt;TRequirement, MartenStoreResource&gt;</c> and it answers for the store selector,
 /// the page frame and every data call.
 /// </summary>

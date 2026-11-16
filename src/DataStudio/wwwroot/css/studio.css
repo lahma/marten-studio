@@ -9669,7 +9669,7 @@ a.ms-row-ref-key:hover {
 /* --------------------------------------------------------------------------
    The capability chip's popover
 
-   Each option's full name - "MartenStudioOptions.Capabilities.ApplySchemaChanges"
+   Each option's full name - "MartenOptions.Capabilities.ApplySchemaChanges"
    - is the thing a host has to type, and at 420 px it was cut off at the
    popover's edge in both themes. The popover is as wide as its longest line
    up to 40rem, and never wider than the viewport; a name that still does not

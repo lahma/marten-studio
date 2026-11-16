@@ -70,7 +70,7 @@ public class PlanPageTests
 
         IRenderedComponent<PlanPage> page = context.Render<PlanPage>();
 
-        page.Find(".ms-capability-disabled").TextContent.Should().Contain("Planning a statement is not enabled").And.Contain("PostgresStudioOptions.Capabilities.RunSql");
+        page.Find(".ms-capability-disabled").TextContent.Should().Contain("Planning a statement is not enabled").And.Contain("PostgresOptions.Capabilities.RunSql");
         page.Find(".ms-query-sql-warning").TextContent.Should().Be(SqlConsolePanel.RunSqlWarning);
         page.Find(".ms-plan-paste-only").TextContent.Should().Be(PlanPage.PasteOnlyNote);
         page.FindAll("#ms-plan-sql, .ms-plan-modes, .ms-plan-options").Should().BeEmpty("running a plan is the console's gate");

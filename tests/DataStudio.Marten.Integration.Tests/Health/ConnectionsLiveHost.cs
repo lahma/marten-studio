@@ -101,7 +101,7 @@ internal sealed class ConnectionsLiveHost : IAsyncDisposable
     public static async Task<ConnectionsLiveHost> CreateAsync(
         string connectionString,
         Action<StoreOptions>? store = null,
-        Action<MartenStudioOptions>? studio = null,
+        Action<MartenOptions>? studio = null,
         Action<IServiceCollection>? services = null,
         ManualClock? clock = null,
         bool sample = true)
@@ -177,7 +177,7 @@ internal sealed class ConnectionsLiveHost : IAsyncDisposable
         ResolvedScope resolved = await circuit.ServiceProvider.GetRequiredService<StudioScopeResolver>()
             .ResolveAsync(Scope, null, TestContext.Current.CancellationToken);
 
-        MartenStudioOptions value = Provider.GetRequiredService<IOptions<MartenStudioOptions>>().Value;
+        MartenOptions value = Provider.GetRequiredService<IOptions<MartenOptions>>().Value;
 
         await using HealthConnection connection = new(resolved.Target);
         HealthSqlRunner sql = new(connection, new ReadOnlySqlOptions { StatementTimeout = TimeSpan.FromSeconds(15), Role = value.SqlConsoleRole }, null);

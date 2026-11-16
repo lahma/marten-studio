@@ -335,7 +335,7 @@ public class ServerSettingsFactsTests
 
         view.ReadsAs.Should().Be("console_role");
         view.LoginRole.Should().Be("console_login");
-        view.ReadingRoleNote.Should().Contain("console_role (MartenStudioOptions.SqlConsoleRole)").And.Contain("logs in as console_login");
+        view.ReadingRoleNote.Should().Contain("console_role (MartenOptions.SqlConsoleRole)").And.Contain("logs in as console_login");
         view.Grants.Single(x => x.Name == "pg_read_all_stats").Held.Should().BeTrue();
         view.Grants.Single(x => x.Name == "pg_stat_scan_tables").Consequence.Should().EndWith("On a self-hosted server a superuser can grant it.");
         view.Grants.Should().NotContain(x => x.Name == "provider admin role", "a self-hosted server has none, and the role is in none");

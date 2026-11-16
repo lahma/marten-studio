@@ -62,8 +62,8 @@ internal sealed class ShapeCheckCache
     /// kind of check and its subject, separated by U+001F.
     /// </summary>
     /// <remarks>
-    /// <b>The key has no visitor in it, on purpose.</b> That is sound because <c>MartenStudioOptions.IsDocumentTypeVisible</c> is a
-    /// <c>Func&lt;Type, bool&gt;</c> (<c>MartenStudioOptions.cs:261</c>): visibility does not depend on who is asking, so two
+    /// <b>The key has no visitor in it, on purpose.</b> That is sound because <c>MartenOptions.IsDocumentTypeVisible</c> is a
+    /// <c>Func&lt;Type, bool&gt;</c> (<c>MartenOptions.cs:261</c>): visibility does not depend on who is asking, so two
     /// visitors with the same resolved scope see the same rows. <b>If it ever takes the visitor, this sharing must go</b> and the
     /// visitor's identity, or what the predicate said, must join the key.
     /// </remarks>

@@ -114,7 +114,7 @@ public class MultiDatabaseDaemonLiveTests(PostgresFixture postgres) : IAsyncLife
         // What a Blazor circuit supplies and a generic host does not.
         builder.Services.AddAuthorization();
         builder.Services.AddSingleton<AuthenticationStateProvider, AnonymousAuthenticationStateProvider>();
-        builder.Services.AddDataStudio().AddMarten(options => options.Capabilities = MartenStudioCapabilities.All());
+        builder.Services.AddDataStudio().AddMarten(options => options.Capabilities = MartenCapabilities.All());
 
         host = builder.Build();
 
@@ -506,7 +506,7 @@ public class MultiDatabaseDaemonLiveTests(PostgresFixture postgres) : IAsyncLife
 
         services.AddDataStudio().AddMarten(options =>
         {
-            options.Capabilities = MartenStudioCapabilities.All();
+            options.Capabilities = MartenCapabilities.All();
             options.StoreAuthorizationPolicy = "studio-store";
             options.WriteAuthorizationPolicy = "studio-write";
             options.DiscoverTenantIds = false;

@@ -27,9 +27,9 @@ internal sealed record MartenStoreRegistration(string Key, string DisplayName, T
 /// </summary>
 /// <remarks>
 /// <para>
-/// Constructed with the <see cref="IServiceCollection" /> at <c>AddMarten</c> time and scanned
-/// <em>lazily</em> on first use, because <c>AddMarten()</c> is routinely called before
-/// <c>AddMarten()</c> and a scan at registration time would find nothing. By the time anything renders,
+/// Constructed with the <see cref="IServiceCollection" /> when the module is registered (<c>AddMarten()</c> on the shell's builder) and scanned
+/// <em>lazily</em> on first use, because the host's own <c>services.AddMarten(...)</c> is routinely called after it
+/// and a scan at registration time would find nothing. By the time anything renders,
 /// the collection is complete - and enumerating it after <c>MakeReadOnly()</c> is allowed, which is what
 /// makes reading it from a built application safe.
 /// </para>
@@ -73,7 +73,7 @@ internal sealed class MartenStoreRegistry
     /// </summary>
     /// <param name="includeAncillaryStores">
     /// Whether stores registered with <c>AddMartenStore</c> are included - the resolved value of
-    /// <see cref="MartenStudioOptions.IncludeAncillaryStores" />.
+    /// <see cref="MartenOptions.IncludeAncillaryStores" />.
     /// </param>
     public IReadOnlyList<MartenStoreRegistration> Registrations(bool includeAncillaryStores)
     {
@@ -267,20 +267,20 @@ internal sealed class MartenStoreRegistry
 }
 
 /// <summary>
-/// Reads <see cref="MartenStudioOptions.IncludeAncillaryStores" /> so callers do not each have to.
+/// Reads <see cref="MartenOptions.IncludeAncillaryStores" /> so callers do not each have to.
 /// </summary>
 internal static class MartenStoreRegistryExtensions
 {
     /// <inheritdoc cref="MartenStoreRegistry.Registrations" />
     public static IReadOnlyList<MartenStoreRegistration> Registrations(
         this MartenStoreRegistry registry,
-        IOptions<MartenStudioOptions> options) =>
+        IOptions<MartenOptions> options) =>
         registry.Registrations(options.Value.IncludeAncillaryStores);
 
     /// <inheritdoc cref="MartenStoreRegistry.Find" />
     public static MartenStoreRegistration? Find(
         this MartenStoreRegistry registry,
         string? key,
-        IOptions<MartenStudioOptions> options) =>
+        IOptions<MartenOptions> options) =>
         registry.Find(key, options.Value.IncludeAncillaryStores);
 }

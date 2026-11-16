@@ -36,7 +36,7 @@ public class AuroraServiceTests
     [Fact]
     public async Task Through_every_gate_the_sessions_are_read_and_the_first_view_is_audited_once_per_circuit()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = PostgresStudioCapabilities.All(), policies: true);
+        await using Harness harness = Harness.Create(static options => options.Capabilities = PostgresCapabilities.All(), policies: true);
 
         AuroraView first = await harness.Service.GetAsync(Scope, Token);
         AuroraView second = await harness.Service.GetAsync(Scope, Token);
@@ -66,7 +66,7 @@ public class AuroraServiceTests
     [Fact]
     public async Task A_view_with_no_session_is_never_audited()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = PostgresStudioCapabilities.All());
+        await using Harness harness = Harness.Create(static options => options.Capabilities = PostgresCapabilities.All());
         harness.Reader.Sessions = new AuroraSessionWaits(Now, []);
 
         AuroraView view = await harness.Service.GetAsync(Scope, Token);
@@ -78,7 +78,7 @@ public class AuroraServiceTests
     [Fact]
     public async Task With_the_capability_off_no_session_is_read_and_the_option_is_named()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = new PostgresStudioCapabilities(), policies: true);
+        await using Harness harness = Harness.Create(static options => options.Capabilities = new PostgresCapabilities(), policies: true);
 
         AuroraView view = await harness.Service.GetAsync(Scope, Token);
 
@@ -86,7 +86,7 @@ public class AuroraServiceTests
         view.Waits!.Value.Should().NotBeNull();
         view.SessionsShown.Should().BeFalse();
         view.Sessions.Should().BeNull();
-        view.SessionsWithheld.Should().Contain("PostgresStudioOptions.Capabilities.ViewDatabaseActivity");
+        view.SessionsWithheld.Should().Contain("PostgresOptions.Capabilities.ViewDatabaseActivity");
         harness.Cache.SessionReadCount.Should().Be(0, "a visitor who may not see the sessions costs no read");
         harness.Reader.SessionReads.Should().Be(0);
         harness.Policies.Calls.Should().NotContain(static x => x.Resource.Capability != null, "a capability that is off is answered before the write policy is asked");
@@ -98,14 +98,14 @@ public class AuroraServiceTests
     {
         await using Harness harness = Harness.Create(static options =>
         {
-            options.Capabilities = PostgresStudioCapabilities.All();
+            options.Capabilities = PostgresCapabilities.All();
             options.ReadOnly = true;
         });
 
         AuroraView view = await harness.Service.GetAsync(Scope, Token);
 
         view.SessionsShown.Should().BeFalse();
-        view.SessionsWithheld.Should().Contain("PostgresStudioOptions.ReadOnly is true");
+        view.SessionsWithheld.Should().Contain("PostgresOptions.ReadOnly is true");
         harness.Cache.SessionReadCount.Should().Be(0);
         harness.Ring.Should().BeEmpty();
     }
@@ -113,7 +113,7 @@ public class AuroraServiceTests
     [Fact]
     public async Task A_write_policy_that_refuses_ViewDatabaseActivity_reads_no_session_and_shows_the_rest()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = PostgresStudioCapabilities.All(), policies: true);
+        await using Harness harness = Harness.Create(static options => options.Capabilities = PostgresCapabilities.All(), policies: true);
         harness.Policies.Allow(static resource => resource.Capability is null);
 
         AuroraView view = await harness.Service.GetAsync(Scope, Token);
@@ -131,12 +131,12 @@ public class AuroraServiceTests
     [Fact]
     public async Task A_store_policy_that_refuses_the_database_refuses_everything_and_reads_nothing()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = PostgresStudioCapabilities.All(), policies: true);
+        await using Harness harness = Harness.Create(static options => options.Capabilities = PostgresCapabilities.All(), policies: true);
         harness.Policies.Allow(static _ => false);
 
         AuroraView view = await harness.Service.GetAsync(Scope, Token);
 
-        view.Refused.Should().Contain("PostgresStudioOptions.SourceAuthorizationPolicy").And.Contain("the server belongs to no tenant");
+        view.Refused.Should().Contain("PostgresOptions.SourceAuthorizationPolicy").And.Contain("the server belongs to no tenant");
         view.IsAurora.Should().BeFalse("nothing was read to say so");
         harness.Cache.ReadCount.Should().Be(0);
         harness.Cache.SessionReadCount.Should().Be(0);
@@ -147,7 +147,7 @@ public class AuroraServiceTests
     [Fact]
     public async Task The_tenant_is_dropped_because_a_server_belongs_to_none()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = PostgresStudioCapabilities.All(), policies: true);
+        await using Harness harness = Harness.Create(static options => options.Capabilities = PostgresCapabilities.All(), policies: true);
 
         // Postgres Studio's source has no tenant called acme, so a resolution that kept it would refuse: the view answers
         // because the service asks for the database as a whole.
@@ -237,7 +237,7 @@ public class AuroraServiceTests
 
         public IReadOnlyList<StudioActionLogEntry> Ring => Provider.GetRequiredService<StudioActionLogService>().GetLatest();
 
-        public static Harness Create(Action<PostgresStudioOptions> configure, bool policies = false)
+        public static Harness Create(Action<PostgresOptions> configure, bool policies = false)
         {
             TestAuthenticationStateProvider users = new();
             users.SignIn("operator");

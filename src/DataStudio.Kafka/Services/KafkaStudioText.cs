@@ -100,8 +100,8 @@ internal static class KafkaStudioText
     /// <param name="readOnlyOption">The host studio's master switch, spelled as its options spell it.</param>
     public static string CapabilityWithoutPolicy(string capabilities, string readOnlyOption) =>
         $"KStudio has {capabilities} enabled and no policy decides who may use them: every visitor admitted to the studio could read the "
-        + "records of every topic this application's credentials can read. Set KafkaStudioOptions.CapabilityAuthorizationPolicy (asked for each "
-        + "capability use, once per topic), or KafkaStudioOptions.ClusterAuthorizationPolicy (asked for every read, once per topic), or turn the "
+        + "records of every topic this application's credentials can read. Set KafkaOptions.CapabilityAuthorizationPolicy (asked for each "
+        + "capability use, once per topic), or KafkaOptions.ClusterAuthorizationPolicy (asked for every read, once per topic), or turn the "
         + $"capabilities off; {readOnlyOption} = true turns them all off.";
 
     // ------------------------------------------------------------------------------------------------

@@ -153,7 +153,7 @@ public class IndexAdvisorMartenLiveTests(MartenAdvisorServer server) : IClassFix
         });
         services.AddDataStudio().AddMarten(options =>
         {
-            options.Capabilities = MartenStudioCapabilities.All();
+            options.Capabilities = MartenCapabilities.All();
             options.QueryTimeout = TimeSpan.FromSeconds(30);
         });
 

@@ -29,7 +29,7 @@ public class StudioLayoutModulePageTests
             Task.FromResult(FindContribution.NotApplicable);
     }
 
-    private static KafkaStudioHarness Harness(Action<KafkaStudioOptions>? configure = null) =>
+    private static KafkaStudioHarness Harness(Action<KafkaOptions>? configure = null) =>
         new(configure, extra: static services => services.AddSingleton<IFindContributor>(new AnyFind()), clusters: [KafkaStudioHarness.Primary, KafkaStudioHarness.Secondary]);
 
     private static async Task<IRenderedComponent<StudioRoutes>> RenderAtAsync(KafkaStudioHarness harness, string path)

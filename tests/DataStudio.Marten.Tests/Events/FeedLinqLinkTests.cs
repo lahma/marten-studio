@@ -40,7 +40,7 @@ public class FeedLinqLinkTests
     [Fact]
     public async Task The_link_is_hidden_when_the_capability_is_off()
     {
-        using StudioComponentContext context = await NewContextAsync(static options => options.Capabilities = new MartenStudioCapabilities());
+        using StudioComponentContext context = await NewContextAsync(static options => options.Capabilities = new MartenCapabilities());
 
         context.Render<Feed>().FindAll(LinkSelector).Should().BeEmpty();
     }
@@ -50,7 +50,7 @@ public class FeedLinqLinkTests
     {
         using StudioComponentContext context = await NewContextAsync(static options =>
         {
-            options.Capabilities = MartenStudioCapabilities.All();
+            options.Capabilities = MartenCapabilities.All();
             options.ReadOnly = true;
         });
 
@@ -109,7 +109,7 @@ public class FeedLinqLinkTests
     }
 
     private static async Task<StudioComponentContext> NewContextAsync(
-        Action<MartenStudioOptions> options,
+        Action<MartenOptions> options,
         string? tenant = null,
         Action<IServiceCollection>? configure = null)
     {

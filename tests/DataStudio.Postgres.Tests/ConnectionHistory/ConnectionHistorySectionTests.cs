@@ -41,7 +41,7 @@ public class ConnectionHistorySectionTests
     // it is Now: left to TimeProvider.System, the 7-day window slides past them and the lookup is Unavailable. Timers stay real, because the
     // QueryTimeout cut-off below is a real 300 ms.
     private static ConnectionHistoryReader Reader(IPostgresConnectionHistoryStore store) =>
-        new(store, Options.Create(new PostgresConnectionHistoryOptions()), PostgresStudioSettings.Of(new PostgresStudioOptions { QueryTimeout = TimeSpan.FromMilliseconds(300) }), new PinnedClock(Now));
+        new(store, Options.Create(new PostgresConnectionHistoryOptions()), PostgresStudioSettings.Of(new PostgresOptions { QueryTimeout = TimeSpan.FromMilliseconds(300) }), new PinnedClock(Now));
 
     // ----------------------------------------------------------------------------------------------
     // The lookup

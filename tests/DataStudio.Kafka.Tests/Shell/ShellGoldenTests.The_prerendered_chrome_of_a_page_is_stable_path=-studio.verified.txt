@@ -39,23 +39,23 @@
                 <div class="ms-find-status" role="status" aria-live="polite"></div></div></div></div><div class="ms-header-right"><button type="button" class="ms-chip ms-chip-button" popovertarget="ms-capability-popover" aria-label="4 of 8 capabilities enabled">4 / 8<span class="ms-chip-word"> capabilities</span></button><div id="ms-capability-popover" popover="auto" class="ms-popover ms-capability-popover"><p class="ms-popover-lead">What this studio allows. Your account's policies decide what you may do.</p><p class="ms-popover-title">Reads authorized like writes</p>
             <ul class="ms-capability-list" aria-label="Reads authorized like writes"><li class="ms-capability ms-capability-off"><span class="ms-capability-state" aria-hidden="true">off</span>
             <span class="ms-capability-name">RunSql</span>
-            <code class="ms-capability-option">PostgresStudioOptions.<wbr>Capabilities.<wbr>RunSql</code></li><li class="ms-capability ms-capability-off"><span class="ms-capability-state" aria-hidden="true">off</span>
+            <code class="ms-capability-option">PostgresOptions.<wbr>Capabilities.<wbr>RunSql</code></li><li class="ms-capability ms-capability-off"><span class="ms-capability-state" aria-hidden="true">off</span>
             <span class="ms-capability-name">BrowseDatabase</span>
-            <code class="ms-capability-option">PostgresStudioOptions.<wbr>Capabilities.<wbr>BrowseDatabase</code></li><li class="ms-capability ms-capability-off"><span class="ms-capability-state" aria-hidden="true">off</span>
+            <code class="ms-capability-option">PostgresOptions.<wbr>Capabilities.<wbr>BrowseDatabase</code></li><li class="ms-capability ms-capability-off"><span class="ms-capability-state" aria-hidden="true">off</span>
             <span class="ms-capability-name">ViewDefinitions</span>
-            <code class="ms-capability-option">PostgresStudioOptions.<wbr>Capabilities.<wbr>ViewDefinitions</code></li><li class="ms-capability ms-capability-off"><span class="ms-capability-state" aria-hidden="true">off</span>
+            <code class="ms-capability-option">PostgresOptions.<wbr>Capabilities.<wbr>ViewDefinitions</code></li><li class="ms-capability ms-capability-off"><span class="ms-capability-state" aria-hidden="true">off</span>
             <span class="ms-capability-name">ViewDatabaseActivity</span>
-            <code class="ms-capability-option">PostgresStudioOptions.<wbr>Capabilities.<wbr>ViewDatabaseActivity</code></li></ul><p class="ms-popover-title">KStudio for Apache Kafka&#xAE; reads</p>
+            <code class="ms-capability-option">PostgresOptions.<wbr>Capabilities.<wbr>ViewDatabaseActivity</code></li></ul><p class="ms-popover-title">KStudio for Apache Kafka&#xAE; reads</p>
             <ul class="ms-capability-list" aria-label="KStudio for Apache Kafka&#xAE; reads"><li class="ms-capability ms-capability-on"><span class="ms-capability-state" aria-hidden="true">on</span>
                         <span class="ms-capability-name">SearchRecords</span>
-                        <code class="ms-capability-option">KafkaStudioOptions.<wbr>Capabilities.<wbr>SearchRecords</code></li><li class="ms-capability ms-capability-on"><span class="ms-capability-state" aria-hidden="true">on</span>
+                        <code class="ms-capability-option">KafkaOptions.<wbr>Capabilities.<wbr>SearchRecords</code></li><li class="ms-capability ms-capability-on"><span class="ms-capability-state" aria-hidden="true">on</span>
                         <span class="ms-capability-name">ReadPayloads</span>
-                        <code class="ms-capability-option">KafkaStudioOptions.<wbr>Capabilities.<wbr>ReadPayloads</code></li><li class="ms-capability ms-capability-on"><span class="ms-capability-state" aria-hidden="true">on</span>
+                        <code class="ms-capability-option">KafkaOptions.<wbr>Capabilities.<wbr>ReadPayloads</code></li><li class="ms-capability ms-capability-on"><span class="ms-capability-state" aria-hidden="true">on</span>
                         <span class="ms-capability-name">ExportRecords</span>
-                        <code class="ms-capability-option">KafkaStudioOptions.<wbr>Capabilities.<wbr>ExportRecords</code></li><li class="ms-capability ms-capability-on"><span class="ms-capability-state" aria-hidden="true">on</span>
+                        <code class="ms-capability-option">KafkaOptions.<wbr>Capabilities.<wbr>ExportRecords</code></li><li class="ms-capability ms-capability-on"><span class="ms-capability-state" aria-hidden="true">on</span>
                         <span class="ms-capability-name">LiveTail</span>
-                        <code class="ms-capability-option">KafkaStudioOptions.<wbr>Capabilities.<wbr>LiveTail</code></li></ul><p class="ms-popover-footnote">
-            Every one of these is off until the host sets it. <code>PostgresStudioCapabilities.All()</code>
+                        <code class="ms-capability-option">KafkaOptions.<wbr>Capabilities.<wbr>LiveTail</code></li></ul><p class="ms-popover-footnote">
+            Every one of these is off until the host sets it. <code>PostgresCapabilities.All()</code>
             turns them all on; <code>DataStudioOptions.ReadOnly</code> turns them all off again.
         </p></div>
                     

@@ -114,7 +114,7 @@ internal static class TableHealthLive
         string schema,
         ManualClock clock,
         Action<StoreOptions>? store = null,
-        Action<MartenStudioOptions>? studio = null,
+        Action<MartenOptions>? studio = null,
         Action<IServiceCollection>? services = null) =>
         HealthLiveHost.CreateAsync(
             postgres,

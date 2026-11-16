@@ -84,7 +84,7 @@ internal interface ISchemaDataService
     /// the store policy, then the write policy with <c>ApplySchemaChanges</c> named.
     /// </remarks>
     /// <exception cref="StudioCapabilityDeniedException">
-    /// <c>MartenStudioOptions.Capabilities.ApplySchemaChanges</c> is off, or <c>ReadOnly</c> is on.
+    /// <c>MartenOptions.Capabilities.ApplySchemaChanges</c> is off, or <c>ReadOnly</c> is on.
     /// </exception>
     /// <exception cref="StudioNotAuthorizedException">
     /// The store policy or the write policy refused this store and database as a whole; its

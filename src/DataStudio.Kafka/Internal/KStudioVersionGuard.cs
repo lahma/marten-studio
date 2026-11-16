@@ -22,10 +22,11 @@ namespace DataStudio.Kafka.Internal;
 /// its own. <c>KStudioVersionGuardTests</c> scans the IL of both to keep it that way.
 /// </para>
 /// <para>
-/// <b>The caveat.</b> <c>KafkaStudioOptions</c> derives from a DataStudio.Kafka.Core type, so the runtime loads DataStudio.Kafka.Core to compile
-/// <c>AddKafka</c> itself: a <em>missing or older</em> DataStudio.Kafka.Core fails in the loader with a <see cref="FileNotFoundException" /> that
-/// names it, before this guard runs. The guard explains a newer one and another build of the same version. A missing or mismatched DataStudio
-/// is always the guard's message.
+/// <b>The caveat.</b> <c>KafkaOptions</c> derives from a DataStudio.Kafka.Core type, and <c>AddKafka</c> extends the shell's
+/// <c>DataStudioBuilder</c>, so the runtime loads DataStudio.Kafka.Core and DataStudio to compile <c>AddKafka</c> itself: a <em>missing or older</em>
+/// one of them fails in the loader with a <see cref="FileNotFoundException" /> that names it, before this guard runs (and the host's own
+/// <c>AddDataStudio()</c>, which comes first, fails the same way for a missing shell). The guard explains a newer one, and another build of the
+/// same version, of either.
 /// </para>
 /// <para>
 /// <b>What it compares.</b> The informational versions. The packages are packed from one commit at one CHANGELOG version, in Release, and

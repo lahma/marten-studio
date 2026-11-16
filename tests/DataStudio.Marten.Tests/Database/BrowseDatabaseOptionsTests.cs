@@ -22,19 +22,19 @@ public class BrowseDatabaseOptionsTests
 {
     private static CancellationToken Token => Xunit.TestContext.Current.CancellationToken;
 
-    private static MartenStudioOptions Resolve(Action<MartenStudioOptions> configure)
+    private static MartenOptions Resolve(Action<MartenOptions> configure)
     {
         var services = new ServiceCollection();
         services.AddDataStudio().AddMarten(configure);
         using ServiceProvider provider = services.BuildServiceProvider();
-        return provider.GetRequiredService<IOptions<MartenStudioOptions>>().Value;
+        return provider.GetRequiredService<IOptions<MartenOptions>>().Value;
     }
 
     [Fact]
     public void BrowseDatabase_is_off_by_default_and_on_in_All()
     {
-        new MartenStudioCapabilities().BrowseDatabase.Should().BeFalse();
-        MartenStudioCapabilities.All().BrowseDatabase.Should().BeTrue();
+        new MartenCapabilities().BrowseDatabase.Should().BeFalse();
+        MartenCapabilities.All().BrowseDatabase.Should().BeTrue();
 
         Resolve(static _ => { }).BrowsableSchemas.Should().BeEmpty();
     }
@@ -46,7 +46,7 @@ public class BrowseDatabaseOptionsTests
     [InlineData("with space")]
     public void An_entry_that_is_star_or_a_quotable_name_is_accepted(string entry)
     {
-        MartenStudioOptions options = Resolve(options => options.BrowsableSchemas.Add(entry));
+        MartenOptions options = Resolve(options => options.BrowsableSchemas.Add(entry));
 
         options.BrowsableSchemas.Should().Equal(entry);
     }
@@ -60,7 +60,7 @@ public class BrowseDatabaseOptionsTests
     {
         Action act = () => Resolve(options => options.BrowsableSchemas.Add(entry));
 
-        act.Should().Throw<OptionsValidationException>().WithMessage("*MartenStudioOptions.BrowsableSchemas*");
+        act.Should().Throw<OptionsValidationException>().WithMessage("*MartenOptions.BrowsableSchemas*");
     }
 
     [Fact]
@@ -73,7 +73,7 @@ public class BrowseDatabaseOptionsTests
 
     /// <summary>
     /// The packet's own requirement: every member of <c>StudioCapabilityGuard.All</c> maps to a
-    /// <c>MartenStudioCapabilities</c> property of the same name, and setting that property - and only
+    /// <c>MartenCapabilities</c> property of the same name, and setting that property - and only
     /// that one - turns it on. The switch's default arm throws, so a forgotten arm fails here.
     /// </summary>
     [Fact]
@@ -81,10 +81,10 @@ public class BrowseDatabaseOptionsTests
     {
         foreach (StudioCapability capability in StudioCapabilityGuard.All)
         {
-            var configured = new MartenStudioCapabilities();
+            var configured = new MartenCapabilities();
 
-            System.Reflection.PropertyInfo property = typeof(MartenStudioCapabilities).GetProperty(capability.ToString())
-                ?? throw new InvalidOperationException(capability + " has no MartenStudioCapabilities property.");
+            System.Reflection.PropertyInfo property = typeof(MartenCapabilities).GetProperty(capability.ToString())
+                ?? throw new InvalidOperationException(capability + " has no MartenCapabilities property.");
 
             MartenStudioSettings.IsConfigured(configured, capability).Should().BeFalse();
 
@@ -97,7 +97,7 @@ public class BrowseDatabaseOptionsTests
                 .Should().OnlyContain(x => !MartenStudioSettings.IsConfigured(configured, x));
         }
 
-        Action unknown = () => MartenStudioSettings.IsConfigured(new MartenStudioCapabilities(), (StudioCapability) 999);
+        Action unknown = () => MartenStudioSettings.IsConfigured(new MartenCapabilities(), (StudioCapability) 999);
         unknown.Should().Throw<ArgumentOutOfRangeException>("a capability with no property must not quietly read as off");
     }
 
@@ -134,9 +134,9 @@ public class BrowseDatabaseOptionsTests
     [Fact]
     public void ReadOnly_turns_BrowseDatabase_off_naming_the_master_switch()
     {
-        var guard = MartenSpine.Guard(Options.Create(new MartenStudioOptions
+        var guard = MartenSpine.Guard(Options.Create(new MartenOptions
         {
-            Capabilities = MartenStudioCapabilities.All(),
+            Capabilities = MartenCapabilities.All(),
             ReadOnly = true,
         }));
 
@@ -144,7 +144,7 @@ public class BrowseDatabaseOptionsTests
 
         guard.Invoking(static x => x.Require(StudioCapability.BrowseDatabase))
             .Should().Throw<StudioCapabilityDeniedException>()
-            .Which.Message.Should().Contain("MartenStudioOptions.ReadOnly");
+            .Which.Message.Should().Contain("MartenOptions.ReadOnly");
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -155,7 +155,7 @@ public class BrowseDatabaseOptionsTests
     public async Task Star_without_a_role_is_a_warning_once_at_startup()
     {
         var logs = new CapturingLoggerProvider();
-        var options = new MartenStudioOptions();
+        var options = new MartenOptions();
         options.BrowsableSchemas.Add("*");
 
         var notice = new DatabaseBrowserConfigurationNotice(MartenStudioSettings.Of(options), Logger(logs), containerEndpoints: MappedStudio());
@@ -175,7 +175,7 @@ public class BrowseDatabaseOptionsTests
     public async Task Named_schemas_or_a_role_say_nothing(bool star, string? role)
     {
         var logs = new CapturingLoggerProvider();
-        var options = new MartenStudioOptions { SqlConsoleRole = role };
+        var options = new MartenOptions { SqlConsoleRole = role };
         options.BrowsableSchemas.Add(star ? "*" : "quartz");
 
         await new DatabaseBrowserConfigurationNotice(MartenStudioSettings.Of(options), Logger(logs), containerEndpoints: MappedStudio())
@@ -238,7 +238,7 @@ public class BrowseDatabaseOptionsTests
         await app.StartAsync(Token);
         await app.StopAsync(Token);
 
-        configured.Should().Be(0, "nothing built MartenStudioOptions for a host that never mapped the studio");
+        configured.Should().Be(0, "nothing built MartenOptions for a host that never mapped the studio");
         logs.Entries.Should().NotContain(static x => x.EventId.Id == 9230);
     }
 

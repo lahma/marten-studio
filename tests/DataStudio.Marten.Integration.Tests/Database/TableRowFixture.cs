@@ -99,7 +99,7 @@ public abstract class TableRowDemoFixture(PostgresFixture postgres) : IAsyncLife
     /// never asked to create anything - then whatever <paramref name="configure" /> says.
     /// </summary>
     internal RowsHost Host(
-        Action<MartenStudioOptions>? configure = null,
+        Action<MartenOptions>? configure = null,
         IAuthorizationService? authorization = null,
         ILoggerProvider? logs = null) =>
         RowsHost.Create(ConnectionString, configure, authorization, logs);
@@ -204,7 +204,7 @@ internal sealed class RowsHost(ServiceProvider provider) : IAsyncDisposable
     /// </summary>
     public static RowsHost Create(
         string connectionString,
-        Action<MartenStudioOptions>? configure = null,
+        Action<MartenOptions>? configure = null,
         IAuthorizationService? authorization = null,
         ILoggerProvider? logs = null)
     {

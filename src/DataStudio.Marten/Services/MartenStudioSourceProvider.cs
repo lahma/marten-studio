@@ -26,7 +26,7 @@ namespace DataStudio.Marten.Services;
 /// </remarks>
 internal sealed class MartenStudioSourceProvider : IStudioSourceProvider
 {
-    private readonly IOptions<MartenStudioOptions> options;
+    private readonly IOptions<MartenOptions> options;
     private readonly MartenStoreRegistry registry;
     private readonly TenantDiscovery tenantDiscovery;
     private readonly IServiceProvider services;
@@ -38,7 +38,7 @@ internal sealed class MartenStudioSourceProvider : IStudioSourceProvider
     /// supplies it, and without one every failure is simply a Warning (<see cref="StudioLogThrottle.LevelOrWarning" />).
     /// </remarks>
     public MartenStudioSourceProvider(
-        IOptions<MartenStudioOptions> options,
+        IOptions<MartenOptions> options,
         MartenStoreRegistry registry,
         TenantDiscovery tenantDiscovery,
         IServiceProvider services,

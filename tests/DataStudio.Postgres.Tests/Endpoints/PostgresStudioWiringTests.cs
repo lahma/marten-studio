@@ -36,7 +36,7 @@ public sealed class PostgresStudioWiringTests : IAsyncDisposable
         collection.AddSingleton<Microsoft.Extensions.Configuration.IConfiguration>(new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build());
         collection.AddSingleton(NpgsqlDataSource.Create("Host=localhost;Database=app;Username=app"));
         collection.AddDataStudio().AddPostgres();
-        collection.AddHealthChecks().AddPostgresStudio();
+        collection.AddHealthChecks().AddPostgresDiagnostics();
         services = collection.BuildServiceProvider();
     }
 
@@ -96,17 +96,17 @@ public sealed class PostgresStudioWiringTests : IAsyncDisposable
         return captured.Entries.Should().ContainSingle().Which.Message.Contains("Postgres Studio", StringComparison.Ordinal);
     }
     [Fact]
-    public void A_health_check_registered_without_the_studio_names_AddPostgresStudio()
+    public void A_health_check_registered_without_the_studio_names_AddPostgres()
     {
         ServiceCollection collection = new();
         collection.AddLogging();
-        collection.AddHealthChecks().AddPostgresStudio();
+        collection.AddHealthChecks().AddPostgresDiagnostics();
         using ServiceProvider alone = collection.BuildServiceProvider();
 
         alone.GetRequiredService<HealthExportRunner>().Text.Should().BeSameAs(PostgresStudioText.Instance,
             "with no settings registered, the words are the registering studio's");
         HealthExportSummary.NotRegistered(DateTimeOffset.UnixEpoch, alone.GetRequiredService<HealthExportRunner>().Text).Problem
-            .Should().Be("Postgres Studio's services are not registered: call services.AddPostgresDiagnostics() or services.AddPostgresStudio() as well as AddHealthChecks().AddPostgresStudio()");
+            .Should().Be("Postgres Studio's services are not registered: call services.AddPostgresDiagnostics() or services.AddDataStudio().AddPostgres() as well as AddHealthChecks().AddPostgresDiagnostics()");
     }
 
     private sealed class Anonymous : AuthenticationStateProvider

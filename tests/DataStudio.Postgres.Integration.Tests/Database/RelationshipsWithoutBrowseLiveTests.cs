@@ -79,7 +79,7 @@ public class RelationshipsWithoutBrowseLiveTests(RelationshipsWithoutBrowseLiveT
         graph.Edges.Should().BeEmpty();
     }
 
-    private StudioHost Host(Action<PostgresStudioOptions> configure) =>
+    private StudioHost Host(Action<PostgresOptions> configure) =>
         StudioHost.Create(
             services => services.AddSingleton(_ => NpgsqlDataSource.Create(databases.Connection)),
             configure);

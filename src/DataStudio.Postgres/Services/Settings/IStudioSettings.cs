@@ -17,7 +17,7 @@ namespace DataStudio.Postgres.Services.Settings;
 /// <b>Names, not values, are what a sentence needs.</b> A disabled control says which option a host would set, spelled
 /// the way the host's own registration spells it (D4). <c>OptionName</c> composes that spelling from
 /// <c>OptionsTypeName</c>, so the shared code that writes the sentence never names a studio's type itself:
-/// MartenStudio answers <c>MartenStudioOptions.Capabilities.RunSql</c>, and a studio with options of its own answers in
+/// MartenStudio answers <c>MartenOptions.Capabilities.RunSql</c>, and a studio with options of its own answers in
 /// its own type's name.
 /// </para>
 /// <para>
@@ -34,7 +34,7 @@ internal interface IStudioSettings : IShellSettings, IDiagnosticsSettings
     /// </summary>
     new string ProductName { get; }
 
-    /// <summary>The public capabilities type's name: <c>MartenStudioCapabilities</c>, whose <c>All()</c> a remedy names.</summary>
+    /// <summary>The public capabilities type's name: <c>MartenCapabilities</c>, whose <c>All()</c> a remedy names.</summary>
     string CapabilitiesTypeName { get; }
 
     /// <summary>
@@ -74,15 +74,8 @@ internal interface IStudioSettings : IShellSettings, IDiagnosticsSettings
     /// <summary>The SQL console's row cap.</summary>
     int MaxSqlConsoleRows { get; }
 
-    /// <summary>The largest value rendered inline before it is offered on demand (MartenStudio's <c>MaxInlineDocumentBytes</c>).</summary>
+    /// <summary>The largest value rendered inline before it is offered on demand (both modules spell the option <c>MaxInlineValueBytes</c>).</summary>
     int MaxInlineValueBytes { get; }
-
-    /// <summary>
-    /// The options member <see cref="MaxInlineValueBytes" /> is read from, as a sentence names it through
-    /// <c>OptionName</c>: <c>MaxInlineDocumentBytes</c> in MartenStudio, <c>MaxInlineValueBytes</c> in
-    /// PostgresStudio - the one option the two studios spell differently.
-    /// </summary>
-    string MaxInlineValueBytesMember { get; }
 
     /// <summary>Above this estimate an exact count is offered on demand rather than run.</summary>
     long ExactCountThreshold { get; }
@@ -91,21 +84,21 @@ internal interface IStudioSettings : IShellSettings, IDiagnosticsSettings
 /// <summary>The sentences built from <see cref="IStudioSettings" /> that more than one place writes.</summary>
 internal static class StudioSettingsText
 {
-    /// <summary>The option a host sets to enable <paramref name="capability" />: <c>MartenStudioOptions.Capabilities.RunSql</c>.</summary>
+    /// <summary>The option a host sets to enable <paramref name="capability" />: <c>MartenOptions.Capabilities.RunSql</c>.</summary>
     public static string CapabilityOption(this IStudioSettings settings, StudioCapability capability)
     {
         ArgumentNullException.ThrowIfNull(settings);
         return settings.OptionName("Capabilities." + capability);
     }
 
-    /// <summary>The master switch's option: <c>MartenStudioOptions.ReadOnly</c>.</summary>
+    /// <summary>The master switch's option: <c>MartenOptions.ReadOnly</c>.</summary>
     public static string ReadOnlyOption(this IStudioSettings settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
         return settings.ReadOnlyOptionName;
     }
 
-    /// <summary>The one-line opt-in that turns every capability on: <c>MartenStudioCapabilities.All()</c>.</summary>
+    /// <summary>The one-line opt-in that turns every capability on: <c>MartenCapabilities.All()</c>.</summary>
     public static string AllCapabilities(this IStudioSettings settings)
     {
         ArgumentNullException.ThrowIfNull(settings);

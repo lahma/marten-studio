@@ -18,7 +18,7 @@ public class RelationFindContributorTests
 
     private static RelationFindContributor Contributor(FakeDatabaseObjectService objects) => new(
         objects,
-        new PostgresStudioSettings(Microsoft.Extensions.Options.Options.Create(new PostgresStudioOptions())),
+        PostgresStudioSettings.Of(Microsoft.Extensions.Options.Options.Create(new PostgresOptions())),
         PostgresStudioDescriptor.Instance);
 
     [Fact]
@@ -138,7 +138,7 @@ public class RelationFindContributorTests
 
     private static RelationFindContributor Crowded(CrowdedObjects objects) => new(
         objects,
-        new PostgresStudioSettings(Microsoft.Extensions.Options.Options.Create(new PostgresStudioOptions())),
+        PostgresStudioSettings.Of(Microsoft.Extensions.Options.Options.Create(new PostgresOptions())),
         PostgresStudioDescriptor.Instance);
 
     [Fact]

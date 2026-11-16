@@ -48,7 +48,7 @@ public class PlanWhatIfLiveTests(HypopgServer server) : IClassFixture<HypopgServ
                     services.AddSingleton<IHypotheticalIndexObserver>(observer);
                 }
             },
-            options => options.Capabilities = PostgresStudioCapabilities.All());
+            options => options.Capabilities = PostgresCapabilities.All());
 
     /// <summary>An observer that fails the what-if the moment hypopg has made its index, and remembers how the connection was left.</summary>
     private sealed class Failing : IHypotheticalIndexObserver

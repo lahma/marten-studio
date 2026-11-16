@@ -85,7 +85,7 @@ public class BlockingLiveTests(PostgresFixture postgres)
                     services.AddSingleton(_ => NpgsqlDataSource.Create(owned[0]));
                     services.AddSingleton<IHealthStatementObserver>(probe);
                 },
-                static o => o.Capabilities = PostgresStudioCapabilities.All(),
+                static o => o.Capabilities = PostgresCapabilities.All(),
                 writePolicy: static (resource, user) => user.Identity?.Name == "admin");
 
             // The regular sweep: C12 checks, nothing fails, and the sweep took no lock but the catalog's - though public.jobs
@@ -196,7 +196,7 @@ public class BlockingLiveTests(PostgresFixture postgres)
 
             await using StudioHost host = StudioHost.Create(
                 services => services.AddSingleton(_ => NpgsqlDataSource.Create(owned[0])),
-                static o => o.Capabilities = PostgresStudioCapabilities.All());
+                static o => o.Capabilities = PostgresCapabilities.All());
 
             BlockingChainFacts facts = await GatherAsync(host);
             BlockingChainCheck check = new();
@@ -249,7 +249,7 @@ public class BlockingLiveTests(PostgresFixture postgres)
         {
             await using StudioHost host = StudioHost.Create(
                 services => services.AddSingleton(_ => NpgsqlDataSource.Create(owned[0])),
-                static o => o.Capabilities = PostgresStudioCapabilities.All());
+                static o => o.Capabilities = PostgresCapabilities.All());
 
             HealthSweep sweep = await SweepAsync(host);
             HealthCheckResult c12 = sweep.Results.Single(static x => x.Check.Code == "C12");

@@ -22,11 +22,11 @@ using System.Collections.Frozen;
 namespace DataStudio.Marten;
 
 /// <summary>
-/// Options for the Marten module of Data Studio, configured through <c>AddMarten(Action&lt;MartenStudioOptions&gt;)</c>.
+/// Options for the Marten module of Data Studio, configured through <c>AddMarten(Action&lt;MartenOptions&gt;)</c>.
 /// Validation runs at startup. Where the studio is mounted, what it is called, who gets in and how often a live page polls are the shell's
 /// (<c>DataStudioOptions</c>); <see cref="ReadOnly" /> here turns only this module's capabilities off.
 /// </summary>
-public sealed class MartenStudioOptions
+public sealed class MartenOptions
 {
     /// <summary>
     /// When set, evaluated against a <see cref="MartenStoreResource"/> (with a <see langword="null"/>
@@ -51,7 +51,7 @@ public sealed class MartenStudioOptions
     /// <summary>
     /// Which mutating operations are enabled. All off by default.
     /// </summary>
-    public MartenStudioCapabilities Capabilities { get; set; } = new();
+    public MartenCapabilities Capabilities { get; set; } = new();
 
     /// <summary>
     /// Rows per page when a list is first shown. Between 1 and <see cref="MaxPageSize"/>.
@@ -94,7 +94,7 @@ public sealed class MartenStudioOptions
     /// Documents larger than this are not fetched into list views and are shown as raw text only in the
     /// detail view.
     /// </summary>
-    public int MaxInlineDocumentBytes { get; set; } = 512 * 1024;
+    public int MaxInlineValueBytes { get; set; } = 512 * 1024;
 
     /// <summary>
     /// Row cap for the SQL console; the reader stops after this many rows. Between 1 and 10000.
@@ -291,9 +291,9 @@ public sealed class MartenStudioOptions
 
     /// <summary>
     /// The Postgres schemas beyond the store's own whose objects the database browser may show, and whose
-    /// non-Marten rows and definitions it may read, once <see cref="MartenStudioCapabilities.BrowseDatabase"/>
+    /// non-Marten rows and definitions it may read, once <see cref="MartenCapabilities.BrowseDatabase"/>
     /// is on - or, for the schemas an entry names exactly, their structure and definitions alone, once
-    /// <see cref="MartenStudioCapabilities.ViewDefinitions"/> is. Empty by default. Each entry is an exact schema
+    /// <see cref="MartenCapabilities.ViewDefinitions"/> is. Empty by default. Each entry is an exact schema
     /// name, compared case-sensitively as Postgres stores it, or <c>"*"</c>.
     /// </summary>
     /// <remarks>
@@ -306,9 +306,9 @@ public sealed class MartenStudioOptions
     /// <para>
     /// The store's own schemas show their structure without the capability, as the Schema screen always
     /// has; the rows and definitions of the non-Marten objects in them follow this list like any other
-    /// schema's. <c>"*"</c> never admits a definition to <see cref="MartenStudioCapabilities.ViewDefinitions"/>:
+    /// schema's. <c>"*"</c> never admits a definition to <see cref="MartenCapabilities.ViewDefinitions"/>:
     /// only a schema named by exact name is read for its definitions without
-    /// <see cref="MartenStudioCapabilities.BrowseDatabase"/>.
+    /// <see cref="MartenCapabilities.BrowseDatabase"/>.
     /// </para>
     /// <para>
     /// <b>This limits what the screens show, not what can be read.</b> The SQL console reads whatever the

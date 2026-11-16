@@ -12,7 +12,7 @@ namespace DataStudio.Kafka.Services;
 /// </summary>
 /// <param name="options">KStudio's options.</param>
 /// <param name="settings">The host studio's settings, whose <c>ReadOnly</c> is the master switch.</param>
-internal sealed class KafkaCapabilityGuard(IOptions<KafkaStudioOptions> options, IShellSettings settings)
+internal sealed class KafkaCapabilityGuard(IOptions<KafkaOptions> options, IShellSettings settings)
 {
     /// <summary>Every capability KStudio offers.</summary>
     public static IReadOnlyList<KafkaCapability> Offered { get; } = Enum.GetValues<KafkaCapability>();
@@ -34,7 +34,7 @@ internal sealed class KafkaCapabilityGuard(IOptions<KafkaStudioOptions> options,
     /// <summary>The option that switches <paramref name="capability" /> on, as a host writes it.</summary>
     /// <param name="capability">The capability.</param>
     public static string OptionFor(KafkaCapability capability) =>
-        nameof(KafkaStudioOptions) + "." + nameof(KafkaStudioOptions.Capabilities) + "." + capability;
+        nameof(KafkaOptions) + "." + nameof(KafkaOptions.Capabilities) + "." + capability;
 
     /// <summary>The capabilities <paramref name="capability" /> needs on as well: <c>SearchRecords</c> for each of the other three.</summary>
     /// <param name="capability">The capability.</param>
@@ -81,10 +81,10 @@ internal sealed class KafkaCapabilityGuard(IOptions<KafkaStudioOptions> options,
 
     /// <summary>The capabilities <paramref name="capabilities" /> switched on.</summary>
     /// <param name="capabilities">The host's capabilities.</param>
-    public static IReadOnlyList<KafkaCapability> ConfiguredIn(KafkaStudioCapabilities capabilities) =>
+    public static IReadOnlyList<KafkaCapability> ConfiguredIn(KafkaCapabilities capabilities) =>
         [.. Offered.Where(capability => IsConfigured(capabilities, capability))];
 
-    private static bool IsConfigured(KafkaStudioCapabilities capabilities, KafkaCapability capability) => capability switch
+    private static bool IsConfigured(KafkaCapabilities capabilities, KafkaCapability capability) => capability switch
     {
         KafkaCapability.SearchRecords => capabilities.SearchRecords,
         KafkaCapability.ReadPayloads => capabilities.ReadPayloads,

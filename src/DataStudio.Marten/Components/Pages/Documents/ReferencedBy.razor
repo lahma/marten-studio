@@ -7,7 +7,8 @@
 @using DataStudio.Postgres.Services
 @using DataStudio.Postgres.Services.Relationships
 @inject StudioState State
-@inject IOptions<MartenStudioOptions> Options
+@inject IOptions<MartenOptions> Options
+@inject IStudioSettings Settings
 
 @*
     The inbound half of a document's relationships: which collections - and which of the database's other
@@ -150,8 +151,8 @@ else if (Referenced.Entries.Count > 0 || Referenced.Withheld > 0 || Referenced.T
     /// </summary>
     private string TableHref(ReferencedByEntry entry) =>
         entry is { IsCounted: true, ChildFilter: { Length: > 0 } filter }
-            ? DatabaseLinks.ToRows(Options.Value, State.ActiveScope, entry.Schema ?? string.Empty, entry.Table ?? string.Empty, filter)
-            : DatabaseLinks.ToObject(Options.Value, State.ActiveScope, entry.Schema ?? string.Empty, entry.Table ?? string.Empty);
+            ? DatabaseLinks.ToRows(Settings, State.ActiveScope, entry.Schema ?? string.Empty, entry.Table ?? string.Empty, filter)
+            : DatabaseLinks.ToObject(Settings, State.ActiveScope, entry.Schema ?? string.Empty, entry.Table ?? string.Empty);
 
     /// <summary>
     /// The search expression that shows exactly the rows this count counted, or <see langword="null" />.

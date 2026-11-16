@@ -47,7 +47,7 @@ namespace DataStudio.Marten.Services.Health;
 /// cannot map to a type is treated as hidden.
 /// </para>
 /// </remarks>
-internal sealed class LongestStreamsAction(IOptions<MartenStudioOptions> options, ColumnCatalog catalog) : IHealthFindingAction
+internal sealed class LongestStreamsAction(IOptions<MartenOptions> options, ColumnCatalog catalog) : IHealthFindingAction
 {
     /// <summary>The action's id.</summary>
     public const string ActionId = "e06.longest-streams";
@@ -508,7 +508,7 @@ internal sealed class StreamAggregateMap
 
     /// <summary>Reads the map from the store's options.</summary>
     /// <param name="options">The store's options.</param>
-    /// <param name="isVisible"><c>MartenStudioOptions.IsDocumentTypeVisible</c>.</param>
+    /// <param name="isVisible"><c>MartenOptions.IsDocumentTypeVisible</c>.</param>
     public static StreamAggregateMap From(IReadOnlyStoreOptions options, Func<Type, bool>? isVisible)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -527,7 +527,7 @@ internal sealed class StreamAggregateMap
 
     /// <summary>The map over aggregate types already paired with the alias Marten files their streams under.</summary>
     /// <param name="aggregates">Each aggregate type, its alias, and whether nothing snapshots it.</param>
-    /// <param name="isVisible"><c>MartenStudioOptions.IsDocumentTypeVisible</c>.</param>
+    /// <param name="isVisible"><c>MartenOptions.IsDocumentTypeVisible</c>.</param>
     internal static StreamAggregateMap Of(IEnumerable<(Type Type, string Alias, bool LiveOnly)> aggregates, Func<Type, bool>? isVisible)
     {
         ArgumentNullException.ThrowIfNull(aggregates);

@@ -16,7 +16,7 @@ public class KStudioReadsNoRawSettingsTests
     [Fact]
     public void KStudio_never_refers_to_the_definitions_raw_settings()
     {
-        IReadOnlyList<string> offenders = MemberReferences(typeof(KafkaStudioOptions).Assembly.Location)
+        IReadOnlyList<string> offenders = MemberReferences(typeof(KafkaOptions).Assembly.Location)
             .Where(static x => x.Type == "DataStudio.Kafka.Core.Clusters.KafkaClusterDefinition" && RawGetters.Contains(x.Member, StringComparer.Ordinal))
             .Select(static x => x.Type + "::" + x.Member)
             .ToList();
@@ -31,7 +31,7 @@ public class KStudioReadsNoRawSettingsTests
         MemberReferences(typeof(KStudioReadsNoRawSettingsTests).Assembly.Location)
             .Should().Contain(("DataStudio.Kafka.Core.Clusters.KafkaClusterDefinition", "get_ConsumerSettings"), "the scan resolves a getter on the definition when one is called");
 
-        MemberReferences(typeof(KafkaStudioOptions).Assembly.Location)
+        MemberReferences(typeof(KafkaOptions).Assembly.Location)
             .Should().Contain(static x => x.Type == "DataStudio.Kafka.Core.Clusters.KafkaClusterDefinition", "KStudio does use the definition, for its declared topics");
     }
 

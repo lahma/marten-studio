@@ -100,7 +100,7 @@ public class KafkaSearchPagePayloadTests
 
         await SearchForAsync(page, "$.status = 'shipped'");
 
-        page.WaitForAssertion(() => page.Find(".ms-k-note-warning").TextContent.Should().Contain("Reading values is not available here.").And.NotContain("KafkaStudioOptions"));
+        page.WaitForAssertion(() => page.Find(".ms-k-note-warning").TextContent.Should().Contain("Reading values is not available here.").And.NotContain("KafkaOptions"));
         page.FindAll("table.ms-k-matches").Should().BeEmpty();
     }
 

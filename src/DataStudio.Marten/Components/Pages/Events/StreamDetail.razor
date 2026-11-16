@@ -15,7 +15,8 @@
 @inject StudioAuthorization Authorization
 @inject ToastService Toasts
 @inject NavigationManager Navigation
-@inject IOptions<MartenStudioOptions> Options
+@inject IOptions<MartenOptions> Options
+@inject IStudioSettings Settings
 
 <PageTitle>Stream</PageTitle>
 
@@ -365,7 +366,7 @@
     private long lastVersionLoaded;
 
     /// <summary>
-    /// Whether <see cref="MartenStudioOptions.WriteAuthorizationPolicy" /> lets <em>this</em> visitor
+    /// Whether <see cref="MartenOptions.WriteAuthorizationPolicy" /> lets <em>this</em> visitor
     /// archive a stream in the scope on screen.
     /// </summary>
     /// <remarks>
@@ -471,9 +472,9 @@
 
     private bool hasMoreEvents;
 
-    private string StreamsHref => EventLinks.To(Options.Value, EventLinks.StreamsRoute, State.ActiveScope);
+    private string StreamsHref => EventLinks.To(Settings, EventLinks.StreamsRoute, State.ActiveScope);
 
-    private string FeedHref => EventLinks.ToFeedForStream(Options.Value, State.ActiveScope, Id ?? string.Empty);
+    private string FeedHref => EventLinks.ToFeedForStream(Settings, State.ActiveScope, Id ?? string.Empty);
 
     private StreamState? searchRequestFor;
     private StudioRecordSearchRequest? searchRequest;
@@ -510,17 +511,17 @@
     /// <summary>The stepper (M1) on this stream, in the aggregate type picked, at the version on the panel.</summary>
     private string? StepHref => string.IsNullOrWhiteSpace(SelectedAggregate)
         ? null
-        : EventLinks.ToStep(Options.Value, State.ActiveScope, Id ?? string.Empty, SelectedAggregate, SelectedVersion);
+        : EventLinks.ToStep(Settings, State.ActiveScope, Id ?? string.Empty, SelectedAggregate, SelectedVersion);
 
     private string ArchiveMessage =>
         $"Archiving marks stream {Id} and every one of its events as archived. Marten has no un-archive " +
         "operation, so this cannot be undone from here.";
 
     private string TypeHref(string eventType) =>
-        EventLinks.ToFeedForType(Options.Value, State.ActiveScope, eventType);
+        EventLinks.ToFeedForType(Settings, State.ActiveScope, eventType);
 
     private string? TagHref(string tagType, string value) =>
-        EventLinks.ToFeedForTag(Options.Value, State.ActiveScope, tagType, value);
+        EventLinks.ToFeedForTag(Settings, State.ActiveScope, tagType, value);
 
     private string CompactTitle(CompactionPlan plan) =>
         !mayCompact
@@ -1225,7 +1226,7 @@
 
     private string Href(long? version, string? aggregate) =>
         EventLinks.To(
-            Options.Value,
+            Settings,
             EventLinks.StreamDetailRoute,
             State.ActiveScope,
             [

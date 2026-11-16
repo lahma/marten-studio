@@ -198,7 +198,7 @@ builder.Services
 
         // Every mutating operation is off until the host says otherwise. `All()` is the one-line, greppable
         // opt-in; the shell's `ReadOnly` overrides it whatever it says.
-        options.Capabilities = sample.ReadOnly ? new MartenStudioCapabilities() : MartenStudioCapabilities.All();
+        options.Capabilities = sample.ReadOnly ? new MartenCapabilities() : MartenCapabilities.All();
 
         // The database browser (Capabilities.BrowseDatabase, part of All()) may also show these schemas: the
         // Quartz.NET job store and the legacy relational schema the sample seeds beside the store. "*" would
@@ -255,7 +255,7 @@ monitoring gets to alert on it. It is opt-in, and this block is compiled from th
 // Optional, and AddMarten() does not do it for you: the health advisor's configuration and catalog
 // checks as one ASP.NET Core health check. It reports codes and counts, never a name, and runs the checks at
 // most once per HealthInterval however often the endpoint is probed.
-builder.Services.AddHealthChecks().AddMartenStudio(tags: ["marten"]);
+builder.Services.AddHealthChecks().AddMartenDiagnostics(tags: ["marten"]);
 ```
 <!-- endSnippet -->
 

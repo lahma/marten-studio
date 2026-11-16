@@ -10,7 +10,7 @@ namespace DataStudio.Postgres.Services.Postgres;
 /// <remarks>
 /// <para>
 /// <b>What a plain data source is.</b> One database, registered by the application; its own schemas are the ones
-/// <c>PostgresStudioOptions.BrowsableSchemas</c> names exactly, whose structure is shown to anyone the source policy
+/// <c>PostgresOptions.BrowsableSchemas</c> names exactly, whose structure is shown to anyone the source policy
 /// admits, and every row needs <c>BrowseDatabase</c>, and every definition <c>ViewDefinitions</c> or <c>BrowseDatabase</c>,
 /// each with the write policy (D27, design PS10). Nothing in
 /// it is anybody's store, except what the <c>mt_</c> rule calls Marten's - whose rows are never read here, in either
@@ -18,7 +18,7 @@ namespace DataStudio.Postgres.Services.Postgres;
 /// </para>
 /// <para>
 /// <b>Never a Marten word but the two that name Marten on purpose.</b> <c>PostgresStudioWordsTests</c> holds every
-/// sentence here to that: none says <c>MartenStudioOptions</c>, <c>StoreOptions</c>, "store" or a session API; only
+/// sentence here to that: none says <c>MartenOptions</c>, <c>StoreOptions</c>, "store" or a session API; only
 /// the <c>mt_</c> notices name Marten and Marten Studio, and only the one about a Marten table's partitions
 /// (<see cref="StudioText.MartenTablePartitionParameters" />) names the store whose <c>StoreOptions</c> declare it.
 /// </para>
@@ -26,7 +26,7 @@ namespace DataStudio.Postgres.Services.Postgres;
 internal static class PostgresStudioText
 {
     /// <summary>The options type's name, as a host's registration spells it.</summary>
-    public const string OptionsTypeName = "PostgresStudioOptions";
+    public const string OptionsTypeName = "PostgresOptions";
 
     /// <summary>The options type a host with no studio configures: the engine's own.</summary>
     public const string DiagnosticsOptionsTypeName = "PostgresDiagnosticsOptions";
@@ -36,7 +36,7 @@ internal static class PostgresStudioText
 
     /// <summary>
     /// The same words for a host that registered <c>AddPostgresDiagnostics()</c> and no studio, which has no
-    /// <c>PostgresStudioOptions</c>: every sentence that names an option names it on <c>PostgresDiagnosticsOptions</c>. Every
+    /// <c>PostgresOptions</c>: every sentence that names an option names it on <c>PostgresDiagnosticsOptions</c>. Every
     /// other word is <see cref="Instance" />'s, and a studio's host never meets this instance.
     /// </summary>
     public static StudioText DiagnosticsInstance { get; } = Build(DiagnosticsOptionsTypeName);
@@ -46,7 +46,7 @@ internal static class PostgresStudioText
         Product = StudioProduct.PostgresStudio,
         ProductName = "Postgres Studio",
         OptionsTypeName = optionsTypeName,
-        RegistrationMethod = "AddPostgresStudio",
+        RegistrationMethod = "AddPostgres",
         AlternativeRegistrationMethod = "AddPostgresDiagnostics",
         SourceNoun = "data source",
         ScopeDeniedEntry = "Not authorized for this data source or database.",
@@ -55,29 +55,29 @@ internal static class PostgresStudioText
         FindNamesScopeLikeThePickers = true,
 
         BrowseReadOnlyDenial =
-            "PostgresStudioOptions.ReadOnly is true, which turns PostgresStudioOptions.Capabilities.BrowseDatabase off with every "
+            "PostgresOptions.ReadOnly is true, which turns PostgresOptions.Capabilities.BrowseDatabase off with every "
             + "other capability.",
         BrowseCapabilityDenial =
-            "The rows of every object here, and everything in the schemas PostgresStudioOptions.BrowsableSchemas admits only "
-            + "through \"*\", need PostgresStudioOptions.Capabilities.BrowseDatabase.",
+            "The rows of every object here, and everything in the schemas PostgresOptions.BrowsableSchemas admits only "
+            + "through \"*\", need PostgresOptions.Capabilities.BrowseDatabase.",
         DefinitionReadOnlyDenial =
-            "PostgresStudioOptions.ReadOnly is true, which turns PostgresStudioOptions.Capabilities.ViewDefinitions and "
-            + "PostgresStudioOptions.Capabilities.BrowseDatabase off with every other capability.",
+            "PostgresOptions.ReadOnly is true, which turns PostgresOptions.Capabilities.ViewDefinitions and "
+            + "PostgresOptions.Capabilities.BrowseDatabase off with every other capability.",
         DefinitionCapabilityDenial =
-            "The definitions of the objects here need PostgresStudioOptions.Capabilities.ViewDefinitions, for the schemas "
-            + "PostgresStudioOptions.BrowsableSchemas names exactly, or PostgresStudioOptions.Capabilities.BrowseDatabase.",
+            "The definitions of the objects here need PostgresOptions.Capabilities.ViewDefinitions, for the schemas "
+            + "PostgresOptions.BrowsableSchemas names exactly, or PostgresOptions.Capabilities.BrowseDatabase.",
         DefinitionWritePolicyDenialHead =
-            "Your account may not read definitions here. The write policy (PostgresStudioOptions.WriteAuthorizationPolicy, "
+            "Your account may not read definitions here. The write policy (PostgresOptions.WriteAuthorizationPolicy, "
             + "or SourceAuthorizationPolicy when no write policy is set) refused ",
         DefinitionWritePolicyDenialTail = " for this data source and database.",
         BrowseWritePolicyDenial =
-            "Your account may not browse the database here. The write policy (PostgresStudioOptions.WriteAuthorizationPolicy, "
+            "Your account may not browse the database here. The write policy (PostgresOptions.WriteAuthorizationPolicy, "
             + "or SourceAuthorizationPolicy when no write policy is set) refused BrowseDatabase for this data source and database.",
         BrowseStorePolicyDenial =
-            "Your account may not browse the database here. The source policy (PostgresStudioOptions.SourceAuthorizationPolicy) "
+            "Your account may not browse the database here. The source policy (PostgresOptions.SourceAuthorizationPolicy) "
             + "refused this data source and database.",
         BrowseEmptyListDenial =
-            "PostgresStudioOptions.BrowsableSchemas is empty, so no schema is browsable. List the schema names, or \"*\".",
+            "PostgresOptions.BrowsableSchemas is empty, so no schema is browsable. List the schema names, or \"*\".",
         MartenDependencyDenial =
             "This view reads one of Marten's own tables - a document or event table, or Marten's bookkeeping - whose rows are "
             + "never read here: browse them with Marten Studio, where the store's tenancy and visibility rules apply.",
@@ -96,33 +96,33 @@ internal static class PostgresStudioText
 
         SessionsCapabilityDenial =
             "Process ids, roles, client addresses, application names, connection times and statements need "
-            + "PostgresStudioOptions.Capabilities.ViewDatabaseActivity.",
+            + "PostgresOptions.Capabilities.ViewDatabaseActivity.",
         SessionsReadOnlyDenial =
-            "PostgresStudioOptions.ReadOnly is true, which turns PostgresStudioOptions.Capabilities.ViewDatabaseActivity off "
+            "PostgresOptions.ReadOnly is true, which turns PostgresOptions.Capabilities.ViewDatabaseActivity off "
             + "with every other capability.",
         SessionsStorePolicyDenial =
             "Your account may not see this database's sessions. The source policy "
-            + "(PostgresStudioOptions.SourceAuthorizationPolicy) refused this data source and database.",
+            + "(PostgresOptions.SourceAuthorizationPolicy) refused this data source and database.",
         SessionsWritePolicyDenial =
-            "Your account may not see who is using this database. The write policy (PostgresStudioOptions.WriteAuthorizationPolicy, "
+            "Your account may not see who is using this database. The write policy (PostgresOptions.WriteAuthorizationPolicy, "
             + "or SourceAuthorizationPolicy when no write policy is set) refused ViewDatabaseActivity for this data source and "
             + "database.",
 
         StorageStorePolicyDenial =
             "Your account may not see this database's storage. The source policy "
-            + "(PostgresStudioOptions.SourceAuthorizationPolicy) refused this data source and database.",
+            + "(PostgresOptions.SourceAuthorizationPolicy) refused this data source and database.",
 
         StatementsCapabilityDenial =
-            "The statements this database runs, their counters and their text, need PostgresStudioOptions.Capabilities.ViewDatabaseActivity.",
+            "The statements this database runs, their counters and their text, need PostgresOptions.Capabilities.ViewDatabaseActivity.",
         StatementsReadOnlyDenial =
-            "PostgresStudioOptions.ReadOnly is true, which turns PostgresStudioOptions.Capabilities.ViewDatabaseActivity off "
+            "PostgresOptions.ReadOnly is true, which turns PostgresOptions.Capabilities.ViewDatabaseActivity off "
             + "with every other capability.",
         StatementsStorePolicyDenial =
             "Your account may not see this database's statements. The source policy "
-            + "(PostgresStudioOptions.SourceAuthorizationPolicy) refused this data source and database.",
+            + "(PostgresOptions.SourceAuthorizationPolicy) refused this data source and database.",
         StatementsWritePolicyDenial =
             "Your account may not see the statements this database runs. The write policy "
-            + "(PostgresStudioOptions.WriteAuthorizationPolicy, or SourceAuthorizationPolicy when no write policy is set) refused "
+            + "(PostgresOptions.WriteAuthorizationPolicy, or SourceAuthorizationPolicy when no write policy is set) refused "
             + "ViewDatabaseActivity for this data source and database.",
         StudioCostCovers =
             "health checks, the SQL console, the database browser, Sessions, Maintenance, Storage, Replication, Server and the "
@@ -148,7 +148,7 @@ internal static class PostgresStudioText
         RelationshipTablesUnavailable = "No table is drawn:",
 
         StatementsOnSessionsPage =
-            "The statements themselves are on Database › Sessions, behind PostgresStudioOptions.Capabilities.ViewDatabaseActivity, "
+            "The statements themselves are on Database › Sessions, behind PostgresOptions.Capabilities.ViewDatabaseActivity, "
             + "masked for the schemas you may not see.",
         ServerSettingComment = "A server setting",
         DeadlockCause =

@@ -49,7 +49,7 @@ internal static class NaturalKeyCatalog
     /// <summary>The aggregates with a usable natural key, one per lookup table.</summary>
     /// <param name="options">The store's own options.</param>
     /// <param name="isVisible">
-    /// <c>MartenStudioOptions.IsDocumentTypeVisible</c>: an aggregate it hides has no natural key here - its key
+    /// <c>MartenOptions.IsDocumentTypeVisible</c>: an aggregate it hides has no natural key here - its key
     /// is not offered in the Streams box, not named in the placeholder, and not looked up.
     /// </param>
     public static IReadOnlyList<NaturalKeyModel> From(IReadOnlyStoreOptions options, Func<Type, bool>? isVisible = null)

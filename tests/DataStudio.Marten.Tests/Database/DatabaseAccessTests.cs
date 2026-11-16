@@ -90,8 +90,8 @@ public class DatabaseAccessTests
 
         grant.Reason.Should().Contain(expected switch
         {
-            DatabaseRefusal.CapabilityOff => "MartenStudioOptions.Capabilities.BrowseDatabase",
-            DatabaseRefusal.ReadOnly => "MartenStudioOptions.ReadOnly",
+            DatabaseRefusal.CapabilityOff => "MartenOptions.Capabilities.BrowseDatabase",
+            DatabaseRefusal.ReadOnly => "MartenOptions.ReadOnly",
             _ => "WriteAuthorizationPolicy",
         });
 
@@ -334,7 +334,7 @@ public class DatabaseAccessTests
 
         result.Allowed.Should().BeFalse();
         result.Refusal.Should().Be(DatabaseRefusal.SchemaNotBrowsable);
-        result.Reason.Should().Contain("MartenStudioOptions.BrowsableSchemas");
+        result.Reason.Should().Contain("MartenOptions.BrowsableSchemas");
 
         StudioActionLogEntry entry = harness.Ring.GetLatest().Should().ContainSingle().Which;
         entry.Succeeded.Should().BeFalse();
@@ -815,7 +815,7 @@ public class DatabaseAccessTests
         /// <summary>Another circuit over the same container.</summary>
         public IServiceScope NewScope() => provider.CreateScope();
 
-        public static Harness Create(Action<MartenStudioOptions> configure, Action<IServiceCollection>? extra = null)
+        public static Harness Create(Action<MartenOptions> configure, Action<IServiceCollection>? extra = null)
         {
             var users = new TestAuthenticationStateProvider();
             users.SignIn("tester");

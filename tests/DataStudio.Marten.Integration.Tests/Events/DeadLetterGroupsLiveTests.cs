@@ -144,9 +144,9 @@ public sealed class DeadLetterGroupsFixture(PostgresFixture postgres) : IAsyncLi
 
         await RunDaemonUntilAsync(7);
 
-        (Events, Audit) = Build(MartenStudioCapabilities.All(), hideDeadLetters: false);
-        (ReadOnlyEvents, ReadOnlyAudit) = Build(new MartenStudioCapabilities(), hideDeadLetters: false);
-        (HidingEvents, _) = Build(MartenStudioCapabilities.All(), hideDeadLetters: true);
+        (Events, Audit) = Build(MartenCapabilities.All(), hideDeadLetters: false);
+        (ReadOnlyEvents, ReadOnlyAudit) = Build(new MartenCapabilities(), hideDeadLetters: false);
+        (HidingEvents, _) = Build(MartenCapabilities.All(), hideDeadLetters: true);
     }
 
     /// <summary>A scope of the default store and database: <paramref name="tenant" />'s, or every tenant's.</summary>
@@ -285,10 +285,10 @@ public sealed class DeadLetterGroupsFixture(PostgresFixture postgres) : IAsyncLi
     /// production bound is 20,000, which a test would take minutes to write past.
     /// </summary>
     internal IEventDataService WithLettersGrouped(int lettersGrouped) =>
-        Build(MartenStudioCapabilities.All(), hideDeadLetters: false, lettersGrouped).Events;
+        Build(MartenCapabilities.All(), hideDeadLetters: false, lettersGrouped).Events;
 
     private (IEventDataService Events, StudioActionLogService Audit) Build(
-        MartenStudioCapabilities capabilities,
+        MartenCapabilities capabilities,
         bool hideDeadLetters,
         int lettersGrouped = DeadLetterGroupLimits.MaxLettersGrouped)
     {

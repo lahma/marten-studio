@@ -10,7 +10,8 @@
 @inject StudioState State
 @inject StudioPreferences Preferences
 @inject NavigationManager Navigation
-@inject IOptions<MartenStudioOptions> Options
+@inject IOptions<MartenOptions> Options
+@inject IStudioSettings Settings
 
 <PageTitle>Streams</PageTitle>
 
@@ -445,7 +446,7 @@
     // not: a list whose every row has a link and a button beside it makes the reader choose between two
     // calls to action where there is only one thing to do.
     private string StreamHref(string streamId) =>
-        EventLinks.ToStream(Options.Value, State.ActiveScope, streamId);
+        EventLinks.ToStream(Settings, State.ActiveScope, streamId);
 
     private string CursorHref(string? cursor) => Href(cursor, offset: null);
 
@@ -453,7 +454,7 @@
 
     private string Href(string? cursor, int? offset) =>
         EventLinks.To(
-            Options.Value,
+            Settings,
             EventLinks.StreamsRoute,
             State.ActiveScope,
             [

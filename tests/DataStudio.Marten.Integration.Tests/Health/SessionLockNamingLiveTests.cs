@@ -292,7 +292,7 @@ public class SessionLockNamingLiveTests(PostgresFixture postgres)
             options.Schema.For<H3OtherThing>();
         }
 
-        static void Studio(MartenStudioOptions options)
+        static void Studio(MartenOptions options)
         {
             options.Capabilities.ViewDatabaseActivity = true;
             options.StoreAuthorizationPolicy = "store";

@@ -37,7 +37,7 @@ internal sealed record SchemaScriptRefusal(DatabaseRefusal Kind, string Reason);
 /// <c>CreateMigrationAsync()</c> and <c>AssertDatabaseMatchesConfigurationAsync()</c> describe every object
 /// the store configures - every tenant's, since under Marten-managed tenant partitioning each tenant's
 /// partition is a <c>CREATE TABLE … partition of … for values in ('tenant')</c> named after the tenant, and
-/// every document type's, the ones <see cref="MartenStudioOptions.IsDocumentTypeVisible" /> hides included.
+/// every document type's, the ones <see cref="MartenOptions.IsDocumentTypeVisible" /> hides included.
 /// Measured by the DB-7 review: a visitor the store policy let see one tenant read every tenant's name in the
 /// DDL tab, and the hidden type's table was in all three outputs while the Tables tab withheld it.
 /// </para>
@@ -63,7 +63,7 @@ internal static class SchemaScriptGate
     public static string StorePolicyDenial(SchemaScript script) =>
         Noun(script) + " spans every tenant of this database - under tenant partitioning it names each " +
         "tenant's partition - so it is shown only to a visitor the store policy " +
-        "(MartenStudioOptions.StoreAuthorizationPolicy) allows for this store and database as a whole, with " +
+        "(MartenOptions.StoreAuthorizationPolicy) allows for this store and database as a whole, with " +
         "no tenant selected, and it refused your account that.";
 
     /// <summary>
@@ -74,16 +74,16 @@ internal static class SchemaScriptGate
     /// <param name="fallback">The gate's own sentence, for a refusal that is none of the usual four.</param>
     public static string HiddenTypesDenial(SchemaScript script, DatabaseRefusal refusal, string? fallback) =>
         Noun(script) + " would print the tables of document types the host hides from the studio " +
-        "(MartenStudioOptions.IsDocumentTypeVisible), so it is shown only past the database browser's gate. " +
+        "(MartenOptions.IsDocumentTypeVisible), so it is shown only past the database browser's gate. " +
         refusal switch
         {
             DatabaseRefusal.ReadOnly => DatabaseGate.ReadOnlyDenial,
-            DatabaseRefusal.CapabilityOff => "It needs MartenStudioOptions.Capabilities.BrowseDatabase.",
+            DatabaseRefusal.CapabilityOff => "It needs MartenOptions.Capabilities.BrowseDatabase.",
             DatabaseRefusal.StorePolicy =>
-                "The store policy (MartenStudioOptions.StoreAuthorizationPolicy) refused your account this store " +
+                "The store policy (MartenOptions.StoreAuthorizationPolicy) refused your account this store " +
                 "and database as a whole, with no tenant selected.",
             DatabaseRefusal.WritePolicy =>
-                "The write policy (MartenStudioOptions.WriteAuthorizationPolicy, or StoreAuthorizationPolicy when " +
+                "The write policy (MartenOptions.WriteAuthorizationPolicy, or StoreAuthorizationPolicy when " +
                 "no write policy is set) refused your account BrowseDatabase for this store and database as a " +
                 "whole, with no tenant selected.",
             _ => fallback ?? "The database browser's gate could not be read.",

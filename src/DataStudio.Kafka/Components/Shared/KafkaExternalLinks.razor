@@ -1,7 +1,7 @@
 @using DataStudio.Kafka.Core.Scanning
 @using DataStudio.Kafka.Internal
 @using Microsoft.Extensions.Options
-@inject IOptions<KafkaStudioOptions> Options
+@inject IOptions<KafkaOptions> Options
 
 @* The host's links from a record to its own tracing or log tool (D44, decision 9 of D-CORR). A link is drawn only for a record that has a value for every
    placeholder its template names, and a value that is masked, cut or absent is no link, never a link with a hole. Opened in a new tab with

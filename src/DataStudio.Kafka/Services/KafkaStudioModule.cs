@@ -12,7 +12,7 @@ namespace DataStudio.Kafka.Services;
 /// read live on every call so a rail entry or the chip follows the options exactly.
 /// </summary>
 /// <param name="options">KStudio's options.</param>
-internal sealed class KafkaStudioModule(IOptions<KafkaStudioOptions> options) : IStudioModule
+internal sealed class KafkaStudioModule(IOptions<KafkaOptions> options) : IStudioModule
 {
     /// <summary>The compile-time root every Kafka page's <c>@page</c> starts with.</summary>
     internal const string PageRoot = "/kafka";
@@ -41,7 +41,7 @@ internal sealed class KafkaStudioModule(IOptions<KafkaStudioOptions> options) : 
     /// would only say it is off. Live tail follows the same rule since 1.3.1 (#74); a page reached by its address says in one neutral sentence that it
     /// is not available, and Cluster settings names the option that turns it on. The topic overview and the record page have no entry: links reach them.
     /// </summary>
-    private static IReadOnlyList<StudioNavSection> Rail(IOptions<KafkaStudioOptions> options) =>
+    private static IReadOnlyList<StudioNavSection> Rail(IOptions<KafkaOptions> options) =>
     [
         new StudioNavSection(
             "Kafka",

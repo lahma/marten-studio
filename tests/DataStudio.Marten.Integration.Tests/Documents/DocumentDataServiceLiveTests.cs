@@ -33,7 +33,7 @@ public class DocumentDataServiceLiveTests(DocumentDataServiceLiveTests.Fixture f
         /// when the event store itself is conjoined. See the packet report - this is a gap in tenant
         /// discovery, not in the documents browser.
         /// </remarks>
-        protected override void ConfigureStudio(MartenStudioOptions options)
+        protected override void ConfigureStudio(MartenOptions options)
         {
             foreach (string tenantId in SampleStore.TenantIds)
             {
@@ -399,7 +399,7 @@ public class DocumentDataServiceLiveTests(DocumentDataServiceLiveTests.Fixture f
         DocumentRow row = page.Rows.Should().ContainSingle().Subject;
 
         row.SizeBytes.Should().BeGreaterThan(1_500_000);
-        row.Json.Should().BeNull("it is over MaxInlineDocumentBytes, so the list reports a size instead");
+        row.Json.Should().BeNull("it is over MaxInlineValueBytes, so the list reports a size instead");
 
         DocumentDetailResult detail = await documents.Service.GetDocumentAsync(
             Scope, "mediaasset", row.Id, TestContext.Current.CancellationToken);

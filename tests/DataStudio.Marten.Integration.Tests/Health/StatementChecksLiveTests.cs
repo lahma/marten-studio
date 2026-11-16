@@ -27,7 +27,7 @@ public class StatementChecksLiveTests(PostgresFixture postgres, StatementsServer
 {
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
-    private static void Activity(MartenStudioOptions options) => options.Capabilities.ViewDatabaseActivity = true;
+    private static void Activity(MartenOptions options) => options.Capabilities.ViewDatabaseActivity = true;
 
     private static void Targets(StoreOptions options)
     {

@@ -38,7 +38,7 @@ internal interface IShellSettings
     /// <summary>The master switch: every capability off, whatever else is set.</summary>
     bool ReadOnly { get; }
 
-    /// <summary>The master switch's option as the host spells it: <c>MartenStudioOptions.ReadOnly</c>.</summary>
+    /// <summary>The master switch's option as the host spells it: <c>MartenOptions.ReadOnly</c>.</summary>
     string ReadOnlyOptionName { get; }
 
     /// <summary>How often a live page polls.</summary>

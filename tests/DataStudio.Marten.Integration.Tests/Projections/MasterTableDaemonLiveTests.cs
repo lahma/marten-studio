@@ -92,7 +92,7 @@ public class MasterTableDaemonLiveTests(PostgresFixture postgres) : IAsyncLifeti
 
         builder.Services.AddAuthorization();
         builder.Services.AddSingleton<AuthenticationStateProvider, AnonymousVisitor>();
-        builder.Services.AddDataStudio().AddMarten(static options => options.Capabilities = MartenStudioCapabilities.All());
+        builder.Services.AddDataStudio().AddMarten(static options => options.Capabilities = MartenCapabilities.All());
 
         host = builder.Build();
 

@@ -190,26 +190,26 @@ public sealed class StudioPreferencesTests
     public void The_shells_read_only_names_the_shells_option_and_the_modules_names_its_own()
     {
         ServiceCollection services = new();
-        services.AddDataStudio().AddPostgres(static options => options.Capabilities = PostgresStudioCapabilities.All());
+        services.AddDataStudio().AddPostgres(static options => options.Capabilities = PostgresCapabilities.All());
         using ServiceProvider provider = services.BuildServiceProvider();
         IStudioSettings settings = provider.GetRequiredService<IStudioSettings>();
         StudioCapabilityGuard guard = new(settings);
 
         settings.ReadOnly.Should().BeFalse();
         guard.IsEnabled(StudioCapability.RunSql).Should().BeTrue();
-        settings.ReadOnlyOptionName.Should().Be("PostgresStudioOptions.ReadOnly", "with neither on, the module's is the switch a host reads to learn which exists");
+        settings.ReadOnlyOptionName.Should().Be("PostgresOptions.ReadOnly", "with neither on, the module's is the switch a host reads to learn which exists");
 
-        provider.GetRequiredService<IOptions<PostgresStudioOptions>>().Value.ReadOnly = true;
+        provider.GetRequiredService<IOptions<PostgresOptions>>().Value.ReadOnly = true;
         settings.ReadOnly.Should().BeTrue();
-        settings.ReadOnlyOptionName.Should().Be("PostgresStudioOptions.ReadOnly");
+        settings.ReadOnlyOptionName.Should().Be("PostgresOptions.ReadOnly");
         PostgresStudioSettings.Offered.Should().OnlyContain(capability => !guard.IsEnabled(capability));
-        FluentActions.Invoking(() => guard.Require(StudioCapability.RunSql)).Should().Throw<StudioCapabilityDeniedException>().WithMessage("*PostgresStudioOptions.ReadOnly*");
+        FluentActions.Invoking(() => guard.Require(StudioCapability.RunSql)).Should().Throw<StudioCapabilityDeniedException>().WithMessage("*PostgresOptions.ReadOnly*");
 
         provider.GetRequiredService<IOptions<DataStudioOptions>>().Value.ReadOnly = true;
         settings.ReadOnlyOptionName.Should().Be("DataStudioOptions.ReadOnly", "the shell's switch is named when it is on");
         FluentActions.Invoking(() => guard.Require(StudioCapability.RunSql)).Should().Throw<StudioCapabilityDeniedException>().WithMessage("*DataStudioOptions.ReadOnly*");
 
-        provider.GetRequiredService<IOptions<PostgresStudioOptions>>().Value.ReadOnly = false;
+        provider.GetRequiredService<IOptions<PostgresOptions>>().Value.ReadOnly = false;
         settings.ReadOnly.Should().BeTrue("the shell's switch alone turns the module's capabilities off");
         PostgresStudioSettings.Offered.Should().OnlyContain(capability => !guard.IsEnabled(capability));
 

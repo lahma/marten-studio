@@ -52,7 +52,7 @@ public class WhatIfLiveTests(HypopgServer server) : IClassFixture<HypopgServer>
     }
 
     /// <summary>A host over one data source whose pool holds one connection, so the next user is the what-if's own backend.</summary>
-    private StudioHost Host(string database, Recorder recorder, Action<PostgresStudioOptions>? studio = null, string role = "app") =>
+    private StudioHost Host(string database, Recorder recorder, Action<PostgresOptions>? studio = null, string role = "app") =>
         StudioHost.Create(
             services =>
             {
@@ -61,7 +61,7 @@ public class WhatIfLiveTests(HypopgServer server) : IClassFixture<HypopgServer>
             },
             options =>
             {
-                options.Capabilities = PostgresStudioCapabilities.All();
+                options.Capabilities = PostgresCapabilities.All();
                 studio?.Invoke(options);
             });
 

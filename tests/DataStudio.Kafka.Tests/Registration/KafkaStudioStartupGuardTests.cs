@@ -10,7 +10,7 @@ public class KafkaStudioStartupGuardTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
-    private static Task Start(Action<DataStudioOptions> shell, Action<KafkaStudioOptions> kafka)
+    private static Task Start(Action<DataStudioOptions> shell, Action<KafkaOptions> kafka)
     {
         ServiceCollection services = new();
         services.AddLogging();
@@ -27,8 +27,8 @@ public class KafkaStudioStartupGuardTests
 
         (await start.Should().ThrowAsync<InvalidOperationException>()).Which.Message.Should().Be(
             "KStudio has SearchRecords enabled and no policy decides who may use them: every visitor admitted to the studio could read the records "
-            + "of every topic this application's credentials can read. Set KafkaStudioOptions.CapabilityAuthorizationPolicy (asked for each "
-            + "capability use, once per topic), or KafkaStudioOptions.ClusterAuthorizationPolicy (asked for every read, once per topic), or turn the "
+            + "of every topic this application's credentials can read. Set KafkaOptions.CapabilityAuthorizationPolicy (asked for each "
+            + "capability use, once per topic), or KafkaOptions.ClusterAuthorizationPolicy (asked for every read, once per topic), or turn the "
             + "capabilities off; DataStudioOptions.ReadOnly = true turns them all off.");
     }
 
@@ -42,7 +42,7 @@ public class KafkaStudioStartupGuardTests
             static _ => { },
             o =>
             {
-                typeof(KafkaStudioCapabilities).GetProperty(capability)!.SetValue(o.Capabilities, true);
+                typeof(KafkaCapabilities).GetProperty(capability)!.SetValue(o.Capabilities, true);
 
                 // ReadPayloads on its own is refused by the options themselves (it needs SearchRecords); the two new flags are not.
                 o.Capabilities.SearchRecords = capability == "ReadPayloads";
@@ -60,7 +60,7 @@ public class KafkaStudioStartupGuardTests
             static _ => { },
             o =>
             {
-                typeof(KafkaStudioCapabilities).GetProperty(capability)!.SetValue(o.Capabilities, true);
+                typeof(KafkaCapabilities).GetProperty(capability)!.SetValue(o.Capabilities, true);
                 o.ClusterAuthorizationPolicy = "kafka-topics";
             });
     }
@@ -68,7 +68,7 @@ public class KafkaStudioStartupGuardTests
     [Fact]
     public async Task A_capability_under_ReadOnly_starts()
     {
-        await Start(static o => o.ReadOnly = true, static o => o.Capabilities = KafkaStudioCapabilities.All());
+        await Start(static o => o.ReadOnly = true, static o => o.Capabilities = KafkaCapabilities.All());
     }
 
     [Theory]
@@ -80,7 +80,7 @@ public class KafkaStudioStartupGuardTests
             static _ => { },
             o =>
             {
-                o.Capabilities = KafkaStudioCapabilities.All();
+                o.Capabilities = KafkaCapabilities.All();
                 if (which == "cluster")
                 {
                     o.ClusterAuthorizationPolicy = "kafka-topics";

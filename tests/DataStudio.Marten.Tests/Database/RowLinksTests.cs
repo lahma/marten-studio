@@ -16,13 +16,13 @@ namespace DataStudio.Marten.Tests.Database;
 /// </summary>
 public class RowLinksTests
 {
-    private static readonly MartenStudioOptions Options = new();
+    private static readonly MartenOptions Options = new();
 
     private static readonly IStudioSettings Settings = MartenStudioSettings.Of(Options);
 
     private static readonly StudioDescriptor Descriptor = MartenStudioDescriptor.Instance;
 
-    private static readonly IStudioLinks Links = new MartenStudioLinks(Microsoft.Extensions.Options.Options.Create(Options));
+    private static readonly IStudioLinks Links = new MartenStudioLinks(MartenStudioSettings.Of(Options));
 
     private static readonly StudioScope Scope = new("default", "localhost.marten", "acme");
 

@@ -57,7 +57,7 @@ public class ConnectionChecksSeamTests
         });
 
         using ServiceProvider martenProvider = marten.BuildServiceProvider();
-        martenProvider.GetRequiredService<IOptions<MartenStudioOptions>>().Value.AcceptedChecks.Keys.Should().BeEquivalentTo(Checks.Select(static x => x.Code));
+        martenProvider.GetRequiredService<IOptions<MartenOptions>>().Value.AcceptedChecks.Keys.Should().BeEquivalentTo(Checks.Select(static x => x.Code));
 
         ServiceCollection postgres = new();
         postgres.AddDataStudio().AddPostgres(options =>
@@ -69,7 +69,7 @@ public class ConnectionChecksSeamTests
         });
 
         using ServiceProvider postgresProvider = postgres.BuildServiceProvider();
-        postgresProvider.GetRequiredService<IOptions<PostgresStudioOptions>>().Value.AcceptedChecks.Keys.Should().BeEquivalentTo(Checks.Select(static x => x.Code));
+        postgresProvider.GetRequiredService<IOptions<PostgresOptions>>().Value.AcceptedChecks.Keys.Should().BeEquivalentTo(Checks.Select(static x => x.Code));
     }
 
     [Theory]

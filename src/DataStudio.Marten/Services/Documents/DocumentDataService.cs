@@ -103,7 +103,7 @@ internal sealed partial class DocumentDataService : IDocumentDataService
     /// <summary>How many collections the "search other collections for this id" action probes.</summary>
     private const int MaxIdProbes = 25;
 
-    private readonly IOptions<MartenStudioOptions> options;
+    private readonly IOptions<MartenOptions> options;
     private readonly StudioScopeResolver resolver;
     private readonly ColumnCatalog columnCatalog;
     private readonly IndexCatalog indexCatalog;
@@ -114,7 +114,7 @@ internal sealed partial class DocumentDataService : IDocumentDataService
     private readonly HypotheticalIndexReader hypothetical;
 
     public DocumentDataService(
-        IOptions<MartenStudioOptions> options,
+        IOptions<MartenOptions> options,
         StudioScopeResolver resolver,
         ColumnCatalog columnCatalog,
         IndexCatalog indexCatalog,
@@ -143,7 +143,7 @@ internal sealed partial class DocumentDataService : IDocumentDataService
     /// </summary>
     /// <remarks>
     /// Built here rather than at each call site because the threshold was missed at two of the three
-    /// before, which is how <see cref="MartenStudioOptions.ExactCountThreshold"/> came to be documented
+    /// before, which is how <see cref="MartenOptions.ExactCountThreshold"/> came to be documented
     /// behaviour the studio did not have.
     /// </remarks>
     private CountEstimator Counter() => Counter(CommandTimeoutSeconds);
@@ -161,7 +161,7 @@ internal sealed partial class DocumentDataService : IDocumentDataService
     };
 
     /// <summary>
-    /// The exact count, when <see cref="MartenStudioOptions.ExactCountThreshold"/> allows one — and the
+    /// The exact count, when <see cref="MartenOptions.ExactCountThreshold"/> allows one — and the
     /// cheap answer, marked as the only one on offer, when it does not.
     /// </summary>
     /// <remarks>
@@ -656,7 +656,7 @@ internal sealed partial class DocumentDataService : IDocumentDataService
             IncludeDeleted = table.SoftDeleteEnabled ? request.Deleted : DeletedFilter.Exclude,
             TenantId = resolved.TenantId,
             Columns = queryColumns,
-            MaxInlineDocumentBytes = options.Value.MaxInlineDocumentBytes,
+            MaxInlineValueBytes = options.Value.MaxInlineValueBytes,
             CommandTimeoutSeconds = CommandTimeoutSeconds,
         };
 
@@ -1037,7 +1037,7 @@ internal sealed partial class DocumentDataService : IDocumentDataService
     /// stays unknown: the header says nothing rather than something false.
     /// </para>
     /// <para>
-    /// <see cref="MartenStudioOptions.ExactCountThreshold"/> governs the upgrade. Above it the header shows
+    /// <see cref="MartenOptions.ExactCountThreshold"/> governs the upgrade. Above it the header shows
     /// the estimate with <see cref="DocumentCount.IsExactRefused"/> set, which is a value the page renders
     /// and not a failure.
     /// </para>
@@ -1714,7 +1714,7 @@ internal sealed partial class DocumentDataService : IDocumentDataService
     /// on its own: twenty-five never-analysed collections of ten million rows each are twenty-five
     /// sequential scans, inside the budget, on every load of the documents page — and the rail is loaded
     /// per circuit rather than through the snapshot cache.
-    /// <b>2. <see cref="MartenStudioOptions.ExactCountThreshold"/></b> bounds what each one may cost, asked
+    /// <b>2. <see cref="MartenOptions.ExactCountThreshold"/></b> bounds what each one may cost, asked
     /// through <c>select 1 … offset N limit 1</c>, whose work is the threshold and not the collection.
     /// <b>3. <see cref="CountEstimator.MaxSpeculativePages"/></b> is the guard for what the probe cannot see: a table of
     /// very large documents can be gigabytes of heap and still hold fewer rows than the threshold, so
@@ -1817,7 +1817,7 @@ internal sealed partial class DocumentDataService : IDocumentDataService
     /// left out. The one copy of the gate, shared with the shape check (1.2-SHAPE).
     /// </summary>
     /// <param name="store">The store.</param>
-    /// <param name="visible"><c>MartenStudioOptions.IsDocumentTypeVisible</c>, or <see langword="null" /> for all.</param>
+    /// <param name="visible"><c>MartenOptions.IsDocumentTypeVisible</c>, or <see langword="null" /> for all.</param>
     internal static IEnumerable<IDocumentType> VisibleDocumentTypesOf(IDocumentStore store, Func<Type, bool>? visible)
     {
         foreach (IDocumentType documentType in store.Options.AllKnownDocumentTypes())

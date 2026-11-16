@@ -128,7 +128,7 @@ public class DeadLettersVisibilityCheckTests
                     new MartenStoreRegistration("default", "Default", typeof(IDocumentStore)),
                     store,
                     store.Storage.Database),
-                MartenStudioSettings.Of(new MartenStudioOptions { IsDocumentTypeVisible = isVisible }),
+                MartenStudioSettings.Of(new MartenOptions { IsDocumentTypeVisible = isVisible }),
                 MartenStudioRuntime.Current,
                 services,
                 new HealthSqlRunner(connection, new ReadOnlySqlOptions(), null),

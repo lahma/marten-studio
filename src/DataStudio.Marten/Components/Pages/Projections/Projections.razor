@@ -21,7 +21,7 @@
 @inject StudioAuthorization Authorization
 @inject StudioLiveUpdatesFactory LiveFactory
 @inject ToastService Toasts
-@inject IOptions<MartenStudioOptions> Options
+@inject IOptions<MartenOptions> Options
 @inject IStudioSettings StudioSettings
 @inject IHealthService Health
 @inject IServiceProvider Services
@@ -136,7 +136,7 @@
                     </p>
                     <p class="ms-muted ms-health-banner-meta">
                         From the health advisor's check at @Preferences.FormatInSelectedTimeZone(finding.Finding.MeasuredAt).
-                        <a class="ms-health-banner-link" href="@HealthLinks.ToFinding(Options.Value, State.ActiveScope, finding)">Why, and what to change</a>
+                        <a class="ms-health-banner-link" href="@HealthLinks.ToFinding(StudioSettings, State.ActiveScope, finding)">Why, and what to change</a>
                     </p>
 
                     @if (string.Equals(finding.Code, "D01", StringComparison.Ordinal))
@@ -587,7 +587,7 @@
                 Lag is the high water mark minus the shard's own sequence. Amber above
                 @ProjectionLagThresholds.Amber.ToString("N0", CultureInfo.InvariantCulture) events, red above
                 @ProjectionLagThresholds.Red.ToString("N0", CultureInfo.InvariantCulture) - unless
-                <code>MartenStudioOptions.ProjectionThresholds</code> names the shard's projection, or its progression
+                <code>MartenOptions.ProjectionThresholds</code> names the shard's projection, or its progression
                 row carries thresholds of its own, which Marten creates and does not write. The chart, the
                 arrow and the time to catch up come from this page's own samples, kept each time this page or the
                 Overview reads the database; until there are enough of them, the arrow is the health advisor's, from
@@ -603,7 +603,7 @@
                             <strong>Lag colours and chart lines:</strong> amber above
                             @DaemonCheckConfiguration.Number(ProjectionLagThresholds.Amber) events behind, red above
                             @DaemonCheckConfiguration.Number(ProjectionLagThresholds.Red) - the studio's own - unless
-                            <code>MartenStudioOptions.ProjectionThresholds</code> names a shard's projection, which then
+                            <code>MartenOptions.ProjectionThresholds</code> names a shard's projection, which then
                             wins for every store of this application, or its progression row carries
                             <code>warning_behind_threshold</code> or <code>critical_behind_threshold</code>, which win
                             over the studio's. Marten creates those two columns and writes neither. A line is drawn on a
@@ -618,7 +618,7 @@
                                             @DaemonCheckConfiguration.Number(source.Warning), red above
                                             @DaemonCheckConfiguration.Number(source.Critical)
                                             (@(source.Source == LagThresholdSource.Option
-                                                ? "MartenStudioOptions.ProjectionThresholds"
+                                                ? "MartenOptions.ProjectionThresholds"
                                                 : "its progression row's columns")).
                                         </li>
                                     }
@@ -877,7 +877,7 @@
     private string? agentRefusal;
 
     /// <summary>
-    /// Whether <see cref="MartenStudioOptions.WriteAuthorizationPolicy" /> lets <em>this</em> visitor use
+    /// Whether <see cref="MartenOptions.WriteAuthorizationPolicy" /> lets <em>this</em> visitor use
     /// each of the three mutating capabilities this page offers, in the scope on screen.
     /// </summary>
     /// <remarks>
@@ -1445,7 +1445,7 @@
     /// <summary>A threshold line's title: its number, and whose it is.</summary>
     private static string ThresholdTitle(string which, long threshold, bool fromRow, bool fromOption = false) =>
         which + " threshold: " + DaemonCheckConfiguration.Number(threshold) + " behind ("
-        + (fromOption ? "from MartenStudioOptions.ProjectionThresholds" : fromRow ? "from its progression row" : "the studio's") + ")";
+        + (fromOption ? "from MartenOptions.ProjectionThresholds" : fromRow ? "from its progression row" : "the studio's") + ")";
 
     /// <summary>
     /// Where per-projection thresholds come from, projection by projection, for the "Thresholds that apply" disclosure -
@@ -1460,7 +1460,7 @@
         string thresholds = "Amber above " + shard.EffectiveWarningThreshold.ToString("N0", CultureInfo.InvariantCulture)
             + ", red above " + shard.EffectiveCriticalThreshold.ToString("N0", CultureInfo.InvariantCulture)
             + (shard.ThresholdsFromOption
-                ? " (MartenStudioOptions.ProjectionThresholds for " + shard.ProjectionName + ")."
+                ? " (MartenOptions.ProjectionThresholds for " + shard.ProjectionName + ")."
                 : shard.WarningThreshold is not null || shard.CriticalThreshold is not null
                     ? " (this shard's own thresholds, from its progression row)."
                     : " (the studio's defaults).");
@@ -1709,7 +1709,7 @@
 
     /// <summary>The Event flow drawn for one projection (1.2).</summary>
     private string FlowHref(string projectionName) =>
-        DataStudio.Marten.Services.Events.EventLinks.ToFlow(Options.Value, State.ActiveScope, projectionName);
+        DataStudio.Marten.Services.Events.EventLinks.ToFlow(StudioSettings, State.ActiveScope, projectionName);
 
     /// <summary>
     /// What the projection reads, from the Event flow's cached model: StoreOptions and the projection graph, no read of the database.

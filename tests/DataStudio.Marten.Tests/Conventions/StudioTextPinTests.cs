@@ -29,11 +29,11 @@ public class StudioTextPinTests
     [Fact]
     public void MartenStudio_settings_speak_in_MartenStudios_words()
     {
-        MartenStudioSettings.Of(new MartenStudioOptions()).Text.Should().BeSameAs(StudioText.Marten);
+        MartenStudioSettings.Of(new MartenOptions()).Text.Should().BeSameAs(StudioText.Marten);
         Marten.Product.Should().Be(StudioProduct.MartenStudio);
         Marten.ProductName.Should().Be("Marten Studio");
-        Marten.OptionsTypeName.Should().Be("MartenStudioOptions");
-        Marten.RegistrationMethod.Should().Be("AddMartenStudio");
+        Marten.OptionsTypeName.Should().Be("MartenOptions");
+        Marten.RegistrationMethod.Should().Be("AddMarten");
         Marten.SourceNoun.Should().Be("Marten store");
     }
 
@@ -41,18 +41,18 @@ public class StudioTextPinTests
     public void The_database_browsers_sentences_are_04s()
     {
         Marten.BrowseReadOnlyDenial.Should().Be(
-            "MartenStudioOptions.ReadOnly is true, which turns MartenStudioOptions.Capabilities.BrowseDatabase off with every other capability.");
+            "MartenOptions.ReadOnly is true, which turns MartenOptions.Capabilities.BrowseDatabase off with every other capability.");
         Marten.BrowseCapabilityDenial.Should().Be(
-            "Other schemas, and the rows and definitions of objects Marten does not own, need MartenStudioOptions.Capabilities.BrowseDatabase.");
+            "Other schemas, and the rows and definitions of objects Marten does not own, need MartenOptions.Capabilities.BrowseDatabase.");
         Marten.BrowseWritePolicyDenial.Should().Be(
-            "Your account may not browse the database here. The write policy (MartenStudioOptions.WriteAuthorizationPolicy, or "
+            "Your account may not browse the database here. The write policy (MartenOptions.WriteAuthorizationPolicy, or "
             + "StoreAuthorizationPolicy when no write policy is set) refused BrowseDatabase for this store and database as a whole, "
             + "with no tenant selected.");
         Marten.BrowseStorePolicyDenial.Should().Be(
-            "Your account may not browse the database here. The store policy (MartenStudioOptions.StoreAuthorizationPolicy) refused "
+            "Your account may not browse the database here. The store policy (MartenOptions.StoreAuthorizationPolicy) refused "
             + "this store and database as a whole, with no tenant selected.");
         Marten.BrowseEmptyListDenial.Should().Be(
-            "MartenStudioOptions.BrowsableSchemas is empty, so no schema's non-Marten rows or definitions are browsable. List the "
+            "MartenOptions.BrowsableSchemas is empty, so no schema's non-Marten rows or definitions are browsable. List the "
             + "schema names, or \"*\".");
         Marten.MartenDependencyDenial.Should().Be(
             "This view reads one of Marten's own tables - a document or event table, or Marten's bookkeeping - whose rows are never "
@@ -70,7 +70,7 @@ public class StudioTextPinTests
         Marten.ScopeDeniedEntry.Should().Be("Not authorized for this store, database or tenant.");
 
         DatabaseGate.SchemaDenial("secret", ["quartz"], Marten).Should().Be(
-            "Schema 'secret' is not one MartenStudioOptions.BrowsableSchemas admits (it must be listed by exact name, or \"*\" must "
+            "Schema 'secret' is not one MartenOptions.BrowsableSchemas admits (it must be listed by exact name, or \"*\" must "
             + "be listed and the studio's role must have USAGE on it).");
         DatabaseGate.SchemaDenial("secret", [], Marten).Should().Be(Marten.BrowseEmptyListDenial);
     }
@@ -84,25 +84,25 @@ public class StudioTextPinTests
     public void The_definitions_sentences_name_both_ways_in()
     {
         Marten.DefinitionReadOnlyDenial.Should().Be(
-            "MartenStudioOptions.ReadOnly is true, which turns MartenStudioOptions.Capabilities.ViewDefinitions and "
-            + "MartenStudioOptions.Capabilities.BrowseDatabase off with every other capability.");
+            "MartenOptions.ReadOnly is true, which turns MartenOptions.Capabilities.ViewDefinitions and "
+            + "MartenOptions.Capabilities.BrowseDatabase off with every other capability.");
         Marten.DefinitionCapabilityDenial.Should().Be(
-            "The definitions of objects Marten does not own need MartenStudioOptions.Capabilities.ViewDefinitions, for the schemas "
-            + "MartenStudioOptions.BrowsableSchemas names exactly, or MartenStudioOptions.Capabilities.BrowseDatabase.");
+            "The definitions of objects Marten does not own need MartenOptions.Capabilities.ViewDefinitions, for the schemas "
+            + "MartenOptions.BrowsableSchemas names exactly, or MartenOptions.Capabilities.BrowseDatabase.");
         Marten.DefinitionWritePolicyDenialFor("ViewDefinitions and BrowseDatabase").Should().Be(
-            "Your account may not read definitions here. The write policy (MartenStudioOptions.WriteAuthorizationPolicy, or "
+            "Your account may not read definitions here. The write policy (MartenOptions.WriteAuthorizationPolicy, or "
             + "StoreAuthorizationPolicy when no write policy is set) refused ViewDefinitions and BrowseDatabase for this store and "
             + "database as a whole, with no tenant selected.");
 
         DatabaseGate.DefinitionSchemaDenial("legacy", ["quartz", "*"], Marten).Should().Be(
-            "Schema 'legacy' is admitted only through \"*\" in MartenStudioOptions.BrowsableSchemas, so its definitions need "
-            + "MartenStudioOptions.Capabilities.BrowseDatabase: MartenStudioOptions.Capabilities.ViewDefinitions covers only the "
+            "Schema 'legacy' is admitted only through \"*\" in MartenOptions.BrowsableSchemas, so its definitions need "
+            + "MartenOptions.Capabilities.BrowseDatabase: MartenOptions.Capabilities.ViewDefinitions covers only the "
             + "schemas that list names exactly.");
         DatabaseGate.DefinitionSchemaDenial("legacy", ["quartz"], Marten).Should().Be(DatabaseGate.SchemaDenial("legacy", ["quartz"], Marten),
             "a schema no entry admits is the entry list's refusal, whichever way in");
         DatabaseGate.MartenDefinitionDenial(Marten).Should().Be(
-            "The definitions of Marten's own objects here need MartenStudioOptions.Capabilities.BrowseDatabase: "
-            + "MartenStudioOptions.Capabilities.ViewDefinitions covers the host's own objects only.");
+            "The definitions of Marten's own objects here need MartenOptions.Capabilities.BrowseDatabase: "
+            + "MartenOptions.Capabilities.ViewDefinitions covers the host's own objects only.");
 
         WritePolicyRefusal.For(StudioCapability.ViewDefinitions).Should().Be("Your account may not read this database's object definitions here.");
     }
@@ -112,21 +112,21 @@ public class StudioTextPinTests
     {
         Marten.SessionsCapabilityDenial.Should().Be(
             "Process ids, roles, client addresses, application names, connection times and statements need "
-            + "MartenStudioOptions.Capabilities.ViewDatabaseActivity.");
+            + "MartenOptions.Capabilities.ViewDatabaseActivity.");
         Marten.SessionsReadOnlyDenial.Should().Be(
-            "MartenStudioOptions.ReadOnly is true, which turns MartenStudioOptions.Capabilities.ViewDatabaseActivity off with every "
+            "MartenOptions.ReadOnly is true, which turns MartenOptions.Capabilities.ViewDatabaseActivity off with every "
             + "other capability.");
         Marten.SessionsStorePolicyDenial.Should().Be(
-            "Your account may not see this database's sessions. The store policy (MartenStudioOptions.StoreAuthorizationPolicy) "
+            "Your account may not see this database's sessions. The store policy (MartenOptions.StoreAuthorizationPolicy) "
             + "refused this store and database as a whole, with no tenant selected: a session belongs to no tenant.");
         Marten.SessionsWritePolicyDenial.Should().Be(
-            "Your account may not see who is using this database. The write policy (MartenStudioOptions.WriteAuthorizationPolicy, "
+            "Your account may not see who is using this database. The write policy (MartenOptions.WriteAuthorizationPolicy, "
             + "or StoreAuthorizationPolicy when no write policy is set) refused ViewDatabaseActivity for this store and database "
             + "as a whole, with no tenant selected.");
 
         // W5-CAP's, new in 0.5 rather than moved: pinned so the Storage page's refusal cannot drift either.
         Marten.StorageStorePolicyDenial.Should().Be(
-            "Your account may not see this database's storage. The store policy (MartenStudioOptions.StoreAuthorizationPolicy) "
+            "Your account may not see this database's storage. The store policy (MartenOptions.StoreAuthorizationPolicy) "
             + "refused this store and database as a whole, with no tenant selected: a table's size belongs to no tenant.");
 
         Marten.ExamplesIntro.Should().Be("Built from this store's own aliases and tables. Click one to load it.");
@@ -145,9 +145,9 @@ public class StudioTextPinTests
         Marten.RelationshipTablesUnavailable.Should().Be("Only document types are drawn:");
 
         QuerySqlErrors.Describe(new SqlError("57014", "canceled", 0, null, null), TimeSpan.FromSeconds(12), Marten).Should().Be(
-            "Statement timed out after 12 s. MartenStudioOptions.QueryTimeout is what sets that.");
+            "Statement timed out after 12 s. MartenOptions.QueryTimeout is what sets that.");
         QuerySqlErrors.Describe(new SqlError("42501", "denied", 0, null, null), TimeSpan.FromSeconds(12), Marten).Should().Be(
-            "The role this statement ran as may not read that. MartenStudioOptions.SqlConsoleRole is what narrows it.");
+            "The role this statement ran as may not read that. MartenOptions.SqlConsoleRole is what narrows it.");
 
         SessionLockWording.Marten.Should().Be(new SessionLockWording(
             "an advisory lock that is not Marten's",
@@ -159,7 +159,7 @@ public class StudioTextPinTests
     public void The_health_sentences_and_remedies_are_04s()
     {
         Marten.StatementsOnSessionsPage.Should().Be(
-            "The statements themselves are on Database › Sessions, behind MartenStudioOptions.Capabilities.ViewDatabaseActivity, "
+            "The statements themselves are on Database › Sessions, behind MartenOptions.Capabilities.ViewDatabaseActivity, "
             + "masked for the schemas you may not see.");
         Marten.ServerSettingComment.Should().Be("A server setting, not a StoreOptions one");
         Marten.DeadlockCause.Should().Be(
@@ -190,7 +190,7 @@ public class StudioTextPinTests
         Marten.NoJudgedTable.Should().Be("No table the studio judges exists yet.");
         Marten.UnjudgedOldest.Should().Be(
             " The oldest table in this database is not one the studio judges - in a schema neither the store nor "
-            + "MartenStudioOptions.BrowsableSchemas admits, another registered store's, a document type the studio hides, or "
+            + "MartenOptions.BrowsableSchemas admits, another registered store's, a document type the studio hides, or "
             + "beyond the largest tables a sweep reads - and wraparound protection counts every table in the database, so it "
             + "holds the whole database back as surely as one of these would.");
         Marten.MartenTablePartitionParameters.Should().Be("the Schema screen's Tables tab shows which parameters the partitions differ on");
@@ -343,7 +343,7 @@ public class StudioTextPinTests
         DateTimeOffset now = DateTimeOffset.UnixEpoch;
 
         HealthExportSummary.NotRegistered(now, Marten).Problem.Should().Be(
-            "Marten Studio's services are not registered: call services.AddMartenStudio() as well as AddHealthChecks().AddMartenStudio()");
+            "Marten Studio's services are not registered: call services.AddDataStudio().AddMarten() as well as AddHealthChecks().AddMartenDiagnostics()");
         HealthExportSummary.NoStores(now, Marten).Problem.Should().Be("Marten Studio found no Marten store to check");
         HealthExportSummary.Stopping(now, Marten).Problem.Should().Be("The application is stopping, so Marten Studio did not finish checking");
         HealthExportSummary.Broken(now, "IOException", Marten).Problem.Should().Be(
@@ -351,7 +351,7 @@ public class StudioTextPinTests
 
         new HealthExportRunner(Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(
                 new Microsoft.Extensions.DependencyInjection.ServiceCollection())).Text
-            .Should().BeSameAs(Marten, "a runner MartenStudio's registration made, with no settings, still names AddMartenStudio()");
+            .Should().BeSameAs(Marten, "a runner MartenStudio's registration made, with no settings, still names AddMarten()");
     }
 
     [Fact]
@@ -362,7 +362,7 @@ public class StudioTextPinTests
                 new RowFilterVerdict { FilterLevel = IndexVerdictLevel.Red },
                 100_000,
                 Marten)
-            .Should().Contain("(more than MartenStudioOptions.ExactCountThreshold, 100,000)");
+            .Should().Contain("(more than MartenOptions.ExactCountThreshold, 100,000)");
     }
 
     [Fact]

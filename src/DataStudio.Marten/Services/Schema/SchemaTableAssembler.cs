@@ -192,7 +192,7 @@ internal static class SchemaTableAssembler
     /// Why the partition counts and the tenancy registry's figures are withheld from this visitor, naming the
     /// gate that is shut - or <see langword="null" /> when they are shown.
     /// </summary>
-    /// <param name="readOnly"><see cref="MartenStudioOptions.ReadOnly" />.</param>
+    /// <param name="readOnly"><see cref="MartenOptions.ReadOnly" />.</param>
     /// <param name="capabilityEnabled">Whether <c>BrowseDatabase</c> is effectively on.</param>
     /// <param name="authorized">The policies' answer, or <see langword="null" /> when they were not asked.</param>
     /// <param name="refusal">
@@ -219,7 +219,7 @@ internal static class SchemaTableAssembler
         return Why + (readOnly
             ? DatabaseGate.ReadOnlyDenial
             : !capabilityEnabled
-                ? "It needs MartenStudioOptions.Capabilities.BrowseDatabase."
+                ? "It needs MartenOptions.Capabilities.BrowseDatabase."
                 : refusal == DatabaseRefusal.StorePolicy
                     ? DatabaseGate.StorePolicyDenial
                     : DatabaseGate.WritePolicyDenial);

@@ -48,7 +48,7 @@ public class ConnectionInsightServiceTests
     [Fact]
     public async Task The_page_needs_the_store_policy_for_the_database_as_a_whole_and_nothing_is_read_before_it_says_yes()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All(), policies: true);
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenCapabilities.All(), policies: true);
 
         // A visitor confined to a tenant: allowed with one, refused without.
         harness.Policies.Allow(static resource => resource.TenantId is not null);
@@ -56,7 +56,7 @@ public class ConnectionInsightServiceTests
         ConnectionPageView view = await harness.Service.GetAsync(Scope with { TenantId = "acme" }, Token);
 
         view.Refusal.Should().Be(ConnectionRefusal.StorePolicy, "a connection belongs to no tenant");
-        view.Reason.Should().Contain("MartenStudioOptions.StoreAuthorizationPolicy");
+        view.Reason.Should().Contain("MartenOptions.StoreAuthorizationPolicy");
         view.Settings.Should().BeEmpty();
         harness.Facts.Reads.Should().Be(0);
         harness.Health.Requests.Should().BeEmpty();
@@ -66,7 +66,7 @@ public class ConnectionInsightServiceTests
     [Fact]
     public async Task A_visitor_through_the_gate_is_shown_the_page_and_the_report_is_asked_with_no_tenant()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = new MartenStudioCapabilities(), policies: true);
+        await using Harness harness = Harness.Create(static options => options.Capabilities = new MartenCapabilities(), policies: true);
 
         ConnectionPageView view = await harness.Service.GetAsync(Scope with { TenantId = "acme" }, Token);
 
@@ -82,7 +82,7 @@ public class ConnectionInsightServiceTests
     [Fact]
     public async Task A_read_that_fails_is_a_value_in_the_studios_words_and_never_the_exceptions()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All());
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenCapabilities.All());
         harness.Facts.Throws = new NpgsqlException("password authentication failed for user svc with " + PasswordSentinel);
 
         ConnectionPageView view = await harness.Service.GetAsync(Scope, Token);
@@ -98,17 +98,17 @@ public class ConnectionInsightServiceTests
     [Fact]
     public async Task The_page_reports_whether_the_applications_sessions_would_be_read_and_asks_nobody_and_audits_nothing()
     {
-        await using (Harness off = Harness.Create(static options => options.Capabilities = new MartenStudioCapabilities(), policies: true))
+        await using (Harness off = Harness.Create(static options => options.Capabilities = new MartenCapabilities(), policies: true))
         {
             ConnectionPageView view = await off.Service.GetAsync(Scope, Token);
 
             view.Activity.Refusal.Should().Be(DatabaseRefusal.CapabilityOff);
-            view.Activity.Denial.Should().Contain("MartenStudioOptions.Capabilities.ViewDatabaseActivity");
+            view.Activity.Denial.Should().Contain("MartenOptions.Capabilities.ViewDatabaseActivity");
             off.Policies.Calls.Should().NotContain(static x => x.Resource.Capability == nameof(StudioCapability.ViewDatabaseActivity), "a capability that is off asks nobody");
             off.Ring.Should().BeEmpty();
         }
 
-        await using (Harness on = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All(), policies: true))
+        await using (Harness on = Harness.Create(static options => options.Capabilities = MartenCapabilities.All(), policies: true))
         {
             on.Policies.Allow(static resource => resource.Capability is null);
 
@@ -119,7 +119,7 @@ public class ConnectionInsightServiceTests
             on.Ring.Should().BeEmpty("the page's question about the gate is never audited");
         }
 
-        await using Harness open = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All());
+        await using Harness open = Harness.Create(static options => options.Capabilities = MartenCapabilities.All());
         (await open.Service.GetAsync(Scope, Token)).Activity.IsOpen.Should().BeTrue();
     }
 
@@ -132,7 +132,7 @@ public class ConnectionInsightServiceTests
     {
         RecordingContributor recording = new();
         await using Harness harness = Harness.Create(
-            static options => options.Capabilities = MartenStudioCapabilities.All(),
+            static options => options.Capabilities = MartenCapabilities.All(),
             contributors: [new FailingContributor(), recording]);
 
         ConnectionPageView view = await harness.Service.GetAsync(Scope, Token);
@@ -154,12 +154,12 @@ public class ConnectionInsightServiceTests
     [Fact]
     public async Task With_the_capability_off_the_sessions_are_refused_and_audited_and_nothing_is_read()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = new MartenStudioCapabilities(), policies: true);
+        await using Harness harness = Harness.Create(static options => options.Capabilities = new MartenCapabilities(), policies: true);
 
         ConnectionApplicationsView view = await harness.Service.GetApplicationsAsync(Scope, Token);
 
         view.Refusal.Should().Be(DatabaseRefusal.CapabilityOff);
-        view.Reason.Should().Contain("MartenStudioOptions.Capabilities.ViewDatabaseActivity");
+        view.Reason.Should().Contain("MartenOptions.Capabilities.ViewDatabaseActivity");
 
         StudioActionLogEntry entry = harness.Ring.Should().ContainSingle().Subject;
         entry.Succeeded.Should().BeFalse();
@@ -172,7 +172,7 @@ public class ConnectionInsightServiceTests
     [Fact]
     public async Task A_write_policy_that_refuses_is_asked_with_no_tenant_and_audited()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All(), policies: true);
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenCapabilities.All(), policies: true);
         harness.Policies.Allow(static resource => resource.Capability is null);
 
         ConnectionApplicationsView view = await harness.Service.GetApplicationsAsync(Scope with { TenantId = "acme" }, Token);
@@ -187,7 +187,7 @@ public class ConnectionInsightServiceTests
     [Fact]
     public async Task A_store_policy_that_refuses_the_database_as_a_whole_refuses_the_sessions_and_audits_it()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All(), policies: true);
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenCapabilities.All(), policies: true);
         harness.Policies.Allow(static resource => resource.Capability is not null);
 
         ConnectionApplicationsView view = await harness.Service.GetApplicationsAsync(Scope, Token);
@@ -204,7 +204,7 @@ public class ConnectionInsightServiceTests
     [Fact]
     public async Task Through_the_gate_the_sessions_are_named_the_role_is_the_logins_and_the_first_reveal_is_audited_once()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All());
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenCapabilities.All());
 
         ConnectionApplicationsView view = await harness.Service.GetApplicationsAsync(Scope, Token);
         await harness.Service.GetApplicationsAsync(Scope, Token);
@@ -230,7 +230,7 @@ public class ConnectionInsightServiceTests
     [Fact]
     public async Task A_role_the_server_will_not_let_read_the_sessions_is_a_sentence_with_the_sqlstate()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All());
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenCapabilities.All());
         harness.Facts.ApplicationsThrow = new PostgresException("permission denied for view pg_stat_activity (S3NT1NEL)", "ERROR", "ERROR", PostgresErrorCodes.InsufficientPrivilege);
 
         ConnectionApplicationsView view = await harness.Service.GetApplicationsAsync(Scope, Token);
@@ -248,7 +248,7 @@ public class ConnectionInsightServiceTests
     public async Task The_overviews_read_asks_for_no_peak_and_so_reads_and_records_nothing()
     {
         FakeHistoryStore history = new();
-        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All(), history: history);
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenCapabilities.All(), history: history);
 
         ConnectionPageView glance = await harness.Service.GetGlanceAsync(Scope, Token);
 
@@ -262,7 +262,7 @@ public class ConnectionInsightServiceTests
     public async Task The_page_records_the_peak_it_shows_once_and_a_later_sessions_reveal_is_recorded_on_its_own_signature()
     {
         FakeHistoryStore history = new();
-        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All(), history: history);
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenCapabilities.All(), history: history);
 
         ConnectionPageView page = await harness.Service.GetAsync(Scope, Token);
         await harness.Service.GetAsync(Scope, Token);
@@ -283,7 +283,7 @@ public class ConnectionInsightServiceTests
     public async Task Opening_the_overview_does_not_use_up_the_sessions_reveal()
     {
         FakeHistoryStore history = new();
-        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All(), history: history);
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenCapabilities.All(), history: history);
 
         await harness.Service.GetGlanceAsync(Scope, Token);
         await harness.Service.GetApplicationsAsync(Scope, Token);
@@ -300,7 +300,7 @@ public class ConnectionInsightServiceTests
     {
         DateTimeOffset readAt = new(2026, 11, 3, 9, 0, 0, TimeSpan.Zero);
         FakeTimeProvider clock = new(readAt);
-        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All(), clock: clock);
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenCapabilities.All(), clock: clock);
         harness.Facts.ReadAt = readAt;
 
         // The facts are shared for up to a health interval; the page is opened well after they were read.
@@ -445,7 +445,7 @@ public class ConnectionInsightServiceTests
         public IReadOnlyList<StudioActionLogEntry> Ring => Provider.GetRequiredService<StudioActionLogService>().GetLatest();
 
         public static Harness Create(
-            Action<MartenStudioOptions> configure,
+            Action<MartenOptions> configure,
             bool policies = false,
             IReadOnlyList<IConnectionInsightContributor>? contributors = null,
             FakeHistoryStore? history = null,

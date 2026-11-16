@@ -118,7 +118,7 @@ public class HealthSweepCacheTests
         // Marten-only checks MartenStudio's.
         Type[] advisor =
         [
-            .. new[] { typeof(HealthSweepCache).Assembly, typeof(MartenStudioOptions).Assembly }
+            .. new[] { typeof(HealthSweepCache).Assembly, typeof(MartenOptions).Assembly }
                 .Distinct()
                 .SelectMany(static x => x.GetTypes())
                 .Where(static x => x.Namespace?.StartsWith("DataStudio.Marten.Services.Health", StringComparison.Ordinal) == true

@@ -88,8 +88,8 @@ internal sealed record LinqRefusal(LinqStage Stage, LinqClause Clause, string Me
 /// </param>
 /// <param name="OrderBy">The ordering (<c>Total desc, Name</c>), or blank for the id order.</param>
 /// <param name="PageSize">
-/// How many documents to show. Defaults to <see cref="MartenStudioOptions.DefaultPageSize" /> and is clamped to
-/// <see cref="MartenStudioOptions.MaxPageSize" /> in the service.
+/// How many documents to show. Defaults to <see cref="MartenOptions.DefaultPageSize" /> and is clamped to
+/// <see cref="MartenOptions.MaxPageSize" /> in the service.
 /// </param>
 /// <param name="Offset">
 /// Where the page starts. LINQ mode pages with Marten's own <c>Skip</c> / <c>Take</c>, which is
@@ -310,10 +310,10 @@ internal enum LinqAvailability
     /// <summary>It can.</summary>
     Available,
 
-    /// <summary><see cref="MartenStudioCapabilities.RunLinqQueries" /> is off.</summary>
+    /// <summary><see cref="MartenCapabilities.RunLinqQueries" /> is off.</summary>
     CapabilityOff,
 
-    /// <summary><see cref="MartenStudioOptions.ReadOnly" /> is on.</summary>
+    /// <summary><see cref="MartenOptions.ReadOnly" /> is on.</summary>
     ReadOnly,
 
     /// <summary>
@@ -419,7 +419,7 @@ internal static class LinqQueryLimits
 
     /// <summary>
     /// How many characters of document JSON one page may inline before the rest of its rows are listed by id
-    /// alone. Each document is also capped at <see cref="MartenStudioOptions.MaxInlineDocumentBytes" />.
+    /// alone. Each document is also capped at <see cref="MartenOptions.MaxInlineValueBytes" />.
     /// </summary>
     public const int PageTextBudget = 8 * 1024 * 1024;
 

@@ -27,7 +27,7 @@ namespace DataStudio.Postgres.Services.Sources;
 /// (<c>resource.SourceName != "admin"</c>) would pass that spelling and then be answered with <c>admin</c>. So once the
 /// registration and the database are matched, and whenever either spelling differs from the registered key or the
 /// matched identity, both policies are asked again about those - before the source completes the scope, opens anything
-/// or reads anything. The public resources promise a handler those names (<c>PostgresStudioResource.DatabaseIdentifier</c>
+/// or reads anything. The public resources promise a handler those names (<c>PostgresResource.DatabaseIdentifier</c>
 /// is "the name a host's <c>IPostgresDatabaseSource</c> lists the database under"); this is where that promise is kept,
 /// whichever caller built the scope. A scope already spelled that way is asked once.
 /// </para>

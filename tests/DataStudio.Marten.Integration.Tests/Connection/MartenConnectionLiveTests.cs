@@ -170,7 +170,7 @@ public class MartenConnectionLiveTests(PostgresFixture postgres)
 
             builder.Services.AddAuthorization();
             builder.Services.AddSingleton<AuthenticationStateProvider, Anonymous>();
-            builder.Services.AddDataStudio().AddMarten(static options => options.Capabilities = MartenStudioCapabilities.All());
+            builder.Services.AddDataStudio().AddMarten(static options => options.Capabilities = MartenCapabilities.All());
 
             IHost built = builder.Build();
             IDocumentStore store = built.Services.GetRequiredService<IDocumentStore>();

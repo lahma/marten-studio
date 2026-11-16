@@ -9,8 +9,9 @@ namespace DataStudio.Postgres.Services.Health.Checks;
 /// <param name="SqlConsoleRole">Whether <c>SqlConsoleRole</c> is set - never the name, which is the database-wide gate's (D29).</param>
 /// <param name="BrowsesEverySchema">Whether <c>BrowsableSchemas</c> contains <c>"*"</c>.</param>
 /// <param name="OptionsTypeName">The options type's name, as a host's registration spells it.</param>
-/// <param name="RegistrationMethod">The registration method: <c>AddMarten</c>, <c>AddPostgres</c>.</param>
+/// <param name="RegistrationMethod">The module's call on the shell's builder: <c>AddMarten</c>, <c>AddPostgres</c>.</param>
 /// <param name="CapabilitiesTypeName">The capabilities type's name.</param>
+/// <param name="ReadOnlyOptionName">The switch that is on when <paramref name="ReadOnly" /> is, as a host spells it: the shell's or the module's.</param>
 internal sealed record StudioLintFacts(
     bool ReadOnly,
     IReadOnlyList<StudioCapability> Configured,
@@ -18,7 +19,8 @@ internal sealed record StudioLintFacts(
     bool BrowsesEverySchema,
     string OptionsTypeName,
     string RegistrationMethod,
-    string CapabilitiesTypeName)
+    string CapabilitiesTypeName,
+    string ReadOnlyOptionName)
 {
     /// <summary>The capabilities that are on: configured, and not under <c>ReadOnly</c>.</summary>
     public IReadOnlyList<StudioCapability> Enabled => ReadOnly ? [] : Configured;
@@ -29,8 +31,11 @@ internal sealed record StudioLintFacts(
     /// <summary><paramref name="member" /> as the host's registration spells it.</summary>
     public string OptionName(string member) => OptionsTypeName + "." + member;
 
-    /// <summary>The method that maps the studio: <c>MapDataStudio</c>, <c>MapDataStudio</c>.</summary>
-    public string MapMethod => RegistrationMethod.StartsWith("Add", StringComparison.Ordinal) ? "Map" + RegistrationMethod[3..] : RegistrationMethod;
+    /// <summary>The call that maps the studio, whichever module registered: <c>MapDataStudio</c>.</summary>
+    public static string MapMethod => "MapDataStudio";
+
+    /// <summary>The shell's entry-policy option as a host spells it: <c>DataStudioOptions.AuthorizationPolicy</c>, whichever module registered.</summary>
+    public static string AuthorizationPolicyOptionName => nameof(DataStudioOptions) + "." + nameof(DataStudioOptions.AuthorizationPolicy);
 
     /// <summary>Reads them off the studio's settings.</summary>
     /// <exception cref="InvalidOperationException">
@@ -51,7 +56,8 @@ internal sealed record StudioLintFacts(
             BrowsableSchemaMatcher.IncludesEverything(settings.BrowsableSchemas),
             settings.OptionsTypeName,
             settings.Text.RegistrationMethod,
-            settings.CapabilitiesTypeName);
+            settings.CapabilitiesTypeName,
+            settings.ReadOnlyOptionName);
     }
 
     /// <summary>
@@ -101,7 +107,7 @@ internal sealed class ConsoleWithoutRoleCheck : HealthCheck<StudioLintFacts>
 
         if (facts.ReadOnly)
         {
-            return HealthVerdict.Quiet(facts.OptionName("ReadOnly") + " is true, so the SQL console is off whatever " + runSql + " says.");
+            return HealthVerdict.Quiet(facts.ReadOnlyOptionName + " is true, so the SQL console is off whatever " + runSql + " says.");
         }
 
         if (!facts.IsEnabled(StudioCapability.RunSql))

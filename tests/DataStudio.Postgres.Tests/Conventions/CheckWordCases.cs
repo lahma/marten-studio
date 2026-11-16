@@ -397,7 +397,7 @@ internal static class CheckWordCases
     // Configuration: K05-K07, in Postgres Studio's options.
 
     private static StudioLintFacts Options(bool readOnly = false, StudioCapability[]? on = null, bool consoleRole = false, bool everySchema = false) =>
-        new(readOnly, on ?? [], consoleRole, everySchema, PostgresStudioText.OptionsTypeName, "AddPostgresStudio", "PostgresStudioCapabilities");
+        new(readOnly, on ?? [], consoleRole, everySchema, PostgresStudioText.OptionsTypeName, "AddPostgres", "PostgresCapabilities", PostgresStudioText.OptionsTypeName + ".ReadOnly");
 
     private static IEnumerable<CheckWordCase> Configuration()
     {

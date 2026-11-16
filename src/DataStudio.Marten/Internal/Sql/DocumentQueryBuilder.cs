@@ -782,7 +782,7 @@ internal static class DocumentQueryBuilder
         DocumentListQuery query,
         ParameterBuilder builder)
     {
-        var maxInline = builder.Add(NpgsqlDbType.Integer, Math.Max(query.MaxInlineDocumentBytes, 0), "maxInline");
+        var maxInline = builder.Add(NpgsqlDbType.Integer, Math.Max(query.MaxInlineValueBytes, 0), "maxInline");
 
         sql.Append("select ").Append(IdRef).Append(",\n");
         sql.Append("       case when octet_length(").Append(DataRef).Append("::text) <= ").Append(maxInline)

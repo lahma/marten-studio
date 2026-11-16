@@ -106,8 +106,8 @@ public class PostgresStudioScenarioTests(BrowserSuiteFixture fixture)
             await card.WaitForAsync();
 
             string refusal = await card.InnerTextAsync();
-            refusal.Should().Contain("PostgresStudioOptions.WriteAuthorizationPolicy", "the card names the exact thing a host would change (D4)");
-            refusal.Should().NotContain("MartenStudioOptions", "Postgres Studio's words, not Marten Studio's");
+            refusal.Should().Contain("PostgresOptions.WriteAuthorizationPolicy", "the card names the exact thing a host would change (D4)");
+            refusal.Should().NotContain("MartenOptions", "Postgres Studio's words, not Marten Studio's");
             (await page.Locator(".ms-row-grid").CountAsync()).Should().Be(0, "no row of it is read for this visitor");
 
             ILocator tabs = page.Locator(".ms-db-object-tabs a");

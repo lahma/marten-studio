@@ -232,7 +232,7 @@ public class HealthExportSummaryTests
     public void A_run_that_could_not_check_anything_says_why_in_the_studios_own_words()
     {
         HealthExportSummary.NotRegistered(Now, StudioText.Marten).Level.Should().Be(HealthExportLevel.Degraded);
-        HealthExportSummary.NotRegistered(Now, StudioText.Marten).Describe(TimeSpan.FromSeconds(60)).Should().Contain("services.AddMartenStudio()");
+        HealthExportSummary.NotRegistered(Now, StudioText.Marten).Describe(TimeSpan.FromSeconds(60)).Should().Contain("services.AddDataStudio().AddMarten()");
         HealthExportSummary.NoStores(Now, StudioText.Marten).Level.Should().Be(HealthExportLevel.Degraded);
 
         HealthExportSummary broken = HealthExportSummary.Broken(Now, nameof(InvalidOperationException), StudioText.Marten);

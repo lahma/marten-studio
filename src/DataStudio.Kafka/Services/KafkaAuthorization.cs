@@ -13,12 +13,12 @@ namespace DataStudio.Kafka.Services;
 /// <para>
 /// <b>It never asks the host studio's policies, and never falls back to them.</b> <c>StoreAuthorizationPolicy</c>,
 /// <c>SourceAuthorizationPolicy</c> and <c>WriteAuthorizationPolicy</c> are asked about <c>MartenStoreResource</c> or
-/// <c>PostgresStudioResource</c>, and their handlers are written for those types: handing one a <see cref="KafkaTopicResource" /> under
+/// <c>PostgresResource</c>, and their handlers are written for those types: handing one a <see cref="KafkaTopicResource" /> under
 /// the same policy name is what D30 forbids. For the same reason the host's <c>StudioAuthorization</c> is not reused through a second
 /// resource factory. With neither KStudio policy set nothing is asked and everything passes.
 /// </para>
 /// <para>
-/// <b>What a question asks.</b> A read (no capability) asks <see cref="KafkaStudioOptions.ClusterAuthorizationPolicy" /> with
+/// <b>What a question asks.</b> A read (no capability) asks <see cref="KafkaOptions.ClusterAuthorizationPolicy" /> with
 /// <see cref="KafkaTopicResource.Capability" /> <see langword="null" />. A capability's use asks the cluster policy first, capability unnamed - it
 /// decides which topics the visitor may reach at all - and then <c>CapabilityAuthorizationPolicy ?? ClusterAuthorizationPolicy</c> with the
 /// capability named (the capability policy falls back to the cluster policy, D5's write-policy fallback). A call that touches three topics asks about each of the
@@ -29,7 +29,7 @@ namespace DataStudio.Kafka.Services;
 /// <param name="authorizationService">The application's policy evaluator.</param>
 /// <param name="authenticationStateProvider">Who is asking.</param>
 internal sealed class KafkaAuthorization(
-    IOptions<KafkaStudioOptions> options,
+    IOptions<KafkaOptions> options,
     IAuthorizationService authorizationService,
     AuthenticationStateProvider authenticationStateProvider)
 {

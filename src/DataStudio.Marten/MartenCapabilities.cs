@@ -7,10 +7,10 @@ namespace DataStudio.Marten;
 /// names other sessions (<see cref="ViewDatabaseActivity"/>) and the one that evaluates a typed expression
 /// (<see cref="RunLinqQueries"/>). Every property defaults to <see langword="false"/>: a freshly mapped
 /// studio is a read-only browser of the store until the host enables what it needs, one switch at a
-/// time, or calls <see cref="All"/>. <see cref="MartenStudioOptions.ReadOnly"/> overrides every property
+/// time, or calls <see cref="All"/>. <see cref="MartenOptions.ReadOnly"/> overrides every property
 /// here.
 /// </summary>
-public sealed class MartenStudioCapabilities
+public sealed class MartenCapabilities
 {
     /// <summary>Edit a document's JSON and save it through the store's serializer and session.</summary>
     public bool EditDocuments { get; set; }
@@ -48,10 +48,10 @@ public sealed class MartenStudioCapabilities
 
     /// <summary>
     /// Read the rows and the definitions (view SQL, function bodies, trigger definitions) of the
-    /// database objects Marten does not own, in the schemas <see cref="MartenStudioOptions.BrowsableSchemas"/>
+    /// database objects Marten does not own, in the schemas <see cref="MartenOptions.BrowsableSchemas"/>
     /// names, and see those schemas' structure at all. Like <see cref="RunSql"/> it is a read that is
-    /// treated as a write for authorization: <see cref="MartenStudioOptions.WriteAuthorizationPolicy"/> is
-    /// asked, against the database as a whole with no tenant, and <see cref="MartenStudioOptions.ReadOnly"/>
+    /// treated as a write for authorization: <see cref="MartenOptions.WriteAuthorizationPolicy"/> is
+    /// asked, against the database as a whole with no tenant, and <see cref="MartenOptions.ReadOnly"/>
     /// turns it off with everything else. Rows of Marten's own document and event tables are never read
     /// this way; they are browsed where tenancy, soft delete and the serializer apply. It implies
     /// <see cref="ViewDefinitions"/>: a visitor it admits reads definitions exactly as before.
@@ -61,14 +61,14 @@ public sealed class MartenStudioCapabilities
     /// <summary>
     /// Read the definitions (a view's or materialized view's query, a function's or procedure's body, a trigger's
     /// definition, a type's description) of the database objects Marten does not own, and see the
-    /// structure of the schemas <see cref="MartenStudioOptions.BrowsableSchemas"/> names <em>exactly</em> - and nothing
+    /// structure of the schemas <see cref="MartenOptions.BrowsableSchemas"/> names <em>exactly</em> - and nothing
     /// else: no rows and no sequence's current value (those are data, and need <see cref="BrowseDatabase"/>), and no
     /// definition in a schema only <c>"*"</c> admits.
     /// A definition is schema the application's own migrations wrote, but it can carry a literal - a function body
     /// with a constant in it - which is why it is a switch of its own rather than part of structure. Like
     /// <see cref="BrowseDatabase"/> it is a read treated as a write for authorization:
-    /// <see cref="MartenStudioOptions.WriteAuthorizationPolicy"/> is asked with this capability's name, against the
-    /// database as a whole with no tenant, and <see cref="MartenStudioOptions.ReadOnly"/> turns it off with everything
+    /// <see cref="MartenOptions.WriteAuthorizationPolicy"/> is asked with this capability's name, against the
+    /// database as a whole with no tenant, and <see cref="MartenOptions.ReadOnly"/> turns it off with everything
     /// else. <see cref="BrowseDatabase"/> implies it.
     /// </summary>
     public bool ViewDefinitions { get; set; }
@@ -80,8 +80,8 @@ public sealed class MartenStudioCapabilities
     /// than the people who browse its data, and what it reveals is other applications' as much as this
     /// one's - statement text carries literal values and other schemas' names. Without it the health
     /// advisor still shows counts and ages, never those details. Like <see cref="BrowseDatabase"/> it is a
-    /// read authorized as a write: <see cref="MartenStudioOptions.WriteAuthorizationPolicy"/> is asked,
-    /// against the database as a whole with no tenant, and <see cref="MartenStudioOptions.ReadOnly"/> turns
+    /// read authorized as a write: <see cref="MartenOptions.WriteAuthorizationPolicy"/> is asked,
+    /// against the database as a whole with no tenant, and <see cref="MartenOptions.ReadOnly"/> turns
     /// it off with everything else.
     /// </summary>
     public bool ViewDatabaseActivity { get; set; }
@@ -99,12 +99,12 @@ public sealed class MartenStudioCapabilities
     /// and handed to Marten's own <c>Query&lt;T&gt;()</c>, so tenancy and soft deletes stay Marten's. It
     /// changes nothing, but it evaluates an expression somebody typed inside the host application, so it
     /// is for people trusted with the store's data; like <see cref="RunSql"/>, it is a read authorized as a
-    /// write, and <see cref="MartenStudioOptions.ReadOnly"/> turns it off with everything else.
+    /// write, and <see cref="MartenOptions.ReadOnly"/> turns it off with everything else.
     /// </summary>
     public bool RunLinqQueries { get; set; }
 
-    /// <summary>Every capability enabled. Still subject to <see cref="MartenStudioOptions.ReadOnly"/>.</summary>
-    public static MartenStudioCapabilities All() => new()
+    /// <summary>Every capability enabled. Still subject to <see cref="MartenOptions.ReadOnly"/>.</summary>
+    public static MartenCapabilities All() => new()
     {
         EditDocuments = true,
         DeleteDocuments = true,

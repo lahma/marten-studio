@@ -22,7 +22,7 @@ public class CapabilityDisabledTests
 
         note.Find(".ms-capability-disabled").TextContent.Should()
             .Contain("Browsing the database is not enabled")
-            .And.Contain("MartenStudioOptions.Capabilities.BrowseDatabase");
+            .And.Contain("MartenOptions.Capabilities.BrowseDatabase");
     }
 
     /// <summary>
@@ -39,7 +39,7 @@ public class CapabilityDisabledTests
 
         string text = note.Find(".ms-capability-disabled").TextContent;
 
-        text.Should().Contain("MartenStudioOptions.ReadOnly").And.Contain("every capability");
+        text.Should().Contain("MartenOptions.ReadOnly").And.Contain("every capability");
         text.Should().Contain("RunSql").And.Contain("BrowseDatabase");
         text.Should().NotContain("every mutating operation off");
     }

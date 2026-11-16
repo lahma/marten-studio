@@ -1,3 +1,4 @@
+using DataStudio.Marten.Services;
 using JasperFx.Events;
 
 using DataStudio.Marten.Services.Events;
@@ -36,10 +37,10 @@ public class EventFindContributorTests
         new(scope ?? Matched, shape, tenants ?? FindTenants.Unrestricted);
 
     private static StreamFindContributor Streams(FakeEventDataService events, FakeFindScopes scopes) =>
-        new(events, scopes, Microsoft.Extensions.Options.Options.Create(new MartenStudioOptions()));
+        new(events, scopes, MartenStudioSettings.Of(new MartenOptions()));
 
     private static EventSequenceFindContributor Sequences(FakeEventDataService events, FakeFindScopes scopes) =>
-        new(events, scopes, Microsoft.Extensions.Options.Options.Create(new MartenStudioOptions()));
+        new(events, scopes, MartenStudioSettings.Of(new MartenOptions()));
 
     [Fact]
     public async Task A_stream_id_asks_the_streams_read_for_that_id_with_archived_streams_and_room_for_several_tenants()
@@ -295,7 +296,7 @@ public class EventFindContributorTests
     [Fact]
     public void A_stream_link_at_an_event_names_the_stream_the_version_and_the_scope()
     {
-        string url = EventLinks.ToStreamAt(new MartenStudioOptions(), new StudioScope("default", "primary", "acme"), StreamId, 7);
+        string url = EventLinks.ToStreamAt(MartenStudioSettings.Of(new MartenOptions()), new StudioScope("default", "primary", "acme"), StreamId, 7);
 
         url.Should().Contain("events/streams/s").And.Contain("id=" + StreamId).And.Contain("v=7")
             .And.Contain("store=default").And.Contain("db=primary").And.Contain("tenant=acme");

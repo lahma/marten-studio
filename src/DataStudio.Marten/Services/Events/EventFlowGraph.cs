@@ -57,7 +57,7 @@ internal static class EventFlowGraph
 
     /// <summary>Builds the model for a store.</summary>
     /// <param name="store">The store; only its options are read.</param>
-    /// <param name="isVisible"><c>MartenStudioOptions.IsDocumentTypeVisible</c>, or <see langword="null" /> to hide nothing.</param>
+    /// <param name="isVisible"><c>MartenOptions.IsDocumentTypeVisible</c>, or <see langword="null" /> to hide nothing.</param>
     public static EventFlowModel Build(IDocumentStore store, Func<Type, bool>? isVisible)
     {
         ArgumentNullException.ThrowIfNull(store);

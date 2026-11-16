@@ -93,7 +93,7 @@ internal sealed class HealthExportHarness : IAsyncDisposable
     /// </param>
     public static HealthExportHarness Create(
         IEnumerable<Type>? checks = null,
-        Action<MartenStudioOptions>? studio = null,
+        Action<MartenOptions>? studio = null,
         Action<StoreOptions>? tenancy = null,
         bool registerStudio = true,
         HealthExportLimits? limits = null,
@@ -150,7 +150,7 @@ internal sealed class HealthExportHarness : IAsyncDisposable
 
         if (healthChecks is null)
         {
-            builder.AddMartenStudio();
+            builder.AddMartenDiagnostics();
         }
         else
         {

@@ -585,7 +585,7 @@ public class KafkaSearchPageTests
 
         IRenderedComponent<KafkaSearchPage> page = rig.Studio.Context.Render<KafkaSearchPage>();
 
-        page.WaitForAssertion(() => page.Markup.Should().Contain("Searching records is not available here.").And.NotContain("KafkaStudioOptions"));
+        page.WaitForAssertion(() => page.Markup.Should().Contain("Searching records is not available here.").And.NotContain("KafkaOptions"));
         page.FindAll("textarea").Should().BeEmpty();
     }
 

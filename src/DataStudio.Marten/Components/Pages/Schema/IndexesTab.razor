@@ -11,8 +11,9 @@
 @inject StudioState State
 @inject StudioPreferences Preferences
 @inject IHealthService Health
-@inject IOptions<MartenStudioOptions> Options
+@inject IOptions<MartenOptions> Options
 @inject ILogger<IndexesTab> Logger
+@inject IStudioSettings Settings
 
 @*
     Both directions of the join: what Postgres has that the configuration does not ask for, and what the
@@ -354,7 +355,7 @@ else
         {
             IReadOnlyList<HealthReportFinding> findings = await Health.CachedFindingsAsync(scope, SchemaHealthMarks.IndexCodes, lifetime.Token);
 
-            marks = SchemaHealthMarks.ForIndexes(findings, finding => HealthLinks.ToFinding(Options.Value, scope, finding));
+            marks = SchemaHealthMarks.ForIndexes(findings, finding => HealthLinks.ToFinding(Settings, scope, finding));
             marksMeasuredAt = findings.Count == 0 ? null : findings.Max(static x => x.Finding.MeasuredAt);
         }
         catch (OperationCanceledException)

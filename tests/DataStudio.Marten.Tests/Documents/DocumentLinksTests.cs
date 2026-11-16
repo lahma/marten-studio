@@ -1,3 +1,4 @@
+using DataStudio.Marten.Services;
 using DataStudio.Marten.Services.Documents;
 using DataStudio.Marten.Services.Query;
 using DataStudio.Postgres.Services;
@@ -10,12 +11,12 @@ namespace DataStudio.Marten.Tests.Documents;
 /// </summary>
 public class DocumentLinksTests
 {
-    private static readonly MartenStudioOptions Options = new();
+    private static readonly MartenOptions Options = new();
 
     [Fact]
     public void A_collection_link_carries_the_scope()
     {
-        var url = DocumentLinks.ToCollection(Options, new StudioScope("default", "localhost.marten", "acme"), "customer");
+        var url = DocumentLinks.ToCollection(MartenStudioSettings.Of(Options), new StudioScope("default", "localhost.marten", "acme"), "customer");
 
         url.Should().StartWith("documents/customer?");
         url.Should().Contain("store=default");
@@ -27,7 +28,7 @@ public class DocumentLinksTests
     public void A_document_link_puts_the_id_in_the_query_string()
     {
         // D9: the router has no catch-all segment and Marten ids are frequently strings with a '/' in them.
-        var url = DocumentLinks.ToDocument(Options, null, "product", "SKU/001");
+        var url = DocumentLinks.ToDocument(MartenStudioSettings.Of(Options), null, "product", "SKU/001");
 
         url.Should().StartWith("documents/product/doc?");
         url.Should().Contain("id=SKU%2F001");
@@ -36,7 +37,7 @@ public class DocumentLinksTests
     [Fact]
     public void An_alias_with_a_slash_in_it_is_escaped_into_one_segment()
     {
-        var url = DocumentLinks.ToCollection(Options, null, "odd/alias");
+        var url = DocumentLinks.ToCollection(MartenStudioSettings.Of(Options), null, "odd/alias");
 
         url.Should().Be("documents/odd%2Falias");
     }
@@ -44,7 +45,7 @@ public class DocumentLinksTests
     [Fact]
     public void The_query_link_carries_the_type_and_the_filter()
     {
-        var url = DocumentLinks.ToQuery(Options, null, "customer", "Email = 'a@b.c'");
+        var url = DocumentLinks.ToQuery(MartenStudioSettings.Of(Options), null, "customer", "Email = 'a@b.c'");
 
         url.Should().StartWith("query?");
         url.Should().Contain("type=customer");

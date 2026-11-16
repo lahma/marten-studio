@@ -193,7 +193,7 @@ public class PlanSettingsGateTests
             services.AddMarten(options => options.Connection(ConnectionString));
             services.AddDataStudio().AddMarten(options =>
             {
-                options.Capabilities = MartenStudioCapabilities.All();
+                options.Capabilities = MartenCapabilities.All();
                 options.StoreAuthorizationPolicy = "studio-store";
                 options.WriteAuthorizationPolicy = "studio-write";
             });

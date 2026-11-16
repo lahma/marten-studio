@@ -31,7 +31,7 @@ internal sealed class KafkaStudioStartupGuard(IServiceProvider provider) : IHost
     /// <inheritdoc />
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        KafkaStudioOptions options = provider.GetRequiredService<IOptions<KafkaStudioOptions>>().Value;
+        KafkaOptions options = provider.GetRequiredService<IOptions<KafkaOptions>>().Value;
         IShellSettings settings = provider.GetRequiredService<IShellSettings>();
         IReadOnlyList<KafkaCapability> configured = KafkaCapabilityGuard.ConfiguredIn(options.Capabilities);
 

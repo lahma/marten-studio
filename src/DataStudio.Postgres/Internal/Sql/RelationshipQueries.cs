@@ -211,7 +211,7 @@ internal static class RelationshipQueries
     /// <summary>Reads every physical foreign key in the store's schemas.</summary>
     /// <param name="connection">An open connection to the database in scope.</param>
     /// <param name="schemas">The schemas the store owns, from <c>SchemaDeclarationReader</c>.</param>
-    /// <param name="commandTimeoutSeconds">The command timeout, from <c>MartenStudioOptions.QueryTimeout</c>.</param>
+    /// <param name="commandTimeoutSeconds">The command timeout, from <c>MartenOptions.QueryTimeout</c>.</param>
     /// <param name="cancellationToken">Cancels the read.</param>
     public static async Task<IReadOnlyList<PhysicalForeignKey>> ReadForeignKeysAsync(
         NpgsqlConnection connection,

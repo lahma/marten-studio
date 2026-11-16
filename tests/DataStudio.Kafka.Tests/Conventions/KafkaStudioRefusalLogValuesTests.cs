@@ -73,7 +73,7 @@ public partial class KafkaStudioRefusalLogValuesTests
 
         logger.SearchRan("u", "t", "c", null, when, when, 0, 0, "limit", "key = 'x'");
         logger.SearchNotRun("u", "t", "c", null, "refused", "key = 'x'");
-        logger.CapabilityRefused("u", "SearchRecords", "KafkaStudioOptions.Capabilities.SearchRecords");
+        logger.CapabilityRefused("u", "SearchRecords", "KafkaOptions.Capabilities.SearchRecords");
         logger.ClusterRefused("u", "c", null, "t", "p");
         logger.RecordOpened("u", "t", 0, 0, "c", null);
         logger.RecordValueRead("u", "t", 0, 0, "c", null);

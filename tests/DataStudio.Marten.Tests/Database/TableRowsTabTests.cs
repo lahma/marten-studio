@@ -535,8 +535,8 @@ public class TableRowsTabTests
 
     [Theory]
     [InlineData("55000", "This materialized view has never been refreshed.", "Never refreshed")]
-    [InlineData("42501", "The role 'studio_reader' (MartenStudioOptions.SqlConsoleRole) has no privilege to read this.", "No privilege to read these rows")]
-    [InlineData("57014", "The read took longer than MartenStudioOptions.QueryTimeout (30 s) and Postgres cancelled it.", "The read timed out")]
+    [InlineData("42501", "The role 'studio_reader' (MartenOptions.SqlConsoleRole) has no privilege to read this.", "No privilege to read these rows")]
+    [InlineData("57014", "The read took longer than MartenOptions.QueryTimeout (30 s) and Postgres cancelled it.", "The read timed out")]
     public async Task A_failed_read_is_named_by_what_happened_and_offers_a_retry(string sqlState, string sentence, string title)
     {
         await using var context = await RowUiData.ContextAsync();

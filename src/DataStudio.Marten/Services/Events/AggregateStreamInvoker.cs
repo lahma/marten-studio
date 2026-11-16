@@ -86,7 +86,7 @@ internal static class AggregateStreamInvoker
     /// </summary>
     /// <param name="options">The store's own configuration - nothing here is guessed.</param>
     /// <param name="isVisible">
-    /// <c>MartenStudioOptions.IsDocumentTypeVisible</c>, or <see langword="null" /> for every type. A type it
+    /// <c>MartenOptions.IsDocumentTypeVisible</c>, or <see langword="null" /> for every type. A type it
     /// hides is not a candidate at all: the picker would print its name, and a replay would put its state on
     /// the screen that the Documents browser never shows.
     /// </param>

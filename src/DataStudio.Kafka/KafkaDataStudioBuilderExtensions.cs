@@ -39,7 +39,7 @@ public static class KafkaDataStudioBuilderExtensions
     /// </exception>
     public static DataStudioBuilder AddKafka(
         this DataStudioBuilder builder,
-        Action<KafkaStudioOptions>? configure = null)
+        Action<KafkaOptions>? configure = null)
     {
         ArgumentNullException.ThrowIfNull(builder);
 
@@ -58,21 +58,21 @@ public static class KafkaDataStudioBuilderExtensions
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void AddKafkaServices(
         DataStudioBuilder builder,
-        Action<KafkaStudioOptions>? configure)
+        Action<KafkaOptions>? configure)
     {
         IServiceCollection services = builder.Services;
 
         // The module itself: TryAddEnumerable deduplicates by implementation type, so a second call adds it once.
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IStudioModule, KafkaStudioModule>());
 
-        OptionsBuilder<KafkaStudioOptions> optionsBuilder = services
-            .AddOptions<KafkaStudioOptions>()
+        OptionsBuilder<KafkaOptions> optionsBuilder = services
+            .AddOptions<KafkaOptions>()
             .Validate(
                 static options => options.Capabilities is not null,
-                "KafkaStudioOptions.Capabilities cannot be null: use new KafkaStudioCapabilities() for none, or KafkaStudioCapabilities.All()")
+                "KafkaOptions.Capabilities cannot be null: use new KafkaCapabilities() for none, or KafkaCapabilities.All()")
             .Validate(
                 static options => options.Capabilities is null || !options.Capabilities.ReadPayloads || options.Capabilities.SearchRecords,
-                "KafkaStudioOptions.Capabilities.ReadPayloads needs KafkaStudioOptions.Capabilities.SearchRecords: a value is read only as part of a record a search or a permalink opened");
+                "KafkaOptions.Capabilities.ReadPayloads needs KafkaOptions.Capabilities.SearchRecords: a value is read only as part of a record a search or a permalink opened");
 
         if (configure is not null)
         {
@@ -80,12 +80,12 @@ public static class KafkaDataStudioBuilderExtensions
         }
 
         // The host's external links (D44): refused at the first read of the options, which the startup guard makes at host start.
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IValidateOptions<KafkaStudioOptions>, KafkaExternalLinkOptionsValidator>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IValidateOptions<KafkaOptions>, KafkaExternalLinkOptionsValidator>());
 
         // The engine: the options object answers both seams, as a database module's does (D30).
         KStudioEngineRegistration.Add(
             services,
-            static provider => provider.GetRequiredService<IOptions<KafkaStudioOptions>>().Value,
+            static provider => provider.GetRequiredService<IOptions<KafkaOptions>>().Value,
             static provider => new KafkaEngineSettings(provider.GetRequiredService<IShellSettings>()));
 
         services.TryAddSingleton<IKafkaClusterEntrySource, CatalogClusterEntrySource>();

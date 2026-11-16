@@ -25,7 +25,7 @@ public class StatementsPageLiveTests(StatementsServerFixture server) : IClassFix
 {
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
-    private static void Activity(MartenStudioOptions options)
+    private static void Activity(MartenOptions options)
     {
         options.Capabilities.ViewDatabaseActivity = true;
         options.Capabilities.BrowseDatabase = true;

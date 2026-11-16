@@ -91,7 +91,7 @@ public class FirstNavigationLiveTests(PostgresFixture postgres)
             },
             static options =>
             {
-                options.Capabilities = PostgresStudioCapabilities.All();
+                options.Capabilities = PostgresCapabilities.All();
                 options.BrowsableSchemas.Add("*");
                 options.AddDatabaseSource("tenants", static services => services.GetRequiredService<FixedDatabases>());
             });

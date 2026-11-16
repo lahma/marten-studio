@@ -62,8 +62,8 @@ public class NoAsyncVoidTests
     {
         Assembly[] assemblies =
         [
-            typeof(MartenStudioOptions).Assembly,
-            typeof(DataStudio.Postgres.PostgresStudioOptions).Assembly,
+            typeof(MartenOptions).Assembly,
+            typeof(DataStudio.Postgres.PostgresOptions).Assembly,
             typeof(DataStudio.Postgres.PostgresDiagnosticsOptions).Assembly,
             typeof(DataStudio.Components.Layout.StudioLayout).Assembly,
         ];

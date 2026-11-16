@@ -7,7 +7,7 @@ using AspNetCoreHealthCheckResult = Microsoft.Extensions.Diagnostics.HealthCheck
 namespace DataStudio.Postgres.Services.Health.Export;
 
 /// <summary>
-/// The one ASP.NET Core health check <c>AddHealthChecks().AddMartenStudio()</c> registers: the export run's
+/// The one ASP.NET Core health check <c>AddHealthChecks().AddMartenDiagnostics()</c> registers: the export run's
 /// summary, as a status, a sentence and codes-and-counts data.
 /// </summary>
 /// <remarks>

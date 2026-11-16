@@ -47,18 +47,18 @@ public class ViewDefinitionsWordsTests
         rows.Allowed.Should().BeFalse();
         rows.Refusal.Should().Be(DatabaseRefusal.CapabilityOff);
         rows.Reason.Should().Be(Words.BrowseCapabilityDenial)
-            .And.Contain("PostgresStudioOptions.Capabilities.BrowseDatabase");
+            .And.Contain("PostgresOptions.Capabilities.BrowseDatabase");
 
         DatabaseRowAccess archive = gate.DefinitionAccess("archive", new DatabaseObjectOwnership(DatabaseObjectOwner.Other));
         archive.Allowed.Should().BeFalse("only \"*\" admits it, and \"*\" is BrowseDatabase's");
         archive.Reason.Should().Contain("only through \"*\"")
-            .And.Contain("PostgresStudioOptions.Capabilities.BrowseDatabase")
-            .And.Contain("PostgresStudioOptions.Capabilities.ViewDefinitions");
+            .And.Contain("PostgresOptions.Capabilities.BrowseDatabase")
+            .And.Contain("PostgresOptions.Capabilities.ViewDefinitions");
 
         // An object named like a Marten store's is the Marten tables' rule: its definition is BrowseDatabase's, as it was.
         DatabaseRowAccess marten = gate.DefinitionAccess("app", new DatabaseObjectOwnership(DatabaseObjectOwner.MartenInfrastructure));
         marten.Allowed.Should().BeFalse();
-        marten.Reason.Should().Contain("PostgresStudioOptions.Capabilities.BrowseDatabase");
+        marten.Reason.Should().Contain("PostgresOptions.Capabilities.BrowseDatabase");
     }
 
     [Fact]
@@ -76,17 +76,17 @@ public class ViewDefinitionsWordsTests
     {
         DatabaseGate off = Gate(browse: false, authorized: null, definitions: null);
         off.State.DefinitionDenial.Should().Be(Words.DefinitionCapabilityDenial)
-            .And.Contain("PostgresStudioOptions.Capabilities.ViewDefinitions")
-            .And.Contain("PostgresStudioOptions.Capabilities.BrowseDatabase");
+            .And.Contain("PostgresOptions.Capabilities.ViewDefinitions")
+            .And.Contain("PostgresOptions.Capabilities.BrowseDatabase");
         off.State.Denial.Should().Be(Words.BrowseCapabilityDenial).And.NotContain("definitions",
             "the rows' sentence is about rows: a definition has a sentence of its own");
 
         Gate(browse: true, authorized: true, DefinitionsPass, readOnly: true).State.DefinitionDenial.Should().Be(Words.DefinitionReadOnlyDenial)
-            .And.Contain("PostgresStudioOptions.Capabilities.ViewDefinitions and PostgresStudioOptions.Capabilities.BrowseDatabase off");
+            .And.Contain("PostgresOptions.Capabilities.ViewDefinitions and PostgresOptions.Capabilities.BrowseDatabase off");
 
         Gate(browse: true, authorized: false, new DatabasePolicyAnswer(true, false, DatabaseRefusal.WritePolicy)).State.DefinitionDenial
             .Should().Be(Words.DefinitionWritePolicyDenialFor("ViewDefinitions and BrowseDatabase"))
-            .And.Contain("PostgresStudioOptions.WriteAuthorizationPolicy").And.Contain("SourceAuthorizationPolicy")
+            .And.Contain("PostgresOptions.WriteAuthorizationPolicy").And.Contain("SourceAuthorizationPolicy")
             .And.Contain("this data source and database");
 
         Gate(browse: false, authorized: null, new DatabasePolicyAnswer(true, false, DatabaseRefusal.WritePolicy)).State.DefinitionDenial
@@ -98,7 +98,7 @@ public class ViewDefinitionsWordsTests
                      DatabaseGate.DefinitionSchemaDenial("archive", Entries, Words),
                  })
         {
-            sentence.Should().NotContain("Marten").And.NotContain("MartenStudioOptions").And.NotContain("store");
+            sentence.Should().NotContain("Marten").And.NotContain("MartenOptions").And.NotContain("store");
         }
     }
 
@@ -118,7 +118,7 @@ public class ViewDefinitionsWordsTests
         string notice = page.Find(".ms-db-access").TextContent;
         notice.Should().Contain(Words.BrowseCapabilityDenial).And.Contain(Words.DefinitionCapabilityDenial);
         notice.Should().Contain("Capabilities.ViewDefinitions").And.Contain("Capabilities.BrowseDatabase");
-        notice.Should().NotContain("MartenStudioOptions").And.NotContain("store");
+        notice.Should().NotContain("MartenOptions").And.NotContain("store");
     }
 
     [Fact]
@@ -138,10 +138,10 @@ public class ViewDefinitionsWordsTests
 
         var notice = page.Find(".ms-db-access");
         notice.QuerySelector(".ms-db-access-title")!.TextContent.Trim().Should().Be("Definitions are shown; browsing rows is not enabled.");
-        notice.TextContent.Should().Contain("PostgresStudioOptions.Capabilities.BrowseDatabase")
+        notice.TextContent.Should().Contain("PostgresOptions.Capabilities.BrowseDatabase")
             .And.Contain("Capabilities.ViewDefinitions")
             .And.Contain("names exactly are shown")
-            .And.NotContain("MartenStudioOptions");
+            .And.NotContain("MartenOptions");
     }
 
     private static DatabaseGate Gate(bool browse, bool? authorized, DatabasePolicyAnswer? definitions, bool readOnly = false) =>

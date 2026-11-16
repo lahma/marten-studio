@@ -102,7 +102,7 @@ public class StudioScopeCatalogUnlistableTests
 
         public static Harness Create(string? storePolicy)
         {
-            var options = new MartenStudioOptions { StoreAuthorizationPolicy = storePolicy };
+            var options = new MartenOptions { StoreAuthorizationPolicy = storePolicy };
 
             var services = new ServiceCollection();
 

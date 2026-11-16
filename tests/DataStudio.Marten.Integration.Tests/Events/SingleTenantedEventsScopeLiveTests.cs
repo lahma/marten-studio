@@ -93,7 +93,7 @@ public sealed class SingleTenantedEventsFixture(PostgresFixture postgres) : IAsy
         services.AddSingleton<IDocumentStore>(Store);
         services.AddDataStudio().AddMarten(static options =>
         {
-            options.Capabilities = MartenStudioCapabilities.All();
+            options.Capabilities = MartenCapabilities.All();
             options.DiscoverTenantIds = false;
             options.KnownTenantIds.Add(Acme);
             options.KnownTenantIds.Add(Globex);
@@ -116,7 +116,7 @@ public sealed class SingleTenantedEventsFixture(PostgresFixture postgres) : IAsy
             new DataStudio.Marten.Integration.Tests.Database.ResourcePolicy(static x => x.Capability is null || x.TenantId is not null));
         narrow.AddDataStudio().AddMarten(static options =>
         {
-            options.Capabilities = MartenStudioCapabilities.All();
+            options.Capabilities = MartenCapabilities.All();
             options.StoreAuthorizationPolicy = "sec1-store";
             options.WriteAuthorizationPolicy = "sec1-write";
             options.DiscoverTenantIds = false;

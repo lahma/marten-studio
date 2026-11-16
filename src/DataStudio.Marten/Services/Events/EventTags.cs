@@ -148,7 +148,7 @@ internal sealed record EventTagModel(EventTagStorage Storage, IReadOnlyList<Even
     /// <summary>Reads the store's tag configuration.</summary>
     /// <param name="options">The store's own options; nothing is guessed.</param>
     /// <param name="isVisible">
-    /// <c>MartenStudioOptions.IsDocumentTypeVisible</c>: a tag type associated with an aggregate it hides keeps
+    /// <c>MartenOptions.IsDocumentTypeVisible</c>: a tag type associated with an aggregate it hides keeps
     /// its table and its filter - a tag is not that aggregate's state - but the aggregate's name is not shown.
     /// </param>
     public static EventTagModel From(IReadOnlyStoreOptions options, Func<Type, bool>? isVisible = null)
@@ -579,7 +579,7 @@ internal static class EventTagText
     /// <param name="threshold">The studio's <c>ExactCountThreshold</c>.</param>
     public static string Deferred(string table, long threshold) =>
         $"Tags are not shown yet: {table} holds more than {threshold.ToString("N0", CultureInfo.InvariantCulture)} rows " +
-        "(MartenStudioOptions.ExactCountThreshold), and a tag table is keyed by value rather than by event, so finding " +
+        "(MartenOptions.ExactCountThreshold), and a tag table is keyed by value rather than by event, so finding " +
         "one page's tags reads the whole table. Load them to pay that once, for the events on the page now; events that " +
         "arrive later are shown without tags until you load again.";
 }

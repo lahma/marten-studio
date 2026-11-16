@@ -151,11 +151,11 @@ public class SchemaTableAssemblerTests
             .Should().BeNull();
 
         SchemaTableAssembler.PartitionCountsWithheld(readOnly: false, capabilityEnabled: false, authorized: null)
-            .Should().Contain("MartenStudioOptions.Capabilities.BrowseDatabase")
+            .Should().Contain("MartenOptions.Capabilities.BrowseDatabase")
             .And.Contain("number of tenants");
 
         SchemaTableAssembler.PartitionCountsWithheld(readOnly: true, capabilityEnabled: false, authorized: null)
-            .Should().Contain("MartenStudioOptions.ReadOnly");
+            .Should().Contain("MartenOptions.ReadOnly");
 
         SchemaTableAssembler.PartitionCountsWithheld(readOnly: false, capabilityEnabled: true, authorized: false)
             .Should().Contain("WriteAuthorizationPolicy");
@@ -171,12 +171,12 @@ public class SchemaTableAssemblerTests
         string store = SchemaTableAssembler.PartitionCountsWithheld(
             readOnly: false, capabilityEnabled: true, authorized: false, DatabaseRefusal.StorePolicy)!;
 
-        store.Should().Contain("The store policy (MartenStudioOptions.StoreAuthorizationPolicy)")
+        store.Should().Contain("The store policy (MartenOptions.StoreAuthorizationPolicy)")
             .And.NotContain("WriteAuthorizationPolicy");
 
         SchemaTableAssembler.PartitionCountsWithheld(
                 readOnly: false, capabilityEnabled: true, authorized: false, DatabaseRefusal.WritePolicy)
-            .Should().Contain("The write policy (MartenStudioOptions.WriteAuthorizationPolicy");
+            .Should().Contain("The write policy (MartenOptions.WriteAuthorizationPolicy");
     }
 
     /// <summary>

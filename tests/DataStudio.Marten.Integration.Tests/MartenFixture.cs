@@ -81,7 +81,7 @@ public sealed class MartenFixture : IAsyncDisposable
         string connectionString,
         string schema,
         Action<StoreOptions>? configureStore = null,
-        Action<MartenStudioOptions>? configureStudio = null)
+        Action<MartenOptions>? configureStudio = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
         ArgumentException.ThrowIfNullOrWhiteSpace(schema);
@@ -285,7 +285,7 @@ public abstract class MartenClassFixture(PostgresFixture postgres) : IAsyncLifet
     }
 
     /// <summary>Studio options for this class.</summary>
-    protected virtual void ConfigureStudio(MartenStudioOptions options)
+    protected virtual void ConfigureStudio(MartenOptions options)
     {
     }
 

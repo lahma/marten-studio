@@ -48,7 +48,7 @@ public class SessionsLiveTests(PostgresFixture postgres)
 
         await using StudioHost host = StudioHost.Create(
             services => services.AddSingleton(_ => NpgsqlDataSource.Create(owned[0])),
-            static o => o.Capabilities = PostgresStudioCapabilities.All(),
+            static o => o.Capabilities = PostgresCapabilities.All(),
             writePolicy: static (resource, user) => user.Identity?.Name == "admin");
 
         try
@@ -83,7 +83,7 @@ public class SessionsLiveTests(PostgresFixture postgres)
             }
 
             host.Calls.All.Should().Contain(static x => x.Policy == StudioHost.WritePolicy
-                && x.Resource == new PostgresStudioResource("default", "default", nameof(PostgresStudioCapabilities.ViewDatabaseActivity)));
+                && x.Resource == new PostgresResource("default", "default", nameof(PostgresCapabilities.ViewDatabaseActivity)));
             host.Ring.GetLatest().Where(static x => x.Action == "Read database sessions").Should().Contain(static x => x.User == "viewer" && !x.Succeeded,
                 "a refusal of the details is audited");
         }

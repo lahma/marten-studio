@@ -12,7 +12,7 @@ namespace DataStudio.Sample.Marten.Domain.Documents;
 /// <para>
 /// It is here because every list view has to prove it does <em>not</em> fetch this. The studio's document
 /// list only inlines <c>data::text</c> when <c>octet_length(data::text)</c> is within
-/// <c>MaxInlineDocumentBytes</c>, so a collection of these renders as a list of sizes, and only the detail
+/// <c>MaxInlineValueBytes</c>, so a collection of these renders as a list of sizes, and only the detail
 /// page pays for the bytes. A browser that fetched a page of fifty of these would be transferring a
 /// hundred megabytes over a SignalR circuit.
 /// </para>

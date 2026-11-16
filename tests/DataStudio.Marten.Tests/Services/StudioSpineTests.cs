@@ -33,7 +33,7 @@ public class StudioSpineTests
     public void The_settings_read_the_shells_options_live_so_a_path_written_after_startup_is_seen()
     {
         DataStudioOptions options = new();
-        MartenStudioSettings settings = MartenStudioSettings.Of(new MartenStudioOptions(), new ShellSettings(Options.Create(options)));
+        MartenStudioSettings settings = MartenStudioSettings.Of(new MartenOptions(), new ShellSettings(Options.Create(options)));
 
         settings.TrimmedPath.Should().Be("/studio");
         settings.HasCustomPath.Should().BeFalse();
@@ -52,16 +52,16 @@ public class StudioSpineTests
         IStudioSettings settings = MartenSpine.Settings();
 
         settings.ProductName.Should().Be("Marten Studio");
-        settings.OptionName("ReadOnly").Should().Be("MartenStudioOptions.ReadOnly");
-        settings.CapabilityOption(StudioCapability.RunSql).Should().Be("MartenStudioOptions.Capabilities.RunSql");
-        settings.ReadOnlyOption().Should().Be("MartenStudioOptions.ReadOnly");
-        settings.AllCapabilities().Should().Be("MartenStudioCapabilities.All()");
+        settings.OptionName("ReadOnly").Should().Be("MartenOptions.ReadOnly");
+        settings.CapabilityOption(StudioCapability.RunSql).Should().Be("MartenOptions.Capabilities.RunSql");
+        settings.ReadOnlyOption().Should().Be("MartenOptions.ReadOnly");
+        settings.AllCapabilities().Should().Be("MartenCapabilities.All()");
     }
 
     [Fact]
     public void The_settings_map_every_capability_and_offer_all_fourteen()
     {
-        MartenStudioOptions options = new() { Capabilities = new MartenStudioCapabilities { BrowseDatabase = true } };
+        MartenOptions options = new() { Capabilities = new MartenCapabilities { BrowseDatabase = true } };
         MartenStudioSettings settings = MartenSpine.Settings(options);
 
         settings.Capabilities.Should().Equal(StudioCapabilityGuard.All);
@@ -77,11 +77,11 @@ public class StudioSpineTests
     [Fact]
     public void The_settings_carry_the_policies_and_the_limits_unchanged()
     {
-        MartenStudioOptions options = new()
+        MartenOptions options = new()
         {
             StoreAuthorizationPolicy = "store",
             WriteAuthorizationPolicy = "write",
-            MaxInlineDocumentBytes = 1234,
+            MaxInlineValueBytes = 1234,
             SqlConsoleRole = "studio_reader",
             IsDocumentTypeVisible = static _ => false,
         };
@@ -124,7 +124,7 @@ public class StudioSpineTests
 
         // The navigation is built for the settings the studio is registered with, so a condition that reads them closes over them (5.6).
         MartenStudioSettings visible = MartenSpine.Settings();
-        MartenStudioSettings hidden = MartenSpine.Settings(new MartenStudioOptions { IsDocumentTypeVisible = static _ => false });
+        MartenStudioSettings hidden = MartenSpine.Settings(new MartenOptions { IsDocumentTypeVisible = static _ => false });
         StudioNavItem deadLetters = descriptor.Navigation(visible).SelectMany(static x => x.Items).Single(static x => x.Label == "Dead letters");
         deadLetters.IsShown.Should().NotBeNull();
         deadLetters.IsShown!(visible).Should().BeTrue();
@@ -297,7 +297,7 @@ public class StudioSpineTests
         services.AddSingleton<MartenStoreRegistryTest.IBrokenStore>(static _ => throw new InvalidOperationException("broken"));
         await using ServiceProvider provider = services.BuildServiceProvider();
 
-        IOptions<MartenStudioOptions> options = Options.Create(new MartenStudioOptions());
+        IOptions<MartenOptions> options = Options.Create(new MartenOptions());
         MartenStudioSourceProvider sources = new(
             options,
             new MartenStoreRegistry(services),
@@ -330,7 +330,7 @@ public class StudioSpineTests
         services.AddMarten(x => x.DatabaseSchemaName = "spine").UseNpgsqlDataSource();
         await using ServiceProvider provider = services.BuildServiceProvider();
 
-        IOptions<MartenStudioOptions> options = Options.Create(new MartenStudioOptions());
+        IOptions<MartenOptions> options = Options.Create(new MartenOptions());
         MartenStudioSourceProvider sources = new(
             options,
             new MartenStoreRegistry(services),
@@ -357,7 +357,7 @@ public class StudioSpineTests
         services.AddSingleton<MartenStoreRegistryTest.IBrokenStore>(static _ => throw new InvalidOperationException("broken"));
         await using ServiceProvider provider = services.BuildServiceProvider();
 
-        IOptions<MartenStudioOptions> options = Options.Create(new MartenStudioOptions());
+        IOptions<MartenOptions> options = Options.Create(new MartenOptions());
         MartenStudioSourceProvider sources = new(
             options,
             new MartenStoreRegistry(services),
@@ -448,7 +448,7 @@ public class StudioSpineTests
             services.AddMarten(x => x.Connection(DummyConnectionString));
             ServiceProvider provider = services.BuildServiceProvider();
 
-            IOptions<MartenStudioOptions> options = Options.Create(new MartenStudioOptions());
+            IOptions<MartenOptions> options = Options.Create(new MartenOptions());
             StudioAuthorization authorization = MartenSpine.Authorization(options, new TestStoreAuthorizationService(), new TestAuthenticationStateProvider());
             var (sources, _, resolver) = MartenSpine.Scope(
                 options,

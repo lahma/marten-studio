@@ -14,17 +14,17 @@ namespace DataStudio.Marten.Tests;
 /// it is a configuration mistake, and the only good time to find one is before the application is
 /// serving.
 /// </remarks>
-public class MartenStudioOptionsTest
+public class MartenOptionsTest
 {
-    private static MartenStudioOptions Resolve(Action<MartenStudioOptions> configure)
+    private static MartenOptions Resolve(Action<MartenOptions> configure)
     {
         var services = new ServiceCollection();
         services.AddDataStudio().AddMarten(configure);
         using var provider = services.BuildServiceProvider();
-        return provider.GetRequiredService<IOptions<MartenStudioOptions>>().Value;
+        return provider.GetRequiredService<IOptions<MartenOptions>>().Value;
     }
 
-    private static Action ResolveAction(Action<MartenStudioOptions> configure) => () => Resolve(configure);
+    private static Action ResolveAction(Action<MartenOptions> configure) => () => Resolve(configure);
 
     [Fact]
     public void The_defaults_are_valid_and_are_the_documented_ones()
@@ -37,7 +37,7 @@ public class MartenStudioOptionsTest
         options.DefaultPageSize.Should().Be(50);
         options.MaxPageSize.Should().Be(500);
         options.QueryTimeout.Should().Be(TimeSpan.FromSeconds(30));
-        options.MaxInlineDocumentBytes.Should().Be(512 * 1024);
+        options.MaxInlineValueBytes.Should().Be(512 * 1024);
         options.MaxSqlConsoleRows.Should().Be(500);
         options.SqlConsoleRole.Should().BeNull();
         options.ExactCountThreshold.Should().Be(100_000);
@@ -102,8 +102,8 @@ public class MartenStudioOptionsTest
     [InlineData((64 * 1024 * 1024) + 1)]
     public void An_inline_document_limit_outside_one_byte_to_64_MiB_is_refused(int bytes)
     {
-        ResolveAction(options => options.MaxInlineDocumentBytes = bytes)
-            .Should().Throw<OptionsValidationException>().WithMessage("*MaxInlineDocumentBytes*");
+        ResolveAction(options => options.MaxInlineValueBytes = bytes)
+            .Should().Throw<OptionsValidationException>().WithMessage("*MaxInlineValueBytes*");
     }
 
     [Theory]
@@ -175,7 +175,7 @@ public class MartenStudioOptionsTest
     [InlineData(60_000, 60_000, 60_000)]
     public void The_advisor_never_runs_faster_than_the_pages_poll(int healthMilliseconds, int refreshMilliseconds, int effectiveMilliseconds)
     {
-        MartenStudioOptions options = Resolve(options => options.HealthInterval = TimeSpan.FromMilliseconds(healthMilliseconds));
+        MartenOptions options = Resolve(options => options.HealthInterval = TimeSpan.FromMilliseconds(healthMilliseconds));
         DataStudioOptions shell = new() { RefreshInterval = TimeSpan.FromMilliseconds(refreshMilliseconds) };
 
         options.HealthInterval.Should().Be(TimeSpan.FromMilliseconds(healthMilliseconds));
@@ -206,7 +206,7 @@ public class MartenStudioOptionsTest
     [Fact]
     public void Every_capability_is_off_by_default()
     {
-        var guard = Support.MartenSpine.Guard(Options.Create(new MartenStudioOptions()));
+        var guard = Support.MartenSpine.Guard(Options.Create(new MartenOptions()));
 
         guard.EnabledCount.Should().Be(0);
         guard.ReadOnly.Should().BeFalse();
@@ -215,9 +215,9 @@ public class MartenStudioOptionsTest
     [Fact]
     public void All_turns_on_every_capability()
     {
-        var guard = Support.MartenSpine.Guard(Options.Create(new MartenStudioOptions
+        var guard = Support.MartenSpine.Guard(Options.Create(new MartenOptions
         {
-            Capabilities = MartenStudioCapabilities.All()
+            Capabilities = MartenCapabilities.All()
         }));
 
         guard.EnabledCount.Should().Be(StudioCapabilityGuard.All.Count);
@@ -230,9 +230,9 @@ public class MartenStudioOptionsTest
     [Fact]
     public void ReadOnly_overrides_every_capability_however_they_were_configured()
     {
-        var guard = Support.MartenSpine.Guard(Options.Create(new MartenStudioOptions
+        var guard = Support.MartenSpine.Guard(Options.Create(new MartenOptions
         {
-            Capabilities = MartenStudioCapabilities.All(),
+            Capabilities = MartenCapabilities.All(),
             ReadOnly = true
         }));
 
@@ -245,7 +245,7 @@ public class MartenStudioOptionsTest
 
             refusal.Reason.Should().Be(CapabilityDenialReason.ReadOnly);
             refusal.Capability.Should().Be(capability);
-            refusal.Message.Should().Contain("MartenStudioOptions.ReadOnly");
+            refusal.Message.Should().Contain("MartenOptions.ReadOnly");
         }
     }
 
@@ -261,10 +261,10 @@ public class MartenStudioOptionsTest
         // and StudioCapability is internal because it is not part of the package's public surface.
         var enabled = Enum.Parse<StudioCapability>(capabilityName);
 
-        var capabilities = new MartenStudioCapabilities();
-        typeof(MartenStudioCapabilities).GetProperty(capabilityName)!.SetValue(capabilities, true);
+        var capabilities = new MartenCapabilities();
+        typeof(MartenCapabilities).GetProperty(capabilityName)!.SetValue(capabilities, true);
 
-        var guard = Support.MartenSpine.Guard(Options.Create(new MartenStudioOptions { Capabilities = capabilities }));
+        var guard = Support.MartenSpine.Guard(Options.Create(new MartenOptions { Capabilities = capabilities }));
 
         guard.EnabledCount.Should().Be(1);
         guard.IsEnabled(enabled).Should().BeTrue();
@@ -277,7 +277,7 @@ public class MartenStudioOptionsTest
             var refusal = guard.Invoking(x => x.Require(other)).Should().Throw<StudioCapabilityDeniedException>().Which;
 
             refusal.Reason.Should().Be(CapabilityDenialReason.Disabled);
-            refusal.Message.Should().Contain("MartenStudioOptions.Capabilities." + other);
+            refusal.Message.Should().Contain("MartenOptions.Capabilities." + other);
         }
     }
 
@@ -299,7 +299,7 @@ public class MartenStudioOptionsTest
     [Fact]
     public void The_capability_enum_and_the_options_class_name_the_same_operations()
     {
-        var properties = typeof(MartenStudioCapabilities)
+        var properties = typeof(MartenCapabilities)
             .GetProperties()
             .Select(x => x.Name)
             .Order(StringComparer.Ordinal)

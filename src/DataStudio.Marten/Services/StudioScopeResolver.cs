@@ -49,7 +49,7 @@ internal sealed class StudioScopeResolver
     /// <param name="scope">The store, database and tenant to reach.</param>
     /// <param name="capability">
     /// The capability being exercised, for a mutating call. Non-null adds a second check against
-    /// <see cref="MartenStudioOptions.WriteAuthorizationPolicy" /> with the capability named on the
+    /// <see cref="MartenOptions.WriteAuthorizationPolicy" /> with the capability named on the
     /// resource; the store policy has already had to pass.
     /// </param>
     /// <param name="cancellationToken">Cancels the resolution.</param>

@@ -232,7 +232,7 @@ public class TenantScopedCorrectionLiveTests(PostgresFixture postgres) : IAsyncL
 
         services.AddDataStudio().AddMarten(options =>
         {
-            options.Capabilities = MartenStudioCapabilities.All();
+            options.Capabilities = MartenCapabilities.All();
             options.StoreAuthorizationPolicy = "studio-store";
             options.WriteAuthorizationPolicy = "studio-write";
             options.KnownTenantIds.Add(Acme);

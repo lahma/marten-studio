@@ -425,7 +425,7 @@ public class QuerySqlComposerTests
         SqlGuardResult refused = QuerySqlComposer.CheckClause(clause, allowNestedReads: false);
 
         refused.Allowed.Should().BeFalse();
-        refused.Message.Should().Contain("MartenStudioOptions.Capabilities.RunSql");
+        refused.Message.Should().Contain("MartenOptions.Capabilities.RunSql");
         refused.Position.Should().BeGreaterThanOrEqualTo(0);
     }
 
@@ -707,7 +707,7 @@ public class QuerySqlComposerTests
         SqlGuardResult refused = QuerySqlComposer.CheckClause(clause, allowNestedReads: false);
 
         refused.Allowed.Should().BeFalse(clause);
-        refused.Message.Should().Contain("MartenStudioOptions.Capabilities.RunSql");
+        refused.Message.Should().Contain("MartenOptions.Capabilities.RunSql");
         refused.Token.Should().NotBeNullOrEmpty();
         refused.Position.Should().BeGreaterThanOrEqualTo(0);
     }

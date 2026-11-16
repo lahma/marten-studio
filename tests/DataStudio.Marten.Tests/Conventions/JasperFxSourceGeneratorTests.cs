@@ -34,7 +34,7 @@ public class JasperFxSourceGeneratorTests
     [Fact]
     public void The_shipped_assembly_is_compiled_without_the_JasperFx_source_generator()
     {
-        var studio = typeof(MartenStudioOptions).Assembly;
+        var studio = typeof(MartenOptions).Assembly;
 
         CarriesMarker(studio).Should().BeFalse(
             "DataStudio.Marten.dll declares no aggregate and no projection; the only thing the generator would put " +

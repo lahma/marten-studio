@@ -215,7 +215,7 @@ public class SqlConsoleLiveTests(PostgresFixture fixture) : IAsyncLifetime
         (await denied.Console
             .Invoking(x => x.RunSqlAsync(denied.Scope, new SqlConsoleRequest($"select count(*) from {personTable}"), Token))
             .Should().ThrowAsync<StudioCapabilityDeniedException>())
-            .Which.Message.Should().Contain("MartenStudioOptions.Capabilities.RunSql");
+            .Which.Message.Should().Contain("MartenOptions.Capabilities.RunSql");
 
         (await PersonCountAsync()).Should().Be(before);
 
@@ -232,7 +232,7 @@ public class SqlConsoleLiveTests(PostgresFixture fixture) : IAsyncLifetime
         (await readOnly.Console
             .Invoking(x => x.RunSqlAsync(readOnly.Scope, new SqlConsoleRequest("select 1"), Token))
             .Should().ThrowAsync<StudioCapabilityDeniedException>())
-            .Which.Message.Should().Contain("MartenStudioOptions.ReadOnly");
+            .Which.Message.Should().Contain("MartenOptions.ReadOnly");
     }
 
     /// <summary>

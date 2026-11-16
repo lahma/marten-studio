@@ -174,7 +174,7 @@ internal sealed class AutovacuumServer : IAsyncDisposable
     /// A Postgres Studio host over this server's <c>postgres</c> database, as <paramref name="user" /> (the superuser when
     /// <see langword="null" />), whose browsable schema is <paramref name="schema" />, on <paramref name="clock" />.
     /// </summary>
-    public StudioHost Host(string schema, ManualClock clock, string? user = null, string? password = null, Action<PostgresStudioOptions>? studio = null)
+    public StudioHost Host(string schema, ManualClock clock, string? user = null, string? password = null, Action<PostgresOptions>? studio = null)
     {
         string connectionString = ConnectionString("postgres", user, password);
 

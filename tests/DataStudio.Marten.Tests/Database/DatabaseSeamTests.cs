@@ -24,7 +24,7 @@ public class DatabaseSeamTests
 {
     private static readonly StudioScope Scope = new("orders", "db1.orders", null);
 
-    private static readonly IStudioSettings Settings = MartenStudioSettings.Of(new MartenStudioOptions());
+    private static readonly IStudioSettings Settings = MartenStudioSettings.Of(new MartenOptions());
 
     [Fact]
     public void Every_browser_link_carries_the_scope_under_the_descriptors_source_parameter()

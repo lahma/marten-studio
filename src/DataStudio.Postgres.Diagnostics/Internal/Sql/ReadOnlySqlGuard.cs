@@ -91,7 +91,7 @@ internal readonly record struct SqlGuardResult(
 /// advisory-lock family are all "reads" as far as SQLSTATE 25006 is concerned. Those are refused here, by
 /// name, and that refusal is worth exactly what a parser's refusal is worth — a determined caller can
 /// reach the same function through a view, a <c>SECURITY DEFINER</c> wrapper or an alias, and this list
-/// will not see it. <b>The only true narrowing is <c>MartenStudioOptions.SqlConsoleRole</c></b>: a Postgres
+/// will not see it. <b>The only true narrowing is <c>MartenOptions.SqlConsoleRole</c></b>: a Postgres
 /// role that was never granted <c>EXECUTE</c> on these functions cannot call them however they are
 /// spelled, and that is what a host that cares should configure. The list is here because the host that
 /// did not configure one should still not be one paste away from terminating its own connections.

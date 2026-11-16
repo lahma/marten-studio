@@ -56,7 +56,7 @@ public class DocumentBulkDeleteTests
     {
         using var context = new DocumentsComponentContext();
         context.Options.ReadOnly = true;
-        context.Options.Capabilities = MartenStudioCapabilities.All();
+        context.Options.Capabilities = MartenCapabilities.All();
         context.Data.Page = Page();
 
         var page = Render(context);

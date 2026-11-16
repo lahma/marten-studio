@@ -107,7 +107,7 @@ public class StoragePageTests
         authorized: true,
         new DatabaseObjectClassifier([]));
 
-    private static StorageService Service(MartenStudioOptions options) => new(
+    private static StorageService Service(MartenOptions options) => new(
         MartenStudioSettings.Of(options),
         MartenStudioDescriptor.Instance,
         authorization: null!,
@@ -116,7 +116,7 @@ public class StoragePageTests
         new StudioLogThrottle(TimeProvider.System),
         NullLogger<StorageService>.Instance);
 
-    private static MartenStudioOptions Hiding() => new() { IsDocumentTypeVisible = static type => type != typeof(HiddenDocument) };
+    private static MartenOptions Hiding() => new() { IsDocumentTypeVisible = static type => type != typeof(HiddenDocument) };
 
     private static async Task<StudioComponentContext> ContextAsync(FakeStorageService storage) =>
         await new StudioComponentContext(services => services.AddSingleton<IStorageService>(storage)).ReadyAsync();
@@ -137,7 +137,7 @@ public class StoragePageTests
         view.Tables[2].Owner.Should().Be("Quartz.NET");
         view.WithheldReason.Should().Be(
             "1 table is shown without its name: it sits in a schema the database browser does not show you (it needs "
-            + "MartenStudioOptions.Capabilities.BrowseDatabase, the write policy and a BrowsableSchemas entry for that schema).");
+            + "MartenOptions.Capabilities.BrowseDatabase, the write policy and a BrowsableSchemas entry for that schema).");
         gateReads.Should().Be(1, "the browser's gate is read once per view");
         view.Tables[0].ShareOfDatabase.Should().BeApproximately(0.4, 0.0001, "160 MiB of 400 MiB measured");
     }
@@ -148,7 +148,7 @@ public class StoragePageTests
         StorageFacts facts = StorageFacts.Build("default", "db", Window(TimeSpan.FromHours(1)),
             new StorageDatabaseRow(1L << 30, 1L << 30, 8192, 170_011), new Set([Orders]), [Row("public", "orders", 1, 0, 0, 1)]);
 
-        StorageView view = await Service(new MartenStudioOptions()).ShowAsync(facts, new StudioScope("default", "db", null),
+        StorageView view = await Service(new MartenOptions()).ShowAsync(facts, new StudioScope("default", "db", null),
             static () => throw new InvalidOperationException("the gate was read for no reason"));
 
         view.Tables.Should().ContainSingle().Which.Name.Should().Be("orders");
@@ -188,7 +188,7 @@ public class StoragePageTests
         string[] owners = [.. page.FindAll(".ms-storage-table tbody tr td:nth-child(2)").Select(static x => x.TextContent.Trim())];
         owners.Should().Equal(["application", WithheldNames.Token, "Quartz.NET"], "a withheld table's ownership would say what kind of schema it sits in");
         page.Markup.Should().NotContain("salaries").And.NotContain("mt_doc_hiddendocument").And.NotContain("HiddenDocument");
-        page.Find(".ms-storage-withheld").TextContent.Should().Contain("MartenStudioOptions.Capabilities.BrowseDatabase");
+        page.Find(".ms-storage-withheld").TextContent.Should().Contain("MartenOptions.Capabilities.BrowseDatabase");
         page.Find(".ms-storage-table tbody tr td:first-child a").GetAttribute("href").Should().Contain("database/object").And.Contain("name=orders");
         page.Markup.Should().Contain("ms-storage-bar");
     }
@@ -264,7 +264,7 @@ public class StoragePageTests
             link.GetAttribute("href").Should().Be("maintenance?store=default&db=localhost.marten");
         }
 
-        DataStudio.Postgres.Services.Settings.IStudioSettings settings = MartenStudioSettings.Of(new MartenStudioOptions());
+        DataStudio.Postgres.Services.Settings.IStudioSettings settings = MartenStudioSettings.Of(new MartenOptions());
         DataStudio.Postgres.Services.Settings.StudioDescriptor marten = MartenStudioDescriptor.Instance;
 
         MaintenanceLinks.ToMaintenance(settings, marten, scope).Should().NotBeNull();
@@ -370,7 +370,7 @@ public class StoragePageTests
         var page = context.Render<DataStudio.Postgres.Components.Pages.Storage.Storage>();
         page.WaitForAssertion(() => page.FindAll(".ms-storage-refusal").Should().ContainSingle());
 
-        page.Find(".ms-storage-refusal").TextContent.Should().Contain("MartenStudioOptions.StoreAuthorizationPolicy");
+        page.Find(".ms-storage-refusal").TextContent.Should().Contain("MartenOptions.StoreAuthorizationPolicy");
         page.FindAll(".ms-storage-table").Should().BeEmpty();
     }
 

@@ -123,7 +123,7 @@ public partial class DiagnosticsApiIsNotServedTests
     public void No_log_event_takes_a_diagnostics_result()
     {
         Assembly postgres = typeof(DataStudio.Postgres.PostgresDiagnosticsOptions).Assembly;
-        Assembly marten = typeof(DataStudio.Marten.MartenStudioOptions).Assembly;
+        Assembly marten = typeof(DataStudio.Marten.MartenOptions).Assembly;
         HashSet<string> readModel = [.. ReadModel(), "HostGate"];
 
         Type[] logs =

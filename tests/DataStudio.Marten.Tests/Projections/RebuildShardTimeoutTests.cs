@@ -44,7 +44,7 @@ public class RebuildShardTimeoutTests
     {
         using var daemon = new FakeProjectionDaemon();
 
-        var options = new MartenStudioOptions { RebuildShardTimeout = TimeSpan.FromMinutes(90) };
+        var options = new MartenOptions { RebuildShardTimeout = TimeSpan.FromMinutes(90) };
 
         await ProjectionDataService.RebuildWithTimeoutAsync(
             daemon, "DailySales", options.RebuildShardTimeout, Token);
@@ -59,7 +59,7 @@ public class RebuildShardTimeoutTests
     [Fact]
     public void The_default_budget_is_an_hour_rather_than_Martens_five_minutes()
     {
-        new MartenStudioOptions().RebuildShardTimeout.Should().Be(TimeSpan.FromHours(1));
+        new MartenOptions().RebuildShardTimeout.Should().Be(TimeSpan.FromHours(1));
     }
 
     [Fact]
@@ -70,7 +70,7 @@ public class RebuildShardTimeoutTests
 
         using ServiceProvider provider = services.BuildServiceProvider();
 
-        Action resolving = () => _ = provider.GetRequiredService<IOptions<MartenStudioOptions>>().Value;
+        Action resolving = () => _ = provider.GetRequiredService<IOptions<MartenOptions>>().Value;
 
         resolving.Should().Throw<OptionsValidationException>().WithMessage("*RebuildShardTimeout*");
     }

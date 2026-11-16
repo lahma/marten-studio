@@ -72,7 +72,7 @@ public class StatementsServiceTests
         StatementsView view = await Service(context, facts).GetAsync(Scope, TestContext.Current.CancellationToken);
 
         view.Refusal.Should().Be(DatabaseRefusal.CapabilityOff);
-        view.Reason.Should().Be(PostgresStudioText.Instance.StatementsCapabilityDenial).And.Contain("PostgresStudioOptions.Capabilities.ViewDatabaseActivity");
+        view.Reason.Should().Be(PostgresStudioText.Instance.StatementsCapabilityDenial).And.Contain("PostgresOptions.Capabilities.ViewDatabaseActivity");
         facts.Reads.Should().Be(0, "a visitor short of the gate never causes a statement sweep");
         context.AuthorizationService.Calls.Should().BeEmpty("nobody is asked who is asking about a capability the process does not have");
     }
@@ -158,7 +158,7 @@ public class StatementsServiceTests
     [Fact]
     public void A_text_is_masked_for_its_visitor_and_withheld_when_their_mask_cannot_be_read()
     {
-        StatementsService service = new(new PostgresStudioSettings(Microsoft.Extensions.Options.Options.Create(new PostgresStudioOptions())),
+        StatementsService service = new(PostgresStudioSettings.Of(Microsoft.Extensions.Options.Options.Create(new PostgresOptions())),
             null!, null!, null!, null!, null!, new StudioLogThrottle(TimeProvider.System), NullLogger<StatementsService>.Instance);
 
         StatementFacts facts = Facts(Read(
@@ -195,7 +195,7 @@ public class StatementsServiceTests
     [Fact]
     public void A_statement_with_no_group_says_whether_its_text_was_read()
     {
-        StatementsService service = new(new PostgresStudioSettings(Microsoft.Extensions.Options.Options.Create(new PostgresStudioOptions())),
+        StatementsService service = new(PostgresStudioSettings.Of(Microsoft.Extensions.Options.Options.Create(new PostgresOptions())),
             null!, null!, null!, null!, null!, new StudioLogThrottle(TimeProvider.System), NullLogger<StatementsService>.Instance);
 
         StatementsView view = service.Show(Facts(Read(null, Statement(1, "(select 1) union (select 2)", 1, 2), Statement(2, null, 1, 1))), gate: null);
@@ -297,7 +297,7 @@ public class StatementsServiceTests
     public void The_studio_line_says_which_of_the_studios_reads_this_page_can_list()
     {
         StatementsService Of(string? role) => new(
-            new PostgresStudioSettings(Microsoft.Extensions.Options.Options.Create(new PostgresStudioOptions { SqlConsoleRole = role })),
+            PostgresStudioSettings.Of(Microsoft.Extensions.Options.Options.Create(new PostgresOptions { SqlConsoleRole = role })),
             null!, null!, null!, null!, null!, new StudioLogThrottle(TimeProvider.System), NullLogger<StatementsService>.Instance);
 
         string narrowed = Of("studio_reader").StudioCostText();

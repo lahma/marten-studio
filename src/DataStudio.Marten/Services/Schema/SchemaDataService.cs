@@ -20,6 +20,7 @@ using Weasel.Postgresql.Tables;
 using DataStudio.Postgres.Internal.Sql;
 using DataStudio.Postgres.Services;
 using DataStudio.Postgres.Services.Schema;
+using DataStudio.Postgres.Services.Settings;
 
 namespace DataStudio.Marten.Services.Schema;
 
@@ -95,7 +96,8 @@ internal sealed partial class SchemaDataService : ISchemaDataService
     /// <summary><c>lock_not_available</c>: a <c>lock_timeout</c> expired.</summary>
     private const string LockNotAvailable = "55P03";
 
-    private readonly IOptions<MartenStudioOptions> options;
+    private readonly IOptions<MartenOptions> options;
+    private readonly IStudioSettings settings;
     private readonly StudioScopeResolver resolver;
     private readonly StudioCapabilityGuard capabilities;
     private readonly StudioAuthorization authorization;
@@ -109,7 +111,8 @@ internal sealed partial class SchemaDataService : ISchemaDataService
     private readonly ILogger<SchemaDataService> logger;
 
     public SchemaDataService(
-        IOptions<MartenStudioOptions> options,
+        IOptions<MartenOptions> options,
+        IStudioSettings settings,
         StudioScopeResolver resolver,
         StudioCapabilityGuard capabilities,
         StudioAuthorization authorization,
@@ -123,6 +126,7 @@ internal sealed partial class SchemaDataService : ISchemaDataService
         ILogger<SchemaDataService> logger)
     {
         this.options = options;
+        this.settings = settings;
         this.resolver = resolver;
         this.capabilities = capabilities;
         this.authorization = authorization;
@@ -239,7 +243,7 @@ internal sealed partial class SchemaDataService : ISchemaDataService
 
         if (!await authorization.IsAuthorizedAsync(wholeDatabase, capability: null, cancellationToken).ConfigureAwait(false))
         {
-            audit.RecordScopeDenied(wholeDatabase, DatabaseAccess.StorePolicyName(options.Value), ApplyAction, target);
+            audit.RecordScopeDenied(wholeDatabase, DatabaseAccess.StorePolicyName(settings), ApplyAction, target);
             throw new StudioNotAuthorizedException(wholeDatabase);
         }
 
@@ -1068,7 +1072,7 @@ internal sealed partial class SchemaDataService : ISchemaDataService
 
         if (!await authorization.IsAuthorizedAsync(wholeDatabase, capability: null, cancellationToken).ConfigureAwait(false))
         {
-            audit.RecordScopeDenied(wholeDatabase, DatabaseAccess.StorePolicyName(options.Value), action, Target(scope));
+            audit.RecordScopeDenied(wholeDatabase, DatabaseAccess.StorePolicyName(settings), action, Target(scope));
             return ScriptGrant.Refused(new SchemaScriptRefusal(DatabaseRefusal.StorePolicy, SchemaScriptGate.StorePolicyDenial(script)));
         }
 
@@ -1137,7 +1141,7 @@ internal sealed partial class SchemaDataService : ISchemaDataService
     }
 
     /// <summary>
-    /// Whether <see cref="MartenStudioOptions.IsDocumentTypeVisible" /> hides any document type the store knows.
+    /// Whether <see cref="MartenOptions.IsDocumentTypeVisible" /> hides any document type the store knows.
     /// A store whose types cannot be listed is taken to hide one: the answer decides whether a script that would
     /// print them is shown, and "cannot tell" must not read as "no".
     /// </summary>
@@ -1177,7 +1181,7 @@ internal sealed partial class SchemaDataService : ISchemaDataService
     /// </summary>
     /// <remarks>
     /// Mirrors <see cref="DatabaseAccess.ReadDeclarations(DataStudio.Postgres.Services.Sources.ResolvedSource)" />: every registration, ancillary
-    /// stores included whatever <see cref="MartenStudioOptions.IncludeAncillaryStores" /> says, the resolved
+    /// stores included whatever <see cref="MartenOptions.IncludeAncillaryStores" /> says, the resolved
     /// store in its registration's place, options only and no database of any store enumerated. A store that
     /// cannot be read is named only to a visitor that store's store policy passes for the database with no
     /// tenant (AGENTS.md D27), as the browser shows another store's key.
@@ -1406,8 +1410,8 @@ internal sealed partial class SchemaDataService : ISchemaDataService
 
     /// <summary>
     /// Runs a Schema tab's catalog read the way the database browser runs its own: a read-only transaction,
-    /// <c>statement_timeout</c> from <see cref="MartenStudioOptions.QueryTimeout" />, a three-second
-    /// <c>lock_timeout</c>, <c>SET LOCAL ROLE</c> to <see cref="MartenStudioOptions.SqlConsoleRole" /> when one is
+    /// <c>statement_timeout</c> from <see cref="MartenOptions.QueryTimeout" />, a three-second
+    /// <c>lock_timeout</c>, <c>SET LOCAL ROLE</c> to <see cref="MartenOptions.SqlConsoleRole" /> when one is
     /// set, and the <c>search_path</c> pinned to <c>pg_catalog</c> before anything else, so every name Postgres
     /// deparses is printed with its schema and can be masked.
     /// </summary>
@@ -1417,7 +1421,7 @@ internal sealed partial class SchemaDataService : ISchemaDataService
         CancellationToken cancellationToken,
         ConnectionUsage usage = ConnectionUsage.Read)
     {
-        MartenStudioOptions value = options.Value;
+        MartenOptions value = options.Value;
 
         var session = new ReadOnlySqlSession(new ReadOnlySqlOptions
         {
@@ -1448,7 +1452,7 @@ internal sealed partial class SchemaDataService : ISchemaDataService
 
     /// <summary>
     /// <c>pg_database_size</c>, or <c>-1</c> ("n/a" on screen) when the reading role may not size the database -
-    /// under <see cref="MartenStudioOptions.SqlConsoleRole" />, a role without <c>CONNECT</c> on it.
+    /// under <see cref="MartenOptions.SqlConsoleRole" />, a role without <c>CONNECT</c> on it.
     /// </summary>
     private static async Task<long> DatabaseSizeAsync(
         NpgsqlConnection connection,

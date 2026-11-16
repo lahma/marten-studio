@@ -32,7 +32,7 @@ public class PooledDaemonLockLiveTests(PooledServerFixture pooled) : IClassFixtu
         await using ConnectionsLiveHost host = await ConnectionsLiveHost.CreateAsync(
             throughBouncer,
             sample: false,
-            studio: static options => options.Capabilities = MartenStudioCapabilities.All(),
+            studio: static options => options.Capabilities = MartenCapabilities.All(),
             store: static options =>
             {
                 options.Projections.AsyncMode = DaemonMode.HotCold;

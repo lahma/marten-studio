@@ -100,7 +100,7 @@ public class HypotheticalWorkloadLiveTests(HypopgServer server) : IClassFixture<
             },
             options =>
             {
-                options.Capabilities = PostgresStudioCapabilities.All();
+                options.Capabilities = PostgresCapabilities.All();
                 options.SqlConsoleRole = consoleRole;
             });
 
@@ -359,7 +359,7 @@ public class IndexAdvisorLiveTests(HypopgServer server) : IClassFixture<HypopgSe
         return (database, app);
     }
 
-    private StudioHost Host(string database, AdvisorRecorder recorder, Action<PostgresStudioOptions>? studio = null, string role = "app", int? pool = null) =>
+    private StudioHost Host(string database, AdvisorRecorder recorder, Action<PostgresOptions>? studio = null, string role = "app", int? pool = null) =>
         StudioHost.Create(
             services =>
             {
@@ -368,7 +368,7 @@ public class IndexAdvisorLiveTests(HypopgServer server) : IClassFixture<HypopgSe
             },
             options =>
             {
-                options.Capabilities = PostgresStudioCapabilities.All();
+                options.Capabilities = PostgresCapabilities.All();
                 studio?.Invoke(options);
             });
 

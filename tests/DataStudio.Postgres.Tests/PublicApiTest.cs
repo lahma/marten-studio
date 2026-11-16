@@ -27,14 +27,14 @@ public class PublicApiTest
     [Fact]
     public async Task The_public_api_has_not_changed_unintentionally()
     {
-        await Verify(PublicApi(typeof(PostgresStudioOptions).Assembly), extension: "txt")
+        await Verify(PublicApi(typeof(PostgresOptions).Assembly), extension: "txt")
             .UseDirectory("Verify")
             .UseFileName("PublicApiTest_DataStudioPostgres");
     }
 
     /// <summary>
     /// The diagnostics engine's own baseline (0.11-C): the types that moved out of <c>DataStudio.Postgres.dll</c> with the engine,
-    /// and the two the engine adds - <c>PostgresDiagnosticsOptions</c>, the base of <c>PostgresStudioOptions</c>, and
+    /// and the two the engine adds - <c>PostgresDiagnosticsOptions</c>, the base of <c>PostgresOptions</c>, and
     /// <c>AddPostgresDiagnostics</c>. Read like the other: a diff is deliberate, never accepted by hand.
     /// </summary>
     [Fact]
@@ -84,10 +84,10 @@ public class PublicApiTest
     [Fact]
     public void The_public_types_are_the_registration_types_the_inbound_types_and_the_diagnostics_read_model()
     {
-        Exported(typeof(PostgresStudioOptions).Assembly).Should().Equal(
-            "DataStudio.Postgres.PostgresStudioCapabilities",
-            "DataStudio.Postgres.PostgresStudioOptions",
-            "DataStudio.Postgres.PostgresStudioResource",
+        Exported(typeof(PostgresOptions).Assembly).Should().Equal(
+            "DataStudio.Postgres.PostgresCapabilities",
+            "DataStudio.Postgres.PostgresOptions",
+            "DataStudio.Postgres.PostgresResource",
             "DataStudio.PostgresDataStudioBuilderExtensions");
 
         Exported(typeof(PostgresDiagnosticsOptions).Assembly).Should().Equal(
@@ -106,6 +106,7 @@ public class PublicApiTest
             "DataStudio.Postgres.PostgresConnectionSample",
             "DataStudio.Postgres.PostgresConnectionsSection",
             "DataStudio.Postgres.PostgresDatabaseRef",
+            "DataStudio.Postgres.PostgresDiagnosticsHealthChecksBuilderExtensions",
             "DataStudio.Postgres.PostgresDiagnosticsOptions",
             "DataStudio.Postgres.PostgresDiagnosticsRequest",
             "DataStudio.Postgres.PostgresDiagnosticsServiceCollectionExtensions",
@@ -114,6 +115,8 @@ public class PublicApiTest
             "DataStudio.Postgres.PostgresFinding",
             "DataStudio.Postgres.PostgresFindingCategory",
             "DataStudio.Postgres.PostgresFindingGroup",
+            "DataStudio.Postgres.PostgresPage",
+            "DataStudio.Postgres.PostgresPageLink",
             "DataStudio.Postgres.PostgresPlatformKind",
             "DataStudio.Postgres.PostgresReadOutcome",
             "DataStudio.Postgres.PostgresServerInfo",
@@ -123,9 +126,6 @@ public class PublicApiTest
             "DataStudio.Postgres.PostgresStatement",
             "DataStudio.Postgres.PostgresStatementsSection",
             "DataStudio.Postgres.PostgresStorageSection",
-            "DataStudio.Postgres.PostgresStudioHealthChecksBuilderExtensions",
-            "DataStudio.Postgres.PostgresStudioLink",
-            "DataStudio.Postgres.PostgresStudioPage",
             "DataStudio.Postgres.PostgresTableOwnership",
             "DataStudio.Postgres.PostgresTableStorage",
             "DataStudio.Postgres.PostgresWalSection");

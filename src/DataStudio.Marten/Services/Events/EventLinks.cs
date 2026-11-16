@@ -1,10 +1,10 @@
+using DataStudio.Services.Settings;
 using System.Globalization;
 using System.Text;
 
 using DataStudio.Components;
 using JasperFx.Events;
 
-using DataStudio.Marten.Components;
 using DataStudio.Marten.Services.Query;
 using DataStudio.Postgres.Services;
 
@@ -64,7 +64,7 @@ internal static class EventLinks
     public const string TenantKey = "tenant";
 
     /// <summary>A link to one of the area's pages, with the query parameters and the scope appended.</summary>
-    /// <param name="options">The studio's options, which decide what the studio root is.</param>
+    /// <param name="settings">The studio's shell settings, which decide what the studio root is.</param>
     /// <param name="route">One of the <c>*Route</c> constants.</param>
     /// <param name="scope">The scope to carry, or <see langword="null" /> to carry none.</param>
     /// <param name="parameters">
@@ -72,14 +72,14 @@ internal static class EventLinks
     /// carries the filters that are actually set.
     /// </param>
     public static string To(
-        MartenStudioOptions options,
+        IShellSettings settings,
         string route,
         StudioScope? scope,
         params IReadOnlyList<KeyValuePair<string, string?>> parameters)
     {
-        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(settings);
 
-        var builder = new StringBuilder(StudioLink.To(options, route));
+        var builder = new StringBuilder(StudioLink.To(settings, route));
         var first = true;
 
         foreach (KeyValuePair<string, string?> parameter in parameters)
@@ -98,36 +98,36 @@ internal static class EventLinks
     }
 
     /// <summary>A link to one stream's detail page.</summary>
-    public static string ToStream(MartenStudioOptions options, StudioScope? scope, string streamId) =>
-        To(options, StreamDetailRoute, scope, [new("id", streamId)]);
+    public static string ToStream(IShellSettings settings, StudioScope? scope, string streamId) =>
+        To(settings, StreamDetailRoute, scope, [new("id", streamId)]);
 
     /// <summary>
     /// A link to one stream's detail page from a caller that knows a store and a tenant and no database (D-CORR 7.2): it carries
     /// <c>store</c> and <c>tenant</c> and never <c>db</c>, and the page resolves the rest and authorizes it again.
     /// </summary>
-    /// <param name="options">The studio's options.</param>
+    /// <param name="settings">The studio's shell settings.</param>
     /// <param name="storeKey">The store, or <see langword="null" /> for the visitor's current one.</param>
     /// <param name="tenantId">The tenant, or <see langword="null" /> for none.</param>
     /// <param name="streamId">The stream's id or key.</param>
-    public static string ToStream(MartenStudioOptions options, string? storeKey, string? tenantId, string streamId) =>
-        To(options, StreamDetailRoute, null, [new("id", streamId), new(StoreKey, storeKey), new(TenantKey, tenantId)]);
+    public static string ToStream(IShellSettings settings, string? storeKey, string? tenantId, string streamId) =>
+        To(settings, StreamDetailRoute, null, [new("id", streamId), new(StoreKey, storeKey), new(TenantKey, tenantId)]);
 
     /// <summary>
     /// A link to one stream's detail page at one of its events (1.2, Find by id): <c>events/streams/s?id=&amp;v=</c>, which the page
     /// selects and scrolls to. The version is the event's own within the stream.
     /// </summary>
-    /// <param name="options">The studio's options.</param>
+    /// <param name="settings">The studio's shell settings.</param>
     /// <param name="scope">The scope to carry.</param>
     /// <param name="streamId">The stream.</param>
     /// <param name="version">The event's version in the stream.</param>
-    public static string ToStreamAt(MartenStudioOptions options, StudioScope? scope, string streamId, long version) =>
-        To(options, StreamDetailRoute, scope, [new("id", streamId), new("v", Number(version))]);
+    public static string ToStreamAt(IShellSettings settings, StudioScope? scope, string streamId, long version) =>
+        To(settings, StreamDetailRoute, scope, [new("id", streamId), new("v", Number(version))]);
 
     /// <summary>
     /// A link to the stepper: the stream, the aggregate type, the step and the watched path all in the query string, so a
     /// pasted link reopens the same step (D9).
     /// </summary>
-    /// <param name="options">The studio's options.</param>
+    /// <param name="settings">The studio's shell settings.</param>
     /// <param name="scope">The scope to carry.</param>
     /// <param name="streamId">The stream.</param>
     /// <param name="aggregate">The aggregate type's full name, or <see langword="null" /> to let the visitor pick.</param>
@@ -138,14 +138,14 @@ internal static class EventLinks
     /// </param>
     /// <param name="path">The value of the aggregate the next-change search watches, or <see langword="null" />.</param>
     public static string ToStep(
-        MartenStudioOptions options,
+        IShellSettings settings,
         StudioScope? scope,
         string streamId,
         string? aggregate = null,
         long? version = null,
         string? projection = null,
         string? path = null) =>
-        To(options, StreamStepperRoute, scope,
+        To(settings, StreamStepperRoute, scope,
         [
             new("id", streamId),
             new("agg", aggregate),
@@ -155,15 +155,15 @@ internal static class EventLinks
         ]);
 
     /// <summary>A link to the dead letters that name one event.</summary>
-    public static string ToDeadLettersForEvent(MartenStudioOptions options, StudioScope? scope, long sequence) =>
-        To(options, DeadLettersRoute, scope, [new("seq", Number(sequence))]);
+    public static string ToDeadLettersForEvent(IShellSettings settings, StudioScope? scope, long sequence) =>
+        To(settings, DeadLettersRoute, scope, [new("seq", Number(sequence))]);
 
     /// <summary>
     /// A link to the event flow (1.2), optionally filtered to one projection and/or one event type, and optionally drawing
     /// Marten's own events too. A blank value is left out, so a link carries only what is set.
     /// </summary>
-    public static string ToFlow(MartenStudioOptions options, StudioScope? scope, string? projection = null, string? eventType = null, bool includeOwn = false) =>
-        To(options, EventFlowRoute, scope,
+    public static string ToFlow(IShellSettings settings, StudioScope? scope, string? projection = null, string? eventType = null, bool includeOwn = false) =>
+        To(settings, EventFlowRoute, scope,
         [
             new("projection", projection),
             new("type", eventType),
@@ -211,20 +211,20 @@ internal static class EventLinks
     /// A link to the Projections page that names one projection's row (1.2). The browser alone cannot scroll to it, because the rows
     /// are drawn after the circuit reads them; the page scrolls once they are, from this fragment.
     /// </summary>
-    public static string ToProjection(MartenStudioOptions options, StudioScope? scope, string projectionName) =>
-        To(options, ProjectionsRoute, scope, []) + "#" + ProjectionAnchor(projectionName);
+    public static string ToProjection(IShellSettings settings, StudioScope? scope, string projectionName) =>
+        To(settings, ProjectionsRoute, scope, []) + "#" + ProjectionAnchor(projectionName);
 
     /// <summary>A link to the feed, filtered to one stream.</summary>
-    public static string ToFeedForStream(MartenStudioOptions options, StudioScope? scope, string streamId) =>
-        To(options, FeedRoute, scope, [new("stream", streamId)]);
+    public static string ToFeedForStream(IShellSettings settings, StudioScope? scope, string streamId) =>
+        To(settings, FeedRoute, scope, [new("stream", streamId)]);
 
     /// <summary>A link to the feed, filtered to one event type.</summary>
-    public static string ToFeedForType(MartenStudioOptions options, StudioScope? scope, string eventType) =>
-        To(options, FeedRoute, scope, [new("types", eventType)]);
+    public static string ToFeedForType(IShellSettings settings, StudioScope? scope, string eventType) =>
+        To(settings, FeedRoute, scope, [new("types", eventType)]);
 
     /// <summary>A link to the feed, filtered to one DCB tag: <c>?tag=type=value</c>.</summary>
-    public static string ToFeedForTag(MartenStudioOptions options, StudioScope? scope, string tagType, string value) =>
-        To(options, FeedRoute, scope, [new("tag", EventTagFilter.Format(tagType, value))]);
+    public static string ToFeedForTag(IShellSettings settings, StudioScope? scope, string tagType, string value) =>
+        To(settings, FeedRoute, scope, [new("tag", EventTagFilter.Format(tagType, value))]);
 
     /// <summary>The Query page, relative to the studio root.</summary>
     public const string QueryRoute = "query";
@@ -233,12 +233,12 @@ internal static class EventLinks
     /// A link to the Query page's LINQ tab over the event log (1.1): <c>?mode=linq&amp;target=events&amp;predicate=…</c>. It fills
     /// the boxes and never runs (D9), so the visitor reads the predicate before it does anything.
     /// </summary>
-    /// <param name="options">The studio's options.</param>
+    /// <param name="settings">The studio's shell settings.</param>
     /// <param name="scope">The scope to carry.</param>
     /// <param name="predicate">The predicate to prefill, or <see langword="null" /> for none.</param>
     /// <param name="archived">What to do about archived events.</param>
-    public static string ToLinqQuery(MartenStudioOptions options, StudioScope? scope, string? predicate, ArchivedFilter archived = ArchivedFilter.Exclude) =>
-        To(options, QueryRoute, scope,
+    public static string ToLinqQuery(IShellSettings settings, StudioScope? scope, string? predicate, ArchivedFilter archived = ArchivedFilter.Exclude) =>
+        To(settings, QueryRoute, scope,
         [
             new("mode", "linq"),
             new("target", "events"),

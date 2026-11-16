@@ -677,10 +677,10 @@ public class DatabaseObjectsPageTests
     // ------------------------------------------------------------------------------------------------
 
     [Theory]
-    [InlineData(nameof(DatabaseRefusal.CapabilityOff), "MartenStudioOptions.Capabilities.BrowseDatabase")]
-    [InlineData(nameof(DatabaseRefusal.ReadOnly), "MartenStudioOptions.ReadOnly")]
-    [InlineData(nameof(DatabaseRefusal.WritePolicy), "MartenStudioOptions.WriteAuthorizationPolicy")]
-    [InlineData(nameof(DatabaseRefusal.SchemaNotBrowsable), "MartenStudioOptions.BrowsableSchemas")]
+    [InlineData(nameof(DatabaseRefusal.CapabilityOff), "MartenOptions.Capabilities.BrowseDatabase")]
+    [InlineData(nameof(DatabaseRefusal.ReadOnly), "MartenOptions.ReadOnly")]
+    [InlineData(nameof(DatabaseRefusal.WritePolicy), "MartenOptions.WriteAuthorizationPolicy")]
+    [InlineData(nameof(DatabaseRefusal.SchemaNotBrowsable), "MartenOptions.BrowsableSchemas")]
     public void A_shut_gate_names_the_exact_option_that_would_open_it(string gate, string option)
     {
         DatabaseRefusal refusal = Enum.Parse<DatabaseRefusal>(gate);
@@ -763,7 +763,7 @@ public class DatabaseObjectsPageTests
         notice.GetAttribute("data-refusal").Should().Be(nameof(DatabaseRefusal.CapabilityOff), "the rows' gate is the one that is shut");
         notice.QuerySelector(".ms-db-access-title")!.TextContent.Trim().Should().Be("Definitions are shown; browsing rows is not enabled.");
         notice.TextContent.Should().Contain("Rows, and everything in a schema")
-            .And.Contain("MartenStudioOptions.Capabilities.BrowseDatabase")
+            .And.Contain("MartenOptions.Capabilities.BrowseDatabase")
             .And.Contain("Capabilities.ViewDefinitions")
             .And.NotContain(DatabaseGate.CapabilityDenial, "that sentence says a definition needs BrowseDatabase, which is no longer true");
 

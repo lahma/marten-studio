@@ -210,7 +210,7 @@ public class SessionsBlockingPageTests
 
             page.Find(".ms-blocking-stats").TextContent.Should().Contain("Chains").And.Contain("Sessions held up").And.Contain("3 min");
             page.Find(".ms-blocking-gated").TextContent.Should().Contain("session detail");
-            page.Find(".ms-capability-disabled").TextContent.Should().Contain("MartenStudioOptions.Capabilities.ViewDatabaseActivity");
+            page.Find(".ms-capability-disabled").TextContent.Should().Contain("MartenOptions.Capabilities.ViewDatabaseActivity");
             page.FindAll(".ms-blocking-chain").Should().BeEmpty();
             page.Markup.Should().NotContain("5151").And.NotContain("4242").And.NotContainEquivalentOf("pg_terminate_backend")
                 .And.NotContain("public.orders");

@@ -54,7 +54,7 @@ public class SampleBaselineLiveTests(PostgresFixture postgres)
             store: UnhealthyDemoStore.Configure,
             studio: static options =>
             {
-                options.Capabilities = MartenStudioCapabilities.All();
+                options.Capabilities = MartenCapabilities.All();
                 options.SqlConsoleRole = SampleConsoleRole.Name;
             });
 

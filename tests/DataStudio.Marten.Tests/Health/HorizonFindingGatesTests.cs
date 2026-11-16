@@ -39,7 +39,7 @@ public class HorizonFindingGatesTests
     [Fact]
     public async Task Without_the_capability_who_holds_it_is_withheld_and_the_kind_the_age_and_the_caveat_are_shown()
     {
-        await using HealthHarness harness = HealthHarness.Create(checks: Stated, studio: static options => options.Capabilities = new MartenStudioCapabilities());
+        await using HealthHarness harness = HealthHarness.Create(checks: Stated, studio: static options => options.Capabilities = new MartenCapabilities());
 
         HealthReport report = await ReportAsync(harness);
 
@@ -47,7 +47,7 @@ public class HorizonFindingGatesTests
 
         finding.Evidence.Should().Contain(new HealthEvidence("Held back by", "a session's snapshot"));
         finding.Evidence.Single(static x => x.Label == "Who it is").Value.Should().StartWith("withheld - ")
-            .And.Contain("MartenStudioOptions.Capabilities.ViewDatabaseActivity");
+            .And.Contain("MartenOptions.Capabilities.ViewDatabaseActivity");
         finding.Finding.Caveat.Should().Contain(CannotSee);
 
         string shown = string.Join("\n", finding.Evidence.Select(static x => x.Value)) + "\n" + finding.Finding.Title + "\n" + finding.Finding.Caveat;
@@ -62,7 +62,7 @@ public class HorizonFindingGatesTests
     [Fact]
     public async Task With_the_capability_and_the_write_policy_who_holds_it_is_shown_and_audited()
     {
-        await using HealthHarness harness = HealthHarness.Create(checks: Stated, studio: static options => options.Capabilities = MartenStudioCapabilities.All());
+        await using HealthHarness harness = HealthHarness.Create(checks: Stated, studio: static options => options.Capabilities = MartenCapabilities.All());
 
         HealthReport report = await ReportAsync(harness);
 
@@ -82,7 +82,7 @@ public class HorizonFindingGatesTests
             checks: Stated,
             studio: static options =>
             {
-                options.Capabilities = MartenStudioCapabilities.All();
+                options.Capabilities = MartenCapabilities.All();
                 options.KnownTenantIds.Add("acme");
             },
             policies: true);

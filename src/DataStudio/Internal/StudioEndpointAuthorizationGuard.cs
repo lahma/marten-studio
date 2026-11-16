@@ -50,7 +50,7 @@ namespace DataStudio.Internal;
 /// nothing.
 /// </para>
 /// <para>
-/// Registered by <c>AddMarten</c>. Adding it without mapping it leaves nothing marked and nothing
+/// Registered by <c>AddDataStudio()</c>. Adding it without mapping it leaves nothing marked and nothing
 /// to refuse, which is right: an application that registered the services and never mapped the endpoints
 /// serves nothing.
 /// </para>

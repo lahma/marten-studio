@@ -63,12 +63,12 @@ public class PostgresStudioWordsRenderTests
         page.WaitForAssertion(() => page.FindAll(".ms-db-marten-notice").Should().ContainSingle(
             "the fake catalog lists objects named like Marten's, so the page says where they are browsed"));
         page.Find(".ms-db-marten-notice").TextContent.Should().Contain(PostgresStudioText.Instance.MartenStoreNotice!);
-        page.Markup.Should().NotContain("MartenStudioOptions").And.NotContain("Declared by this Marten store");
+        page.Markup.Should().NotContain("MartenOptions").And.NotContain("Declared by this Marten store");
     }
 
     /// <summary>What a rendered PostgresStudio page must never say - MartenStudio's options, configuration and nouns.</summary>
     private static readonly string[] MartenStudioWords =
-        ["MartenStudioOptions", "StoreOptions", "Marten Studio", "the store's", "this store", "LightweightSession", "AddMartenStudio"];
+        ["MartenOptions", "StoreOptions", "Marten Studio", "the store's", "this store", "LightweightSession", "AddMarten"];
 
     public static TheoryData<string> Pages() => ["overview", "query", "database", "sessions", "health", "storage", "activity"];
 

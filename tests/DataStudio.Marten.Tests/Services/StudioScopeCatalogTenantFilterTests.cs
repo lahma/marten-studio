@@ -273,7 +273,7 @@ public class StudioScopeCatalogTenantFilterTests
         /// <param name="logs">Where the catalog's log goes, through a real throttle, when a test reads it.</param>
         public static async Task<Harness> CreateAsync(string? storePolicy, CapturingLoggerProvider? logs = null)
         {
-            var options = new MartenStudioOptions { StoreAuthorizationPolicy = storePolicy };
+            var options = new MartenOptions { StoreAuthorizationPolicy = storePolicy };
             options.KnownTenantIds.Add("acme");
             options.KnownTenantIds.Add("globex");
 

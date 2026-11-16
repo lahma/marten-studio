@@ -121,7 +121,7 @@ public class ProjectionCapabilityGatingLiveTests(PostgresFixture postgres) : Pro
 {
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
-    private protected override MartenStudioCapabilities? Capabilities => new();
+    private protected override MartenCapabilities? Capabilities => new();
 
     [PostgresFact]
     public async Task Reading_needs_no_capability_at_all()
@@ -154,7 +154,7 @@ public class ProjectionCapabilityGatingLiveTests(PostgresFixture postgres) : Pro
         foreach (Func<Task> control in controls)
         {
             (await control.Should().ThrowAsync<StudioCapabilityDeniedException>())
-                .WithMessage("*MartenStudioOptions.Capabilities.ControlDaemon*");
+                .WithMessage("*MartenOptions.Capabilities.ControlDaemon*");
         }
     }
 
@@ -164,7 +164,7 @@ public class ProjectionCapabilityGatingLiveTests(PostgresFixture postgres) : Pro
         Func<Task> rebuilding = () => Fixture.UseAsync(service => service.RebuildAsync(Fixture.Scope, "DailySales", Token));
 
         (await rebuilding.Should().ThrowAsync<StudioCapabilityDeniedException>())
-            .WithMessage("*MartenStudioOptions.Capabilities.RebuildProjections*");
+            .WithMessage("*MartenOptions.Capabilities.RebuildProjections*");
 
         Fixture.Operations.All().Should().BeEmpty();
     }
@@ -175,7 +175,7 @@ public class ProjectionCapabilityGatingLiveTests(PostgresFixture postgres) : Pro
         Func<Task> correcting = () => Fixture.UseAsync(service => service.CorrectProgressionAsync(Fixture.Scope, Token));
 
         (await correcting.Should().ThrowAsync<StudioCapabilityDeniedException>())
-            .WithMessage("*MartenStudioOptions.Capabilities.CorrectProgression*");
+            .WithMessage("*MartenOptions.Capabilities.CorrectProgression*");
     }
 
     /// <summary>Every refusal is in the ring, which is what the Activity page reads.</summary>

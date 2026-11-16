@@ -7,7 +7,8 @@
 @implements IDisposable
 @inject StudioState State
 @inject NavigationManager Navigation
-@inject IOptions<MartenStudioOptions> Options
+@inject IOptions<MartenOptions> Options
+@inject IStudioSettings Settings
 
 <PageTitle>Schema</PageTitle>
 
@@ -163,11 +164,11 @@
     /// never disagree about the route or its parameters.
     /// </summary>
     private string ObjectLink(string schema, string name) =>
-        DatabaseLinks.ToObject(Options.Value, State.ActiveScope, schema, name);
+        DatabaseLinks.ToObject(Settings, State.ActiveScope, schema, name);
 
     private string Link(string subPath, params (string Name, string? Value)[] extra)
     {
-        string path = StudioLink.To(Options.Value, subPath);
+        string path = StudioLink.To(Settings, subPath);
         Dictionary<string, string?> query = new(StringComparer.Ordinal);
 
         StudioScope? scope = State.ActiveScope;

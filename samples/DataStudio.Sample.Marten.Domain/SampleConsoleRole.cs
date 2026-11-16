@@ -11,7 +11,7 @@ using DataStudio.Sample.Postgres.Data;
 namespace DataStudio.Sample.Marten.Domain;
 
 /// <summary>
-/// The role the sample's studio reads as (<c>MartenStudioOptions.SqlConsoleRole</c>, wave 6): narrower than the store's own
+/// The role the sample's studio reads as (<c>MartenOptions.SqlConsoleRole</c>, wave 6): narrower than the store's own
 /// login, which on the throwaway container is the server's superuser - so K05, "SQL console without a narrowed role", shows
 /// its remedy applied rather than a Warning.
 /// </summary>

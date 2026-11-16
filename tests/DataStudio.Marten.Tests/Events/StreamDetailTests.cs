@@ -290,7 +290,7 @@ public class StreamDetailTests
         IRenderedComponent<StreamDetail> page = Render(context);
 
         page.Find(".ms-capability-disabled").TextContent.Should()
-            .Contain("MartenStudioOptions.Capabilities.ArchiveStreams");
+            .Contain("MartenOptions.Capabilities.ArchiveStreams");
         page.FindAll("button.ms-button-danger").Should().BeEmpty();
     }
 

@@ -54,7 +54,7 @@ public class HotColdLeaderSessionLiveTests(PostgresFixture postgres)
         {
             long[] ids = DaemonLockIds(host);
             await using ConnectionsLiveHost studio = await ConnectionsLiveHost.CreateAsync(
-                database, studio: static options => options.Capabilities = MartenStudioCapabilities.All());
+                database, studio: static options => options.Capabilities = MartenCapabilities.All());
 
             if (ConnectionDaemonLiveTests.LeaderKeepsItsTransactionWithAKeepalive)
             {
@@ -167,7 +167,7 @@ public class HotColdLeaderSessionLiveTests(PostgresFixture postgres)
         {
             long[] ids = DaemonLockIds(host);
             await using ConnectionsLiveHost studio = await ConnectionsLiveHost.CreateAsync(
-                database, studio: static options => options.Capabilities = MartenStudioCapabilities.All());
+                database, studio: static options => options.Capabilities = MartenCapabilities.All());
 
             await LiveWait.UntilAsync(
                 async () => await LiveWait.ScalarAsync<bool>(

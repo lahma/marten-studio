@@ -186,7 +186,7 @@ public class TenantOverviewServiceTests
         TenantOverview overview = await harness.Service.GetAsync(DefaultScope, new TenantOverviewRequest(), Token);
 
         overview.VolumesShown.Should().BeFalse();
-        overview.VolumesWithheldReason.Should().Contain("ViewDatabaseActivity").And.Contain("MartenStudioOptions.Capabilities.ViewDatabaseActivity")
+        overview.VolumesWithheldReason.Should().Contain("ViewDatabaseActivity").And.Contain("MartenOptions.Capabilities.ViewDatabaseActivity")
             .And.Contain("write policy");
         overview.Rows.Should().OnlyContain(static x => x.ReadProblem == null, "no connection was attempted: a read of an unreachable host would show as a problem");
         overview.Rows.Should().OnlyContain(static x => x.Documents.Text == "—" && x.Events.Text == "—" && x.Streams.Text == "—" && x.LastEvent.Text == "—");
@@ -500,7 +500,7 @@ public class TenantOverviewServiceTests
 
                 if (activity)
                 {
-                    options.Capabilities = new MartenStudioCapabilities { ViewDatabaseActivity = true };
+                    options.Capabilities = new MartenCapabilities { ViewDatabaseActivity = true };
                 }
             });
 

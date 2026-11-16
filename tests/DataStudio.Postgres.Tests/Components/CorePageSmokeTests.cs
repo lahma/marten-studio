@@ -133,7 +133,7 @@ public class CorePageSmokeTests
 
         var page = context.Render<QueryPage>();
 
-        page.Markup.Should().Contain("PostgresStudioOptions.Capabilities.RunSql").And.NotContain("MartenStudioOptions");
+        page.Markup.Should().Contain("PostgresOptions.Capabilities.RunSql").And.NotContain("MartenOptions");
     }
 
     [Fact]
@@ -172,7 +172,7 @@ public class CorePageSmokeTests
 
     /// <summary>
     /// The one option the two studios spell differently: a value cut at the cap names PostgresStudio's own option. (The
-    /// same sentence names <c>MartenStudioOptions.MaxInlineDocumentBytes</c> in MartenStudio, pinned by its
+    /// same sentence names <c>MartenOptions.MaxInlineValueBytes</c> in MartenStudio, pinned by its
     /// <c>RowDetailPageTests</c>.)
     /// </summary>
     [Fact]
@@ -195,7 +195,7 @@ public class CorePageSmokeTests
         row.QuerySelector("button.ms-row-show-all")!.Click();
 
         row = page.FindAll(".ms-row-kv-row")[calendar];
-        row.QuerySelector(".ms-row-value-note")!.TextContent.Should().Contain("(PostgresStudioOptions.MaxInlineValueBytes)");
+        row.QuerySelector(".ms-row-value-note")!.TextContent.Should().Contain("(PostgresOptions.MaxInlineValueBytes)");
     }
 
     [Fact]
@@ -347,7 +347,7 @@ public class CorePageSmokeTests
         banner.FindAll(".ms-capability-name").Select(static x => x.TextContent)
             .Should().Equal("RunSql", "BrowseDatabase", "ViewDefinitions", "ViewDatabaseActivity");
         banner.FindAll(".ms-capability-option").Select(static x => x.TextContent)
-            .Should().OnlyContain(static x => x.StartsWith("PostgresStudioOptions.Capabilities.", StringComparison.Ordinal));
-        banner.Markup.Should().Contain("PostgresStudioCapabilities.All()").And.NotContain("Marten");
+            .Should().OnlyContain(static x => x.StartsWith("PostgresOptions.Capabilities.", StringComparison.Ordinal));
+        banner.Markup.Should().Contain("PostgresCapabilities.All()").And.NotContain("Marten");
     }
 }

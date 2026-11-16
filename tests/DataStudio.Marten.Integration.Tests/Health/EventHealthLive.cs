@@ -83,7 +83,7 @@ internal sealed class EventHealthHost : IAsyncDisposable
         PostgresFixture postgres,
         string schema,
         Action<StoreOptions>? store = null,
-        Action<MartenStudioOptions>? studio = null,
+        Action<MartenOptions>? studio = null,
         Action<IServiceCollection>? services = null)
     {
         ArgumentNullException.ThrowIfNull(postgres);
@@ -101,7 +101,7 @@ internal sealed class EventHealthHost : IAsyncDisposable
         string connectionString,
         string schema,
         Action<StoreOptions>? store = null,
-        Action<MartenStudioOptions>? studio = null,
+        Action<MartenOptions>? studio = null,
         Action<IServiceCollection>? services = null)
     {
         await CreateSchemaAsync(connectionString, schema);

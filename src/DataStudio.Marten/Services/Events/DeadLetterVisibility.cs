@@ -4,7 +4,7 @@ namespace DataStudio.Marten.Services.Events;
 
 /// <summary>
 /// Whether the host lets the studio show <c>DeadLetterEvent</c> - asked of
-/// <see cref="MartenStudioOptions.IsDocumentTypeVisible" /> like any document type, and failing closed.
+/// <see cref="MartenOptions.IsDocumentTypeVisible" /> like any document type, and failing closed.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -26,10 +26,10 @@ internal static class DeadLetterVisibility
     /// What the dead-letter page, a refused Discard and a refused Rewind say while the type is hidden. Constant: it never
     /// names the type's alias or table, so a host that re-aliased the type it hides does not have the alias printed.
     /// </summary>
-    public const string HiddenMessage = "Dead letters are hidden by MartenStudioOptions.IsDocumentTypeVisible.";
+    public const string HiddenMessage = "Dead letters are hidden by MartenOptions.IsDocumentTypeVisible.";
 
     /// <summary>Whether <paramref name="isDocumentTypeVisible" /> lets <c>DeadLetterEvent</c> be shown.</summary>
-    /// <param name="isDocumentTypeVisible"><see cref="MartenStudioOptions.IsDocumentTypeVisible" />; <see langword="null" /> shows everything.</param>
+    /// <param name="isDocumentTypeVisible"><see cref="MartenOptions.IsDocumentTypeVisible" />; <see langword="null" /> shows everything.</param>
     /// <param name="failure">What the delegate threw, or <see langword="null" />.</param>
     /// <returns><see langword="false" /> when the delegate hides the type or throws.</returns>
     public static bool IsVisible(Func<Type, bool>? isDocumentTypeVisible, out Exception? failure)

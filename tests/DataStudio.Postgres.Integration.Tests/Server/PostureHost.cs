@@ -42,7 +42,7 @@ internal sealed class PostureHost : IAsyncDisposable
     /// <summary>A container with the studio registered over <paramref name="connectionString" />, its own pool.</summary>
     public static async Task<PostureHost> CreateAsync(
         string connectionString,
-        Action<PostgresStudioOptions>? options = null,
+        Action<PostgresOptions>? options = null,
         string? environment = null)
     {
         ServiceCollection collection = new();
@@ -67,7 +67,7 @@ internal sealed class PostureHost : IAsyncDisposable
     public static async Task<PostureHost> ServeAsync(
         string connectionString,
         Action<IEndpointConventionBuilder> map,
-        Action<PostgresStudioOptions>? options = null,
+        Action<PostgresOptions>? options = null,
         string environment = "Production")
     {
         WebApplicationBuilder builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = environment });
@@ -113,7 +113,7 @@ internal sealed class PostureHost : IAsyncDisposable
         await owner.DisposeAsync();
     }
 
-    private static void Register(IServiceCollection collection, string connectionString, Action<PostgresStudioOptions>? options, string? environment)
+    private static void Register(IServiceCollection collection, string connectionString, Action<PostgresOptions>? options, string? environment)
     {
         NpgsqlConnectionStringBuilder own = new(connectionString)
         {

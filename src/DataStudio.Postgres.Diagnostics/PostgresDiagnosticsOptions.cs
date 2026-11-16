@@ -8,7 +8,7 @@ namespace DataStudio.Postgres;
 
 /// <summary>
 /// Options for the Postgres diagnostics engine, configured through
-/// <c>AddPostgresDiagnostics(Action&lt;PostgresDiagnosticsOptions&gt;)</c>, and the base of <c>PostgresStudioOptions</c>:
+/// <c>AddPostgresDiagnostics(Action&lt;PostgresDiagnosticsOptions&gt;)</c>, and the base of <c>PostgresOptions</c>:
 /// everything about which databases are read and how, with nothing about a UI.
 /// </summary>
 /// <remarks>
@@ -20,7 +20,7 @@ namespace DataStudio.Postgres;
 /// application's own data sources, with their role, TLS and settings, and adds no new place that holds credentials.
 /// </para>
 /// <para>
-/// The members keep the defaults and the bounds they have on <c>PostgresStudioOptions</c>, which inherits them, so a
+/// The members keep the defaults and the bounds they have on <c>PostgresOptions</c>, which inherits them, so a
 /// host that registers a studio configures them exactly as before.
 /// </para>
 /// </remarks>

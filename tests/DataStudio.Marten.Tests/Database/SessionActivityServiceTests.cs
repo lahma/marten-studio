@@ -36,7 +36,7 @@ public class SessionActivityServiceTests
     [Fact]
     public async Task The_summary_counts_and_ages_without_naming_anybody_and_says_what_the_details_need()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = new MartenStudioCapabilities());
+        await using Harness harness = Harness.Create(static options => options.Capabilities = new MartenCapabilities());
 
         SessionActivitySummary summary = await harness.Service.GetSummaryAsync(Scope, Token);
 
@@ -47,7 +47,7 @@ public class SessionActivityServiceTests
         summary.LongestTransaction.Should().Be(TimeSpan.FromMinutes(12));
         summary.PreparedCount.Should().Be(1);
         summary.Details.Refusal.Should().Be(DatabaseRefusal.CapabilityOff);
-        summary.Details.Denial.Should().Contain("MartenStudioOptions.Capabilities.ViewDatabaseActivity");
+        summary.Details.Denial.Should().Contain("MartenOptions.Capabilities.ViewDatabaseActivity");
 
         summary.Locks.Select(static x => x.Target).Should().Contain("a relation Marten does not own")
             .And.NotContain(static x => x.Contains("employees", StringComparison.Ordinal) || x.Contains("legacy", StringComparison.Ordinal),
@@ -64,7 +64,7 @@ public class SessionActivityServiceTests
     [Fact]
     public async Task Connections_by_application_are_totals_in_the_summary_and_names_only_in_the_details()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All());
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenCapabilities.All());
 
         SessionActivitySummary summary = await harness.Service.GetSummaryAsync(Scope, Token);
 
@@ -89,7 +89,7 @@ public class SessionActivityServiceTests
     [Fact]
     public async Task The_whole_servers_connections_are_counts_in_the_summary_and_names_only_in_the_details()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All());
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenCapabilities.All());
         harness.Reader.Snapshot = harness.Reader.Snapshot with
         {
             Holders = new SessionServerHolders(
@@ -127,7 +127,7 @@ public class SessionActivityServiceTests
     [Fact]
     public async Task A_reader_that_did_not_read_the_holders_leaves_them_out_of_both_halves()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All());
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenCapabilities.All());
 
         (await harness.Service.GetSummaryAsync(Scope, Token)).Holders.Should().BeNull();
         (await harness.Service.GetDetailsAsync(Scope, Token)).Holders.Should().Be(SessionHoldersDetails.None);
@@ -136,7 +136,7 @@ public class SessionActivityServiceTests
     [Fact]
     public async Task The_summary_needs_the_store_policy_for_the_database_as_a_whole()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All(), policies: true);
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenCapabilities.All(), policies: true);
 
         // A visitor confined to a tenant: allowed with one, refused without.
         harness.Policies.Allow(static resource => resource.TenantId is not null);
@@ -150,7 +150,7 @@ public class SessionActivityServiceTests
     [Fact]
     public async Task A_failed_read_is_a_value_in_the_studios_words_and_never_Postgres_own()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All());
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenCapabilities.All());
         harness.Reader.Throws = new NpgsqlException("relation \"hr.secret\" does not exist (pretend)");
 
         SessionActivitySummary summary = await harness.Service.GetSummaryAsync(Scope, Token);
@@ -167,12 +167,12 @@ public class SessionActivityServiceTests
     [Fact]
     public async Task With_the_capability_off_the_details_are_refused_and_audited_and_nothing_is_read()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = new MartenStudioCapabilities(), policies: true);
+        await using Harness harness = Harness.Create(static options => options.Capabilities = new MartenCapabilities(), policies: true);
 
         SessionActivityDetails details = await harness.Service.GetDetailsAsync(Scope, Token);
 
         details.Refusal.Should().Be(DatabaseRefusal.CapabilityOff);
-        details.Reason.Should().Contain("MartenStudioOptions.Capabilities.ViewDatabaseActivity");
+        details.Reason.Should().Contain("MartenOptions.Capabilities.ViewDatabaseActivity");
         details.Sessions.Should().BeEmpty();
 
         StudioActionLogEntry entry = harness.Ring.Should().ContainSingle().Subject;
@@ -192,7 +192,7 @@ public class SessionActivityServiceTests
     public async Task The_snapshot_download_asks_no_details_of_a_visitor_the_summary_shuts_out()
     {
         CapturingLoggerProvider logs = new();
-        await using Harness harness = Harness.Create(static options => options.Capabilities = new MartenStudioCapabilities(), policies: true, logs: logs);
+        await using Harness harness = Harness.Create(static options => options.Capabilities = new MartenCapabilities(), policies: true, logs: logs);
         await using AsyncServiceScope circuit = harness.Provider.CreateAsyncScope();
 
         DataStudio.Postgres.Services.Diagnostics.VisitorSnapshot snapshot = await circuit.ServiceProvider
@@ -204,7 +204,7 @@ public class SessionActivityServiceTests
 
         using System.Text.Json.JsonDocument document = System.Text.Json.JsonDocument.Parse(snapshot.Json);
         document.RootElement.GetProperty("withheld").GetProperty("connections.byApplication").GetString()
-            .Should().Contain("MartenStudioOptions.Capabilities.ViewDatabaseActivity", "the summary's own sentence says what the names need");
+            .Should().Contain("MartenOptions.Capabilities.ViewDatabaseActivity", "the summary's own sentence says what the names need");
         document.RootElement.GetProperty("connections").GetProperty("database").GetProperty("total").GetInt32().Should().Be(3);
 
         // Q36 (issue #36): Marten Studio's download carries the Replication page's WAL section too, at that page's gate - an
@@ -223,7 +223,7 @@ public class SessionActivityServiceTests
     {
         await using Harness harness = Harness.Create(static options =>
         {
-            options.Capabilities = MartenStudioCapabilities.All();
+            options.Capabilities = MartenCapabilities.All();
             options.ReadOnly = true;
         });
 
@@ -236,7 +236,7 @@ public class SessionActivityServiceTests
     [Fact]
     public async Task A_write_policy_that_refuses_is_asked_with_no_tenant_and_audited()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All(), policies: true);
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenCapabilities.All(), policies: true);
         harness.Policies.Allow(static resource => resource.Capability is null);
 
         SessionActivityDetails details = await harness.Service.GetDetailsAsync(Scope with { TenantId = "acme" }, Token);
@@ -252,7 +252,7 @@ public class SessionActivityServiceTests
     [Fact]
     public async Task A_store_policy_that_refuses_the_database_as_a_whole_refuses_the_details()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All(), policies: true);
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenCapabilities.All(), policies: true);
         harness.Policies.Allow(static resource => resource.Capability is not null);
 
         SessionActivityDetails details = await harness.Service.GetDetailsAsync(Scope, Token);
@@ -268,7 +268,7 @@ public class SessionActivityServiceTests
     [Fact]
     public async Task Through_the_gate_the_details_name_the_sessions_and_withhold_every_statement_when_the_schemas_cannot_be_checked()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All());
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenCapabilities.All());
 
         SessionActivityDetails details = await harness.Service.GetDetailsAsync(Scope, Token);
 
@@ -286,7 +286,7 @@ public class SessionActivityServiceTests
     [Fact]
     public async Task The_first_read_of_the_details_is_audited_once_and_a_refresh_is_not()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All());
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenCapabilities.All());
 
         await harness.Service.GetDetailsAsync(Scope, Token);
         await harness.Service.GetDetailsAsync(Scope, Token);
@@ -313,7 +313,7 @@ public class SessionActivityServiceTests
     [Fact]
     public async Task The_summarys_lock_labels_come_from_every_stores_declarations_and_name_only_this_stores_own()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = new MartenStudioCapabilities(), otherStore: true);
+        await using Harness harness = Harness.Create(static options => options.Capabilities = new MartenCapabilities(), otherStore: true);
 
         harness.Reader.Snapshot = harness.Reader.Snapshot with
         {
@@ -347,7 +347,7 @@ public class SessionActivityServiceTests
     [Fact]
     public async Task The_gate_questions_and_the_audit_name_the_resolved_database_when_the_scope_spells_it_empty()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All(), policies: true);
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenCapabilities.All(), policies: true);
         string identity = harness.Identity;
         harness.Policies.Allow(resource => resource.Capability is null || resource.DatabaseIdentifier == identity);
 
@@ -369,7 +369,7 @@ public class SessionActivityServiceTests
     [Fact]
     public async Task A_policy_that_grants_only_the_visitors_spelling_refuses_the_details_and_the_refusal_names_the_identity()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All(), policies: true);
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenCapabilities.All(), policies: true);
         string identity = harness.Identity;
         harness.Policies.Allow(static resource => resource.Capability is null || resource.DatabaseIdentifier.Length == 0);
 
@@ -390,7 +390,7 @@ public class SessionActivityServiceTests
     [Fact]
     public async Task A_store_key_spelt_in_another_case_is_asked_and_audited_under_the_registered_key()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All(), policies: true);
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenCapabilities.All(), policies: true);
         harness.Policies.Allow(static resource =>
             resource.Capability is null || string.Equals(resource.StoreName, "default", StringComparison.Ordinal));
 
@@ -410,7 +410,7 @@ public class SessionActivityServiceTests
     [Fact]
     public async Task The_summary_and_the_details_share_one_read()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All());
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenCapabilities.All());
 
         await harness.Service.GetSummaryAsync(Scope, Token);
         await harness.Service.GetDetailsAsync(Scope, Token);
@@ -476,7 +476,7 @@ public class SessionActivityServiceTests
         public string Identity => Provider.GetRequiredService<IDocumentStore>().Storage.Database.Id.Identity;
 
         public static Harness Create(
-            Action<MartenStudioOptions> configure,
+            Action<MartenOptions> configure,
             bool policies = false,
             bool otherStore = false,
             CapturingLoggerProvider? logs = null)

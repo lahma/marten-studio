@@ -122,7 +122,7 @@ public class ConfirmsRefuseDuringScopeChangeTests
         };
         using StudioComponentContext context = new(services => services.AddSingleton<ISchemaDataService>(schema));
         await TwoDatabasesAsync(context);
-        context.Options.Capabilities = MartenStudioCapabilities.All();
+        context.Options.Capabilities = MartenCapabilities.All();
         Gate gate = new(context);
 
         IRenderedComponent<DataStudio.Marten.Components.Pages.Schema.DriftTab> tab = context.Render<DataStudio.Marten.Components.Pages.Schema.DriftTab>();

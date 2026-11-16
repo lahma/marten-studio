@@ -20,7 +20,7 @@ namespace DataStudio.Kafka;
 /// for other resources.
 /// </para>
 /// </remarks>
-public sealed class KafkaStudioOptions : KafkaEngineOptions
+public sealed class KafkaOptions : KafkaEngineOptions
 {
     /// <summary>
     /// The name of the authorization policy asked about every cluster and topic a call reaches, with <see cref="KafkaTopicResource.Capability" />
@@ -37,7 +37,7 @@ public sealed class KafkaStudioOptions : KafkaEngineOptions
     public string? CapabilityAuthorizationPolicy { get; set; }
 
     /// <summary>What KStudio may read beyond metadata. Every capability is off until the host sets it.</summary>
-    public KafkaStudioCapabilities Capabilities { get; set; } = new();
+    public KafkaCapabilities Capabilities { get; set; } = new();
 
     private readonly List<KafkaExternalLinkRegistration> externalLinks = [];
 
@@ -61,7 +61,7 @@ public sealed class KafkaStudioOptions : KafkaEngineOptions
     /// <param name="urlTemplate">The address, with placeholders.</param>
     /// <returns>This options object, so calls can be chained.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="label" /> or <paramref name="urlTemplate" /> is null.</exception>
-    public KafkaStudioOptions ExternalLink(string label, string urlTemplate)
+    public KafkaOptions ExternalLink(string label, string urlTemplate)
     {
         ArgumentNullException.ThrowIfNull(label);
         ArgumentNullException.ThrowIfNull(urlTemplate);

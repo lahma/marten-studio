@@ -79,7 +79,7 @@ public class ConnectionPoolLiveTests(PostgresFixture postgres)
     public async Task Two_pools_under_Martens_connection_string_that_disagree_are_not_judged()
     {
         string database = await ConnectionsLiveHost.CreateDatabaseAsync(postgres.ConnectionString, "health_c01_shared_name");
-        await using ConnectionsLiveHost host = await ConnectionsLiveHost.CreateAsync(database, studio: static options => options.Capabilities = MartenStudioCapabilities.All());
+        await using ConnectionsLiveHost host = await ConnectionsLiveHost.CreateAsync(database, studio: static options => options.Capabilities = MartenCapabilities.All());
 
         // Marten's own pool, made to exist; and the host's, through a plain NpgsqlConnection on the same string.
         await using (NpgsqlConnection touched = host.Store.Storage.Database.CreateConnection())

@@ -112,7 +112,7 @@ public sealed class ConnectionUxFixATests
     [Theory]
     [InlineData(1, HealthService.ActivityPolicyRefusal, "1 finding is hidden because your account may not see activity on this database.")]
     [InlineData(3, HealthService.ActivityPolicyRefusal, "3 findings are hidden because your account may not see activity on this database.")]
-    [InlineData(2, "needs PostgresStudioOptions.Capabilities.ViewDatabaseActivity", "2 findings are hidden: needs PostgresStudioOptions.Capabilities.ViewDatabaseActivity.")]
+    [InlineData(2, "needs PostgresOptions.Capabilities.ViewDatabaseActivity", "2 findings are hidden: needs PostgresOptions.Capabilities.ViewDatabaseActivity.")]
     [InlineData(1, null, "1 finding is hidden from your account.")]
     public void The_notice_for_withheld_findings_is_count_aware_and_keeps_a_reason_it_has_no_sentence_for(int count, string? reason, string expected) =>
         ConnectionPageBuilder.WithheldNotice(count, reason).Should().Be(expected);

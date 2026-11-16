@@ -290,7 +290,7 @@ public class StaticTenancyDeclaredTenantsTests
         });
 
         await using ServiceProvider provider = services.BuildServiceProvider();
-        IOptions<MartenStudioOptions> options = Options.Create(new MartenStudioOptions());
+        IOptions<MartenOptions> options = Options.Create(new MartenOptions());
         var users = new TestAuthenticationStateProvider();
         users.SignIn("tester");
 
@@ -379,7 +379,7 @@ public class StaticTenancyDeclaredTenantsTests
 
             ServiceProvider provider = services.BuildServiceProvider();
 
-            var options = Options.Create(new MartenStudioOptions { StoreAuthorizationPolicy = policy ? StorePolicy : null });
+            var options = Options.Create(new MartenOptions { StoreAuthorizationPolicy = policy ? StorePolicy : null });
             var users = new TestAuthenticationStateProvider();
             users.SignIn("tester");
 

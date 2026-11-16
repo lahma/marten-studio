@@ -57,7 +57,7 @@ public class SampleTickerTests
     [Fact]
     public void The_settings_lower_the_tail_pause_and_leave_only_search_on()
     {
-        KafkaStudioOptions defaults = new();
+        KafkaOptions defaults = new();
         SampleKafkaRegistration.Configure(defaults, "localhost:9");
         defaults.Capabilities.LiveTail.Should().BeTrue("the sample turns everything on by default");
         defaults.Capabilities.ExportRecords.Should().BeTrue();
@@ -71,7 +71,7 @@ public class SampleTickerTests
             })
             .Build();
 
-        KafkaStudioOptions demo = new();
+        KafkaOptions demo = new();
         SampleKafkaRegistration.Configure(demo, "localhost:9", configuration);
 
         demo.Limits.TailPauseAfter.Should().Be(TimeSpan.FromSeconds(10));

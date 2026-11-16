@@ -42,7 +42,7 @@ public class DocumentRecentLiveTests(DocumentRecentLiveTests.Fixture fixture)
     public sealed class Fixture(PostgresFixture postgres) : MartenClassFixture(postgres)
     {
         /// <inheritdoc />
-        protected override void ConfigureStudio(MartenStudioOptions options) =>
+        protected override void ConfigureStudio(MartenOptions options) =>
             // One second is the floor the options validator allows, and it is what makes the blocked read
             // below take a second rather than thirty.
             options.QueryTimeout = TimeSpan.FromSeconds(1);

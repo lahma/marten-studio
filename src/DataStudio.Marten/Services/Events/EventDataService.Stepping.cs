@@ -36,7 +36,7 @@ namespace DataStudio.Marten.Services.Events;
 /// <b>Bounded.</b> A window is <see cref="StepWindowSize" /> events, read with a limit. The events before it are streamed
 /// past the fold one at a time and never held - so a step deep in a long stream costs one read of the events before it,
 /// not one round trip each - except for a projection folded from the start, which keeps at most
-/// <see cref="AggregateWalk.FromTheStartLimit" />. Every call runs under <see cref="MartenStudioOptions.QueryTimeout" />, and
+/// <see cref="AggregateWalk.FromTheStartLimit" />. Every call runs under <see cref="MartenOptions.QueryTimeout" />, and
 /// a fold that runs past it is a value on the page.
 /// </para>
 /// <para>
@@ -621,7 +621,7 @@ internal sealed partial class EventDataService
             $"{what} took longer than the studio's query timeout "
             + $"({options.Value.QueryTimeout.TotalSeconds.ToString("N0", CultureInfo.InvariantCulture)} s), so it was stopped. "
             + "Each window folds every event before it; a stream this long, or a projection this slow, needs a longer "
-            + "MartenStudioOptions.QueryTimeout.",
+            + "MartenOptions.QueryTimeout.",
             null,
             true);
 

@@ -37,7 +37,7 @@ public class PostgresStudioEndpointsTests
 
     private static WebApplication CreateApp(
         Action<DataStudioOptions>? configureShell = null,
-        Action<PostgresStudioOptions>? configureStudio = null,
+        Action<PostgresOptions>? configureStudio = null,
         Action<WebApplicationBuilder>? configureBuilder = null)
     {
         WebApplicationBuilder builder = WebApplication.CreateBuilder();
@@ -777,7 +777,7 @@ public class PostgresStudioEndpointsTests
         await app.StopAsync(Token);
 
         RouteEndpoints(app).Should().BeEmpty("nothing is mapped until the host maps it");
-        configured.Should().Be(0, "nothing built PostgresStudioOptions for a host that never mapped the studio");
+        configured.Should().Be(0, "nothing built PostgresOptions for a host that never mapped the studio");
         resolved.Should().Be(0, "nothing resolved the application's NpgsqlDataSource for a studio nobody can open");
         logs.Entries.Should().NotBeEmpty("the capture is the host's own logger, and the host logged its start through it");
         logs.Entries.Should().NotContain(static x => x.Level >= LogLevel.Warning);

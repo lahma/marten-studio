@@ -5,17 +5,17 @@ using DataStudio.Postgres.Services;
 namespace DataStudio.Marten.Services;
 
 /// <summary>
-/// Validates <see cref="MartenStudioOptions.ProjectionThresholds" />: both numbers greater than zero, and the critical threshold
+/// Validates <see cref="MartenOptions.ProjectionThresholds" />: both numbers greater than zero, and the critical threshold
 /// at least the warning threshold. A type of its own, not a lambda, because a message names the projection it is about. A name
 /// that no projection of a store has is not a failure here - projections are registered per environment - and the Projections
 /// page says so.
 /// </summary>
-internal sealed class ProjectionThresholdsValidator : IValidateOptions<MartenStudioOptions>
+internal sealed class ProjectionThresholdsValidator : IValidateOptions<MartenOptions>
 {
-    private const string Prefix = "MartenStudioOptions.ProjectionThresholds[";
+    private const string Prefix = "MartenOptions.ProjectionThresholds[";
 
     /// <inheritdoc />
-    public ValidateOptionsResult Validate(string? name, MartenStudioOptions options)
+    public ValidateOptionsResult Validate(string? name, MartenOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
 

@@ -26,12 +26,12 @@ internal sealed class EventTypeListingCache
     internal static readonly TimeSpan TimeToLive = TimeSpan.FromSeconds(30);
 
     private readonly ColumnCatalog catalog;
-    private readonly IOptions<MartenStudioOptions> options;
+    private readonly IOptions<MartenOptions> options;
     private readonly StudioSnapshotCache cache;
     private readonly TimeProvider clock;
     private readonly Func<ResolvedScope, CancellationToken, Task<EventTypeList>>? read;
 
-    public EventTypeListingCache(ColumnCatalog catalog, IOptions<MartenStudioOptions> options)
+    public EventTypeListingCache(ColumnCatalog catalog, IOptions<MartenOptions> options)
         : this(catalog, options, TimeProvider.System)
     {
     }
@@ -42,7 +42,7 @@ internal sealed class EventTypeListingCache
     /// <param name="read">The shared read, for a test that has no database; the group-by itself otherwise.</param>
     internal EventTypeListingCache(
         ColumnCatalog catalog,
-        IOptions<MartenStudioOptions> options,
+        IOptions<MartenOptions> options,
         TimeProvider timeProvider,
         Func<ResolvedScope, CancellationToken, Task<EventTypeList>>? read = null)
     {

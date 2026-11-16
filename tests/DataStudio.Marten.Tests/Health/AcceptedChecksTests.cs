@@ -36,15 +36,15 @@ public class AcceptedChecksTests
 
     private static readonly Type[] Checks = [typeof(ScriptedAcceptableCheck), typeof(ScriptedAcceptableActivityCheck), typeof(ScriptedConfigurationCheck)];
 
-    private static MartenStudioOptions Resolve(Action<MartenStudioOptions> configure)
+    private static MartenOptions Resolve(Action<MartenOptions> configure)
     {
         ServiceCollection services = new();
         services.AddDataStudio().AddMarten(configure);
         using ServiceProvider provider = services.BuildServiceProvider();
-        return provider.GetRequiredService<IOptions<MartenStudioOptions>>().Value;
+        return provider.GetRequiredService<IOptions<MartenOptions>>().Value;
     }
 
-    private static HealthHarness Accepting(Action<MartenStudioOptions>? more = null, bool policies = false) =>
+    private static HealthHarness Accepting(Action<MartenOptions>? more = null, bool policies = false) =>
         HealthHarness.Create(
             Checks,
             studio: options =>
@@ -59,10 +59,10 @@ public class AcceptedChecksTests
     [Fact]
     public void AcceptedChecks_is_empty_case_insensitive_and_takes_any_check_of_this_studio()
     {
-        new MartenStudioOptions().AcceptedChecks.Should().NotBeNull().And.BeEmpty();
+        new MartenOptions().AcceptedChecks.Should().NotBeNull().And.BeEmpty();
 
         // D01 is Marten Studio's own check and K05 the shared engine's: both are in this studio's registry.
-        MartenStudioOptions options = Resolve(static x =>
+        MartenOptions options = Resolve(static x =>
         {
             x.AcceptedChecks["d01"] = "the daemon is not run by this process";
             x.AcceptedChecks["K05"] = "managed roles";
@@ -83,7 +83,7 @@ public class AcceptedChecksTests
         OptionsValidationException refusal = resolve.Should().Throw<OptionsValidationException>().Which;
 
         refusal.Failures.Should().ContainSingle().Which.Should()
-            .Be("MartenStudioOptions.AcceptedChecks key '" + key + "' is not a health check code of this studio");
+            .Be("MartenOptions.AcceptedChecks key '" + key + "' is not a health check code of this studio");
     }
 
     [Theory]
@@ -91,7 +91,7 @@ public class AcceptedChecksTests
     [InlineData("k10")]
     public void An_entry_for_a_retired_check_is_accepted_and_ignored_so_a_host_that_accepted_it_still_starts(string key)
     {
-        MartenStudioOptions options = Resolve(x =>
+        MartenOptions options = Resolve(x =>
         {
             x.AcceptedChecks[key] = "the schema is named with a hyphen on purpose";
             x.AcceptedChecks["K05"] = "managed roles";
@@ -113,11 +113,11 @@ public class AcceptedChecksTests
         });
         using ServiceProvider provider = services.BuildServiceProvider();
 
-        _ = provider.GetRequiredService<IOptions<MartenStudioOptions>>().Value;
-        _ = provider.GetRequiredService<IOptionsMonitor<MartenStudioOptions>>().CurrentValue;
+        _ = provider.GetRequiredService<IOptions<MartenOptions>>().Value;
+        _ = provider.GetRequiredService<IOptionsMonitor<MartenOptions>>().CurrentValue;
         using (IServiceScope scope = provider.CreateScope())
         {
-            _ = scope.ServiceProvider.GetRequiredService<IOptionsSnapshot<MartenStudioOptions>>().Value;
+            _ = scope.ServiceProvider.GetRequiredService<IOptionsSnapshot<MartenOptions>>().Value;
         }
 
         CapturedLogEntry line = captured.Entries.Where(static x => x.EventId.Id == 9490).Should().ContainSingle().Subject;
@@ -133,7 +133,7 @@ public class AcceptedChecksTests
         services.AddSingleton(captured.CreateFactory());
         services.AddDataStudio().AddMarten(static x => x.AcceptedChecks["K05"] = "managed roles");
         using ServiceProvider provider = services.BuildServiceProvider();
-        _ = provider.GetRequiredService<IOptions<MartenStudioOptions>>().Value;
+        _ = provider.GetRequiredService<IOptions<MartenOptions>>().Value;
 
         captured.Entries.Should().NotContain(static x => x.EventId.Id == 9490);
 
@@ -144,7 +144,7 @@ public class AcceptedChecksTests
         });
 
         both.Should().Throw<OptionsValidationException>().Which.Failures.Should().ContainSingle()
-            .Which.Should().Be("MartenStudioOptions.AcceptedChecks key 'X99' is not a health check code of this studio");
+            .Which.Should().Be("MartenOptions.AcceptedChecks key 'X99' is not a health check code of this studio");
     }
 
     [Theory]
@@ -155,7 +155,7 @@ public class AcceptedChecksTests
         Action resolve = () => Resolve(x => x.AcceptedChecks["K05"] = reason);
 
         resolve.Should().Throw<OptionsValidationException>().Which.Failures.Should().ContainSingle()
-            .Which.Should().StartWith("MartenStudioOptions.AcceptedChecks['K05'] needs a reason");
+            .Which.Should().StartWith("MartenOptions.AcceptedChecks['K05'] needs a reason");
     }
 
     [Fact]
@@ -166,7 +166,7 @@ public class AcceptedChecksTests
         Action resolve = () => Resolve(static x => x.AcceptedChecks["K05"] = new string('r', 501));
 
         resolve.Should().Throw<OptionsValidationException>().Which.Failures.Should().ContainSingle()
-            .Which.Should().Be("MartenStudioOptions.AcceptedChecks['K05'] has a reason longer than 500 characters");
+            .Which.Should().Be("MartenOptions.AcceptedChecks['K05'] has a reason longer than 500 characters");
     }
 
     // ---- The sweep -----------------------------------------------------------------------------------------------

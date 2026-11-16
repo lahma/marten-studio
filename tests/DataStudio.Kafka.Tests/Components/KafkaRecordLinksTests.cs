@@ -20,7 +20,7 @@ public class KafkaRecordLinksTests
 
     private static CancellationToken Ct => Xunit.TestContext.Current.CancellationToken;
 
-    private static KafkaSearchRig Rig(FakeRouteLinks? routes, Action<KafkaStudioOptions>? studio = null, Action<KafkaEngineOptions>? engine = null) =>
+    private static KafkaSearchRig Rig(FakeRouteLinks? routes, Action<KafkaOptions>? studio = null, Action<KafkaEngineOptions>? engine = null) =>
         new(
             engine: engine ?? (static o => o.Topic("orders", static t => t.Correlation(static c =>
             {

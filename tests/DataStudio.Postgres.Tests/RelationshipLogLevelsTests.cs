@@ -76,7 +76,7 @@ public class RelationshipLogLevelsTests
         ServiceCollection services = new();
         services.AddLogging(builder => builder.SetMinimumLevel(LogLevel.Trace).AddProvider(logs));
         services.AddAuthorization(static options => options.AddPolicy(SourcePolicy, static policy => policy.RequireAssertion(
-            static context => context.Resource is PostgresStudioResource { SourceName: not RefusedSource })));
+            static context => context.Resource is PostgresResource { SourceName: not RefusedSource })));
         services.AddSingleton(_ => NpgsqlDataSource.Create("Host=postgres-studio-relationship-log.invalid;Database=none;Username=none;Password=none"));
         services.AddDataStudio().AddPostgres(static options =>
         {

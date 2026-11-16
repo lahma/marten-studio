@@ -135,7 +135,7 @@ public class ConnectionServerLiveTests(ConnectionsServerFixture server) : IClass
     public async Task An_orphaned_prepared_transaction_is_critical_five_minutes_on_with_its_gid_behind_the_gate()
     {
         string database = await ConnectionsLiveHost.CreateDatabaseAsync(server.ConnectionString, "health_c07_fires");
-        await using ConnectionsLiveHost host = await ConnectionsLiveHost.CreateAsync(database, studio: static options => options.Capabilities = MartenStudioCapabilities.All());
+        await using ConnectionsLiveHost host = await ConnectionsLiveHost.CreateAsync(database, studio: static options => options.Capabilities = MartenCapabilities.All());
 
         const string Gid = "h3-orphan-c07";
 

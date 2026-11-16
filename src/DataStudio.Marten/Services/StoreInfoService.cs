@@ -108,7 +108,7 @@ internal interface IStoreInfoService
 /// </remarks>
 internal sealed class StoreInfoService : IStoreInfoService
 {
-    private readonly IOptions<MartenStudioOptions> options;
+    private readonly IOptions<MartenOptions> options;
     private readonly MartenStoreRegistry registry;
     private readonly StudioAuthorization authorization;
     private readonly IServiceProvider provider;
@@ -117,7 +117,7 @@ internal sealed class StoreInfoService : IStoreInfoService
     private readonly Dictionary<string, string?> postgresVersions = new(StringComparer.OrdinalIgnoreCase);
 
     public StoreInfoService(
-        IOptions<MartenStudioOptions> options,
+        IOptions<MartenOptions> options,
         MartenStoreRegistry registry,
         StudioAuthorization authorization,
         IServiceProvider provider,

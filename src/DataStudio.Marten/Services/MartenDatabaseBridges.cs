@@ -26,17 +26,6 @@ namespace DataStudio.Marten;
 /// </remarks>
 internal static class MartenDatabaseBridges
 {
-    extension(DatabaseAccess)
-    {
-        /// <summary>
-        /// The policy a store-policy refusal names in event 9203, from MartenStudio's options
-        /// (<see cref="DatabaseAccess.StorePolicyName(DataStudio.Postgres.Services.Settings.IStudioSettings)" />). Caller: <c>SchemaDataService</c>.
-        /// </summary>
-        /// <param name="options">MartenStudio's options.</param>
-        internal static string StorePolicyName(MartenStudioOptions options) =>
-            DatabaseAccess.StorePolicyName(MartenStudioSettings.Of(options));
-    }
-
     extension(DatabasePoolSettings)
     {
         /// <summary>
@@ -51,34 +40,34 @@ internal static class MartenDatabaseBridges
     extension(DatabaseLinks)
     {
         /// <summary>
-        /// One relation's detail page, with MartenStudio's options and descriptor. Callers: <c>Schema.razor</c> and
+        /// One relation's detail page, with the registered settings and MartenStudio's descriptor. Callers: <c>Schema.razor</c> and
         /// <c>ReferencedBy.razor</c>.
         /// </summary>
-        /// <param name="options">MartenStudio's options.</param>
+        /// <param name="settings">The registered studio settings.</param>
         /// <param name="scope">The scope to carry.</param>
         /// <param name="schema">The relation's schema.</param>
         /// <param name="name">The relation's name.</param>
         /// <param name="tab">The tab to open, or <see langword="null" />.</param>
         /// <param name="extra">Further parameters to carry.</param>
         public static string ToObject(
-            MartenStudioOptions options,
+            DataStudio.Postgres.Services.Settings.IStudioSettings settings,
             StudioScope? scope,
             string schema,
             string name,
             DatabaseObjectTab? tab = null,
             IReadOnlyList<KeyValuePair<string, string?>>? extra = null) =>
-            DatabaseLinks.ToObject(MartenStudioSettings.Of(options), MartenStudioDescriptor.Instance, scope, schema, name, tab, extra);
+            DatabaseLinks.ToObject(settings, MartenStudioDescriptor.Instance, scope, schema, name, tab, extra);
 
         /// <summary>
-        /// A relation's Rows tab, with MartenStudio's options and descriptor. Caller: <c>ReferencedBy.razor</c>.
+        /// A relation's Rows tab, with the registered settings and MartenStudio's descriptor. Caller: <c>ReferencedBy.razor</c>.
         /// </summary>
-        /// <param name="options">MartenStudio's options.</param>
+        /// <param name="settings">The registered studio settings.</param>
         /// <param name="scope">The scope to carry.</param>
         /// <param name="schema">The relation's schema.</param>
         /// <param name="name">The relation's name.</param>
         /// <param name="filter">A row filter, or <see langword="null" />.</param>
-        public static string ToRows(MartenStudioOptions options, StudioScope? scope, string schema, string name, string? filter = null) =>
-            DatabaseLinks.ToRows(MartenStudioSettings.Of(options), MartenStudioDescriptor.Instance, scope, schema, name, filter);
+        public static string ToRows(DataStudio.Postgres.Services.Settings.IStudioSettings settings, StudioScope? scope, string schema, string name, string? filter = null) =>
+            DatabaseLinks.ToRows(settings, MartenStudioDescriptor.Instance, scope, schema, name, filter);
     }
 
     extension(SafeReturnLink)

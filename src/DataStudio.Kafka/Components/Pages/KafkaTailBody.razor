@@ -40,7 +40,7 @@
 
     @if (!Capabilities.IsEnabled(KafkaCapability.LiveTail))
     {
-        <KafkaCapabilityDisabled Capability="@nameof(KafkaStudioCapabilities.LiveTail)" Action="@KafkaStudioText.LiveTailAction" />
+        <KafkaCapabilityDisabled Capability="@nameof(KafkaCapabilities.LiveTail)" Action="@KafkaStudioText.LiveTailAction" />
     }
     else if (State.ActiveCluster is { } profiled && Tail.ForbiddenByProfile(profiled))
     {
@@ -48,7 +48,7 @@
     }
     else if (!Capabilities.IsEnabled(KafkaCapability.SearchRecords))
     {
-        <KafkaCapabilityDisabled Capability="@nameof(KafkaStudioCapabilities.SearchRecords)" Action="Searching records" />
+        <KafkaCapabilityDisabled Capability="@nameof(KafkaCapabilities.SearchRecords)" Action="Searching records" />
     }
     else if (error is not null)
     {

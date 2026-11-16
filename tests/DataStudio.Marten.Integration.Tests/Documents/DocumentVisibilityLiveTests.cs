@@ -28,7 +28,7 @@ public class DocumentVisibilityLiveTests(DocumentVisibilityLiveTests.Fixture fix
     public sealed class Fixture(PostgresFixture postgres) : MartenClassFixture(postgres)
     {
         /// <inheritdoc />
-        protected override void ConfigureStudio(MartenStudioOptions options) =>
+        protected override void ConfigureStudio(MartenOptions options) =>
             options.IsDocumentTypeVisible = static type => type != typeof(Customer);
     }
 

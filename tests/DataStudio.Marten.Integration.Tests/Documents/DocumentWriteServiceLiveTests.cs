@@ -490,7 +490,7 @@ public class DocumentWriteServiceLiveTests(PostgresFixture postgres) : DocumentW
     public async Task A_capability_that_is_off_refuses_the_write_and_changes_nothing()
     {
         Users.SignIn("viewer");
-        StudioOptions.Capabilities = new MartenStudioCapabilities();
+        StudioOptions.Capabilities = new MartenCapabilities();
 
         try
         {
@@ -520,7 +520,7 @@ public class DocumentWriteServiceLiveTests(PostgresFixture postgres) : DocumentW
         }
         finally
         {
-            StudioOptions.Capabilities = MartenStudioCapabilities.All();
+            StudioOptions.Capabilities = MartenCapabilities.All();
         }
     }
 

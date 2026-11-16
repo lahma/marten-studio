@@ -64,7 +64,7 @@ internal sealed record LinqMember(MemberInfo Member, Type MemberType, LinqTypeKi
 /// Dictionaries, collections of collections, delegates, pointers, open generics and <see cref="object" />.
 /// </description></item>
 /// <item><description>
-/// Any document type the host hides with <see cref="MartenStudioOptions.IsDocumentTypeVisible" />: a member whose
+/// Any document type the host hides with <see cref="MartenOptions.IsDocumentTypeVisible" />: a member whose
 /// type, or whose element type, is one of them is not in the graph, so a predicate cannot reach a hidden type
 /// through a navigation either. (Marten's predicates cannot leave the document's own row anyway - there is no
 /// join a predicate can express - but the graph does not rely on that.)
@@ -72,7 +72,7 @@ internal sealed record LinqMember(MemberInfo Member, Type MemberType, LinqTypeKi
 /// </list>
 /// <para>
 /// The structure is reflection over types that do not change while the process runs, so it is computed once per
-/// document type. The hidden set is not: <see cref="MartenStudioOptions.IsDocumentTypeVisible" /> is the host's
+/// document type. The hidden set is not: <see cref="MartenOptions.IsDocumentTypeVisible" /> is the host's
 /// own predicate, and it is asked again for every request.
 /// </para>
 /// </remarks>
@@ -137,7 +137,7 @@ internal sealed class LinqDocumentGraph
     /// </summary>
     /// <param name="root">The document type - a root mapping or a subclass of one.</param>
     /// <param name="hiddenDocumentTypes">
-    /// Every document type the store knows that <see cref="MartenStudioOptions.IsDocumentTypeVisible" /> hides,
+    /// Every document type the store knows that <see cref="MartenOptions.IsDocumentTypeVisible" /> hides,
     /// subclasses included.
     /// </param>
     public static LinqDocumentGraph For(Type root, IReadOnlySet<Type> hiddenDocumentTypes)

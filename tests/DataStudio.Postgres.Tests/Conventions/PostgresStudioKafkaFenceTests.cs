@@ -53,7 +53,7 @@ public class PostgresStudioKafkaFenceTests
     [Fact]
     public void The_built_assemblies_reference_no_Kafka_client_no_Wolverine_and_no_KStudio()
     {
-        foreach (System.Reflection.Assembly assembly in new[] { typeof(PostgresStudioOptions).Assembly, typeof(PostgresDiagnosticsOptions).Assembly })
+        foreach (System.Reflection.Assembly assembly in new[] { typeof(PostgresOptions).Assembly, typeof(PostgresDiagnosticsOptions).Assembly })
         {
             string[] references = [.. assembly.GetReferencedAssemblies().Select(static x => x.Name!)];
 

@@ -239,7 +239,7 @@ public class DaemonTopologyTests
             options.Projections.Add(new SoloProjection(), ProjectionLifecycle.Async);
         });
         services.MartenDaemonModeIsSolo();
-        services.AddDataStudio().AddMarten(static options => options.Capabilities = MartenStudioCapabilities.All());
+        services.AddDataStudio().AddMarten(static options => options.Capabilities = MartenCapabilities.All());
         services.AddScoped<AuthenticationStateProvider>(_ => users);
 
         await using ServiceProvider provider = services.BuildServiceProvider();

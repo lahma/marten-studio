@@ -23,7 +23,7 @@ public class KafkaExportServiceTests
         bool payloads = false,
         bool searchOn = true,
         KafkaProfile? profile = null,
-        Action<KafkaStudioOptions>? studio = null,
+        Action<KafkaOptions>? studio = null,
         Action<KafkaEngineOptions>? engine = null) =>
         new(
             engine,
@@ -169,7 +169,7 @@ public class KafkaExportServiceTests
         outcome.LeftOut.Should().BeGreaterThan(0);
         (outcome.Written + outcome.LeftOut).Should().Be(20);
         outcome.Text.Should().Be(KafkaStudioText.ExportLimited(outcome.Written, 20, OneMiB))
-            .And.NotContain("KafkaStudioOptions", "an option's name is on Cluster settings only")
+            .And.NotContain("KafkaOptions", "an option's name is on Cluster settings only")
             .And.Contain("size limit for an export");
         capture.Bytes.Length.Should().BeLessThanOrEqualTo((int) OneMiB);
         Encoding.UTF8.GetString(capture.Bytes).Split('\n', StringSplitOptions.RemoveEmptyEntries).Should().HaveCount(outcome.Written,"a file never holds a cut row");

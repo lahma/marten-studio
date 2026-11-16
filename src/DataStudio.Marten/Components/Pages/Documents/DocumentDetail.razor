@@ -21,7 +21,7 @@
 @inject StudioAuthorization Authorization
 @inject ToastService Toasts
 @inject NavigationManager Navigation
-@inject IOptions<MartenStudioOptions> Options
+@inject IOptions<MartenOptions> Options
 @inject IStudioSettings StudioSettings
 @inject IJSRuntime JsRuntime
 
@@ -41,7 +41,7 @@
 
 <div class="ms-page ms-doc-detail-page">
     <nav class="ms-breadcrumb" aria-label="Breadcrumb">
-        <a href="@DocumentLinks.ToIndex(Options.Value, State.ActiveScope)">Documents</a>
+        <a href="@DocumentLinks.ToIndex(StudioSettings, State.ActiveScope)">Documents</a>
         <span aria-hidden="true">/</span>
         <a href="@BackHref">@Alias</a>
         <span aria-hidden="true">/</span>
@@ -76,7 +76,7 @@
 
                     @if (streamExists)
                     {
-                        <a class="ms-btn ms-btn-sm" href="@DocumentLinks.ToStream(Options.Value, State.ActiveScope, detail.Id)" title="An event stream with this id exists">View stream</a>
+                        <a class="ms-btn ms-btn-sm" href="@DocumentLinks.ToStream(StudioSettings, State.ActiveScope, detail.Id)" title="An event stream with this id exists">View stream</a>
                     }
 
                     @* D-CORR 8.2: a module's search over this document, when one is registered and knows a reference to it. *@
@@ -98,12 +98,12 @@
                        the aria-label is the accessible name. *@
                     <span class="ms-doc-detail-nav">
                         <a class="ms-btn ms-btn-sm ms-btn-icon @(previousId is null ? "ms-btn-disabled" : null)"
-                           href="@(previousId is null ? "#" : DocumentLinks.ToDocument(Options.Value, State.ActiveScope, Alias, previousId, SafeFrom))"
+                           href="@(previousId is null ? "#" : DocumentLinks.ToDocument(StudioSettings, State.ActiveScope, Alias, previousId, SafeFrom))"
                            aria-disabled="@(previousId is null ? "true" : "false")"
                            aria-label="Previous document"
                            title="The previous document on the list you came from">@ChevronLeft</a>
                         <a class="ms-btn ms-btn-sm ms-btn-icon @(nextId is null ? "ms-btn-disabled" : null)"
-                           href="@(nextId is null ? "#" : DocumentLinks.ToDocument(Options.Value, State.ActiveScope, Alias, nextId, SafeFrom))"
+                           href="@(nextId is null ? "#" : DocumentLinks.ToDocument(StudioSettings, State.ActiveScope, Alias, nextId, SafeFrom))"
                            aria-disabled="@(nextId is null ? "true" : "false")"
                            aria-label="Next document"
                            title="The next document on the list you came from">@ChevronRight</a>
@@ -214,7 +214,7 @@
     private string? editRefusal;
     private WritePreview? editProbe;
 
-    // What MartenStudioOptions.WriteAuthorizationPolicy said about *this* visitor and the scope on
+    // What MartenOptions.WriteAuthorizationPolicy said about *this* visitor and the scope on
     // screen, evaluated once per load beside the document read. They start true because a host that
     // configured no write policy is the overwhelmingly common case and StudioAuthorization answers true
     // for it without asking anything.
@@ -400,7 +400,7 @@
                                     <CollectionChip Alias="@probe.Alias" Hue="@probe.Hue" Small="true" />
                                     @if (probe.Found)
                                     {
-                                        <a class="ms-doc-id" href="@DocumentLinks.ToDocument(Options.Value, State.ActiveScope, probe.Alias, Id!)">found</a>
+                                        <a class="ms-doc-id" href="@DocumentLinks.ToDocument(StudioSettings, State.ActiveScope, probe.Alias, Id!)">found</a>
                                     }
                                     else
                                     {
@@ -434,23 +434,23 @@
     private string? SafeFrom => SafeReturnLink.Sanitize(From, StudioSettings);
 
     private string BackHref =>
-        SafeFrom ?? DocumentLinks.ToCollection(Options.Value, State.ActiveScope, Alias);
+        SafeFrom ?? DocumentLinks.ToCollection(StudioSettings, State.ActiveScope, Alias);
 
     /// <summary>Why Edit is off before anyone presses it, when a projection owns the document.</summary>
     private static string? ProjectionRefusal(DocumentModel detail) =>
         detail.WrittenByProjection ? ProjectionOwnedDocuments.EditRefusal(detail.Id) : null;
 
     private string QueryHref(DocumentModel detail) =>
-        DocumentLinks.ToQuery(Options.Value, State.ActiveScope, Alias, $"id = '{detail.Id}'");
+        DocumentLinks.ToQuery(StudioSettings, State.ActiveScope, Alias, $"id = '{detail.Id}'");
 
     private string RelatedHref(string alias, string id) =>
-        DocumentLinks.ToDocument(Options.Value, State.ActiveScope, alias, id);
+        DocumentLinks.ToDocument(StudioSettings, State.ActiveScope, alias, id);
 
     private string ReferencedHref(string alias, string? filter) =>
         filter is null
-            ? DocumentLinks.ToCollection(Options.Value, State.ActiveScope, alias)
+            ? DocumentLinks.ToCollection(StudioSettings, State.ActiveScope, alias)
             : DocumentLinks.ToCollection(
-                Options.Value,
+                StudioSettings,
                 State.ActiveScope,
                 alias,
                 new Dictionary<string, string?>(StringComparer.Ordinal) { ["q"] = filter });

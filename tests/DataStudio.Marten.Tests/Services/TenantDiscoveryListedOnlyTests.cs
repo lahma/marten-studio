@@ -26,7 +26,7 @@ public class TenantDiscoveryListedOnlyTests
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
     private static TenantDiscovery Create() =>
-        new(Options.Create(new MartenStudioOptions()), NullLogger<TenantDiscovery>.Instance, TimeProvider.System);
+        new(Options.Create(new MartenOptions()), NullLogger<TenantDiscovery>.Instance, TimeProvider.System);
 
     [Fact]
     public async Task A_master_table_database_lists_the_tenant_it_was_built_from_without_being_described()

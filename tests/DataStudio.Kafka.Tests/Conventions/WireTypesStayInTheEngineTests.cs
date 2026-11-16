@@ -35,7 +35,7 @@ public class WireTypesStayInTheEngineTests
     {
         string[] offenders =
         [
-            .. TypeReferences(typeof(KafkaStudioOptions).Assembly.Location)
+            .. TypeReferences(typeof(KafkaOptions).Assembly.Location)
                 .Where(static x => x == "DataStudio.Kafka.Core.Decoding.RecordEvaluationContext"
                     || (x.StartsWith("DataStudio.Kafka.Core.Wire.", StringComparison.Ordinal) && !IsCatalogValueType(x)))
                 .Distinct()
@@ -50,7 +50,7 @@ public class WireTypesStayInTheEngineTests
     {
         // Anti-vacuity: the test assembly builds wire records on purpose (the fake broker), and KStudio uses a catalog value type.
         TypeReferences(typeof(WireTypesStayInTheEngineTests).Assembly.Location).Should().Contain("DataStudio.Kafka.Core.Wire.WireRecord");
-        TypeReferences(typeof(KafkaStudioOptions).Assembly.Location).Should().Contain(static x => x.StartsWith("DataStudio.Kafka.Core.Wire.WireError", StringComparison.Ordinal));
+        TypeReferences(typeof(KafkaOptions).Assembly.Location).Should().Contain(static x => x.StartsWith("DataStudio.Kafka.Core.Wire.WireError", StringComparison.Ordinal));
     }
 
     private static bool IsCatalogValueType(string name) =>

@@ -90,11 +90,11 @@ public sealed class CapacityReaderTests : IDisposable
     private CapacityReader ReaderOver(ServiceCollection services, TimeSpan? timeout = null)
     {
         ServiceProvider provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
-        PostgresStudioOptions options = new() { HealthInterval = TimeSpan.FromSeconds(60) };
+        PostgresOptions options = new() { HealthInterval = TimeSpan.FromSeconds(60) };
 
         return new CapacityReader(
             provider,
-            new PostgresStudioSettings(Options.Create(options)),
+            PostgresStudioSettings.Of(Options.Create(options)),
             new StudioLogThrottle(clock),
             logs.CreateFactory().CreateLogger<CapacityReader>(),
             clock)

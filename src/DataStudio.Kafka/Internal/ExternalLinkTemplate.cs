@@ -59,7 +59,7 @@ internal static partial class ExternalLinkTemplate
 
         if (links.Count > MaxLinks)
         {
-            problems.Add(string.Create(CultureInfo.InvariantCulture, $"KafkaStudioOptions.ExternalLink was called {links.Count} times; at most {MaxLinks} links are allowed."));
+            problems.Add(string.Create(CultureInfo.InvariantCulture, $"KafkaOptions.ExternalLink was called {links.Count} times; at most {MaxLinks} links are allowed."));
         }
 
         HashSet<string> labels = new(StringComparer.OrdinalIgnoreCase);
@@ -243,10 +243,10 @@ internal static partial class ExternalLinkTemplate
 }
 
 /// <summary>Refuses a host whose <c>ExternalLink</c> calls break a rule of D44, at the first read of the options (the startup guard reads them).</summary>
-internal sealed class KafkaExternalLinkOptionsValidator : IValidateOptions<KafkaStudioOptions>
+internal sealed class KafkaExternalLinkOptionsValidator : IValidateOptions<KafkaOptions>
 {
     /// <inheritdoc />
-    public ValidateOptionsResult Validate(string? name, KafkaStudioOptions options)
+    public ValidateOptionsResult Validate(string? name, KafkaOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
 

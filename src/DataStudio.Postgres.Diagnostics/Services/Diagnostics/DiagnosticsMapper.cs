@@ -180,7 +180,7 @@ internal static class DiagnosticsMapper
             DocsUrl = info.DocsUrl,
             StudioPath = HealthLinks.Relative(sourceParameter, HealthLinks.Route, scope) + "#" + HealthReportFinding.AnchorFor(finding),
             StudioLinks = finding.Link is { } link
-                ? [new PostgresStudioLink { Label = link.Label, Path = HealthLinks.Relative(sourceParameter, link.Route, scope, link.Query) }]
+                ? [new PostgresPageLink { Label = link.Label, Path = HealthLinks.Relative(sourceParameter, link.Route, scope, link.Query) }]
                 : [],
             MeasuredAt = finding.MeasuredAt,
             Accepted = finding.Accepted,

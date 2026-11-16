@@ -1,18 +1,18 @@
 namespace DataStudio.Postgres
 {
-    public sealed class PostgresStudioCapabilities
+    public sealed class PostgresCapabilities
     {
-        public PostgresStudioCapabilities() { }
+        public PostgresCapabilities() { }
         public bool BrowseDatabase { get; set; }
         public bool RunSql { get; set; }
         public bool ViewDatabaseActivity { get; set; }
         public bool ViewDefinitions { get; set; }
-        public static DataStudio.Postgres.PostgresStudioCapabilities All() { }
+        public static DataStudio.Postgres.PostgresCapabilities All() { }
     }
-    public sealed class PostgresStudioOptions : DataStudio.Postgres.PostgresDiagnosticsOptions
+    public sealed class PostgresOptions : DataStudio.Postgres.PostgresDiagnosticsOptions
     {
-        public PostgresStudioOptions() { }
-        public DataStudio.Postgres.PostgresStudioCapabilities Capabilities { get; set; }
+        public PostgresOptions() { }
+        public DataStudio.Postgres.PostgresCapabilities Capabilities { get; set; }
         public int DefaultPageSize { get; set; }
         public long ExactCountThreshold { get; set; }
         public int MaxInlineValueBytes { get; set; }
@@ -21,12 +21,12 @@ namespace DataStudio.Postgres
         public bool ReadOnly { get; set; }
         public string? SourceAuthorizationPolicy { get; set; }
         public string? WriteAuthorizationPolicy { get; set; }
-        public new DataStudio.Postgres.PostgresStudioOptions AddDataSource(string name, System.Func<System.IServiceProvider, Npgsql.NpgsqlDataSource> resolve) { }
-        public new DataStudio.Postgres.PostgresStudioOptions AddDatabaseSource(string name, System.Func<System.IServiceProvider, DataStudio.Postgres.IPostgresDatabaseSource> resolve) { }
+        public new DataStudio.Postgres.PostgresOptions AddDataSource(string name, System.Func<System.IServiceProvider, Npgsql.NpgsqlDataSource> resolve) { }
+        public new DataStudio.Postgres.PostgresOptions AddDatabaseSource(string name, System.Func<System.IServiceProvider, DataStudio.Postgres.IPostgresDatabaseSource> resolve) { }
     }
-    public sealed record PostgresStudioResource : System.IEquatable<DataStudio.Postgres.PostgresStudioResource>
+    public sealed record PostgresResource : System.IEquatable<DataStudio.Postgres.PostgresResource>
     {
-        public PostgresStudioResource(string SourceName, string DatabaseIdentifier, string? Capability) { }
+        public PostgresResource(string SourceName, string DatabaseIdentifier, string? Capability) { }
         public string? Capability { get; init; }
         public string DatabaseIdentifier { get; init; }
         public string SourceName { get; init; }
@@ -36,6 +36,6 @@ namespace DataStudio
 {
     public static class PostgresDataStudioBuilderExtensions
     {
-        public static DataStudio.DataStudioBuilder AddPostgres(this DataStudio.DataStudioBuilder builder, System.Action<DataStudio.Postgres.PostgresStudioOptions>? configure = null) { }
+        public static DataStudio.DataStudioBuilder AddPostgres(this DataStudio.DataStudioBuilder builder, System.Action<DataStudio.Postgres.PostgresOptions>? configure = null) { }
     }
 }

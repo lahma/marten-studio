@@ -65,7 +65,7 @@ public class SqlConsolePanelTests
 
         var panel = context.Render<SqlConsolePanel>();
 
-        panel.Find(".ms-capability-disabled").TextContent.Should().Contain("MartenStudioOptions.Capabilities.RunSql");
+        panel.Find(".ms-capability-disabled").TextContent.Should().Contain("MartenOptions.Capabilities.RunSql");
         panel.Find(".ms-query-sql-warning").TextContent.Should().Be(SqlConsolePanel.RunSqlWarning);
         panel.FindAll("#ms-query-sql").Should().BeEmpty();
     }

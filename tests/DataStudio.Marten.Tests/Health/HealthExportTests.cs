@@ -67,7 +67,7 @@ public class HealthExportTests
         plain.AddHealthChecks();
 
         ServiceCollection opted = new();
-        opted.AddHealthChecks().AddMartenStudio();
+        opted.AddHealthChecks().AddMartenDiagnostics();
 
         ServiceDescriptor[] added = [.. opted.Skip(plain.Count)];
 
@@ -83,7 +83,7 @@ public class HealthExportTests
     public void The_registration_carries_the_callers_name_failure_status_and_tags()
     {
         ServiceCollection services = new();
-        services.AddHealthChecks().AddMartenStudio(name: "marten", failureStatus: HealthStatus.Degraded, tags: ["marten", "ready"]);
+        services.AddHealthChecks().AddMartenDiagnostics(name: "marten", failureStatus: HealthStatus.Degraded, tags: ["marten", "ready"]);
 
         using ServiceProvider provider = services.BuildServiceProvider();
         HealthCheckRegistration registration = provider.GetRequiredService<IOptions<HealthCheckServiceOptions>>()
@@ -99,7 +99,7 @@ public class HealthExportTests
     public void Unless_told_otherwise_it_is_marten_studio_Unhealthy_and_untagged()
     {
         ServiceCollection services = new();
-        services.AddHealthChecks().AddMartenStudio();
+        services.AddHealthChecks().AddMartenDiagnostics();
 
         using ServiceProvider provider = services.BuildServiceProvider();
         HealthCheckRegistration registration = provider.GetRequiredService<IOptions<HealthCheckServiceOptions>>()
@@ -114,7 +114,7 @@ public class HealthExportTests
     public void Two_registrations_share_one_runner()
     {
         ServiceCollection services = new();
-        services.AddHealthChecks().AddMartenStudio("live").AddMartenStudio("ready", tags: ["ready"]);
+        services.AddHealthChecks().AddMartenDiagnostics("live").AddMartenDiagnostics("ready", tags: ["ready"]);
 
         services.Count(static x => x.ServiceType == typeof(HealthExportRunner)).Should().Be(1);
     }
@@ -122,9 +122,9 @@ public class HealthExportTests
     [Fact]
     public void The_arguments_are_checked()
     {
-        FluentActions.Invoking(static () => MartenStudioHealthChecksBuilderExtensions.AddMartenStudio(null!))
+        FluentActions.Invoking(static () => MartenHealthChecksBuilderExtensions.AddMartenDiagnostics(null!))
             .Should().Throw<ArgumentNullException>();
-        FluentActions.Invoking(static () => new ServiceCollection().AddHealthChecks().AddMartenStudio(" "))
+        FluentActions.Invoking(static () => new ServiceCollection().AddHealthChecks().AddMartenDiagnostics(" "))
             .Should().Throw<ArgumentException>();
     }
 
@@ -197,7 +197,7 @@ public class HealthExportTests
     public async Task The_callers_failure_status_is_what_a_critical_reports()
     {
         await using HealthExportHarness harness = HealthExportHarness.Create(
-            healthChecks: static builder => builder.AddMartenStudio(failureStatus: HealthStatus.Degraded));
+            healthChecks: static builder => builder.AddMartenDiagnostics(failureStatus: HealthStatus.Degraded));
         harness.Script.Finds("C90", HealthSeverity.Critical);
 
         (await harness.ProbeAsync()).Status.Should().Be(HealthStatus.Degraded);
@@ -243,7 +243,7 @@ public class HealthExportTests
         HealthReportEntry entry = await harness.ProbeAsync();
 
         entry.Status.Should().Be(HealthStatus.Degraded);
-        entry.Description.Should().Contain("services.AddMartenStudio()");
+        entry.Description.Should().Contain("services.AddDataStudio().AddMarten()");
     }
 
     /// <summary>
@@ -347,7 +347,7 @@ public class HealthExportTests
     {
         await using HealthExportHarness harness = HealthExportHarness.Create(
             checks: [typeof(ScriptedConfigurationCheck)],
-            healthChecks: static builder => builder.AddMartenStudio("live").AddMartenStudio("ready"));
+            healthChecks: static builder => builder.AddMartenDiagnostics("live").AddMartenDiagnostics("ready"));
 
         AspNetCoreHealthReport[] reports = await Task.WhenAll(Enumerable.Range(0, 3).Select(_ => harness.ProbeAllAsync()));
 
@@ -452,7 +452,7 @@ public class HealthExportTests
     {
         await using HealthExportHarness harness = HealthExportHarness.Create(
             checks: [typeof(ScriptedConfigurationCheck)],
-            healthChecks: static builder => builder.AddMartenStudio(timeout: TimeSpan.FromMilliseconds(200)));
+            healthChecks: static builder => builder.AddMartenDiagnostics(timeout: TimeSpan.FromMilliseconds(200)));
         (TaskCompletionSource entered, TaskCompletionSource release) = Block(harness);
 
         HealthReportEntry timedOut = await harness.ProbeAsync();
@@ -472,7 +472,7 @@ public class HealthExportTests
     public void The_registration_takes_ASP_NET_Cores_usual_timeout()
     {
         ServiceCollection services = new();
-        services.AddHealthChecks().AddMartenStudio("timed", timeout: TimeSpan.FromSeconds(5)).AddMartenStudio("untimed");
+        services.AddHealthChecks().AddMartenDiagnostics("timed", timeout: TimeSpan.FromSeconds(5)).AddMartenDiagnostics("untimed");
 
         using ServiceProvider provider = services.BuildServiceProvider();
         Dictionary<string, HealthCheckRegistration> registrations = provider

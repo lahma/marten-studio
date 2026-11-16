@@ -140,7 +140,7 @@ public class ViewDefinitionsServiceTests
     {
         await using Harness harness = Harness.Create(static options =>
         {
-            options.Capabilities = MartenStudioCapabilities.All();
+            options.Capabilities = MartenCapabilities.All();
             options.ReadOnly = true;
             options.BrowsableSchemas.Add("legacy");
         });
@@ -168,7 +168,7 @@ public class ViewDefinitionsServiceTests
 
         value.Found.Should().BeFalse();
         value.Refusal.Should().Be(DatabaseRefusal.CapabilityOff, "a value is data: BrowseDatabase's alone");
-        value.Reason.Should().Be(StudioText.Marten.BrowseCapabilityDenial).And.Contain("MartenStudioOptions.Capabilities.BrowseDatabase");
+        value.Reason.Should().Be(StudioText.Marten.BrowseCapabilityDenial).And.Contain("MartenOptions.Capabilities.BrowseDatabase");
 
         StudioActionLogEntry entry = harness.Ring.GetLatest().Should().ContainSingle().Which;
         entry.Action.Should().Be(DatabaseObjectService.SequenceValueAction);
@@ -256,7 +256,7 @@ public class ViewDefinitionsServiceTests
 
         public IDatabaseObjectService Objects => scope.ServiceProvider.GetRequiredService<IDatabaseObjectService>();
 
-        public static Harness Create(Action<MartenStudioOptions> configure)
+        public static Harness Create(Action<MartenOptions> configure)
         {
             var users = new TestAuthenticationStateProvider();
             users.SignIn("tester");

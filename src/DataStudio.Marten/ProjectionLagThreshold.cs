@@ -2,7 +2,7 @@ namespace DataStudio.Marten;
 
 /// <summary>
 /// How far behind the event sequence's high-water mark one projection may fall, in events, before Marten Studio colours
-/// it amber and red. Set per projection name in <see cref="MartenStudioOptions.ProjectionThresholds" />.
+/// it amber and red. Set per projection name in <see cref="MartenOptions.ProjectionThresholds" />.
 /// </summary>
 /// <remarks>
 /// <para>

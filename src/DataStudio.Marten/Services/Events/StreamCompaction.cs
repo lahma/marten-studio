@@ -56,7 +56,7 @@ internal enum CompactionUnavailableReason
     EmptyStreamId,
 
     /// <summary>
-    /// The stream's aggregate type is one <c>MartenStudioOptions.IsDocumentTypeVisible</c> hides: compacting
+    /// The stream's aggregate type is one <c>MartenOptions.IsDocumentTypeVisible</c> hides: compacting
     /// it would write that aggregate's state into an event, which the studio does not do for a type it is
     /// not allowed to show.
     /// </summary>
@@ -216,7 +216,7 @@ internal static class CompactionAggregates
     /// <param name="registered">What <see cref="Registered" /> returned.</param>
     /// <param name="streamType">The stream's <c>type</c> column.</param>
     /// <param name="isVisible">
-    /// <c>MartenStudioOptions.IsDocumentTypeVisible</c>: an aggregate it hides is refused as
+    /// <c>MartenOptions.IsDocumentTypeVisible</c>: an aggregate it hides is refused as
     /// <see cref="CompactionUnavailableReason.AggregateHidden" /> - matched first and refused after, so the
     /// refusal is that reason rather than "not registered", and says nothing about which type it is.
     /// </param>

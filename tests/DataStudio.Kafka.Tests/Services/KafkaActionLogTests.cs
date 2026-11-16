@@ -28,10 +28,10 @@ public class KafkaActionLogTests
         StudioActionLogEntry entry = harness.Context.Services.GetRequiredService<StudioActionLogService>().GetLatest().Should().ContainSingle().Which;
         entry.Succeeded.Should().BeFalse();
         entry.Capability.Should().Be("SearchRecords");
-        entry.Message.Should().Contain("KafkaStudioOptions.Capabilities.SearchRecords");
+        entry.Message.Should().Contain("KafkaOptions.Capabilities.SearchRecords");
         entry.Scope.Kind.Should().Be("kafka");
         captured.Entries.Should().ContainSingle().Which.Should().Match<CapturedLogEntry>(
-            static x => x.EventId.Id == 9602 && x.Level == LogLevel.Warning && x.Message.Contains("KafkaStudioOptions.Capabilities.SearchRecords", StringComparison.Ordinal));
+            static x => x.EventId.Id == 9602 && x.Level == LogLevel.Warning && x.Message.Contains("KafkaOptions.Capabilities.SearchRecords", StringComparison.Ordinal));
     }
 
     [Fact]

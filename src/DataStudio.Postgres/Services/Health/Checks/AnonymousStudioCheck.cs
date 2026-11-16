@@ -65,7 +65,7 @@ internal sealed class AnonymousStudioCheck : HealthCheck<AnonymousStudioFacts>
         {
             return HealthVerdict.Quiet(
                 "The studio is served to anyone (AllowAnonymous), with every capability off"
-                + (options.ReadOnly ? " (" + options.OptionName("ReadOnly") + ")" : string.Empty)
+                + (options.ReadOnly ? " (" + options.ReadOnlyOptionName + ")" : string.Empty)
                 + ": it browses and changes nothing.");
         }
 
@@ -95,11 +95,11 @@ internal sealed class AnonymousStudioCheck : HealthCheck<AnonymousStudioFacts>
                   + "the environment is " + HostEnvironmentName.Describe(facts.EnvironmentName) + ".",
             Remedy = new HealthRemedy(
                 "// Ask who the visitor is:\n"
-                + "app." + options.MapMethod + "().RequireAuthorization();\n\n"
+                + "app." + StudioLintFacts.MapMethod + "().RequireAuthorization();\n\n"
                 + "// ...or keep it anonymous, with every capability off:\n"
                 + "options.Capabilities = new " + options.CapabilitiesTypeName + "();",
                 "RequireAuthorization() authorizes the studio's pages and its circuit with the host's default policy; "
-                + options.OptionName("AuthorizationPolicy") + " names another, and authorizes the static assets with them."),
+                + StudioLintFacts.AuthorizationPolicyOptionName + " names another, and authorizes the static assets with them."),
         });
     }
 }

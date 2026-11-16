@@ -23,7 +23,7 @@ public class ShortcutSheetTests
     private static IRenderedComponent<ShortcutSheet> Render(StudioDescriptor descriptor)
     {
         BunitContext context = new();
-        PostgresStudioSettings settings = new(Microsoft.Extensions.Options.Options.Create(new PostgresStudioOptions()));
+        PostgresStudioSettings settings = PostgresStudioSettings.Of(Microsoft.Extensions.Options.Options.Create(new PostgresOptions()));
         context.Services.AddSingleton(StudioModuleComposition.Compose([new DatabaseStudioModule(descriptor, settings, new StudioCapabilityGuard(settings))]));
         return context.Render<ShortcutSheet>();
     }

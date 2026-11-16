@@ -37,9 +37,9 @@ public class HealthAlertsTests
             Scope = scope,
         };
 
-    private static HealthAlerts Alerts(ToastService toasts, Action<MartenStudioOptions>? configure = null, Action<DataStudioOptions>? configureShell = null)
+    private static HealthAlerts Alerts(ToastService toasts, Action<MartenOptions>? configure = null, Action<DataStudioOptions>? configureShell = null)
     {
-        MartenStudioOptions options = new();
+        MartenOptions options = new();
         configure?.Invoke(options);
         DataStudioOptions shell = new();
         configureShell?.Invoke(shell);

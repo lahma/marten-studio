@@ -160,7 +160,7 @@ public class LinqQueryPanelTests
     {
         var linq = new FakeLinqQueryService
         {
-            Status = new LinqModeStatus(LinqAvailability.CapabilityOff, "Set MartenStudioOptions.Capabilities.RunLinqQueries to true.", []),
+            Status = new LinqModeStatus(LinqAvailability.CapabilityOff, "Set MartenOptions.Capabilities.RunLinqQueries to true.", []),
         };
 
         using StudioComponentContext context = CreateContext(linq, runLinq: false);
@@ -295,7 +295,7 @@ public class LinqQueryPanelTests
             [
                 new LinqQueryRow("42", """{"Name":"Ada"}""", "acme"),
                 new LinqQueryRow("42", """{"Name":"Ada"}""", "globex"),
-                new LinqQueryRow("43", null, NotInlined: "Not shown: it is larger than MartenStudioOptions.MaxInlineDocumentBytes."),
+                new LinqQueryRow("43", null, NotInlined: "Not shown: it is larger than MartenOptions.MaxInlineValueBytes."),
             ],
             HasMore: true,
             Offset: 0,
@@ -322,7 +322,7 @@ public class LinqQueryPanelTests
         panel.Find(".ms-query-sql-note").TextContent.Should().Contain(":p0 (Varchar)").And.NotContain("Ada");
         panel.Find(".ms-query-linq-suggestion").TextContent.Should().Contain("Duplicate(x => x.Customer.Name)");
         panel.Find(".ms-query-linq-scans").TextContent.Should().Contain("Seq Scan on mt_doc_order");
-        panel.Find(".ms-query-linq-not-inlined").TextContent.Should().Contain("MaxInlineDocumentBytes");
+        panel.Find(".ms-query-linq-not-inlined").TextContent.Should().Contain("MaxInlineValueBytes");
         panel.FindAll(".ms-query-scope-chip").Select(static x => x.TextContent.Trim()).Should().Contain("all tenants");
         panel.Find(".ms-query-linq-range").TextContent.Should().Contain("more follow");
     }

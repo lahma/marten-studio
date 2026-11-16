@@ -68,7 +68,7 @@ public class TenantDiscoveryInstanceLiveTests(PostgresFixture postgres)
             .Should().ThrowAsync<PostgresException>()
             .Where(static x => x.SqlState == PostgresErrorCodes.UndefinedTable, "the premise: describing reads the master table");
 
-        var discovery = new TenantDiscovery(Options.Create(new MartenStudioOptions()), NullLogger<TenantDiscovery>.Instance);
+        var discovery = new TenantDiscovery(Options.Create(new MartenOptions()), NullLogger<TenantDiscovery>.Instance);
         TenantList tenants = await discovery.DiscoverAsync(MartenStoreRegistry.DefaultStoreKey, store, database, [database], Token);
 
         tenants.Source.Should().Be(TenantListSource.Descriptor, "the instance's own tenant list answered");

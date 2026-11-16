@@ -11,10 +11,10 @@ using DataStudio.Postgres.Services.Settings;
 namespace DataStudio.Kafka.Tests.Registration;
 
 /// <summary>
-/// D34: <c>AddKafkaStudio()</c> adds a module to the registered studio, in either order and twice, and refuses to start without a studio and with a
-/// capability no policy answers - word for word.
+/// D34: <c>AddKafka()</c> adds a module to the shell the host registered with <c>AddDataStudio()</c>, in either order beside a database module and
+/// twice, and the host is refused at start with a capability no policy answers - word for word.
 /// </summary>
-public class AddKafkaStudioTests
+public class AddKafkaTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
@@ -89,7 +89,7 @@ public class AddKafkaStudioTests
     }
 
     [Fact]
-    public void Kafka_before_and_after_AddPostgresStudio_compose_the_same_rail()
+    public void Kafka_before_and_after_AddPostgres_compose_the_same_rail()
     {
         using ServiceProvider before = Build(static services =>
         {
@@ -113,7 +113,7 @@ public class AddKafkaStudioTests
     }
 
     [Fact]
-    public void AddKafkaStudio_twice_registers_one_module()
+    public void AddKafka_twice_registers_one_module()
     {
         ServiceCollection services = new();
         services.AddDataStudio().AddPostgres();
@@ -150,10 +150,10 @@ public class AddKafkaStudioTests
         module.ProductName.Should().Be("KStudio for Apache Kafka®");
         module.CapabilityGroups.Should().ContainSingle().Which.Heading.Should().Be("KStudio for Apache Kafka® reads");
         module.CapabilityGroups.Single().Capabilities.Should().Equal(
-            new StudioModuleCapability("SearchRecords", "KafkaStudioOptions.Capabilities.SearchRecords", Configured: true),
-            new StudioModuleCapability("ReadPayloads", "KafkaStudioOptions.Capabilities.ReadPayloads", Configured: false),
-            new StudioModuleCapability("ExportRecords", "KafkaStudioOptions.Capabilities.ExportRecords", Configured: false),
-            new StudioModuleCapability("LiveTail", "KafkaStudioOptions.Capabilities.LiveTail", Configured: false));
+            new StudioModuleCapability("SearchRecords", "KafkaOptions.Capabilities.SearchRecords", Configured: true),
+            new StudioModuleCapability("ReadPayloads", "KafkaOptions.Capabilities.ReadPayloads", Configured: false),
+            new StudioModuleCapability("ExportRecords", "KafkaOptions.Capabilities.ExportRecords", Configured: false),
+            new StudioModuleCapability("LiveTail", "KafkaOptions.Capabilities.LiveTail", Configured: false));
         module.Navigation.Should().ContainSingle().Which.Items.Select(static x => x.Label).Should().Equal("Topics", "Search", "Live tail", "Cluster settings");
         module.Navigation.Single().Items.Single(static x => x.Label == "Live tail").IsShown.Should().NotBeNull("the entry is drawn only while the capability is on (#74), like Search");
         module.AuditEventIds.Should().Be("9600-9609");

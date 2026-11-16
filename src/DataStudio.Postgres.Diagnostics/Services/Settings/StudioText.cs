@@ -40,10 +40,13 @@ internal sealed class StudioText
     /// <summary>The product's name in a sentence: <c>Marten Studio</c>.</summary>
     public required string ProductName { get; init; }
 
-    /// <summary>The public options type's name: <c>MartenStudioOptions</c>.</summary>
+    /// <summary>The public options type's name: <c>MartenOptions</c>.</summary>
     public required string OptionsTypeName { get; init; }
 
-    /// <summary>The registration method a host calls: <c>AddMartenStudio</c>.</summary>
+    /// <summary>
+    /// The module's call on the shell's builder, as a host writes it after <c>services.AddDataStudio()</c>: <c>AddMarten</c>. The health check's
+    /// own registration is this name and <c>Diagnostics</c>: <c>AddMartenDiagnostics</c>.
+    /// </summary>
     public required string RegistrationMethod { get; init; }
 
     /// <summary>
@@ -56,7 +59,7 @@ internal sealed class StudioText
     /// <summary>A source in a sentence: <c>Marten store</c>.</summary>
     public required string SourceNoun { get; init; }
 
-    /// <summary><paramref name="member" /> as a host's registration spells it: <c>MartenStudioOptions.SqlConsoleRole</c>.</summary>
+    /// <summary><paramref name="member" /> as a host's registration spells it: <c>MartenOptions.SqlConsoleRole</c>.</summary>
     /// <param name="member">The member path below the options type.</param>
     public string OptionName(string member) => OptionsTypeName + "." + member;
 
@@ -541,8 +544,8 @@ internal sealed class StudioText
     {
         Product = StudioProduct.MartenStudio,
         ProductName = "Marten Studio",
-        OptionsTypeName = "MartenStudioOptions",
-        RegistrationMethod = "AddMartenStudio",
+        OptionsTypeName = "MartenOptions",
+        RegistrationMethod = "AddMarten",
         SourceNoun = "Marten store",
         ScopeDeniedEntry = "Not authorized for this store, database or tenant.",
         SourcePossessive = "the store's",
@@ -571,19 +574,19 @@ internal sealed class StudioText
         SessionsWritePolicyDenial = StudioDenialText.SessionsWritePolicyDenial,
 
         StorageStorePolicyDenial =
-            "Your account may not see this database's storage. The store policy (MartenStudioOptions.StoreAuthorizationPolicy) "
+            "Your account may not see this database's storage. The store policy (MartenOptions.StoreAuthorizationPolicy) "
             + "refused this store and database as a whole, with no tenant selected: a table's size belongs to no tenant.",
 
         StatementsCapabilityDenial =
-            "The statements this database runs, their counters and their text, need MartenStudioOptions.Capabilities.ViewDatabaseActivity.",
+            "The statements this database runs, their counters and their text, need MartenOptions.Capabilities.ViewDatabaseActivity.",
         StatementsReadOnlyDenial =
-            "MartenStudioOptions.ReadOnly is true, which turns MartenStudioOptions.Capabilities.ViewDatabaseActivity off with every "
+            "MartenOptions.ReadOnly is true, which turns MartenOptions.Capabilities.ViewDatabaseActivity off with every "
             + "other capability.",
         StatementsStorePolicyDenial =
-            "Your account may not see this database's statements. The store policy (MartenStudioOptions.StoreAuthorizationPolicy) "
+            "Your account may not see this database's statements. The store policy (MartenOptions.StoreAuthorizationPolicy) "
             + "refused this store and database as a whole, with no tenant selected: a statement belongs to no tenant.",
         StatementsWritePolicyDenial =
-            "Your account may not see the statements this database runs. The write policy (MartenStudioOptions.WriteAuthorizationPolicy, "
+            "Your account may not see the statements this database runs. The write policy (MartenOptions.WriteAuthorizationPolicy, "
             + "or StoreAuthorizationPolicy when no write policy is set) refused ViewDatabaseActivity for this store and database as "
             + "a whole, with no tenant selected.",
         StudioCostCovers =
@@ -647,7 +650,7 @@ internal sealed class StudioText
         NoJudgedTable = "No table the studio judges exists yet.",
         UnjudgedOldest =
             " The oldest table in this database is not one the studio judges - in a schema neither the store nor "
-            + "MartenStudioOptions.BrowsableSchemas admits, another registered store's, a document type the studio hides, or "
+            + "MartenOptions.BrowsableSchemas admits, another registered store's, a document type the studio hides, or "
             + "beyond the largest tables a sweep reads - and wraparound protection counts every table in the database, so it "
             + "holds the whole database back as surely as one of these would.",
         MartenTablePartitionParameters = "the Schema screen's Tables tab shows which parameters the partitions differ on",

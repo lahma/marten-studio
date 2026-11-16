@@ -246,7 +246,7 @@ internal sealed class ConjoinedEventsFixture : IAsyncDisposable
 
         services.AddDataStudio().AddMarten(options =>
         {
-            options.Capabilities = MartenStudioCapabilities.All();
+            options.Capabilities = MartenCapabilities.All();
 
             // Named rather than discovered, so the resolution is one round trip and a test that scopes to
             // a tenant is not also testing tenant discovery.

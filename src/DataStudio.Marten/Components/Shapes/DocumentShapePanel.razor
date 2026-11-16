@@ -6,9 +6,10 @@
 @inject IDocumentShapeCheck Check
 @inject StudioState State
 @inject StudioPreferences Preferences
-@inject IOptions<MartenStudioOptions> Options
+@inject IOptions<MartenOptions> Options
 @inject NavigationManager Navigation
 @inject IServiceProvider Services
+@inject IStudioSettings Settings
 
 @*
     Check shapes, for one document collection (D-SHAPE S10). It exists only after a click, so it never runs during prerender, and it
@@ -242,7 +243,7 @@
             scope = scope with { TenantId = tenant };
         }
 
-        return DocumentLinks.ToDocument(Options.Value, scope, Alias, id, Navigation.ToBaseRelativePath(Navigation.Uri));
+        return DocumentLinks.ToDocument(Settings, scope, Alias, id, Navigation.ToBaseRelativePath(Navigation.Uri));
     }
 
     /// <inheritdoc />

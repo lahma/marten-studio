@@ -72,7 +72,7 @@ public class MigrationImpactLiveTests(PostgresFixture postgres)
 
         preview.Impact.Tables.Should().ContainSingle().Which.Sessions.Should().BeNull();
         preview.Impact.Tables.Single().Footprint.Should().NotBeNull("rows and size are not activity");
-        preview.Impact.SessionsNotice.Should().Contain("ViewDatabaseActivity").And.Contain("MartenStudioOptions.Capabilities");
+        preview.Impact.SessionsNotice.Should().Contain("ViewDatabaseActivity").And.Contain("MartenOptions.Capabilities");
 
         drifted.Audit.GetLatest().Should().NotContain(
             static x => x.Action == SchemaDataService.ImpactSessionsAction,

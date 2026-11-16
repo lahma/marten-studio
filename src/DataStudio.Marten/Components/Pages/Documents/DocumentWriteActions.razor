@@ -14,7 +14,7 @@
     CLR type to write it as and no amount of configuration changes that.
 
     There is a fourth level, and it is per person rather than per process: a capability is a property of
-    the application, while `MartenStudioOptions.WriteAuthorizationPolicy` is asked about the visitor. A
+    the application, while `MartenOptions.WriteAuthorizationPolicy` is asked about the visitor. A
     studio with EditDocuments on, mounted for a team where only two people may write, showed everybody a
     live Edit button and told the other forty only after they had pressed it. So the page evaluates the
     write policy for this scope and hands the answer down as `MayEdit` / `MayDelete`, and a refusal
@@ -98,7 +98,7 @@
     public string? EditRefusal { get; set; }
 
     /// <summary>
-    /// Whether <see cref="MartenStudioOptions.WriteAuthorizationPolicy" /> lets <em>this</em> visitor edit
+    /// Whether <see cref="MartenOptions.WriteAuthorizationPolicy" /> lets <em>this</em> visitor edit
     /// documents in the scope on screen.
     /// </summary>
     /// <remarks>

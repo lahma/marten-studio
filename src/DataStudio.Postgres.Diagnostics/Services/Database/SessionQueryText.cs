@@ -19,7 +19,7 @@ internal sealed record SessionStatementText(string? Text, string? Note);
 /// The classifier over every registered store's declarations, or <see langword="null" /> when they could not all be
 /// read.
 /// </param>
-/// <param name="HidesDocumentTypes">Whether <c>MartenStudioOptions.IsDocumentTypeVisible</c> is set at all.</param>
+/// <param name="HidesDocumentTypes">Whether <c>MartenOptions.IsDocumentTypeVisible</c> is set at all.</param>
 /// <param name="RefusedStoreTables">
 /// The document tables of every other registered store whose store policy refuses the visitor
 /// (<c>DatabaseGate.RefusedStoreDocumentTables</c>).

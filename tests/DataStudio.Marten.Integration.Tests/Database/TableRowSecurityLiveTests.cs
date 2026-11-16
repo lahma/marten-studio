@@ -369,7 +369,7 @@ public class TableRowSecurityLiveTests(TableRowSecurityLiveTests.Fixture fixture
     [PostgresFact]
     public async Task A_cell_is_capped_in_bytes_and_a_json_value_is_rendered_once()
     {
-        await using RowsHost host = fixture.Host(static options => options.MaxInlineDocumentBytes = 1000);
+        await using RowsHost host = fixture.Host(static options => options.MaxInlineValueBytes = 1000);
         var key = new Dictionary<string, string> { ["id"] = "1" };
 
         TableCellValue body = await host.RowsAsync(x => x.GetCellAsync(RowsHost.Scope, "legacy", "wide_cells", key, "body", Token));

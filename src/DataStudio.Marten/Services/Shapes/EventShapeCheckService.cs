@@ -55,7 +55,7 @@ internal sealed class EventShapeCheckService : IEventShapeCheck
 {
     private const string Kind = "events";
 
-    private readonly IOptions<MartenStudioOptions> options;
+    private readonly IOptions<MartenOptions> options;
     private readonly StudioScopeResolver resolver;
     private readonly ColumnCatalog columnCatalog;
     private readonly IndexCatalog indexCatalog;
@@ -73,7 +73,7 @@ internal sealed class EventShapeCheckService : IEventShapeCheck
 
     /// <summary>The service a host's container builds.</summary>
     public EventShapeCheckService(
-        IOptions<MartenStudioOptions> options,
+        IOptions<MartenOptions> options,
         StudioScopeResolver resolver,
         ColumnCatalog columnCatalog,
         IndexCatalog indexCatalog,
@@ -85,7 +85,7 @@ internal sealed class EventShapeCheckService : IEventShapeCheck
     }
 
     internal EventShapeCheckService(
-        IOptions<MartenStudioOptions> options,
+        IOptions<MartenOptions> options,
         StudioScopeResolver resolver,
         ColumnCatalog columnCatalog,
         IndexCatalog indexCatalog,

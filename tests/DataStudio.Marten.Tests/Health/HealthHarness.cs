@@ -296,7 +296,7 @@ internal sealed class HealthHarness : IAsyncDisposable
     /// </param>
     public static HealthHarness Create(
         IEnumerable<Type>? checks = null,
-        Action<MartenStudioOptions>? studio = null,
+        Action<MartenOptions>? studio = null,
         Action<StoreOptions>? store = null,
         string? environment = "Development",
         bool policies = false,

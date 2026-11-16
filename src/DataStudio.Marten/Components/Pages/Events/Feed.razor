@@ -14,7 +14,7 @@
 @inject NavigationManager Navigation
 @inject IJSRuntime JsRuntime
 @inject StudioLiveUpdatesFactory LiveFactory
-@inject IOptions<MartenStudioOptions> Options
+@inject IOptions<MartenOptions> Options
 @inject IStudioSettings StudioSettings
 @inject StudioCapabilityGuard Capabilities
 
@@ -822,7 +822,7 @@
 
     private string PageHref(long? after) =>
         EventLinks.To(
-            Options.Value,
+            StudioSettings,
             EventLinks.FeedRoute,
             State.ActiveScope,
             [
@@ -841,7 +841,7 @@
     /// </summary>
     private string LinqHref() =>
         EventLinks.ToLinqQuery(
-            Options.Value,
+            StudioSettings,
             State.ActiveScope,
             EventLinks.FeedPredicate(
                 shape?.StreamIdentity ?? JasperFx.Events.StreamIdentity.AsGuid,
@@ -851,13 +851,13 @@
             ArchivedFlag ? DataStudio.Marten.Services.Query.ArchivedFilter.Include : DataStudio.Marten.Services.Query.ArchivedFilter.Exclude);
 
     private string StreamHref(string streamId) =>
-        EventLinks.ToStream(Options.Value, State.ActiveScope, streamId);
+        EventLinks.ToStream(StudioSettings, State.ActiveScope, streamId);
 
     private string TypeHref(string eventType) =>
-        EventLinks.ToFeedForType(Options.Value, State.ActiveScope, eventType);
+        EventLinks.ToFeedForType(StudioSettings, State.ActiveScope, eventType);
 
     private string? TagHref(string tagType, string value) =>
-        EventLinks.ToFeedForTag(Options.Value, State.ActiveScope, tagType, value);
+        EventLinks.ToFeedForTag(StudioSettings, State.ActiveScope, tagType, value);
 
     /// <summary>A tag filter's verdict, as the filter bar draws it.</summary>
     /// <param name="Level">The colour: <c>green</c>, <c>amber</c> or <c>red</c>.</param>

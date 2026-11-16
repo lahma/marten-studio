@@ -2,7 +2,7 @@ namespace DataStudio.Kafka;
 
 /// <summary>
 /// What KStudio's authorization policies are asked about (AGENTS.md D35). Deliberately unrelated to <c>MartenStoreResource</c> and
-/// <c>PostgresStudioResource</c>: a handler written for one must never be handed another (D30).
+/// <c>PostgresResource</c>: a handler written for one must never be handed another (D30).
 /// </summary>
 /// <param name="Cluster">The cluster entry's key.</param>
 /// <param name="TenantId">The entry's own tenant id, never one from an address or a record; <see langword="null" /> for a cluster with none.</param>

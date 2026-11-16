@@ -45,7 +45,7 @@ public class KafkaFenceTests
     [Fact]
     public void The_built_assembly_references_no_Kafka_client_no_Wolverine_and_no_KStudio()
     {
-        string[] references = [.. typeof(MartenStudioOptions).Assembly.GetReferencedAssemblies().Select(static x => x.Name!)];
+        string[] references = [.. typeof(MartenOptions).Assembly.GetReferencedAssemblies().Select(static x => x.Name!)];
 
         references.Should().Contain("Marten");
         references.Where(IsKafkaFamily).Should().BeEmpty();

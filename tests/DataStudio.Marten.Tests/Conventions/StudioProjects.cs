@@ -52,7 +52,7 @@ internal static class StudioProjects
     public static Assembly DiagnosticsAssembly => typeof(IDiagnosticsSettings).Assembly;
 
     /// <summary>MartenStudio's assembly.</summary>
-    public static Assembly MartenAssembly => typeof(MartenStudioOptions).Assembly;
+    public static Assembly MartenAssembly => typeof(MartenOptions).Assembly;
 
     /// <summary>All four assemblies, the shared studio's first; four distinct ones, or the split did not happen.</summary>
     public static IReadOnlyList<Assembly> Assemblies => [SharedAssembly, DiagnosticsAssembly, MartenAssembly, ShellAssembly];

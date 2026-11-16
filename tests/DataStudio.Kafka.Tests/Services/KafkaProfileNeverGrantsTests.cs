@@ -44,7 +44,7 @@ public class KafkaProfileNeverGrantsTests
 
         for (int mask = 0; mask < 16; mask++)
         {
-            KafkaStudioCapabilities set = new()
+            KafkaCapabilities set = new()
             {
                 SearchRecords = (mask & 1) != 0,
                 ReadPayloads = (mask & 2) != 0,

@@ -88,7 +88,7 @@ public class StudioSourceResolverHostFailureTests
 
     private static StudioSourceResolver Resolver(ThrowingSource source, ILoggerFactory? factory)
     {
-        IStudioSettings settings = PostgresStudioSettings.Of(new PostgresStudioOptions());
+        IStudioSettings settings = PostgresStudioSettings.Of(new PostgresOptions());
         StudioAuthorization authorization = new(settings, PostgresStudioDescriptor.Instance, new TestSourceAuthorizationService(), new TestAuthenticationStateProvider());
         return new StudioSourceResolver(
             new ThrowingProvider(source),

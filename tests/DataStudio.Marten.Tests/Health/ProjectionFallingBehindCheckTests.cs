@@ -113,8 +113,8 @@ public class ProjectionFallingBehindCheckTests
     {
         HealthFinding finding = EvaluateWith(DaemonInProcess.NotHosted, WithOption(500, 3_000), Growing).Findings.Should().ContainSingle().Subject;
 
-        finding.Evidence.Should().Contain(x => x.Label == "Warning threshold" && x.Value == "500 (MartenStudioOptions.ProjectionThresholds)");
-        finding.Evidence.Should().Contain(x => x.Label == "Critical threshold" && x.Value == "3,000, passed (MartenStudioOptions.ProjectionThresholds)");
+        finding.Evidence.Should().Contain(x => x.Label == "Warning threshold" && x.Value == "500 (MartenOptions.ProjectionThresholds)");
+        finding.Evidence.Should().Contain(x => x.Label == "Critical threshold" && x.Value == "3,000, passed (MartenOptions.ProjectionThresholds)");
     }
 
     /// <summary>A projection that has been told 5,000 behind is normal is not falling behind at 3,800 - where the default 1,000 says it is.</summary>
@@ -137,7 +137,7 @@ public class ProjectionFallingBehindCheckTests
                 At(TimeSpan.Zero, 1_200, 5_000, warning: 100))
             .Findings.Single();
 
-        finding.Evidence.Should().Contain(x => x.Label == "Warning threshold" && x.Value == "500 (MartenStudioOptions.ProjectionThresholds)");
+        finding.Evidence.Should().Contain(x => x.Label == "Warning threshold" && x.Value == "500 (MartenOptions.ProjectionThresholds)");
     }
 
     /// <summary>

@@ -124,7 +124,7 @@ internal sealed class ProjectionsFixture : IAsyncDisposable
         PostgresFixture postgres,
         string schema,
         bool withDaemon = true,
-        MartenStudioCapabilities? capabilities = null,
+        MartenCapabilities? capabilities = null,
         Action<StoreOptions>? configureStore = null,
         Action<IServiceCollection>? configureServices = null,
         ILoggerProvider? logs = null,
@@ -175,7 +175,7 @@ internal sealed class ProjectionsFixture : IAsyncDisposable
         builder.Services.AddAuthorization();
         builder.Services.AddSingleton<AuthenticationStateProvider, AnonymousAuthenticationStateProvider>();
 
-        builder.Services.AddDataStudio().AddMarten(options => options.Capabilities = capabilities ?? MartenStudioCapabilities.All());
+        builder.Services.AddDataStudio().AddMarten(options => options.Capabilities = capabilities ?? MartenCapabilities.All());
 
         configureServices?.Invoke(builder.Services);
 
@@ -384,7 +384,7 @@ public abstract class ProjectionsTestBase : IAsyncLifetime
     /// What the host granted. <see langword="null" /> means every capability, which is what the other
     /// classes need; a class about a refusal states something smaller.
     /// </summary>
-    private protected virtual MartenStudioCapabilities? Capabilities => null;
+    private protected virtual MartenCapabilities? Capabilities => null;
 
     /// <summary>What sees this host's log, for a class about what the studio logs.</summary>
     private protected virtual ILoggerProvider? Logs => null;

@@ -352,7 +352,7 @@ public class LongestStreamsActionLiveTests(PostgresFixture postgres)
             string schema,
             bool conjoined = false,
             bool activity = false,
-            Action<MartenStudioOptions>? studio = null,
+            Action<MartenOptions>? studio = null,
             bool createTables = true)
         {
             await postgres.CreateSchemaAsync(schema, Token);

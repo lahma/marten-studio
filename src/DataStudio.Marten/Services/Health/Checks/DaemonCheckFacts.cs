@@ -235,7 +235,7 @@ internal sealed record DaemonCheckConfiguration(
         new Dictionary<string, ProjectionLagThreshold>(StringComparer.Ordinal);
 
     /// <summary>
-    /// <c>MartenStudioOptions.ProjectionThresholds</c> as read at gather time: the host's lag thresholds by projection name,
+    /// <c>MartenOptions.ProjectionThresholds</c> as read at gather time: the host's lag thresholds by projection name,
     /// which win over a progression row's columns for D03's recorded series and D04's judgement (<see cref="LagThresholdResolver" />).
     /// </summary>
     public IReadOnlyDictionary<string, ProjectionLagThreshold> ProjectionThresholds { get; init; } = NoThresholds;

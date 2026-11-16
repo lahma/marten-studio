@@ -25,7 +25,7 @@ public class PostgresStudioDiagnosticsVersionGuardTests
     private const BindingFlags Declared =
         BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly;
 
-    private static readonly Assembly Studio = typeof(PostgresStudioOptions).Assembly;
+    private static readonly Assembly Studio = typeof(PostgresOptions).Assembly;
 
     private static readonly Assembly Engine = typeof(PostgresDiagnosticsOptions).Assembly;
 
@@ -263,7 +263,7 @@ public class PostgresStudioDiagnosticsVersionGuardTests
     private static MethodInfo AddPostgres =>
         typeof(PostgresDataStudioBuilderExtensions).GetMethod(
             nameof(PostgresDataStudioBuilderExtensions.AddPostgres),
-            [typeof(DataStudioBuilder), typeof(Action<PostgresStudioOptions>)])!;
+            [typeof(DataStudioBuilder), typeof(Action<PostgresOptions>)])!;
 
     /// <summary>
     /// A throwaway in-memory assembly carrying <paramref name="informationalVersion" />, so every pair of versions the

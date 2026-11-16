@@ -74,7 +74,7 @@ public class DatabaseGateLiveTests(DatabaseGateLiveTests.Fixture database) : ICl
     [PostgresFact]
     public async Task With_the_default_BrowsableSchemas_public_is_listed_and_every_other_schema_is_counted_never_named()
     {
-        await using StudioHost host = Host(static o => o.Capabilities = PostgresStudioCapabilities.All());
+        await using StudioHost host = Host(static o => o.Capabilities = PostgresCapabilities.All());
         await using StudioCircuit circuit = host.Circuit();
         IDatabaseObjectService objects = circuit.Get<IDatabaseObjectService>();
 
@@ -103,7 +103,7 @@ public class DatabaseGateLiveTests(DatabaseGateLiveTests.Fixture database) : ICl
     {
         await using StudioHost host = Host(static o =>
         {
-            o.Capabilities = PostgresStudioCapabilities.All();
+            o.Capabilities = PostgresCapabilities.All();
             o.BrowsableSchemas.Clear();
             o.BrowsableSchemas.Add("*");
         });
@@ -126,7 +126,7 @@ public class DatabaseGateLiveTests(DatabaseGateLiveTests.Fixture database) : ICl
         await using StudioHost host = Host(static _ => { });
         await using StudioCircuit circuit = host.Circuit();
 
-        new PostgresStudioOptions().Capabilities.BrowseDatabase.Should().BeFalse("the premise: off until the host says otherwise (D4)");
+        new PostgresOptions().Capabilities.BrowseDatabase.Should().BeFalse("the premise: off until the host says otherwise (D4)");
 
         TableRowPage rows = await circuit.Get<ITableRowService>().ListRowsAsync(Scope, "public", "orders", new TableRowRequest(), Token);
         rows.Refusal.Should().Be(DatabaseRefusal.CapabilityOff, rows.Reason);
@@ -144,7 +144,7 @@ public class DatabaseGateLiveTests(DatabaseGateLiveTests.Fixture database) : ICl
     public async Task Rows_need_the_write_policy_asked_about_BrowseDatabase_for_the_whole_database()
     {
         await using StudioHost host = Host(
-            static o => o.Capabilities = PostgresStudioCapabilities.All(),
+            static o => o.Capabilities = PostgresCapabilities.All(),
             writePolicy: static (resource, user) => user.Identity?.Name == "admin");
 
         await using (StudioCircuit viewer = host.Circuit("viewer"))
@@ -165,7 +165,7 @@ public class DatabaseGateLiveTests(DatabaseGateLiveTests.Fixture database) : ICl
         }
 
         host.Calls.All.Should().Contain(static x => x.Policy == StudioHost.WritePolicy && x.User == "viewer" && !x.Allowed
-            && x.Resource == new PostgresStudioResource("default", "default", nameof(PostgresStudioCapabilities.BrowseDatabase)));
+            && x.Resource == new PostgresResource("default", "default", nameof(PostgresCapabilities.BrowseDatabase)));
 
         IReadOnlyList<StudioActionLogEntry> audited = [.. host.Ring.GetLatest().Where(static x => x.Action == DatabaseAccess.RowsAction)];
         audited.Should().Contain(static x => x.User == "viewer" && !x.Succeeded, "the refusal is audited");
@@ -177,7 +177,7 @@ public class DatabaseGateLiveTests(DatabaseGateLiveTests.Fixture database) : ICl
     {
         await using StudioHost host = Host(static o =>
         {
-            o.Capabilities = PostgresStudioCapabilities.All();
+            o.Capabilities = PostgresCapabilities.All();
             o.ReadOnly = true;
         });
         await using StudioCircuit circuit = host.Circuit();
@@ -193,7 +193,7 @@ public class DatabaseGateLiveTests(DatabaseGateLiveTests.Fixture database) : ICl
     {
         await using StudioHost host = Host(static o =>
         {
-            o.Capabilities = PostgresStudioCapabilities.All();
+            o.Capabilities = PostgresCapabilities.All();
             o.BrowsableSchemas.Add("*");
         });
         await using StudioCircuit circuit = host.Circuit();
@@ -220,7 +220,7 @@ public class DatabaseGateLiveTests(DatabaseGateLiveTests.Fixture database) : ICl
         // A list that names schemas replaces the default, so public is named beside legacy.
         await using StudioHost host = Host(static o =>
         {
-            o.Capabilities = PostgresStudioCapabilities.All();
+            o.Capabilities = PostgresCapabilities.All();
             o.BrowsableSchemas.Add("public");
             o.BrowsableSchemas.Add("legacy");
         });
@@ -276,7 +276,7 @@ public class DatabaseGateLiveTests(DatabaseGateLiveTests.Fixture database) : ICl
                 await scan.ExecuteNonQueryAsync(Token);
             }
 
-            await using StudioHost host = Host(static o => o.Capabilities = PostgresStudioCapabilities.All());
+            await using StudioHost host = Host(static o => o.Capabilities = PostgresCapabilities.All());
             await using StudioCircuit circuit = host.Circuit();
             IDatabaseObjectService objects = circuit.Get<IDatabaseObjectService>();
 
@@ -307,8 +307,8 @@ public class DatabaseGateLiveTests(DatabaseGateLiveTests.Fixture database) : ICl
     }
 
     private StudioHost Host(
-        Action<PostgresStudioOptions> studio,
-        Func<PostgresStudioResource, System.Security.Claims.ClaimsPrincipal, bool>? writePolicy = null) =>
+        Action<PostgresOptions> studio,
+        Func<PostgresResource, System.Security.Claims.ClaimsPrincipal, bool>? writePolicy = null) =>
         StudioHost.Create(
             services => services.AddSingleton(_ => NpgsqlDataSource.Create(database.ConnectionString)),
             studio,

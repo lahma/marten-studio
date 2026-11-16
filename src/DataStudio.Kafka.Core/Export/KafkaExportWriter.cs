@@ -163,7 +163,7 @@ internal static class KafkaExportWriter
         {
             return Refused(string.Create(
                 CultureInfo.InvariantCulture,
-                $"This value is {KafkaRecordRead.Bytes(content.Length)}, more than KafkaStudioOptions.Limits.MaxExportBytes ({KafkaRecordRead.Bytes(maxBytes)})"));
+                $"This value is {KafkaRecordRead.Bytes(content.Length)}, more than KafkaOptions.Limits.MaxExportBytes ({KafkaRecordRead.Bytes(maxBytes)})"));
         }
 
         return new KafkaExportFile(KafkaExportFormat.Value, content, extension, contentType, 1, 0, true, match.ValueTruncated, null);

@@ -205,7 +205,7 @@ public sealed class StreamCompactionFixture(PostgresFixture postgres) : IAsyncLi
 
         services.AddDataStudio().AddMarten(options =>
         {
-            options.Capabilities = capabilities ? MartenStudioCapabilities.All() : new MartenStudioCapabilities();
+            options.Capabilities = capabilities ? MartenCapabilities.All() : new MartenCapabilities();
             options.IsDocumentTypeVisible = isVisible;
             options.DiscoverTenantIds = false;
             options.KnownTenantIds.Add(TenantA);

@@ -19,8 +19,9 @@
 @inject StudioAuthorization Authorization
 @inject ToastService Toasts
 @inject NavigationManager Navigation
-@inject IOptions<MartenStudioOptions> Options
+@inject IOptions<MartenOptions> Options
 @inject IJSRuntime JsRuntime
+@inject IStudioSettings Settings
 
 <PageTitle>@(Alias is { Length: > 0 } ? Alias + " — Documents" : "Documents")</PageTitle>
 
@@ -126,7 +127,7 @@
     private bool bulkDeleting;
     private string? selectionKey;
 
-    // What MartenStudioOptions.WriteAuthorizationPolicy said about *this* visitor and the scope on
+    // What MartenOptions.WriteAuthorizationPolicy said about *this* visitor and the scope on
     // screen, evaluated once per load. True to start with because a host that configured no write policy
     // is the common case and StudioAuthorization answers true for it without asking anything.
     private bool mayDelete = true;
@@ -561,7 +562,7 @@
                                     <td><CollectionChip Alias="@document.Alias" Hue="@document.Hue" Small="true" /></td>
                                     <td class="ms-id-cell">
                                         <a class="ms-doc-id ms-id-text"
-                                           href="@DocumentLinks.ToDocument(Options.Value, State.ActiveScope, document.Alias, document.Id)"
+                                           href="@DocumentLinks.ToDocument(Settings, State.ActiveScope, document.Alias, document.Id)"
                                            title="@document.Id">@document.Id</a>
                                     </td>
                                     <td title="@Preferences.FormatInSelectedTimeZone(document.LastModified)">
@@ -586,16 +587,16 @@
     private readonly List<string?> cursorHistory = [];
 
     private string RailHref(string alias) =>
-        DocumentLinks.ToCollection(Options.Value, State.ActiveScope, alias);
+        DocumentLinks.ToCollection(Settings, State.ActiveScope, alias);
 
     private string CollectionHref(string alias) =>
-        DocumentLinks.ToCollection(Options.Value, State.ActiveScope, alias);
+        DocumentLinks.ToCollection(Settings, State.ActiveScope, alias);
 
     private string DetailHref(string id) =>
-        DocumentLinks.ToDocument(Options.Value, State.ActiveScope, Alias ?? string.Empty, id, CurrentRelativeUrl());
+        DocumentLinks.ToDocument(Settings, State.ActiveScope, Alias ?? string.Empty, id, CurrentRelativeUrl());
 
     private string QueryHref() =>
-        DocumentLinks.ToQuery(Options.Value, State.ActiveScope, Alias ?? string.Empty, Search);
+        DocumentLinks.ToQuery(Settings, State.ActiveScope, Alias ?? string.Empty, Search);
 
     private string CurrentRelativeUrl() => Navigation.ToBaseRelativePath(Navigation.Uri);
 
@@ -630,7 +631,7 @@
         Add(query, "deleted", deleted ?? Deleted);
         Add(query, "paging", pagingSet ? paging : Paging);
 
-        Navigation.NavigateTo(DocumentLinks.ToCollection(Options.Value, State.ActiveScope, Alias ?? string.Empty, query));
+        Navigation.NavigateTo(DocumentLinks.ToCollection(Settings, State.ActiveScope, Alias ?? string.Empty, query));
     }
 
     private static void Add(Dictionary<string, string?> query, string key, string? value)

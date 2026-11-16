@@ -401,7 +401,7 @@ public class NavIndicatorServiceTests
             TestStoreAuthorizationService policies = new();
             policies.Allow(policy);
 
-            IOptions<MartenStudioOptions> options = Options.Create(new MartenStudioOptions { StoreAuthorizationPolicy = Harness.PolicyName });
+            IOptions<MartenOptions> options = Options.Create(new MartenOptions { StoreAuthorizationPolicy = Harness.PolicyName });
             StudioAuthorization authorization = MartenSpine.Authorization(options, policies, visitor);
             FakeStudioSourceProvider sources = new FakeStudioSourceProvider().WithSource("default", "localhost.marten");
 
@@ -503,7 +503,7 @@ public class NavIndicatorServiceTests
         /// <summary>The per-store policy name <see cref="WithPolicy" /> configures.</summary>
         public const string PolicyName = "MartenStoreOwner";
 
-        private readonly MartenStudioOptions options = new();
+        private readonly MartenOptions options = new();
 
         public Harness()
         {

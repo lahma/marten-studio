@@ -114,7 +114,7 @@ public class KafkaExportMenuTests
 
         page.FindAll(".ms-k-export-menu").Should().BeEmpty();
         page.FindAll(".ms-k-export, .ms-k-export-off").Should().BeEmpty("a capability that is off leaves its controls out (#74), as the SQL studio's Query does while RunSql is off");
-        page.Markup.Should().NotContain("KafkaStudioOptions").And.NotContain("Exporting records");
+        page.Markup.Should().NotContain("KafkaOptions").And.NotContain("Exporting records");
     }
 
     [Fact]
@@ -126,7 +126,7 @@ public class KafkaExportMenuTests
         IRenderedComponent<KafkaSearchPage> page = await SearchedAsync(rig);
 
         page.FindAll(".ms-k-export, .ms-k-export-forbidden, .ms-k-export-popover").Should().BeEmpty("a profile that forbids export leaves the control out (#74)");
-        page.Markup.Should().NotContain("KafkaClusterBuilder").And.NotContain("KafkaStudioOptions");
+        page.Markup.Should().NotContain("KafkaClusterBuilder").And.NotContain("KafkaOptions");
         rig.Studio.Context.JSInterop.Invocations.Should().NotContain(static x => x.Identifier == "martenStudio.download.stream");
     }
 

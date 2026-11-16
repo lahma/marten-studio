@@ -28,15 +28,15 @@ public class StudioScopeResolverTest
     private sealed record Harness(
         StudioScopeResolver Resolver,
         TestStoreAuthorizationService Authorization,
-        MartenStudioOptions Options,
+        MartenOptions Options,
         ServiceProvider Provider) : IDisposable
     {
         public void Dispose() => Provider.Dispose();
     }
 
-    private static Harness CreateHarness(Action<MartenStudioOptions>? configure = null, bool registerStore = true)
+    private static Harness CreateHarness(Action<MartenOptions>? configure = null, bool registerStore = true)
     {
-        var options = new MartenStudioOptions
+        var options = new MartenOptions
         {
             StoreAuthorizationPolicy = StorePolicy,
             WriteAuthorizationPolicy = WritePolicy
@@ -149,7 +149,7 @@ public class StudioScopeResolverTest
     [Fact]
     public async Task A_store_that_will_not_build_is_a_StudioStoreUnavailable()
     {
-        var options = new MartenStudioOptions();
+        var options = new MartenOptions();
         var services = new ServiceCollection();
         services.AddSingleton<MartenStoreRegistryTest.IBrokenStore>(static _ =>
             throw new InvalidOperationException("no connection string was configured"));

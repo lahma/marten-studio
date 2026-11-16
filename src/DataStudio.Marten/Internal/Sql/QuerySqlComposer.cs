@@ -324,7 +324,7 @@ internal static class QuerySqlComposer
     /// <c>StudioCapabilityGuard</c> so this file stays inside <c>Internal/Sql</c> and depends on nothing
     /// above it; a unit test holds the two spellings together.
     /// </summary>
-    internal const string RunSqlOption = "MartenStudioOptions.Capabilities.RunSql";
+    internal const string RunSqlOption = "MartenOptions.Capabilities.RunSql";
 
     /// <summary>
     /// Whether a <c>where</c> clause may be run, and why not.

@@ -70,7 +70,7 @@ internal sealed class LiveSearchHost : IAsyncDisposable
     /// <param name="user">The Kafka principal the engine reads as.</param>
     /// <param name="configure">Sets KStudio's options (topics, limits).</param>
     /// <param name="profile">The cluster's profile, or <see langword="null" /> for none.</param>
-    public static LiveSearchHost Create(KafkaFixture fixture, string user, Action<KafkaStudioOptions>? configure = null, KafkaProfile? profile = null)
+    public static LiveSearchHost Create(KafkaFixture fixture, string user, Action<KafkaOptions>? configure = null, KafkaProfile? profile = null)
     {
         Assert.SkipUnless(DockerAvailability.IsAvailable, DockerAvailability.SkipReason);
         DockerAvailability.ThrowIfMissingOnContinuousIntegration();

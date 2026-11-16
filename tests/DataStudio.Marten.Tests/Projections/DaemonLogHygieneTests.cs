@@ -567,7 +567,7 @@ public class DaemonLogHygieneTests
                 configureStore?.Invoke(options);
             });
 
-            services.AddDataStudio().AddMarten(static options => options.Capabilities = MartenStudioCapabilities.All());
+            services.AddDataStudio().AddMarten(static options => options.Capabilities = MartenCapabilities.All());
             services.AddScoped<AuthenticationStateProvider>(_ => users);
 
             configureServices?.Invoke(services);

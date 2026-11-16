@@ -5,7 +5,7 @@
  * exporting `afterWebStarted` - and Blazor loads the initializers of every referenced RCL into every
  * Blazor app in the process. A host that runs its own Blazor Server app therefore fetched this file from
  * the *site root* on every page it served, including pages that have nothing to do with the studio; where
- * MartenStudioOptions.AuthorizationPolicy is set, that path is authorized too, so the fetch was redirected
+ * MartenOptions.AuthorizationPolicy is set, that path is authorized too, so the fetch was redirected
  * to the login page, came back as text/html, and the browser logged a MIME-type error on every page load -
  * the host's unauthenticated login page included. Registering the studio must never change how the host
  * behaves, and that was the host's own app executing a script belonging to something it had only

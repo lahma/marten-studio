@@ -147,7 +147,7 @@ public class PostgresStudioSeamsLiveTests(PostgresFixture postgres)
                 options.BrowsableSchemas.Add(schema);
             }
 
-            options.Capabilities = PostgresStudioCapabilities.All();
+            options.Capabilities = PostgresCapabilities.All();
         });
 
         return services.BuildServiceProvider();

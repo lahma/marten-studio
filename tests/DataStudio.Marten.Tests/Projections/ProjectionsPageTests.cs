@@ -219,9 +219,9 @@ public class ProjectionsPageTests
 
         IElement pause = page.Find(".ms-daemon-pause");
         pause.HasAttribute("disabled").Should().BeTrue();
-        pause.GetAttribute("title").Should().Contain("MartenStudioOptions.Capabilities.ControlDaemon");
+        pause.GetAttribute("title").Should().Contain("MartenOptions.Capabilities.ControlDaemon");
 
-        page.Markup.Should().Contain("MartenStudioOptions.Capabilities.ControlDaemon");
+        page.Markup.Should().Contain("MartenOptions.Capabilities.ControlDaemon");
         page.FindAll(".ms-capability-disabled").Should().HaveCount(2, "ControlDaemon and CorrectProgression are both off");
     }
 
@@ -285,7 +285,7 @@ public class ProjectionsPageTests
         page.WaitForAssertion(() =>
         {
             context.Toasts.Messages.Should().ContainSingle();
-            context.Toasts.Messages[0].Message.Should().Contain("MartenStudioOptions.Capabilities.ControlDaemon");
+            context.Toasts.Messages[0].Message.Should().Contain("MartenOptions.Capabilities.ControlDaemon");
         });
     }
 
@@ -439,7 +439,7 @@ public class ProjectionsPageTests
 
         string note = page.Find(".ms-rebuild-timeout-note").TextContent;
         note.Should().Contain("emptied first");
-        note.Should().Contain("MartenStudioOptions.RebuildShardTimeout");
+        note.Should().Contain("MartenOptions.RebuildShardTimeout");
     }
 
     /// <summary>

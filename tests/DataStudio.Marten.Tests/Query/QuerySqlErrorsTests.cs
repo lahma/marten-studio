@@ -27,7 +27,7 @@ public class QuerySqlErrorsTests
     public void The_timeout_names_the_seconds_and_the_option_that_sets_them()
     {
         QuerySqlErrors.Describe(Error("57014"), TimeSpan.FromSeconds(12), StudioText.Marten)
-            .Should().Contain("timed out after 12 s").And.Contain("MartenStudioOptions.QueryTimeout");
+            .Should().Contain("timed out after 12 s").And.Contain("MartenOptions.QueryTimeout");
     }
 
     [Fact]
@@ -40,7 +40,7 @@ public class QuerySqlErrorsTests
     public void A_narrowed_role_refusal_names_the_option_that_narrowed_it()
     {
         QuerySqlErrors.Describe(Error("42501"), TimeSpan.FromSeconds(30), StudioText.Marten)
-            .Should().Contain("MartenStudioOptions.SqlConsoleRole");
+            .Should().Contain("MartenOptions.SqlConsoleRole");
     }
 
     [Fact]

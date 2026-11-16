@@ -209,7 +209,7 @@ public class DataSourceDiscoveryLiveTests(DataSourceDiscoveryLiveTests.Fixture d
         return [.. list.Items.Select(static x => x.Name)];
     }
 
-    private StudioHost Host(Func<PostgresStudioResource, ClaimsPrincipal, bool>? policy) =>
+    private StudioHost Host(Func<PostgresResource, ClaimsPrincipal, bool>? policy) =>
         StudioHost.Create(
             services =>
             {
@@ -219,7 +219,7 @@ public class DataSourceDiscoveryLiveTests(DataSourceDiscoveryLiveTests.Fixture d
             },
             static options =>
             {
-                options.Capabilities = PostgresStudioCapabilities.All();
+                options.Capabilities = PostgresCapabilities.All();
                 options.AddDataSource("reporting", static services => services.GetRequiredKeyedService<NpgsqlDataSource>("reporting"));
                 options.AddDatabaseSource("tenants", static services => services.GetRequiredService<TenantDatabases>());
             },

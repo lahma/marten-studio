@@ -45,7 +45,7 @@ public class LinqEventQueryServiceTests
     [Fact]
     public async Task A_capability_that_is_off_refuses_an_event_run_before_anything_is_resolved_and_records_none_of_the_text()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = new MartenStudioCapabilities());
+        await using Harness harness = Harness.Create(static options => options.Capabilities = new MartenCapabilities());
 
         Func<Task> run = () => harness.Linq.RunAsync(NoTenant, Events("EventTypeName == \"secret-literal\""), Token);
 
@@ -64,7 +64,7 @@ public class LinqEventQueryServiceTests
     {
         await using Harness harness = Harness.Create(static options =>
         {
-            options.Capabilities = MartenStudioCapabilities.All();
+            options.Capabilities = MartenCapabilities.All();
             options.ReadOnly = true;
         });
 
@@ -76,7 +76,7 @@ public class LinqEventQueryServiceTests
     [Fact]
     public async Task The_write_policy_is_asked_with_RunLinqQueries_and_its_refusal_is_audited_as_an_event_query()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All());
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenCapabilities.All());
         harness.Policies.Allow(static resource => resource.Capability is null);
 
         Func<Task> run = () => harness.Linq.RunAsync(NoTenant, Events("Version > 1"), Token);
@@ -99,7 +99,7 @@ public class LinqEventQueryServiceTests
     {
         await using Harness harness = Harness.Create(static options =>
         {
-            options.Capabilities = MartenStudioCapabilities.All();
+            options.Capabilities = MartenCapabilities.All();
             options.IsDocumentTypeVisible = static _ => false;
         });
 
@@ -116,7 +116,7 @@ public class LinqEventQueryServiceTests
     public async Task Describing_the_events_connects_to_nothing_and_follows_the_scopes_tenant()
     {
         await using Harness harness = Harness.Create(
-            static options => options.Capabilities = MartenStudioCapabilities.All(),
+            static options => options.Capabilities = MartenCapabilities.All(),
             static marten => marten.Events.TenancyStyle = TenancyStyle.Conjoined);
 
         LinqModeStatus all = await harness.Linq.DescribeAsync(NoTenant, Token);
@@ -131,7 +131,7 @@ public class LinqEventQueryServiceTests
     [DynamicLinqFact]
     public async Task The_target_decides_and_whatever_alias_came_with_it_is_dropped()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All());
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenCapabilities.All());
 
         const string Hostile = "no\r\nsuch\u001b[2J";
 
@@ -154,7 +154,7 @@ public class LinqEventQueryServiceTests
     [InlineData("Data == null", 0)]
     public async Task A_withheld_member_is_a_screen_refusal_with_a_caret_and_an_event_audit_entry(string predicate, int position)
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All());
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenCapabilities.All());
 
         LinqQueryResult result = await harness.Linq.RunAsync(NoTenant, Events(predicate), Token);
 
@@ -174,7 +174,7 @@ public class LinqEventQueryServiceTests
     [InlineData("AggregateTypeName == \"a\"", "Not stored in a column.")]
     public async Task A_refusal_that_names_a_withheld_member_says_why_it_is_withheld(string predicate, string reason)
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All());
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenCapabilities.All());
 
         LinqQueryResult result = await harness.Linq.RunAsync(NoTenant, Events(predicate), Token);
 
@@ -186,7 +186,7 @@ public class LinqEventQueryServiceTests
     [DynamicLinqFact]
     public async Task An_ordering_that_names_a_withheld_member_says_why_too()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All());
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenCapabilities.All());
 
         LinqQueryResult result = await harness.Linq.RunAsync(NoTenant, Events(null, orderBy: "IsSkipped desc"), Token);
 
@@ -197,7 +197,7 @@ public class LinqEventQueryServiceTests
     [DynamicLinqFact]
     public async Task A_refusal_that_names_something_that_is_not_withheld_gets_no_reason()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All());
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenCapabilities.All());
 
         LinqQueryResult result = await harness.Linq.RunAsync(NoTenant, Events("Nonsense == 1"), Token);
 
@@ -207,7 +207,7 @@ public class LinqEventQueryServiceTests
     [DynamicLinqFact]
     public async Task A_page_past_the_offset_cap_is_refused_in_the_events_words()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All());
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenCapabilities.All());
 
         LinqQueryResult result = await harness.Linq.RunAsync(NoTenant, Events(null, offset: LinqQueryLimits.MaxOffset + 1), Token);
 
@@ -217,7 +217,7 @@ public class LinqEventQueryServiceTests
     [DynamicLinqFact]
     public async Task Marten_refusing_a_shape_is_shown_as_Martens_refusal()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All());
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenCapabilities.All());
 
         LinqQueryResult result = await harness.Linq.RunAsync(NoTenant, Events("EventTypeName.Length > 3"), Token);
 
@@ -232,7 +232,7 @@ public class LinqEventQueryServiceTests
     [DynamicLinqFact]
     public async Task An_accepted_query_is_built_by_Marten_and_only_then_reaches_for_the_database()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All());
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenCapabilities.All());
 
         LinqQueryResult result = await harness.Linq.RunAsync(
             NoTenant, Events("EventTypeName == \"order_placed\" and Version > 1", "Timestamp desc"), Token);
@@ -253,7 +253,7 @@ public class LinqEventQueryServiceTests
     [DynamicLinqFact]
     public async Task The_archived_selector_is_in_the_audit_target()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All());
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenCapabilities.All());
 
         await harness.Linq.RunAsync(NoTenant, Events(null, archived: ArchivedFilter.Only), Token);
 
@@ -272,7 +272,7 @@ public class LinqEventQueryServiceTests
     public async Task Conjoined_events_from_a_tenant_scope_ask_only_the_tenant_and_a_tenant_only_visitor_passes()
     {
         await using Harness harness = Harness.Create(
-            static options => options.Capabilities = MartenStudioCapabilities.All(),
+            static options => options.Capabilities = MartenCapabilities.All(),
             static marten => marten.Events.TenancyStyle = TenancyStyle.Conjoined);
         harness.Policies.Allow(static resource => resource.TenantId == Acme);
 
@@ -292,7 +292,7 @@ public class LinqEventQueryServiceTests
     [DynamicLinqFact]
     public async Task Single_events_from_a_tenant_scope_are_asked_as_the_whole_database_and_a_tenant_only_visitor_is_refused()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All());
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenCapabilities.All());
         harness.Policies.Allow(static resource => resource.TenantId == Acme);
 
         Func<Task> run = () => harness.Linq.RunAsync(AcmeScope, Events("Version > 1"), Token);
@@ -312,7 +312,7 @@ public class LinqEventQueryServiceTests
     [DynamicLinqFact]
     public async Task Single_events_from_a_tenant_scope_pass_for_a_visitor_allowed_the_whole_database_and_say_so()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All());
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenCapabilities.All());
 
         LinqQueryResult result = await harness.Linq.RunAsync(AcmeScope, Events("Version > 1"), Token);
 
@@ -327,7 +327,7 @@ public class LinqEventQueryServiceTests
     public async Task Conjoined_events_with_no_tenant_read_every_tenant_and_say_so()
     {
         await using Harness harness = Harness.Create(
-            static options => options.Capabilities = MartenStudioCapabilities.All(),
+            static options => options.Capabilities = MartenCapabilities.All(),
             static marten => marten.Events.TenancyStyle = TenancyStyle.Conjoined);
 
         LinqQueryResult result = await harness.Linq.RunAsync(NoTenant, Events(null), Token);
@@ -343,7 +343,7 @@ public class LinqEventQueryServiceTests
     [DynamicLinqFact]
     public async Task A_what_if_over_the_events_is_not_compared_and_audited_after_the_same_gate()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All());
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenCapabilities.All());
 
         WhatIfResult result = await harness.Linq.WhatIfAsync(NoTenant, Events("Version > 1"), Imagined, Token);
 
@@ -361,7 +361,7 @@ public class LinqEventQueryServiceTests
     [DynamicLinqFact]
     public async Task A_what_if_over_the_events_is_refused_at_the_gate_before_it_is_declined()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = new MartenStudioCapabilities());
+        await using Harness harness = Harness.Create(static options => options.Capabilities = new MartenCapabilities());
 
         WhatIfResult result = await harness.Linq.WhatIfAsync(NoTenant, Events("Version > 1"), Imagined, Token);
 
@@ -390,7 +390,7 @@ public class LinqEventQueryServiceTests
 
         public ILinqQueryService Linq => scope.ServiceProvider.GetRequiredService<ILinqQueryService>();
 
-        public static Harness Create(Action<MartenStudioOptions> configure, Action<StoreOptions>? marten = null)
+        public static Harness Create(Action<MartenOptions> configure, Action<StoreOptions>? marten = null)
         {
             var users = new TestAuthenticationStateProvider();
             users.SignIn("tester");

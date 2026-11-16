@@ -66,7 +66,7 @@ public class ReferencedByTablesTests
 
         var panel = Render(context, new ReferencedBy(
         [
-            Credit(count: 0) with { NotCounted = "Schema 'legacy' is not one MartenStudioOptions.BrowsableSchemas admits." },
+            Credit(count: 0) with { NotCounted = "Schema 'legacy' is not one MartenOptions.BrowsableSchemas admits." },
         ]));
 
         panel.Find(".ms-referenced-count").TextContent.Should().Be("?");

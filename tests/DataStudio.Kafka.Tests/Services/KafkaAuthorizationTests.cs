@@ -95,7 +95,7 @@ public class KafkaAuthorizationTests
     public async Task The_hosts_store_policy_is_never_asked()
     {
         // The host sets every policy it has; Kafka sets one of its own. The host's handler (which records any resource it sees) is only ever shown
-        // its own resource: PostgresStudioResource is asked about the host's scope, never about a cluster or a topic.
+        // its own resource: PostgresResource is asked about the host's scope, never about a cluster or a topic.
         using KafkaStudioHarness harness = new(static o => o.ClusterAuthorizationPolicy = "kafka-topics");
         harness.Context.Options.SourceAuthorizationPolicy = "p";
         harness.Context.Options.WriteAuthorizationPolicy = "w";

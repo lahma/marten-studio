@@ -35,10 +35,10 @@ public class FindScopesTests
 
     private static StudioAuthorization Authorization(bool policy)
     {
-        MartenStudioOptions options = new() { StoreAuthorizationPolicy = policy ? "Visitors" : null };
+        MartenOptions options = new() { StoreAuthorizationPolicy = policy ? "Visitors" : null };
 
         return new StudioAuthorization(
-            new MartenStudioSettings(Microsoft.Extensions.Options.Options.Create(options)),
+            MartenStudioSettings.Of(Microsoft.Extensions.Options.Options.Create(options)),
             MartenStudioDescriptor.Instance,
             new TestStoreAuthorizationService(),
             new TestAuthenticationStateProvider());

@@ -724,7 +724,7 @@ internal sealed record TableRowCount
     public static TableRowCount Refused(DatabaseRefusal refusal, string reason) => new() { Refusal = refusal, Reason = reason };
 }
 
-/// <summary>One cell, whole - up to <c>MaxInlineDocumentBytes</c>.</summary>
+/// <summary>One cell, whole - up to <c>MaxInlineValueBytes</c>.</summary>
 internal sealed record TableCellValue
 {
     /// <summary>The gate that refused, or <see cref="DatabaseRefusal.None" />.</summary>
@@ -761,7 +761,7 @@ internal sealed record TableCellValue
     public long FullLength { get; init; }
 
     /// <summary>
-    /// The cap it was read under, in bytes: <c>MaxInlineDocumentBytes</c>. A text
+    /// The cap it was read under, in bytes: <c>MaxInlineValueBytes</c>. A text
     /// value is cut to that many bytes of UTF-8 on a character boundary, a <c>bytea</c> to that many bytes.
     /// </summary>
     public int Cap { get; init; }

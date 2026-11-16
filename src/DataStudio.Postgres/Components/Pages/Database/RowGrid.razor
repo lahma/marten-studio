@@ -607,7 +607,7 @@
     /// <summary>
     /// Opens a JSON cell, or a bytea that holds JSON or UTF-8 text, under the grid - JSON in the viewer, text
     /// as text: straight from the page when it was read whole, through GetCellAsync when it was cut, which
-    /// caps it at MaxInlineDocumentBytes. A failure is drawn in the panel (hard rule 6).
+    /// caps it at MaxInlineValueBytes. A failure is drawn in the panel (hard rule 6).
     /// </summary>
     private async Task OpenCellAsync(int rowIndex, int columnIndex)
     {
@@ -686,7 +686,7 @@
                     Cut = value.Truncated,
                     Note = value.Truncated
                         ? "Cut at " + SqlCellFormat.Bytes(value.Cap) + " of " + SqlCellFormat.Bytes(value.FullLength) +
-                          " (" + Settings.OptionName(Settings.MaxInlineValueBytesMember) + "), so it is not offered for copying; the SQL console reads the rest."
+                          " (" + Settings.OptionName(nameof(PostgresOptions.MaxInlineValueBytes)) + "), so it is not offered for copying; the SQL console reads the rest."
                         : null,
                 },
                 _ when isText => new CellPanel(title, column.Name)
@@ -694,7 +694,7 @@
                     Text = value.Text ?? (value.Bytes is { } read ? SqlCellFormat.DecodeText(read, value.Truncated) ?? Encoding.UTF8.GetString(read) : string.Empty),
                     Note = value.Truncated
                         ? "Cut at " + SqlCellFormat.Bytes(value.Cap) + " of " + SqlCellFormat.Bytes(value.FullLength) +
-                          " (" + Settings.OptionName(Settings.MaxInlineValueBytesMember) + "); the SQL console reads the rest."
+                          " (" + Settings.OptionName(nameof(PostgresOptions.MaxInlineValueBytes)) + "); the SQL console reads the rest."
                         : null,
                 },
                 _ => new CellPanel(title, column.Name)
@@ -702,7 +702,7 @@
                     Json = value.Text ?? (value.Bytes is { } bytes ? Encoding.UTF8.GetString(bytes) : string.Empty),
                     Note = value.Truncated
                         ? "Cut at " + SqlCellFormat.Bytes(value.Cap) + " of " + SqlCellFormat.Bytes(value.FullLength) +
-                          " (" + Settings.OptionName(Settings.MaxInlineValueBytesMember) + "), so the viewer may not be able to read it as JSON."
+                          " (" + Settings.OptionName(nameof(PostgresOptions.MaxInlineValueBytes)) + "), so the viewer may not be able to read it as JSON."
                         : null,
                 },
             };

@@ -50,7 +50,7 @@ public class HealthSeamTests
                 new MartenStoreRegistration("default", "Default", typeof(IDocumentStore)),
                 store,
                 store.Storage.Database),
-            MartenStudioSettings.Of(new MartenStudioOptions()),
+            MartenStudioSettings.Of(new MartenOptions()),
             MartenStudioRuntime.Current,
             services,
             new HealthSqlRunner(new HealthConnection(MartenStudioDatabase.Of(store.Storage.Database)), new ReadOnlySqlOptions(), null),

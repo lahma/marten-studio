@@ -69,14 +69,14 @@ public class SchemaScriptGateLiveTests(PostgresFixture fixture)
 
         await using Host host = await StartAsync("db7f_tenant", hideSecret: false, policy, static options =>
         {
-            options.Capabilities = MartenStudioCapabilities.All();
+            options.Capabilities = MartenCapabilities.All();
             options.StoreAuthorizationPolicy = StorePolicy;
             options.WriteAuthorizationPolicy = WritePolicy;
         });
 
         DdlScript ddl = await host.SchemaAsync(x => x.DdlAsync(AcmeOnly, Token));
         ddl.Withheld!.Kind.Should().Be(DatabaseRefusal.StorePolicy);
-        ddl.Withheld.Reason.Should().Contain("spans every tenant").And.Contain("MartenStudioOptions.StoreAuthorizationPolicy");
+        ddl.Withheld.Reason.Should().Contain("spans every tenant").And.Contain("MartenOptions.StoreAuthorizationPolicy");
         ddl.Text.Should().BeEmpty();
 
         SchemaCheck check = await host.SchemaAsync(x => x.CheckAsync(AcmeOnly, Token));
@@ -124,7 +124,7 @@ public class SchemaScriptGateLiveTests(PostgresFixture fixture)
 
         await using Host host = await StartAsync("db7f_apply_tenant", hideSecret: false, policy, static options =>
         {
-            options.Capabilities = MartenStudioCapabilities.All();
+            options.Capabilities = MartenCapabilities.All();
             options.StoreAuthorizationPolicy = StorePolicy;
             options.WriteAuthorizationPolicy = WritePolicy;
         });
@@ -187,7 +187,7 @@ public class SchemaScriptGateLiveTests(PostgresFixture fixture)
         foreach (SchemaScriptRefusal? refusal in new[] { ddl.Withheld, check.Withheld, preview.Withheld })
         {
             refusal!.Kind.Should().Be(DatabaseRefusal.CapabilityOff);
-            refusal.Reason.Should().Contain("MartenStudioOptions.Capabilities.BrowseDatabase")
+            refusal.Reason.Should().Contain("MartenOptions.Capabilities.BrowseDatabase")
                 .And.Contain("document types the host hides");
         }
 
@@ -208,14 +208,14 @@ public class SchemaScriptGateLiveTests(PostgresFixture fixture)
 
         await using Host host = await StartAsync("db7f_hid_wp", hideSecret: true, policy, static options =>
         {
-            options.Capabilities = MartenStudioCapabilities.All();
+            options.Capabilities = MartenCapabilities.All();
             options.StoreAuthorizationPolicy = StorePolicy;
             options.WriteAuthorizationPolicy = WritePolicy;
         });
 
         DdlScript ddl = await host.SchemaAsync(x => x.DdlAsync(WholeDatabase, Token));
         ddl.Withheld!.Kind.Should().Be(DatabaseRefusal.WritePolicy);
-        ddl.Withheld.Reason.Should().Contain("MartenStudioOptions.WriteAuthorizationPolicy").And.Contain("BrowseDatabase");
+        ddl.Withheld.Reason.Should().Contain("MartenOptions.WriteAuthorizationPolicy").And.Contain("BrowseDatabase");
 
         (await host.SchemaAsync(x => x.PreviewAsync(WholeDatabase, Token))).Withheld!.Kind.Should().Be(DatabaseRefusal.WritePolicy);
         (await host.SchemaAsync(x => x.CheckAsync(WholeDatabase, Token))).Withheld!.Kind.Should().Be(DatabaseRefusal.WritePolicy);
@@ -234,7 +234,7 @@ public class SchemaScriptGateLiveTests(PostgresFixture fixture)
     public async Task With_a_hidden_type_a_visitor_past_the_gate_reads_the_whole_script()
     {
         await using Host host = await StartAsync("db7f_hid_open", hideSecret: true, configure: static options =>
-            options.Capabilities = MartenStudioCapabilities.All());
+            options.Capabilities = MartenCapabilities.All());
 
         DdlScript ddl = await host.SchemaAsync(x => x.DdlAsync(WholeDatabase, Token));
 
@@ -275,7 +275,7 @@ public class SchemaScriptGateLiveTests(PostgresFixture fixture)
         registry.SequentialScans.Should().BeNull();
         registry.IndexScans.Should().BeNull();
 
-        tables.PartitionCountsWithheld.Should().Contain("MartenStudioOptions.Capabilities.BrowseDatabase");
+        tables.PartitionCountsWithheld.Should().Contain("MartenOptions.Capabilities.BrowseDatabase");
 
         string json = JsonSerializer.Serialize(tables);
         foreach (string tenant in Tenants)
@@ -288,7 +288,7 @@ public class SchemaScriptGateLiveTests(PostgresFixture fixture)
     public async Task Past_the_gate_the_partition_count_and_the_tenancy_tables_rows_are_shown()
     {
         await using Host host = await StartAsync("db7f_f9_open", hideSecret: false, configure: static options =>
-            options.Capabilities = MartenStudioCapabilities.All());
+            options.Capabilities = MartenCapabilities.All());
 
         SchemaTables tables = await host.SchemaAsync(x => x.TablesAsync(WholeDatabase, Token));
 
@@ -317,7 +317,7 @@ public class SchemaScriptGateLiveTests(PostgresFixture fixture)
 
         await using (Host host = await StartAsync("db7f_names_sp", hideSecret: false, storeRefuses, static options =>
         {
-            options.Capabilities = MartenStudioCapabilities.All();
+            options.Capabilities = MartenCapabilities.All();
             options.StoreAuthorizationPolicy = StorePolicy;
             options.WriteAuthorizationPolicy = WritePolicy;
         }))
@@ -325,7 +325,7 @@ public class SchemaScriptGateLiveTests(PostgresFixture fixture)
             SchemaTables tables = await host.SchemaAsync(x => x.TablesAsync(AcmeOnly, Token));
 
             tables.Reason.Should().BeNull();
-            tables.PartitionCountsWithheld.Should().Contain("The store policy (MartenStudioOptions.StoreAuthorizationPolicy)")
+            tables.PartitionCountsWithheld.Should().Contain("The store policy (MartenOptions.StoreAuthorizationPolicy)")
                 .And.NotContain("WriteAuthorizationPolicy");
             tables.Tables.Single(static x => x.Table == "mt_doc_gateinvoice").PartitionCount.Should().BeNull();
         }
@@ -334,14 +334,14 @@ public class SchemaScriptGateLiveTests(PostgresFixture fixture)
 
         await using (Host host = await StartAsync("db7f_names_wp", hideSecret: false, writeRefuses, static options =>
         {
-            options.Capabilities = MartenStudioCapabilities.All();
+            options.Capabilities = MartenCapabilities.All();
             options.StoreAuthorizationPolicy = StorePolicy;
             options.WriteAuthorizationPolicy = WritePolicy;
         }))
         {
             SchemaTables tables = await host.SchemaAsync(x => x.TablesAsync(WholeDatabase, Token));
 
-            tables.PartitionCountsWithheld.Should().Contain("The write policy (MartenStudioOptions.WriteAuthorizationPolicy");
+            tables.PartitionCountsWithheld.Should().Contain("The write policy (MartenOptions.WriteAuthorizationPolicy");
             tables.Tables.Single(static x => x.Table == "mt_tenant_partitions").FiguresWithheld.Should().BeTrue();
         }
     }
@@ -358,7 +358,7 @@ public class SchemaScriptGateLiveTests(PostgresFixture fixture)
         string schema,
         bool hideSecret,
         IAuthorizationService? authorization = null,
-        Action<MartenStudioOptions>? configure = null)
+        Action<MartenOptions>? configure = null)
     {
         await fixture.CreateSchemaAsync(schema, Token);
 

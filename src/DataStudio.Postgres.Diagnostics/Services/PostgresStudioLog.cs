@@ -73,7 +73,7 @@ internal static partial class PostgresStudioLog
     [LoggerMessage(EventId = 9222, Message = "Postgres Studio's health check {Code} could not check data source {StoreKey}, database {DatabaseId}")]
     public static partial void PostgresStudioHealthCheckFailed(this ILogger logger, LogLevel level, Exception exception, string code, string storeKey, string databaseId);
 
-    [LoggerMessage(EventId = 9230, Level = LogLevel.Warning, Message = "Postgres Studio's database browser may show every schema (PostgresStudioOptions.BrowsableSchemas contains \"*\") and PostgresStudioOptions.SqlConsoleRole is not set, so it reads the catalog and rows as the data source's own Postgres role: every table that role can select from is browsable by anyone granted PostgresStudioOptions.Capabilities.BrowseDatabase. Set SqlConsoleRole to a role that can read only what the browser should show.")]
+    [LoggerMessage(EventId = 9230, Level = LogLevel.Warning, Message = "Postgres Studio's database browser may show every schema (PostgresOptions.BrowsableSchemas contains \"*\") and PostgresOptions.SqlConsoleRole is not set, so it reads the catalog and rows as the data source's own Postgres role: every table that role can select from is browsable by anyone granted PostgresOptions.Capabilities.BrowseDatabase. Set SqlConsoleRole to a role that can read only what the browser should show.")]
     public static partial void PostgresStudioDatabaseBrowserOpenToEverySchemaWithoutRole(this ILogger logger);
 
     [LoggerMessage(EventId = 9235, Level = LogLevel.Information, Message = "Postgres Studio user {User} performed {Action} on {Relation} in data source {StoreKey}, database {DatabaseId} with filter {Filter} and sort {Sort}")]

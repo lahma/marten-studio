@@ -183,7 +183,7 @@ internal static class ProjectionProgressQueries
     /// When set, only rows whose name ends in <c>:{tenantId}</c>. Marten's own filter, and the caller
     /// decides when it means anything - see <c>ProjectionDataService</c>.
     /// </param>
-    /// <param name="commandTimeout">A bound on the read, from <c>MartenStudioOptions.QueryTimeout</c>.</param>
+    /// <param name="commandTimeout">A bound on the read, from <c>MartenOptions.QueryTimeout</c>.</param>
     public static NpgsqlCommand BuildProgressionRows(
         string schema,
         IReadOnlyCollection<string> physicalColumns,

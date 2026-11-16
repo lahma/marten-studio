@@ -20,7 +20,7 @@ public class KafkaTailServiceTests
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
-    private static KafkaSearchRig Rig(Action<KafkaStudioOptions>? studio = null, bool payloads = false, KafkaProfile? profile = null) =>
+    private static KafkaSearchRig Rig(Action<KafkaOptions>? studio = null, bool payloads = false, KafkaProfile? profile = null) =>
         new(
             studio: o =>
             {

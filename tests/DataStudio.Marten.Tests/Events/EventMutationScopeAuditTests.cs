@@ -164,7 +164,7 @@ public class EventMutationScopeAuditTests
 
             services.AddDataStudio().AddMarten(static options =>
             {
-                options.Capabilities = MartenStudioCapabilities.All();
+                options.Capabilities = MartenCapabilities.All();
                 options.QueryTimeout = TimeSpan.FromSeconds(5);
                 options.DiscoverTenantIds = false;
                 options.KnownTenantIds.Add("acme");

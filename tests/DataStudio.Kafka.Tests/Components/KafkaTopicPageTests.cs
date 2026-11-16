@@ -224,7 +224,7 @@ public class KafkaTopicPageTests
         });
         await using KafkaCatalogRig both = new(studio: o =>
         {
-            o.Capabilities = KafkaStudioCapabilities.All();
+            o.Capabilities = KafkaCapabilities.All();
             o.CapabilityAuthorizationPolicy = "kafka-search";
         });
         searchOnly.Topic("orders", 1, 1);
@@ -244,7 +244,7 @@ public class KafkaTopicPageTests
         await using KafkaCatalogRig production = new(
             studio: o =>
             {
-                o.Capabilities = KafkaStudioCapabilities.All();
+                o.Capabilities = KafkaCapabilities.All();
                 o.CapabilityAuthorizationPolicy = "kafka-search";
             },
             profile: KafkaProfile.Production);
@@ -263,7 +263,7 @@ public class KafkaTopicPageTests
         off.Topic("orders", 1, 1);
         await using KafkaCatalogRig on = new(studio: o =>
         {
-            o.Capabilities = KafkaStudioCapabilities.All();
+            o.Capabilities = KafkaCapabilities.All();
             o.CapabilityAuthorizationPolicy = "kafka-search";
         });
         on.Topic("orders", 1, 1);
@@ -272,7 +272,7 @@ public class KafkaTopicPageTests
         IRenderedComponent<KafkaTopicPage> enabled = await OpenAsync(on, "orders");
 
         disabled.WaitForAssertion(() => disabled.FindAll(".ms-capability-disabled").Should().HaveCount(1));
-        disabled.Find(".ms-capability-disabled").TextContent.Should().Contain("Searching this topic is not available here.").And.NotContain("KafkaStudioOptions");
+        disabled.Find(".ms-capability-disabled").TextContent.Should().Contain("Searching this topic is not available here.").And.NotContain("KafkaOptions");
         disabled.FindAll("a[href*='kafka/search']").Should().BeEmpty();
 
         enabled.WaitForAssertion(() => enabled.FindAll("a[href*='kafka/search']").Should().HaveCount(1));

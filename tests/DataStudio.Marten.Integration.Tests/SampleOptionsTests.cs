@@ -197,7 +197,7 @@ public class SampleOptionsTests
     /// </summary>
     /// <remarks>
     /// <c>--path --urls http://localhost:5210</c> mounted the studio at <c>"--urls"</c> — which
-    /// <c>MartenStudioOptions</c> would then have refused with a message about a path, several screens
+    /// <c>MartenOptions</c> would then have refused with a message about a path, several screens
     /// later — and consumed <c>--urls</c> on the way, so Kestrel listened on the default port too.
     /// </remarks>
     [Theory]

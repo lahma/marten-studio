@@ -367,7 +367,7 @@ public class EventShapeCheckLiveTests(EventShapeCheckLiveTests.Fixture fixture)
         IServiceProvider provider = scope.ServiceProvider;
 
         EventShapeCheckService service = new(
-            provider.GetRequiredService<IOptions<MartenStudioOptions>>(),
+            provider.GetRequiredService<IOptions<MartenOptions>>(),
             provider.GetRequiredService<StudioScopeResolver>(),
             provider.GetRequiredService<ColumnCatalog>(),
             provider.GetRequiredService<IndexCatalog>(),
@@ -406,7 +406,7 @@ public class EventShapeCheckLiveTests(EventShapeCheckLiveTests.Fixture fixture)
         IServiceProvider provider = scope.ServiceProvider;
 
         EventShapeCheckService service = new(
-            provider.GetRequiredService<IOptions<MartenStudioOptions>>(),
+            provider.GetRequiredService<IOptions<MartenOptions>>(),
             provider.GetRequiredService<StudioScopeResolver>(),
             provider.GetRequiredService<ColumnCatalog>(),
             provider.GetRequiredService<IndexCatalog>(),

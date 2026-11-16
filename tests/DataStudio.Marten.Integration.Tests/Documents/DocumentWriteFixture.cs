@@ -61,11 +61,11 @@ public abstract class DocumentWriteFixture(PostgresFixture postgres) : IAsyncLif
     /// <see cref="TenantDiscovery" /> and the only one that works for a demo store whose tenants exist
     /// in documents and not in event streams.
     /// </remarks>
-    protected MartenStudioOptions StudioOptions { get; } = new()
+    protected MartenOptions StudioOptions { get; } = new()
     {
         StoreAuthorizationPolicy = StorePolicyName,
         WriteAuthorizationPolicy = WritePolicyName,
-        Capabilities = MartenStudioCapabilities.All(),
+        Capabilities = MartenCapabilities.All(),
         KnownTenantIds = { "acme", "globex" },
     };
 

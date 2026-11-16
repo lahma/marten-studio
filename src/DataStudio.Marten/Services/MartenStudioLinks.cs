@@ -1,9 +1,9 @@
+using DataStudio.Services.Settings;
 using DataStudio.Postgres.Services.Database;
 using DataStudio.Marten.Services.Documents;
 using DataStudio.Marten.Services.Events;
 using DataStudio.Postgres.Services.Settings;
 
-using Microsoft.Extensions.Options;
 using DataStudio.Postgres.Services;
 
 namespace DataStudio.Marten.Services;
@@ -18,32 +18,33 @@ namespace DataStudio.Marten.Services;
 /// </remarks>
 internal sealed class MartenStudioLinks : IStudioLinks
 {
-    private readonly IOptions<MartenStudioOptions> options;
+    private readonly IShellSettings settings;
 
-    public MartenStudioLinks(IOptions<MartenStudioOptions> options)
+    public MartenStudioLinks(IShellSettings settings)
     {
-        this.options = options;
+        ArgumentNullException.ThrowIfNull(settings);
+        this.settings = settings;
     }
 
     /// <inheritdoc />
-    public string? ToDocuments(StudioScope? scope) => DocumentLinks.ToIndex(options.Value, scope);
+    public string? ToDocuments(StudioScope? scope) => DocumentLinks.ToIndex(settings, scope);
 
     /// <inheritdoc />
-    public string? ToCollection(StudioScope? scope, string alias) => DocumentLinks.ToCollection(options.Value, scope, alias);
+    public string? ToCollection(StudioScope? scope, string alias) => DocumentLinks.ToCollection(settings, scope, alias);
 
     /// <inheritdoc />
-    public string? ToDocument(StudioScope? scope, string alias, string id) => DocumentLinks.ToDocument(options.Value, scope, alias, id);
+    public string? ToDocument(StudioScope? scope, string alias, string id) => DocumentLinks.ToDocument(settings, scope, alias, id);
 
     /// <inheritdoc />
-    public string? ToStreams(StudioScope? scope) => EventLinks.To(options.Value, EventLinks.StreamsRoute, scope);
+    public string? ToStreams(StudioScope? scope) => EventLinks.To(settings, EventLinks.StreamsRoute, scope);
 
     /// <inheritdoc />
-    public string? ToFeed(StudioScope? scope) => EventLinks.To(options.Value, EventLinks.FeedRoute, scope);
+    public string? ToFeed(StudioScope? scope) => EventLinks.To(settings, EventLinks.FeedRoute, scope);
 
     /// <inheritdoc />
-    public string? ToProjections(StudioScope? scope) => EventLinks.To(options.Value, "projections", scope);
+    public string? ToProjections(StudioScope? scope) => EventLinks.To(settings, "projections", scope);
 
     /// <inheritdoc />
     public string? ToSchema(StudioScope? scope, string tab = "tables") =>
-        EventLinks.To(options.Value, "schema", scope, [new KeyValuePair<string, string?>(DatabaseLinks.TabParameter, tab)]);
+        EventLinks.To(settings, "schema", scope, [new KeyValuePair<string, string?>(DatabaseLinks.TabParameter, tab)]);
 }

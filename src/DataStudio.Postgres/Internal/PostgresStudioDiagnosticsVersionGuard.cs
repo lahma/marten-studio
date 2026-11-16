@@ -29,7 +29,7 @@ namespace DataStudio.Postgres.Internal;
 /// guard could say why.
 /// </para>
 /// <para>
-/// <b>What it cannot cover.</b> <c>AddPostgres</c>'s own parameter type, <c>Action&lt;PostgresStudioOptions&gt;</c>,
+/// <b>What it cannot cover.</b> <c>AddPostgres</c>'s own parameter type, <c>Action&lt;PostgresOptions&gt;</c>,
 /// names a type that derives from the engine's <c>PostgresDiagnosticsOptions</c>, so the runtime loads the engine to compile
 /// <c>AddPostgres</c> itself, in every host, with a <c>configure</c> lambda or without, before the guard's first line.
 /// A deployment with no engine, or an older one, therefore fails in the loader when <c>AddPostgres</c> is first called,
@@ -38,8 +38,9 @@ namespace DataStudio.Postgres.Internal;
 /// is what answers a <em>newer</em> engine, or another commit of the same version, with the central-pin message. The shell is the
 /// same case one package down: <c>AddPostgres</c> extends the shell's <c>DataStudioBuilder</c>, so the loader needs
 /// <c>DataStudio</c> too before the guard's first line, and the guard answers a newer shell or another commit of the same version.
-/// <c>DataStudio.Marten</c>'s <c>PostgresStudioVersionGuard</c> names no options type before it runs and covers all three cases
-/// for a Marten host.
+/// <c>DataStudio.Marten</c>'s <c>PostgresStudioVersionGuard</c> names no options type before it runs, so for a Marten host it
+/// answers a missing, older, newer or other-commit DataStudio.Postgres and engine itself; only the shell, which <c>AddMarten</c> extends as well,
+/// is the loader's when it is missing or older.
 /// </para>
 /// <para>
 /// <b>What it compares.</b> The informational versions. The packages are packed from one commit at one CHANGELOG version,

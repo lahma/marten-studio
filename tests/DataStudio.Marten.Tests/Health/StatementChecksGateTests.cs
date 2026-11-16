@@ -26,7 +26,7 @@ public class StatementChecksGateTests
 
     private static CancellationToken Token => Xunit.TestContext.Current.CancellationToken;
 
-    private static HealthHarness Scripted(Action<MartenStudioOptions>? studio = null)
+    private static HealthHarness Scripted(Action<MartenOptions>? studio = null)
     {
         HealthHarness harness = HealthHarness.Create(checks: [.. HealthHarness.ScriptedChecks, typeof(ScriptedStatementCheck)], studio: studio, policies: true);
 
@@ -54,7 +54,7 @@ public class StatementChecksGateTests
         harness.Script.Runs.Should().NotContainKey("T91", "the request to run is the service's to refuse, whatever the page sent");
         report.StatementChecksExist.Should().BeTrue();
         report.StatementChecksAllowed.Should().BeFalse();
-        report.StatementChecksRefused.Should().Contain("MartenStudioOptions.Capabilities.ViewDatabaseActivity");
+        report.StatementChecksRefused.Should().Contain("MartenOptions.Capabilities.ViewDatabaseActivity");
         report.StatementsMeasuredAt.Should().BeNull();
         report.Checks.Should().NotContain(static x => x.Code == "T91", "not even the row: a tier-3 run is not shown short of its gate");
         report.Findings.Should().NotContain(static x => x.Code == "T91");
@@ -167,7 +167,7 @@ public class StatementChecksGateTests
         {
             StatementChecksExist = true,
             StatementChecksAllowed = false,
-            StatementChecksRefused = "needs MartenStudioOptions.Capabilities.ViewDatabaseActivity",
+            StatementChecksRefused = "needs MartenOptions.Capabilities.ViewDatabaseActivity",
         };
 
         var page = context.Render<HealthPage>();

@@ -46,7 +46,7 @@ public class ConnectionCompareServiceTests
         ConnectionCompareView view = await harness.Service.CompareAsync(Scope with { TenantId = "acme" }, Pasted, Token);
 
         view.Outcome.Should().Be(ConnectionCompareOutcome.Refused, "a connection belongs to no tenant, so the policy is asked without one");
-        view.Reason.Should().Contain("MartenStudioOptions.StoreAuthorizationPolicy");
+        view.Reason.Should().Contain("MartenOptions.StoreAuthorizationPolicy");
         view.Rows.Should().BeEmpty();
         harness.Facts.Reads.Should().Be(0, "nothing is read for a visitor the gate refused");
         harness.Ring.Should().BeEmpty();
@@ -246,7 +246,7 @@ public class ConnectionCompareServiceTests
 
             services.AddDataStudio().AddMarten(options =>
             {
-                options.Capabilities = MartenStudioCapabilities.All();
+                options.Capabilities = MartenCapabilities.All();
 
                 if (policies)
                 {

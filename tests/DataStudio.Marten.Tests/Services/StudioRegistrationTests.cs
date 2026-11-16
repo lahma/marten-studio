@@ -152,25 +152,25 @@ public class StudioRegistrationTests
         (typeof(SessionActivitySnapshots), ServiceLifetime.Singleton, How.Type, typeof(SessionActivitySnapshots)),
         (typeof(SessionHolderNames), ServiceLifetime.Scoped, How.Type, typeof(SessionHolderNames)),
         (typeof(ISessionActivityService), ServiceLifetime.Scoped, How.Type, typeof(SessionActivityService)),
-        (typeof(IValidateOptions<MartenStudioOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenStudioOptions>)),
-        (typeof(IValidateOptions<MartenStudioOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenStudioOptions>)),
-        (typeof(IValidateOptions<MartenStudioOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenStudioOptions>)),
-        (typeof(IValidateOptions<MartenStudioOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenStudioOptions>)),
-        (typeof(IValidateOptions<MartenStudioOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenStudioOptions>)),
-        (typeof(IValidateOptions<MartenStudioOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenStudioOptions>)),
-        (typeof(IValidateOptions<MartenStudioOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenStudioOptions>)),
-        (typeof(IValidateOptions<MartenStudioOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenStudioOptions>)),
-        (typeof(IValidateOptions<MartenStudioOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenStudioOptions>)),
-        (typeof(IValidateOptions<MartenStudioOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenStudioOptions>)),
-        (typeof(IValidateOptions<MartenStudioOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenStudioOptions>)),
+        (typeof(IValidateOptions<MartenOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenOptions>)),
+        (typeof(IValidateOptions<MartenOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenOptions>)),
+        (typeof(IValidateOptions<MartenOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenOptions>)),
+        (typeof(IValidateOptions<MartenOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenOptions>)),
+        (typeof(IValidateOptions<MartenOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenOptions>)),
+        (typeof(IValidateOptions<MartenOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenOptions>)),
+        (typeof(IValidateOptions<MartenOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenOptions>)),
+        (typeof(IValidateOptions<MartenOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenOptions>)),
+        (typeof(IValidateOptions<MartenOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenOptions>)),
+        (typeof(IValidateOptions<MartenOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenOptions>)),
+        (typeof(IValidateOptions<MartenOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenOptions>)),
         // 1.0 (#44): MaxStudioConnections and StudioApplicationName, two more of the shared bounds.
-        (typeof(IValidateOptions<MartenStudioOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenStudioOptions>)),
-        (typeof(IValidateOptions<MartenStudioOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenStudioOptions>)),
+        (typeof(IValidateOptions<MartenOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenOptions>)),
+        (typeof(IValidateOptions<MartenOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenOptions>)),
         // 1.2-HEADER: ApplicationPath, one more of the shared bounds.
-        (typeof(IValidateOptions<MartenStudioOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenStudioOptions>)),
-        (typeof(IValidateOptions<MartenStudioOptions>), ServiceLifetime.Singleton, How.Factory, typeof(IValidateOptions<MartenStudioOptions>)),
+        (typeof(IValidateOptions<MartenOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenOptions>)),
+        (typeof(IValidateOptions<MartenOptions>), ServiceLifetime.Singleton, How.Factory, typeof(IValidateOptions<MartenOptions>)),
         // 1.2-PROJ: ProjectionThresholds' validator, a type of its own because its message names the projection.
-        (typeof(IValidateOptions<MartenStudioOptions>), ServiceLifetime.Singleton, How.Type, typeof(ProjectionThresholdsValidator)),
+        (typeof(IValidateOptions<MartenOptions>), ServiceLifetime.Singleton, How.Type, typeof(ProjectionThresholdsValidator)),
         (typeof(MartenStoreRegistry), ServiceLifetime.Singleton, How.Instance, typeof(MartenStoreRegistry)),
         (typeof(IStudioSourceProvider), ServiceLifetime.Scoped, How.Type, typeof(MartenStudioSourceProvider)),
         (typeof(IStudioLinks), ServiceLifetime.Singleton, How.Type, typeof(MartenStudioLinks)),
@@ -330,7 +330,7 @@ public class StudioRegistrationTests
 
         // 1.1 (K10's retirement): the accepted-checks validator takes the container's logger factory, to say once that an entry
         // names a retired check. One of several validators of the options, so it is found among them.
-        [typeof(IValidateOptions<MartenStudioOptions>)] = typeof(AcceptedChecksValidator<MartenStudioOptions>),
+        [typeof(IValidateOptions<MartenOptions>)] = typeof(AcceptedChecksValidator<MartenOptions>),
     };
 
     /// <summary>
@@ -394,7 +394,7 @@ public class StudioRegistrationTests
     }
 
     private static readonly Assembly[] StudioAssemblies =
-        [.. new[] { typeof(MartenStudioOptions).Assembly, typeof(StudioCoreRegistration).Assembly, typeof(DiagnosticsCoreRegistration).Assembly, typeof(StudioShellDescriptor).Assembly }.Distinct()];
+        [.. new[] { typeof(MartenOptions).Assembly, typeof(StudioCoreRegistration).Assembly, typeof(DiagnosticsCoreRegistration).Assembly, typeof(StudioShellDescriptor).Assembly }.Distinct()];
 
     private static (Type Service, ServiceLifetime Lifetime, How How, Type Implementation) Read(ServiceDescriptor descriptor) =>
         descriptor switch

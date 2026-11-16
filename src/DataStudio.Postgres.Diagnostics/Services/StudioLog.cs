@@ -180,7 +180,7 @@ internal static partial class StudioLog
     /// Event ids <c>9230-9234</c> belong to the database browser; <c>9231-9234</c> are unassigned.
     /// </para>
     /// </remarks>
-    [LoggerMessage(EventId = 9230, Level = LogLevel.Warning, Message = "Marten Studio's database browser may show every schema (MartenStudioOptions.BrowsableSchemas contains \"*\") and MartenStudioOptions.SqlConsoleRole is not set, so it reads the catalog and rows as the store's own Postgres role: every table that role can select from is browsable by anyone granted MartenStudioOptions.Capabilities.BrowseDatabase. Set SqlConsoleRole to a role that can read only what the browser should show.")]
+    [LoggerMessage(EventId = 9230, Level = LogLevel.Warning, Message = "Marten Studio's database browser may show every schema (MartenOptions.BrowsableSchemas contains \"*\") and MartenOptions.SqlConsoleRole is not set, so it reads the catalog and rows as the store's own Postgres role: every table that role can select from is browsable by anyone granted MartenOptions.Capabilities.BrowseDatabase. Set SqlConsoleRole to a role that can read only what the browser should show.")]
     public static partial void DatabaseBrowserOpenToEverySchemaWithoutRole(this ILogger logger);
 
     // --------------------------------------------------------------------------------------------------

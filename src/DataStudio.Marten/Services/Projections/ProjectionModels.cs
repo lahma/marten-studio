@@ -170,7 +170,7 @@ internal enum LagSeverity
 /// Where the two lag colours change.
 /// </summary>
 /// <remarks>
-/// The studio's defaults, which a shard's own thresholds replace: a host's <c>MartenStudioOptions.ProjectionThresholds</c> for
+/// The studio's defaults, which a shard's own thresholds replace: a host's <c>MartenOptions.ProjectionThresholds</c> for
 /// the shard's projection name first, then numbers it wrote into the progression row (<see cref="LagThresholdResolver" />). A
 /// threshold is in events - the one unit the studio can compute honestly, not seconds behind. These two numbers are the ones an
 /// operator recognises: a thousand events behind is worth looking at, a hundred thousand is worth acting on.
@@ -254,7 +254,7 @@ internal sealed record ShardProgress(
 
     /// <summary>
     /// Whether <see cref="WarningThreshold" /> and <see cref="CriticalThreshold" /> are the host's
-    /// <c>MartenStudioOptions.ProjectionThresholds</c> for this shard's projection rather than the progression row's
+    /// <c>MartenOptions.ProjectionThresholds</c> for this shard's projection rather than the progression row's
     /// (<see cref="LagThresholdResolver" />).
     /// </summary>
     public bool ThresholdsFromOption { get; init; }
@@ -991,7 +991,7 @@ internal sealed record ProjectionSummary(
 {
     /// <summary>
     /// The colour the Overview tile wears: the worst of the shards' own colours, which are judged against the thresholds that
-    /// apply to each (<c>MartenStudioOptions.ProjectionThresholds</c>, a row's columns, the studio's defaults) - or, where no
+    /// apply to each (<c>MartenOptions.ProjectionThresholds</c>, a row's columns, the studio's defaults) - or, where no
     /// shard list was read, the worst lag against the studio's defaults.
     /// </summary>
     public LagSeverity Severity => Shards is { Count: > 0 } shards
@@ -1037,7 +1037,7 @@ internal sealed record ProjectionSummary(
 /// <param name="TablesAffected">The tables Marten would rewrite, by name.</param>
 /// <param name="Lifecycle">The projection's lifecycle, because rebuilding an inline projection is a different question.</param>
 /// <param name="ShardTimeout">
-/// The per-shard replay budget this rebuild will be given - <c>MartenStudioOptions.RebuildShardTimeout</c>.
+/// The per-shard replay budget this rebuild will be given - <c>MartenOptions.RebuildShardTimeout</c>.
 /// Stated in the dialog because Marten applies it <em>after</em> the projection's tables have been torn
 /// down, so a replay that overruns leaves them empty.
 /// </param>

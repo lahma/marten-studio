@@ -68,7 +68,7 @@ public class StorageServiceTests
         StorageView view = await harness.Service.GetAsync(new StudioScope("default", string.Empty, null), Token);
 
         view.Refusal.Should().Be(DatabaseRefusal.StorePolicy);
-        view.Reason.Should().Contain("MartenStudioOptions.StoreAuthorizationPolicy");
+        view.Reason.Should().Contain("MartenOptions.StoreAuthorizationPolicy");
         harness.Facts.Reads.Should().Be(0, "a refusal is decided before anything is read");
     }
 

@@ -159,7 +159,7 @@ public class StreamStepperLiveTests(StepperStoreFixture fixture) : IClassFixture
             Scope, fixture.LongStream.ToString(), typeof(StepperSlowLedger).FullName!, StepperStoreFixture.LongLength, Token);
 
         window.Error.Should().NotBeNull();
-        window.Error!.Message.Should().Contain("query timeout").And.Contain("MartenStudioOptions.QueryTimeout");
+        window.Error!.Message.Should().Contain("query timeout").And.Contain("MartenOptions.QueryTimeout");
         window.Error.CanRetry.Should().BeTrue();
         window.Steps.Should().BeEmpty();
     }
@@ -331,7 +331,7 @@ public sealed class StepperStoreFixture(PostgresFixture postgres) : IAsyncLifeti
     }
 
     /// <summary>A studio over the store, configured as the test needs: the class's own with no capability at all.</summary>
-    internal ServiceProvider Studio(Action<MartenStudioOptions> configure)
+    internal ServiceProvider Studio(Action<MartenOptions> configure)
     {
         var services = new ServiceCollection();
         services.AddLogging();

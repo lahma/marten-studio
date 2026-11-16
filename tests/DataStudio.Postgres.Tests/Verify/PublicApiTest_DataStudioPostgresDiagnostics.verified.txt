@@ -19,7 +19,7 @@ namespace DataStudio.Postgres
         System.Collections.Generic.IReadOnlyList<DataStudio.Postgres.PostgresCheck> Checks { get; }
         System.Threading.Tasks.Task<DataStudio.Postgres.PostgresDiagnosticsSnapshot> GetSnapshotAsync(DataStudio.Postgres.PostgresDiagnosticsRequest request, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<DataStudio.Postgres.PostgresDiagnosticsSnapshot> GetSnapshotAsync(DataStudio.Postgres.PostgresDatabaseRef database, DataStudio.Postgres.PostgresDiagnosticsRequest request, System.Threading.CancellationToken cancellationToken = default);
-        string GetStudioPath(DataStudio.Postgres.PostgresDatabaseRef database, DataStudio.Postgres.PostgresStudioPage page);
+        string GetStudioPath(DataStudio.Postgres.PostgresDatabaseRef database, DataStudio.Postgres.PostgresPage page);
         System.Collections.Generic.IAsyncEnumerable<DataStudio.Postgres.PostgresDatabaseRef> ListDatabasesAsync(System.Threading.CancellationToken cancellationToken = default);
     }
     public enum PostgresActionKind
@@ -134,6 +134,10 @@ namespace DataStudio.Postgres
         public string Database { get; }
         public string Source { get; }
     }
+    public static class PostgresDiagnosticsHealthChecksBuilderExtensions
+    {
+        public static Microsoft.Extensions.DependencyInjection.IHealthChecksBuilder AddPostgresDiagnostics(this Microsoft.Extensions.DependencyInjection.IHealthChecksBuilder builder, string name = "postgres-studio", Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus? failureStatus = default, System.Collections.Generic.IEnumerable<string>? tags = null, System.TimeSpan? timeout = default) { }
+    }
     public class PostgresDiagnosticsOptions
     {
         public PostgresDiagnosticsOptions() { }
@@ -219,7 +223,7 @@ namespace DataStudio.Postgres
         public string Key { get; }
         public System.DateTimeOffset MeasuredAt { get; init; }
         public DataStudio.Postgres.PostgresSeverity Severity { get; init; }
-        public System.Collections.Generic.IReadOnlyList<DataStudio.Postgres.PostgresStudioLink> StudioLinks { get; init; }
+        public System.Collections.Generic.IReadOnlyList<DataStudio.Postgres.PostgresPageLink> StudioLinks { get; init; }
         public string StudioPath { get; init; }
         public string? Subject { get; init; }
         public string? TenantId { get; init; }
@@ -248,6 +252,27 @@ namespace DataStudio.Postgres
         public string StudioPath { get; init; }
         public string? Subject { get; init; }
         public string Title { get; init; }
+    }
+    public enum PostgresPage
+    {
+        Health = 0,
+        Sessions = 1,
+        Blocking = 2,
+        Statements = 3,
+        Maintenance = 4,
+        Storage = 5,
+        Server = 6,
+        Plan = 7,
+        Holders = 8,
+        Replication = 9,
+        Overview = 10,
+        Connection = 11,
+    }
+    public sealed record PostgresPageLink : System.IEquatable<DataStudio.Postgres.PostgresPageLink>
+    {
+        public PostgresPageLink() { }
+        public string Label { get; init; }
+        public string Path { get; init; }
     }
     public enum PostgresPlatformKind
     {
@@ -346,31 +371,6 @@ namespace DataStudio.Postgres
         public string? Reason { get; init; }
         public bool SizesAreEstimates { get; init; }
         public System.DateTimeOffset? StatisticsSince { get; init; }
-    }
-    public static class PostgresStudioHealthChecksBuilderExtensions
-    {
-        public static Microsoft.Extensions.DependencyInjection.IHealthChecksBuilder AddPostgresStudio(this Microsoft.Extensions.DependencyInjection.IHealthChecksBuilder builder, string name = "postgres-studio", Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus? failureStatus = default, System.Collections.Generic.IEnumerable<string>? tags = null, System.TimeSpan? timeout = default) { }
-    }
-    public sealed record PostgresStudioLink : System.IEquatable<DataStudio.Postgres.PostgresStudioLink>
-    {
-        public PostgresStudioLink() { }
-        public string Label { get; init; }
-        public string Path { get; init; }
-    }
-    public enum PostgresStudioPage
-    {
-        Health = 0,
-        Sessions = 1,
-        Blocking = 2,
-        Statements = 3,
-        Maintenance = 4,
-        Storage = 5,
-        Server = 6,
-        Plan = 7,
-        Holders = 8,
-        Replication = 9,
-        Overview = 10,
-        Connection = 11,
     }
     public enum PostgresTableOwnership
     {

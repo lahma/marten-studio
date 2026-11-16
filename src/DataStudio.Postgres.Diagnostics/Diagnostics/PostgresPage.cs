@@ -3,7 +3,7 @@ namespace DataStudio.Postgres;
 /// <summary>
 /// A studio page a host can link to for one database (<see cref="IPostgresDiagnostics.GetStudioPath" />). May gain members.
 /// </summary>
-public enum PostgresStudioPage
+public enum PostgresPage
 {
     /// <summary>The Health page.</summary>
     Health = 0,

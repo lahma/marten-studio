@@ -375,10 +375,10 @@ public class DaemonControlPageTests
         IElement pause = page.Find(".ms-daemon-pause");
 
         pause.HasAttribute("disabled").Should().BeTrue();
-        pause.GetAttribute("title").Should().Contain("MartenStudioOptions.Capabilities.ControlDaemon");
+        pause.GetAttribute("title").Should().Contain("MartenOptions.Capabilities.ControlDaemon");
 
         page.Find(".ms-shard-start").GetAttribute("title")
-            .Should().Contain("MartenStudioOptions.Capabilities.ControlDaemon");
+            .Should().Contain("MartenOptions.Capabilities.ControlDaemon");
 
         // The coordinator hint is about a control the visitor could otherwise use; with the capability
         // off it would be a second, misleading reason.

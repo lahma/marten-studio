@@ -43,7 +43,7 @@ public class IndexWhatIfActionLiveTests(HypopgServer server) : IClassFixture<Hyp
         return (database, app);
     }
 
-    private StudioHost Host(string database, AdvisorRecorder recorder, Action<PostgresStudioOptions>? studio = null, string role = "app", int? pool = null) =>
+    private StudioHost Host(string database, AdvisorRecorder recorder, Action<PostgresOptions>? studio = null, string role = "app", int? pool = null) =>
         StudioHost.Create(
             services =>
             {
@@ -52,7 +52,7 @@ public class IndexWhatIfActionLiveTests(HypopgServer server) : IClassFixture<Hyp
             },
             options =>
             {
-                options.Capabilities = PostgresStudioCapabilities.All();
+                options.Capabilities = PostgresCapabilities.All();
                 studio?.Invoke(options);
             });
 

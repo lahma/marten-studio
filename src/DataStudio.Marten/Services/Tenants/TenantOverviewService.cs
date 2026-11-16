@@ -72,7 +72,7 @@ internal sealed class TenantOverviewService : ITenantOverviewService
     private readonly StudioAuthorization authorization;
     private readonly StudioCapabilityGuard capabilities;
     private readonly StudioActionLog audit;
-    private readonly IOptions<MartenStudioOptions> options;
+    private readonly IOptions<MartenOptions> options;
     private readonly ColumnCatalog catalog;
     private readonly ILogger<TenantOverviewService> logger;
     private readonly TableRowAuditLedger ledger = new();
@@ -84,7 +84,7 @@ internal sealed class TenantOverviewService : ITenantOverviewService
         StudioAuthorization authorization,
         StudioCapabilityGuard capabilities,
         StudioActionLog audit,
-        IOptions<MartenStudioOptions> options,
+        IOptions<MartenOptions> options,
         ColumnCatalog catalog,
         ILogger<TenantOverviewService> logger,
         TimeSpan? budget = null)

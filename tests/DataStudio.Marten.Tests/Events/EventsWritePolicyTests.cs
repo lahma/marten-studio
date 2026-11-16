@@ -13,7 +13,7 @@ using DataStudio.Postgres.Services;
 namespace DataStudio.Marten.Tests.Events;
 
 /// <summary>
-/// The Events screens' mutating controls against <see cref="MartenStudioOptions.WriteAuthorizationPolicy" />,
+/// The Events screens' mutating controls against <see cref="MartenOptions.WriteAuthorizationPolicy" />,
 /// which is asked about the visitor rather than about the process.
 /// </summary>
 /// <remarks>
@@ -151,7 +151,7 @@ public class EventsWritePolicyTests
             IRenderedComponent<StreamDetail> page = RenderStream(context);
 
             page.Find(".ms-capability-disabled").TextContent
-                .Should().Contain("MartenStudioOptions.Capabilities.ArchiveStreams");
+                .Should().Contain("MartenOptions.Capabilities.ArchiveStreams");
             page.FindAll(".ms-write-refusal").Should().BeEmpty();
             page.FindAll(".ms-stream-archive").Should().BeEmpty();
         }

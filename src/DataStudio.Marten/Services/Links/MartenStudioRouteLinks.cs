@@ -54,13 +54,15 @@ internal sealed class MartenStudioRouteLinks : IStudioRouteLinks
     /// <summary>The longest stream key Marten's <c>stream_key</c> column holds.</summary>
     private const int MaxStreamKeyLength = 250;
 
-    private readonly IOptions<MartenStudioOptions> options;
+    private readonly IOptions<MartenOptions> options;
+    private readonly IShellSettings settings;
     private readonly MartenStoreRegistry registry;
     private readonly IServiceProvider provider;
 
-    public MartenStudioRouteLinks(IOptions<MartenStudioOptions> options, MartenStoreRegistry registry, IServiceProvider provider)
+    public MartenStudioRouteLinks(IOptions<MartenOptions> options, IShellSettings settings, MartenStoreRegistry registry, IServiceProvider provider)
     {
         this.options = options;
+        this.settings = settings;
         this.registry = registry;
         this.provider = provider;
     }
@@ -75,7 +77,7 @@ internal sealed class MartenStudioRouteLinks : IStudioRouteLinks
             return null;
         }
 
-        MartenStudioOptions current = options.Value;
+        MartenOptions current = options.Value;
 
         List<Candidate> candidates = [];
         foreach ((MartenStoreRegistration registration, IDocumentStore store) in Stores(current))
@@ -92,7 +94,7 @@ internal sealed class MartenStudioRouteLinks : IStudioRouteLinks
             return null;
         }
 
-        return DocumentLinks.ToDocument(current, chosen.StoreKey, tenant, alias, id);
+        return DocumentLinks.ToDocument(settings, chosen.StoreKey, tenant, alias, id);
     }
 
     /// <inheritdoc />
@@ -105,7 +107,7 @@ internal sealed class MartenStudioRouteLinks : IStudioRouteLinks
             return null;
         }
 
-        MartenStudioOptions current = options.Value;
+        MartenOptions current = options.Value;
 
         List<Candidate> candidates = [];
         foreach ((MartenStoreRegistration registration, IDocumentStore store) in Stores(current))
@@ -122,11 +124,11 @@ internal sealed class MartenStudioRouteLinks : IStudioRouteLinks
             return null;
         }
 
-        return EventLinks.ToStream(current, chosen.StoreKey, tenant, canonicalId);
+        return EventLinks.ToStream(settings, chosen.StoreKey, tenant, canonicalId);
     }
 
     /// <summary>The stores the studio lists, the default first, those that build.</summary>
-    private IEnumerable<(MartenStoreRegistration Registration, IDocumentStore Store)> Stores(MartenStudioOptions current)
+    private IEnumerable<(MartenStoreRegistration Registration, IDocumentStore Store)> Stores(MartenOptions current)
     {
         foreach (MartenStoreRegistration registration in registry.Registrations(current.IncludeAncillaryStores))
         {
@@ -176,7 +178,7 @@ internal sealed class MartenStudioRouteLinks : IStudioRouteLinks
     /// with no database to the first database the visitor may see whose tenant listing carries it, and no database lists tenants
     /// otherwise. A tenancy of the application's own, or one the configuration would not classify, never answers.
     /// </summary>
-    private static bool TenantFor(IDocumentStore store, MartenStudioOptions current, string? tenantId, out string? tenant)
+    private static bool TenantFor(IDocumentStore store, MartenOptions current, string? tenantId, out string? tenant)
     {
         tenant = null;
 

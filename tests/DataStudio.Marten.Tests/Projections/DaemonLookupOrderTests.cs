@@ -362,7 +362,7 @@ public class DaemonLookupOrderTests
                 marten.AddAsyncDaemon(DaemonMode.Solo);
             }
 
-            services.AddDataStudio().AddMarten(static options => options.Capabilities = MartenStudioCapabilities.All());
+            services.AddDataStudio().AddMarten(static options => options.Capabilities = MartenCapabilities.All());
             services.AddScoped<AuthenticationStateProvider>(_ => users);
 
             if (coordinator is not null)

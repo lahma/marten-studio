@@ -30,7 +30,7 @@ public class StudioEndpointsTest
     private static WebApplication CreateApp(
         Action<DataStudioOptions>? configureShell = null,
         Action<WebApplicationBuilder>? configureBuilder = null,
-        Action<MartenStudioOptions>? configureStudio = null)
+        Action<MartenOptions>? configureStudio = null)
     {
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseTestServer();

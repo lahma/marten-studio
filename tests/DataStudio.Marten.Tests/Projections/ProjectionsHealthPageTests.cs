@@ -197,7 +197,7 @@ public class ProjectionsHealthPageTests
             Mark = 100,
             OpenTransactions = 1,
             DetailsShown = false,
-            DetailsWithheldReason = "Naming sessions needs MartenStudioOptions.Capabilities.ViewDatabaseActivity.",
+            DetailsWithheldReason = "Naming sessions needs MartenOptions.Capabilities.ViewDatabaseActivity.",
         });
 
         IRenderedComponent<Page> page = context.Render<Page>();

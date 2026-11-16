@@ -78,7 +78,7 @@ internal sealed class MatrixHost : IAsyncDisposable
         MatrixRole role,
         string database = MatrixServer.Database,
         Action<IServiceCollection>? services = null,
-        Action<PostgresStudioOptions>? options = null,
+        Action<PostgresOptions>? options = null,
         Action<NpgsqlConnectionStringBuilder>? connection = null)
     {
         ArgumentNullException.ThrowIfNull(server);
@@ -105,7 +105,7 @@ internal sealed class MatrixHost : IAsyncDisposable
                 studio.BrowsableSchemas.Add(schema);
             }
 
-            studio.Capabilities = PostgresStudioCapabilities.All();
+            studio.Capabilities = PostgresCapabilities.All();
             options?.Invoke(studio);
         });
 

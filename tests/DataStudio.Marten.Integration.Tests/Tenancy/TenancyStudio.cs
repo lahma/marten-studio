@@ -46,7 +46,7 @@ internal sealed class TenancyStudio : IAsyncDisposable
     public IServiceProvider Services => provider;
 
     /// <summary>A studio over a store configured by <paramref name="configure" />, and nothing else - or with the stores <paramref name="extra" /> adds.</summary>
-    public static TenancyStudio Start(Action<StoreOptions> configure, Action<IServiceCollection>? extra = null, Action<MartenStudioOptions>? studio = null)
+    public static TenancyStudio Start(Action<StoreOptions> configure, Action<IServiceCollection>? extra = null, Action<MartenOptions>? studio = null)
     {
         ArgumentNullException.ThrowIfNull(configure);
 

@@ -122,16 +122,16 @@ internal enum DatabaseRefusal
     /// <summary>Nothing refused.</summary>
     None,
 
-    /// <summary><c>MartenStudioOptions.ReadOnly</c> is on.</summary>
+    /// <summary><c>MartenOptions.ReadOnly</c> is on.</summary>
     ReadOnly,
 
-    /// <summary><c>MartenStudioOptions.Capabilities.BrowseDatabase</c> is off.</summary>
+    /// <summary><c>MartenOptions.Capabilities.BrowseDatabase</c> is off.</summary>
     CapabilityOff,
 
     /// <summary>The write policy refused this visitor for the database as a whole.</summary>
     WritePolicy,
 
-    /// <summary>The schema is not one <c>MartenStudioOptions.BrowsableSchemas</c> admits.</summary>
+    /// <summary>The schema is not one <c>MartenOptions.BrowsableSchemas</c> admits.</summary>
     SchemaNotBrowsable,
 
     /// <summary>No such object where the visitor may look.</summary>
@@ -165,7 +165,7 @@ internal enum DatabaseRefusal
     Unavailable,
 
     /// <summary>
-    /// The store policy (<c>MartenStudioOptions.StoreAuthorizationPolicy</c>) refused this visitor the
+    /// The store policy (<c>MartenOptions.StoreAuthorizationPolicy</c>) refused this visitor the
     /// store - the resolved one for the database as a whole, or another store whose object this is.
     /// </summary>
     StorePolicy,
@@ -246,13 +246,13 @@ internal sealed record DatabaseRowAccess(bool Allowed, DatabaseRefusal Refusal, 
 /// <param name="CapabilityEnabled">
 /// <c>Capabilities.BrowseDatabase</c> and not <c>ReadOnly</c> - process-wide.
 /// </param>
-/// <param name="ReadOnly"><c>MartenStudioOptions.ReadOnly</c>.</param>
+/// <param name="ReadOnly"><c>MartenOptions.ReadOnly</c>.</param>
 /// <param name="Authorized">
 /// Whether the store policy and then the write policy pass this visitor for the database with no tenant;
 /// <see langword="null" /> when they were not asked because the capability is off. When it is
 /// <see langword="false" />, <paramref name="Refusal" /> names which of the two said no.
 /// </param>
-/// <param name="BrowsableSchemasConfigured">Whether <c>MartenStudioOptions.BrowsableSchemas</c> names anything.</param>
+/// <param name="BrowsableSchemasConfigured">Whether <c>MartenOptions.BrowsableSchemas</c> names anything.</param>
 /// <param name="StoreSchemas">The store's own schemas: structure visible without the capability.</param>
 /// <param name="BrowsableSchemas">
 /// The schemas whose non-Marten rows and definitions this visitor may read - empty while the gate is shut.

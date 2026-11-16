@@ -33,7 +33,7 @@
 
     @if (!Capabilities.IsEnabled(KafkaCapability.SearchRecords))
     {
-        <KafkaCapabilityDisabled Capability="@nameof(KafkaStudioCapabilities.SearchRecords)" Action="Searching related records" />
+        <KafkaCapabilityDisabled Capability="@nameof(KafkaCapabilities.SearchRecords)" Action="Searching related records" />
     }
     else if (ready && mode == EntryMode.None)
     {

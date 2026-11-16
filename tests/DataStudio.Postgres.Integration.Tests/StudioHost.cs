@@ -23,7 +23,7 @@ namespace DataStudio.Postgres.Integration.Tests;
 /// and the caches are exercised rather than bypassed.
 /// </para>
 /// <para>
-/// <b>The two resource policies are predicates</b> over <see cref="PostgresStudioResource" /> and the visitor, registered
+/// <b>The two resource policies are predicates</b> over <see cref="PostgresResource" /> and the visitor, registered
 /// as <see cref="SourcePolicy" /> and <see cref="WritePolicy" /> only when a test passes one, and every question either is
 /// asked is recorded in <see cref="Calls" />. The visitor is per circuit (<see cref="CircuitAsync" />), so two visitors in
 /// one process share every singleton cache the studio has - which is what an isolation test needs.
@@ -65,9 +65,9 @@ internal sealed class StudioHost : IAsyncDisposable
     /// <param name="writePolicy">The write policy, or <see langword="null" /> for none (every capability passes).</param>
     public static StudioHost Create(
         Action<IServiceCollection> services,
-        Action<PostgresStudioOptions>? studio = null,
-        Func<PostgresStudioResource, ClaimsPrincipal, bool>? sourcePolicy = null,
-        Func<PostgresStudioResource, ClaimsPrincipal, bool>? writePolicy = null)
+        Action<PostgresOptions>? studio = null,
+        Func<PostgresResource, ClaimsPrincipal, bool>? sourcePolicy = null,
+        Func<PostgresResource, ClaimsPrincipal, bool>? writePolicy = null)
     {
         ArgumentNullException.ThrowIfNull(services);
 
@@ -142,23 +142,23 @@ internal sealed class StudioHost : IAsyncDisposable
     /// <summary>One policy's requirement: the predicate the test gave it.</summary>
     private sealed class PredicateRequirement(
         string policy,
-        Func<PostgresStudioResource, ClaimsPrincipal, bool> allow,
+        Func<PostgresResource, ClaimsPrincipal, bool> allow,
         PolicyCalls calls) : IAuthorizationRequirement
     {
         public string Policy { get; } = policy;
 
-        public Func<PostgresStudioResource, ClaimsPrincipal, bool> Allow { get; } = allow;
+        public Func<PostgresResource, ClaimsPrincipal, bool> Allow { get; } = allow;
 
         public PolicyCalls Calls { get; } = calls;
     }
 
     /// <summary>Answers either requirement from the resource the studio passes, and records the question.</summary>
-    private sealed class PredicateHandler : AuthorizationHandler<PredicateRequirement, PostgresStudioResource>
+    private sealed class PredicateHandler : AuthorizationHandler<PredicateRequirement, PostgresResource>
     {
         protected override Task HandleRequirementAsync(
             AuthorizationHandlerContext context,
             PredicateRequirement requirement,
-            PostgresStudioResource resource)
+            PostgresResource resource)
         {
             bool allowed = requirement.Allow(resource, context.User);
             requirement.Calls.Add(new PolicyCall(requirement.Policy, context.User.Identity?.Name, resource, allowed));
@@ -187,7 +187,7 @@ internal sealed class StudioCircuit(AsyncServiceScope scope) : IAsyncDisposable
 }
 
 /// <summary>One question a policy was asked, and its answer.</summary>
-internal sealed record PolicyCall(string Policy, string? User, PostgresStudioResource Resource, bool Allowed);
+internal sealed record PolicyCall(string Policy, string? User, PostgresResource Resource, bool Allowed);
 
 /// <summary>Every question the host's policies were asked.</summary>
 internal sealed class PolicyCalls

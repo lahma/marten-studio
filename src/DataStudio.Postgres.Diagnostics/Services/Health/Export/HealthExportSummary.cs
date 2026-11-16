@@ -35,7 +35,7 @@ internal enum HealthExportLevel
 /// </para>
 /// <para>
 /// <b>Hidden document types are already gone.</b> The sweeper drops a finding about a type
-/// <c>MartenStudioOptions.IsDocumentTypeVisible</c> hides before the sweep is returned, so such a finding is
+/// <c>MartenOptions.IsDocumentTypeVisible</c> hides before the sweep is returned, so such a finding is
 /// not counted here either - not by code, not by number.
 /// </para>
 /// </remarks>
@@ -265,7 +265,7 @@ internal sealed record HealthExportSummary
         MeasuredAt = measuredAt,
         Problem = text.ProductName + "'s services are not registered: call services."
             + (text.AlternativeRegistrationMethod is { } alternative ? alternative + "() or services." : string.Empty)
-            + text.RegistrationMethod + "() as well as AddHealthChecks()." + text.RegistrationMethod + "()",
+            + "AddDataStudio()." + text.RegistrationMethod + "() as well as AddHealthChecks()." + text.RegistrationMethod + "Diagnostics()",
     };
 
     /// <summary>A host whose container holds no source the studio would list.</summary>

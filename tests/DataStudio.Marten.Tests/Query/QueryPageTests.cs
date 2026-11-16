@@ -188,7 +188,7 @@ public class QueryPageTests
         page.Find("#ms-query-mode-sql").Click();
 
         page.Find(".ms-capability-disabled").TextContent.Should()
-            .Contain("MartenStudioOptions.Capabilities.RunSql");
+            .Contain("MartenOptions.Capabilities.RunSql");
         page.Find(".ms-query-sql-warning").TextContent.Should().Contain("psql");
         page.FindAll("#ms-query-sql").Should().BeEmpty("there is no editor to type into when the console is off");
     }
@@ -393,7 +393,7 @@ public class QueryPageTests
         RunEditor(page, "ms-query-sql", "select 1");
 
         page.Find(".ms-query-error-message").TextContent.Should()
-            .Contain("MartenStudioOptions.Capabilities.RunSql");
+            .Contain("MartenOptions.Capabilities.RunSql");
     }
 
     [Fact]

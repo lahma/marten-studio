@@ -57,11 +57,11 @@ internal sealed class DeadLettersGrowingCheck : HealthCheck<DeadLettersFacts>
 
     /// <summary>What D06 says when the host hides <c>DeadLetterEvent</c>.</summary>
     internal const string HiddenReason =
-        "MartenStudioOptions.IsDocumentTypeVisible hides DeadLetterEvent, so the advisor does not read the dead letters.";
+        "MartenOptions.IsDocumentTypeVisible hides DeadLetterEvent, so the advisor does not read the dead letters.";
 
     /// <summary>What D06 says when the host's visibility delegate throws for <c>DeadLetterEvent</c>.</summary>
     internal const string VisibilityFailedReason =
-        "MartenStudioOptions.IsDocumentTypeVisible threw for DeadLetterEvent, so the advisor treats it as hidden and does not read "
+        "MartenOptions.IsDocumentTypeVisible threw for DeadLetterEvent, so the advisor treats it as hidden and does not read "
         + "the dead letters.";
 
     /// <inheritdoc />

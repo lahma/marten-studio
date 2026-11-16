@@ -57,7 +57,7 @@ public class StudioConnectionPoolsTests
         DiagnosticsOptionsValidation.IsMaxStudioConnections(100).Should().BeTrue();
         DiagnosticsOptionsValidation.IsMaxStudioConnections(101).Should().BeFalse();
         new PostgresDiagnosticsOptions().MaxStudioConnections.Should().Be(2);
-        new PostgresStudioOptions().StudioApplicationName.Should().BeNull("the derived name is the default");
+        new PostgresOptions().StudioApplicationName.Should().BeNull("the derived name is the default");
     }
 
     [Fact]
@@ -206,12 +206,12 @@ public class StudioConnectionPoolsTests
     [Fact]
     public void The_health_pages_share_line_names_the_pool_size_only_when_it_held_the_cap()
     {
-        IStudioSettings settings = PostgresStudioSettings.Of(new PostgresStudioOptions());
+        IStudioSettings settings = PostgresStudioSettings.Of(new PostgresOptions());
 
         HealthPresentation.Share(new StudioConnectionShare(2, 1, 2, null), settings).Should().Be(
-            "It holds at most 2 of the pool's connections at a time (PostgresStudioOptions.MaxStudioConnections), 1 now.");
+            "It holds at most 2 of the pool's connections at a time (PostgresOptions.MaxStudioConnections), 1 now.");
         HealthPresentation.Share(new StudioConnectionShare(1, 0, 2, 1), settings).Should().Be(
-            "It holds at most 1 of the pool's connections at a time (PostgresStudioOptions.MaxStudioConnections is 2; the data source's Maximum Pool Size is 1), 0 now.");
+            "It holds at most 1 of the pool's connections at a time (PostgresOptions.MaxStudioConnections is 2; the data source's Maximum Pool Size is 1), 0 now.");
     }
 
     [Fact]

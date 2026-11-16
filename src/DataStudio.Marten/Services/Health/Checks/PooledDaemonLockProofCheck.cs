@@ -136,7 +136,7 @@ internal sealed class PooledDaemonLockProofCheck : HealthCheck<PooledLockProbeFa
             Caveat =
                 "Measured on the studio's own connection, from this database's data source as this process configures it. A daemon on "
                 + "another node runs with that node's connection string, which may not go through the pooler; this says what this "
-                + "process's daemon would meet. The two process ids are shown only with MartenStudioOptions.Capabilities.ViewDatabaseActivity.",
+                + "process's daemon would meet. The two process ids are shown only with MartenOptions.Capabilities.ViewDatabaseActivity.",
             Remedy = DaemonLockPooling.Remedy,
         });
     }

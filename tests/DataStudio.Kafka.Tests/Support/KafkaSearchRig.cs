@@ -27,7 +27,7 @@ internal sealed class KafkaSearchRig : IAsyncDisposable
     /// <summary>The cluster entry the studio lists.</summary>
     public KafkaClusterEntry Entry { get; }
 
-    public KafkaSearchRig(Action<KafkaEngineOptions>? engine = null, Action<KafkaStudioOptions>? studio = null, bool searchOn = true, bool policies = true, Func<FakeKafkaWire, DataStudio.Kafka.Core.Wire.IKafkaWire>? wrap = null, bool payloads = false, bool traceCircuit = false, Action<IServiceCollection>? services = null, KafkaProfile? profile = null, KafkaClusterEntry? other = null)
+    public KafkaSearchRig(Action<KafkaEngineOptions>? engine = null, Action<KafkaOptions>? studio = null, bool searchOn = true, bool policies = true, Func<FakeKafkaWire, DataStudio.Kafka.Core.Wire.IKafkaWire>? wrap = null, bool payloads = false, bool traceCircuit = false, Action<IServiceCollection>? services = null, KafkaProfile? profile = null, KafkaClusterEntry? other = null)
     {
         Entry = new KafkaClusterEntry(EngineHarness.ClusterKey, null, "Test cluster", "production", profile);
         Cluster = new FakeKafkaCluster(TimeProvider.System);

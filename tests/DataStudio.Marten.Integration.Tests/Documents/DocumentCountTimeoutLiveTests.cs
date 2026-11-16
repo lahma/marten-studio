@@ -53,7 +53,7 @@ public class DocumentCountTimeoutLiveTests(DocumentCountTimeoutLiveTests.Fixture
         protected override void ConfigureStore(StoreOptions options) => options.Schema.For<SlowCountThing>();
 
         /// <inheritdoc />
-        protected override void ConfigureStudio(MartenStudioOptions options) =>
+        protected override void ConfigureStudio(MartenOptions options) =>
             options.QueryTimeout = TimeSpan.FromSeconds(1);
 
         /// <inheritdoc />

@@ -98,7 +98,7 @@ internal sealed partial class EventDataService : IEventDataService
     private readonly DaemonAccessor daemons;
     private readonly ColumnCatalog catalog;
     private readonly IndexCatalog indexes;
-    private readonly IOptions<MartenStudioOptions> options;
+    private readonly IOptions<MartenOptions> options;
     private readonly StudioLogThrottle throttle;
     private readonly ILogger<EventDataService> logger;
     private readonly DatabaseReachAuthorization reach;
@@ -114,7 +114,7 @@ internal sealed partial class EventDataService : IEventDataService
         DaemonAccessor daemons,
         ColumnCatalog catalog,
         IndexCatalog indexes,
-        IOptions<MartenStudioOptions> options,
+        IOptions<MartenOptions> options,
         StudioLogThrottle throttle,
         ILogger<EventDataService> logger,
         DeadLetterGroupCache groups,
@@ -1406,7 +1406,7 @@ internal sealed partial class EventDataService : IEventDataService
     }
 
     /// <summary>
-    /// Whether the host lets the studio show <c>DeadLetterEvent</c> (<see cref="MartenStudioOptions.IsDocumentTypeVisible" />),
+    /// Whether the host lets the studio show <c>DeadLetterEvent</c> (<see cref="MartenOptions.IsDocumentTypeVisible" />),
     /// failing closed: a delegate that throws hides it, and says so in the log.
     /// </summary>
     /// <remarks>
@@ -1439,7 +1439,7 @@ internal sealed partial class EventDataService : IEventDataService
 
     /// <summary>What the log says could not be done when the visibility delegate throws for <c>DeadLetterEvent</c>.</summary>
     internal const string DeadLetterVisibilityRead =
-        "ask MartenStudioOptions.IsDocumentTypeVisible about DeadLetterEvent, so the dead letters are treated as hidden,";
+        "ask MartenOptions.IsDocumentTypeVisible about DeadLetterEvent, so the dead letters are treated as hidden,";
 
     /// <summary>
     /// Refuses a dead-letter write when the host hides <c>DeadLetterEvent</c>, with the page's own sentence

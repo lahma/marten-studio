@@ -156,7 +156,7 @@ internal sealed class QueryHarness : IAsyncDisposable
     public static async Task<QueryHarness> CreateAsync(
         PostgresFixture fixture,
         string schema,
-        Action<MartenStudioOptions>? configure = null,
+        Action<MartenOptions>? configure = null,
         Action<StoreOptions>? configureStore = null)
     {
         await fixture.CreateSchemaAsync(schema);

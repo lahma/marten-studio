@@ -12,12 +12,12 @@ internal enum LagThresholdSource
     /// </summary>
     ProgressionRow,
 
-    /// <summary><see cref="MartenStudioOptions.ProjectionThresholds" />.</summary>
+    /// <summary><see cref="MartenOptions.ProjectionThresholds" />.</summary>
     Option,
 }
 
 /// <summary>
-/// The one place the precedence of lag thresholds is decided: <see cref="MartenStudioOptions.ProjectionThresholds" /> for the
+/// The one place the precedence of lag thresholds is decided: <see cref="MartenOptions.ProjectionThresholds" /> for the
 /// shard's projection name, then a value a host wrote into the row's own columns, then the studio's defaults.
 /// </summary>
 /// <remarks>
@@ -159,7 +159,7 @@ internal sealed record ProjectionThresholdSource(string Projection, LagThreshold
 
 /// <summary>What the Projections page's "Thresholds that apply" says about per-projection thresholds.</summary>
 /// <param name="Projections">The projections whose thresholds are not the studio's defaults, by name.</param>
-/// <param name="UnmatchedOptions">Names in <see cref="MartenStudioOptions.ProjectionThresholds" /> that this store has no projection of.</param>
+/// <param name="UnmatchedOptions">Names in <see cref="MartenOptions.ProjectionThresholds" /> that this store has no projection of.</param>
 internal sealed record ThresholdDisclosure(IReadOnlyList<ProjectionThresholdSource> Projections, IReadOnlyList<string> UnmatchedOptions)
 {
     /// <summary>Whether there is nothing to say: every projection runs on the studio's defaults, and no option is unmatched.</summary>

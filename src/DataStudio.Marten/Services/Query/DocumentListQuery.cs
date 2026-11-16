@@ -107,7 +107,7 @@ internal sealed record DocumentListQuery
     public const int MaxPageSize = 500;
 
     /// <summary>The default inline-JSON budget: bigger documents come back as a size, not as text.</summary>
-    public const int DefaultMaxInlineDocumentBytes = 64 * 1024;
+    public const int DefaultMaxInlineValueBytes = 64 * 1024;
 
     /// <summary>The filter terms, ANDed. Normally <see cref="SearchGrammar.Parse"/>'s output.</summary>
     public IReadOnlyList<DocumentPredicate> Predicates { get; init; } = [];
@@ -161,7 +161,7 @@ internal sealed record DocumentListQuery
     /// <summary>
     /// The threshold above which <c>data</c> is not inlined. The list still reports every document's size.
     /// </summary>
-    public int MaxInlineDocumentBytes { get; init; } = DefaultMaxInlineDocumentBytes;
+    public int MaxInlineValueBytes { get; init; } = DefaultMaxInlineValueBytes;
 
     /// <summary>
     /// The command timeout the built read carries, in seconds. Zero leaves Npgsql's own default.

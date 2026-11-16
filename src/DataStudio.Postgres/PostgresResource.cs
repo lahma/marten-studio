@@ -2,9 +2,9 @@ namespace DataStudio.Postgres;
 
 /// <summary>
 /// The resource Postgres Studio passes to <c>IAuthorizationService.AuthorizeAsync(user, resource, policy)</c> when
-/// evaluating <see cref="PostgresStudioOptions.SourceAuthorizationPolicy" /> and
-/// <see cref="PostgresStudioOptions.WriteAuthorizationPolicy" />. A host writes one
-/// <c>AuthorizationHandler&lt;TRequirement, PostgresStudioResource&gt;</c> and it answers for the source picker, the page
+/// evaluating <see cref="PostgresOptions.SourceAuthorizationPolicy" /> and
+/// <see cref="PostgresOptions.WriteAuthorizationPolicy" />. A host writes one
+/// <c>AuthorizationHandler&lt;TRequirement, PostgresResource&gt;</c> and it answers for the source picker, the page
 /// frame and every data call.
 /// </summary>
 /// <remarks>
@@ -40,4 +40,4 @@ namespace DataStudio.Postgres;
 /// <param name="Capability">
 /// The name of the capability being exercised (for example <c>RunSql</c>), or <see langword="null" /> for a read.
 /// </param>
-public sealed record PostgresStudioResource(string SourceName, string DatabaseIdentifier, string? Capability);
+public sealed record PostgresResource(string SourceName, string DatabaseIdentifier, string? Capability);

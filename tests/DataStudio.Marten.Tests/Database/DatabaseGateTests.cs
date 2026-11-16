@@ -89,7 +89,7 @@ public class DatabaseGateTests
 
         gate.IsOpen.Should().BeFalse();
         gate.State.Refusal.Should().Be(DatabaseRefusal.CapabilityOff);
-        gate.State.Denial.Should().Contain("MartenStudioOptions.Capabilities.BrowseDatabase");
+        gate.State.Denial.Should().Contain("MartenOptions.Capabilities.BrowseDatabase");
         gate.State.Authorized.Should().BeNull("nobody is asked about a capability the process does not have");
 
         gate.VisibleSchemas.Should().Equal(DocumentSchema, EventSchema, ReportingSchema);
@@ -144,7 +144,7 @@ public class DatabaseGateTests
     {
         DatabaseGate readOnly = Gate(capability: true, authorized: true, entries: ["*"], readOnly: true);
         readOnly.State.Refusal.Should().Be(DatabaseRefusal.ReadOnly);
-        readOnly.State.Denial.Should().Contain("MartenStudioOptions.ReadOnly");
+        readOnly.State.Denial.Should().Contain("MartenOptions.ReadOnly");
         readOnly.DataAccess("quartz").Refusal.Should().Be(DatabaseRefusal.ReadOnly);
 
         DatabaseGate refused = Gate(capability: true, authorized: false, entries: ["*"]);
@@ -160,7 +160,7 @@ public class DatabaseGateTests
 
         gate.IsOpen.Should().BeTrue("the capability and the policy said yes");
         gate.State.Refusal.Should().Be(DatabaseRefusal.SchemaNotBrowsable);
-        gate.State.Denial.Should().Contain("MartenStudioOptions.BrowsableSchemas is empty");
+        gate.State.Denial.Should().Contain("MartenOptions.BrowsableSchemas is empty");
         gate.DataAccess(DocumentSchema).Refusal.Should().Be(DatabaseRefusal.SchemaNotBrowsable,
             "the store's own schemas give structure for free and nothing more");
     }
@@ -184,7 +184,7 @@ public class DatabaseGateTests
         Names(gate, DatabaseObjectCategory.Functions).Should().NotContain("legacy.recalculate");
 
         gate.DataAccess("legacy").Refusal.Should().Be(DatabaseRefusal.SchemaNotBrowsable);
-        gate.DataAccess("legacy").Reason.Should().Contain("MartenStudioOptions.BrowsableSchemas");
+        gate.DataAccess("legacy").Reason.Should().Contain("MartenOptions.BrowsableSchemas");
         gate.DataAccess("quartz").Allowed.Should().BeTrue();
     }
 
@@ -330,7 +330,7 @@ public class DatabaseGateTests
             dependsOnHidden: false);
 
         rows.Refusal.Should().Be(DatabaseRefusal.NoPrivilege);
-        rows.Reason.Should().Contain("studio_reader").And.Contain("MartenStudioOptions.SqlConsoleRole");
+        rows.Reason.Should().Contain("studio_reader").And.Contain("MartenOptions.SqlConsoleRole");
     }
 
     [Fact]

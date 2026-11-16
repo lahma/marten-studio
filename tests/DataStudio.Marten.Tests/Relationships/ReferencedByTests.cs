@@ -1,3 +1,4 @@
+using DataStudio.Marten.Services;
 using Bunit;
 
 using DataStudio.Marten.Tests.Components;
@@ -178,9 +179,9 @@ public class ReferencedByTests
     /// </summary>
     private static string Href(string alias, string? filter) =>
         filter is null
-            ? DataStudio.Marten.Services.Documents.DocumentLinks.ToCollection(new MartenStudioOptions(), null, alias)
+            ? DataStudio.Marten.Services.Documents.DocumentLinks.ToCollection(MartenStudioSettings.Of(new MartenOptions()), null, alias)
             : DataStudio.Marten.Services.Documents.DocumentLinks.ToCollection(
-                new MartenStudioOptions(),
+                MartenStudioSettings.Of(new MartenOptions()),
                 null,
                 alias,
                 new Dictionary<string, string?>(StringComparer.Ordinal) { ["q"] = filter });

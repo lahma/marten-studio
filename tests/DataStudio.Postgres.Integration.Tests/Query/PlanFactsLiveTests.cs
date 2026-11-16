@@ -128,14 +128,14 @@ public class PlanFactsLiveTests(PlanFactsLiveTests.Fixture database) : IClassFix
     }
 
     private StudioHost Host(
-        Action<PostgresStudioOptions> studio,
-        Func<PostgresStudioResource, System.Security.Claims.ClaimsPrincipal, bool>? writePolicy = null) =>
+        Action<PostgresOptions> studio,
+        Func<PostgresResource, System.Security.Claims.ClaimsPrincipal, bool>? writePolicy = null) =>
         StudioHost.Create(
             services => services.AddSingleton(_ => NpgsqlDataSource.Create(database.ConnectionString)),
             studio,
             writePolicy: writePolicy);
 
-    private static void RunSqlOnly(PostgresStudioOptions options) => options.Capabilities.RunSql = true;
+    private static void RunSqlOnly(PostgresOptions options) => options.Capabilities.RunSql = true;
 
     /// <summary>Plans <paramref name="sql" /> as the Plan page does - analyzed, VERBOSE - and reads its facts.</summary>
     private static async Task<(QueryPlan Plan, PlanFacts Facts)> FactsOfAsync(StudioCircuit circuit, string sql, bool analyze = true)
@@ -320,7 +320,7 @@ public class PlanFactsLiveTests(PlanFactsLiveTests.Fixture database) : IClassFix
     {
         await using StudioHost host = Host(static o =>
         {
-            o.Capabilities = PostgresStudioCapabilities.All();
+            o.Capabilities = PostgresCapabilities.All();
             o.BrowsableSchemas.Clear();
             o.BrowsableSchemas.Add("public");
             o.BrowsableSchemas.Add("secret");
@@ -338,7 +338,7 @@ public class PlanFactsLiveTests(PlanFactsLiveTests.Fixture database) : IClassFix
     [PostgresFact]
     public async Task Values_are_read_past_the_row_gate_and_each_relations_read_is_audited_as_a_BrowseDatabase_read()
     {
-        await using StudioHost host = Host(static o => o.Capabilities = PostgresStudioCapabilities.All());
+        await using StudioHost host = Host(static o => o.Capabilities = PostgresCapabilities.All());
         await using StudioCircuit circuit = host.Circuit();
 
         (_, PlanFacts facts) = await FactsOfAsync(circuit, "select * from public.orders where status = 'open'");
@@ -379,7 +379,7 @@ public class PlanFactsLiveTests(PlanFactsLiveTests.Fixture database) : IClassFix
     public async Task A_write_policy_that_refuses_BrowseDatabase_leaves_the_values_where_they_are_while_RunSql_still_reads_the_structure()
     {
         await using StudioHost host = Host(
-            static o => o.Capabilities = PostgresStudioCapabilities.All(),
+            static o => o.Capabilities = PostgresCapabilities.All(),
             writePolicy: static (resource, _) => resource.Capability != nameof(StudioCapability.BrowseDatabase));
         await using StudioCircuit circuit = host.Circuit();
 
@@ -397,7 +397,7 @@ public class PlanFactsLiveTests(PlanFactsLiveTests.Fixture database) : IClassFix
     {
         await using StudioHost host = Host(static o =>
         {
-            o.Capabilities = PostgresStudioCapabilities.All();
+            o.Capabilities = PostgresCapabilities.All();
             o.BrowsableSchemas.Clear();
             o.BrowsableSchemas.Add("*");
         });
@@ -489,7 +489,7 @@ public class PlanFactsLiveTests(PlanFactsLiveTests.Fixture database) : IClassFix
             services => services.AddSingleton(_ => NpgsqlDataSource.Create(database.FailingConnectionString)),
             static o =>
             {
-                o.Capabilities = PostgresStudioCapabilities.All();
+                o.Capabilities = PostgresCapabilities.All();
                 o.SqlConsoleRole = Fixture.ReaderRole;
             });
         await using StudioCircuit circuit = host.Circuit();

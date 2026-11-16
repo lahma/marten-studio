@@ -1,8 +1,8 @@
+using DataStudio.Services.Settings;
 using System.Globalization;
 
 using DataStudio.Marten.Services.Documents;
 
-using Microsoft.Extensions.Options;
 
 using DataStudio.Postgres.Services;
 using DataStudio.Postgres.Services.Find;
@@ -25,13 +25,13 @@ internal sealed class DocumentFindContributor : IFindContributor
 {
     private readonly IDocumentDataService documents;
     private readonly IFindScopes scopes;
-    private readonly IOptions<MartenStudioOptions> options;
+    private readonly IShellSettings settings;
 
-    public DocumentFindContributor(IDocumentDataService documents, IFindScopes scopes, IOptions<MartenStudioOptions> options)
+    public DocumentFindContributor(IDocumentDataService documents, IFindScopes scopes, IShellSettings settings)
     {
         this.documents = documents;
         this.scopes = scopes;
-        this.options = options;
+        this.settings = settings;
     }
 
     /// <inheritdoc />
@@ -83,7 +83,7 @@ internal sealed class DocumentFindContributor : IFindContributor
                 hits.Add(new FindHit(
                     Kind: "Document",
                     Title: hit.Alias + " " + hit.Id,
-                    Url: DocumentLinks.ToDocument(options.Value, at, hit.Alias, hit.Id),
+                    Url: DocumentLinks.ToDocument(settings, at, hit.Alias, hit.Id),
                     Scope: at,
                     Id: hit.Alias + "\u001f" + hit.Id,
                     TenantChip: row.TenantId is null ? null : "tenant " + row.TenantId,

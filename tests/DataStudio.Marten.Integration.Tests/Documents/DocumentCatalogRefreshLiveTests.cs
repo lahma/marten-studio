@@ -50,8 +50,8 @@ public class DocumentCatalogRefreshLiveTests(DocumentCatalogRefreshLiveTests.Fix
             options.Schema.For<CatalogThing>().Duplicate(x => x.Email);
 
         /// <inheritdoc />
-        protected override void ConfigureStudio(MartenStudioOptions options) =>
-            options.Capabilities = MartenStudioCapabilities.All();
+        protected override void ConfigureStudio(MartenOptions options) =>
+            options.Capabilities = MartenCapabilities.All();
 
         /// <inheritdoc />
         protected override async Task SeedAsync()

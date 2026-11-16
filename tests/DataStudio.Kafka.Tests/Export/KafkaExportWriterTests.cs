@@ -467,7 +467,7 @@ public class KafkaExportWriterTests
     {
         KafkaExportFile file = KafkaExportWriter.Write([Make(Json(new string('x', 4_000)))], KafkaExportFormat.Value, 100);
 
-        file.Refusal.Should().Contain("KafkaStudioOptions.Limits.MaxExportBytes").And.Contain("100 B");
+        file.Refusal.Should().Contain("KafkaOptions.Limits.MaxExportBytes").And.Contain("100 B");
         file.Written.Should().Be(0);
         file.Content.Should().BeEmpty();
     }

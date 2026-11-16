@@ -175,7 +175,7 @@ public class SchemaPageTests
         var page = context.Render<SchemaPage>();
 
         page.FindAll(".ms-capability-disabled").Should().ContainSingle();
-        page.Markup.Should().Contain("MartenStudioOptions.Capabilities.ApplySchemaChanges");
+        page.Markup.Should().Contain("MartenOptions.Capabilities.ApplySchemaChanges");
         page.FindAll(".ms-button-danger").Should().BeEmpty();
     }
 
@@ -276,7 +276,7 @@ public class SchemaPageTests
         page.Find(".ms-confirm-actions .ms-button-danger").Click();
 
         page.Find(".ms-error-alert").TextContent.Should()
-            .Contain("MartenStudioOptions.Capabilities.ApplySchemaChanges");
+            .Contain("MartenOptions.Capabilities.ApplySchemaChanges");
     }
 
     [Fact]

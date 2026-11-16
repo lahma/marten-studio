@@ -30,7 +30,7 @@ public class HealthWithheldStatusTests
 
     private static readonly string[] DatabaseWide = ["C04", "C06", "T14", "T90"];
 
-    private static HealthHarness TenantScenario(Action<MartenStudioOptions>? studio = null)
+    private static HealthHarness TenantScenario(Action<MartenOptions>? studio = null)
     {
         HealthHarness harness = HealthHarness.Create(
             checks: Checks,

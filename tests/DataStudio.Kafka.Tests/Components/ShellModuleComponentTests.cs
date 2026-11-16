@@ -94,8 +94,8 @@ public class ShellModuleComponentTests
     public async Task Search_is_on_the_rail_only_while_the_capability_is_effectively_on()
     {
         using KafkaStudioHarness off = new();
-        using KafkaStudioHarness on = new(static o => o.Capabilities = KafkaStudioCapabilities.All());
-        using KafkaStudioHarness readOnly = new(static o => o.Capabilities = KafkaStudioCapabilities.All());
+        using KafkaStudioHarness on = new(static o => o.Capabilities = KafkaCapabilities.All());
+        using KafkaStudioHarness readOnly = new(static o => o.Capabilities = KafkaCapabilities.All());
         readOnly.Context.ShellOptions.ReadOnly = true;
         await off.Context.ReadyAsync();
         await on.Context.ReadyAsync();
@@ -114,8 +114,8 @@ public class ShellModuleComponentTests
     {
         using KafkaStudioHarness off = new();
         using KafkaStudioHarness searchOnly = new(static o => o.Capabilities.SearchRecords = true);
-        using KafkaStudioHarness on = new(static o => o.Capabilities = KafkaStudioCapabilities.All());
-        using KafkaStudioHarness readOnly = new(static o => o.Capabilities = KafkaStudioCapabilities.All());
+        using KafkaStudioHarness on = new(static o => o.Capabilities = KafkaCapabilities.All());
+        using KafkaStudioHarness readOnly = new(static o => o.Capabilities = KafkaCapabilities.All());
         readOnly.Context.ShellOptions.ReadOnly = true;
         await off.Context.ReadyAsync();
         await searchOnly.Context.ReadyAsync();
@@ -168,7 +168,7 @@ public class ShellModuleComponentTests
     public async Task The_chip_counts_the_kafka_capabilities()
     {
         using KafkaStudioHarness off = new();
-        using KafkaStudioHarness on = new(static o => o.Capabilities = KafkaStudioCapabilities.All());
+        using KafkaStudioHarness on = new(static o => o.Capabilities = KafkaCapabilities.All());
         await off.Context.ReadyAsync();
         await on.Context.ReadyAsync();
         StudioCapabilityGuard host = off.Context.Services.GetRequiredService<StudioCapabilityGuard>();
@@ -184,7 +184,7 @@ public class ShellModuleComponentTests
     [Fact]
     public async Task The_banner_lists_the_kafka_group_with_its_options()
     {
-        using KafkaStudioHarness harness = new(static o => o.Capabilities = KafkaStudioCapabilities.All());
+        using KafkaStudioHarness harness = new(static o => o.Capabilities = KafkaCapabilities.All());
         await harness.Context.ReadyAsync();
 
         IRenderedComponent<CapabilityBanner> banner = harness.Context.Render<CapabilityBanner>();
@@ -194,10 +194,10 @@ public class ShellModuleComponentTests
         rows.Should().HaveCount(4);
         rows.Select(static x => x.QuerySelector(".ms-capability-name")!.TextContent).Should().Equal("SearchRecords", "ReadPayloads", "ExportRecords", "LiveTail");
         rows.Should().OnlyContain(static x => x.ClassList.Contains("ms-capability-on"));
-        rows[0].QuerySelector("code")!.TextContent.Should().Be("KafkaStudioOptions.Capabilities.SearchRecords");
-        rows[1].QuerySelector("code")!.TextContent.Should().Be("KafkaStudioOptions.Capabilities.ReadPayloads");
-        rows[2].QuerySelector("code")!.TextContent.Should().Be("KafkaStudioOptions.Capabilities.ExportRecords");
-        rows[3].QuerySelector("code")!.TextContent.Should().Be("KafkaStudioOptions.Capabilities.LiveTail");
+        rows[0].QuerySelector("code")!.TextContent.Should().Be("KafkaOptions.Capabilities.SearchRecords");
+        rows[1].QuerySelector("code")!.TextContent.Should().Be("KafkaOptions.Capabilities.ReadPayloads");
+        rows[2].QuerySelector("code")!.TextContent.Should().Be("KafkaOptions.Capabilities.ExportRecords");
+        rows[3].QuerySelector("code")!.TextContent.Should().Be("KafkaOptions.Capabilities.LiveTail");
     }
 
     [Fact]
@@ -214,7 +214,7 @@ public class ShellModuleComponentTests
     [Fact]
     public async Task ReadOnly_counts_the_kafka_capabilities_off()
     {
-        using KafkaStudioHarness harness = new(static o => o.Capabilities = KafkaStudioCapabilities.All());
+        using KafkaStudioHarness harness = new(static o => o.Capabilities = KafkaCapabilities.All());
         harness.Context.ShellOptions.ReadOnly = true;
         await harness.Context.ReadyAsync();
 
@@ -356,15 +356,15 @@ public class ShellModuleComponentTests
         await harness.Context.ReadyAsync();
 
         IRenderedComponent<KafkaCapabilityDisabled> off = harness.Context.Render<KafkaCapabilityDisabled>(
-            p => p.Add(x => x.Capability, nameof(KafkaStudioCapabilities.SearchRecords)).Add(x => x.Action, "Searching records"));
+            p => p.Add(x => x.Capability, nameof(KafkaCapabilities.SearchRecords)).Add(x => x.Action, "Searching records"));
 
-        off.Markup.Should().Contain("Searching records is not available here.").And.NotContain("KafkaStudioOptions");
+        off.Markup.Should().Contain("Searching records is not available here.").And.NotContain("KafkaOptions");
 
         harness.Context.ShellOptions.ReadOnly = true;
         IRenderedComponent<KafkaCapabilityDisabled> readOnly = harness.Context.Render<KafkaCapabilityDisabled>(
-            p => p.Add(x => x.Capability, nameof(KafkaStudioCapabilities.SearchRecords)));
+            p => p.Add(x => x.Capability, nameof(KafkaCapabilities.SearchRecords)));
 
-        readOnly.Markup.Should().Contain("is not available here.").And.NotContain("ReadOnly").And.NotContain("PostgresStudioOptions");
+        readOnly.Markup.Should().Contain("is not available here.").And.NotContain("ReadOnly").And.NotContain("PostgresOptions");
     }
 
     // ---- every page ends with the trademark line
@@ -374,7 +374,7 @@ public class ShellModuleComponentTests
     {
         Type[] pages =
         [
-            .. typeof(KafkaStudioOptions).Assembly.GetTypes()
+            .. typeof(KafkaOptions).Assembly.GetTypes()
                 .Where(static x => typeof(IComponent).IsAssignableFrom(x) && x.GetCustomAttributes<RouteAttribute>().Any()),
         ];
         pages.Should().NotBeEmpty("scanning nothing would pass for the wrong reason");
@@ -409,7 +409,7 @@ public class ShellModuleComponentTests
     [Fact]
     public void No_kafka_component_declares_a_layout()
     {
-        Type[] components = [.. typeof(KafkaStudioOptions).Assembly.GetTypes().Where(static x => typeof(IComponent).IsAssignableFrom(x))];
+        Type[] components = [.. typeof(KafkaOptions).Assembly.GetTypes().Where(static x => typeof(IComponent).IsAssignableFrom(x))];
 
         components.Should().HaveCountGreaterThan(4);
         components.Where(static x => x.GetCustomAttribute<LayoutAttribute>() is not null).Should().BeEmpty(

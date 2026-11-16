@@ -254,7 +254,7 @@ internal sealed partial class ProjectionDataService
         int lockId = DaemonCheckConfiguration.DaemonLockIdOf(storeOptions);
         IReadOnlyList<long> lockKeys = DaemonCheckConfiguration.LockKeysFor(schema, DaemonCheckConfiguration.AsyncShardsOf(resolved.Store), lockId);
 
-        MartenStudioOptions studio = options.Value;
+        MartenOptions studio = options.Value;
         ReadOnlySqlOptions sessionOptions = new()
         {
             StatementTimeout = studio.QueryTimeout < ExplainStatementTimeout ? studio.QueryTimeout : ExplainStatementTimeout,

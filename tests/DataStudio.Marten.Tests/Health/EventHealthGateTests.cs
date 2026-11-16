@@ -21,7 +21,7 @@ public class EventHealthGateTests
 
     private static readonly HealthReportRequest Deeper = new(Deeper: HealthDeeperChecks.Run);
 
-    private static HealthHarness Harness(bool conjoined, Action<MartenStudioOptions>? studio = null)
+    private static HealthHarness Harness(bool conjoined, Action<MartenOptions>? studio = null)
     {
         HealthHarness harness = HealthHarness.Create(checks: [typeof(ScriptedDeeperCheck)], studio: studio, policies: true);
 

@@ -106,7 +106,7 @@ public class DocumentQueryBuilderLiveTests(PostgresFixture fixture) : PostgresTe
     {
         var table = await BareTableAsync();
 
-        var rows = await ReadAsync(table, new DocumentListQuery { MaxInlineDocumentBytes = 5 });
+        var rows = await ReadAsync(table, new DocumentListQuery { MaxInlineValueBytes = 5 });
 
         rows.Should().HaveCount(2);
         rows.Should().AllSatisfy(row =>

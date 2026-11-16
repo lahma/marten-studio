@@ -96,7 +96,7 @@ internal static class FakeTableRows
     {
         State = TableRowPageState.Withheld,
         EstimatedRows = 2_400_000,
-        Reason = "Not read yet: quartz.qrtz_triggers holds about 2,400,000 rows (more than MartenStudioOptions.ExactCountThreshold, " +
+        Reason = "Not read yet: quartz.qrtz_triggers holds about 2,400,000 rows (more than MartenOptions.ExactCountThreshold, " +
                  "100,000), and a filter no index serves would read every one of them. Run anyway to read it, or filter on an indexed column.",
         Verdict = new RowFilterVerdict
         {

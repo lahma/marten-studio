@@ -76,7 +76,7 @@ public class StudioStateLinkTests
             "tenant_b is withheld, and tenant_c is the first database the policy allows - tenant_a, the first listed, is withheld too");
     }
 
-    private static ServiceProvider Build(Func<PostgresStudioResource, bool>? sourcePolicy = null)
+    private static ServiceProvider Build(Func<PostgresResource, bool>? sourcePolicy = null)
     {
         ServiceCollection services = new();
         services.AddLogging();
@@ -85,7 +85,7 @@ public class StudioStateLinkTests
             if (sourcePolicy is not null)
             {
                 options.AddPolicy(SourcePolicy, policy => policy.RequireAssertion(
-                    context => context.Resource is PostgresStudioResource resource && sourcePolicy(resource)));
+                    context => context.Resource is PostgresResource resource && sourcePolicy(resource)));
             }
         });
         services.AddSingleton(_ => NpgsqlDataSource.Create("Host=postgres-studio-link-tests.invalid;Database=none;Username=none;Password=none"));

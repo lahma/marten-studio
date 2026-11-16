@@ -139,7 +139,7 @@ internal sealed class StringIdentityEventsFixture : IAsyncDisposable
 
         services.AddDataStudio().AddMarten(options =>
         {
-            options.Capabilities = MartenStudioCapabilities.All();
+            options.Capabilities = MartenCapabilities.All();
             options.DiscoverTenantIds = false;
         });
 

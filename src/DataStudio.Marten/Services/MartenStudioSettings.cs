@@ -7,7 +7,7 @@ using DataStudio.Postgres.Services;
 namespace DataStudio.Marten.Services;
 
 /// <summary>
-/// The Marten module's <see cref="IStudioSettings" />: a live adapter over <see cref="MartenStudioOptions" /> and the shell's settings.
+/// The Marten module's <see cref="IStudioSettings" />: a live adapter over <see cref="MartenOptions" /> and the shell's settings.
 /// </summary>
 /// <remarks>
 /// Every member reads its options again, so <c>MapDataStudio(pattern)</c>'s write of <c>DataStudioOptions.Path</c> onto the resolved instance after
@@ -16,16 +16,11 @@ namespace DataStudio.Marten.Services;
 /// </remarks>
 internal sealed class MartenStudioSettings : IStudioSettings
 {
-    private readonly IOptions<MartenStudioOptions> options;
+    private readonly IOptions<MartenOptions> options;
     private readonly IShellSettings shell;
 
-    /// <summary>The settings over <paramref name="options" /> and a default shell, for a caller that builds the services by hand and has no shell of its own.</summary>
-    public MartenStudioSettings(IOptions<MartenStudioOptions> options)
-        : this(options, DefaultShell())
-    {
-    }
-
-    public MartenStudioSettings(IOptions<MartenStudioOptions> options, IShellSettings shell)
+    /// <summary>The settings over <paramref name="options" />, answering the shell's members from <paramref name="shell" />, the container's own.</summary>
+    public MartenStudioSettings(IOptions<MartenOptions> options, IShellSettings shell)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(shell);
@@ -33,34 +28,19 @@ internal sealed class MartenStudioSettings : IStudioSettings
         this.shell = shell;
     }
 
-    /// <summary>The adapter over <paramref name="options" /> and the shell's <paramref name="shell" /> settings, for a caller that builds the services by hand.</summary>
-    public static MartenStudioSettings Of(MartenStudioOptions options, IShellSettings shell)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        return new MartenStudioSettings(Options.Create(options), shell);
-    }
+    private MartenOptions Value => options.Value;
 
-    /// <summary>The adapter over <paramref name="options" /> and a default shell, for a caller that builds the services by hand.</summary>
-    public static MartenStudioSettings Of(MartenStudioOptions options) => Of(options, DefaultShell());
-
-    /// <summary>The adapter over <paramref name="options" /> and a default shell.</summary>
-    public static MartenStudioSettings Of(IOptions<MartenStudioOptions> options) => new(options, DefaultShell());
-
-    private static ShellSettings DefaultShell() => new(Options.Create(new DataStudioOptions()));
-
-    private MartenStudioOptions Value => options.Value;
-
-    /// <summary><see cref="MartenStudioOptions.ProjectionThresholds" />, as frozen at startup, for the daemon checks (D03, D04).</summary>
+    /// <summary><see cref="MartenOptions.ProjectionThresholds" />, as frozen at startup, for the daemon checks (D03, D04).</summary>
     internal IReadOnlyDictionary<string, ProjectionLagThreshold> ProjectionThresholds => Value.ProjectionLagThresholdsByName;
 
     /// <inheritdoc />
     public string ProductName => "Marten Studio";
 
     /// <inheritdoc />
-    public string OptionsTypeName => nameof(MartenStudioOptions);
+    public string OptionsTypeName => nameof(MartenOptions);
 
     /// <inheritdoc />
-    public string CapabilitiesTypeName => nameof(MartenStudioCapabilities);
+    public string CapabilitiesTypeName => nameof(MartenCapabilities);
 
     /// <inheritdoc />
     public StudioText Text => StudioText.Marten;
@@ -113,10 +93,7 @@ internal sealed class MartenStudioSettings : IStudioSettings
     public int MaxSqlConsoleRows => Value.MaxSqlConsoleRows;
 
     /// <inheritdoc />
-    public int MaxInlineValueBytes => Value.MaxInlineDocumentBytes;
-
-    /// <inheritdoc />
-    public string MaxInlineValueBytesMember => nameof(MartenStudioOptions.MaxInlineDocumentBytes);
+    public int MaxInlineValueBytes => Value.MaxInlineValueBytes;
 
     /// <inheritdoc />
     public TimeSpan QueryTimeout => Value.QueryTimeout;
@@ -151,7 +128,7 @@ internal sealed class MartenStudioSettings : IStudioSettings
     public Func<Type, bool>? IsDocumentTypeVisible => Value.IsDocumentTypeVisible;
 
     /// <summary>
-    /// The <see cref="MartenStudioCapabilities" /> property behind <paramref name="capability" />.
+    /// The <see cref="MartenCapabilities" /> property behind <paramref name="capability" />.
     /// </summary>
     /// <remarks>
     /// The default arm throws rather than answering <see langword="false" />. A <c>_ =&gt; false</c> arm is
@@ -160,7 +137,7 @@ internal sealed class MartenStudioSettings : IStudioSettings
     /// host sets it, and nothing changes. <c>StudioCapabilityGuardTests</c> walks every member so the
     /// omission fails a test rather than a support ticket.
     /// </remarks>
-    internal static bool IsConfigured(MartenStudioCapabilities capabilities, StudioCapability capability)
+    internal static bool IsConfigured(MartenCapabilities capabilities, StudioCapability capability)
     {
         ArgumentNullException.ThrowIfNull(capabilities);
 
@@ -183,14 +160,14 @@ internal sealed class MartenStudioSettings : IStudioSettings
             _ => throw new ArgumentOutOfRangeException(
                 nameof(capability),
                 capability,
-                "No MartenStudioCapabilities property is mapped to this capability."),
+                "No MartenCapabilities property is mapped to this capability."),
         };
     }
 
     /// <summary>
-    /// <c>MartenStudioOptions.Capabilities.X</c> - the option behind <paramref name="capability" />, for Marten-only code
+    /// <c>MartenOptions.Capabilities.X</c> - the option behind <paramref name="capability" />, for Marten-only code
     /// that has no settings object in hand. Shared code asks <see cref="StudioCapabilityGuard.OptionFor" />.
     /// </summary>
     internal static string CapabilityOption(StudioCapability capability) =>
-        nameof(MartenStudioOptions) + ".Capabilities." + capability;
+        nameof(MartenOptions) + ".Capabilities." + capability;
 }

@@ -14,7 +14,7 @@
         @switch (access)
         {
             case KafkaValueAccess.CapabilityOff:
-                <KafkaCapabilityDisabled Capability="@nameof(KafkaStudioCapabilities.ReadPayloads)" Action="Reading values" />
+                <KafkaCapabilityDisabled Capability="@nameof(KafkaCapabilities.ReadPayloads)" Action="Reading values" />
                 break;
             case KafkaValueAccess.PolicyRefused:
                 <p class="ms-k-note" role="note">@KafkaStudioText.ValueNotAvailable</p>

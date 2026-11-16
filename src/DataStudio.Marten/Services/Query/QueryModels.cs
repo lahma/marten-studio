@@ -41,8 +41,8 @@ internal sealed record QueryDocumentTypeInfo(
 /// lifted out of it - see <see cref="QuerySqlComposer.TryPartition" />.
 /// </param>
 /// <param name="PageSize">
-/// How many rows to ask for. Defaults to <see cref="MartenStudioOptions.DefaultPageSize" /> and is
-/// clamped to <see cref="MartenStudioOptions.MaxPageSize" /> in the service - a page size that arrived
+/// How many rows to ask for. Defaults to <see cref="MartenOptions.DefaultPageSize" /> and is
+/// clamped to <see cref="MartenOptions.MaxPageSize" /> in the service - a page size that arrived
 /// from a browser is a number somebody can type (plan §4.8).
 /// </param>
 /// <param name="IncludeDeleted">

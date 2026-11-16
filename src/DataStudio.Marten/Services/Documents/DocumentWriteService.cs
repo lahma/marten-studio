@@ -112,7 +112,7 @@ internal sealed class DocumentWriteService : IDocumentWriteService
     /// Five seconds is long enough that the ordinary case — another circuit's save, which takes
     /// milliseconds — never notices, and short enough that a row held by somebody's forgotten
     /// <c>begin;</c> in a psql window produces an answer while the person is still looking at the page.
-    /// Clamped down to <see cref="MartenStudioOptions.QueryTimeout" /> when that is shorter, because a
+    /// Clamped down to <see cref="MartenOptions.QueryTimeout" /> when that is shorter, because a
     /// host that said "no statement of mine takes more than two seconds" meant this one too.
     /// </remarks>
     internal static readonly TimeSpan DefaultRowLockTimeout = TimeSpan.FromSeconds(5);
@@ -145,7 +145,7 @@ internal sealed class DocumentWriteService : IDocumentWriteService
     private readonly StudioScopeResolver resolver;
     private readonly StudioActionLog audit;
     private readonly ColumnCatalog columnCatalog;
-    private readonly IOptions<MartenStudioOptions> options;
+    private readonly IOptions<MartenOptions> options;
     private readonly ILogger<DocumentWriteService> logger;
     private readonly AuthenticationStateProvider authenticationStateProvider;
 
@@ -154,7 +154,7 @@ internal sealed class DocumentWriteService : IDocumentWriteService
         StudioScopeResolver resolver,
         StudioActionLog audit,
         ColumnCatalog columnCatalog,
-        IOptions<MartenStudioOptions> options,
+        IOptions<MartenOptions> options,
         ILogger<DocumentWriteService> logger,
         AuthenticationStateProvider authenticationStateProvider)
     {
@@ -1483,7 +1483,7 @@ internal sealed class DocumentWriteService : IDocumentWriteService
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <see cref="MartenStudioOptions.IsDocumentTypeVisible" /> is honoured here as well as on the read
+    /// <see cref="MartenOptions.IsDocumentTypeVisible" /> is honoured here as well as on the read
     /// side: a type a host hid from the studio must not be writable through a hand-typed alias either.
     /// A hidden type answers exactly as an unmapped one does — the refusal is the same sentence — so the
     /// gate does not tell a visitor which types exist and are merely hidden.

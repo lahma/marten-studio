@@ -55,7 +55,7 @@ public class OrphanRemovalPageTests
 
         IElement button = page.Find(Remove);
         button.HasAttribute("disabled").Should().BeTrue();
-        button.GetAttribute("title").Should().Contain("MartenStudioOptions.Capabilities.CorrectProgression");
+        button.GetAttribute("title").Should().Contain("MartenOptions.Capabilities.CorrectProgression");
 
         page.Find(".ms-orphaned-progression .ms-capability-disabled").TextContent
             .Should().Contain("CorrectProgression").And.Contain("Removing an orphaned progression row");

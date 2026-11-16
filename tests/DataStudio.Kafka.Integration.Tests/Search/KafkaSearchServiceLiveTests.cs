@@ -20,7 +20,7 @@ public abstract class KafkaSearchServiceLiveTests(KafkaFixture fixture)
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
-    private LiveSearchHost Host(Action<KafkaStudioOptions>? configure = null) => LiveSearchHost.Create(fixture, "reader", configure);
+    private LiveSearchHost Host(Action<KafkaOptions>? configure = null) => LiveSearchHost.Create(fixture, "reader", configure);
 
     private static KafkaSearchInput Input(LiveSearchHost host, string[] topics, string? predicate, KafkaScanCursor? cursor = null) =>
         new(host.Entry, topics, LiveScanEngine.T0, DateTimeOffset.UtcNow.AddDays(1), predicate, IncludeUncommitted: false, cursor);

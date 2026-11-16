@@ -32,7 +32,7 @@ public class StudioRouteTableTests
         }
 
         return DataStudio.Marten.Services.MartenStudioSettings.Of(
-            new MartenStudioOptions(),
+            new MartenOptions(),
             new DataStudio.Services.Settings.ShellSettings(Microsoft.Extensions.Options.Options.Create(shell)));
     }
 

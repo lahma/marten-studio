@@ -33,7 +33,7 @@ public class DocumentQueryBuilderTests
         command.CommandText.Should().Contain("from \"studio_sql\".\"mt_doc_sqltestcustomer\" as d");
         command.CommandText.Should().NotContain("select *");
 
-        Parameter(command, "maxInline").Value.Should().Be(DocumentListQuery.DefaultMaxInlineDocumentBytes);
+        Parameter(command, "maxInline").Value.Should().Be(DocumentListQuery.DefaultMaxInlineValueBytes);
     }
 
     [Fact]

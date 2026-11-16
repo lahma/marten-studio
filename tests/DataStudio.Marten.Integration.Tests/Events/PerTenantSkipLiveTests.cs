@@ -93,7 +93,7 @@ public sealed class PerTenantSkipFixture(PostgresFixture postgres) : IAsyncLifet
         services.AddSingleton<IAuthorizationService>(Policy);
         services.AddDataStudio().AddMarten(static options =>
         {
-            options.Capabilities = MartenStudioCapabilities.All();
+            options.Capabilities = MartenCapabilities.All();
             options.StoreAuthorizationPolicy = "studio-store";
             options.WriteAuthorizationPolicy = "studio-write";
             options.DiscoverTenantIds = false;

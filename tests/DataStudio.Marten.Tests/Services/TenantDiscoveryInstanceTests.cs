@@ -48,7 +48,7 @@ public class TenantDiscoveryInstanceTests
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
     private static TenantDiscovery Create() =>
-        new(Options.Create(new MartenStudioOptions()), NullLogger<TenantDiscovery>.Instance, TimeProvider.System);
+        new(Options.Create(new MartenOptions()), NullLogger<TenantDiscovery>.Instance, TimeProvider.System);
 
     [Fact]
     public async Task A_master_table_database_is_read_for_its_own_tenant_and_never_described()

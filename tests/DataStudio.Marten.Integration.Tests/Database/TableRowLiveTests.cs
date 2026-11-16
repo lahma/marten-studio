@@ -141,7 +141,7 @@ public class TableRowLiveTests(TableRowLiveTests.Fixture fixture) : IClassFixtur
                 RowsHost.Scope, "legacy", "audit_log", new TableRowRequest { Filter = "details ~ changed" }, Token));
 
             withheld.State.Should().Be(TableRowPageState.Withheld, withheld.Error?.Sentence ?? withheld.Reason);
-            withheld.Reason.Should().Contain("Run anyway").And.Contain("MartenStudioOptions.ExactCountThreshold");
+            withheld.Reason.Should().Contain("Run anyway").And.Contain("MartenOptions.ExactCountThreshold");
             withheld.Rows.Should().BeEmpty();
             withheld.Sql.Should().Contain("pg_catalog.strpos(");
             withheld.ParameterNames.Should().Contain("@f1");
@@ -549,7 +549,7 @@ public class TableRowLiveTests(TableRowLiveTests.Fixture fixture) : IClassFixtur
     [PostgresFact]
     public async Task Every_gate_refuses_every_method_before_any_row_sql_and_audits_it()
     {
-        (string Case, Action<MartenStudioOptions>? Configure, ResourcePolicy? Policy, string Schema, string Table, DatabaseRefusal Refusal)[] cases =
+        (string Case, Action<MartenOptions>? Configure, ResourcePolicy? Policy, string Schema, string Table, DatabaseRefusal Refusal)[] cases =
         [
             ("capability off", static o => o.Capabilities.BrowseDatabase = false, null, "legacy", "departments", DatabaseRefusal.CapabilityOff),
             ("read-only", static o => o.ReadOnly = true, null, "legacy", "departments", DatabaseRefusal.ReadOnly),
@@ -566,7 +566,7 @@ public class TableRowLiveTests(TableRowLiveTests.Fixture fixture) : IClassFixtur
 
         var key = new Dictionary<string, string> { ["id"] = "1" };
 
-        foreach ((string what, Action<MartenStudioOptions>? configure, ResourcePolicy? policy, string schema, string table, DatabaseRefusal expected) in cases)
+        foreach ((string what, Action<MartenOptions>? configure, ResourcePolicy? policy, string schema, string table, DatabaseRefusal expected) in cases)
         {
             await using RowsHost host = fixture.Host(configure, policy);
             using var log = new StatementLog();
@@ -649,7 +649,7 @@ public class TableRowLiveTests(TableRowLiveTests.Fixture fixture) : IClassFixtur
 
         departments.State.Should().Be(TableRowPageState.Failed, departments.Reason);
         departments.Error!.SqlState.Should().Be("42501");
-        departments.Error.Sentence.Should().Contain("MartenStudioOptions.SqlConsoleRole").And.Contain(fixture.Role);
+        departments.Error.Sentence.Should().Contain("MartenOptions.SqlConsoleRole").And.Contain(fixture.Role);
 
         TableRowPage triggers = await host.RowsAsync(x => x.ListRowsAsync(RowsHost.Scope, "quartz", "qrtz_triggers", new TableRowRequest(), Token));
 

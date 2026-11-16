@@ -111,30 +111,30 @@ internal sealed class PostgresDiagnosticsService : IPostgresDiagnostics
     }
 
     /// <inheritdoc />
-    public string GetStudioPath(PostgresDatabaseRef database, PostgresStudioPage page)
+    public string GetStudioPath(PostgresDatabaseRef database, PostgresPage page)
     {
         ArgumentNullException.ThrowIfNull(database);
 
         string route = page switch
         {
-            PostgresStudioPage.Health => HealthLinks.Route,
-            PostgresStudioPage.Sessions or PostgresStudioPage.Blocking or PostgresStudioPage.Holders => SessionLinks.Route,
-            PostgresStudioPage.Statements => StatementLinks.Route,
-            PostgresStudioPage.Maintenance => MaintenanceLinks.Route,
-            PostgresStudioPage.Storage => StorageLinks.Route,
-            PostgresStudioPage.Server => ServerLinks.Route,
-            PostgresStudioPage.Plan => StudioPageRoutes.Plan,
-            PostgresStudioPage.Replication => ReplicationLinks.Route,
-            PostgresStudioPage.Overview => OverviewLinks.Route,
-            PostgresStudioPage.Connection => StudioPageRoutes.Connection,
+            PostgresPage.Health => HealthLinks.Route,
+            PostgresPage.Sessions or PostgresPage.Blocking or PostgresPage.Holders => SessionLinks.Route,
+            PostgresPage.Statements => StatementLinks.Route,
+            PostgresPage.Maintenance => MaintenanceLinks.Route,
+            PostgresPage.Storage => StorageLinks.Route,
+            PostgresPage.Server => ServerLinks.Route,
+            PostgresPage.Plan => StudioPageRoutes.Plan,
+            PostgresPage.Replication => ReplicationLinks.Route,
+            PostgresPage.Overview => OverviewLinks.Route,
+            PostgresPage.Connection => StudioPageRoutes.Connection,
             _ => throw new ArgumentOutOfRangeException(nameof(page)),
         };
 
         // The Sessions page's two other tabs are named in its query string (D9), the same parameter with its own value.
         IReadOnlyList<KeyValuePair<string, string?>> query = page switch
         {
-            PostgresStudioPage.Blocking => [new KeyValuePair<string, string?>(SessionLinks.ViewParameter, SessionLinks.BlockingView)],
-            PostgresStudioPage.Holders => [new KeyValuePair<string, string?>(SessionLinks.ViewParameter, SessionLinks.HoldersView)],
+            PostgresPage.Blocking => [new KeyValuePair<string, string?>(SessionLinks.ViewParameter, SessionLinks.BlockingView)],
+            PostgresPage.Holders => [new KeyValuePair<string, string?>(SessionLinks.ViewParameter, SessionLinks.HoldersView)],
             _ => [],
         };
 

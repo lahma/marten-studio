@@ -24,13 +24,13 @@ public class PublicApiShapeTests
     /// PS-3's registration record, positional since 0.5's first baseline: it is the resource an authorization handler is
     /// handed, never built by a host, and changing its shape now would be the breaking change this test exists to prevent.
     /// </summary>
-    private static readonly Type[] PositionalByDesign = [typeof(PostgresStudioResource)];
+    private static readonly Type[] PositionalByDesign = [typeof(PostgresResource)];
 
     private static readonly string[] SourceProjects = ["DataStudio.Postgres", "DataStudio.Postgres.Diagnostics"];
 
     private static Type[] Exported() =>
     [
-        .. typeof(PostgresStudioOptions).Assembly.GetExportedTypes()
+        .. typeof(PostgresOptions).Assembly.GetExportedTypes()
             .Concat(typeof(PostgresDiagnosticsOptions).Assembly.GetExportedTypes())
             .Where(static type => !typeof(IComponent).IsAssignableFrom(type) && type.Name != "_Imports")
             .OrderBy(static type => type.FullName, StringComparer.Ordinal),

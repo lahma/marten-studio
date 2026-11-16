@@ -473,7 +473,7 @@ public class CapabilityGatingMatrixTests
     [Fact]
     public async Task A_capability_that_is_off_refuses_every_mutating_call_and_audits_it()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = new MartenStudioCapabilities());
+        await using Harness harness = Harness.Create(static options => options.Capabilities = new MartenCapabilities());
 
         await AssertEveryCallRefusedAsync<StudioCapabilityDeniedException>(harness, checkCapabilityOnEntry: true);
 
@@ -487,7 +487,7 @@ public class CapabilityGatingMatrixTests
     {
         await using Harness harness = Harness.Create(static options =>
         {
-            options.Capabilities = MartenStudioCapabilities.All();
+            options.Capabilities = MartenCapabilities.All();
             options.ReadOnly = true;
         });
 
@@ -497,7 +497,7 @@ public class CapabilityGatingMatrixTests
     [Fact]
     public async Task A_write_policy_that_refuses_the_visitor_refuses_every_mutating_call_and_audits_it()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All());
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenCapabilities.All());
 
         // The store policy passes and the write policy does not, which is the shape that matters: the
         // visitor may look at this store and may not change it. The capability travels on the resource,
@@ -523,7 +523,7 @@ public class CapabilityGatingMatrixTests
     {
         await using Harness harness = Harness.Create(options =>
         {
-            options.Capabilities = readOnly ? MartenStudioCapabilities.All() : new MartenStudioCapabilities();
+            options.Capabilities = readOnly ? MartenCapabilities.All() : new MartenCapabilities();
             options.ReadOnly = readOnly;
         });
 
@@ -540,7 +540,7 @@ public class CapabilityGatingMatrixTests
     [Fact]
     public async Task A_capability_that_is_off_refuses_every_gated_read_as_a_value_and_audits_it()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = new MartenStudioCapabilities());
+        await using Harness harness = Harness.Create(static options => options.Capabilities = new MartenCapabilities());
 
         await AssertEveryGatedReadRefusedAsync(harness, DatabaseRefusal.CapabilityOff);
     }
@@ -550,7 +550,7 @@ public class CapabilityGatingMatrixTests
     {
         await using Harness harness = Harness.Create(static options =>
         {
-            options.Capabilities = MartenStudioCapabilities.All();
+            options.Capabilities = MartenCapabilities.All();
             options.ReadOnly = true;
         });
 
@@ -560,7 +560,7 @@ public class CapabilityGatingMatrixTests
     [Fact]
     public async Task A_write_policy_that_refuses_the_visitor_refuses_every_gated_read_as_a_value_and_audits_it()
     {
-        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All());
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenCapabilities.All());
 
         harness.Policies.Allow(static resource => resource.Capability is null);
 
@@ -876,7 +876,7 @@ public class CapabilityGatingMatrixTests
 
         public object Resolve(Type service) => scope.ServiceProvider.GetRequiredService(service);
 
-        public static Harness Create(Action<MartenStudioOptions> configure)
+        public static Harness Create(Action<MartenOptions> configure)
         {
             var users = new TestAuthenticationStateProvider();
             users.SignIn("tester");

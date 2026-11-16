@@ -68,16 +68,16 @@ public class KafkaSettingsPageTests
         page.WaitForAssertion(() => page.FindAll("[aria-label='Capabilities'] tbody tr").Should().HaveCount(4));
         string[] rows = [.. page.FindAll("[aria-label='Capabilities'] tbody tr").Select(static x => string.Join(" | ", x.QuerySelectorAll("td").Select(static c => c.TextContent.Trim())))];
         rows.Should().Equal(
-            "SearchRecords | on | KafkaStudioOptions.Capabilities.SearchRecords",
-            "ReadPayloads | off | KafkaStudioOptions.Capabilities.ReadPayloads",
-            "ExportRecords | off | KafkaStudioOptions.Capabilities.ExportRecords",
-            "LiveTail | off | KafkaStudioOptions.Capabilities.LiveTail");
+            "SearchRecords | on | KafkaOptions.Capabilities.SearchRecords",
+            "ReadPayloads | off | KafkaOptions.Capabilities.ReadPayloads",
+            "ExportRecords | off | KafkaOptions.Capabilities.ExportRecords",
+            "LiveTail | off | KafkaOptions.Capabilities.LiveTail");
     }
 
     [Fact]
     public async Task A_capability_a_Production_profile_forbids_reads_forbidden_by_the_profile_not_on()
     {
-        await using KafkaCatalogRig rig = new(studio: o => o.Capabilities = KafkaStudioCapabilities.All(), profile: KafkaProfile.Production);
+        await using KafkaCatalogRig rig = new(studio: o => o.Capabilities = KafkaCapabilities.All(), profile: KafkaProfile.Production);
 
         IRenderedComponent<KafkaSettingsPage> page = await OpenAsync(rig);
 

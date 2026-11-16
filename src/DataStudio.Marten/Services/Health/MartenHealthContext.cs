@@ -51,7 +51,7 @@ internal static class MartenHealthContext
 
         /// <summary>
         /// The studio's settings, under the name MartenStudio's checks read them by - the interval and the document-type
-        /// filter, which are all they read, live from <c>MartenStudioOptions</c>.
+        /// filter, which are all they read, live from <c>MartenOptions</c>.
         /// </summary>
         public IStudioSettings StudioOptions => context.Settings as IStudioSettings
             ?? throw new InvalidOperationException("MartenStudio's checks run under AddMarten(), whose one settings object is a studio's.");
@@ -102,23 +102,23 @@ internal static class MartenHealthBridges
     extension(HealthLinks)
     {
         /// <summary>
-        /// <see cref="HealthLinks.ToPage(IDiagnosticsSettings, string, StudioScope?)" /> with MartenStudio's options and source
+        /// <see cref="HealthLinks.ToPage(IDiagnosticsSettings, string, StudioScope?)" /> with the registered settings and MartenStudio's source
         /// parameter. Caller: <c>Overview.razor</c>, MartenStudio's overview body.
         /// </summary>
-        /// <param name="options">MartenStudio's options.</param>
+        /// <param name="settings">The registered studio settings.</param>
         /// <param name="scope">The scope to carry.</param>
-        internal static string ToPage(MartenStudioOptions options, StudioScope? scope) =>
-            HealthLinks.ToPage(MartenStudioSettings.Of(options), MartenStudioDescriptor.SourceQueryParameter, scope);
+        internal static string ToPage(IStudioSettings settings, StudioScope? scope) =>
+            HealthLinks.ToPage(settings, MartenStudioDescriptor.SourceQueryParameter, scope);
 
         /// <summary>
         /// <see cref="HealthLinks.ToFinding(IDiagnosticsSettings, string, StudioScope?, HealthReportFinding)" /> with
-        /// MartenStudio's options and source parameter. Callers: <c>Overview.razor</c>, <c>EventTypes.razor</c>,
+        /// the registered settings and MartenStudio's source parameter. Callers: <c>Overview.razor</c>, <c>EventTypes.razor</c>,
         /// <c>Projections.razor</c> and <c>IndexesTab.razor</c>.
         /// </summary>
-        /// <param name="options">MartenStudio's options.</param>
+        /// <param name="settings">The registered studio settings.</param>
         /// <param name="scope">The scope to carry.</param>
         /// <param name="finding">The finding.</param>
-        internal static string ToFinding(MartenStudioOptions options, StudioScope? scope, HealthReportFinding finding) =>
-            HealthLinks.ToFinding(MartenStudioSettings.Of(options), MartenStudioDescriptor.SourceQueryParameter, scope, finding);
+        internal static string ToFinding(IStudioSettings settings, StudioScope? scope, HealthReportFinding finding) =>
+            HealthLinks.ToFinding(settings, MartenStudioDescriptor.SourceQueryParameter, scope, finding);
     }
 }

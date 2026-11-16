@@ -396,7 +396,7 @@ public class DatabaseCatalogLiveTests(DatabaseCatalogLiveTests.Fixture fixture) 
             BrowserHost.Scope, new DatabaseObjectQuery(DatabaseObjectCategory.Tables, fixture.LegacySchema)));
 
         legacy.Refusal.Should().Be(DatabaseRefusal.SchemaNotBrowsable);
-        legacy.Reason.Should().Contain("MartenStudioOptions.BrowsableSchemas");
+        legacy.Reason.Should().Contain("MartenOptions.BrowsableSchemas");
 
         DatabaseObjectDetail orders = await host.ObjectsAsync(x => x.GetObjectAsync(BrowserHost.Scope, fixture.LegacySchema, "orders"));
         orders.Refusal.Should().Be(DatabaseRefusal.SchemaNotBrowsable);

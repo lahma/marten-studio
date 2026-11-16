@@ -197,7 +197,7 @@ internal sealed class DaemonHealthHost : IAsyncDisposable
         bool seed = true,
         bool gated = false,
         Action<StoreOptions>? store = null,
-        Action<MartenStudioOptions>? studio = null,
+        Action<MartenOptions>? studio = null,
         IHealthStatementObserver? observer = null,
         bool fresh = true,
         bool denyWrites = false,
@@ -244,7 +244,7 @@ internal sealed class DaemonHealthHost : IAsyncDisposable
         builder.Services.AddSingleton<AuthenticationStateProvider, Anonymous>();
         builder.Services.AddDataStudio().AddMarten(options =>
         {
-            options.Capabilities = MartenStudioCapabilities.All();
+            options.Capabilities = MartenCapabilities.All();
 
             if (denyWrites)
             {

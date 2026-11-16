@@ -38,7 +38,7 @@ public class AuroraSectionTests
             HealthHistoryView.Empty,
             Now)),
         SessionsShown = sessions,
-        SessionsWithheld = sessions ? null : "Each session's waits - its process id, role and application - need PostgresStudioOptions.Capabilities.ViewDatabaseActivity.",
+        SessionsWithheld = sessions ? null : "Each session's waits - its process id, role and application - need PostgresOptions.Capabilities.ViewDatabaseActivity.",
         Sessions = sessions
             ? ServerRead<AuroraSessionWaits>.Of(new AuroraSessionWaits(Now,
                 [new AuroraSession(3027, "app", "svcA", "active", Now, 4870, [new AuroraSessionWait("IO:XactSync", 4867, 0.98)])]))

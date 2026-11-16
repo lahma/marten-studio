@@ -131,9 +131,9 @@ public class ViewDefinitionsLiveTests(ViewDefinitionsLiveTests.Fixture database)
 
         host.Calls.All.Should().Contain(static x =>
             x.Policy == StudioHost.WritePolicy && x.Allowed
-            && x.Resource == new PostgresStudioResource("default", "default", nameof(PostgresStudioCapabilities.ViewDefinitions)),
+            && x.Resource == new PostgresResource("default", "default", nameof(PostgresCapabilities.ViewDefinitions)),
             "the write policy was asked with ViewDefinitions, about the database as a whole");
-        host.Calls.All.Should().NotContain(static x => x.Resource.Capability == nameof(PostgresStudioCapabilities.BrowseDatabase),
+        host.Calls.All.Should().NotContain(static x => x.Resource.Capability == nameof(PostgresCapabilities.BrowseDatabase),
             "BrowseDatabase is off, so nobody was asked about it");
     }
 
@@ -157,7 +157,7 @@ public class ViewDefinitionsLiveTests(ViewDefinitionsLiveTests.Fixture database)
         host.Ring.GetLatest().Where(static x => x.Action == DatabaseAccess.RowsAction && !x.Succeeded).Select(static x => x.Target)
             .Should().Contain(["app.accounts", "app.account_summary"]);
         host.Ring.GetLatest().Where(static x => x.Action == DatabaseAccess.RowsAction)
-            .Should().OnlyContain(static x => x.Capability == nameof(PostgresStudioCapabilities.BrowseDatabase));
+            .Should().OnlyContain(static x => x.Capability == nameof(PostgresCapabilities.BrowseDatabase));
     }
 
     [PostgresFact]
@@ -184,7 +184,7 @@ public class ViewDefinitionsLiveTests(ViewDefinitionsLiveTests.Fixture database)
         detail.Found.Should().BeFalse();
 
         host.Ring.GetLatest().Where(static x => x.Action == DatabaseAccess.DefinitionAction).Should().HaveCount(2)
-            .And.OnlyContain(static x => !x.Succeeded && x.Capability == nameof(PostgresStudioCapabilities.ViewDefinitions)
+            .And.OnlyContain(static x => !x.Succeeded && x.Capability == nameof(PostgresCapabilities.ViewDefinitions)
                 && x.Target.StartsWith("archive.", StringComparison.Ordinal));
     }
 
@@ -208,7 +208,7 @@ public class ViewDefinitionsLiveTests(ViewDefinitionsLiveTests.Fixture database)
         rows.Rows.Should().HaveCount(2);
 
         host.Calls.All.Where(static x => x.Resource.Capability is not null).Select(static x => x.Resource.Capability)
-            .Distinct().Should().Equal(nameof(PostgresStudioCapabilities.BrowseDatabase));
+            .Distinct().Should().Equal(nameof(PostgresCapabilities.BrowseDatabase));
     }
 
     [PostgresFact]
@@ -216,7 +216,7 @@ public class ViewDefinitionsLiveTests(ViewDefinitionsLiveTests.Fixture database)
     {
         await using StudioHost host = Host(
             static o => o.Capabilities.ViewDefinitions = true,
-            writePolicy: static (resource, _) => resource.Capability != nameof(PostgresStudioCapabilities.ViewDefinitions));
+            writePolicy: static (resource, _) => resource.Capability != nameof(PostgresCapabilities.ViewDefinitions));
         await using StudioCircuit circuit = host.Circuit();
         IDatabaseObjectService objects = circuit.Get<IDatabaseObjectService>();
 
@@ -228,7 +228,7 @@ public class ViewDefinitionsLiveTests(ViewDefinitionsLiveTests.Fixture database)
 
         StudioActionLogEntry entry = host.Ring.GetLatest().Should().ContainSingle(static x => x.Action == DatabaseAccess.DefinitionAction).Subject;
         entry.Succeeded.Should().BeFalse();
-        entry.Capability.Should().Be(nameof(PostgresStudioCapabilities.ViewDefinitions));
+        entry.Capability.Should().Be(nameof(PostgresCapabilities.ViewDefinitions));
         entry.Target.Should().Be("app.account_summary");
 
         DatabaseBrowserOverview overview = await objects.GetOverviewAsync(Scope, Token);
@@ -241,9 +241,9 @@ public class ViewDefinitionsLiveTests(ViewDefinitionsLiveTests.Fixture database)
     public async Task A_visitor_the_policy_admits_to_ViewDefinitions_and_not_BrowseDatabase_reads_definitions_and_no_rows()
     {
         await using StudioHost host = Host(
-            static o => o.Capabilities = PostgresStudioCapabilities.All(),
+            static o => o.Capabilities = PostgresCapabilities.All(),
             writePolicy: static (resource, user) =>
-                resource.Capability == nameof(PostgresStudioCapabilities.BrowseDatabase) ? user.Identity?.Name == "admin" : true);
+                resource.Capability == nameof(PostgresCapabilities.BrowseDatabase) ? user.Identity?.Name == "admin" : true);
 
         await using (StudioCircuit viewer = host.Circuit("viewer"))
         {
@@ -274,7 +274,7 @@ public class ViewDefinitionsLiveTests(ViewDefinitionsLiveTests.Fixture database)
     {
         await using StudioHost host = Host(static o =>
         {
-            o.Capabilities = PostgresStudioCapabilities.All();
+            o.Capabilities = PostgresCapabilities.All();
             o.ReadOnly = true;
         });
         await using StudioCircuit circuit = host.Circuit();
@@ -296,15 +296,15 @@ public class ViewDefinitionsLiveTests(ViewDefinitionsLiveTests.Fixture database)
         DatabaseObjectDefinition refused = await circuit.Get<IDatabaseObjectService>().GetDefinitionAsync(Scope, AppView, Token);
 
         refused.Refusal.Should().Be(DatabaseRefusal.CapabilityOff, refused.Reason);
-        refused.Reason.Should().Contain("PostgresStudioOptions.Capabilities.ViewDefinitions")
-            .And.Contain("PostgresStudioOptions.Capabilities.BrowseDatabase");
+        refused.Reason.Should().Contain("PostgresOptions.Capabilities.ViewDefinitions")
+            .And.Contain("PostgresOptions.Capabilities.BrowseDatabase");
         host.Ring.GetLatest().Should().ContainSingle(static x => x.Action == DatabaseAccess.DefinitionAction).Which.Capability
-            .Should().Be(nameof(PostgresStudioCapabilities.BrowseDatabase), "as every such refusal always was");
+            .Should().Be(nameof(PostgresCapabilities.BrowseDatabase), "as every such refusal always was");
     }
 
     private StudioHost Host(
-        Action<PostgresStudioOptions> studio,
-        Func<PostgresStudioResource, System.Security.Claims.ClaimsPrincipal, bool>? writePolicy = null) =>
+        Action<PostgresOptions> studio,
+        Func<PostgresResource, System.Security.Claims.ClaimsPrincipal, bool>? writePolicy = null) =>
         StudioHost.Create(
             services => services.AddSingleton(_ => NpgsqlDataSource.Create(database.ConnectionString)),
             options =>

@@ -16,7 +16,7 @@ using DataStudio.Postgres.Services;
 namespace DataStudio.Marten.Tests.Events;
 
 /// <summary>
-/// CL1 item 4: the dead-letter screen honours <see cref="MartenStudioOptions.IsDocumentTypeVisible" /> for
+/// CL1 item 4: the dead-letter screen honours <see cref="MartenOptions.IsDocumentTypeVisible" /> for
 /// <c>DeadLetterEvent</c>, as D06 already did and as D27 says a hidden document type is honoured everywhere.
 /// </summary>
 /// <remarks>
@@ -36,7 +36,7 @@ public class DeadLetterVisibilityTests
     private const string Unreachable =
         "Host=cl1-dead-letter-visibility.invalid;Database=none;Username=none;Password=none;Timeout=2";
 
-    private const string Hidden = "Dead letters are hidden by MartenStudioOptions.IsDocumentTypeVisible.";
+    private const string Hidden = "Dead letters are hidden by MartenOptions.IsDocumentTypeVisible.";
 
     private static readonly Guid LetterId = new("33333333-4444-5555-6666-777777777777");
 
@@ -230,7 +230,7 @@ public class DeadLetterVisibilityTests
 
             services.AddDataStudio().AddMarten(options =>
             {
-                options.Capabilities = MartenStudioCapabilities.All();
+                options.Capabilities = MartenCapabilities.All();
                 options.IsDocumentTypeVisible = isVisible;
                 options.QueryTimeout = TimeSpan.FromSeconds(5);
             });
