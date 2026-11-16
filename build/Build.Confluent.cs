@@ -6,13 +6,13 @@ using Fallout.Common;
 using Serilog;
 
 /// <summary>
-/// Which Confluent.Kafka the KStudio projects are restored, compiled and tested against - the floor KStudio.Core
+/// Which Confluent.Kafka the KStudio projects are restored, compiled and tested against - the floor DataStudio.Kafka.Core
 /// depends on, or the newest release CI also tests (docs/maintainers/package-budget-changes.md, 2026-11-09).
 /// </summary>
 /// <remarks>
 /// <para>
-/// Both versions live in <c>Directory.Packages.props</c> and nowhere else: <c>KStudioConfluentFloor</c> and
-/// <c>KStudioConfluentLatest</c>. This file only reads them (with <see cref="ReadPackagesProperty"/> and
+/// Both versions live in <c>Directory.Packages.props</c> and nowhere else: <c>DataStudioConfluentFloor</c> and
+/// <c>DataStudioConfluentLatest</c>. This file only reads them (with <see cref="ReadPackagesProperty"/> and
 /// <see cref="ExactVersion"/>, Build.Marten.cs's), so bumping either one is an edit to that file and to nothing in
 /// <c>build/</c> or <c>.github/</c>. The <c>marten-latest</c> workflow sets <c>CONFLUENT_VERSION: latest</c>, which
 /// Fallout binds to <see cref="ConfluentVersion"/>; every other workflow, and every local run that does not ask, gets
@@ -35,18 +35,18 @@ using Serilog;
 partial class Build
 {
     /// <summary>The MSBuild property <c>Directory.Packages.props</c> takes the Confluent.Kafka version from.</summary>
-    const string ConfluentVersionProperty = "KStudioConfluentVersion";
+    const string ConfluentVersionProperty = "DataStudioConfluentVersion";
 
     [Parameter("The Confluent.Kafka version the KStudio projects are restored, compiled and tested against: 'floor' " +
-               "(the default - the version KStudio.Core depends on, and the only one Pack packs at), 'latest' (the " +
+               "(the default - the version DataStudio.Kafka.Core depends on, and the only one Pack packs at), 'latest' (the " +
                "newest release CI tests, pinned in Directory.Packages.props), or an exact version such as 2.16.0. " +
                "(env: CONFLUENT_VERSION)")]
     readonly string ConfluentVersion;
 
-    /// <summary><c>KStudioConfluentFloor</c> from <c>Directory.Packages.props</c>.</summary>
+    /// <summary><c>DataStudioConfluentFloor</c> from <c>Directory.Packages.props</c>.</summary>
     string ConfluentFloor { get; set; }
 
-    /// <summary><c>KStudioConfluentLatest</c> from <c>Directory.Packages.props</c>.</summary>
+    /// <summary><c>DataStudioConfluentLatest</c> from <c>Directory.Packages.props</c>.</summary>
     string ConfluentLatest { get; set; }
 
     /// <summary>The exact Confluent.Kafka version this run restores, compiles and tests against.</summary>
@@ -60,8 +60,8 @@ partial class Build
     {
         var props = XDocument.Load(PackagesPropsFile);
 
-        ConfluentFloor = ReadPackagesProperty(props, "KStudioConfluentFloor");
-        ConfluentLatest = ReadPackagesProperty(props, "KStudioConfluentLatest");
+        ConfluentFloor = ReadPackagesProperty(props, "DataStudioConfluentFloor");
+        ConfluentLatest = ReadPackagesProperty(props, "DataStudioConfluentLatest");
 
         var requested = ConfluentVersion?.Trim();
 
@@ -93,7 +93,7 @@ partial class Build
     {
         Assert.True(ResolvedConfluentVersion == ConfluentFloor,
             $"Refusing to pack with --confluent-version {ResolvedConfluentVersion}: KStudio is packed only at the " +
-            $"Confluent.Kafka floor ({ConfluentFloor}, KStudioConfluentFloor in Directory.Packages.props). The nuspec " +
+            $"Confluent.Kafka floor ({ConfluentFloor}, DataStudioConfluentFloor in Directory.Packages.props). The nuspec " +
             $"would say 'Confluent.Kafka >= {ResolvedConfluentVersion}' and raise every host's Confluent.Kafka (a " +
             "Wolverine host pins the floor). Run Pack without --confluent-version (and without CONFLUENT_VERSION in " +
             "the environment), or raise the floor deliberately and record why in " +

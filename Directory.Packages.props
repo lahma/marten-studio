@@ -10,36 +10,36 @@
   <!--
     The Marten version, defined once and tested at both ends.
 
-    MartenStudioMartenFloor is the version the shipped package depends on (`Marten >= floor` in its
+    DataStudioMartenFloor is the version the shipped package depends on (`Marten >= floor` in its
     nuspec) and the one every build, test and pack uses unless told otherwise. Since 2026-11-03 the
     floors follow the latest releases (the user's policy of 2026-11-02: consumers keep up). 9.57.0
     fixes #5797, where compacting a stream that folds to null replaced its whole history with an
     empty snapshot, and brings JasperFx 2.98.0, Weasel 9.48.0 and Npgsql 9.0.4. Full record in
     AGENTS.md, *Package budget changes*, 2026-11-03.
 
-    MartenStudioMartenLatest is the newest 9.x CI tests: the marten-latest workflow runs
+    DataStudioMartenLatest is the newest 9.x CI tests: the marten-latest workflow runs
     `dotnet fallout Test` with MARTEN_VERSION=latest, the Fallout parameter `marten-version`. It is an
     exact version, never a floating `9.*`: a red main caused by an upstream release would be nobody's
     pull request's fault. To bump it, change the value here, run both suites at it (the Fallout
-    parameter set to `latest`, or `dotnet test` with -p:MartenStudioMartenVersion=<new>), and fix or
+    parameter set to `latest`, or `dotnet test` with -p:DataStudioMartenVersion=<new>), and fix or
     record every difference in the same pull request.
 
-    MartenStudioMartenVersion is what is actually restored. Leave it empty and it is the floor; set it
-    with -p:MartenStudioMartenVersion=9.54.1, or through the Fallout parameter, which resolves `floor`
+    DataStudioMartenVersion is what is actually restored. Leave it empty and it is the floor; set it
+    with -p:DataStudioMartenVersion=9.54.1, or through the Fallout parameter, which resolves `floor`
     and `latest` from the two properties above. Pack always packs at the floor and refuses anything
-    else - the build's Pack target and a guard in src/MartenStudio/MartenStudio.csproj both say so -
+    else - the build's Pack target and a guard in src/DataStudio.Marten/DataStudio.Marten.csproj both say so -
     because a package packed at a newer Marten would silently raise every host's floor.
 
     (No double hyphen anywhere in an XML comment: it is not well-formed XML, and MSBuild answers a
     malformed Directory.Packages.props with NU1015 on every project rather than with a parse error.)
   -->
   <PropertyGroup Label="Marten version">
-    <MartenStudioMartenFloor>9.57.0</MartenStudioMartenFloor>
-    <MartenStudioMartenLatest>9.57.0</MartenStudioMartenLatest>
-    <MartenStudioMartenVersion Condition="'$(MartenStudioMartenVersion)' == ''">$(MartenStudioMartenFloor)</MartenStudioMartenVersion>
+    <DataStudioMartenFloor>9.57.0</DataStudioMartenFloor>
+    <DataStudioMartenLatest>9.57.0</DataStudioMartenLatest>
+    <DataStudioMartenVersion Condition="'$(DataStudioMartenVersion)' == ''">$(DataStudioMartenFloor)</DataStudioMartenVersion>
   </PropertyGroup>
 
-  <ItemGroup Label="Library (src/MartenStudio)">
+  <ItemGroup Label="Library (src/DataStudio.Marten)">
     <!-- The only PackageReference the shipped RCL makes. Everything else it needs is in the
          Microsoft.AspNetCore.App shared framework (FrameworkReference), which is what keeps the
          package from pinning an ASP.NET Core patch on its host. Floor, not exact pin: a consumer
@@ -48,7 +48,7 @@
          The floor is 9.57.0 (2026-11-03): the newest release, which removes the compaction hazard
          of #5797 instead of guarding it. Older bisections (9.31.0 for the code, 9.39.0 for the
          advisories) are history in AGENTS.md, *Package budget changes*. -->
-    <PackageVersion Include="Marten" Version="$(MartenStudioMartenVersion)" />
+    <PackageVersion Include="Marten" Version="$(DataStudioMartenVersion)" />
     <!--
       blazor.web.js. As of .NET 10 it is not in the shared framework and not embedded in any ASP.NET
       Core assembly: it lives in this pack, which the SDK resolves only for a project whose
@@ -104,7 +104,7 @@
     <PackageVersion Include="AwesomeAssertions" Version="9.6.0" />
   </ItemGroup>
 
-  <ItemGroup Label="Test - MartenStudio.Tests (no Docker)">
+  <ItemGroup Label="Test - DataStudio.Marten.Tests (no Docker)">
     <PackageVersion Include="bunit" Version="2.13.3" />
     <!--
       PINNED AT 32.0.0 ON PURPOSE. Verify.XunitV3 33.x depends on xunit.v3.extensibility.core
@@ -118,7 +118,7 @@
     <PackageVersion Include="Microsoft.AspNetCore.TestHost" Version="10.0.12" />
   </ItemGroup>
 
-  <ItemGroup Label="Test - MartenStudio.Integration.Tests (needs Docker)">
+  <ItemGroup Label="Test - DataStudio.Marten.Integration.Tests (needs Docker)">
     <!-- WebApplicationFactory over the real sample host. 11.0.0 is rc; do not take it. -->
     <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.12" />
     <PackageVersion Include="Microsoft.Playwright" Version="1.62.0" />
@@ -128,93 +128,93 @@
     The Npgsql version of the PostgresStudio-only projects, defined once and tested at both ends, like
     Marten's above.
 
-    PostgresStudioNpgsqlFloor is what the PostgresStudio package depends on (`Npgsql >= floor` in its
+    DataStudioNpgsqlFloor is what the PostgresStudio package depends on (`Npgsql >= floor` in its
     nuspec). It must never be above the Npgsql the Marten floor resolves, or PostgresStudio would raise
     every MartenStudio host's Npgsql through the ProjectReference (NpgsqlVersionTests reads
-    src/MartenStudio's restore to check). 9.0.4 is that Npgsql: the one Marten 9.57.0 itself
+    src/DataStudio.Marten's restore to check). 9.0.4 is that Npgsql: the one Marten 9.57.0 itself
     references. Since 2026-11-03 nothing older is supported (AGENTS.md, Package budget changes);
     the 8.0.3 floor of PS-7 is history.
 
-    PostgresStudioNpgsqlLatest is the newest Npgsql CI tests PostgresStudio at: the marten-latest
+    DataStudioNpgsqlLatest is the newest Npgsql CI tests PostgresStudio at: the marten-latest
     workflow sets NPGSQL_VERSION=latest, the Fallout parameter `npgsql-version`. It applies ONLY to the
-    second pass over postgres-studio.slnf (build/Build.Npgsql.cs), which holds the projects that set
-    PostgresStudioPinsNpgsql. Passed to the whole solution it would raise MartenStudio and its tests to
+    second pass over data-studio-postgres.slnf (build/Build.Npgsql.cs), which holds the projects that set
+    DataStudioPostgresPinsNpgsql. Passed to the whole solution it would raise MartenStudio and its tests to
     that Npgsql through the ProjectReference, with no diagnostic, and MartenStudio on Npgsql 10 is not
     a tested combination.
 
-    PostgresStudioNpgsqlVersion is what those projects restore. Empty means the floor. Pack packs
-    PostgresStudio at the floor only: the build's Pack target and src/PostgresStudio/PostgresStudio.csproj
+    DataStudioNpgsqlVersion is what those projects restore. Empty means the floor. Pack packs
+    PostgresStudio at the floor only: the build's Pack target and src/DataStudio.Postgres/DataStudio.Postgres.csproj
     both refuse anything else.
   -->
   <PropertyGroup Label="PostgresStudio Npgsql version">
-    <PostgresStudioNpgsqlFloor>9.0.4</PostgresStudioNpgsqlFloor>
-    <PostgresStudioNpgsqlLatest>10.0.3</PostgresStudioNpgsqlLatest>
-    <PostgresStudioNpgsqlVersion Condition="'$(PostgresStudioNpgsqlVersion)' == ''">$(PostgresStudioNpgsqlFloor)</PostgresStudioNpgsqlVersion>
+    <DataStudioNpgsqlFloor>9.0.4</DataStudioNpgsqlFloor>
+    <DataStudioNpgsqlLatest>10.0.3</DataStudioNpgsqlLatest>
+    <DataStudioNpgsqlVersion Condition="'$(DataStudioNpgsqlVersion)' == ''">$(DataStudioNpgsqlFloor)</DataStudioNpgsqlVersion>
   </PropertyGroup>
 
-  <ItemGroup Label="PostgresStudio-only projects (they set PostgresStudioPinsNpgsql)">
-    <PackageVersion Include="Npgsql" Version="$(PostgresStudioNpgsqlVersion)" Condition="'$(PostgresStudioPinsNpgsql)' == 'true'" />
+  <ItemGroup Label="PostgresStudio-only projects (they set DataStudioPostgresPinsNpgsql)">
+    <PackageVersion Include="Npgsql" Version="$(DataStudioNpgsqlVersion)" Condition="'$(DataStudioPostgresPinsNpgsql)' == 'true'" />
   </ItemGroup>
 
   <!--
     The Confluent.Kafka version of the KStudio projects, defined once and tested at both ends, like Marten's above.
-    KStudioConfluentFloor is what KStudio.Core depends on: 2.14.0, the version WolverineFx.Kafka 6.61 pins, so a
-    Wolverine host is never raised (AGENTS.md, Package budget changes, 2026-11-09). KStudioConfluentLatest is the newest
-    release the suites are also run at. KStudioConfluentVersion is what is restored; empty means the floor. Only the
+    DataStudioConfluentFloor is what DataStudio.Kafka.Core depends on: 2.14.0, the version WolverineFx.Kafka 6.61 pins, so a
+    Wolverine host is never raised (AGENTS.md, Package budget changes, 2026-11-09). DataStudioConfluentLatest is the newest
+    release the suites are also run at. DataStudioConfluentVersion is what is restored; empty means the floor. Only the
     KStudio projects reference Confluent.Kafka, so the property may be passed to the whole solution.
   -->
   <PropertyGroup Label="KStudio Confluent.Kafka version">
-    <KStudioConfluentFloor>2.14.0</KStudioConfluentFloor>
-    <KStudioConfluentLatest>2.16.0</KStudioConfluentLatest>
-    <KStudioConfluentVersion Condition="'$(KStudioConfluentVersion)' == ''">$(KStudioConfluentFloor)</KStudioConfluentVersion>
+    <DataStudioConfluentFloor>2.14.0</DataStudioConfluentFloor>
+    <DataStudioConfluentLatest>2.16.0</DataStudioConfluentLatest>
+    <DataStudioConfluentVersion Condition="'$(DataStudioConfluentVersion)' == ''">$(DataStudioConfluentFloor)</DataStudioConfluentVersion>
   </PropertyGroup>
 
-  <ItemGroup Label="KStudio (src/KStudio.Core)">
-    <PackageVersion Include="Confluent.Kafka" Version="$(KStudioConfluentVersion)" />
+  <ItemGroup Label="KStudio (src/DataStudio.Kafka.Core)">
+    <PackageVersion Include="Confluent.Kafka" Version="$(DataStudioConfluentVersion)" />
   </ItemGroup>
 
   <!--
     Wolverine's Kafka transport (KStudio M4, WOLV; AGENTS.md D43; Package budget changes, 2026-11-1x entry "WolverineFx.Kafka 6.61.0").
-    Referenced by src/KStudio.Wolverine, tests/KStudio.Integration.Tests and samples/KStudio.Sample (tests/KStudio.Wolverine.Tests takes it through its reference to the adapter). 6.61.0
-    pins Confluent.Kafka 2.14.0, KStudio.Core's floor, so a Wolverine host is never raised by KStudio. It brings JasperFx 2.99.0, above Marten
+    Referenced by src/DataStudio.Kafka.Wolverine, tests/DataStudio.Kafka.Integration.Tests and samples/DataStudio.Sample.Kafka (tests/DataStudio.Kafka.Wolverine.Tests takes it through its reference to the adapter). 6.61.0
+    pins Confluent.Kafka 2.14.0, DataStudio.Kafka.Core's floor, so a Wolverine host is never raised by KStudio. It brings JasperFx 2.99.0, above Marten
     9.57.0's 2.98.0: a project that holds both resolves 2.99.0, as every Marten-plus-Wolverine host does. Unconditional: none of the shipped
-    studio packages or KStudio / KStudio.Core reference it (KStudioWolverineFenceTests).
+    studio packages or KStudio / DataStudio.Kafka.Core reference it (KStudioWolverineFenceTests).
   -->
-  <ItemGroup Label="KStudio.Wolverine (src/KStudio.Wolverine)">
+  <ItemGroup Label="DataStudio.Kafka.Wolverine (src/DataStudio.Kafka.Wolverine)">
     <PackageVersion Include="WolverineFx.Kafka" Version="6.61.0" />
   </ItemGroup>
 
   <!--
-    Wolverine's runtime code generation, for samples/KStudio.Sample only (KStudio M4, SAMPLE-M4; Package budget changes, 2026-11-12 entry
+    Wolverine's runtime code generation, for samples/DataStudio.Sample.Kafka only (KStudio M4, SAMPLE-M4; Package budget changes, 2026-11-12 entry
     "WolverineFx.RuntimeCompilation 6.61.0"). Wolverine 6.61 no longer ships its Roslyn compiler, and a host with a handler needs this package
     (or pre-generated code) to start. Version matches WolverineFx 6.61.0. No shipped project and no test project references it.
   -->
-  <ItemGroup Label="KStudio sample (samples/KStudio.Sample)">
+  <ItemGroup Label="KStudio sample (samples/DataStudio.Sample.Kafka)">
     <PackageVersion Include="WolverineFx.RuntimeCompilation" Version="6.61.0" />
   </ItemGroup>
 
   <!--
-    The Microsoft.Extensions.* packages of src/PostgresStudio.Diagnostics, which has no FrameworkReference to
+    The Microsoft.Extensions.* packages of src/DataStudio.Postgres.Diagnostics, which has no FrameworkReference to
     Microsoft.AspNetCore.App and so needs the abstractions it uses as packages (AGENTS.md, Package budget
     changes, 2026-11-01). They are floors, not exact pins.
 
     Why 10.0.0 and not 8.0.x: Npgsql 10.0.3's net10.0 dependency group asks for
     Microsoft.Extensions.Logging.Abstractions 10.0.0. Measured with the rows at 8.0.0 and
-    PostgresStudioNpgsqlVersion=10.0.3: restore raises no NU code and resolves Logging.Abstractions 8.0.0 under it,
+    DataStudioNpgsqlVersion=10.0.3: restore raises no NU code and resolves Logging.Abstractions 8.0.0 under it,
     the central pin silently winning, and a floor that lets the resolved set sit below what the driver asks for is not
     a floor. The library is net10.0 only (D1), so nothing older than the first net10.0 release is a host this package
     could meet.
 
     Why conditional: an unconditional row would pin, through CentralPackageTransitivePinningEnabled, the
     Microsoft.Extensions.* that Marten, JasperFx and Weasel bring in MartenStudio and its tests. Only a project
-    that sets PostgresStudioDiagnosticsPinsExtensions (the Diagnostics project and the worker sample) sees the rows.
+    that sets DataStudioDiagnosticsPinsExtensions (the Diagnostics project and the worker sample) sees the rows.
 
     Microsoft.Extensions.Hosting is the worker sample's only addition (0.11-D, Package budget changes 2026-11-01): the
-    generic host a worker runs in, which no shipped package references directly. KStudio.Wolverine (1.3) sets
-    KStudioCorePinsExtensions, so its nuspec carries this row as a minimum through transitive pinning: it equals WolverineFx
+    generic host a worker runs in, which no shipped package references directly. DataStudio.Kafka.Wolverine (1.3) sets
+    DataStudioKafkaCorePinsExtensions, so its nuspec carries this row as a minimum through transitive pinning: it equals WolverineFx
     6.61's own net10.0 minimum and raises nothing.
   -->
-  <ItemGroup Label="PostgresStudio.Diagnostics and KStudio.Core (they set PostgresStudioDiagnosticsPinsExtensions or KStudioCorePinsExtensions)" Condition="'$(PostgresStudioDiagnosticsPinsExtensions)' == 'true' or '$(KStudioCorePinsExtensions)' == 'true'">
+  <ItemGroup Label="DataStudio.Postgres.Diagnostics and DataStudio.Kafka.Core (they set DataStudioDiagnosticsPinsExtensions or DataStudioKafkaCorePinsExtensions)" Condition="'$(DataStudioDiagnosticsPinsExtensions)' == 'true' or '$(DataStudioKafkaCorePinsExtensions)' == 'true'">
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.0" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" />
     <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.0" />

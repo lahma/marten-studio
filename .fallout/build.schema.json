@@ -123,7 +123,7 @@
         },
         "ConfluentVersion": {
           "type": "string",
-          "description": "The Confluent.Kafka version the KStudio projects are restored, compiled and tested against: 'floor' (the default - the version KStudio.Core depends on, and the only one Pack packs at), 'latest' (the newest release CI tests, pinned in Directory.Packages.props), or an exact version such as 2.16.0. (env: CONFLUENT_VERSION)"
+          "description": "The Confluent.Kafka version the KStudio projects are restored, compiled and tested against: 'floor' (the default - the version DataStudio.Kafka.Core depends on, and the only one Pack packs at), 'latest' (the newest release CI tests, pinned in Directory.Packages.props), or an exact version such as 2.16.0. (env: CONFLUENT_VERSION)"
         },
         "GitHubReleaseGitHubToken": {
           "type": "string",
@@ -139,7 +139,7 @@
         },
         "NpgsqlVersion": {
           "type": "string",
-          "description": "The Npgsql version the PostgresStudio-only projects (postgres-studio.slnf) are tested against: 'floor' (the default - the version the PostgresStudio package depends on, the only one Pack packs at, and the one the whole-solution pass always uses), 'latest' (the newest Npgsql CI tests, pinned in Directory.Packages.props), or an exact version such as 10.0.3. Anything but the floor adds a second restore, build and test pass over postgres-studio.slnf after Test. (env: NPGSQL_VERSION)"
+          "description": "The Npgsql version the PostgresStudio-only projects (data-studio-postgres.slnf) are tested against: 'floor' (the default - the version the PostgresStudio package depends on, the only one Pack packs at, and the one the whole-solution pass always uses), 'latest' (the newest Npgsql CI tests, pinned in Directory.Packages.props), or an exact version such as 10.0.3. Anything but the floor adds a second restore, build and test pass over data-studio-postgres.slnf after Test. (env: NPGSQL_VERSION)"
         },
         "NuGetUser": {
           "type": "string",

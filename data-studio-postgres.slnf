@@ -1,0 +1,14 @@
+{
+  "solution": {
+    "path": "data-studio.slnx",
+    "projects": [
+      "src\\DataStudio.Postgres.Diagnostics\\DataStudio.Postgres.Diagnostics.csproj",
+      "src\\DataStudio.Postgres\\DataStudio.Postgres.csproj",
+      "samples\\DataStudio.Sample.Postgres.Data\\DataStudio.Sample.Postgres.Data.csproj",
+      "samples\\DataStudio.Sample.Postgres\\DataStudio.Sample.Postgres.csproj",
+      "samples\\DataStudio.Sample.Postgres.Worker\\DataStudio.Sample.Postgres.Worker.csproj",
+      "tests\\DataStudio.Postgres.Tests\\DataStudio.Postgres.Tests.csproj",
+      "tests\\DataStudio.Postgres.Integration.Tests\\DataStudio.Postgres.Integration.Tests.csproj"
+    ]
+  }
+}
