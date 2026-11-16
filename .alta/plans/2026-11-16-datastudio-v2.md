@@ -133,7 +133,7 @@ Each step ends with every suite it can reach green. Steps 1 to 3 change no behav
 
 - [x] 1. **Freeze the public API.** Write `docs/maintainers/v2-public-api.md`: every public type and member of the table
       above, with its 1.x name beside it. Review it before step 4; steps 2 and 3 do not depend on it.
-- [ ] 2. **Rename projects, assemblies and namespaces**, one project per commit, mechanically (`git mv`, a scripted
+- [x] 2. **Rename projects, assemblies and namespaces**, one project per commit, mechanically (`git mv`, a scripted
       namespace rewrite, the Roslyn rename tools for types): `src/PostgresStudio.Diagnostics` →
       `src/DataStudio.Postgres.Diagnostics`, `src/PostgresStudio` → `src/DataStudio.Postgres`, `src/MartenStudio` →
       `src/DataStudio.Marten`, `src/KStudio.Core` → `src/DataStudio.Kafka.Core`, `src/KStudio` → `src/DataStudio.Kafka`,
