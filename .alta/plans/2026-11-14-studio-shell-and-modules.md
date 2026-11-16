@@ -184,7 +184,7 @@ Phase A changes no package, no public type and no word. It can ship in any relea
 - [x] 5. Extend `IStudioModule` (`ScopeGate`, `HeaderSearch`, `HomeRoute`, `IsRoot`) and add `DatabaseStudioModule` in
       `PostgresStudio`, built from either descriptor. Move the layout's scope gate and address rewrite into its
       `ScopeGate` component.
-- [ ] 6. Give the database's audit entries a scope kind and register its `IStudioAuditScopeGate`; the ring has no default
+- [x] 6. Give the database's audit entries a scope kind and register its `IStudioAuditScopeGate`; the ring has no default
       gate left.
 - [ ] 7. Move the shell's files to `src/PostgresStudio/Shell/` in the shell's final namespace, and add `ShellFenceTests`:
       no file there names Npgsql, `StudioScope`, a source or tenant type, or an engine namespace.
