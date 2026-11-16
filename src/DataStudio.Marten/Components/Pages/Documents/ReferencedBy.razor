@@ -1,0 +1,216 @@
+@using Microsoft.Extensions.Options
+@using DataStudio.Postgres.Components.Pages.Relationships
+@using DataStudio.Postgres.Services.Database
+@using DataStudio.Marten.Services.Relationships
+@using ReferencedByModel = DataStudio.Postgres.Services.Relationships.ReferencedBy
+@using DataStudio.Postgres.Components.Shared
+@using DataStudio.Postgres.Services
+@using DataStudio.Postgres.Services.Relationships
+@inject StudioState State
+@inject IOptions<MartenStudioOptions> Options
+
+@*
+    The inbound half of a document's relationships: which collections - and which of the database's other
+    tables - point at it, how many of their rows point at this one, and what deleting it does to them.
+
+    The outbound half (RelatedDocumentsPanel) follows a declared foreign key from a column this document
+    already carries, which is one indexed read. This half is the opposite direction and is the expensive
+    one, which is why it is bounded: `select count(*) from (select 1 … limit 1001) x`, so the answer is
+    exact where a person needs it exact - three orders or three hundred, before they delete a customer -
+    and stops rather than paying for a sequential scan to say "lots".
+
+    Each collection row links to the pointing collection already filtered on this id, written with the .NET
+    member. Either name would resolve where there is one - DocumentTableInfo.FindDuplicated matches the
+    normalised *column* name as well as the member path - so this is a choice about what a person reads in
+    the search box, not a workaround. What decides the link is whether the row has a member at all: a
+    physical-only key on a column with no DuplicatedField behind it resolves under neither name, so such a
+    row links to the *unfiltered* collection rather than to a link that answers "nothing found".
+
+    A table row is a table the studio does not map - legacy.customer_credit, say - and links to its rows on the
+    object page's Rows tab, filtered to exactly the rows counted (or, when they were not counted, to its object
+    detail). Its count is a read of that table's rows, so it is made only for a visitor the database
+    browser's gate lets read them (D27); anybody else sees the key, its columns and its ON DELETE action,
+    and "not counted" with the reason. A key from a schema the visitor is not shown is counted and never
+    named. Every row says what a delete does - a cascade into a table nobody on this page mapped is exactly
+    the thing a person deleting a customer needs to be told.
+*@
+
+@if (Referenced.Error is { Length: > 0 } error)
+{
+    <ErrorAlert Message="@error" />
+}
+else if (Referenced.Entries.Count > 0 || Referenced.Withheld > 0 || Referenced.Truncated)
+{
+    <section class="ms-referenced" aria-label="Referenced by">
+        <h3 class="ms-doc-meta-title">Referenced by</h3>
+        @if (Referenced.Entries.Count > 0)
+        {
+        <ul class="ms-referenced-list">
+            @* Keyed on the ordinal, as the graph's edges and the unmatched-key rows are: the natural key
+               is not one. Two edges from the same collection can share a primary column while differing
+               in the rest of a composite key, so FromAlias + '.' + Column repeats - and a duplicate @key
+               takes the circuit down. The list is rebuilt whole on every read, so position is stable. *@
+            @for (int ordinal = 0; ordinal < Referenced.Entries.Count; ordinal++)
+            {
+                ReferencedByEntry entry = Referenced.Entries[ordinal];
+
+                @if (entry.IsTable)
+                {
+                    <li class="ms-referenced-item ms-referenced-table" @key="ordinal">
+                        <a class="ms-referenced-link" href="@TableHref(entry)" title="@Title(entry)">
+                            <TableChip Schema="@entry.Schema" Name="@entry.Table" Hue="@entry.Hue" Small="true" />
+                            <span class="ms-referenced-count">@Count(entry)</span>
+                        </a>
+                        <span class="ms-referenced-column ms-mono" title="@(entry.AllColumns ?? entry.Column)">@entry.Column</span>
+                        @if (entry.Error is { Length: > 0 } rowError)
+                        {
+                            <span class="ms-badge ms-badge-warning" title="@rowError">not counted</span>
+                        }
+                        else if (entry.NotCounted is { Length: > 0 } notCounted)
+                        {
+                            <span class="ms-badge ms-referenced-notcounted" title="@notCounted">not counted</span>
+                        }
+                        <span class="ms-referenced-ondelete" title="What deleting this document does to these rows">on delete @OnDeleteText(entry.OnDelete)</span>
+                    </li>
+                }
+                else
+                {
+                    <li class="ms-referenced-item" @key="ordinal">
+                        <a class="ms-referenced-link" href="@Href(entry)" title="@Title(entry)">
+                            <CollectionChip Alias="@entry.FromAlias" Hue="@entry.Hue" Small="true" />
+                            <span class="ms-referenced-count">@Count(entry)</span>
+                        </a>
+                        <span class="ms-referenced-column ms-mono">@(entry.Member ?? entry.Column)</span>
+                        @if (entry.Error is { Length: > 0 } rowError)
+                        {
+                            <span class="ms-badge ms-badge-warning" title="@rowError">not counted</span>
+                        }
+                        else if (!entry.Physical)
+                        {
+                            <span class="ms-badge ms-badge-warning"
+                                  title="StoreOptions declares this key but the database has no such constraint.">declared only</span>
+                        }
+                        else if (!entry.Declared)
+                        {
+                            <span class="ms-badge ms-badge-tenant"
+                                  title="The database has this constraint and StoreOptions does not declare it.">database only</span>
+                        }
+                        <span class="ms-referenced-ondelete" title="What deleting this document does to these documents">on delete @OnDeleteText(entry.OnDelete)</span>
+                    </li>
+                }
+            }
+        </ul>
+        }
+        @if (Referenced.Withheld > 0)
+        {
+            <p class="ms-referenced-withheld" role="note">
+                @(Referenced.Withheld == 1
+                    ? "1 more foreign key points here from a schema this studio does not show you."
+                    : $"{Referenced.Withheld} more foreign keys point here from schemas this studio does not show you.")
+            </p>
+        }
+        @* The foreign-key read stops at RelationshipQueries.DefaultForeignKeyCap; past it a key that points
+           here may be missing from both the list and the count above, and the panel says so rather than
+           reading as complete. *@
+        @if (Referenced.Truncated)
+        {
+            <p class="ms-referenced-withheld ms-referenced-truncated" role="note">More foreign keys point here than were read.</p>
+        }
+    </section>
+}
+
+@code {
+    /// <summary>
+    /// What points here, as a <c>ReferencedBy</c>. Typed <see cref="object" /> — see
+    /// <see cref="DocumentComponentModel" /> for why.
+    /// </summary>
+    [Parameter]
+    public object? Model { get; set; }
+
+    /// <summary>This document's id, which becomes the filter each row links to.</summary>
+    [Parameter]
+    public string DocumentId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Builds the link to a collection's list, optionally filtered. The second argument is the search
+    /// expression in the list's own grammar, or <see langword="null" /> for the unfiltered list.
+    /// </summary>
+    [Parameter]
+    public Func<string, string?, string> HrefFor { get; set; } = static (_, _) => "#";
+
+    /// <summary>The inbound list, read back into the type it really is.</summary>
+    private ReferencedByModel Referenced => DocumentComponentModel.Read(Model, ReferencedByModel.None);
+
+    private string Href(ReferencedByEntry entry) => HrefFor(entry.FromAlias, Filter(entry));
+
+    /// <summary>
+    /// A pointing table's rows, filtered to exactly the ones counted, on the object page's Rows tab - or its
+    /// object detail, when they were not counted (the gate said no, or the key could not be bound to this
+    /// document) and a Rows tab would only repeat the refusal.
+    /// </summary>
+    private string TableHref(ReferencedByEntry entry) =>
+        entry is { IsCounted: true, ChildFilter: { Length: > 0 } filter }
+            ? DatabaseLinks.ToRows(Options.Value, State.ActiveScope, entry.Schema ?? string.Empty, entry.Table ?? string.Empty, filter)
+            : DatabaseLinks.ToObject(Options.Value, State.ActiveScope, entry.Schema ?? string.Empty, entry.Table ?? string.Empty);
+
+    /// <summary>
+    /// The search expression that shows exactly the rows this count counted, or <see langword="null" />.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The value is quoted, and an embedded quote is doubled, because that is how the grammar spells an
+    /// escaped quote — and because quoting is what forces the literal to be compared as text, which is the
+    /// one form that converts cleanly to every id column type the studio supports.
+    /// </para>
+    /// <para>
+    /// <see langword="null" /> when the entry has no member, because that is exactly the entry nothing
+    /// can filter. <c>DocumentTableInfo.FindDuplicated</c> resolves a path or a normalised column name
+    /// against the same set of duplicated columns, and <c>Member</c> is non-null precisely when that set
+    /// has an entry for this column — so a row without one is a physical-only key on a plain column, and
+    /// spelling the filter with the column name instead would produce a JSON path that matches nothing.
+    /// The unfiltered link is the honest answer there.
+    /// </para>
+    /// </remarks>
+    private string? Filter(ReferencedByEntry entry) =>
+        entry.Member is { Length: > 0 } member && DocumentId.Length > 0
+            ? member + " = \"" + DocumentId.Replace("\"", "\"\"", StringComparison.Ordinal) + "\""
+            : null;
+
+    private string Count(ReferencedByEntry entry)
+    {
+        if (!entry.IsCounted)
+        {
+            return "?";
+        }
+
+        string rows = entry.Count.ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
+
+        return entry.IsCapped ? rows + "+" : rows;
+    }
+
+    private string Title(ReferencedByEntry entry)
+    {
+        string what = entry.IsTable ? "rows of " + entry.FromAlias : entry.FromAlias + " document(s)";
+
+        if (entry.NotCounted is { Length: > 0 } notCounted)
+        {
+            return $"Not counted: {notCounted}";
+        }
+
+        return entry.IsCapped
+            ? $"More than {entry.Count.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)} " +
+              (entry.IsTable ? what : $"{entry.FromAlias} documents") + $" point at this one through {entry.Column}."
+            : $"{entry.Count.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)} " +
+              $"{what} point at this one through {entry.Column}.";
+    }
+
+    /// <summary><c>CascadeAction</c>'s spelling, as SQL spells it.</summary>
+    private static string OnDeleteText(string action) => action switch
+    {
+        "Cascade" => "cascade",
+        "Restrict" => "restrict",
+        "SetNull" => "set null",
+        "SetDefault" => "set default",
+        _ => "no action",
+    };
+}

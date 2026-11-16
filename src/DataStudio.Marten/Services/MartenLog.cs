@@ -1,0 +1,176 @@
+using Microsoft.Extensions.Logging;
+using DataStudio.Postgres.Services;
+
+namespace DataStudio.Marten.Services;
+
+/// <summary>
+/// The events only MartenStudio logs, in the studio's one id space (<c>9200-9299</c>, see <see cref="StudioLog" />).
+/// </summary>
+/// <remarks>
+/// <para>
+/// Moved out of <c>StudioLog.cs</c> by 0.5's split with their ids, levels and message templates unchanged: the schema
+/// apply (9206), projection rebuilds and daemon control (9207-9209), the document round trip (9211), and the
+/// operational anomalies of the daemon, the shard tracker, the projection summary and the event store (9212,
+/// 9215-9218). The LINQ events (9260-9264) are in <c>MartenLog.Query.cs</c>.
+/// </para>
+/// <para>
+/// Every rule of <see cref="StudioLog" /> applies here too: an anomaly takes its level as a parameter, and every call
+/// takes it from <see cref="StudioLogThrottle" /> (<c>LogLevelsTests</c> reads both files).
+/// </para>
+/// </remarks>
+internal static partial class MartenLog
+{
+    // Wave 6: 9206, 9207 and 9209 name the user, whose name is the host's identity's and can be shaped by a visitor, and the
+    // scope, so a site writes them only through the wrappers below, which escape and bound both (StudioLogValue.Cap) as the
+    // shared audit dispatchers do; the generated templates are the *Raw methods, which RefusalLogValuesTests lets nothing
+    // but these wrappers call. H1: 9207's projection and 9209's operation and target too - a shard a circuit names reaches
+    // 9209 before the daemon has looked it up.
+
+    [LoggerMessage(EventId = 9206, Level = LogLevel.Information, Message = "Marten Studio user {User} applied schema changes to store {StoreKey}, database {DatabaseId}: {Summary}")]
+    public static partial void SchemaChangeAppliedRaw(this ILogger logger, string user, string storeKey, string databaseId, string summary);
+
+    [LoggerMessage(EventId = 9207, Level = LogLevel.Information, Message = "Marten Studio user {User} started a rebuild of projection {Projection} in store {StoreKey}, database {DatabaseId}")]
+    public static partial void ProjectionRebuildStartedRaw(this ILogger logger, string user, string projection, string storeKey, string databaseId);
+
+    [LoggerMessage(EventId = 9208, Level = LogLevel.Information, Message = "Rebuild of projection {Projection} in store {StoreKey}, database {DatabaseId} finished after {ElapsedMilliseconds} ms: {Outcome}")]
+    public static partial void ProjectionRebuildFinished(this ILogger logger, string projection, string storeKey, string databaseId, long elapsedMilliseconds, string outcome);
+
+    [LoggerMessage(EventId = 9209, Level = LogLevel.Information, Message = "Marten Studio user {User} requested daemon control {Operation} on {Target} in store {StoreKey}, database {DatabaseId}")]
+    public static partial void DaemonControlRequestedRaw(this ILogger logger, string user, string operation, string target, string storeKey, string databaseId);
+
+    [LoggerMessage(EventId = 9225, Level = LogLevel.Information, Message = "Marten Studio user {User} is removing the orphaned progression row {Row} from store {StoreKey}, database {DatabaseId}")]
+    public static partial void OrphanedProgressionRemovalRequestedRaw(this ILogger logger, string user, string row, string storeKey, string databaseId);
+
+    [LoggerMessage(EventId = 9226, Level = LogLevel.Information, Message = "Marten Studio refused user {User}'s removal of the progression row {Row} from store {StoreKey}, database {DatabaseId}: {Reason}")]
+    public static partial void OrphanedProgressionRemovalRefusedRaw(this ILogger logger, string user, string row, string storeKey, string databaseId, string reason);
+
+    [LoggerMessage(EventId = 9265, Level = LogLevel.Information, Message = "Marten Studio user {User} read the per-tenant row estimates and last events of {Tenants} tenants in store {StoreKey}, database {DatabaseId}")]
+    public static partial void TenantVolumesReadRaw(this ILogger logger, string user, int tenants, string storeKey, string databaseId);
+
+    /// <summary>9265, with the user's name and the scope escaped and bounded.</summary>
+    /// <remarks>
+    /// The Tenants overview's audit, the first read in a circuit of a database's activity-gated columns (hard rule 5, a read authorized
+    /// like a write). It carries a count and the scope, never a tenant's id: the ring entry says the same.
+    /// </remarks>
+    public static void TenantVolumesRead(this ILogger logger, string user, int tenants, string storeKey, string databaseId)
+    {
+        (user, storeKey, databaseId) = (StudioLogValue.Cap(user), StudioLogValue.Cap(storeKey), StudioLogValue.Cap(databaseId));
+        logger.TenantVolumesReadRaw(user, tenants, storeKey, databaseId);
+    }
+
+    /// <summary>9225, with the user's name, the row's name and the scope escaped and bounded.</summary>
+    /// <remarks>
+    /// Written after the service has read the table again and found the row, immediately before Marten's call. The name is still
+    /// the circuit's - the page sends the name of the row it drew - so it is the visitor's text, and is capped (H1).
+    /// </remarks>
+    public static void OrphanedProgressionRemovalRequested(this ILogger logger, string user, string row, string storeKey, string databaseId)
+    {
+        (user, row, storeKey, databaseId) =
+            (StudioLogValue.Cap(user), StudioLogValue.Cap(row), StudioLogValue.Cap(storeKey), StudioLogValue.Cap(databaseId));
+        logger.OrphanedProgressionRemovalRequestedRaw(user, row, storeKey, databaseId);
+    }
+
+    /// <summary>9226, with the user's name, the row's name and the scope escaped and bounded.</summary>
+    public static void OrphanedProgressionRemovalRefused(this ILogger logger, string user, string row, string storeKey, string databaseId, string reason)
+    {
+        (user, row, storeKey, databaseId) =
+            (StudioLogValue.Cap(user), StudioLogValue.Cap(row), StudioLogValue.Cap(storeKey), StudioLogValue.Cap(databaseId));
+        logger.OrphanedProgressionRemovalRefusedRaw(user, row, storeKey, databaseId, reason);
+    }
+
+    /// <summary>9206, with the user's name and the scope escaped and bounded.</summary>
+    public static void SchemaChangeApplied(this ILogger logger, string user, string storeKey, string databaseId, string summary)
+    {
+        (user, storeKey, databaseId) = (StudioLogValue.Cap(user), StudioLogValue.Cap(storeKey), StudioLogValue.Cap(databaseId));
+        logger.SchemaChangeAppliedRaw(user, storeKey, databaseId, summary);
+    }
+
+    /// <remarks>
+    /// 1.2-SHAPE: Debug, on a path a visitor started (a press of Check shapes) and nothing polls. The subject is the alias, which
+    /// the caller passes through <c>StudioLogValue.Cap</c>; no path, id, tenant, exception message or value is logged at any level.
+    /// 9228 is the events check's, in the same words.
+    /// </remarks>
+    [LoggerMessage(EventId = 9227, Level = LogLevel.Debug, Message = "Marten Studio checked the shapes of {Subject}: {Examined} examined, {Problems} kinds of problem, {Coverage}")]
+    public static partial void DocumentShapesChecked(this ILogger logger, string subject, int examined, int problems, string coverage);
+
+    /// <remarks>9228: the events check's, in the same words and at the same level as 9227; the subject is the event type name as stored.</remarks>
+    [LoggerMessage(EventId = 9228, Level = LogLevel.Debug, Message = "Marten Studio checked the shapes of events {Subject}: {Examined} examined, {Problems} kinds of problem, {Coverage}")]
+    public static partial void EventShapesChecked(this ILogger logger, string subject, int examined, int problems, string coverage);
+
+    /// <summary>9207, with the user's name, the projection and the scope escaped and bounded.</summary>
+    public static void ProjectionRebuildStarted(this ILogger logger, string user, string projection, string storeKey, string databaseId)
+    {
+        (user, projection, storeKey, databaseId) =
+            (StudioLogValue.Cap(user), StudioLogValue.Cap(projection), StudioLogValue.Cap(storeKey), StudioLogValue.Cap(databaseId));
+        logger.ProjectionRebuildStartedRaw(user, projection, storeKey, databaseId);
+    }
+
+    /// <summary>9209, with the user's name, the operation, its target and the scope escaped and bounded.</summary>
+    /// <remarks>
+    /// The target is what the circuit named: a shard an agent control was asked for is the visitor's text until the daemon
+    /// has looked it up, and the line is written before it does - so it is bounded and escaped like the scope (H1).
+    /// </remarks>
+    public static void DaemonControlRequested(this ILogger logger, string user, string operation, string target, string storeKey, string databaseId)
+    {
+        (user, operation, target, storeKey, databaseId) = (
+            StudioLogValue.Cap(user),
+            StudioLogValue.Cap(operation),
+            StudioLogValue.Cap(target),
+            StudioLogValue.Cap(storeKey),
+            StudioLogValue.Cap(databaseId));
+        logger.DaemonControlRequestedRaw(user, operation, target, storeKey, databaseId);
+    }
+
+    /// <remarks>
+    /// Warning, and it counts the properties: Marten has no untyped write path, so saving an edited
+    /// document round-trips through the CLR type and anything the type does not have is gone. The dialog
+    /// shows the loss before the save; this is the record that it happened anyway.
+    /// </remarks>
+    [LoggerMessage(EventId = 9211, Level = LogLevel.Warning, Message = "Marten Studio user {User} saved {DocumentType} {Id} and the round trip dropped {DroppedCount} properties: {Dropped}")]
+    public static partial void DocumentWriteRoundTripDropped(this ILogger logger, string user, string documentType, string id, int droppedCount, string dropped);
+
+    // --------------------------------------------------------------------------------------------------
+    // 9212-9229: operational anomalies, each at the level StudioLogThrottle chose (StudioLog's remarks)
+    // --------------------------------------------------------------------------------------------------
+
+    /// <remarks>
+    /// A coordinator <em>is</em> registered and answered with something other than the two expected
+    /// shapes, or could not be constructed for a reason other than the expected one. Wolverine's managed
+    /// distribution throws <c>NotSupportedException</c> from the per-database lookup by design, and its
+    /// constructor throws <c>ArgumentOutOfRangeException</c> for a store its agent family does not know;
+    /// neither comes here. Two throttle sites share this event - the lookup and the construction - so
+    /// one does not silence the other.
+    /// </remarks>
+    [LoggerMessage(EventId = 9212, Message = "Marten Studio could not reach the async daemon of store {StoreKey}, database {DatabaseId}")]
+    public static partial void DaemonUnreachable(this ILogger logger, LogLevel level, Exception exception, string storeKey, string databaseId);
+
+    /// <remarks>
+    /// The page falls back to the database rows it was reading anyway, so nothing on screen is wrong -
+    /// only less fresh between polls.
+    /// </remarks>
+    [LoggerMessage(EventId = 9215, Message = "Marten Studio could not observe the shard state tracker of store {StoreKey}, database {DatabaseId}")]
+    public static partial void ShardTrackerUnobservable(this ILogger logger, LogLevel level, Exception exception, string storeKey, string databaseId);
+
+    /// <remarks>Polled by the Overview's projection tiles and by the navigation badges.</remarks>
+    [LoggerMessage(EventId = 9216, Message = "Marten Studio could not summarise the projections of store {StoreKey}, database {DatabaseId}")]
+    public static partial void ProjectionSummaryUnreadable(this ILogger logger, LogLevel level, Exception exception, string storeKey, string databaseId);
+
+    /// <remarks>
+    /// Every event-store read renders its failure as a value through one describer, and this is its log
+    /// line. A timeout - 57014, or the <c>NpgsqlException</c> wrapping a <c>TimeoutException</c> that the
+    /// same expiry produces when the backend is slow to answer the cancel - is the page's business and is
+    /// Debug. A table or schema that is not there (42P01, 3F000) comes here: every read asks the column
+    /// catalog, or <c>DescribeDeadLettersAsync</c>, before it touches a table, so an event store that
+    /// has not been created yet is an empty answer and never this, and one of those SQLSTATEs means the
+    /// catalog and the database disagree. So does a connection failure and any other SQLSTATE.
+    /// </remarks>
+    [LoggerMessage(EventId = 9217, Message = "Marten Studio could not {What} in store {StoreKey}, database {DatabaseId}: {SqlState}")]
+    public static partial void EventReadFailed(this ILogger logger, LogLevel level, Exception exception, string what, string storeKey, string databaseId, string? sqlState);
+
+    /// <remarks>
+    /// <c>mt_streams."timestamp"</c> is <c>NOT NULL</c> in every schema Marten creates, so this is a table
+    /// somebody migrated by hand - worth one line, and not one per page of the stream list.
+    /// </remarks>
+    [LoggerMessage(EventId = 9218, Message = "Marten Studio stopped paging the stream list: {Schema}.mt_streams has a row with a null timestamp, which no Marten-created schema has and which a keyset cannot page past")]
+    public static partial void StreamTimestampMissing(this ILogger logger, LogLevel level, string schema);
+}

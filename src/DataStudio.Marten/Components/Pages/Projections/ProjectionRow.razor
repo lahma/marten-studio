@@ -1,0 +1,99 @@
+@using DataStudio.Marten.Services.Events
+@using DataStudio.Postgres.Components.Shared
+@* One projection, as the table's group header row: what the host registered, and what can be done to it.
+
+   Parameters are primitives and callbacks for the same reason as everywhere else on this screen - a
+   public [Parameter] cannot have an internal type, and every DTO here is internal (plan D12). *@
+
+<tr class="ms-table-row ms-projection-row" id="@EventLinks.ProjectionAnchor(Name)" data-projection="@Name">
+    @* The header's name is the projection's and its lifecycle, not the link that follows them. *@
+    <th scope="rowgroup" class="ms-table-cell ms-projection-name" aria-labelledby="@(EventLinks.ProjectionAnchor(Name) + "-name " + EventLinks.ProjectionAnchor(Name) + "-lifecycle")">
+        <span class="ms-mono" id="@(EventLinks.ProjectionAnchor(Name) + "-name")"><BreakableName Value="@Name" /></span>
+        <span class="ms-badge ms-lifecycle ms-lifecycle-@Lifecycle.ToLowerInvariant()" id="@(EventLinks.ProjectionAnchor(Name) + "-lifecycle")">@Lifecycle</span>
+        @if (!IsAsync)
+        {
+            <span class="ms-muted ms-projection-note">the async daemon does not run this</span>
+        }
+        @if (IsRebuilding)
+        {
+            @* A state, not an error: the rebuild is somebody's deliberate act, and the buttons beside it say what it
+               means for them. *@
+            <span class="ms-badge ms-projection-rebuilding" title="@("Being rebuilt " + (RebuildingBy ?? string.Empty))">rebuilding</span>
+        }
+        @if (FlowHref is { Length: > 0 })
+        {
+            <a class="ms-projection-flow-link" href="@FlowHref" aria-label="@("Show its flow: " + Name)" title="@("Draw only " + Name + " and the event types it reads and what it writes")">Show its flow</a>
+        }
+        @* Version and shard count were columns of their own, a number each in a column as wide as its header: on a narrower font the
+           table ran out of its region (1.2-FINAL-FIX-4). They are the second line of the name cell now, each with its label for a
+           screen reader. @( ... ) and not a bare @: an '@' with a word character in front of it and one behind it is an e-mail
+           address to the Razor parser. *@
+        <span class="ms-muted ms-projection-meta">
+            <span class="ms-sr-only">Version </span><span class="ms-mono ms-projection-version">v@(Version)</span>
+            <span aria-hidden="true">&middot;</span>
+            <span class="ms-mono ms-projection-shard-count">@ShardCount</span>
+            <span>@(ShardCount == 1 ? "shard" : "shards")</span>
+        </span>
+    </th>
+    <td class="ms-table-cell ms-table-cell-mono ms-projection-type" title="@ImplementationType">@ImplementationType</td>
+    <td class="ms-table-cell ms-projection-subscription">@SubscriptionType</td>
+    <td class="ms-table-cell ms-table-cell-actions" colspan="4">
+        @Actions
+    </td>
+</tr>
+
+@code {
+    /// <summary>The projection's registered name, which is what a rebuild is asked for by.</summary>
+    [Parameter]
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>Inline, Async or Live.</summary>
+    [Parameter]
+    public string Lifecycle { get; set; } = string.Empty;
+
+    /// <summary>Whether the daemon is the thing that runs it.</summary>
+    [Parameter]
+    public bool IsAsync { get; set; }
+
+    /// <summary>What JasperFx calls this subscription - Projection, Subscription, and so on.</summary>
+    [Parameter]
+    public string SubscriptionType { get; set; } = string.Empty;
+
+    /// <summary>The projection version the host declared.</summary>
+    [Parameter]
+    public uint Version { get; set; }
+
+    /// <summary>The CLR type the host registered.</summary>
+    [Parameter]
+    public string ImplementationType { get; set; } = string.Empty;
+
+    /// <summary>How many shards it runs as.</summary>
+    [Parameter]
+    public int ShardCount { get; set; }
+
+    /// <summary>
+    /// Whether it is being rebuilt right now - by Marten Studio, or where the daemon here can say so (JasperFx 2.86+),
+    /// by anything.
+    /// </summary>
+    [Parameter]
+    public bool IsRebuilding { get; set; }
+
+    /// <summary>The link to the Event flow drawn for this projection alone (1.2), or <see langword="null" /> for none.</summary>
+    [Parameter]
+    public string? FlowHref { get; set; }
+
+    /// <summary>Who is rebuilding it, for the badge's hover text ("by Marten Studio").</summary>
+    [Parameter]
+    public string? RebuildingBy { get; set; }
+
+    /// <summary>
+    /// The buttons for this projection, rendered by the page.
+    /// </summary>
+    /// <remarks>
+    /// The page decides what is offered, because the page is what knows the capabilities, the write
+    /// policy and whether a daemon is hosted here. A row that decided that for itself would be a second
+    /// place for the gating to be wrong.
+    /// </remarks>
+    [Parameter]
+    public RenderFragment? Actions { get; set; }
+}

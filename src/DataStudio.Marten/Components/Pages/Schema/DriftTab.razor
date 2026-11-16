@@ -1,0 +1,721 @@
+@using DataStudio.Marten.Services.Configuration
+@using DataStudio.Marten.Services.Schema
+@using DataStudio.Postgres.Components.Shared
+@using DataStudio.Postgres.Services
+@implements IDisposable
+@inject ISchemaDataService SchemaData
+@inject StudioState State
+@inject StudioCapabilityGuard Capabilities
+@inject StudioAuthorization Authorization
+@inject ToastService Toasts
+
+@*
+    Nothing here runs on navigation, and the reason is stronger than "it is slow".
+
+    Both buttons reach Weasel through IMartenDatabase, which builds every feature schema in the store to
+    get there - and below Marten 9.50.3 Marten's feature list included the lazy HiLo Sequences feature,
+    whose initialiser applied a migration under the database's own AutoCreate. That is a fine thing to do
+    on purpose and an indefensible thing to do because somebody opened a tab, so the tab arrives with two
+    buttons (packet P7-fix, finding B1; hard rule 14 stands at every version). Since 9.50.3 (#5665) the
+    enumeration describes the HiLo feature without applying it, and the wording below says so. The buttons
+    stay buttons: both still connect.
+
+    And both answers span the whole database - every tenant's partition by name, every document type's
+    table, the hidden ones included - so the service gives them only to a visitor who may see all of it
+    (SchemaScriptGate), and anybody else a refusal naming the option, drawn as a note rather than an error:
+    pressing again changes nothing. The apply is refused the same way, to the same visitor.
+*@
+
+<div class="ms-schema-toolbar">
+    <span class="ms-drift-badge @BadgeClass">@check.BadgeText</span>
+    <button type="button" class="ms-button ms-button-primary" disabled="@busy" @onclick="CheckAsync">
+        Check schema
+    </button>
+    <button type="button" class="ms-button" disabled="@busy" @onclick="PreviewAsync">
+        Preview migration
+    </button>
+    <span class="ms-schema-toolbar-spacer"></span>
+    @if (busy)
+    {
+        <span class="ms-schema-progress">
+            <span class="ms-spinner ms-spinner-sm"></span>
+            <span>@progress</span>
+        </span>
+    }
+</div>
+
+@if (error is { Length: > 0 })
+{
+    <ErrorAlert Message="@error" OnRetry="CheckAsync" />
+}
+
+@if (check.Status is SchemaCheckStatus.NotChecked && !previewed)
+{
+    <div class="ms-empty">
+        <p class="ms-empty-title">Not checked yet</p>
+        <p class="ms-empty-description">
+            <strong>Check schema</strong> asks Marten whether this database matches its configuration
+            (<code>AssertDatabaseMatchesConfigurationAsync</code>) and lists the objects that differ.
+            <strong>Preview migration</strong> renders the SQL that would bring it into line, without
+            running any of it.
+        </p>
+        <p class="ms-empty-description ms-schema-note">
+            Both ask Marten to build its feature schemas, which this host's Marten
+            (@MartenRuntime.Current.Describe(RuntimePackage.Marten)) does without creating anything - its HiLo
+            objects, <code>mt_hilo</code> and <code>mt_get_next_hi</code>, are described, not created. Neither
+            applies anything, and nothing on this page runs until you press a button.
+        </p>
+    </div>
+}
+
+@if (check.Withheld is { } checkWithheld)
+{
+    <div class="ms-alert ms-alert-info ms-schema-refusal" role="note">
+        <div class="ms-alert-content">
+            <p>@checkWithheld.Reason</p>
+        </div>
+    </div>
+}
+else if (check.Status is not SchemaCheckStatus.NotChecked)
+{
+    <div class="ms-kv">
+        <div class="ms-kv-row">
+            <span class="ms-kv-key">Verdict</span>
+            <span class="ms-kv-value">@check.BadgeText</span>
+        </div>
+        @if (check.Schemas.Count > 0)
+        {
+            <div class="ms-kv-row">
+                <span class="ms-kv-key">Schemas</span>
+                <span class="ms-kv-value ms-mono">@string.Join(", ", check.Schemas)</span>
+            </div>
+        }
+        @if (check.AssertionMessage is { Length: > 0 } assertion)
+        {
+            <div class="ms-kv-row">
+                <span class="ms-kv-key">Marten says</span>
+                <span class="ms-kv-value">@assertion</span>
+            </div>
+        }
+        @if (check.Reason is { Length: > 0 } reason)
+        {
+            <div class="ms-kv-row">
+                <span class="ms-kv-key">Could not report</span>
+                <span class="ms-kv-value">@reason</span>
+            </div>
+        }
+    </div>
+
+    @if (check.Objects.Count > 0)
+    {
+        <TableScroll Label="Schema differences table">
+            <table class="ms-table">
+                <thead>
+                    <tr>
+                        <th>Object</th>
+                        <th>Kind</th>
+                        <th>Difference</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (SchemaObjectDifference difference in check.Objects)
+                    {
+                        <tr class="ms-table-row" @key="difference.Name">
+                            <td class="ms-table-cell ms-table-cell-mono">@difference.Name</td>
+                            <td class="ms-table-cell">@difference.Kind</td>
+                            <td class="ms-table-cell">@difference.Difference</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </TableScroll>
+    }
+}
+
+@if (previewed && preview.Withheld is { } previewWithheld)
+{
+    <h2 class="ms-section-title">Migration preview</h2>
+    <div class="ms-alert ms-alert-info ms-schema-refusal" role="note">
+        <div class="ms-alert-content">
+            <p>@previewWithheld.Reason</p>
+        </div>
+    </div>
+}
+else if (previewed)
+{
+    <h2 class="ms-section-title">Migration preview</h2>
+    <MigrationPreviewPanel Sql="@preview.Sql"
+                           ObjectCount="@preview.ObjectCount"
+                           Notice="@preview.Notice"
+                           FileName="@FileName" />
+
+    @if (preview.Deltas.Count > 0)
+    {
+        <TableScroll Label="Migration preview differences table">
+            <table class="ms-table">
+                <thead>
+                    <tr>
+                        <th>Object</th>
+                        <th>Kind</th>
+                        <th>Difference</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (SchemaObjectDifference delta in preview.Deltas)
+                    {
+                        <tr class="ms-table-row" @key="delta.Name">
+                            <td class="ms-table-cell ms-table-cell-mono">@delta.Name</td>
+                            <td class="ms-table-cell">@delta.Kind</td>
+                            <td class="ms-table-cell">@delta.Difference</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </TableScroll>
+    }
+}
+
+<h2 class="ms-section-title ms-schema-apply-heading">Apply</h2>
+
+@if (!Capabilities.IsEnabled(StudioCapability.ApplySchemaChanges))
+{
+    <CapabilityDisabled Capability="@nameof(StudioCapability.ApplySchemaChanges)" Action="Applying schema changes" />
+}
+else
+{
+    <p class="ms-schema-note">
+        Applying runs Marten's own migration for <strong>this database only</strong> - but for all of it:
+        <strong>every tenant's</strong> tables and partitions, whichever tenant is selected above, which is why
+        your account needs the write policy for the database as a whole. It runs with
+        <code>AutoCreate.CreateOrUpdate</code> - the same mode the preview above was rendered with, so what
+        runs is what you read. It never uses <code>AutoCreate.All</code>, which would drop and recreate
+        every object Marten manages. The SQL is written to the audit log under event id 9206.
+    </p>
+
+    <p class="ms-schema-note ms-schema-caution">
+        <strong><code>CreateOrUpdate</code> is not additive.</strong> It can
+        <strong>drop an index or a column</strong> that exists on a Marten table and is not in
+        <code>StoreOptions</code>, <strong>change a column's type</strong>, <strong>drop and recreate a
+        changed primary key</strong> with <code>CASCADE</code>, and <strong>rebuild a repartitioned
+        table</strong> by copying it out and back. Read the SQL above; the preview is the whole of what
+        runs. To keep an index the configuration does not declare, name it in
+        <code>opts.Schema.For&lt;T&gt;().IgnoreIndex("...")</code> - or
+        <code>opts.Events.IgnoreIndex("...")</code> on an event table.
+    </p>
+
+    @if (preview.IsDestructive)
+    {
+        <div class="ms-alert ms-alert-error ms-schema-destructive" role="alert">
+            <div class="ms-alert-content">
+                <p><strong>@MigrationRisk.WarningHeadline</strong> @MigrationRisk.WarningDetail</p>
+                @* Keyed on the ordinal: nothing guarantees two destructive statements differ as text,
+                   and this is the one list that must never fail to render - it is what somebody reads
+                   before typing the confirmation. *@
+                <ul class="ms-destructive-list">
+                    @for (int ordinal = 0; ordinal < preview.DestructiveStatements.Count; ordinal++)
+                    {
+                        DestructiveStatement statement = preview.DestructiveStatements[ordinal];
+
+                        <li @key="ordinal">
+                            <span class="ms-destructive-kind">@statement.Kind</span>
+                            <code class="ms-destructive-statement">@statement.Statement</code>
+                        </li>
+                    }
+                </ul>
+                <label class="ms-destructive-ack">
+                    <input type="checkbox"
+                           checked="@acknowledged"
+                           @onchange="OnAcknowledgedAsync" />
+                    <span>
+                        I have read the @preview.DestructiveStatements.Count statement(s) above and accept
+                        that applying this removes or rewrites them.
+                    </span>
+                </label>
+            </div>
+        </div>
+    }
+
+    @* Notes, not alarms: statements that remove nothing a person made but are worth reading before they run - an
+       index build that makes writers wait (a tag table's on the way to Marten 9.51 among them), and Weasel 9.46's
+       partition-index rebuild, which reads like a drop and is not. Nothing to tick: the destructive list above is
+       the one the apply waits for. *@
+    @* A statement the lock table below already prints is printed there only (1.2-FINAL-FIX): with index-only drift the two lists were
+       the same statements twice. *@
+    @if (NotesNotInLockTable(preview) is { Count: > 0 } notes)
+    {
+        <div class="ms-alert ms-alert-info ms-schema-notes" role="note">
+            <div class="ms-alert-content">
+                <p><strong>Worth knowing before you apply.</strong> These statements remove nothing, but:</p>
+                <ul class="ms-destructive-list">
+                    @for (int ordinal = 0; ordinal < notes.Count; ordinal++)
+                    {
+                        MigrationNote note = notes[ordinal];
+
+                        <li @key="ordinal">
+                            <span class="ms-destructive-kind">@note.Kind</span>
+                            <code class="ms-destructive-statement">@note.Statement</code>
+                        </li>
+                    }
+                </ul>
+            </div>
+        </div>
+    }
+
+    @* 1.2-APPLY: what the statements above lock on tables that already exist, whether they rewrite them, how big the tables
+       are (pg_class statistics - nothing was counted or locked to read them) and, for a visitor through the Activity gate,
+       how many sessions have a lock on them now: counts and states, never a statement. Notes, never a refusal. *@
+    @if (preview.Impact is { HasContent: true } impact)
+    {
+        <div class="ms-alert ms-alert-info ms-schema-notes ms-schema-impact" role="note">
+            <div class="ms-alert-content">
+                <p>
+                    <strong>What applying this will lock and rewrite.</strong> The statements below run against tables that already
+                    exist. Rows and sizes are estimates from the catalog's statistics (<code>pg_class</code>), as of the last
+                    <code>VACUUM</code> or <code>ANALYZE</code> or index build - nothing was counted or locked to read them.
+                    Every <code>ALTER TABLE</code> and partition create on an existing table is listed. Functions and sequences
+                    lock no table, except that Weasel drops a replaced function with <code>CASCADE</code>, which removes every
+                    index or default built on it under that table's <code>ACCESS EXCLUSIVE</code> lock - the list names the drop.
+                    New tables and their indexes lock nothing that already holds data.
+                </p>
+                @if (impact.Notice is { Length: > 0 } impactNotice)
+                {
+                    <p class="ms-muted">@impactNotice</p>
+                }
+                @{
+                    bool showSessions = impact.Tables.Any(static x => x.Sessions is not null);
+
+                    // 1.2-UX-FIX: the quiet-time advice moves up under the summary line when there is one, rather than last of the paragraphs.
+                    bool adviceUnderSummary = impact.LockSummary is { Length: > 0 } && impact.Advice.Contains(MigrationRisk.AccessExclusiveAdvice);
+                    string[] laterAdvice = [.. impact.Advice.Where(x => !adviceUnderSummary || !string.Equals(x, MigrationRisk.AccessExclusiveAdvice, StringComparison.Ordinal))];
+                }
+                @if (impact.LockSummary is { Length: > 0 } lockSummary)
+                {
+                    @* The line a visitor needs first, built from the same statements as the list below. *@
+                    <p class="ms-schema-lock-summary" role="status"><strong>@lockSummary</strong></p>
+                    @if (adviceUnderSummary)
+                    {
+                        <p class="ms-schema-lock-advice">@MigrationRisk.AccessExclusiveAdvice</p>
+                    }
+                }
+                <TableScroll Label="Tables the migration locks">
+                    <table class="ms-table">
+                        <thead>
+                            <tr>
+                                <th>Table</th>
+                                <th>What the migration does to it</th>
+                                <th>Rows</th>
+                                <th>Size</th>
+                                @if (showSessions)
+                                {
+                                    <th>Sessions now</th>
+                                }
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (TableImpact table in impact.Tables)
+                            {
+                                <tr class="ms-table-row" @key="table.Display">
+                                    <td class="ms-table-cell ms-table-cell-mono">@table.Display</td>
+                                    <td class="ms-table-cell">
+                                        <ul class="ms-destructive-list">
+                                            @for (int ordinal = 0; ordinal < table.Statements.Count; ordinal++)
+                                            {
+                                                TableLockStatement statement = table.Statements[ordinal];
+
+                                                <li @key="ordinal">
+                                                    <span class="ms-destructive-kind">@statement.Kind</span>
+                                                    <strong>@statement.LockName</strong> lock; @statement.RewriteText. This @statement.Effect.
+                                                    <code class="ms-destructive-statement">@statement.Statement</code>
+                                                </li>
+                                            }
+                                        </ul>
+                                    </td>
+                                    @if (table.IsFunction)
+                                    {
+                                        <td class="ms-table-cell ms-muted" colspan="2">@table.Note</td>
+                                    }
+                                    else if (table.Footprint is { } footprint)
+                                    {
+                                        <td class="ms-table-cell ms-num">@footprint.RowsText</td>
+                                        <td class="ms-table-cell">@footprint.SizeText</td>
+                                    }
+                                    else
+                                    {
+                                        <td class="ms-table-cell ms-muted" colspan="2">
+                                            Not in the catalog yet, or not resolvable by name.
+                                        </td>
+                                    }
+                                    @if (showSessions)
+                                    {
+                                        <td class="ms-table-cell">@(table.IsFunction ? "-" : table.Sessions?.Summary ?? "not shown")</td>
+                                    }
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </TableScroll>
+                @if (impact.SessionsNotice is { Length: > 0 } sessionsNotice)
+                {
+                    <p class="ms-muted">@sessionsNotice</p>
+                }
+                @if (laterAdvice.Length > 0)
+                {
+                    <ul class="ms-destructive-list">
+                        @for (int ordinal = 0; ordinal < laterAdvice.Length; ordinal++)
+                        {
+                            <li @key="ordinal">@laterAdvice[ordinal]</li>
+                        }
+                    </ul>
+                }
+            </div>
+        </div>
+    }
+
+    @* Disabled and not hidden for a visitor the write policy refuses: "this studio can apply schema
+       changes and your account may not" is a different fact from "this studio cannot apply schema
+       changes". ISchemaDataService refuses regardless (AGENTS.md hard rule 5). *@
+    <button type="button"
+            class="ms-button ms-button-danger ms-schema-apply"
+            disabled="@(busy || !preview.HasSql || !Acknowledged || !mayApply)"
+            title="@ApplyTitle"
+            @onclick="OpenApplyAsync">
+        Apply @(preview.HasSql ? preview.ObjectCount.ToString(System.Globalization.CultureInfo.InvariantCulture) + " change(s)" : "changes")
+    </button>
+
+    <WriteRefusal Refused="!mayApply" Capability="@nameof(StudioCapability.ApplySchemaChanges)" />
+
+    @if (!preview.HasSql)
+    {
+        <p class="ms-schema-note">Preview the migration first; there is nothing to apply until there is.</p>
+    }
+
+    @if (applyResult is { } result)
+    {
+        <div class="ms-alert @(result.Succeeded ? "ms-alert-success" : "ms-alert-error")" role="status">
+            <div class="ms-alert-content">
+                <p>@result.Message</p>
+                @if (result.IsInsufficientPrivilege)
+                {
+                    <p class="ms-muted">
+                        PostgreSQL refused this with <code>42501</code>, which means the role this
+                        application connects as may not change the schema. Grant that role rights on the
+                        schema, or run the migration from a deployment step that connects as an owner -
+                        nothing about Marten Studio's own configuration will change this.
+                    </p>
+                }
+            </div>
+        </div>
+    }
+}
+
+<ConfirmDialog IsOpen="@applyOpen"
+               Title="Apply schema changes"
+               Message="@ConfirmMessage"
+               ConfirmationPhrase="@databaseIdentity"
+               OnConfirm="ApplyAsync"
+               OnCancel="CancelApply" />
+
+@code {
+    private readonly CancellationTokenSource lifetime = new();
+
+    private SchemaCheck check = SchemaCheck.NotChecked;
+    private MigrationPreview preview = MigrationPreview.None;
+    private SchemaApplyResult? applyResult;
+    private string? error;
+    private string progress = string.Empty;
+    private string databaseIdentity = string.Empty;
+    private bool previewed;
+    private bool busy;
+    private bool applyOpen;
+    private bool acknowledged;
+
+    /// <summary>
+    /// Whether the destructive-statement block has been ticked, when there is one.
+    /// </summary>
+    /// <remarks>
+    /// A migration that only creates things needs no acknowledgement - making people tick a box for the
+    /// harmless case is how a box stops being read.
+    /// </remarks>
+    private bool Acknowledged => !preview.IsDestructive || acknowledged;
+
+    /// <summary>
+    /// Whether the store policy and <see cref="MartenStudioOptions.WriteAuthorizationPolicy" /> let
+    /// <em>this</em> visitor apply a migration to the database on screen - all of it, every tenant's.
+    /// </summary>
+    /// <remarks>
+    /// Asked once, when this tab is first rendered, and never memoised: the answer is about this
+    /// circuit's user. It defaults to <see langword="true" /> because the common case is a host that
+    /// configured no write policy at all, and fail-open is safe because this is not the enforcement -
+    /// <c>ISchemaDataService.ApplyAsync</c> asks both policies about the same tenant-less scope, with the
+    /// same capability, and throws (AGENTS.md hard rule 5).
+    /// </remarks>
+    private bool mayApply = true;
+
+    /// <summary>
+    /// The preview's notes whose statement the lock table (<see cref="MigrationPreview.Impact" />) does not list: with that table on
+    /// screen, a statement in both is printed once, in the table, which says more about it (the lock it takes and whether it rewrites).
+    /// </summary>
+    internal static IReadOnlyList<MigrationNote> NotesNotInLockTable(MigrationPreview preview)
+    {
+        if (preview.Notes is not { Count: > 0 } notes)
+        {
+            return [];
+        }
+
+        if (preview.Impact is not { HasContent: true } impact)
+        {
+            return notes;
+        }
+
+        HashSet<string> listed = new(
+            impact.Tables.SelectMany(static table => table.Statements).Select(static statement => statement.Statement),
+            StringComparer.Ordinal);
+
+        return [.. notes.Where(note => !listed.Contains(note.Statement))];
+    }
+
+    private string ApplyTitle => mayApply
+        ? "Runs the previewed migration against this database - every tenant's tables included"
+        : WritePolicyRefusal.For(StudioCapability.ApplySchemaChanges);
+
+    /// <summary>The scope the Apply dialog was opened under: its confirmation acts on this and on nothing else (1.2-FINAL-FIX).</summary>
+    private StudioScope? applyScope;
+
+    /// <summary>
+    /// The Schema page tears this tab down when the scope moves; this is the tab holding to it on its own, so the dialog is closed
+    /// whoever hosts the tab.
+    /// </summary>
+    private Task OnScopeChangedAsync()
+    {
+        applyOpen = false;
+        applyScope = null;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        State.ScopeChanged += OnScopeChangedAsync;
+
+        StudioScope? scope = State.ActiveScope;
+        if (scope is null)
+        {
+            return;
+        }
+
+        try
+        {
+            // Asked as the service asks it: about the database as a whole, with no tenant, since the migration
+            // is every tenant's - the store policy, then the write policy with the capability named.
+            StudioScope wholeDatabase = scope with { TenantId = null };
+
+            mayApply = await Authorization.IsAuthorizedAsync(wholeDatabase, capability: null, lifetime.Token)
+                && await Authorization.IsAuthorizedAsync(wholeDatabase, StudioCapability.ApplySchemaChanges, lifetime.Token);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private string BadgeClass => check.Status switch
+    {
+        SchemaCheckStatus.Matches => "ms-drift-badge-ok",
+        SchemaCheckStatus.Differences => "ms-drift-badge-warn",
+        _ => "ms-drift-badge-unknown",
+    };
+
+    private string FileName => "marten-migration-" + Sanitize(databaseIdentity) + ".sql";
+
+    private string ConfirmMessage
+    {
+        get
+        {
+            string message =
+                $"This runs {preview.ObjectCount} schema change(s) against {databaseIdentity} - the whole " +
+                "database, every tenant's tables and partitions included, whichever tenant is selected. " +
+                "It cannot be undone from here.";
+
+            return preview.IsDestructive
+                ? message + $" {preview.DestructiveStatements.Count} of its statements remove or rewrite " +
+                  "an object: " + string.Join(", ", MigrationRisk.KindsIn(preview.Sql)) + "."
+                : message;
+        }
+    }
+
+    private async Task CheckAsync()
+    {
+        await RunAsync("Reading the catalog...", async token =>
+        {
+            StudioScope? scope = State.ActiveScope;
+            if (scope is null)
+            {
+                return;
+            }
+
+            check = await SchemaData.CheckAsync(scope, token);
+            databaseIdentity = await SchemaData.DatabaseIdentityAsync(scope, token);
+        });
+    }
+
+    private async Task PreviewAsync()
+    {
+        await RunAsync("Building the migration...", async token =>
+        {
+            StudioScope? scope = State.ActiveScope;
+            if (scope is null)
+            {
+                return;
+            }
+
+            preview = await SchemaData.PreviewAsync(scope, token);
+            databaseIdentity = await SchemaData.DatabaseIdentityAsync(scope, token);
+            previewed = true;
+
+            // A fresh preview is a fresh decision: an acknowledgement carried over from a script the
+            // visitor is no longer looking at would be an acknowledgement of nothing.
+            acknowledged = false;
+        });
+    }
+
+    private Task OnAcknowledgedAsync(ChangeEventArgs args)
+    {
+        acknowledged = args.Value is true;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OpenApplyAsync()
+    {
+        if (string.IsNullOrEmpty(databaseIdentity))
+        {
+            StudioScope? scope = State.ActiveScope;
+            if (scope is not null)
+            {
+                databaseIdentity = await SchemaData.DatabaseIdentityAsync(scope, lifetime.Token);
+            }
+        }
+
+        applyScope = State.ActiveScope;
+        applyOpen = true;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private Task CancelApply()
+    {
+        applyOpen = false;
+        applyScope = null;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>
+    /// Applies the migration, with <paramref name="typed" /> being what the visitor wrote in the dialog.
+    /// </summary>
+    /// <remarks>
+    /// The dialog hands the typed string out rather than the page handing its own copy of the identity
+    /// in. Passing <c>databaseIdentity</c> here would mean the service's second check compared the
+    /// server's own value against itself, which proves nothing about what anybody typed.
+    /// </remarks>
+    private async Task ApplyAsync(string typed)
+    {
+        // The dialog is closed first (1.2-UX-FIX-FU4): a confirm that is refused below is never dropped silently with the dialog left up.
+        applyOpen = false;
+
+        // The scope the dialog was opened under, and only if it is still the page's (the scope change closes the dialog).
+        StudioScope? openedUnder = applyScope;
+        applyScope = null;
+
+        // One apply at a time (1.2-UX-FIX-FU3), whatever reaches here twice: the dialog refuses a second confirm itself, and this is the
+        // defence in depth for a migration that must not run twice.
+        if (busy || openedUnder is null || openedUnder != State.ActiveScope)
+        {
+            return;
+        }
+
+        await RunAsync("Applying...", async token =>
+        {
+            StudioScope? scope = openedUnder;
+
+            applyResult = await SchemaData.ApplyAsync(scope, typed, token);
+
+            if (applyResult.Succeeded)
+            {
+                await Toasts.Success(applyResult.Message);
+
+                // The database has moved, so the two things on screen that described the old one are now
+                // wrong. Re-checking is cheaper than leaving a stale "3 differences" badge up.
+                check = await SchemaData.CheckAsync(scope, token);
+                preview = await SchemaData.PreviewAsync(scope, token);
+                acknowledged = false;
+            }
+            else
+            {
+                await Toasts.Error(applyResult.Message);
+            }
+        });
+    }
+
+    /// <summary>
+    /// Runs one action with the progress line up and every failure on screen.
+    /// </summary>
+    /// <remarks>
+    /// The capability and authorization refusals are caught by name, because their messages are the
+    /// whole point: one names the option a host would set, the other deliberately says nothing about
+    /// which store, database or tenant was refused.
+    /// </remarks>
+    private async Task RunAsync(string message, Func<CancellationToken, Task> action)
+    {
+        busy = true;
+        progress = message;
+        error = null;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            await action(lifetime.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // The circuit is going away; there is nobody to tell.
+        }
+        catch (StudioCapabilityDeniedException denied)
+        {
+            error = denied.Message;
+        }
+        catch (StudioNotAuthorizedException notAuthorized)
+        {
+            error = notAuthorized.Message;
+        }
+        catch (Exception exception)
+        {
+            error = exception.Message;
+        }
+        finally
+        {
+            busy = false;
+            progress = string.Empty;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private static string Sanitize(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "database";
+        }
+
+        Span<char> buffer = stackalloc char[value.Length];
+        for (int i = 0; i < value.Length; i++)
+        {
+            char c = value[i];
+            buffer[i] = char.IsLetterOrDigit(c) || c is '-' or '_' ? c : '-';
+        }
+
+        return new string(buffer);
+    }
+
+    public void Dispose()
+    {
+        State.ScopeChanged -= OnScopeChangedAsync;
+        lifetime.Cancel();
+        lifetime.Dispose();
+    }
+}

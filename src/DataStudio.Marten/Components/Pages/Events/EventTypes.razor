@@ -1,0 +1,492 @@
+@page "/marten/events/types"
+@using System.Globalization
+@using Microsoft.Extensions.Logging
+@using Microsoft.Extensions.Options
+@using DataStudio.Postgres.Components.Pages.Health
+@using DataStudio.Marten.Components.Shapes
+@using DataStudio.Marten.Services
+@using DataStudio.Marten.Services.Events
+@using DataStudio.Marten.Services.Health
+@using DataStudio.Postgres.Components.Shared
+@using DataStudio.Postgres.Services
+@using DataStudio.Postgres.Services.Health
+@implements IAsyncDisposable
+@inject IEventDataService Events
+@inject IHealthService Health
+@inject StudioState State
+@inject StudioPreferences Preferences
+@inject IOptions<MartenStudioOptions> Options
+@inject ILogger<EventTypes> Logger
+
+<PageTitle>Event types</PageTitle>
+
+<div class="ms-page">
+    <div class="ms-page-header">
+        <h1 class="ms-page-title">Event types</h1>
+        <button type="button" class="ms-button" disabled="@(loading || counting)" @onclick="LoadCountsAsync">
+            @(counting ? "Counting..." : "Load counts")
+        </button>
+        <button type="button" class="ms-button" disabled="@loading" @onclick="OpenShapesAsync">Check shapes</button>
+    </div>
+
+    <p class="ms-muted">
+        Every event type this store registers, in the colour it wears everywhere else. Counts are behind
+        the button because <code>group by type</code> reads the whole events table - the same reason
+        collection counts are estimates by default. They are cached for this session once loaded.
+    </p>
+
+    @* When the counted listing was read (1.2-UX-FIX). It is shared between visitors for half a minute and kept by this page until the
+       counts are loaded again, so a type written after that time is not in it, and the page says so rather than imply it is current. *@
+    @if (!loading && list is { Error: null, ListedAt: { } listedAt })
+    {
+        <p class="ms-muted ms-event-types-listed" role="status">
+            Counted at @Preferences.FormatInSelectedTimeZone(listedAt, "HH:mm:ss"). The count is shared for
+            @EventTypeListingCache.TimeToLive.TotalSeconds.ToString("0", CultureInfo.InvariantCulture) seconds, so an event type written
+            since then appears after Load counts is pressed again.
+        </p>
+    }
+
+    @* E05 from the health advisor's last regular sweep, read from its cache: this page never starts a sweep.
+       With no recent sweep there is nothing here - and nothing here says the store is healthy either, because
+       absence is "not checked", not "fine". The table's own "not registered" marks below are this page's own
+       read and do not depend on it. *@
+    @foreach (HealthReportFinding finding in healthFindings)
+    {
+        bool critical = finding.Severity == HealthSeverity.Critical;
+
+        <section class="@("ms-alert ms-health-banner ms-event-types-health ms-health-banner-" + finding.Code.ToLowerInvariant() + (critical ? " ms-alert-error" : " ms-alert-warning"))"
+                 role="@(critical ? "alert" : "status")"
+                 aria-label="@("Health finding " + finding.Code)"
+                 @key="finding.MuteKey">
+            <div class="ms-alert-content">
+                <p class="ms-health-banner-title">
+                    <span class="@HealthPresentation.ChipClass(finding.Severity)">@HealthPresentation.Label(finding.Severity)</span>
+                    <code class="ms-health-banner-code">@finding.Code</code>
+                    @finding.Finding.Title
+                </p>
+                <p class="ms-event-types-health-why">@finding.Finding.WhyItMatters</p>
+                <p class="ms-muted ms-health-banner-meta">
+                    From the health advisor's check at @Preferences.FormatInSelectedTimeZone(finding.Finding.MeasuredAt).
+                    <a class="ms-health-banner-link" href="@HealthLinks.ToFinding(Options.Value, State.ActiveScope, finding)">Why, and what to change</a>
+                </p>
+            </div>
+        </section>
+    }
+
+    @* 1.2-SHAPE: a scope change re-creates the panel (its key changes), and it starts its checks when it is created. *@
+    @if (shapeOpen && !loading && list is { Error: null } checkable)
+    {
+        <EventShapePanel @key="State.ActiveScope"
+                         TypeNames="@checkable.Types.Select(static x => x.Name).ToList()"
+                         Counts="@ShapeCounts(checkable)"
+                         OnClose="CloseShapesAsync" />
+    }
+
+    @if (loading)
+    {
+        <LoadingSpinner />
+    }
+    else if (list?.Error is { } error)
+    {
+        <ErrorAlert Message="@error.Display" OnRetry="@(error.CanRetry ? EventCallback.Factory.Create(this, ReloadAsync) : default)" />
+    }
+    else if (list is null || list.Types.Count == 0)
+    {
+        <div class="ms-empty">
+            <p class="ms-empty-title">No event types</p>
+            <p class="ms-empty-description">
+                This store registers no event type, and none has been seen in <code>mt_events</code>.
+            </p>
+        </div>
+    }
+    else
+    {
+        <TableScroll Label="Event types table">
+            <table class="ms-table">
+                <thead>
+                    <tr>
+                        <th>Type</th>
+                        <th>.NET type</th>
+                        <th>Events</th>
+                        <th>First</th>
+                        <th>Last</th>
+                        <th>Notes</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (EventTypeInfo type in list.Types)
+                    {
+                        <tr class="ms-table-row" @key="type.Name">
+                            <td class="ms-table-cell">
+                                <EventTypeChip Name="@type.Name"
+                                               DotNetTypeName="@type.DotNetTypeName"
+                                               IsRegistered="type.IsRegistered"
+                                               Href="@FeedHref(type.Name)" />
+                                @if (type.IsRegistered)
+                                {
+                                    @* 1.2: the Event flow, drawn for this event type: which projections read it and what they write. *@
+                                    <a class="ms-event-flow-link" href="@FlowHref(type.Name)" aria-label="@("Show its flow: " + type.Name)" title="Which projections and subscriptions read this event type, and what they write">Show its flow</a>
+                                }
+                            </td>
+                            @* The readable name in the cell, the assembly-qualified one Marten recorded in
+                               the title. A closed generic's real name is 170 characters of nested
+                               qualification and made this column 1691px wide on its own, which pushed four
+                               of the other five off the screen. *@
+                            <td class="ms-table-cell ms-table-cell-mono ms-truncate ms-type-name"
+                                title="@(type.DotNetTypeName ?? "-")">@(DisplayValueHelper.PrettyTypeName(type.DotNetTypeName) ?? "-")</td>
+                            <td class="ms-table-cell ms-table-cell-mono">
+                                @(type.Count is { } count ? count.ToString("N0", CultureInfo.InvariantCulture) : "not counted")
+                            </td>
+                            @if (list.SequencesPerTenant)
+                            {
+                                @* Each tenant numbers its own events here, so the lowest and highest across tenants
+                                   name no event (SEC1-fix4). *@
+                                <td class="ms-table-cell ms-muted ms-event-types-per-tenant" title="@PerTenantSequenceTitle">per tenant</td>
+                                <td class="ms-table-cell ms-muted ms-event-types-per-tenant" title="@PerTenantSequenceTitle">per tenant</td>
+                            }
+                            else
+                            {
+                                <td class="ms-table-cell ms-table-cell-mono">@Sequence(type.FirstSequence)</td>
+                                <td class="ms-table-cell ms-table-cell-mono">@Sequence(type.LastSequence)</td>
+                            }
+                            <td class="ms-table-cell">
+                                @if (type.IsUnregistered)
+                                {
+                                    <span class="ms-event-flag ms-event-flag-skipped"
+                                          title="Present in mt_events, absent from this store's configuration">
+                                        not registered
+                                    </span>
+                                }
+                                @if (list.CountsLoaded && type.IsRegisteredButEmpty)
+                                {
+                                    <span class="ms-event-flag ms-event-flag-archived"
+                                          title="Registered with the store, but no event of this type has ever been appended">
+                                        no events
+                                    </span>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </TableScroll>
+
+        @if (list.IsTruncated)
+        {
+            <div class="ms-alert ms-alert-warning" role="status">
+                <div class="ms-alert-content">
+                    <p>This list is not complete.</p>
+                    <p class="ms-muted">
+                        This store has more than
+                        @list.Types.Count.ToString("N0", CultureInfo.InvariantCulture) distinct event types
+                        and the screen stops there, so a store whose <code>type</code> column holds tens of
+                        thousands of values cannot turn one click into a page nobody can render. Narrow the
+                        question in the feed instead.
+                    </p>
+                </div>
+            </div>
+        }
+
+        @if (!list.CountsLoaded)
+        {
+            <p class="ms-muted">
+                Counts, first and last sequence are unknown until "Load counts" is pressed. Unknown is not
+                zero: a type with no row here may simply not have been counted.
+            </p>
+        }
+    }
+
+    @* F4. The store's DCB tag types: what each holds, where it lives, how many rows its table has (an estimate,
+       D8, and none at all for a tenant-scoped visitor on a conjoined store) and whether the feed's tag: filter
+       on it is index-backed. Drawn only on a store that registers a tag type. *@
+    @if (tagTypes.Error is { } tagError)
+    {
+        <section class="ms-section ms-event-tag-types">
+            <h2 class="ms-section-title">DCB tag types</h2>
+            <ErrorAlert Message="@tagError.Display" />
+        </section>
+    }
+    else if (tagTypes.HasTags)
+    {
+        <section class="ms-section ms-event-tag-types">
+            <h2 class="ms-section-title">DCB tag types</h2>
+            <p class="ms-muted ms-event-tag-types-lead">@TagStorageSentence</p>
+
+            <TableScroll Label="DCB tag types table">
+                <table class="ms-table">
+                    <thead>
+                        <tr>
+                            <th>Tag type</th>
+                            <th>Value</th>
+                            <th>Aggregate</th>
+                            <th>Stored in</th>
+                            <th>Rows</th>
+                            <th>tag: filter</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @for (int index = 0; index < tagTypes.Types.Count; index++)
+                        {
+                            EventTagTypeInfo tag = tagTypes.Types[index];
+
+                            <tr class="ms-table-row" @key="index">
+                                <td class="ms-table-cell">
+                                    <span class="ms-event-tag-type-name">@tag.Name</span>
+                                    <span class="ms-muted ms-mono ms-event-tag-type-suffix" title="The table suffix, which tag: also accepts">@tag.Suffix</span>
+                                </td>
+                                <td class="ms-table-cell ms-table-cell-mono">@tag.ValueType</td>
+                                <td class="ms-table-cell">@(tag.AggregateName ?? "-")</td>
+                                <td class="ms-table-cell ms-table-cell-mono">
+                                    @tag.Table
+                                    @if (!tag.TableExists)
+                                    {
+                                        <span class="ms-event-flag ms-event-flag-skipped" title="@tag.RowsNote">not created</span>
+                                    }
+                                </td>
+                                <td class="ms-table-cell ms-table-cell-mono" title="@(tag.RowsNote ?? string.Empty)">@tag.Rows.Display</td>
+                                <td class="ms-table-cell">
+                                    <span class="@("ms-verdict-badge ms-verdict-badge-" + tag.FilterLevel.ToString().ToLowerInvariant())"
+                                          title="@tag.FilterReason">@VerdictText(tag)</span>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </TableScroll>
+
+            @if (tagTypes.VersionTableExists)
+            {
+                <p class="ms-muted ms-event-tag-version">
+                    <code>mt_dcb_tag_version</code>, the boundary-version row every DCB save bumps:
+                    @tagTypes.VersionRows.Display rows.
+                </p>
+            }
+        </section>
+    }
+</div>
+
+@code {
+    private readonly CancellationTokenSource pageCancellation = new();
+
+    private EventTypeList? list;
+    private bool loading = true;
+    private bool counting;
+    private bool countsRequested;
+    private string? signature;
+
+    /// <summary>1.2-SHAPE: whether the shape check's panel is open.</summary>
+    private bool shapeOpen;
+
+    private Task OpenShapesAsync()
+    {
+        shapeOpen = true;
+        return Task.CompletedTask;
+    }
+
+    private Task CloseShapesAsync()
+    {
+        shapeOpen = false;
+        return Task.CompletedTask;
+    }
+
+    /// <summary>The counts this page has loaded, by type name: a type the page counted as empty is not sent to the check.</summary>
+    /// <remarks>It carries the listing too (<see cref="CountedListingView" />), which the check confirms the names it lists against.</remarks>
+    private static CountedListingView ShapeCounts(EventTypeList source) => new(source);
+
+    /// <summary>The store's DCB tag types; empty on a store with none.</summary>
+    private EventTagTypeList tagTypes = EventTagTypeList.None;
+
+    /// <summary>E05 as this visitor may see it, from the advisor's last regular sweep; empty without one.</summary>
+    private IReadOnlyList<HealthReportFinding> healthFindings = [];
+
+    private string TagStorageSentence => tagTypes.Storage == EventTagStorage.HStore
+        ? "Kept inline in mt_events.tags, an hstore keyed by each type's table suffix, with one GIN index over the column - "
+            + "so an event's tags come with the event, and tag: is a containment test the index serves."
+        : "Kept in one table per tag type, keyed " + (tagTypes.IsConjoined ? "(value, tenant_id, seq_id)" : "(value, seq_id)")
+            + " - so tag: on the feed reads only that value's rows, while finding one event's tags reads the whole table, "
+            + "which is why the feed only does that for small ones.";
+
+    private static string VerdictText(EventTagTypeInfo tag) =>
+        tag.FilterLevel switch
+        {
+            DataStudio.Postgres.Services.Query.IndexVerdictLevel.Green => "indexed",
+            DataStudio.Postgres.Services.Query.IndexVerdictLevel.Amber => "partly indexed",
+            _ => "full scan",
+        };
+
+    /// <summary>The store this link is about.</summary>
+    [SupplyParameterFromQuery(Name = EventLinks.StoreKey)]
+    public string? Store { get; set; }
+
+    /// <summary>The database this link is about.</summary>
+    [SupplyParameterFromQuery(Name = EventLinks.DatabaseKey)]
+    public string? Database { get; set; }
+
+    /// <summary>The tenant this link is about.</summary>
+    [SupplyParameterFromQuery(Name = EventLinks.TenantKey)]
+    public string? Tenant { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        State.ScopeChanged += OnScopeChangedAsync;
+        await ApplyScopeFromQueryAsync();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        string current = Signature();
+        if (string.Equals(current, signature, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        signature = current;
+        await LoadAsync();
+    }
+
+    private async Task ApplyScopeFromQueryAsync()
+    {
+        if (string.IsNullOrWhiteSpace(Store) && string.IsNullOrWhiteSpace(Database) && string.IsNullOrWhiteSpace(Tenant))
+        {
+            return;
+        }
+
+        StudioScope? active = State.ActiveScope;
+        if (active is not null
+            && string.Equals(active.StoreKey, Store ?? active.StoreKey, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(active.DatabaseId, Database ?? active.DatabaseId, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(active.TenantId ?? string.Empty, Tenant ?? active.TenantId ?? string.Empty, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        await State.SetScopeAsync(Store, Database, Tenant, pageCancellation.Token);
+    }
+
+    private async Task OnScopeChangedAsync()
+    {
+        // A different store is a different set of types, and the counts asked for on the last one say
+        // nothing about this one.
+        countsRequested = false;
+        signature = Signature();
+        await LoadAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private Task ReloadAsync()
+    {
+        signature = Signature();
+        return LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        StudioScope? scope = State.ActiveScope;
+        if (scope is null)
+        {
+            loading = false;
+            return;
+        }
+
+        loading = true;
+        StateHasChanged();
+
+        try
+        {
+            list = await Events.ListEventTypesAsync(scope, countsRequested, pageCancellation.Token);
+
+            // Options only on a store without tag types; catalog and pg_class reads on one with them.
+            tagTypes = await Events.ListTagTypesAsync(scope, pageCancellation.Token);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            list = EventTypeList.Failed(new EventDataError(exception.Message, null, true));
+        }
+        finally
+        {
+            loading = false;
+        }
+
+        await LoadHealthAsync(scope);
+    }
+
+    /// <summary>
+    /// E05 from the advisor's cache. A banner is a decoration: one that could not be read is no banner, never
+    /// a broken page - and no banner is never a claim that the store is healthy.
+    /// </summary>
+    private async Task LoadHealthAsync(StudioScope scope)
+    {
+        try
+        {
+            healthFindings = await Health.CachedFindingsAsync(scope, EventTypesHealth.BannerCodes, pageCancellation.Token);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            // Debug: the page loses only a decoration, and the advisor logs its own failures where they happen.
+            Logger.LogDebug(exception, "Marten Studio's Event types screen could not read the health advisor's cached E05 finding");
+            healthFindings = [];
+        }
+    }
+
+    private async Task LoadCountsAsync()
+    {
+        StudioScope? scope = State.ActiveScope;
+        if (scope is null || counting)
+        {
+            return;
+        }
+
+        counting = true;
+        countsRequested = true;
+
+        try
+        {
+            list = await Events.ListEventTypesAsync(scope, withCounts: true, pageCancellation.Token);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            list = EventTypeList.Failed(new EventDataError(exception.Message, null, true));
+        }
+        finally
+        {
+            counting = false;
+        }
+    }
+
+    private static string PerTenantSequenceTitle => StreamCompactionRules.ReadNeedsTenant("each type's first and last sequence");
+
+    private static string Sequence(long? value) =>
+        value is { } sequence ? "#" + sequence.ToString(CultureInfo.InvariantCulture) : "-";
+
+    private string FlowHref(string eventType) =>
+        EventLinks.ToFlow(Options.Value, State.ActiveScope, eventType: eventType);
+
+    private string FeedHref(string eventType) =>
+        EventLinks.ToFeedForType(Options.Value, State.ActiveScope, eventType);
+
+    private string Signature() =>
+        string.Join(
+            '',
+            State.ActiveScope?.StoreKey,
+            State.ActiveScope?.DatabaseId,
+            State.ActiveScope?.TenantId);
+
+    public async ValueTask DisposeAsync()
+    {
+        State.ScopeChanged -= OnScopeChangedAsync;
+
+        await pageCancellation.CancelAsync();
+        pageCancellation.Dispose();
+
+        GC.SuppressFinalize(this);
+    }
+}

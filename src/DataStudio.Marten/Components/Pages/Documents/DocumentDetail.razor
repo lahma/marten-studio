@@ -1,0 +1,919 @@
+@page "/marten/documents/{Alias}/doc"
+@using System.Text.Json
+@using Microsoft.Extensions.Options
+@using DataStudio.Marten.Services.Documents
+@using DataStudio.Postgres.Services.Json
+@using DocumentModel = DataStudio.Marten.Services.Documents.DocumentDetail
+@using RelatedModel = DataStudio.Marten.Services.Documents.RelatedDocuments
+@using ReferencedByModel = DataStudio.Postgres.Services.Relationships.ReferencedBy
+@using DataStudio.Postgres.Components.Json
+@using DataStudio.Postgres.Components.Shared
+@using DataStudio.Postgres.Services
+@using DataStudio.Marten.Components.Shared
+@using DataStudio.Postgres.Services.Settings
+@implements IAsyncDisposable
+@inject IDocumentDataService Data
+@inject DataStudio.Postgres.Services.Relationships.IRelationshipDataService RelationshipData
+@inject IDocumentWriteService Writes
+@inject DocumentBrowserState Browser
+@inject StudioState State
+@inject StudioCapabilityGuard Capabilities
+@inject StudioAuthorization Authorization
+@inject ToastService Toasts
+@inject NavigationManager Navigation
+@inject IOptions<MartenStudioOptions> Options
+@inject IJSRuntime JsRuntime
+
+@*
+    One document, in two panes: the JSON on the left and everything the database knows about the row on the
+    right. The id is in the query string, not in the path, because Marten ids are frequently strings with
+    a slash in them and the studio's router has no catch-all segment (D9).
+
+    This is also where a document is edited and deleted. The editor takes the place of the viewer in the
+    left pane rather than opening over it, so the metadata panel beside it keeps answering about the same
+    row while it is being changed; the flow itself lives in `DocumentEditPane`, and the buttons that start
+    it in `DocumentWriteActions`. Everything those two do is refused again by `IDocumentWriteService`,
+    which is the only thing standing between a circuit and the store (AGENTS.md hard rule 5).
+*@
+
+<PageTitle>@(Alias) @Id</PageTitle>
+
+<div class="ms-page ms-doc-detail-page">
+    <nav class="ms-breadcrumb" aria-label="Breadcrumb">
+        <a href="@DocumentLinks.ToIndex(Options.Value, State.ActiveScope)">Documents</a>
+        <span aria-hidden="true">/</span>
+        <a href="@BackHref">@Alias</a>
+        <span aria-hidden="true">/</span>
+        <span class="ms-mono">@Id</span>
+    </nav>
+
+    @if (loading)
+    {
+        <LoadingSpinner />
+    }
+    else if (result?.NotFound is { } missing)
+    {
+        @RenderNotFound(missing)
+    }
+    else if (result?.Detail is { } detail)
+    {
+        <div class="ms-page-header ms-doc-detail-header">
+            <h1 class="ms-page-title">
+                <CollectionChip Alias="@Alias" Hue="@Hue" Title="@detail.ClrType?.FullName" />
+                <span class="ms-mono ms-doc-detail-id">@detail.Id</span>
+            </h1>
+
+            @* Two groups rather than nine equal-weight buttons. The secondary group is where this
+               document goes next - a query, its stream, a file, the clipboard - and the primary group,
+               pushed to the right, is the pair that changes it and the pair that leaves it. Download
+               stays in the header although the JSON viewer below offers one too, because the viewer's
+               whole toolbar disappears while the editor is open; the three copies do not, because the
+               menu is where they belong. Nine buttons, six controls. *@
+            <div class="ms-doc-detail-actions">
+                <div class="ms-doc-detail-actions-group ms-doc-detail-actions-secondary">
+                    <a class="ms-btn ms-btn-sm" href="@QueryHref(detail)">Open in Query</a>
+
+                    @if (streamExists)
+                    {
+                        <a class="ms-btn ms-btn-sm" href="@DocumentLinks.ToStream(Options.Value, State.ActiveScope, detail.Id)" title="An event stream with this id exists">View stream</a>
+                    }
+
+                    @* D-CORR 8.2: a module's search over this document, when one is registered and knows a reference to it. *@
+                    <RecordSearchLinkButton Request="searchRequest" />
+
+                    <button type="button" class="ms-btn ms-btn-sm" @onclick="() => DownloadAsync(detail)">Download</button>
+
+                    <DocumentCopyMenu Label="@detail.Id"
+                                      Id="@detail.Id"
+                                      OnCopyJson='() => CopyAsync(detail.Json, "JSON")'
+                                      OnCopyId='() => CopyAsync(detail.Id, "id")'
+                                      OnCopyRecord="() => CopyRecordAsync(detail)" />
+                </div>
+
+                <div class="ms-doc-detail-actions-group ms-doc-detail-actions-primary">
+                    @* Chevrons rather than the ◀ ▶ glyphs. Those are text, so they inherited the
+                       button's font and rendered at a different weight in every browser, and a screen
+                       reader read them out as "black left-pointing triangle". The SVG is decorative and
+                       the aria-label is the accessible name. *@
+                    <span class="ms-doc-detail-nav">
+                        <a class="ms-btn ms-btn-sm ms-btn-icon @(previousId is null ? "ms-btn-disabled" : null)"
+                           href="@(previousId is null ? "#" : DocumentLinks.ToDocument(Options.Value, State.ActiveScope, Alias, previousId, SafeFrom))"
+                           aria-disabled="@(previousId is null ? "true" : "false")"
+                           aria-label="Previous document"
+                           title="The previous document on the list you came from">@ChevronLeft</a>
+                        <a class="ms-btn ms-btn-sm ms-btn-icon @(nextId is null ? "ms-btn-disabled" : null)"
+                           href="@(nextId is null ? "#" : DocumentLinks.ToDocument(Options.Value, State.ActiveScope, Alias, nextId, SafeFrom))"
+                           aria-disabled="@(nextId is null ? "true" : "false")"
+                           aria-label="Next document"
+                           title="The next document on the list you came from">@ChevronRight</a>
+                    </span>
+
+                    <DocumentWriteActions Writable="@IsWritable(detail)"
+                                          SoftDeleteType="@IsSoftDeleteType(detail)"
+                                          IsDeleted="detail.IsDeleted"
+                                          Editing="editing"
+                                          Busy="writing"
+                                          EditRefusal="@(editRefusal ?? ProjectionRefusal(detail))"
+                                          MayEdit="mayEdit"
+                                          MayDelete="mayDelete"
+                                          OnEdit="StartEditAsync"
+                                          OnDelete="OpenDeleteDialog"
+                                          OnUndelete="UndeleteAsync" />
+                </div>
+            </div>
+        </div>
+
+        @if (detail.IsDeleted)
+        {
+            <div class="ms-alert ms-alert-warning ms-doc-deleted-banner" role="status">
+                This document is soft-deleted: the row is still in the table, and Marten's own queries do
+                not return it.
+            </div>
+        }
+
+        @if (detail.WrittenByProjection)
+        {
+            <div class="ms-alert ms-alert-info ms-doc-projection-note" role="status">
+                Written by its projection from the events of stream '@detail.Id': the studio does not edit it.
+            </div>
+        }
+
+        @if (writeError is { Length: > 0 } failure)
+        {
+            <div class="ms-alert ms-alert-error ms-doc-write-error" role="alert">@failure</div>
+        }
+
+        <div class="ms-split ms-doc-detail-split">
+            <div class="ms-split-pane ms-doc-detail-json">
+                @if (editing)
+                {
+                    <DocumentEditPane @key="@(detail.Alias + '/' + detail.Id)"
+                                      Alias="@detail.Alias"
+                                      Id="@detail.Id"
+                                      Json="@Pretty(detail.Json)"
+                                      Model="editProbe"
+                                      OnFinished="FinishEditAsync"
+                                      OnCancelled="CancelEditAsync" />
+                }
+                else
+                {
+                    <JsonView Json="@detail.Json"
+                              DocumentType="detail.ClrType"
+                              NamingPolicy="detail.NamingPolicy"
+                              Label="@($"{Alias} {detail.Id}")"
+                              DownloadFileName="@FileName(detail)" />
+                }
+            </div>
+
+            <div class="ms-split-pane ms-doc-detail-meta">
+                <DocumentMetadataPanel Model="detail" />
+                <RelatedDocumentsPanel Model="related" HrefFor="RelatedHref" />
+                <ReferencedBy Model="referencedBy" DocumentId="@Id" HrefFor="ReferencedHref" />
+            </div>
+        </div>
+
+        <ConfirmDialog IsOpen="deleteDialogOpen"
+                       Title="@(IsSoftDeleteType(detail) ? "Soft-delete this document?" : "Delete this document?")"
+                       Message="@DeleteMessage(detail)"
+                       ConfirmationPhrase="@detail.Id"
+                       ConfirmText="@(IsSoftDeleteType(detail) ? "Soft-delete" : "Delete")"
+                       OnConfirm="DeleteAsync"
+                       OnCancel="CloseDeleteDialog" />
+    }
+</div>
+
+@code {
+    /// <summary>The previous-document glyph. Constant markup only — no icon library, ever (hard rule 3).</summary>
+    private static readonly MarkupString ChevronLeft = new(
+        """<svg class="ms-btn-glyph" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="11,3 5,9 11,15" /></svg>""");
+
+    /// <summary>The next-document glyph.</summary>
+    private static readonly MarkupString ChevronRight = new(
+        """<svg class="ms-btn-glyph" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="7,3 13,9 7,15" /></svg>""");
+
+    private CancellationTokenSource? cts;
+    private DocumentDetailResult? result;
+    private RelatedModel related = RelatedModel.None;
+    private ReferencedByModel referencedBy = ReferencedByModel.None;
+    private IReadOnlyList<DocumentIdProbe> probes = [];
+    private bool probing;
+    private bool streamExists;
+    private StudioRecordSearchRequest? searchRequest;
+    private bool loading = true;
+    private string? loadedSignature;
+    private string? previousId;
+    private string? nextId;
+    private bool editing;
+    private bool writing;
+    private bool deleteDialogOpen;
+
+    /// <summary>The scope the delete dialog was opened under (1.2-FINAL-FIX).</summary>
+    private StudioScope? deleteDialogScope;
+    private string? writeError;
+    private string? editRefusal;
+    private WritePreview? editProbe;
+
+    // What MartenStudioOptions.WriteAuthorizationPolicy said about *this* visitor and the scope on
+    // screen, evaluated once per load beside the document read. They start true because a host that
+    // configured no write policy is the overwhelmingly common case and StudioAuthorization answers true
+    // for it without asking anything.
+    private bool mayEdit = true;
+    private bool mayDelete = true;
+
+    /// <summary>The collection alias from the route.</summary>
+    [Parameter]
+    public string Alias { get; set; } = string.Empty;
+
+    /// <summary>The document id. In the query string, never in the path (D9).</summary>
+    [SupplyParameterFromQuery(Name = "id")]
+    public string? Id { get; set; }
+
+    /// <summary>The list URL this document was opened from, so "back" returns to the same page of it.</summary>
+    [SupplyParameterFromQuery(Name = "from")]
+    public string? From { get; set; }
+
+    /// <summary>The store key.</summary>
+    [SupplyParameterFromQuery(Name = "store")]
+    public string? StoreKey { get; set; }
+
+    /// <summary>The database identity.</summary>
+    [SupplyParameterFromQuery(Name = "db")]
+    public string? DatabaseId { get; set; }
+
+    /// <summary>The tenant.</summary>
+    [SupplyParameterFromQuery(Name = "tenant")]
+    public string? TenantId { get; set; }
+
+    protected override void OnInitialized() => State.ScopeChanged += OnScopeChangedAsync;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await State.EnsureInitializedAsync();
+        await ApplyScopeFromUrlAsync();
+
+        string signature = string.Join('\u001f', Alias, Id, State.ActiveScope?.StoreKey, State.ActiveScope?.DatabaseId, State.ActiveScope?.TenantId, TenantUnplaced);
+
+        if (string.Equals(signature, loadedSignature, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        loadedSignature = signature;
+        await LoadAsync();
+    }
+
+    /// <summary>
+    /// Whether this page's address names a tenant the studio could not place in any database (ZW38): the scope is the usual database with no
+    /// tenant, and the id must not be read there. Whatever the reason, the page says what it says of an id that is not there.
+    /// </summary>
+    private bool TenantUnplaced => State.IsTenantUnplaced(StoreKey, DatabaseId, TenantId);
+
+    private async Task ApplyScopeFromUrlAsync()
+    {
+        if (StoreKey is null && DatabaseId is null && TenantId is null)
+        {
+            return;
+        }
+
+        StudioScope? active = State.ActiveScope;
+
+        bool differs = (StoreKey is not null && !string.Equals(StoreKey, active?.StoreKey, StringComparison.OrdinalIgnoreCase))
+            || (DatabaseId is not null && !string.Equals(DatabaseId, active?.DatabaseId, StringComparison.OrdinalIgnoreCase))
+            || (TenantId is not null && !string.Equals(string.IsNullOrWhiteSpace(TenantId) ? null : TenantId, active?.TenantId, StringComparison.Ordinal));
+
+        if (differs)
+        {
+            // DatabaseId as the address gave it: a tenant named with no database is looked for in the store's databases, and a
+            // database filled in from the scope on screen would hide that the address named none.
+            await State.SetScopeAsync(StoreKey ?? active?.StoreKey, DatabaseId, TenantId);
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        StudioScope? scope = State.ActiveScope;
+
+        if (scope is null || string.IsNullOrEmpty(Id))
+        {
+            loading = false;
+            result = DocumentDetailResult.Missing("This link carries no document id.");
+            return;
+        }
+
+        CancellationToken token = ResetCancellation();
+
+        if (TenantUnplaced)
+        {
+            // Read nothing: the id would be found in the database on screen, which is not the tenant's. The same words as an id that is not there.
+            loading = false;
+            probes = [];
+            related = RelatedModel.None;
+            referencedBy = ReferencedByModel.None;
+            streamExists = false;
+            searchRequest = null;
+            editing = false;
+            result = DocumentDetailResult.Missing($"No document with id '{Id}' is in '{Alias}' for tenant '{TenantId}'.");
+
+            // Drawn now: this load may have been started by a scope change's handler, which renders nothing of its own.
+            StateHasChanged();
+            return;
+        }
+
+        loading = true;
+        probes = [];
+        related = RelatedModel.None;
+        referencedBy = ReferencedByModel.None;
+        streamExists = false;
+        searchRequest = null;
+        editing = false;
+        editProbe = null;
+        editRefusal = null;
+        writeError = null;
+        deleteDialogOpen = false;
+        StateHasChanged();
+
+        try
+        {
+            result = await Data.GetDocumentAsync(scope, Alias, Id, token);
+
+            (previousId, nextId) = Browser.Neighbours(Alias, Id);
+
+            // Per visitor rather than per process, so it is asked here rather than read off the guard.
+            // Nothing is memoised: the answer is about this circuit's user, and a cache that outlived one
+            // would be how one person's answer gets shown to another.
+            mayEdit = await Authorization.IsAuthorizedAsync(scope, StudioCapability.EditDocuments, token);
+            mayDelete = await Authorization.IsAuthorizedAsync(scope, StudioCapability.DeleteDocuments, token);
+
+            if (result.Found)
+            {
+                // The overload that takes the document we have just read, not the one that takes an id:
+                // the id overload reads the row again to find out what it points at, which is a second
+                // round trip for a document already in hand.
+                related = await Data.GetRelatedAsync(scope, Alias, result.Detail!, token);
+                referencedBy = await RelationshipData.GetReferencedByAsync(scope, Alias, Id, token);
+                streamExists = await Data.StreamExistsAsync(scope, Id, token);
+                searchRequest = SearchRequestFor(scope, result.Detail!);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (StudioNotAuthorizedException)
+        {
+            result = DocumentDetailResult.Missing("You are not authorized for this store, database or tenant.");
+        }
+        catch (Exception exception)
+        {
+            result = DocumentDetailResult.Missing(exception.Message);
+        }
+        finally
+        {
+            loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private RenderFragment RenderNotFound(DocumentNotFound missing) =>
+        @<div class="ms-empty">
+            <p class="ms-empty-title">No such document</p>
+            <p class="ms-empty-description">@missing.Message</p>
+
+            @if (missing.Sql is { Length: > 0 } sql)
+            {
+                <pre class="ms-code"><code>@sql</code></pre>
+            }
+
+            @if (missing.IdWasMalformed || probes.Count > 0)
+            {
+                <div class="ms-doc-probe">
+                    <button type="button" class="ms-btn ms-btn-sm" disabled="@probing" @onclick="ProbeAsync">
+                        Search other collections for this id
+                    </button>
+
+                    @if (probes.Count > 0)
+                    {
+                        <ul class="ms-doc-probe-list">
+                            @foreach (DocumentIdProbe probe in probes)
+                            {
+                                <li @key="probe.Alias">
+                                    <CollectionChip Alias="@probe.Alias" Hue="@probe.Hue" Small="true" />
+                                    @if (probe.Found)
+                                    {
+                                        <a class="ms-doc-id" href="@DocumentLinks.ToDocument(Options.Value, State.ActiveScope, probe.Alias, Id!)">found</a>
+                                    }
+                                    else
+                                    {
+                                        <span class="ms-text-muted">not there</span>
+                                    }
+                                </li>
+                            }
+                        </ul>
+                    }
+                    else if (!probing)
+                    {
+                        <p class="ms-text-muted">
+                            Only collections whose <code>id</code> column could hold this value are probed.
+                        </p>
+                    }
+                </div>
+            }
+
+            <p><a class="ms-btn ms-btn-sm" href="@BackHref">Back to @Alias</a></p>
+        </div>;
+
+    private int Hue => DataStudio.Postgres.Services.CollectionColorizer.HueFor(Alias);
+
+    /// <summary>
+    /// The <c>?from=</c> the link carried, but only when it is a return link this page may render.
+    /// </summary>
+    /// <remarks>
+    /// It arrives from the query string, so it arrives from whoever wrote the link. See
+    /// <see cref="SafeReturnLink" /> for what is accepted and why the rule is an allow-list.
+    /// </remarks>
+    private string? SafeFrom => SafeReturnLink.Sanitize(From, Options.Value);
+
+    private string BackHref =>
+        SafeFrom ?? DocumentLinks.ToCollection(Options.Value, State.ActiveScope, Alias);
+
+    /// <summary>Why Edit is off before anyone presses it, when a projection owns the document.</summary>
+    private static string? ProjectionRefusal(DocumentModel detail) =>
+        detail.WrittenByProjection ? ProjectionOwnedDocuments.EditRefusal(detail.Id) : null;
+
+    private string QueryHref(DocumentModel detail) =>
+        DocumentLinks.ToQuery(Options.Value, State.ActiveScope, Alias, $"id = '{detail.Id}'");
+
+    private string RelatedHref(string alias, string id) =>
+        DocumentLinks.ToDocument(Options.Value, State.ActiveScope, alias, id);
+
+    private string ReferencedHref(string alias, string? filter) =>
+        filter is null
+            ? DocumentLinks.ToCollection(Options.Value, State.ActiveScope, alias)
+            : DocumentLinks.ToCollection(
+                Options.Value,
+                State.ActiveScope,
+                alias,
+                new Dictionary<string, string?>(StringComparer.Ordinal) { ["q"] = filter });
+
+    /// <summary>The metadata column the search window is read from, when the table has it (hard rule 10: every one is optional).</summary>
+    private const string LastModifiedColumn = "mt_last_modified";
+
+    /// <summary>
+    /// What a module is asked to search for (D-CORR 8.2): the document by the names its type goes by, in the page's scope, within an hour of
+    /// its last modification when the table keeps that column. Only values this page already shows.
+    /// </summary>
+    internal static StudioRecordSearchRequest SearchRequestFor(StudioScope scope, DocumentModel detail)
+    {
+        List<string> names = [detail.Alias];
+
+        foreach (string? name in (string?[])[detail.ClrType?.FullName, detail.ClrType?.Name])
+        {
+            if (!string.IsNullOrEmpty(name) && !names.Contains(name, StringComparer.Ordinal))
+            {
+                names.Add(name);
+            }
+        }
+
+        DateTimeOffset? modified = null;
+        foreach (PhysicalColumnValue column in detail.Columns)
+        {
+            if (string.Equals(column.Name, LastModifiedColumn, StringComparison.OrdinalIgnoreCase)
+                && column.Value is { } text
+                && DateTimeOffset.TryParse(text, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal, out DateTimeOffset parsed))
+            {
+                modified = parsed;
+            }
+        }
+
+        return new StudioRecordSearchRequest(
+            scope.StoreKey,
+            scope.TenantId,
+            new StudioRecordReference(StudioRecordKind.Document, names, detail.Id),
+            modified?.AddHours(-1),
+            modified?.AddHours(1));
+    }
+
+    private static string FileName(DocumentModel detail) => detail.Alias + "-" + detail.Id + ".json";
+
+    private async Task ProbeAsync()
+    {
+        StudioScope? scope = State.ActiveScope;
+
+        if (scope is null || string.IsNullOrEmpty(Id) || probing)
+        {
+            return;
+        }
+
+        probing = true;
+        StateHasChanged();
+
+        try
+        {
+            probes = await Data.ProbeIdAsync(scope, Id, cts?.Token ?? CancellationToken.None);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            await Toasts.Error(exception.Message);
+        }
+        finally
+        {
+            probing = false;
+            StateHasChanged();
+        }
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // Writes
+    // ------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Whether this collection can be written through the document path at all.
+    /// </summary>
+    /// <remarks>
+    /// A table the studio only discovered has no mapping, so there is no CLR type to deserialize the
+    /// edit into. Marten's own bookkeeping - <c>DeadLetterEvent</c> - is excluded for a different reason:
+    /// it has a screen of its own gated on <c>ManageDeadLetters</c>, and reaching the same rows here
+    /// would put a second capability in charge of the same data. The write service refuses both cases on
+    /// its own; this is what stops the buttons being drawn in the first place.
+    /// </remarks>
+    private static bool IsWritable(DocumentModel detail) =>
+        detail.IsRegistered &&
+        (detail.ClrType is null || !CollectionAliases.IsMartenInfrastructure(detail.ClrType));
+
+    /// <summary>
+    /// Whether a delete here marks the row or removes it, read from the row's own columns rather than
+    /// from a flag.
+    /// </summary>
+    /// <remarks>
+    /// <c>mt_deleted</c> is structural: Marten's <c>DocumentTable</c> emits it if and only if the delete
+    /// style is soft (Appendix B addendum). <c>Metadata.IsSoftDeleted.Enabled</c> deliberately is not
+    /// used - it reports true for types that are not soft-deleted at all - and the page has the physical
+    /// column list already, so asking the table is both cheaper and harder to get wrong.
+    /// </remarks>
+    private static bool IsSoftDeleteType(DocumentModel detail)
+    {
+        foreach (PhysicalColumnValue column in detail.Columns)
+        {
+            if (string.Equals(column.Name, "mt_deleted", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // A hard delete also says what its ON DELETE actions do to tables the studio does not map, from the
+    // referenced-by counts already on the page (DB-6); a soft delete is an update and fires none of them.
+    private string DeleteMessage(DocumentModel detail) => IsSoftDeleteType(detail)
+        ? $"'{detail.Alias}' is soft-deleted, so this marks the document as deleted: the row stays in " +
+          $"{detail.TableName}, Marten's own queries stop returning it, and it can be undeleted."
+        : $"'{detail.Alias}' is not soft-deleted, so this removes the row from {detail.TableName}. " +
+          "There is no undo." + (referencedBy.DeleteConsequence() is { } consequence ? " " + consequence : string.Empty);
+
+    /// <summary>
+    /// Opens the editor, but only after the round trip has been asked whether this document can survive
+    /// one.
+    /// </summary>
+    /// <remarks>
+    /// The probe is a <c>PreviewAsync</c> of the document exactly as it is stored, which answers two
+    /// questions at once: whether the CLR type can be constructed from this JSON at all
+    /// (<c>TypeIsConstructible</c>), and what version the save will be checked against. A type that
+    /// cannot be constructed is refused <em>here</em> rather than after somebody has typed an edit into
+    /// it, and the Edit button then carries the reason as its title.
+    /// </remarks>
+    private async Task StartEditAsync()
+    {
+        StudioScope? scope = State.ActiveScope;
+
+        if (scope is null || result?.Detail is not { } detail || writing)
+        {
+            return;
+        }
+
+        writing = true;
+        writeError = null;
+        editRefusal = null;
+        StateHasChanged();
+
+        try
+        {
+            WritePreview probe = await Writes.PreviewAsync(
+                scope,
+                Alias,
+                detail.Id,
+                detail.Json,
+                cts?.Token ?? CancellationToken.None);
+
+            if (probe.Status != WritePreviewStatus.Ready || !probe.TypeIsConstructible)
+            {
+                editRefusal = probe.Reason ?? "This document cannot be edited through the studio.";
+                writeError = editRefusal;
+                return;
+            }
+
+            editProbe = probe;
+            editing = true;
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            // A capability turned off since the page loaded, or a policy that says no. Both are a
+            // sentence on the page, never an unhandled exception on the circuit (plan §4.8).
+            writeError = exception.Message;
+        }
+        finally
+        {
+            writing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task FinishEditAsync()
+    {
+        editing = false;
+        editProbe = null;
+        await ReloadDocumentAsync();
+    }
+
+    private Task CancelEditAsync()
+    {
+        editing = false;
+        editProbe = null;
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private void OpenDeleteDialog()
+    {
+        deleteDialogScope = State.ActiveScope;
+        deleteDialogOpen = true;
+    }
+
+    private void CloseDeleteDialog()
+    {
+        deleteDialogOpen = false;
+        deleteDialogScope = null;
+    }
+
+    private async Task DeleteAsync()
+    {
+        deleteDialogOpen = false;
+
+        // The scope the dialog was opened under, and only if it is still the page's (the scope change closes the dialog).
+        StudioScope? scope = deleteDialogScope;
+        deleteDialogScope = null;
+
+        if (scope is null || scope != State.ActiveScope || result?.Detail is not { } detail || writing)
+        {
+            return;
+        }
+
+        writing = true;
+        writeError = null;
+        StateHasChanged();
+
+        try
+        {
+            DeleteResult deleted = await Writes.DeleteAsync(
+                scope,
+                Alias,
+                detail.Id,
+                cts?.Token ?? CancellationToken.None);
+
+            await ReportAsync(deleted);
+
+            if (deleted.Outcome == DeleteOutcome.HardDeleted)
+            {
+                // The row is gone, so there is no document to come back to. The list is.
+                Navigation.NavigateTo(BackHref);
+                return;
+            }
+
+            // Only a write that changed something is worth re-reading, and a reload would clear the
+            // refusal the page has just put on screen.
+            if (deleted.Changed)
+            {
+                await ReloadDocumentAsync();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            writeError = exception.Message;
+            await Toasts.Error(exception.Message);
+        }
+        finally
+        {
+            writing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task UndeleteAsync()
+    {
+        StudioScope? scope = State.ActiveScope;
+
+        if (scope is null || result?.Detail is not { } detail || writing)
+        {
+            return;
+        }
+
+        writing = true;
+        writeError = null;
+        StateHasChanged();
+
+        try
+        {
+            DeleteResult undeleted = await Writes.UndeleteAsync(
+                scope,
+                Alias,
+                detail.Id,
+                cts?.Token ?? CancellationToken.None);
+
+            await ReportAsync(undeleted);
+
+            if (undeleted.Changed)
+            {
+                await ReloadDocumentAsync();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            writeError = exception.Message;
+            await Toasts.Error(exception.Message);
+        }
+        finally
+        {
+            writing = false;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>Names the outcome rather than saying "done": the four of them are not the same thing.</summary>
+    private async Task ReportAsync(DeleteResult outcome)
+    {
+        switch (outcome.Outcome)
+        {
+            case DeleteOutcome.SoftDeleted:
+                await Toasts.Success($"{outcome.Id} is marked deleted. It can be undeleted.");
+                break;
+
+            case DeleteOutcome.HardDeleted:
+                await Toasts.Success($"{outcome.Id} was removed from the table.");
+                break;
+
+            case DeleteOutcome.Undeleted:
+                await Toasts.Success(outcome.Reason ?? $"{outcome.Id} is back.");
+                break;
+
+            case DeleteOutcome.NotFound:
+                writeError = outcome.Reason;
+                await Toasts.Info(outcome.Reason ?? "There was no such document.");
+                break;
+
+            default:
+                writeError = outcome.Reason;
+                await Toasts.Error(outcome.Reason ?? "The write was refused.");
+                break;
+        }
+    }
+
+    private Task ReloadDocumentAsync()
+    {
+        loadedSignature = null;
+        return LoadAsync();
+    }
+
+    /// <summary>
+    /// The stored document as something a person can edit. <c>jsonb</c> comes back without the
+    /// whitespace it was written with, so an unformatted document would be one very long line.
+    /// </summary>
+    private static string Pretty(string json)
+    {
+        try
+        {
+            return JsonPrettyPrinter.PrettyPrint(json);
+        }
+        catch (JsonException)
+        {
+            // A row whose `data` the studio cannot parse still opens in the editor as it is stored: the
+            // editor's own Validate button is a better place to find out than a blank pane is.
+            return json;
+        }
+    }
+
+    private async Task CopyAsync(string text, string what)
+    {
+        if (await CopyTextAsync(text))
+        {
+            await Toasts.Success($"Copied the {what}.");
+        }
+    }
+
+    private async Task CopyRecordAsync(DocumentModel detail)
+    {
+        string code = CSharpRecordGenerator.Generate(detail.Json, detail.ClrType?.Name ?? Pascal(detail.Alias));
+
+        if (await CopyTextAsync(code))
+        {
+            await Toasts.Success("Copied a C# record for this document.");
+        }
+    }
+
+    private async Task<bool> CopyTextAsync(string text)
+    {
+        try
+        {
+            return await JsRuntime.InvokeAsync<bool>("martenStudio.clipboard.copyText", new object?[] { text });
+        }
+        catch (Exception exception) when (DocumentsInterop.IsUnavailable(exception))
+        {
+            // One filter for the whole family. JSDisconnectedException derives from Exception rather
+            // than from JSException, so a `catch (JSException)` misses the commonest case of all - a
+            // circuit that closed while the call was in flight.
+            return false;
+        }
+    }
+
+    private async Task DownloadAsync(DocumentModel detail)
+    {
+        try
+        {
+            await JsRuntime.InvokeAsync<bool>(
+                "martenStudio.download.text",
+                new object?[] { FileName(detail), "application/json", detail.Json });
+        }
+        catch (Exception exception) when (DocumentsInterop.IsUnavailable(exception))
+        {
+        }
+    }
+
+    private static string Pascal(string alias)
+    {
+        if (alias.Length == 0)
+        {
+            return "Document";
+        }
+
+        Span<char> buffer = stackalloc char[alias.Length];
+        int length = 0;
+        bool upper = true;
+
+        foreach (char c in alias)
+        {
+            if (c is '_' or '-' or ' ')
+            {
+                upper = true;
+                continue;
+            }
+
+            buffer[length++] = upper ? char.ToUpperInvariant(c) : c;
+            upper = false;
+        }
+
+        return length == 0 ? "Document" : new string(buffer[..length]);
+    }
+
+    private CancellationToken ResetCancellation()
+    {
+        CancellationTokenSource? previous = cts;
+        cts = new CancellationTokenSource();
+        previous?.Cancel();
+        previous?.Dispose();
+        return cts.Token;
+    }
+
+    private Task OnScopeChangedAsync() => InvokeAsync(async () =>
+    {
+        // The delete dialog names a document of the last scope: closed before anything is read, not after (1.2-FINAL-FIX).
+        CloseDeleteDialog();
+
+        // So is the editor and the save-preview dialog it owns, which would save against the new scope.
+        editing = false;
+        editProbe = null;
+        loadedSignature = null;
+        await OnParametersSetAsync();
+    });
+
+    public async ValueTask DisposeAsync()
+    {
+        State.ScopeChanged -= OnScopeChangedAsync;
+
+        if (cts is { } source)
+        {
+            await source.CancelAsync();
+            source.Dispose();
+            cts = null;
+        }
+    }
+}

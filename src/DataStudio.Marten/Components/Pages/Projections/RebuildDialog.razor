@@ -1,0 +1,279 @@
+@using DataStudio.Postgres.Components.Shared
+@* The rebuild confirm: what it will do, and the projection's name typed out before it will do it.
+
+   A rebuild deletes the projection's documents and replays every event into them - from Marten 9.52, every event
+   above the projection's start floor, which the dialog then names (RebuildWording). There is no undo and
+   there is no progress bar that can bring the old rows back, so this is the "type the name" severity of
+   confirmation rather than the "are you sure" one. It states the scope first - tables, shards, how many
+   events would be replayed and how long each shard is given - because a person cannot consent to
+   something the dialog did not say.
+
+   The typed confirmation is the shared ConfirmDialog's, not a second implementation of it: this
+   component decides what has to be typed and what is shown above the box, and nothing else. *@
+
+<ConfirmDialog IsOpen="IsOpen"
+               Title="@($"Rebuild projection {ProjectionName}")"
+               Message="@Summary"
+               ConfirmationPhrase="@ProjectionName"
+               ConfirmText="@($"Rebuild {ProjectionName}")"
+               OnConfirm="OnConfirm"
+               OnCancel="OnCancel">
+    <div class="ms-kv ms-rebuild-scope">
+        <div class="ms-kv-row">
+            <span class="ms-kv-key">Lifecycle</span>
+            <span class="ms-kv-value">@Lifecycle</span>
+        </div>
+        <div class="ms-kv-row">
+            <span class="ms-kv-key">Shards restarted</span>
+            <span class="ms-kv-value ms-mono">@(Shards.Count == 0 ? "none" : string.Join(", ", Shards))</span>
+        </div>
+        <div class="ms-kv-row">
+            <span class="ms-kv-key">Tables rewritten</span>
+            <span class="ms-kv-value ms-mono">@(Tables.Count == 0 ? "could not be determined" : string.Join(", ", Tables))</span>
+        </div>
+        @if (EventTypesRead is { Length: > 0 })
+        {
+            @* From the Event flow's model, which is StoreOptions and the projection graph alone: a rebuild replays every event
+               through the shard's filter, so these are the event types it takes in. *@
+            <div class="ms-kv-row ms-rebuild-event-types">
+                <span class="ms-kv-key">Event types read</span>
+                <span class="ms-kv-value">
+                    @EventTypesRead
+                    @if (EventTypesHref is { Length: > 0 })
+                    {
+                        <a class="ms-rebuild-flow-link" href="@EventTypesHref" aria-label="@("Show its flow: " + ProjectionName)">Show its flow</a>
+                    }
+                </span>
+            </div>
+        }
+        <div class="ms-kv-row">
+            <span class="ms-kv-key">Events to replay</span>
+            <span class="ms-kv-value ms-mono">@EventsToReplay.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)</span>
+        </div>
+        @if (ReplaysFrom is { Length: > 0 })
+        {
+            @* Marten 9.52+: a rebuild replays from the projection's start floor (RebuildWording). Absent below it, where every
+               rebuild replays from the first event and the summary says so. *@
+            <div class="ms-kv-row ms-rebuild-floor">
+                <span class="ms-kv-key">Replays from</span>
+                <span class="ms-kv-value">@ReplaysFrom</span>
+            </div>
+        }
+        <div class="ms-kv-row ms-rebuild-timeout">
+            <span class="ms-kv-key">Time allowed per shard</span>
+            <span class="ms-kv-value ms-mono">@TimeoutText</span>
+        </div>
+        @if (ErrorPolicy is { Length: > 0 })
+        {
+            @* The store's Projections.RebuildErrors, which is not the policy the live agents run under (Projections.Errors): a
+               host that set SkipApplyErrors for the continuous agents only sees a rebuild fail where the live agent skipped.
+               Read off StoreOptions; no database read. *@
+            <div class="ms-kv-row ms-rebuild-error-policy">
+                <span class="ms-kv-key">Error policy</span>
+                <span class="ms-kv-value">
+                    @ErrorPolicy
+                    @if (ErrorPolicyDifference is { Length: > 0 })
+                    {
+                        @* An explicit space: the compiler trims the one written inside the element, which ran the two sentences together
+                           ("skipped.Differs from ...", 1.2-UX-FIX). *@
+                        @(" ")<span class="ms-rebuild-error-policy-difference">@ErrorPolicyDifference</span>
+                    }
+                </span>
+            </div>
+        }
+        @if (Estimate is { Length: > 0 })
+        {
+            <div class="ms-kv-row ms-rebuild-estimate">
+                <span class="ms-kv-key">How long it may take</span>
+                <span class="ms-kv-value">@Estimate</span>
+            </div>
+        }
+    </div>
+
+    @if (FloorNote is { Length: > 0 })
+    {
+        <p class="ms-muted ms-rebuild-floor-note">@FloorNote</p>
+    }
+
+    <p class="ms-muted ms-rebuild-timeout-note">
+        The tables are emptied first and then replayed, so a shard that has not finished within
+        @TimeoutText stops with them still empty. Raise
+        <code>MartenStudioOptions.RebuildShardTimeout</code> if this store needs longer.
+    </p>
+
+    @if (Warnings.Count > 0)
+    {
+        @* The health advisor's D08: this projection is being rebuilt somewhere, or a rebuild stopped half-way. From its
+           last sweep, never a new one; absent when there is no such finding. *@
+        <div class="ms-alert ms-alert-warning ms-rebuild-health-warning" role="note">
+            <div class="ms-alert-content">
+                @foreach (string warning in Warnings)
+                {
+                    <p>@warning</p>
+                }
+            </div>
+        </div>
+    }
+
+    @if (DrainNote is { Length: > 0 })
+    {
+        @* The rebuild stops the projection's running shards before it tears their tables down, and a stop is
+           bounded by Projections.StopAndDrainTimeout - the dialog says what that means rather than implying a clean
+           hand-over. *@
+        <p class="ms-muted ms-rebuild-drain-note">The rebuild stops this projection's running shards first. @DrainNote</p>
+    }
+
+    @if (Tenant is { Length: > 0 })
+    {
+        @* A tenant in the selector narrows what the page reads, not what the daemon rebuilds: Marten
+           empties the projection's storage for the whole database and replays every event in it. The
+           service authorizes the rebuild for the database as a whole for the same reason. *@
+        <p class="ms-alert ms-alert-warning ms-rebuild-tenant-note" role="note">
+            Tenant <strong>@Tenant</strong> is selected, but the rebuild is not limited to it: it rewrites
+            @ProjectionName for every tenant stored in this database.
+        </p>
+    }
+
+    @if (!IsAsync)
+    {
+        <p class="ms-alert ms-alert-warning ms-rebuild-inline-warning" role="note">
+            This projection is <strong>@Lifecycle</strong>, not async. The daemon can still rebuild it,
+            but nothing will keep it up to date afterwards except the next write.
+        </p>
+    }
+</ConfirmDialog>
+
+@code {
+    /// <summary>Whether the dialog is showing.</summary>
+    [Parameter]
+    public bool IsOpen { get; set; }
+
+    /// <summary>The projection that would be rebuilt, and the word that has to be typed.</summary>
+    [Parameter]
+    public string ProjectionName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// How many events a rebuild would replay: the store's high-water mark, less the projection's stored start floor from
+    /// Marten 9.52.
+    /// </summary>
+    [Parameter]
+    public long EventsToReplay { get; set; }
+
+    /// <summary>Where the summary says the replay starts - "from the beginning" below Marten 9.52 (<c>RebuildWording</c>).</summary>
+    [Parameter]
+    public string ReplayPhrase { get; set; } = "from the beginning";
+
+    /// <summary>
+    /// The "Event types read" row (<c>FlowReads.Sentence</c>), or <see langword="null" /> where the Event flow could not say.
+    /// </summary>
+    [Parameter]
+    public string? EventTypesRead { get; set; }
+
+    /// <summary>The link to this projection's Event flow, beside that row.</summary>
+    [Parameter]
+    public string? EventTypesHref { get; set; }
+
+    /// <summary>The "Replays from" row, or <see langword="null" /> below Marten 9.52, where there is none.</summary>
+    [Parameter]
+    public string? ReplaysFrom { get; set; }
+
+    /// <summary>What the start floor does to the projection's documents, or <see langword="null" /> below Marten 9.52.</summary>
+    [Parameter]
+    public string? FloorNote { get; set; }
+
+    /// <summary>The shards that would restart.</summary>
+    [Parameter]
+    public IReadOnlyList<string> Shards { get; set; } = [];
+
+    /// <summary>The tables Marten would rewrite.</summary>
+    [Parameter]
+    public IReadOnlyList<string> Tables { get; set; } = [];
+
+    /// <summary>The projection's lifecycle, spelled out.</summary>
+    [Parameter]
+    public string Lifecycle { get; set; } = string.Empty;
+
+    /// <summary>Whether the daemon is what runs this projection.</summary>
+    [Parameter]
+    public bool IsAsync { get; set; }
+
+    /// <summary>
+    /// The tenant the scope selector is on, or <see langword="null" />. Said in the dialog because it does
+    /// not narrow the rebuild.
+    /// </summary>
+    [Parameter]
+    public string? Tenant { get; set; }
+
+    /// <summary>
+    /// How long each shard is given to replay - <c>MartenStudioOptions.RebuildShardTimeout</c>.
+    /// </summary>
+    /// <remarks>
+    /// Shown because it is not a retry budget: Marten tears the projection's tables down before the
+    /// timeout starts applying to the replay.
+    /// </remarks>
+    [Parameter]
+    public TimeSpan ShardTimeout { get; set; } = TimeSpan.FromHours(1);
+
+    /// <summary>
+    /// How long the replay may take: the events to replay over the throughput the health advisor measured for this
+    /// projection - or its honest "no estimate yet" before the advisor has seen it process anything.
+    /// </summary>
+    [Parameter]
+    public string? Estimate { get; set; }
+
+    /// <summary>
+    /// The policy a rebuild runs under, from the store's <c>Projections.RebuildErrors</c>
+    /// (<c>RebuildErrorPolicy.Sentence</c>), or <see langword="null" /> where it was not read.
+    /// </summary>
+    [Parameter]
+    public string? ErrorPolicy { get; set; }
+
+    /// <summary>
+    /// A second clause when that differs from the continuous agents' <c>Projections.Errors</c>
+    /// (<c>RebuildErrorPolicy.DifferenceSentence</c>), or <see langword="null" /> when they agree.
+    /// </summary>
+    [Parameter]
+    public string? ErrorPolicyDifference { get; set; }
+
+    /// <summary>What stopping the projection's shards does, in the store's own <c>StopAndDrainTimeout</c>.</summary>
+    [Parameter]
+    public string? DrainNote { get; set; }
+
+    /// <summary>
+    /// The health advisor's findings about rebuilding this projection (D08), by title - from its cache, so empty when no
+    /// recent sweep has one.
+    /// </summary>
+    [Parameter]
+    public IReadOnlyList<string> Warnings { get; set; } = [];
+
+    /// <summary>Raised when the name has been typed and the button pressed.</summary>
+    [Parameter]
+    public EventCallback OnConfirm { get; set; }
+
+    /// <summary>Raised on Cancel.</summary>
+    [Parameter]
+    public EventCallback OnCancel { get; set; }
+
+    private string Summary =>
+        $"This deletes what {ProjectionName} has written and replays "
+        + EventsToReplay.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)
+        + " events into it " + ReplayPhrase + ". It cannot be undone.";
+
+    /// <summary>The timeout in the largest unit that says it without a decimal point.</summary>
+    private string TimeoutText
+    {
+        get
+        {
+            System.Globalization.CultureInfo culture = System.Globalization.CultureInfo.InvariantCulture;
+
+            if (ShardTimeout.TotalHours >= 1)
+            {
+                return string.Create(culture, $"{ShardTimeout.TotalHours:0.##} h");
+            }
+
+            return ShardTimeout.TotalMinutes >= 1
+                ? string.Create(culture, $"{ShardTimeout.TotalMinutes:0.##} min")
+                : string.Create(culture, $"{ShardTimeout.TotalSeconds:0.##} s");
+        }
+    }
+}

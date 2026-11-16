@@ -1,0 +1,2262 @@
+using JasperFx.Events.Daemon;
+using JasperFx.Events.Projections;
+using JasperFx.Events.Subscriptions;
+
+using Marten;
+using Marten.Schema;
+using Marten.Storage;
+
+using DataStudio.Marten.Internal.Sql;
+using DataStudio.Postgres.Services.Database;
+using DataStudio.Marten.Services.Live;
+
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+
+using Npgsql;
+
+using MartenCoordinator = Marten.Events.Daemon.Coordination.IProjectionCoordinator;
+using DataStudio.Postgres.Internal.Sql;
+using DataStudio.Postgres.Services;
+using DataStudio.Postgres.Services.Health;
+using DataStudio.Postgres.Services.Live;
+
+namespace DataStudio.Marten.Services.Projections;
+
+/// <summary>
+/// Reads what the store was configured to project and what it has actually projected, and asks the
+/// host's own daemon to change it.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Three sources, in this order. The <b>static model</b> comes from
+/// <c>store.Options.Events.Projections()</c> and is the list: a projection that has never run still has a
+/// row. <b>Progress</b> comes from the database - the studio's own parameterised reads of
+/// <c>mt_event_progression</c> and of the event sequence, through
+/// <see cref="ProjectionProgressQueries" /> - and is true whether or not a daemon is hosted here.
+/// <b>Live state</b> comes from the in-process shard tracker and only refines the numbers between polls.
+/// </para>
+/// <para>
+/// <b>The database half is never read through Marten's own calls.</b>
+/// <c>IMartenDatabase.AllProjectionProgress</c> and <c>IMartenDatabase.FetchHighestEventSequenceNumber</c>
+/// each open with <c>EnsureStorageExistsAsync(typeof(IEvent), token)</c>, which applies the event store's
+/// Weasel migration under the database's own <c>AutoCreate</c> - so a projections page on a timer would
+/// create <c>mt_events</c> on a database that never had one and apply any pending event-store change to
+/// one that did (AGENTS.md hard rule 14). A database with no event tables is
+/// <see cref="ProjectionsView.HasEventStore" /> <see langword="false" /> and no rows, which is a value
+/// rather than an error or a migration.
+/// </para>
+/// <para>
+/// Every method resolves its scope first (plan section 4.3), so a store, database or tenant the visitor
+/// may not have is refused before Marten is touched, and every mutating method is
+/// <c>Require</c> → resolve with the capability → do → audit, written on failure as well as on success.
+/// </para>
+/// <para>
+/// The running daemon is only ever reached through <see cref="DaemonAccessor" />, never through
+/// <c>store.BuildProjectionDaemonAsync()</c> (AGENTS.md hard rule 11).
+/// </para>
+/// </remarks>
+internal sealed partial class ProjectionDataService : IProjectionDataService
+{
+    /// <summary>
+    /// The progression row Marten keeps the store-global high-water mark in, which is not a shard and
+    /// must not be rendered as one.
+    /// </summary>
+    /// <remarks>
+    /// Tenant-neutral: under per-tenant high water Marten also writes <c>HighWaterMark:{tenant}</c> rows
+    /// (<c>ShardName.Identity</c> hard-codes both forms), and those are bookkeeping too.
+    /// </remarks>
+    private const string HighWaterMarkRowName = "HighWaterMark";
+
+    /// <summary>The prefix of a per-tenant high-water row.</summary>
+    private const string TenantHighWaterPrefix = HighWaterMarkRowName + ":";
+
+    /// <summary>
+    /// What a failure rehydrated from the progression table calls its exception type, because the type
+    /// names were never persisted. The same sentinel <c>Marten.Events.Daemon.Progress.ShardStateSelector</c>
+    /// uses, so a row read here and a row read by Marten are indistinguishable.
+    /// </summary>
+    private const string UnknownExceptionType = "Unknown";
+
+    private readonly StudioScopeResolver resolver;
+    private readonly StudioAuthorization authorization;
+    private readonly StudioCapabilityGuard capabilities;
+    private readonly StudioActionLog audit;
+    private readonly DaemonAccessor daemons;
+    private readonly StudioSnapshotCache cache;
+    private readonly StudioLiveState liveState;
+    private readonly StudioOperationTracker operations;
+    private readonly DaemonControlState controlState;
+    private readonly ColumnCatalog catalog;
+    private readonly IOptions<MartenStudioOptions> options;
+    private readonly StudioLogThrottle throttle;
+    private readonly ILogger<ProjectionDataService> logger;
+    private readonly DatabaseReachAuthorization reach;
+    private readonly DatabaseAccess databaseAccess;
+    private readonly HealthHistory healthHistory;
+    private readonly ProjectionLagHistory lagHistory;
+
+    public ProjectionDataService(
+        StudioScopeResolver resolver,
+        StudioAuthorization authorization,
+        StudioCapabilityGuard capabilities,
+        StudioActionLog audit,
+        DaemonAccessor daemons,
+        StudioSnapshotCache cache,
+        StudioLiveState liveState,
+        StudioOperationTracker operations,
+        DaemonControlState controlState,
+        ColumnCatalog catalog,
+        IOptions<MartenStudioOptions> options,
+        StudioLogThrottle throttle,
+        ILogger<ProjectionDataService> logger,
+        DatabaseAccess databaseAccess,
+        HealthHistory healthHistory,
+        ProjectionLagHistory lagHistory)
+    {
+        this.databaseAccess = databaseAccess;
+        this.healthHistory = healthHistory;
+        this.lagHistory = lagHistory;
+        this.resolver = resolver;
+        this.authorization = authorization;
+        this.capabilities = capabilities;
+        this.audit = audit;
+        this.daemons = daemons;
+        this.cache = cache;
+        this.liveState = liveState;
+        this.operations = operations;
+        this.controlState = controlState;
+        this.catalog = catalog;
+        this.options = options;
+        this.throttle = throttle;
+        this.logger = logger;
+        reach = new DatabaseReachAuthorization(authorization, logger);
+    }
+
+    /// <summary>The budget every read here runs under - <c>MartenStudioOptions.QueryTimeout</c>.</summary>
+    private TimeSpan CommandTimeout => options.Value.QueryTimeout;
+
+    /// <inheritdoc />
+    public async Task<ProjectionsView> GetProjectionsAsync(StudioScope scope, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+
+        ResolvedScope resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
+
+        return await ViewAsync(resolved, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>The projections view of a scope that has resolved.</summary>
+    /// <param name="resolved">The scope as it resolved: its registered store key and database identity key the cache (H1).</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    /// <param name="withLagHistories">
+    /// Whether to judge every shard's own samples for the chart - which the projections screen draws and the Overview's
+    /// summary does not. The samples are recorded either way, by the snapshot read.
+    /// </param>
+    private async Task<ProjectionsView> ViewAsync(ResolvedScope resolved, CancellationToken cancellationToken, bool withLagHistories = true)
+    {
+        // The database read is shared; the daemon and the tracker are in-process and are read fresh, so a
+        // start or a stop shows on the next render rather than a second later.
+        StoredProjections stored = await cache
+            .GetAsync(CacheKey(resolved, "projections"), token => ReadStoredAsync(resolved, token), cancellationToken)
+            .ConfigureAwait(false);
+
+        DaemonStatus daemon = await DescribeDaemonAsync(resolved, cancellationToken).ConfigureAwait(false);
+
+        // The host's per-projection thresholds (MartenStudioOptions.ProjectionThresholds) win over the row's columns, which win
+        // over the studio's defaults; from here every colour, chart line and summary reads the shard's own numbers.
+        List<ShardProgress> merged = LagThresholdResolver.Apply(
+            MergeProgress(resolved, stored), options.Value.ProjectionLagThresholdsByName);
+
+        // The orphans are not shards: their lag only grows, so they are carried apart and never sort to the top (M4).
+        IReadOnlyList<ShardProgress> progress = [.. merged.Where(static x => x.IsRegistered)];
+
+        (IReadOnlyDictionary<string, ShardTrend> trends, HealthHistoryView history) =
+            await TrendsAsync(resolved, daemon, progress, cancellationToken).ConfigureAwait(false);
+
+        OrphanedProgression orphans = await OrphansAsync(resolved, merged, cancellationToken).ConfigureAwait(false);
+
+        return new ProjectionsView(
+            stored.Projections, progress, daemon, stored.HighWaterMark, stored.ReadAt, stored.HasEventStore,
+            resolved.Database.Id.Identity)
+        {
+            Trends = trends,
+            HealthHistory = history,
+            LagHistories = withLagHistories ? LagHistoriesOf(resolved, daemon, progress) : ProjectionsView.Empty.LagHistories,
+            Thresholds = withLagHistories ? ThresholdsOf(resolved.Store) : null,
+            TenantPartitionedEvents = resolved.Store.Options.Events.UseTenantPartitionedEvents,
+            DatabaseAutoCreate = Read<string?>(() => resolved.Database.AutoCreate.ToString(), null),
+            Orphans = orphans,
+        };
+    }
+
+    /// <summary>
+    /// The orphaned progression rows among <paramref name="merged" />, counted for everyone the scope admits and named only
+    /// for a visitor the store policy allows for the database as a whole (M4).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The database's, not a tenant's.</b> A row is the database's bookkeeping - a projection's history, named by the
+    /// projection - so its name is read at the gate the advisor's database-wide numbers are read at
+    /// (<see cref="HealthGate.Database" />): the store policy with <c>TenantId = null</c>, which the resolver has already
+    /// asked when the scope names no tenant. A visitor short of it is told how many there are and why it is not told more.
+    /// Under <c>UseTenantPartitionedEvents</c> a tenant-scoped read sees only that tenant's rows, as every row here.
+    /// </para>
+    /// <para>
+    /// <b>Listing is a read; removing is <see cref="RemoveOrphanedProgressionAsync" />'s.</b> The studio writes no DML of its own
+    /// (D6): Marten removes one row by its exact name - registered or not - with
+    /// <c>IEventDatabase.DeleteProjectionProgressByShardNameAsync</c> (marten#4785, public at <c>V9.39.0</c> and
+    /// <c>v9.54.2</c>), while <c>IEventStore.DeleteProjectionProgressAsync</c> looks the name up among the registered
+    /// projections and throws <see cref="ArgumentOutOfRangeException" /> for any other. Each row it may name carries that call,
+    /// for the host's own code, and the statement, for its migrations, built in <c>MigrationSqlText</c> - except a row the daemon
+    /// may still read, which is also the row the studio will not remove.
+    /// </para>
+    /// </remarks>
+    private async Task<OrphanedProgression> OrphansAsync(
+        ResolvedScope resolved,
+        IReadOnlyList<ShardProgress> merged,
+        CancellationToken cancellationToken)
+    {
+        List<ShardProgress> orphans = [.. OrphanRowsOf(merged)];
+
+        if (orphans.Count == 0)
+        {
+            return OrphanedProgression.None;
+        }
+
+        bool wholeDatabase = resolved.Scope.TenantId is null
+            || await authorization.IsAuthorizedAsync(
+                    new StudioScope(resolved.Registration.Key, resolved.Database.Id.Identity, null), capability: null, cancellationToken)
+                .ConfigureAwait(false);
+
+        if (!wholeDatabase)
+        {
+            return new OrphanedProgression(orphans.Count, [], OrphanWording.NamesWithheld);
+        }
+
+        string schema = EventSchemaOf(resolved);
+
+        return new OrphanedProgression(
+            orphans.Count,
+            [
+                .. orphans
+                    .OrderBy(static x => x.ShardName, StringComparer.Ordinal)
+                    .Select(x =>
+                    {
+                        ProgressionRowClass row = x.Classification
+                            ?? new ProgressionRowClass(ProgressionRowKind.Orphan, Reason: OrphanReason.NoSuchProjection);
+
+                        return new OrphanedProgressionRow(
+                            x.ShardName,
+                            x.Sequence,
+                            x.LastProgress,
+                            row.Reason ?? OrphanReason.NoSuchProjection,
+                            OrphanWording.Explain(x.ShardName, row),
+                            row.TenantId,
+                            row.ReadByDaemon,
+                            row.ReadByDaemon
+                                ? null
+                                : MigrationSqlText.DeleteRowWhereEquals(schema, ProjectionProgressQueries.ProgressionTable, "name", x.ShardName),
+                            row.ReadByDaemon ? null : OrphanWording.MartenCall(x.ShardName));
+                    }),
+            ]);
+    }
+
+    /// <inheritdoc />
+    public async Task<ProjectionSummary> GetSummaryAsync(StudioScope scope, CancellationToken cancellationToken = default)
+    {
+        ResolvedScope? resolved = null;
+
+        try
+        {
+            ArgumentNullException.ThrowIfNull(scope);
+
+            resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
+            ProjectionsView view = await ViewAsync(resolved, cancellationToken, withLagHistories: false).ConfigureAwait(false);
+
+            ShardProgress? worst = view.Progress.Count > 0 ? view.Progress[0] : null;
+
+            return new ProjectionSummary(
+                view.Projections.Count,
+                view.Projections.Count(static x => x.IsAsync),
+                worst?.Lag ?? 0,
+                worst is { Lag: > 0 } ? worst.ShardName : null,
+                view.Progress.Count(static x => x.IsPaused),
+                view.Progress.Count(static x => x.HasFailed),
+                view.Daemon,
+                null,
+                view.HighWaterMark,
+                view.Progress);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // "Cannot report" is a value the Overview draws differently from zero (plan section 4.8).
+            LogSummaryFailure(scope, resolved, exception);
+
+            return new ProjectionSummary(
+                0, 0, 0, null, 0, 0,
+                new DaemonStatus(DaemonHostingState.NotHostedInThisProcess, false, "Unknown", [], false, null, exception.Message),
+                exception.Message);
+        }
+    }
+
+    /// <summary>
+    /// The log line for a summary that could not be read, at the level the failure deserves.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The summary is polled - by the Overview's tiles and by the navigation badges, every
+    /// <c>RefreshInterval</c>, in every open circuit - so its failures are sorted rather than all written
+    /// at Warning. A refused scope, a store that will not build and a store or database the URL named
+    /// that does not exist are values the page already renders, and each has its own record elsewhere
+    /// (the audit, or event 9210, which the registry throttles); they are Debug here.
+    /// </para>
+    /// <para>
+    /// Anything else - a connection that failed, a statement that timed out on a read that is normally
+    /// instant, an SQLSTATE nobody expected - is an anomaly: event 9216, at Warning once per store,
+    /// database and kind of failure per <see cref="StudioLogThrottle.Window" />, and at Debug between.
+    /// </para>
+    /// <para>
+    /// Once the scope has resolved, the store and the database are named - in the line and in the throttle's key - by the
+    /// registered key and the database's identity, as every other site names them, and never by the visitor's spelling:
+    /// a link that spelled them another way, or named no database, would otherwise be another line and another key. A
+    /// failure before that (the Debug cases, or an enumeration that threw) has only the spelling, capped.
+    /// </para>
+    /// </remarks>
+    private void LogSummaryFailure(StudioScope? scope, ResolvedScope? resolved, Exception exception)
+    {
+        string storeKey = resolved?.Source.Key ?? StudioLogValue.Cap(scope?.StoreKey) ?? string.Empty;
+        string databaseId = resolved?.Target.Identity ?? StudioLogValue.Cap(scope?.DatabaseId) ?? string.Empty;
+
+        if (exception is StudioNotAuthorizedException or StudioStoreUnavailableException or KeyNotFoundException)
+        {
+            if (logger.IsEnabled(LogLevel.Debug))
+            {
+                logger.LogDebug(
+                    exception,
+                    "Marten Studio has no projection summary for store {StoreKey}, database {DatabaseId}",
+                    storeKey,
+                    databaseId);
+            }
+
+            return;
+        }
+
+        LogLevel level = throttle.WarningOrDebug(
+            "ProjectionDataService.Summary", storeKey, databaseId, StudioLogThrottle.KindOf(exception));
+        logger.ProjectionSummaryUnreadable(level, exception, storeKey, databaseId);
+    }
+
+    /// <inheritdoc />
+    public async Task<RebuildScope> DescribeRebuildAsync(
+        StudioScope scope,
+        string projectionName,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectionName);
+
+        ResolvedScope resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
+
+        ISubscriptionSource? source = FindSource(resolved.Store, projectionName)
+            ?? throw UnknownProjection(projectionName);
+
+        // The same read the page's own numbers come from, and for the same reason: describing a rebuild
+        // must not be the thing that creates an event store (hard rule 14). A database that has none has
+        // nothing to replay, which is honestly zero.
+        await using NpgsqlConnection connection = await OpenAsync(resolved, cancellationToken).ConfigureAwait(false);
+
+        long highWaterMark = await ReadHighWaterMarkAsync(resolved, connection, cancellationToken)
+            .ConfigureAwait(false) ?? 0;
+
+        // A rebuild replays from the projection's start floor, not from the first event. The stored floors are read
+        // with the studio's own SQL, never through IEventDatabase.FetchProjectionFloorAsync, which ensures the event
+        // storage first (hard rule 14).
+        RebuildFloor floor = RebuildFloor.From(
+            await ProjectionProgressQueries
+                .ReadProjectionFloorsAsync(connection, catalog, EventSchemaOf(resolved), source.Name, CommandTimeout, cancellationToken)
+                .ConfigureAwait(false),
+            resolved.Store.Options.Events.UseTenantPartitionedEvents);
+
+        return new RebuildScope(
+            source.Name,
+            floor.EventsToReplay(highWaterMark),
+            [.. ShardIdentities(source)],
+            TablesFor(resolved.Store, source),
+            source.Lifecycle,
+            options.Value.RebuildShardTimeout)
+        {
+            Floor = floor,
+            ErrorPolicy = Read<RebuildErrorPolicy?>(() => RebuildErrorPolicy.Read(resolved.Store), null),
+        };
+    }
+
+    /// <inheritdoc />
+    public async Task<IDisposable> SubscribeToLiveStateAsync(StudioScope scope, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+
+        ResolvedScope resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
+        DaemonHosting hosting = await daemons.ForScopeAsync(resolved, cancellationToken).ConfigureAwait(false);
+
+        // No daemon here means no tracker to observe: the page falls back to what the database says, which
+        // is what it was reading anyway.
+        return hosting.State == DaemonHostingState.Hosted
+            ? liveState.Subscribe(resolved.Registration.Key, resolved.Database)
+            : NullLease.Instance;
+    }
+
+    /// <inheritdoc />
+    public Task<DaemonControlResult> StartAgentAsync(StudioScope scope, string shardName, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(shardName);
+
+        return AgentControlAsync(
+            scope, "StartAgent", shardName,
+            (daemon, hosting, resolved, token) => StartAgentCheckedAsync(daemon, hosting, resolved, shardName, token),
+            cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public Task<DaemonControlResult> StopAgentAsync(StudioScope scope, string shardName, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(shardName);
+
+        return AgentControlAsync(
+            scope, "StopAgent", shardName,
+            async (daemon, hosting, _, _) =>
+            {
+                // JasperFx's StopAgentAsync does nothing for a shard this daemon runs no agent for - after a pause, every
+                // shard; under HotCold, every shard another node leads - so that is refused as the no-op it is (M7).
+                if (!RunsAgent(daemon, shardName))
+                {
+                    return DaemonTopologyWording.NothingToStop(shardName, hosting.Leadership?.IsHotCold == true);
+                }
+
+                // StopAgentAsync takes the exception that stopped it rather than a token: null means "asked to".
+                await daemon.StopAgentAsync(shardName, null).ConfigureAwait(false);
+                return null;
+            },
+            cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public Task PauseDaemonAsync(StudioScope scope, CancellationToken cancellationToken = default) =>
+        CoordinatorControlAsync(
+            scope, "PauseDaemon", DaemonControlMessages.PauseIsProcessWide,
+            static async (coordinator, context) =>
+            {
+                await coordinator.PauseAsync().ConfigureAwait(false);
+
+                context.ControlState.RecordPause(new StudioDaemonPause(
+                    context.Resolved.Registration.Key,
+                    context.User,
+                    DateTimeOffset.UtcNow,
+                    context.Resolved.Database.Id.Identity,
+                    context.Resolved.TenantId));
+            },
+            cancellationToken);
+
+    /// <inheritdoc />
+    public Task ResumeDaemonAsync(StudioScope scope, CancellationToken cancellationToken = default) =>
+        CoordinatorControlAsync(
+            scope, "ResumeDaemon", DaemonControlMessages.ResumeIsProcessWide,
+            static async (coordinator, context) =>
+            {
+                await coordinator.ResumeAsync().ConfigureAwait(false);
+
+                // Cleared after the resume rather than before it: a ResumeAsync that throws leaves the
+                // recorded pause standing, which is what the card should keep saying.
+                context.ControlState.ClearPause(context.Resolved.Registration.Key);
+            },
+            cancellationToken);
+
+    /// <inheritdoc />
+    public Task RestartHighWaterAgentAsync(StudioScope scope, CancellationToken cancellationToken = default) =>
+        ControlAsync(
+            scope, StudioCapability.ControlDaemon, "RestartHighWaterAgent", HighWaterMarkRowName,
+            static (daemon, token) => daemon.RestartHighWaterAgentAsync(token),
+            cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<OperationStart> RebuildAsync(
+        StudioScope scope,
+        string projectionName,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectionName);
+
+        const string action = "RebuildProjection";
+
+        try
+        {
+            capabilities.Require(StudioCapability.RebuildProjections);
+
+            ResolvedScope resolved = await resolver
+                .ResolveAsync(scope, nameof(StudioCapability.RebuildProjections), cancellationToken)
+                .ConfigureAwait(false);
+
+            // A rebuild empties the projection's storage for the whole database and replays every event in
+            // it - every tenant's, whatever tenant the selector is on (DatabaseReach).
+            await reach.RequireWholeDatabaseAsync(resolved, resolved.Database, StudioCapability.RebuildProjections, cancellationToken)
+                .ConfigureAwait(false);
+
+            // As in ControlAsync: an externally managed store - however the accessor learned it - has no
+            // daemon here to rebuild with, and is refused with that explanation.
+            DaemonHosting hosting = await daemons.ForScopeAsync(resolved, cancellationToken).ConfigureAwait(false);
+            if (!hosting.TryGetDaemon(out IProjectionDaemon daemon))
+            {
+                throw new StudioDaemonNotHostedException(hosting.Explanation);
+            }
+
+            ISubscriptionSource source = FindSource(resolved.Store, projectionName)
+                ?? throw UnknownProjection(projectionName);
+
+            // "Already rebuilding" is a state: the daemon here is rebuilding it and the studio is not (JasperFx 2.86+).
+            if (RebuildRefusal(daemon, resolved, source) is { } refusal)
+            {
+                audit.Record(action, source.Name, false, refusal, StudioCapability.RebuildProjections, scope);
+                return OperationStart.Refused("Rebuild", source.Name, refusal);
+            }
+
+            string user = await authorization.UserNameAsync().ConfigureAwait(false);
+            string storeKey = resolved.Registration.Key;
+            string databaseId = resolved.Database.Id.Identity;
+            string name = source.Name;
+            TimeSpan shardTimeout = options.Value.RebuildShardTimeout;
+
+            // Detached, with a cancellation token the tracker owns. A rebuild that a closing browser tab
+            // could cancel would leave a projection's tables neither the old shape nor the new one.
+            bool coordinatorRestarts = hosting.Coordination == DaemonCoordination.LeadershipLoop;
+            OperationStart start = operations.StartReporting(
+                "Rebuild", name, storeKey, databaseId, user, StudioCapability.RebuildProjections,
+                async token =>
+                {
+                    try
+                    {
+                        return await RebuildAndHandBackAsync(
+                            daemon, name, shardTimeout, coordinatorRestarts, () => controlState.Find(storeKey) is not null, token)
+                            .ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        cache.InvalidatePrefix(CachePrefix(resolved));
+                    }
+                });
+
+            audit.Record(
+                action,
+                name,
+                true,
+                start.Started
+                    ? $"Started as operation {start.Id}; per-shard timeout {shardTimeout}."
+                    : $"Already running as operation {start.Id}; nothing was started.",
+                StudioCapability.RebuildProjections,
+                scope);
+
+            cache.InvalidatePrefix(CachePrefix(resolved));
+
+            return start;
+        }
+        catch (StudioCapabilityDeniedException denial)
+        {
+            audit.RecordCapabilityDenied(denial, action, projectionName);
+            throw;
+        }
+        catch (StudioNotAuthorizedException denied)
+        {
+            audit.RecordScopeDenied(denied.Scope, PolicyName(StudioCapability.RebuildProjections), action, projectionName);
+            throw;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            audit.Record(action, projectionName, false, exception.Message, StudioCapability.RebuildProjections, scope);
+            throw;
+        }
+    }
+
+    /// <inheritdoc />
+    public Task AdvanceHighWaterMarkAsync(StudioScope scope, CancellationToken cancellationToken = default) =>
+        AdvancedAsync(
+            scope, "AdvanceHighWaterMark",
+            static (advanced, tenantId, token) => tenantId is null
+                ? advanced.AdvanceHighWaterMarkToLatestAsync(token)
+                : advanced.AdvanceHighWaterMarkToLatestAsync(tenantId, token),
+            cancellationToken);
+
+    /// <inheritdoc />
+    public Task CorrectProgressionAsync(StudioScope scope, CancellationToken cancellationToken = default) =>
+        AdvancedAsync(
+            scope, "CorrectProgression",
+            static (advanced, tenantId, token) => tenantId is null
+                ? advanced.TryCorrectProgressInDatabaseAsync(token)
+                : advanced.TryCorrectProgressInDatabaseAsync(tenantId, token),
+            cancellationToken);
+
+    /// <inheritdoc />
+    public StudioOperation? FindOperation(string? operationId) => operations.Find(operationId);
+
+    /// <inheritdoc />
+    public async Task<bool> CancelOperationAsync(
+        StudioScope scope,
+        string operationId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        ArgumentException.ThrowIfNullOrWhiteSpace(operationId);
+
+        const string action = "CancelOperation";
+        const StudioCapability capability = StudioCapability.RebuildProjections;
+
+        try
+        {
+            capabilities.Require(capability);
+
+            ResolvedScope resolved = await resolver
+                .ResolveAsync(scope, capability.ToString(), cancellationToken)
+                .ConfigureAwait(false);
+
+            // The only operation there is to cancel is a rebuild, and a rebuild half-done is every tenant's
+            // problem: its tables were emptied for the whole database before the replay started. So
+            // stopping one is authorized as the rebuild itself was.
+            await reach.RequireWholeDatabaseAsync(resolved, resolved.Database, capability, cancellationToken).ConfigureAwait(false);
+
+            // An operation is addressed by where it runs: a visitor authorized for one database must not
+            // be able to stop a rebuild running against another.
+            StudioOperation? operation = operations.Find(operationId);
+            if (operation is null
+                || !string.Equals(operation.StoreKey, resolved.Registration.Key, StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(operation.DatabaseId, resolved.Database.Id.Identity, StringComparison.OrdinalIgnoreCase))
+            {
+                audit.Record(action, operationId, false, "No such operation in this scope.", capability, scope);
+                return false;
+            }
+
+            bool cancelled = operations.Cancel(operationId);
+
+            audit.Record(
+                action,
+                operation.Kind + " " + operation.Target,
+                cancelled,
+                cancelled ? $"Asked operation {operationId} to stop." : $"Operation {operationId} was no longer running.",
+                capability,
+                scope);
+
+            return cancelled;
+        }
+        catch (StudioCapabilityDeniedException denial)
+        {
+            audit.RecordCapabilityDenied(denial, action, operationId);
+            throw;
+        }
+        catch (StudioNotAuthorizedException denied)
+        {
+            audit.RecordScopeDenied(denied.Scope, PolicyName(capability), action, operationId);
+            throw;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<StudioOperation>> RunningOperationsAsync(
+        StudioScope scope,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+
+        // Resolved like every sibling, so the store, database and tenant a visitor may address is decided
+        // in one place rather than trusted from the three strings in a URL.
+        ResolvedScope resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
+
+        return operations.RunningFor(resolved.Registration.Key, resolved.Database.Id.Identity);
+    }
+
+    /// <summary>
+    /// The one call that starts a replay, and the only place the per-shard timeout is chosen.
+    /// </summary>
+    /// <remarks>
+    /// <c>RebuildProjectionAsync(name, token)</c> looks like the plain overload and is not: JasperFx
+    /// 2.69.3 forwards it to <c>RebuildProjectionAsync(name, 5.Minutes(), token)</c>. The teardown of the
+    /// projection's tables happens <em>before</em> that budget starts applying to the replay, so on a
+    /// production-sized store the five minutes expire with the tables already emptied and the operation
+    /// recorded as failed. The studio therefore always names its own budget
+    /// (<c>MartenStudioOptions.RebuildShardTimeout</c>, one hour by default), and the rebuild dialog
+    /// states it next to the number of events.
+    /// </remarks>
+    internal static Task RebuildWithTimeoutAsync(
+        IProjectionDaemon daemon,
+        string projectionName,
+        TimeSpan shardTimeout,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(daemon);
+        return daemon.RebuildProjectionAsync(projectionName, shardTimeout, cancellationToken);
+    }
+
+    /// <summary>
+    /// A rebuild, and then the shards it stopped handed back to the coordinator that starts them (1.2-FINAL-FIX-2). Answers the
+    /// operation's result line, or <see langword="null" /> when there was nothing to say.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The cause.</b> JasperFx's rebuild stops the projection's running agents, replays through transient agents, and
+    /// <c>rebuildAgent</c> registers each transient agent in the daemon's own table under the shard's name
+    /// (<c>_agents.AddOrUpdate</c>, JasperFx V2.98.0); the daemon then drains and disposes it, which leaves a <em>Stopped</em> agent
+    /// under that name. The coordinator's <c>startAgentsIfNecessaryAsync</c> starts a shard only when it has no agent, or when its
+    /// agent is Paused for longer than <c>HealthCheckPollingTime</c>, so it leaves a Stopped one alone and the shard stays down. The
+    /// daemon's own contract (jasperfx#535) is that the driving caller restarts what a rebuild stopped; this is that caller.
+    /// Stopping the registered agent removes it, and the coordinator then sees none and starts the shard.
+    /// </para>
+    /// <para>
+    /// Only through the daemon the DI-registered coordinator hands out (hard rule 11), for every shard of the projection that is
+    /// Stopped after a rebuild that succeeded, whatever its status was before (the studio's own Stop removes the agent, so a Stopped
+    /// agent left behind is the rebuild's or a failure's leftover, never an operator's choice; a Paused one the coordinator restarts
+    /// by itself), and only when a leadership loop exists to start it again. While the studio's own pause is in effect the same agents
+    /// are cleared but nothing is started, and the result line says so. A rebuild that failed or was cancelled hands nothing back, and
+    /// says what state it leaves the shards in. Each stop re-reads the daemon's agents and stops only the same instance, still Stopped,
+    /// so an agent the coordinator started in the meantime is never touched.
+    /// </para>
+    /// </remarks>
+    internal static async Task<string?> RebuildAndHandBackAsync(
+        IProjectionDaemon daemon,
+        string projectionName,
+        TimeSpan shardTimeout,
+        bool coordinatorRestartsShards,
+        Func<bool> studioPauseInEffect,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(daemon);
+        ArgumentNullException.ThrowIfNull(studioPauseInEffect);
+
+        string notHandedBack =
+            $" Nothing was handed back to the coordinator: the shards of {projectionName} are as the rebuild left them.";
+
+        try
+        {
+            await RebuildWithTimeoutAsync(daemon, projectionName, shardTimeout, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException cancelled)
+        {
+            throw new StudioOperationCancelledException("Cancelled." + notHandedBack, cancelled);
+        }
+        catch (Exception failure)
+        {
+            // A separator between the failure and the sentence after it, whatever punctuation the failure ended with.
+            throw new InvalidOperationException(failure.Message.TrimEnd().TrimEnd('.', ':', ';') + "." + notHandedBack, failure);
+        }
+
+        // JasperFx returns without an error when the token is cancelled mid-rebuild, leaving the replay partial: that is a cancelled
+        // operation, not a completed one, and nothing is handed back.
+        if (cancellationToken.IsCancellationRequested)
+        {
+            throw new StudioOperationCancelledException("Cancelled." + notHandedBack);
+        }
+
+        if (!coordinatorRestartsShards)
+        {
+            return $"Completed. This daemon has no coordinator loop to start {projectionName}'s shards again; start them from the Start buttons.";
+        }
+
+        // While the studio's pause is in effect the coordinator starts nothing, so removing the Stopped agent the rebuild registered starts
+        // nothing either: the shard is as an operator's stop leaves it (no agent). It is still removed, because otherwise resuming the daemon
+        // would leave the shard down exactly as the rebuild did (measured: RebuildResumesLiveTests).
+        bool paused = studioPauseInEffect();
+
+        List<string> handedBack = [];
+        List<string> failed = [];
+
+        foreach (ISubscriptionAgent seen in daemon.CurrentAgents()
+            .Where(x => string.Equals(x.Name.Name, projectionName, StringComparison.Ordinal) && x.Status == JasperFx.AgentStatus.Stopped)
+            .ToArray())
+        {
+            string shard = seen.Name.Identity;
+
+            // Re-read just before the stop: the coordinator may have replaced the agent since, and a running one is never stopped.
+            ISubscriptionAgent? now = daemon.CurrentAgents().FirstOrDefault(x => string.Equals(x.Name.Identity, shard, StringComparison.Ordinal));
+            if (!ReferenceEquals(now, seen) || seen.Status != JasperFx.AgentStatus.Stopped)
+            {
+                continue;
+            }
+
+            try
+            {
+                // Removes the Stopped agent the rebuild registered; the coordinator then finds none and starts the shard.
+                await daemon.StopAgentAsync(shard, null).ConfigureAwait(false);
+                handedBack.Add(shard);
+            }
+            catch (Exception e) when (e is not OperationCanceledException)
+            {
+                failed.Add(shard);
+            }
+        }
+
+        List<string> sentences = [];
+        if (handedBack.Count > 0 && paused)
+        {
+            sentences.Add(
+                "Marten Studio's pause is in effect, so nothing was started; cleared the Stopped agent the rebuild left for "
+                + ShardList(handedBack) + ", which resuming the daemon starts.");
+        }
+        else if (handedBack.Count > 0)
+        {
+            sentences.Add(
+                "Handed " + ShardList(handedBack) + " back to the coordinator, which starts "
+                + (handedBack.Count == 1 ? "it" : "them") + " again.");
+        }
+
+        if (failed.Count > 0)
+        {
+            sentences.Add("Could not hand " + ShardList(failed) + " back; start it from the Start button.");
+        }
+
+        return sentences.Count == 0 ? null : "Completed. " + string.Join(' ', sentences);
+    }
+
+    /// <summary>Up to five shard names, then "and N more": a composite or a per-tenant projection has hundreds, and the line is logged and kept.</summary>
+    private static string ShardList(List<string> shards) =>
+        shards.Count <= 5
+            ? string.Join(", ", shards)
+            : string.Join(", ", shards.Take(5)) + " and " + (shards.Count - 5).ToString(System.Globalization.CultureInfo.InvariantCulture) + " more";
+
+    // ------------------------------------------------------------------------------------------------
+    // Reading
+    // ------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// The projections screen's static model: every projection <c>Projections()</c> lists, with its shards and a composite's
+    /// members, and every subscription only the daemon's <c>AllShards()</c> lists - by name. Configuration only.
+    /// </summary>
+    /// <remarks>
+    /// A subscription registered with <c>Events.Subscribe(...)</c> is in <c>AllShards()</c> and not in <c>Projections()</c>
+    /// (<c>EventGraph</c> at <c>V9.39.0</c> and <c>v9.54.2</c>): it runs, and its progression rows are its own, so it is
+    /// listed too (M4) - never as an orphan, as 0.5's "Unregistered shards" drew it.
+    /// </remarks>
+    internal static List<ProjectionInfo> RegisteredProjectionsOf(IDocumentStore store)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+
+        List<ProjectionInfo> projections = [];
+        foreach (ISubscriptionSource source in store.Options.Events.Projections())
+        {
+            projections.Add(new ProjectionInfo(
+                source.Name,
+                source.Lifecycle,
+                source.Type.ToString(),
+                source.Version,
+                source.ImplementationType?.Name ?? "(unknown)",
+                [.. ShardIdentities(source)])
+            {
+                MemberShardNames = CompositeMemberIdentities(source),
+            });
+        }
+
+        HashSet<string> listed = new(projections.Select(static x => x.Name), StringComparer.OrdinalIgnoreCase);
+        foreach (string member in projections.SelectMany(static x => x.MemberShardNames))
+        {
+            if (ShardName.TryParse(member, out ShardName? parsed) && parsed is not null)
+            {
+                listed.Add(parsed.Name);
+            }
+        }
+
+        projections.AddRange(ProgressionRowClassifier.SubscriptionsOf(store, listed));
+        projections.Sort(static (left, right) => string.Compare(left.Name, right.Name, StringComparison.OrdinalIgnoreCase));
+
+        return projections;
+    }
+
+    private async Task<StoredProjections> ReadStoredAsync(ResolvedScope resolved, CancellationToken cancellationToken)
+    {
+        List<ProjectionInfo> projections = RegisteredProjectionsOf(resolved.Store);
+
+        // One read connection for both numbers, on the database the scope resolved - never
+        // IMartenDatabase.AllProjectionProgress or FetchHighestEventSequenceNumber, which migrate before
+        // they read (hard rule 14, and ProjectionProgressQueries says where that was verified).
+        await using NpgsqlConnection connection = await OpenAsync(resolved, cancellationToken).ConfigureAwait(false);
+
+        long? highWaterMark = await ReadHighWaterMarkAsync(resolved, connection, cancellationToken).ConfigureAwait(false);
+
+        string? tenantId = TenantFilterFor(resolved);
+
+        ProgressionRows rows = await ProjectionProgressQueries
+            .ReadProgressionRowsAsync(
+                connection,
+                catalog,
+                EventSchemaOf(resolved),
+                // The store's own flag, not the shape of the table: Marten creates the extended columns on
+                // every migrated progression table and reads them only when this is on, so a store that
+                // has the columns and not the flag has telemetry nothing is maintaining. See
+                // ProjectionProgressQueries for the whole of it.
+                resolved.Store.Options.Events.EnableExtendedProgressionTracking,
+                tenantId,
+                CommandTimeout,
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        IEnumerable<ProgressionRow> kept = tenantId is null
+            ? rows.Rows
+            : rows.Rows.Where(x => BelongsToTenant(x.Name, tenantId));
+
+        List<ProgressionRow> keptRows = [.. kept];
+        List<ShardState> states = [.. keptRows.Select(ToShardState)];
+
+        Dictionary<string, ProgressionRow> byName = new(StringComparer.OrdinalIgnoreCase);
+        foreach (ProgressionRow row in keptRows)
+        {
+            byName.TryAdd(row.Name, row);
+        }
+
+        DateTimeOffset readAt = DateTimeOffset.UtcNow;
+
+        // The screen's own samples (ProjectionLagHistory), from this read - which the snapshot cache shares between every
+        // circuit and runs once per time-to-live - and from no read of their own: the shards a registered async
+        // projection claims, at the position the database records, against the high water this read saw.
+        if (highWaterMark is { } mark)
+        {
+            HashSet<string> charted = new(
+                projections.Where(static x => x.IsAsync).SelectMany(static x => x.ShardNames.Concat(x.MemberShardNames)),
+                StringComparer.OrdinalIgnoreCase);
+
+            lagHistory.Append(
+                resolved.Registration.Key,
+                resolved.Database.Id.Identity,
+                readAt,
+                mark,
+                keptRows.Where(x => charted.Contains(x.Name)).Select(static x => (x.Name, x.Sequence)),
+                lagHistory.SpacingFor(options.Value.RefreshInterval));
+        }
+
+        return new StoredProjections(
+            projections,
+            states,
+            highWaterMark ?? 0,
+            highWaterMark is not null || rows.TableExists,
+            readAt,
+            byName);
+    }
+
+    /// <summary>
+    /// Each registered shard's history from the screen's own samples (<see cref="ProjectionLagHistory" />), judged with what
+    /// is known here of the daemon: whether its projection is being rebuilt (and since when, if Marten Studio started it),
+    /// Marten Studio's own pause, and its agent's status here. Memory only - never a read.
+    /// </summary>
+    private Dictionary<string, ShardLagHistory> LagHistoriesOf(ResolvedScope resolved, DaemonStatus daemon, IReadOnlyList<ShardProgress> progress)
+    {
+        Dictionary<string, ShardLagHistory> histories = new(StringComparer.OrdinalIgnoreCase);
+
+        string storeKey = resolved.Registration.Key;
+        string databaseId = resolved.Database.Id.Identity;
+        TimeSpan spacing = lagHistory.SpacingFor(options.Value.RefreshInterval);
+        IReadOnlyList<StudioOperation> running = operations.RunningFor(storeKey, databaseId);
+
+        foreach (ShardProgress shard in progress)
+        {
+            if (!shard.IsRegistered || !shard.HasProgressRow)
+            {
+                continue;
+            }
+
+            IReadOnlyList<LagPoint> points = lagHistory.Read(storeKey, databaseId, shard.ShardName);
+
+            if (points.Count == 0)
+            {
+                continue;
+            }
+
+            StudioOperation? rebuild = running.FirstOrDefault(x =>
+                string.Equals(x.Kind, "Rebuild", StringComparison.Ordinal)
+                && string.Equals(x.Target, shard.ProjectionName, StringComparison.OrdinalIgnoreCase));
+
+            ShardLagContext context = new(
+                spacing,
+                Rebuilding: rebuild is not null || daemon.IsRebuildingHere(shard.ProjectionName),
+                RebuildStartedAt: rebuild?.StartedAt,
+                PausedByStudio: daemon.IsPausedByStudio,
+                AgentStatusHere: daemon.IsHostedHere
+                    ? daemon.Agents.FirstOrDefault(x => string.Equals(x.ShardName, shard.ShardName, StringComparison.OrdinalIgnoreCase))?.Status
+                    : null,
+                WarningThreshold: shard.WarningThreshold,
+                CriticalThreshold: shard.CriticalThreshold,
+                ThresholdsFromOption: shard.ThresholdsFromOption);
+
+            histories[shard.ShardName] = ShardLagHistory.Build(shard.ShardName, points, context);
+        }
+
+        return histories;
+    }
+
+    /// <summary>The studio's own thresholds that apply to this store's shards, read off its settings.</summary>
+    private ProjectionThresholds ThresholdsOf(IDocumentStore store) =>
+        new(
+            Read(() => store.Options.Events.Daemon.SlowPollingTime, TimeSpan.FromSeconds(1)),
+            options.Value.EffectiveHealthInterval,
+            lagHistory.SpacingFor(options.Value.RefreshInterval));
+
+    /// <summary>The event store's schema, which is where all three of these objects live.</summary>
+    private static string EventSchemaOf(ResolvedScope resolved) => resolved.Store.Options.Events.DatabaseSchemaName;
+
+    /// <summary>
+    /// The high-water mark for the scope's database, or <see langword="null" /> when there is no event
+    /// store in it to have one.
+    /// </summary>
+    private Task<long?> ReadHighWaterMarkAsync(
+        ResolvedScope resolved,
+        NpgsqlConnection connection,
+        CancellationToken cancellationToken) =>
+        ProjectionProgressQueries.ReadHighWaterMarkAsync(
+            connection,
+            catalog,
+            EventSchemaOf(resolved),
+            resolved.Store.Options.Events.UseTenantPartitionedEvents,
+            CommandTimeout,
+            cancellationToken);
+
+    /// <summary>
+    /// The tenant whose progression rows this scope may see, or <see langword="null" /> for every row in
+    /// the database.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A progression name carries a tenant only under <c>UseTenantPartitionedEvents</c>, where
+    /// <c>ShardName.Identity</c> is <c>{Name}:{ShardKey}:{tenantId}</c>. That is the one shape where a
+    /// database holds one tenant's progress next to another's, and where a scope pinned to a tenant must
+    /// not read the other's rows. Everywhere else - a single-tenanted store, a conjoined store without
+    /// per-tenant partitioning, database-per-tenant - every row is store-global or the database *is* the
+    /// tenant, and filtering on a <c>:{tenant}</c> suffix would return nothing at all and draw a healthy
+    /// store as one whose projections have never run.
+    /// </para>
+    /// <para>
+    /// This is what <c>store.Advanced.AllProjectionProgress(tenantId, ct)</c> did for the studio before
+    /// hard rule 14 took it away, and it is not a filter: verified against Marten 9.35's
+    /// <c>AdvancedOperations</c>, it resolves the tenant's <em>database</em> and then calls the
+    /// <em>untenanted</em> <c>IMartenDatabase.AllProjectionProgress(token)</c> on it. The scope resolver
+    /// has already picked that database, so the only thing left to decide is the narrowing above.
+    /// </para>
+    /// </remarks>
+    private static string? TenantFilterFor(ResolvedScope resolved) =>
+        resolved.Store.Options.Events.UseTenantPartitionedEvents && resolved.TenantId is { Length: > 0 } tenantId
+            ? tenantId
+            : null;
+
+    /// <summary>
+    /// Whether a progression name really belongs to <paramref name="tenantId" />, rather than merely
+    /// ending in it.
+    /// </summary>
+    /// <remarks>
+    /// Marten's own second pass, and it is not redundant with the SQL suffix filter. A trailing
+    /// <c>:{tenantId}</c> is the most a string comparison can check, but <c>ShardName.Identity</c> without
+    /// a tenant is <c>{Name}:{ShardKey}</c> - so a projection sliced by a shard key that happens to equal
+    /// a tenant id ends in the same suffix and would be reported as that tenant's progress. Parsing
+    /// settles it: <c>ShardName.TryParse</c> puts <c>Foo:acme</c>'s trailing segment in the shard-key slot
+    /// and <c>Orders:All:acme</c>'s in the tenant slot. A name that does not parse at all is not
+    /// attributable to a tenant, so it is excluded rather than guessed at.
+    /// </remarks>
+    internal static bool BelongsToTenant(string progressionName, string tenantId) =>
+        ShardName.TryParse(progressionName, out ShardName? shard) && shard?.TenantId == tenantId;
+
+    /// <summary>A read connection on the database the scope resolved, opened or not opened at all.</summary>
+    private static async Task<NpgsqlConnection> OpenAsync(ResolvedScope resolved, CancellationToken cancellationToken)
+    {
+        NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
+
+        try
+        {
+            await connection.OpenStudioAsync(cancellationToken).ConfigureAwait(false);
+            return connection;
+        }
+        catch
+        {
+            await connection.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// One progression row as the rest of the studio - and the live tracker beside it - speaks about
+    /// shards.
+    /// </summary>
+    /// <remarks>
+    /// The same mapping <c>Marten.Events.Daemon.Progress.ShardStateSelector</c> performs - <em>given the
+    /// same columns</em>, which is why the read that produced <paramref name="row" /> asks for the
+    /// extended ones only under <c>EnableExtendedProgressionTracking</c>, exactly as the selector hydrates
+    /// them only under that flag. A row read here and a row read by Marten are then the same
+    /// <see cref="ShardState" />: with the flag off both leave <c>AgentStatus</c>, <c>PauseReason</c>,
+    /// <c>LastHeartbeat</c> and <c>Failure</c> unset rather than reconstructing them from columns nothing
+    /// is writing. <c>Timestamp</c> is set by the constructor to "now" in both cases and means "when this
+    /// was read", not when the shard moved.
+    /// </remarks>
+    private static ShardState ToShardState(ProgressionRow row) =>
+        new(row.Name, row.Sequence)
+        {
+            LastHeartbeat = row.LastHeartbeat,
+            AgentStatus = row.AgentStatus,
+            PauseReason = row.PauseReason,
+            RunningOnNode = row.RunningOnNode,
+            Failure = BuildFailure(row),
+        };
+
+    /// <summary>
+    /// The classified failure a progression row carries, or <see langword="null" /> when it carries none.
+    /// </summary>
+    /// <remarks>
+    /// Marten's own reconstruction, repeated because its selector is internal: <c>failure_category</c> is
+    /// the presence flag, <c>pause_reason</c> is both <c>Message</c> and <c>Detail</c> (the exception text
+    /// is the only part that was ever persisted), and the exception type names are the same <c>Unknown</c>
+    /// sentinel <c>ShardStateSelector</c> uses - both members are <c>required</c> on
+    /// <see cref="ShardFailure" />, and inventing a plausible type name would be worse than admitting
+    /// there is none. A category the enum does not know is treated as no failure rather than guessed at.
+    /// </remarks>
+    private static ShardFailure? BuildFailure(ProgressionRow row)
+    {
+        if (row.FailureCategory is not { Length: > 0 } category
+            || !Enum.TryParse(category, out ShardFailureCategory parsed))
+        {
+            return null;
+        }
+
+        string detail = row.PauseReason ?? string.Empty;
+
+        return new ShardFailure
+        {
+            Category = parsed,
+            ExceptionType = UnknownExceptionType,
+            RootExceptionType = UnknownExceptionType,
+            Message = detail,
+            Detail = detail,
+            OccurredAt = row.LastHeartbeat ?? default,
+            Event = row.FailureEventSequence is { } sequence
+                ? new EventFailureDetails
+                {
+                    Sequence = sequence,
+                    EventTypeName = row.FailureEventType,
+                    TenantId = row.FailureEventTenantId,
+                }
+                : null,
+        };
+    }
+
+    private List<ShardProgress> MergeProgress(ResolvedScope resolved, StoredProjections stored) =>
+        MergeProgress(
+            stored.Projections,
+            stored.Progress,
+            liveState.Latest(resolved.Registration.Key, resolved.Database.Id.Identity),
+            stored.HighWaterMark,
+            stored.Rows,
+            ProgressionRowClassifier.For(resolved.Store, stored.Projections));
+
+    /// <summary>
+    /// The shard rows the page draws, from three sources - each projection's own shards, a composite's members, and the
+    /// rows nothing registered claims - with every shard name exactly once.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Once, because the names are <c>@key</c>s.</b> The projections table and the Overview's health table key each
+    /// row by its shard name (<c>Projections.razor</c>, <c>Overview.razor</c>), and two siblings with one key end the
+    /// circuit rather than the render - issue #1's failure. So the sources are taken in order of authority and a name
+    /// already drawn is never drawn again.
+    /// </para>
+    /// <para>
+    /// <b>Every projection's own shards first, then the members.</b> Neither JasperFx nor Marten refuses a composite
+    /// member whose name is also a top-level projection's, and both then write the same <c>X:All</c> row. The top-level
+    /// projection is the agent that row belongs to, so its claim is settled before any composite is looked at - which a
+    /// single pass in name order would get wrong whenever the composite sorts first.
+    /// </para>
+    /// <para>
+    /// <b>Then each tenant's rows, under <c>UseTenantPartitionedEvents</c></b> (M4, <paramref name="classifier" />): the
+    /// daemon runs one agent per shard and tenant there, and each writes <c>{Name}:{ShardKey}:{tenant}</c>. They are the
+    /// shard's, drawn under its projection with their tenant - and a shard that has tenant rows and no store-global row of
+    /// its own is not drawn a second time as "never started": its agents are the tenants'. Whatever is left is an orphan,
+    /// carried with its <see cref="ShardProgress.Classification" /> and <see cref="ShardProgress.IsRegistered" /> off.
+    /// </para>
+    /// </remarks>
+    internal static List<ShardProgress> MergeProgress(
+        IReadOnlyList<ProjectionInfo> projections,
+        IReadOnlyList<ShardState> stored,
+        IReadOnlyDictionary<string, ShardState> live,
+        long highWaterMark,
+        IReadOnlyDictionary<string, ProgressionRow>? rows,
+        ProgressionRowClassifier? classifier = null)
+    {
+        ArgumentNullException.ThrowIfNull(projections);
+        ArgumentNullException.ThrowIfNull(stored);
+        ArgumentNullException.ThrowIfNull(live);
+
+        Dictionary<string, ShardState> byShard = new(StringComparer.OrdinalIgnoreCase);
+        foreach (ShardState row in stored)
+        {
+            if (row.ShardName is { Length: > 0 } name && !IsBookkeepingRow(name))
+            {
+                byShard[name] = row;
+            }
+        }
+
+        // What each row is, by the store's configuration - once, before anything is drawn, so a shard can tell it has
+        // tenants of its own.
+        Dictionary<string, ProgressionRowClass> classes = new(StringComparer.OrdinalIgnoreCase);
+        HashSet<string> withTenantRows = new(StringComparer.OrdinalIgnoreCase);
+
+        if (classifier is not null)
+        {
+            foreach (string name in byShard.Keys)
+            {
+                ProgressionRowClass row = classifier.Classify(name);
+                classes[name] = row;
+
+                if (row.Kind == ProgressionRowKind.TenantShard && ShardName.TryParse(name, out ShardName? parsed) && parsed is not null)
+                {
+                    withTenantRows.Add(ShardName.Compose(parsed.Name, parsed.ShardKey, null, parsed.Version).Identity);
+                }
+            }
+        }
+
+        List<ShardProgress> progress = [];
+        HashSet<string> rendered = new(StringComparer.OrdinalIgnoreCase);
+
+        // Inline and live projections have no daemon shard: the async daemon never runs them, so a progress row for one
+        // would be a number about something that does not happen.
+        ProjectionInfo[] daemonRun = [.. projections.Where(static x => x.IsAsync)];
+
+        // Pass one: every projection's own shards.
+        foreach (ProjectionInfo projection in daemonRun)
+        {
+            foreach (string shardName in projection.ShardNames)
+            {
+                // Under per-tenant partitioning a shard whose tenants have rows, and which has none of its own, runs as
+                // its tenants' agents: those rows are drawn below, and a "never started" row beside them would say the
+                // opposite of what is happening.
+                if (!byShard.ContainsKey(shardName) && withTenantRows.Contains(shardName))
+                {
+                    continue;
+                }
+
+                if (!rendered.Add(shardName))
+                {
+                    continue;
+                }
+
+                progress.Add(Build(shardName, projection.Name, byShard.GetValueOrDefault(shardName), live.GetValueOrDefault(shardName), highWaterMark, isRegistered: true, rows?.GetValueOrDefault(shardName)));
+            }
+        }
+
+        // Pass two: a composite's members, which record rows of their own that its agent advances in its own batch. They
+        // are the composite's, drawn under it, and not agents - only once they have a row, because a member that never
+        // ran is the composite never having run, which its own shard already says.
+        foreach (ProjectionInfo projection in daemonRun)
+        {
+            foreach (string memberName in projection.MemberShardNames)
+            {
+                if (byShard.GetValueOrDefault(memberName) is not { } memberRow || !rendered.Add(memberName))
+                {
+                    continue;
+                }
+
+                progress.Add(Build(memberName, projection.Name, memberRow, live.GetValueOrDefault(memberName), highWaterMark, isRegistered: true, rows?.GetValueOrDefault(memberName))
+                    with { IsCompositeMember = true });
+            }
+        }
+
+        // Pass three: each tenant's rows of a registered shard or member, under per-tenant partitioning - the shard's own,
+        // drawn under the projection that runs it, with the tenant they are for.
+        foreach (KeyValuePair<string, ShardState> row in byShard)
+        {
+            if (classes.GetValueOrDefault(row.Key) is { Kind: ProgressionRowKind.TenantShard, Projection: { } owner } tenantRow
+                && rendered.Add(row.Key))
+            {
+                ShardProgress built = Build(row.Key, owner, row.Value, live.GetValueOrDefault(row.Key), highWaterMark, isRegistered: true, rows?.GetValueOrDefault(row.Key));
+
+                // A row read from the table carries no tenant (ShardState's string constructor sets none): the name does.
+                progress.Add(built with
+                {
+                    TenantId = built.TenantId ?? tenantRow.TenantId,
+                    IsCompositeMember = tenantRow.OfCompositeMember,
+                    Classification = tenantRow,
+                });
+            }
+        }
+
+        // Rows the database has that the configuration does not: a projection that was removed from the
+        // host's registration still has progress, and hiding it would hide the reason something reads it as
+        // stale. They are marked rather than mixed in, so the view can carry them as orphans (M4) instead of
+        // inventing a projection row for a projection this store no longer has.
+        foreach (KeyValuePair<string, ShardState> orphan in byShard)
+        {
+            if (rendered.Add(orphan.Key))
+            {
+                progress.Add(Build(orphan.Key, ProjectionNameOf(orphan.Key), orphan.Value, live.GetValueOrDefault(orphan.Key), highWaterMark, isRegistered: false, rows?.GetValueOrDefault(orphan.Key))
+                    with { Classification = classes.GetValueOrDefault(orphan.Key) });
+            }
+        }
+
+        progress.Sort(static (left, right) =>
+        {
+            int byLag = right.Lag.CompareTo(left.Lag);
+            return byLag != 0 ? byLag : string.Compare(left.ShardName, right.ShardName, StringComparison.OrdinalIgnoreCase);
+        });
+
+        return progress;
+    }
+
+    private static ShardProgress Build(
+        string shardName,
+        string projectionName,
+        ShardState? stored,
+        ShardState? live,
+        long highWaterMark,
+        bool isRegistered,
+        ProgressionRow? row)
+    {
+        // The tracker is ahead of the database by design: it publishes as the shard advances, and the
+        // progression row is written in the same transaction as the projected documents. Take whichever
+        // sequence is higher and say which one it was.
+        bool useLive = live is not null && (stored is null || live.Sequence >= stored.Sequence);
+        ShardState? state = useLive ? live : stored;
+
+        return new ShardProgress(
+            shardName,
+            projectionName,
+            state?.Sequence ?? 0,
+            highWaterMark,
+            Blank(state?.AgentStatus),
+            Blank(state?.PauseReason),
+            Describe(state?.Failure),
+            state?.LastAdvanced,
+            state?.SkippedEventsCount,
+            Blank(state?.TenantId),
+            stored is not null,
+            useLive && live is not null,
+            isRegistered,
+            row?.LastUpdated,
+            row is { LastUpdated: { } updated, ReadAt: { } readAt } ? readAt - updated : null,
+            row?.WarningBehindThreshold,
+            row?.CriticalBehindThreshold);
+    }
+
+    private async Task<DaemonStatus> DescribeDaemonAsync(ResolvedScope resolved, CancellationToken cancellationToken)
+    {
+        string mode = ModeOf(resolved.Store);
+        int pollingMilliseconds = LeadershipPollingMillisecondsOf(resolved.Store);
+        int agentPauseMilliseconds = AgentPauseMillisecondsOf(resolved.Store);
+
+        // What this process itself paused, which is the only pause anybody can honestly report: the
+        // coordinator has PauseAsync and ResumeAsync and no public flag between them.
+        StudioDaemonPause? pause = controlState.Find(resolved.Registration.Key);
+
+        DaemonHosting hosting = await daemons.ForScopeAsync(resolved, cancellationToken).ConfigureAwait(false);
+
+        // The dialog names the databases a pause would reach, and it must never name one this visitor may
+        // not address: the list comes from IMartenStorage.AllDatabases() and is therefore the store's
+        // whole set, while StoreAuthorizationPolicy is per database (D5).
+        IReadOnlyList<string> databases = await VisibleDatabasesAsync(
+            resolved, hosting.Databases ?? [], cancellationToken).ConfigureAwait(false);
+
+        if (!hosting.TryGetDaemon(out IProjectionDaemon daemon))
+        {
+            // Not hosted here, or run by an external system: the state the accessor settled on, carried
+            // through as it is, so the card can tell the two apart.
+            return new DaemonStatus(
+                hosting.State, false, mode, [], false, null, hosting.Explanation,
+                PausedByStudio: null,
+                LeadershipPollingMilliseconds: pollingMilliseconds,
+                CoordinatedDatabases: databases,
+                AgentPauseMilliseconds: agentPauseMilliseconds,
+                StopAndDrainMilliseconds: StopAndDrainMillisecondsOf(resolved.Store));
+        }
+
+        // Several IProjectionDaemon members are default interface methods in JasperFx whose default
+        // bodies throw, and an implementation is free not to override them. A daemon card is not worth a
+        // page-wide failure, so each fact is read defensively and its absence is drawn as "unknown".
+        bool isRunning = Read(() => daemon.IsRunning, false);
+        bool hasAnyPaused = Read(daemon.HasAnyPaused, false);
+        DateTimeOffset? lastPolled = Read<DateTimeOffset?>(() => daemon.HighWaterLastPolledAt, null);
+
+        List<DaemonAgentInfo> agents = [];
+        foreach (ISubscriptionAgent agent in Read<IReadOnlyList<ISubscriptionAgent>>(daemon.CurrentAgents, []))
+        {
+            agents.Add(new DaemonAgentInfo(
+                Read(() => agent.Name?.Identity, null) ?? "(unnamed)",
+                Read(() => agent.Status.ToString(), "Unknown"),
+                Read(() => agent.Position, 0L),
+                Read(() => agent.HighWaterMark, 0L)));
+        }
+
+        agents.Sort(static (left, right) => string.Compare(left.ShardName, right.ShardName, StringComparison.OrdinalIgnoreCase));
+
+        return new DaemonStatus(
+            DaemonHostingState.Hosted,
+            isRunning,
+            mode,
+            agents,
+            hasAnyPaused,
+            lastPolled,
+            hosting.Explanation,
+            pause,
+            pollingMilliseconds,
+            databases,
+            agentPauseMilliseconds,
+            RebuildingProjectionsOf(daemon, resolved.Store),
+            StopAndDrainMillisecondsOf(resolved.Store))
+        {
+            Coordination = hosting.Coordination,
+            Distribution = hosting.Leadership?.Distribution ?? DaemonDistribution.Unknown,
+            Leadership = LeadershipOf(hosting, resolved.Store),
+        };
+    }
+
+    /// <summary>
+    /// Under HotCold, whether this node holds the leadership lock of each registered async shard, by store-global identity
+    /// (M7) - asked of the coordinator's distributor in memory (<see cref="DaemonLeadership" />); empty under any other
+    /// coordination, and for a shard it could not tell.
+    /// </summary>
+    private static Dictionary<string, bool> LeadershipOf(DaemonHosting hosting, IDocumentStore store)
+    {
+        Dictionary<string, bool> leads = new(StringComparer.OrdinalIgnoreCase);
+
+        if (hosting.Leadership is not { IsHotCold: true } leadership)
+        {
+            return leads;
+        }
+
+        foreach (ShardName shard in DataStudio.Marten.Services.Health.Checks.DaemonCheckConfiguration.AsyncShardsOf(store))
+        {
+            if (leadership.Leads(shard) is { } led)
+            {
+                leads[shard.Identity] = led;
+            }
+        }
+
+        return leads;
+    }
+
+    /// <summary>
+    /// The databases of this store the visitor may address, of those a coordinator control would reach.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The same question <see cref="StudioScopeResolver" /> asks when a scope is resolved, asked once per
+    /// database rather than once for the one in the URL - because a coordinator pause is not scoped to
+    /// the database the selector is on. The same per-database question, with the write form added, is
+    /// what <see cref="DatabaseReachAuthorization.RequireEveryDatabaseOfTheStoreAsync" /> asks to decide
+    /// whether the pause may happen at all.
+    /// </para>
+    /// <para>
+    /// The read form of the policy (a <see langword="null" /> capability), because listing a database is
+    /// a read. The control itself asks both forms.
+    /// </para>
+    /// </remarks>
+    private async Task<IReadOnlyList<string>> VisibleDatabasesAsync(
+        ResolvedScope resolved,
+        IReadOnlyList<string> databases,
+        CancellationToken cancellationToken)
+    {
+        if (databases.Count == 0 || !authorization.IsEnabled)
+        {
+            return databases;
+        }
+
+        List<string> visible = [];
+
+        foreach (string databaseId in databases)
+        {
+            bool allowed = await authorization
+                .IsAuthorizedAsync(new StudioScope(resolved.Registration.Key, databaseId, null), null, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (allowed)
+            {
+                visible.Add(databaseId);
+            }
+        }
+
+        return visible;
+    }
+
+    /// <summary>
+    /// How often this store's projection coordinator restarts the agents it finds missing.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Read off the store rather than assumed, because the whole point of quoting it is that the person
+    /// reading the hint can go and change it. The route is not obvious and was verified against
+    /// Marten 9.35 and JasperFx.Events 2.69.3: <c>LeadershipPollingTime</c> is an <c>int</c> of
+    /// milliseconds on <c>DaemonSettings</c>, and <em>neither</em> <c>IReadOnlyStoreOptions</c> (which is
+    /// all <c>IDocumentStore.Options</c> hands out - it has no <c>Projections</c> member at all) nor
+    /// <c>IReadOnlyDaemonSettings</c> exposes it. What does reach it is the object identity:
+    /// <c>EventGraph</c> implements <c>IReadOnlyEventStoreOptions.Daemon</c> as
+    /// <c>_store.Options.Projections</c>, and <c>ProjectionOptions : ProjectionGraph&lt;,,&gt; :
+    /// DaemonSettings</c> - so the interface the studio is handed <em>is</em> a
+    /// <see cref="DaemonSettings" /> at run time.
+    /// </para>
+    /// <para>
+    /// A pattern match and not a cast, with the documented default as the fallback: this is a hint on a
+    /// card, and a store whose settings object is some other implementation must not take the page down
+    /// for it. <c>MartenApiSurfaceTest</c> pins the identity so the fallback stays theoretical.
+    /// </para>
+    /// </remarks>
+    internal static int LeadershipPollingMillisecondsOf(IDocumentStore store)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+
+        try
+        {
+            return store.Options.Events.Daemon is DaemonSettings { LeadershipPollingTime: > 0 } settings
+                ? settings.LeadershipPollingTime
+                : DaemonDefaults.LeadershipPollingMilliseconds;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return DaemonDefaults.LeadershipPollingMilliseconds;
+        }
+    }
+
+    /// <inheritdoc cref="LeadershipPollingMillisecondsOf" />
+    internal static TimeSpan LeadershipPollingTimeOf(IDocumentStore store) =>
+        TimeSpan.FromMilliseconds(LeadershipPollingMillisecondsOf(store));
+
+    /// <summary>
+    /// How long the coordinator's leadership loop sleeps between passes while any shard is paused.
+    /// </summary>
+    /// <remarks>
+    /// Read off the store by the same route and with the same fallback as
+    /// <see cref="LeadershipPollingMillisecondsOf" />, and quoted for the same reason: it is the number
+    /// that actually applies to somebody looking at a paused shard, and it is five times smaller than the
+    /// leadership interval by default. <c>ProjectionCoordinatorBase</c>'s loop ends each pass with
+    /// <c>Task.Delay(agentPauseTime)</c> rather than the leadership interval whenever any resolved daemon
+    /// answers <c>HasAnyPaused()</c> - verified against JasperFx.Events 2.69.3.
+    /// </remarks>
+    internal static int AgentPauseMillisecondsOf(IDocumentStore store)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+
+        try
+        {
+            return store.Options.Events.Daemon is DaemonSettings { AgentPauseTime.TotalMilliseconds: > 0 } settings
+                ? (int) Math.Ceiling(settings.AgentPauseTime.TotalMilliseconds)
+                : DaemonDefaults.AgentPauseMilliseconds;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return DaemonDefaults.AgentPauseMilliseconds;
+        }
+    }
+
+    /// <inheritdoc cref="AgentPauseMillisecondsOf" />
+    internal static TimeSpan AgentPauseTimeOf(IDocumentStore store) =>
+        TimeSpan.FromMilliseconds(AgentPauseMillisecondsOf(store));
+
+    // ------------------------------------------------------------------------------------------------
+    // Writing
+    // ------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// One daemon control: require the capability, resolve with it, ask the daemon, write the audit entry
+    /// either way.
+    /// </summary>
+    private async Task ControlAsync(
+        StudioScope scope,
+        StudioCapability capability,
+        string action,
+        string target,
+        Func<IProjectionDaemon, CancellationToken, Task> operation,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+
+        try
+        {
+            capabilities.Require(capability);
+
+            ResolvedScope resolved = await resolver
+                .ResolveAsync(scope, capability.ToString(), cancellationToken)
+                .ConfigureAwait(false);
+
+            // The one control through here is a high-water restart, and the high-water agent is the
+            // database's - every tenant's, or under per-tenant partitioning every tenant's own (DatabaseReach).
+            await reach.RequireWholeDatabaseAsync(resolved, resolved.Database, capability, cancellationToken).ConfigureAwait(false);
+
+            // Only a Hosted answer carries a daemon: ExternallyManaged - by AsyncMode, or by a coordinator
+            // whose lookup said NotSupported - is refused here with its own explanation, exactly as the
+            // coordinator controls refuse it.
+            DaemonHosting hosting = await daemons.ForScopeAsync(resolved, cancellationToken).ConfigureAwait(false);
+            if (!hosting.TryGetDaemon(out IProjectionDaemon daemon))
+            {
+                throw new StudioDaemonNotHostedException(hosting.Explanation);
+            }
+
+            string user = await authorization.UserNameAsync().ConfigureAwait(false);
+            logger.DaemonControlRequested(user, action, target, resolved.Registration.Key, resolved.Database.Id.Identity);
+
+            await operation(daemon, cancellationToken).ConfigureAwait(false);
+
+            audit.Record(action, target, true, null, capability, scope);
+            cache.InvalidatePrefix(CachePrefix(resolved));
+        }
+        catch (StudioCapabilityDeniedException denial)
+        {
+            audit.RecordCapabilityDenied(denial, action, target);
+            throw;
+        }
+        catch (StudioNotAuthorizedException denied)
+        {
+            // The scope the refusal names, not the one that was asked for - see CoordinatorControlAsync.
+            audit.RecordScopeDenied(denied.Scope, PolicyName(capability), action, target);
+            throw;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            audit.Record(action, target, false, exception.Message, capability, scope);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// One per-agent control: everything <see cref="ControlAsync" /> does, plus the check that makes the
+    /// control mean what it says.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The coordinator's leadership loop starts every shard of every set it holds the lock for that is
+    /// missing from <c>daemon.CurrentAgents()</c>, every <c>LeadershipPollingTime</c> - and
+    /// <c>JasperFxAsyncDaemon.StopAgentAsync</c> removes the agent from that map. So stopping one agent
+    /// while the coordinator runs is undone within a poll, and starting one is a no-op the coordinator
+    /// was about to do anyway. Both are therefore refused rather than performed: a control that reverts
+    /// itself a second later is worse than no control, because the person watching believes it worked.
+    /// </para>
+    /// <para>
+    /// A refusal is <b>not</b> a capability denial and is not recorded as one - the capability is on, the
+    /// policy passed, and the operation is available the moment the daemon is paused. It is audited as an
+    /// action that did not succeed, carrying the reason, so the ring shows the attempt and shows that
+    /// nothing was done.
+    /// </para>
+    /// </remarks>
+    private async Task<DaemonControlResult> AgentControlAsync(
+        StudioScope scope,
+        string action,
+        string target,
+        Func<IProjectionDaemon, DaemonHosting, ResolvedScope, CancellationToken, Task<string?>> operation,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+
+        const StudioCapability capability = StudioCapability.ControlDaemon;
+
+        try
+        {
+            capabilities.Require(capability);
+
+            ResolvedScope resolved = await resolver
+                .ResolveAsync(scope, capability.ToString(), cancellationToken)
+                .ConfigureAwait(false);
+
+            // What this one agent processes: its tenant's events if the shard name carries one, every
+            // tenant's in the database otherwise.
+            await RequireAgentReachAsync(resolved, target, capability, cancellationToken).ConfigureAwait(false);
+
+            DaemonHosting hosting = await daemons.ForScopeAsync(resolved, cancellationToken).ConfigureAwait(false);
+
+            if (hosting.State == DaemonHostingState.ExternallyManaged)
+            {
+                // Refused as a value, like the coordinator refusal below and for the same reason: nothing
+                // failed, nothing was changed, and there is nothing here the visitor could do about it.
+                // The system that runs these projections is the one that starts and stops them.
+                audit.Record(action, target, false, hosting.Explanation, capability, scope);
+
+                return DaemonControlResult.Refused(hosting.Explanation);
+            }
+
+            if (!hosting.TryGetDaemon(out IProjectionDaemon daemon))
+            {
+                throw new StudioDaemonNotHostedException(hosting.Explanation);
+            }
+
+            // The leadership loop is what undoes a single agent's start or stop, so it is what the pause is for. A coordinator
+            // with no loop - MartenDaemonModeIsSolo()'s ExplicitProjectionCoordinator - starts and stops nothing on its own,
+            // and its Start and Stop mean what they say without one (M7).
+            if (hosting.Coordination != DaemonCoordination.Explicit && controlState.Find(resolved.Registration.Key) is null)
+            {
+                string reason = DaemonControlMessages.AgentControlNeedsPause(
+                    LeadershipPollingTimeOf(resolved.Store),
+                    AgentPauseTimeOf(resolved.Store));
+
+                audit.Record(action, target, false, reason, capability, scope);
+
+                return DaemonControlResult.Refused(reason);
+            }
+
+            string user = await authorization.UserNameAsync().ConfigureAwait(false);
+            logger.DaemonControlRequested(user, action, target, resolved.Registration.Key, resolved.Database.Id.Identity);
+
+            // A control the daemon did not do is refused, not done: audited as such, with the daemon's reason, and shown
+            // as a hint rather than a success toast. From JasperFx 2.86 a start during a rebuild returned quietly and was
+            // audited here as a success - StartAgentCheckedAsync is what reads whether anything started.
+            if (await operation(daemon, hosting, resolved, cancellationToken).ConfigureAwait(false) is { } refusal)
+            {
+                audit.Record(action, target, false, refusal, capability, scope);
+                cache.InvalidatePrefix(CachePrefix(resolved));
+
+                return DaemonControlResult.Refused(refusal);
+            }
+
+            audit.Record(action, target, true, null, capability, scope);
+            cache.InvalidatePrefix(CachePrefix(resolved));
+
+            return DaemonControlResult.Done;
+        }
+        catch (StudioCapabilityDeniedException denial)
+        {
+            audit.RecordCapabilityDenied(denial, action, target);
+            throw;
+        }
+        catch (StudioNotAuthorizedException denied)
+        {
+            // The scope the refusal names, not the one that was asked for - see CoordinatorControlAsync.
+            audit.RecordScopeDenied(denied.Scope, PolicyName(capability), action, target);
+            throw;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            audit.Record(action, target, false, exception.Message, capability, scope);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// One coordinator control - a pause or a resume - gated, audited and recorded exactly like the
+    /// daemon controls, but aimed at the store rather than at one database.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The target of the audit entry is the store key, because that is the granularity the operation
+    /// actually has: <c>PauseAsync()</c> stops the coordinator's leadership runner and then stops every
+    /// daemon it has resolved, across every database of that store. Recording one database's identity as
+    /// the target would make the entry narrower than the thing that happened.
+    /// </para>
+    /// <para>
+    /// <b>Which is exactly why one resolved scope is not enough to authorize it.</b>
+    /// <see cref="StudioScopeResolver" /> authorizes the store, database and tenant in the URL; the
+    /// operation reaches <em>every</em> database of the store. A host whose
+    /// <see cref="MartenStudioOptions.StoreAuthorizationPolicy" /> scopes by database - which the scope
+    /// selector honours, so it is a shape hosts are expected to have - would otherwise let a visitor
+    /// allowed only database A stop the projections of database B, and the confirm dialog would name B
+    /// while doing it. So the policies are asked for every coordinated database before the coordinator
+    /// is touched (<see cref="DatabaseReachAuthorization.RequireEveryDatabaseOfTheStoreAsync" />), and the
+    /// first refusal is a scope denial: the same exception, the same 9203 audit entry, and nothing paused.
+    /// </para>
+    /// </remarks>
+    private async Task CoordinatorControlAsync(
+        StudioScope scope,
+        string action,
+        string outcome,
+        Func<MartenCoordinator, DaemonControlContext, Task> operation,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+
+        const StudioCapability capability = StudioCapability.ControlDaemon;
+        string target = StoreTarget(scope);
+
+        try
+        {
+            capabilities.Require(capability);
+
+            ResolvedScope resolved = await resolver
+                .ResolveAsync(scope, capability.ToString(), cancellationToken)
+                .ConfigureAwait(false);
+
+            // Everything the pause would reach is authorized first, whatever the daemon's state: a visitor
+            // who may not address every database of the store is refused as such, and learns nothing about
+            // where the daemon runs.
+            await reach.RequireEveryDatabaseOfTheStoreAsync(resolved, capability, action, cancellationToken).ConfigureAwait(false);
+
+            // Then the accessor's answer, and not a second opinion formed here: before the coordinator is
+            // handed out, anything but Hosted is refused. An externally managed store's pause and resume
+            // belong to the system that runs its projections - and on Wolverine, PauseAsync and ResumeAsync
+            // are StopAllAsync and StartAllAsync on this node, behind the back of the distribution that
+            // assigned those agents. And "not hosted here" is also what a lookup that faulted answers - a
+            // coordinator that threw, databases that could not be listed, no daemon provably this
+            // database's - which is no basis for stopping a coordinator either: the studio would be pausing
+            // something it just failed to get a straight answer from.
+            DaemonHosting hosting = await daemons.ForScopeAsync(resolved, cancellationToken).ConfigureAwait(false);
+            if (hosting.State != DaemonHostingState.Hosted)
+            {
+                throw new StudioDaemonNotHostedException(hosting.Explanation);
+            }
+
+            MartenCoordinator coordinator = daemons.CoordinatorForScope(resolved, hosting, out string missing)
+                ?? throw new StudioDaemonNotHostedException(missing);
+
+            string user = await authorization.UserNameAsync().ConfigureAwait(false);
+            logger.DaemonControlRequested(user, action, target, resolved.Registration.Key, resolved.Database.Id.Identity);
+
+            await operation(coordinator, new DaemonControlContext(resolved, user, controlState)).ConfigureAwait(false);
+
+            audit.Record(action, target, true, outcome, capability, scope);
+
+            // A coordinator control reaches every database of the store, so every one's cached reads go.
+            cache.InvalidatePrefix(StorePrefix(resolved));
+        }
+        catch (StudioCapabilityDeniedException denial)
+        {
+            audit.RecordCapabilityDenied(denial, action, target);
+            throw;
+        }
+        catch (StudioNotAuthorizedException denied)
+        {
+            // The scope the refusal names, and not the one that was asked for. They are the same thing
+            // when the scope resolver refused, and they are deliberately different when
+            // RequireEveryDatabaseOfTheStoreAsync did: the entry then says which database the visitor
+            // could not reach, which is the one fact this refusal knows and the requested scope does not.
+            audit.RecordScopeDenied(denied.Scope, PolicyName(capability), action, target);
+            throw;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            audit.Record(action, target, false, exception.Message, capability, scope);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Refuses a per-agent control unless the visitor may address what that one agent processes.
+    /// </summary>
+    /// <remarks>
+    /// An agent whose shard name carries a tenant - the per-tenant partitioning form,
+    /// <c>{Name}:{ShardKey}:{tenant}</c> - processes that tenant's events and no one else's, and is asked
+    /// about as that tenant: a visitor scoped to <c>acme</c> may stop <c>acme</c>'s agent, and is asked
+    /// separately about <c>globex</c>'s. Every other shard name - a store-global shard, including one
+    /// whose own identity happens to parse with a tenant
+    /// (<see cref="DatabaseReach.TenantOfShard(IDocumentStore, string)" />), or a bare projection name,
+    /// which <c>StartAgentAsync</c> expands to every shard of it - reaches every tenant in the database,
+    /// and is <see cref="DatabaseReachAuthorization.RequireWholeDatabaseAsync" />.
+    /// </remarks>
+    private async Task RequireAgentReachAsync(
+        ResolvedScope resolved,
+        string shardName,
+        StudioCapability capability,
+        CancellationToken cancellationToken)
+    {
+        if (DatabaseReach.TenantOfShard(resolved.Store, shardName) is not { } shardTenant)
+        {
+            await reach.RequireWholeDatabaseAsync(resolved, resolved.Database, capability, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        // A scope with no tenant was authorized for the database as a whole, which holds this tenant; the
+        // scope's own tenant was authorized by the resolver. Anything else is a different tenant's agent.
+        if (resolved.TenantId is { Length: > 0 } scoped
+            && !string.Equals(scoped, shardTenant, StringComparison.Ordinal)
+            && reach.AnyPolicyAnswersFor(capability))
+        {
+            await reach.RequireDatabaseAsync(resolved, resolved.Database.Id.Identity, shardTenant, capability, cancellationToken)
+                .ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// One progression correction: advance the high-water mark, or pull progression back to the highest
+    /// real sequence. These do not need a daemon - they are writes against the progression table - which
+    /// is why they are gated on <c>CorrectProgression</c> and offered even when the daemon runs somewhere
+    /// else.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Neither reaches only the database in the URL, and Marten 9.31 has no call that would.</b>
+    /// <c>AdvancedOperations.AdvanceHighWaterMarkToLatestAsync(token)</c> and
+    /// <c>TryCorrectProgressInDatabaseAsync(token)</c> - the overloads without a tenant - loop over
+    /// <c>Tenancy.BuildDatabases()</c> and run a <c>HighWaterDetector</c> against <em>every</em> database
+    /// of the store (read at tag <c>V9.31.0</c>, <c>src/Marten/AdvancedOperations.cs</c>). The overloads
+    /// with a tenant run one against <c>Tenancy.GetTenantAsync(tenantId).Database</c>. The per-database
+    /// type underneath, <c>Marten.Events.Daemon.HighWater.HighWaterDetector</c>, is internal, and
+    /// re-implementing what it does - the committed-sequence reading, the allocation fence and the
+    /// stuck-gap rows - in the studio's own SQL would be the one way to make these corrections wrong.
+    /// <c>MartenApiSurfaceTest</c> pins all of that, so a Marten that grows a per-database overload fails
+    /// there and says to use it.
+    /// </para>
+    /// <para>
+    /// So the studio authorizes what the call reaches rather than what the URL names. Without a tenant,
+    /// that is every database of the store
+    /// (<see cref="DatabaseReachAuthorization.RequireEveryDatabaseOfTheStoreAsync" />, the same check a
+    /// coordinator pause gets), and the confirm dialog says the correction reaches all of them.
+    /// Before that, a visitor whose store policy allowed database A could advance database B's
+    /// high-water mark, which makes every async projection in B treat the events it has not processed as
+    /// already gone.
+    /// </para>
+    /// <para>
+    /// <b>With a tenant it is still not only that tenant.</b> The tenant overloads find the tenant's
+    /// database - through the tenancy, so normally the one the scope resolved but not provably so: a
+    /// host's <c>KnownTenantIds</c> are one list for every database and the resolver accepts any of them
+    /// for any database - and then run the same untenanted <c>HighWaterDetector</c> over it: the advance
+    /// marks the store-global <c>HighWaterMark</c> row and the correction rewrites every row of
+    /// <c>mt_event_progression</c>, both for every tenant stored there (read at <c>V9.31.0</c>,
+    /// <c>HighWaterDetector.AdvanceHighWaterMarkToLatest</c> and
+    /// <c>TryCorrectProgressInDatabaseAsync</c>). Authorizing <c>(store, database, tenant)</c> alone let a
+    /// visitor allowed one tenant of a conjoined database advance the mark every other tenant's async
+    /// projections are read against, and those projections then skipped their unprocessed events for
+    /// good. So the tenant's database is asked about as a whole
+    /// (<see cref="DatabaseReachAuthorization.RequireWholeDatabaseAsync" />), unless it is exclusively that
+    /// tenant's.
+    /// </para>
+    /// <para>
+    /// <b>And the tenant's database is found without asking the tenancy to find the tenant</b>
+    /// (<see cref="DatabaseReach.FindTenantDatabaseAsync" />). On a sharded tenancy
+    /// <c>GetTenantAsync</c> assigns and partitions a tenant it does not know, and on a single-server
+    /// tenancy it creates a database - and that call used to come first, so a <c>KnownTenantIds</c> entry
+    /// nobody had provisioned yet ran DDL before the whole-database question was asked, let alone
+    /// answered. A tenant no database of the store holds yet is refused with nothing provisioned.
+    /// </para>
+    /// <para>
+    /// The audit target is what was corrected: the store key for a correction that reached every
+    /// database - as <see cref="CoordinatorControlAsync" /> records a pause - and the tenant's database
+    /// for one that reached that database.
+    /// </para>
+    /// </remarks>
+    private async Task AdvancedAsync(
+        StudioScope scope,
+        string action,
+        Func<AdvancedOperations, string?, CancellationToken, Task> operation,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+
+        const StudioCapability capability = StudioCapability.CorrectProgression;
+        string target = scope.TenantId is { Length: > 0 }
+            ? (scope.DatabaseId is { Length: > 0 } id ? id : "(default database)")
+            : StoreTarget(scope);
+
+        try
+        {
+            capabilities.Require(capability);
+
+            ResolvedScope resolved = await resolver
+                .ResolveAsync(scope, capability.ToString(), cancellationToken)
+                .ConfigureAwait(false);
+
+            if (resolved.TenantId is not { Length: > 0 } tenantId)
+            {
+                await reach.RequireEveryDatabaseOfTheStoreAsync(resolved, capability, action, cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                // The database Marten is about to reach, so the one named in the audit entry and authorized
+                // here is the one the correction then writes to - found without provisioning anything.
+                IMartenDatabase tenantDatabase =
+                    await DatabaseReach.FindTenantDatabaseAsync(resolved.Store, tenantId, cancellationToken).ConfigureAwait(false)
+                    ?? throw UnprovisionedTenant(resolved.Registration.Key, tenantId);
+
+                target = tenantDatabase.Id.Identity;
+
+                await reach.RequireWholeDatabaseAsync(resolved, tenantDatabase, capability, cancellationToken).ConfigureAwait(false);
+            }
+
+            string user = await authorization.UserNameAsync().ConfigureAwait(false);
+            logger.DaemonControlRequested(user, action, target, resolved.Registration.Key, resolved.Database.Id.Identity);
+
+            await operation(resolved.Store.Advanced, resolved.TenantId, cancellationToken).ConfigureAwait(false);
+
+            audit.Record(action, target, true, null, capability, scope);
+
+            // Without a tenant a correction reaches every database of the store, and with one the tenant's database,
+            // which need not be the one in the scope: every database's cached reads go.
+            cache.InvalidatePrefix(StorePrefix(resolved));
+        }
+        catch (StudioCapabilityDeniedException denial)
+        {
+            audit.RecordCapabilityDenied(denial, action, target);
+            throw;
+        }
+        catch (StudioNotAuthorizedException denied)
+        {
+            // The scope the refusal names, not the one that was asked for - see CoordinatorControlAsync.
+            audit.RecordScopeDenied(denied.Scope, PolicyName(capability), action, target);
+            throw;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            audit.Record(action, target, false, exception.Message, capability, scope);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// The refusal a tenant correction gets for a tenant no database of the store holds yet.
+    /// </summary>
+    /// <remarks>
+    /// Not a policy refusal - nothing was asked, and nothing was provisioned - so it is audited as a
+    /// failed action with this message rather than as a 9203 scope denial.
+    /// </remarks>
+    internal static KeyNotFoundException UnprovisionedTenant(string storeKey, string tenantId) =>
+        new($"No database of Marten store '{storeKey}' holds tenant '{StudioLogValue.Cap(tenantId)}' yet. Marten Studio does not " +
+            "ask the tenancy to find it, because on a sharded or single-server tenancy finding a tenant " +
+            "provisions one.");
+
+    /// <summary>
+    /// The refusal for a projection name this store has none of: the name as it was asked for - a visitor's text, from the
+    /// page or a circuit - escaped and bounded, because the message is audited and rendered whole (H1).
+    /// </summary>
+    /// <param name="projectionName">The name that was asked for.</param>
+    internal static KeyNotFoundException UnknownProjection(string projectionName) =>
+        new($"This store has no projection named '{StudioLogValue.Cap(projectionName)}'.");
+
+    // ------------------------------------------------------------------------------------------------
+    // Helpers
+    // ------------------------------------------------------------------------------------------------
+
+    private string PolicyName(StudioCapability capability) =>
+        authorization.PolicyFor(capability.ToString()) ?? "(none configured)";
+
+    /// <summary>The audit target of an operation that reaches the whole store: its key.</summary>
+    private static string StoreTarget(StudioScope scope) =>
+        scope.StoreKey is { Length: > 0 } key ? key : "(default store)";
+
+    /// <summary>
+    /// Every cached read of one database, every tenant's: the store's registered key and the database's own identity, as
+    /// the scope resolved to them (H1). A write invalidates this prefix, so it reaches every tenant's entry and every
+    /// spelling's - there is only one spelling.
+    /// </summary>
+    private static string CachePrefix(ResolvedScope resolved) =>
+        StorePrefix(resolved) + resolved.Database.Id.Identity + "|";
+
+    /// <summary>Every cached read of every database of the store: what an operation that reaches them all invalidates.</summary>
+    private static string StorePrefix(ResolvedScope resolved) => resolved.Registration.Key + "|";
+
+    /// <summary>
+    /// One cached read: the database by its registered key and identity, never the visitor's spelling of either (D29, H1) -
+    /// a link with no <c>?db=</c>, or a key in another case, is the same database and the same entry, as every other cache
+    /// keys it - and the tenant, which the read is narrowed by and which is matched ordinally, so already spelled as listed.
+    /// </summary>
+    private static string CacheKey(ResolvedScope resolved, string query) =>
+        CachePrefix(resolved) + (resolved.TenantId ?? string.Empty) + "|" + query;
+
+    /// <summary>
+    /// Whether a row of <c>mt_event_progression</c> is Marten's own bookkeeping rather than a shard.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Marten writes three kinds of bookkeeping row beside the real shards: <c>HighWaterMark</c> (and
+    /// <c>HighWaterMark:{tenant}</c> under per-tenant high water - <c>ShardName.Identity</c> hard-codes
+    /// both forms), <c>HighWaterAllocationFence</c> and <c>HighWaterStuckGap</c>
+    /// (<c>Marten.Events.Daemon.HighWater.HighWaterStatisticsDetector</c>'s two <c>ProgressionName</c>
+    /// constants). None of them is a projection, and only the first was being excluded - so the fence and
+    /// the gap were rendered under "Unregistered shards" and, worse, counted towards the worst lag. The
+    /// gap row trails the mark by the detection gap <em>by design</em>, which made a permanently
+    /// 10 000-events-behind projection that does not exist the top row of an operations screen sorted by
+    /// lag.
+    /// </para>
+    /// <para>
+    /// The general rule rather than a list of three names: every real shard identity contains a colon
+    /// (<c>Name:ShardKey</c>, <c>Name:ShardKey:Tenant</c>, <c>Name:V2:ShardKey</c>), because
+    /// <c>ShardName</c> composes it that way and refuses to parse anything else - the high-water names
+    /// are the only ones it documents as "not carrying a shard key". So a progression name without a
+    /// colon cannot be a shard, whatever Marten decides to bookkeep next; the per-tenant high-water
+    /// prefix is the one colon-carrying exception and is named explicitly.
+    /// </para>
+    /// </remarks>
+    internal static bool IsBookkeepingRow(string progressionName) =>
+        string.IsNullOrWhiteSpace(progressionName)
+        || !progressionName.Contains(':', StringComparison.Ordinal)
+        || progressionName.StartsWith(TenantHighWaterPrefix, StringComparison.OrdinalIgnoreCase);
+
+    private static string ProjectionNameOf(string shardName)
+    {
+        int separator = shardName.IndexOf(':', StringComparison.Ordinal);
+        return separator > 0 ? shardName[..separator] : shardName;
+    }
+
+    private static IEnumerable<string> ShardIdentities(ISubscriptionSource source)
+    {
+        ShardName[] shards;
+        try
+        {
+            shards = source.ShardNames();
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // A composite projection can refuse to enumerate its stages; the bundle is then one row named
+            // after the projection, which is how it is driven anyway.
+            return [source.Name + ":All"];
+        }
+
+        return shards.Length == 0 ? [source.Name + ":All"] : shards.Select(static x => x.Identity);
+    }
+
+    /// <summary>
+    /// A composite projection's members, by the shard identity each records its progress under, or none for any other
+    /// projection.
+    /// </summary>
+    /// <remarks>
+    /// Floor-safe, and the composite's own rule: <c>ProjectionStage.BuildExecution</c> names each member's shard
+    /// <c>ShardName.Compose(member.Name, tenantId: parent.TenantId, version: member.Version)</c> (JasperFx 2.74.0 and
+    /// 2.95.1), and the store-global form of that is what is listed here, as <see cref="ShardIdentities" /> lists a
+    /// projection's. <c>CompositeProjection.AllProjections()</c> is public at both ends. JasperFx 2.95.1's
+    /// <c>IEventStore.RegisteredShardNames(includeCompositeMembers: true)</c> would say the same, but it is a call on the
+    /// event store, which the studio makes none of (<c>StorageEnsuringCallTests</c>).
+    /// </remarks>
+    internal static IReadOnlyList<string> CompositeMemberIdentities(ISubscriptionSource source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+
+        if (source is not JasperFx.Events.Projections.Composite.CompositeProjection<IDocumentOperations, IQuerySession> composite)
+        {
+            return [];
+        }
+
+        try
+        {
+            return
+            [
+                .. composite.AllProjections()
+                    .Select(static member => ShardName.Compose(member.Name, version: member.Version).Identity)
+                    .Distinct(StringComparer.OrdinalIgnoreCase),
+            ];
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // A composite that will not enumerate its members still runs; its members' rows then read as unregistered, as
+            // they always did, rather than the page failing.
+            return [];
+        }
+    }
+
+    private static ISubscriptionSource? FindSource(IDocumentStore store, string projectionName)
+    {
+        foreach (ISubscriptionSource source in store.Options.Events.Projections())
+        {
+            if (string.Equals(source.Name, projectionName, StringComparison.OrdinalIgnoreCase))
+            {
+                return source;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The tables a rebuild would rewrite, by matching the projection's published types against the
+    /// document types this store knows - leaving out every type <c>IsDocumentTypeVisible</c> hides, whose
+    /// table name is never shown.
+    /// </summary>
+    private List<string> TablesFor(IDocumentStore store, ISubscriptionSource source)
+    {
+        HashSet<Type> published = [.. PublishedTypesOf(source)];
+        Func<Type, bool>? isVisible = options.Value.IsDocumentTypeVisible;
+
+        List<string> tables = [];
+        foreach (IDocumentType documentType in store.Options.AllKnownDocumentTypes())
+        {
+            if (published.Contains(documentType.DocumentType) && isVisible?.Invoke(documentType.DocumentType) != false)
+            {
+                tables.Add(documentType.TableName.QualifiedName);
+            }
+        }
+
+        tables.Sort(StringComparer.OrdinalIgnoreCase);
+        return tables;
+    }
+
+    /// <summary>
+    /// The document types a projection writes (<c>IProjectionSource.PublishedTypes()</c>): none for a subscription,
+    /// and none for a projection that will not describe itself - which still rebuilds; the dialog just cannot list
+    /// its tables, and says so by listing none.
+    /// </summary>
+    internal static IReadOnlyList<Type> PublishedTypesOf(ISubscriptionSource source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+
+        if (source is not IProjectionSource<IDocumentOperations, IQuerySession> projection)
+        {
+            return [];
+        }
+
+        try
+        {
+            return [.. projection.PublishedTypes().Distinct()];
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return [];
+        }
+    }
+
+    private static string ModeOf(IDocumentStore store)
+    {
+        try
+        {
+            return store.Options.Events.Daemon.AsyncMode.ToString();
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return "Unknown";
+        }
+    }
+
+    private static string? Blank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
+
+    /// <summary>A shard failure as one sentence, which is all a table cell can hold.</summary>
+    private static string? Describe(ShardFailure? failure)
+    {
+        if (failure is null)
+        {
+            return null;
+        }
+
+        string message = Blank(failure.Message) ?? Blank(failure.ExceptionType) ?? "failed";
+        return Blank(failure.ExceptionType) is { } type ? $"{type}: {message}" : message;
+    }
+
+    /// <summary>
+    /// Reads one fact off the daemon, treating a throwing default interface implementation as "unknown".
+    /// </summary>
+    private static T Read<T>(Func<T> read, T fallback)
+    {
+        try
+        {
+            return read();
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return fallback;
+        }
+    }
+
+    /// <summary>
+    /// What a coordinator control needs besides the coordinator, so its body can stay a static lambda.
+    /// </summary>
+    /// <param name="Resolved">The scope, already authorized.</param>
+    /// <param name="User">Who asked, for the pause record.</param>
+    /// <param name="ControlState">Where the pause this process issued is remembered.</param>
+    private readonly record struct DaemonControlContext(
+        ResolvedScope Resolved,
+        string User,
+        DaemonControlState ControlState);
+
+    /// <summary>What the database said, before the tracker and the daemon are consulted.</summary>
+    /// <param name="Projections">The static model, from the store's own options.</param>
+    /// <param name="Progress">The progression rows this database holds.</param>
+    /// <param name="HighWaterMark">The event sequence's high-water mark, or zero when there is none.</param>
+    /// <param name="HasEventStore">
+    /// Whether this database has an event store at all. <see langword="false" /> is not "nothing has
+    /// happened yet": it is "there is nothing here to have happened in", and the studio will not create
+    /// one to find out (hard rule 14).
+    /// </param>
+    /// <param name="ReadAt">When this was read.</param>
+    /// <param name="Rows">
+    /// The rows behind <paramref name="Progress" />, by name, for what a <c>ShardState</c> cannot carry at the floor:
+    /// <c>last_updated</c>, the per-row thresholds and the server's read time.
+    /// </param>
+    private sealed record StoredProjections(
+        IReadOnlyList<ProjectionInfo> Projections,
+        IReadOnlyList<ShardState> Progress,
+        long HighWaterMark,
+        bool HasEventStore,
+        DateTimeOffset ReadAt,
+        IReadOnlyDictionary<string, ProgressionRow>? Rows = null);
+
+    /// <summary>The lease handed out when there is no tracker to watch.</summary>
+    private sealed class NullLease : IDisposable
+    {
+        public static NullLease Instance { get; } = new();
+
+        public void Dispose()
+        {
+        }
+    }
+}

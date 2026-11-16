@@ -1,0 +1,286 @@
+@using DataStudio.Marten.Services.Documents
+@using DataStudio.Postgres.Components.Shared
+
+@*
+    The left rail. Four bands, always in the same order: what the visitor pinned, the Recent
+    pseudo-collection, everything StoreOptions knows about (subclasses nested under their root), and the
+    mt_doc_* tables the database has that no mapping claims.
+
+    The "Discovered" band is a differentiator, not a curiosity (plan section 3.4): a table Marten used to
+    manage and no longer does is invisible in every other tool, and it is exactly the thing somebody is
+    looking for when they open a database browser.
+*@
+
+<nav class="ms-rail" aria-label="Document collections">
+    @if (Rail.Error is { Length: > 0 } error)
+    {
+        <ErrorAlert Message="@error" OnRetry="OnRetry" />
+    }
+
+    @foreach (RailBand band in Bands())
+    {
+        <section class="ms-rail-group" @key="band.Key">
+            <h2 class="ms-rail-title">
+                <span class="ms-rail-name">@band.Title</span>
+                <span class="ms-rail-count">@band.Collections.Count</span>
+            </h2>
+
+            @if (band.Collections.Count == 0)
+            {
+                <p class="ms-rail-empty">@band.EmptyText</p>
+            }
+            else
+            {
+                <ul class="ms-rail-list">
+                    @foreach (CollectionInfo collection in band.Collections)
+                    {
+                        <li class="ms-rail-item" @key="band.Key + '/' + collection.Alias">
+                            @RenderEntry(collection, band.Key)
+
+                            @if (collection.SubCollections.Count > 0)
+                            {
+                                <ul class="ms-rail-list ms-rail-sublist">
+                                    @foreach (CollectionInfo subclass in collection.SubCollections)
+                                    {
+                                        <li class="ms-rail-item" @key="band.Key + '/' + subclass.Alias">
+                                            @RenderEntry(subclass, band.Key)
+                                        </li>
+                                    }
+                                </ul>
+                            }
+                        </li>
+                    }
+                </ul>
+            }
+        </section>
+    }
+</nav>
+
+@code {
+    /// <summary>
+    /// What the data service found, as a <see cref="CollectionRail" />. Typed
+    /// <see cref="object" /> — see <see cref="DocumentComponentModel" /> for why.
+    /// </summary>
+    [Parameter]
+    public object? Model { get; set; }
+
+    /// <summary>The alias the page is currently showing, which is drawn as the active entry.</summary>
+    [Parameter]
+    public string? ActiveAlias { get; set; }
+
+    /// <summary>The aliases the visitor pinned, read from this browser's local storage.</summary>
+    [Parameter]
+    public IReadOnlyCollection<string> Pinned { get; set; } = [];
+
+    /// <summary>Builds the link for one collection, from its alias.</summary>
+    [Parameter]
+    public Func<string, string> HrefFor { get; set; } = static _ => "#";
+
+    /// <summary>Pins or unpins a collection.</summary>
+    [Parameter]
+    public EventCallback<string> OnTogglePin { get; set; }
+
+    /// <summary>Asks for an exact <c>count(*)</c> for one collection (D8).</summary>
+    [Parameter]
+    public EventCallback<string> OnExactCount { get; set; }
+
+    /// <summary>Reloads the rail after a failure.</summary>
+    [Parameter]
+    public EventCallback OnRetry { get; set; }
+
+    /// <summary>The rail, read back into the type it really is.</summary>
+    private CollectionRail Rail => DocumentComponentModel.Read(Model, EmptyRail);
+
+    private static readonly CollectionRail EmptyRail = new([]);
+
+    private sealed record RailBand(string Key, string Title, IReadOnlyList<CollectionInfo> Collections, string EmptyText);
+
+    /// <summary>
+    /// One rail entry. An inline template rather than a child component: it is rendered from three places
+    /// in this file and from nowhere else, and a component would add a parameter-diffing lifecycle to a
+    /// line of markup.
+    /// </summary>
+    private RenderFragment RenderEntry(CollectionInfo collection, string bandKey) =>
+        @<div class="ms-rail-entry">
+            <a class="@EntryClass(collection)" href="@HrefFor(collection.Alias)">
+                <CollectionChip Alias="@collection.Alias"
+                                Hue="@collection.Hue"
+                                Title="@(collection.FullTypeName ?? collection.Table)" />
+
+                @if (collection.ClrTypeName is { Length: > 0 } typeName)
+                {
+                    <span class="ms-rail-type">@typeName</span>
+                }
+
+                @if (CountText(collection) is { Length: > 0 } count)
+                {
+                    <span class="ms-rail-badge-count" title="@CountTitle(collection)">@count</span>
+                }
+            </a>
+
+            <span class="ms-rail-flags">
+                @if (collection.Flags.SoftDeleted)
+                {
+                    <span class="ms-rail-flag ms-rail-flag-delete" title="Soft-deleted: rows are flagged, not removed">D</span>
+                }
+                @if (collection.Flags.Conjoined)
+                {
+                    <span class="ms-rail-flag ms-rail-flag-tenant" title="Conjoined multi-tenancy: every row carries a tenant_id">T</span>
+                }
+                @if (collection.Flags.OptimisticConcurrency)
+                {
+                    <span class="ms-rail-flag ms-rail-flag-concurrency" title="Optimistic concurrency: writes check mt_version">C</span>
+                }
+                @if (collection.Flags.Hierarchy)
+                {
+                    <span class="ms-rail-flag ms-rail-flag-hierarchy" title="Hierarchy: several .NET types share this table">H</span>
+                }
+                @if (!collection.IsRegistered && collection.Alias != CollectionAliases.Recent)
+                {
+                    <span class="ms-rail-flag ms-rail-flag-discovered" title="No StoreOptions mapping claims this table - read-only">?</span>
+                }
+
+                @* Offered for an unknown count as well as for an estimate: a "?" a person cannot resolve is
+                   a dead end, and an unanalysed table is precisely the one where the exact count is the
+                   only number available.
+
+                   Withheld from an estimate the studio has already declined to improve on: the collection
+                   is above ExactCountThreshold, pressing it runs the same refusal again, and a button that
+                   does nothing twice is worse than no button. An *unknown* refusal keeps it - that is the
+                   conjoined-under-a-tenant case, RefusedExact(Unknown, ...), where pressing it is exactly
+                   what gets this tenant's count, and the large-heap case, where it is what pays for the
+                   scan the rail would not pay for on its own. *@
+                @if ((collection.Count.IsEstimate || collection.Count.IsUnknown) &&
+                     !(collection.Count.IsExactRefused && !collection.Count.IsUnknown) &&
+                     OnExactCount.HasDelegate)
+                {
+                    <button type="button"
+                            class="ms-rail-action"
+                            title="Count the rows exactly. On a large collection this is a sequential scan."
+                            @onclick="() => ExactCountAsync(collection.Alias)">=</button>
+                }
+
+                @if (OnTogglePin.HasDelegate && collection.Alias != CollectionAliases.Recent && bandKey != "pinned")
+                {
+                    <button type="button"
+                            class="ms-rail-action @(IsPinned(collection.Alias) ? "ms-rail-action-on" : null)"
+                            title="@(IsPinned(collection.Alias) ? "Unpin" : "Pin to the top of the rail")"
+                            aria-pressed="@(IsPinned(collection.Alias) ? "true" : "false")"
+                            @onclick="() => TogglePinAsync(collection.Alias)">@(IsPinned(collection.Alias) ? "★" : "☆")</button>
+                }
+                else if (OnTogglePin.HasDelegate && bandKey == "pinned")
+                {
+                    <button type="button"
+                            class="ms-rail-action ms-rail-action-on"
+                            title="Unpin"
+                            aria-pressed="true"
+                            @onclick="() => TogglePinAsync(collection.Alias)">★</button>
+                }
+            </span>
+        </div>;
+
+    private IEnumerable<RailBand> Bands()
+    {
+        yield return new RailBand(
+            "pinned",
+            "Pinned",
+            PinnedCollections(),
+            "Nothing pinned yet. Use the pin beside a collection to keep it here.");
+
+        foreach (CollectionGroup group in Rail.Groups)
+        {
+            yield return new RailBand(
+                group.Kind.ToString().ToLowerInvariant(),
+                group.Title,
+                group.Collections,
+                group.Kind == CollectionGroupKind.Documents
+                    ? "This store registers no document types."
+                    : "Nothing here.");
+        }
+    }
+
+    /// <summary>
+    /// The pinned band, built from the real entries rather than from the stored aliases: a pin for a
+    /// collection that has since been removed from StoreOptions simply does not appear, which is the right
+    /// behaviour for a preference that lives in somebody's browser.
+    /// </summary>
+    private IReadOnlyList<CollectionInfo> PinnedCollections()
+    {
+        if (Pinned.Count == 0)
+        {
+            return [];
+        }
+
+        List<CollectionInfo> pinned = [];
+
+        foreach (string alias in Pinned)
+        {
+            if (Rail.Find(alias) is { } collection)
+            {
+                pinned.Add(collection with { SubCollections = [] });
+            }
+        }
+
+        return pinned;
+    }
+
+    private bool IsPinned(string alias) => Pinned.Contains(alias, StringComparer.OrdinalIgnoreCase);
+
+    private string EntryClass(CollectionInfo collection) =>
+        string.Equals(collection.Alias, ActiveAlias, StringComparison.OrdinalIgnoreCase)
+            ? "ms-rail-link ms-rail-link-active"
+            : "ms-rail-link";
+
+    /// <summary>
+    /// The number beside a collection, or the honest absence of one.
+    /// </summary>
+    /// <remarks>
+    /// <c>DocumentCount.IsUnknown</c> is checked <em>before</em> <c>IsUnavailable</c>, which it is a kind
+    /// of on purpose. "Postgres has never analysed this table" is a different fact from
+    /// "the studio could not read this table", and it is one a person can act on — <c>analyze</c> — so it
+    /// gets a mark of its own rather than the blank that a refused read gets. Reporting it as <c>~0</c> is
+    /// the studio saying "no documents" about a collection it has not looked at, which is the one answer
+    /// that is worse than saying nothing.
+    /// </remarks>
+    private static string CountText(CollectionInfo collection)
+    {
+        if (collection.Count.IsUnknown)
+        {
+            return "?";
+        }
+
+        if (collection.Count.IsUnavailable)
+        {
+            return string.Empty;
+        }
+
+        string value = collection.Count.Value.ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
+
+        // The tilde is load-bearing: D8 says counts are reltuples estimates, and a number that looks
+        // exact when it is not is how a dashboard loses somebody's trust the first time they check it.
+        return collection.Count.IsEstimate ? "~" + value : value;
+    }
+
+    /// <summary>What the badge says on hover, which is the only place the estimate's provenance fits.</summary>
+    private static string CountTitle(CollectionInfo collection)
+    {
+        // The count says why it is the only one on offer when there is something to say - refused above
+        // ExactCountThreshold, or a never-analysed heap too large to read speculatively - and the two
+        // generic titles are the fallback. The sentence lives on the value so the list header agrees.
+        if (collection.Count.Reason is { } reason)
+        {
+            return reason;
+        }
+
+        if (collection.Count.IsUnknown)
+        {
+            return "Postgres has never analysed this table";
+        }
+
+        return collection.Count.IsEstimate ? "Estimated from pg_class.reltuples" : "Exact count";
+    }
+
+    private async Task TogglePinAsync(string alias) => await OnTogglePin.InvokeAsync(alias);
+
+    private async Task ExactCountAsync(string alias) => await OnExactCount.InvokeAsync(alias);
+}

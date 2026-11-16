@@ -1,0 +1,187 @@
+@using DataStudio.Marten.Services.Documents
+@using DataStudio.Marten.Services.Query
+@using DataStudio.Postgres.Components.Shared
+@using DataStudio.Postgres.Services.Query
+
+@*
+    The parse strip and the index verdict (plan section 3.4, differentiator 2).
+
+    Three things happen here that a generic SQL browser cannot do. The search is echoed back as the studio
+    understood it, so a typo is visible before it becomes an empty result set. Each term carries a verdict
+    from the store's declared indexes cross-checked with pg_indexes. And a red verdict is not run: the page
+    says what it would cost and offers the StoreOptions line that would fix it, with "Run anyway" for the
+    times the answer is worth the scan.
+
+    This strip is about the *filter* and nothing else. The sort key has an index verdict of its own and it
+    used to be rendered here, which made the strip red on every collection in the store - Marten declares
+    no index on mt_last_modified, so the default sort is red on its own, and a red banner above a page
+    nobody has typed a filter into is a banner people learn to ignore. DocumentTable draws that verdict
+    beside the column header it is about instead; SearchVerdict.FilterLevel is the half of the verdict this
+    component reads, and it is the same half that decides whether a read is withheld.
+*@
+
+@{
+    IReadOnlyList<SearchChip> chips = FilterChips;
+}
+
+<div class="ms-search-strip ms-verdict-@Level" role="status">
+    <div class="ms-search-strip-row">
+        <span class="ms-verdict-badge ms-verdict-badge-@Level" title="@VerdictTitle">@VerdictText</span>
+
+        @* Keyed by position, never by the chip. SearchChip is a record, so two identical terms - `?q=foo
+           foo`, `?q=is:deleted is:deleted`, or the `..` that parses into two of the same thing - are equal
+           to each other and the renderer throws "more than one sibling has the same key value", which on a
+           Blazor Server circuit is a 500 and a dead page from a search box. *@
+        @for (int index = 0; index < chips.Count; index++)
+        {
+            SearchChip chip = chips[index];
+
+            <span class="ms-search-chip ms-search-chip-@chip.Kind.ToString().ToLowerInvariant() ms-verdict-@chip.Level.ToString().ToLowerInvariant()"
+                  title="@chip.Reason"
+                  @key="index">
+                @chip.Text
+            </span>
+        }
+
+        @if (chips.Count == 0)
+        {
+            <span class="ms-search-chip ms-search-chip-empty">no filter — the whole collection</span>
+        }
+    </div>
+
+    @if (chips.Count > 0)
+    {
+        <ul class="ms-verdict-reasons">
+            @for (int index = 0; index < chips.Count; index++)
+            {
+                SearchChip chip = chips[index];
+
+                @if (chip.Level != IndexVerdictLevel.Green)
+                {
+                    <li class="ms-verdict-reason ms-verdict-@chip.Level.ToString().ToLowerInvariant()" @key="index">
+                        <span class="ms-verdict-reason-text">@chip.Reason</span>
+                        @if (chip.Suggestion is { Length: > 0 } suggestion)
+                        {
+                            <code class="ms-code-inline">@suggestion</code>
+                        }
+                    </li>
+                }
+            }
+        </ul>
+    }
+
+    @if (Blocked)
+    {
+        <div class="ms-verdict-blocked">
+            <span>
+                This filter reads every row of the collection, so the studio has not run it. Narrow it, add
+                the index below, or run it anyway.
+            </span>
+            <button type="button" class="ms-btn ms-btn-primary ms-btn-sm" @onclick="RunAnywayAsync">Run anyway</button>
+        </div>
+    }
+
+    @* D14: there is no live SQL tail, and this is what answers the question people actually have. *@
+    <SqlDisclosure Sql="@Sql" ParameterNames="ParameterNames" />
+</div>
+
+@code {
+    /// <summary>
+    /// The verdict on the current search, as a <see cref="SearchVerdict" />. Typed
+    /// <see cref="object" /> — see <see cref="DocumentComponentModel" /> for why.
+    /// </summary>
+    [Parameter]
+    public object? Model { get; set; }
+
+    /// <summary>The statement that ran, or would have run.</summary>
+    [Parameter]
+    public string? Sql { get; set; }
+
+    /// <summary>The parameter names in it.</summary>
+    [Parameter]
+    public IReadOnlyList<string> ParameterNames { get; set; } = [];
+
+    /// <summary>Whether the read was withheld because the verdict is red.</summary>
+    [Parameter]
+    public bool Blocked { get; set; }
+
+    /// <summary>Runs the search despite a red verdict.</summary>
+    [Parameter]
+    public EventCallback OnRunAnyway { get; set; }
+
+    /// <summary>The verdict, read back into the type it really is.</summary>
+    private SearchVerdict Verdict => DocumentComponentModel.Read(Model, SearchVerdict.Empty);
+
+    /// <summary>
+    /// The chips this strip draws: everything the verdict carries except the sort.
+    /// </summary>
+    /// <remarks>
+    /// The sort chip is still in the verdict — it is a real fact and <c>DocumentTable</c> renders it
+    /// beside the column it is about. Filtering it out here rather than asking the data service not to
+    /// produce it keeps the one verdict the one answer, and keeps this a question of where a fact is
+    /// drawn rather than of whether it is known.
+    /// </remarks>
+    private IReadOnlyList<SearchChip> FilterChips
+    {
+        get
+        {
+            List<SearchChip> filtered = new(Verdict.Chips.Count);
+
+            foreach (SearchChip chip in Verdict.Chips)
+            {
+                if (chip.Kind != SearchChipKind.Sort)
+                {
+                    filtered.Add(chip);
+                }
+            }
+
+            return filtered;
+        }
+    }
+
+    /// <summary>Whether anything was actually filtered, as opposed to a plain page of the collection.</summary>
+    private bool HasFilter
+    {
+        get
+        {
+            foreach (SearchChip chip in Verdict.Chips)
+            {
+                if (chip.Kind != SearchChipKind.Sort)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// The colour of the strip, and of the badge: <see cref="SearchVerdict.FilterLevel" /> rather than
+    /// <see cref="SearchVerdict.Level" />, because the sort's verdict is drawn elsewhere and a strip that
+    /// went red for it went red on every collection in the store.
+    /// </summary>
+    private string Level => Verdict.FilterLevel.ToString().ToLowerInvariant();
+
+    private string VerdictText => Verdict.HasErrors
+        ? "cannot parse"
+        : !HasFilter
+            ? "no filter"
+            : Verdict.FilterLevel switch
+            {
+                IndexVerdictLevel.Green => "indexed",
+                IndexVerdictLevel.Amber => "partly indexed",
+                _ => "full scan"
+            };
+
+    private string VerdictTitle => !HasFilter
+        ? "Nothing is filtered: this is one page of the collection, in sort order."
+        : Verdict.FilterLevel switch
+        {
+            IndexVerdictLevel.Green => "An index can serve every term of this filter.",
+            IndexVerdictLevel.Amber => "An index names the column but may not be used for this filter.",
+            _ => "Nothing serves this filter: every row of the collection is read."
+        };
+
+    private async Task RunAnywayAsync() => await OnRunAnyway.InvokeAsync();
+}
