@@ -49,16 +49,30 @@ public class DatabaseScopeGateTests
         gate.WaitForAssertion(() => gate.FindAll(".ms-loading-spinner").Should().ContainSingle());
     }
 
+    /// <summary>
+    /// A gate that was disposed is no longer subscribed, and a late answer neither renders it nor puts an exception on the renderer. The
+    /// subscription is read from the event's invocation list, because a gate that stayed subscribed would otherwise be saved by its own
+    /// <c>disposed</c> check; the render count is read after a round trip through the dispatcher, which is where a stale handler's render lands.
+    /// </summary>
     [Fact]
-    public void A_disposed_gate_no_longer_listens()
+    public async Task A_disposed_gate_is_unsubscribed_and_a_late_answer_renders_nothing()
     {
-        using StudioComponentContext context = new();
+        await using StudioComponentContext context = new();
         DatabaseScopeAccess access = context.Services.GetRequiredService<DatabaseScopeAccess>();
         IRenderedComponent<DatabaseScopeGate> gate = Render(context);
+        System.Reflection.FieldInfo changed = typeof(DatabaseScopeAccess).GetField(nameof(DatabaseScopeAccess.Changed), System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+
+        changed.GetValue(access).Should().NotBeNull("the premise: a live gate listens");
+        int renders = gate.RenderCount;
 
         gate.Instance.Dispose();
 
-        Action change = () => access.Set(ScopeAccess.Granted);
-        change.Should().NotThrow();
+        changed.GetValue(access).Should().BeNull("a disposed gate leaves the event");
+
+        access.Set(ScopeAccess.Granted);
+        await context.Renderer.Dispatcher.InvokeAsync(static () => Task.CompletedTask);
+
+        gate.RenderCount.Should().Be(renders, "a late answer is nobody's to draw");
+        context.Renderer.UnhandledException.IsCompleted.Should().BeFalse("a disposed gate must not put an exception on the renderer");
     }
 }

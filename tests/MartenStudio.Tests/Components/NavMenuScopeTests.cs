@@ -4,12 +4,13 @@ using MartenStudio.Services;
 
 using PostgresStudio.Components.Layout;
 using PostgresStudio.Services;
+using PostgresStudio.Services.Live;
 using PostgresStudio.Services.Settings;
 
 namespace MartenStudio.Tests.Components;
 
 /// <summary>
-/// 1.2-SCOPE-1 S1: a sidebar entry can be shown only for some scope states (<c>StudioNavItem.IsShownInScope</c>), and MartenStudio's
+/// 1.2-SCOPE-1 S1: a sidebar entry can be shown only for some scope states (<c>StudioNavItem.ShownWhen</c>, answered by the database's rail), and MartenStudio's
 /// Stores entry is shown only while the visitor may see two or more stores - the header's store picker's own test.
 /// </summary>
 public class NavMenuScopeTests
@@ -99,7 +100,8 @@ public class NavMenuScopeTests
     {
         StudioNavItem[] items = [.. MartenStudioDescriptor.Instance.Navigation(MartenStudio.Tests.Support.MartenSpine.Settings()).SelectMany(static x => x.Items)];
 
-        items.Single(static x => x.Label == "Stores").IsShownInScope.Should().NotBeNull();
-        items.Single(static x => x.Label == "Overview").IsShownInScope.Should().BeNull();
+        items.Single(static x => x.Label == "Stores").ShownWhen.Should().Be(DatabaseRailConditions.SeveralSources);
+        items.Single(static x => x.Label == "Tenants").ShownWhen.Should().Be(DatabaseRailConditions.TenantSelector);
+        items.Single(static x => x.Label == "Overview").ShownWhen.Should().BeNull();
     }
 }

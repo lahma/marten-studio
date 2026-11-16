@@ -100,8 +100,9 @@ internal sealed class StudioDescriptor : DiagnosticsDescriptor
 internal sealed record StudioNavSection(string Title, IReadOnlyList<StudioNavItem> Items)
 {
     /// <summary>
-    /// The key of the module that contributed the section, set by the composition and never by a module (D34); <see langword="null" />
-    /// for a host studio's own. A module's links carry no host scope.
+    /// The key of the module that contributed the section, set by the composition and never by a module (D34): the root's sections carry the
+    /// root's key, so "a host section" is "a section of the root module". The rail asks the module's <see cref="IStudioModuleRail" />, if it
+    /// has one, for the section's links and entries. <see langword="null" /> only on a section no composition has stamped.
     /// </summary>
     public string? ModuleKey { get; init; }
 }
@@ -130,12 +131,12 @@ internal sealed record StudioNavItem(
     public Func<IShellSettings, bool>? IsShown { get; init; }
 
     /// <summary>
-    /// Whether the entry is drawn for the visitor's scope state, or <see langword="null" /> for always (1.2): MartenStudio's Stores
-    /// entry is drawn while the visitor may see two or more stores, the same test the header's store picker makes. Pure and
-    /// in-memory like <see cref="IsShown" />: the sidebar asks it on every render and re-renders on every scope change, so it reads
-    /// what <see cref="StudioState" /> already holds and does no I/O.
+    /// The key of the condition the module's rail answers for this entry, or <see langword="null" /> for none (1.2): MartenStudio's Stores
+    /// entry is drawn while the visitor may see two or more stores, the same test the header's store picker makes. The module's
+    /// <see cref="IStudioModuleRail.IsShown" /> answers it, in memory, on every render, and a key it does not know is not shown (fail
+    /// closed). The database's keys are <see cref="Live.DatabaseRailConditions" />.
     /// </summary>
-    public Func<StudioState, bool>? IsShownInScope { get; init; }
+    public string? ShownWhen { get; init; }
 }
 
 /// <summary>What one sidebar badge renders as.</summary>

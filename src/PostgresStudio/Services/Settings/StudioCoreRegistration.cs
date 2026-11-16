@@ -136,6 +136,9 @@ internal static class StudioCoreRegistration
         // services, so a badge is subject to the same source, database and tenant policies as the screen.
         services.TryAddScoped<INavIndicatorService, NavIndicatorService>();
 
+        // The database's half of the rail (D34): its links carry the scope, two entries follow the scope's state, and the badges are read here.
+        services.TryAddEnumerable(ServiceDescriptor.Scoped<IStudioModuleRail, DatabaseModuleRail>());
+
         // DB-1: database browser. The catalog is a singleton for the same reason ColumnCatalog is: what it
         // caches is a fact about the database, the same for every circuit, and the per-visitor gate is
         // applied after the cache. The gate and the service are about one circuit's visitor, so scoped.

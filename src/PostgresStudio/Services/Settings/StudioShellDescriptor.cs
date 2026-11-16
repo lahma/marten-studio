@@ -55,7 +55,7 @@ internal sealed class StudioShellDescriptor
 
     /// <summary>
     /// The sidebar, section by section: the root's, with every other module's inserted immediately before the root's last section (System, which
-    /// holds Activity), in key order, each stamped with its <see cref="StudioNavSection.ModuleKey" />.
+    /// holds Activity), in key order, each stamped with its module's <see cref="StudioNavSection.ModuleKey" /> - the root's too.
     /// </summary>
     public IReadOnlyList<StudioNavSection> Navigation => navigation.Value;
 
@@ -101,7 +101,9 @@ internal sealed class StudioShellDescriptor
     private List<StudioNavSection> BuildNavigation()
     {
         IStudioModule? first = Root;
-        List<StudioNavSection> sections = [.. first?.Navigation ?? []];
+
+        // The root's sections are stamped with the root's key too: a section's rail is the rail of its module, whichever module it is.
+        List<StudioNavSection> sections = [.. (first?.Navigation ?? []).Select(section => section with { ModuleKey = first!.Key })];
 
         int at = Math.Max(sections.Count - 1, 0);
         sections.InsertRange(

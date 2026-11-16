@@ -99,6 +99,9 @@ public class StudioRegistrationTests
         (typeof(StudioSnapshotCache), ServiceLifetime.Singleton, How.Type, typeof(StudioSnapshotCache)),
         (typeof(StudioLiveUpdatesFactory), ServiceLifetime.Scoped, How.Type, typeof(StudioLiveUpdatesFactory)),
         (typeof(INavIndicatorService), ServiceLifetime.Scoped, How.Type, typeof(NavIndicatorService)),
+
+        // Shell A2b: the database's half of the rail - its links, two entries' conditions and its badges.
+        (typeof(IStudioModuleRail), ServiceLifetime.Scoped, How.Type, typeof(DatabaseModuleRail)),
         (typeof(DatabaseCatalog), ServiceLifetime.Singleton, How.Type, typeof(DatabaseCatalog)),
         (typeof(DatabaseAccess), ServiceLifetime.Scoped, How.Type, typeof(DatabaseAccess)),
         (typeof(IDatabaseObjectService), ServiceLifetime.Scoped, How.Type, typeof(DatabaseObjectService)),

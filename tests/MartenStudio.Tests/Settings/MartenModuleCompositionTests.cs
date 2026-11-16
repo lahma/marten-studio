@@ -73,8 +73,10 @@ public class MartenModuleCompositionTests
 
         string[] hostTitles = [.. Host.Navigation(Settings).Select(static x => x.Title)];
         composed.Navigation.Select(static x => x.Title).Should().Equal([.. hostTitles[..^1], "Fake section", hostTitles[^1]]);
-        composed.Navigation.Single(static x => x.ModuleKey is not null).Title.Should().Be("Fake section");
-        composed.Navigation.Where(static x => x.ModuleKey is null).Should().HaveCount(hostTitles.Length);
+        composed.Navigation.Single(static x => x.ModuleKey == "fake").Title.Should().Be("Fake section");
+
+        // Shell A2b, 6.1: the root's sections carry the root's key (before, none).
+        composed.Navigation.Where(static x => x.ModuleKey == Host.Key).Should().HaveCount(hostTitles.Length);
         composed.ProductName.Should().Be(Host.ProductName);
         composed.ExtraShortcuts.Should().HaveSameCount(Host.ExtraShortcuts, "Marten Studio's document shortcuts are carried");
         composed.PageAssemblies.Should().HaveCount(Host.PageAssemblies.Count + 1);

@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 
+using PostgresStudio.Components;
 using PostgresStudio.Services;
 using PostgresStudio.Services.Postgres;
 using PostgresStudio.Services.Settings;
@@ -94,8 +95,12 @@ public class StudioModuleCompositionTests
         public string AuditEventIds => string.Empty;
     }
 
-    private static (string Title, string? ModuleKey, (string Label, string? Route, string Icon, string? BadgeKey, string? Title)[] Items) Shape(StudioNavSection section) =>
-        (section.Title, section.ModuleKey, [.. section.Items.Select(static i => (i.Label, i.Route, i.Icon, i.BadgeKey, i.Title))]);
+    /// <summary>
+    /// What a section says, without the module's stamp, which the composition adds (6.1): the entries' words and, per entry, whether it carries a
+    /// condition and which - a factory that dropped Query's <c>RunSqlEnabled</c> or Stores' key would change one of them.
+    /// </summary>
+    private static (string Title, (string Label, string? Route, string Icon, string? BadgeKey, string? Title, bool HasIsShown, string? ShownWhen)[] Items) Shape(StudioNavSection section) =>
+        (section.Title, [.. section.Items.Select(static i => (i.Label, i.Route, i.Icon, i.BadgeKey, i.Title, i.IsShown is not null, i.ShownWhen))]);
 
     [Fact]
     public void No_module_registered_resolves_the_database_as_the_one_root_module()
@@ -126,8 +131,21 @@ public class StudioModuleCompositionTests
         shell.PageAssemblies.Should().Equal(Host.PageAssemblies);
         shell.ExtraShortcuts.Should().Equal(Host.ExtraShortcuts);
         shell.Navigation.Select(Shape).Should().BeEquivalentTo(Host.Navigation(Settings).Select(Shape), static options => options.WithStrictOrdering());
-        shell.Navigation.Should().OnlyContain(static x => x.ModuleKey == null, "the root's own sections carry no module key");
-        shell.Routes.Should().BeSameAs(shell.Routes, "built once");
+
+        // Shell A2b, 6.1: the one expected value that moves. The root's sections are stamped with the root's key too, so that a section's rail is
+        // the rail of its module, whichever module it is; before, they carried none.
+        shell.Navigation.Should().OnlyContain(static x => x.ModuleKey == "postgres", "the root's own sections carry the root's key");
+
+        // The route table is the database's own: one built from its page assemblies alone matches every entry's route to the same page.
+        StudioRouteTable own = new(Host.PageAssemblies);
+        string[] routes = [.. Host.Navigation(Settings).SelectMany(static x => x.Items).Select(static x => x.Route).OfType<string>()];
+        routes.Should().NotBeEmpty();
+        foreach (string route in routes)
+        {
+            Microsoft.AspNetCore.Components.RouteData? expected = own.Match(route, Settings);
+            expected.Should().NotBeNull("'{0}' is an entry of the database's own rail", route);
+            shell.Routes.Match(route, Settings)!.PageType.Should().Be(expected!.PageType, "'{0}' is the same page in the composed table", route);
+        }
     }
 
     [Fact]
@@ -138,8 +156,8 @@ public class StudioModuleCompositionTests
 
         string[] hostTitles = [.. Host.Navigation(Settings).Select(static x => x.Title)];
         composed.Navigation.Select(static x => x.Title).Should().Equal([.. hostTitles[..^1], "Alpha", "Bravo", hostTitles[^1]]);
-        composed.Navigation.Where(static x => x.ModuleKey is not null).Select(static x => x.ModuleKey).Should().Equal("a", "b");
-        composed.Navigation.Where(static x => x.ModuleKey is null).Should().HaveCount(hostTitles.Length, "the root's own sections never carry a module key");
+        composed.Navigation.Where(static x => x.ModuleKey != "postgres").Select(static x => x.ModuleKey).Should().Equal("a", "b");
+        composed.Navigation.Where(static x => x.ModuleKey == "postgres").Should().HaveCount(hostTitles.Length, "the root's own sections carry the root's key (6.1)");
         composed.Modules.Select(static x => x.Key).Should().Equal("postgres", "a", "b");
         composed.PageAssemblies.Should().HaveCount(Host.PageAssemblies.Count + 2);
         composed.ExtraShortcuts.Select(static x => x.Title).Should().Equal([.. Host.ExtraShortcuts.Select(static x => x.Title), "a keys", "b keys"]);

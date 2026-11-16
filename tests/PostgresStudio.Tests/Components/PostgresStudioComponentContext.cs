@@ -130,6 +130,7 @@ internal sealed class PostgresStudioComponentContext : BunitContext
         Services.AddSingleton(static provider =>
             StudioModuleComposition.Compose(provider.GetRequiredService<StudioDescriptor>(), provider.GetServices<IStudioModule>()));
         Services.AddSingleton<DatabaseScopeAccess>();
+        Services.AddSingleton<IStudioModuleRail, DatabaseModuleRail>();
         Services.AddSingleton<ToastService>();
         Services.AddSingleton<StudioActionLogService>();
         Services.AddSingleton<StudioActionLog>();

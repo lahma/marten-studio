@@ -88,6 +88,27 @@ public class StudioLayoutModulePageTests
         harness.Authorization.HostCalls.Should().BeEmpty("the host's gate is not asked on a module's page");
     }
 
+    /// <summary>
+    /// Shell A2b: a module that has no <c>ScopeGate</c> (KStudio's) has its page's body drawn as it is - whatever the database's gate has
+    /// answered or not, which on a Kafka page it never does. What a shell with no root, or a module with no gate under a root, should do is phase
+    /// B's; this pins what it does today.
+    /// </summary>
+    [Fact]
+    public async Task A_module_with_no_scope_gate_draws_its_page_body_ungated()
+    {
+        using KafkaStudioHarness harness = Harness();
+        harness.Descriptor.Modules.Single(static x => x.Key == "kafka").ScopeGate.Should().BeNull("the premise: KStudio's module has no gate");
+
+        DatabaseScopeAccess access = harness.Context.Services.GetRequiredService<DatabaseScopeAccess>();
+        access.Set(ScopeAccess.Denied);
+
+        IRenderedComponent<StudioRoutes> layout = await RenderAtAsync(harness, "/postgres/kafka");
+
+        layout.WaitForAssertion(() => Heading(layout).Should().Be("Kafka topics"));
+        layout.FindAll(".ms-loading-spinner, .ms-empty-title").Should().BeEmpty("no gate drew a spinner or a refusal in front of the body");
+        access.Value.Should().NotBe(ScopeAccess.Granted, "the database's host never answered on a module's page");
+    }
+
     [Fact]
     public async Task A_host_page_with_the_same_policy_still_shows_ScopeNotAuthorized()
     {

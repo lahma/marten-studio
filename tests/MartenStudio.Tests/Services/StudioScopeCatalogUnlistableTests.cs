@@ -10,6 +10,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
 using PostgresStudio.Services;
+using PostgresStudio.Services.Live;
 
 namespace MartenStudio.Tests.Services;
 
@@ -77,8 +78,10 @@ public class StudioScopeCatalogUnlistableTests
         state.AvailableStores.Select(static x => x.Key).Should().Equal([nameof(IUnlistableCatalogStore)], "only a listable store is selectable");
         state.UnlistableStores.Select(static x => x.Key).Should().Equal(MartenStoreRegistry.DefaultStoreKey);
         state.KnownStoreCount.Should().Be(2);
-        MartenStudioDescriptor.Instance.Navigation(MartenSpine.Settings()).SelectMany(static x => x.Items).Single(static x => x.Label == "Stores")
-            .IsShownInScope!(state).Should().BeTrue("the Stores page is where a store that could not be listed is explained");
+        string? condition = MartenStudioDescriptor.Instance.Navigation(MartenSpine.Settings()).SelectMany(static x => x.Items).Single(static x => x.Label == "Stores")
+            .ShownWhen;
+        condition.Should().Be(DatabaseRailConditions.SeveralSources);
+        DatabaseRailConditions.IsShown(condition, state).Should().BeTrue("the Stores page is where a store that could not be listed is explained");
     }
 
     private sealed class Harness : IAsyncDisposable

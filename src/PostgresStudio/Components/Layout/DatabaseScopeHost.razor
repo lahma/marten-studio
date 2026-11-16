@@ -20,6 +20,7 @@
     private bool addressScopeApplied;
     private bool locationSubscribed;
     private bool interactive;
+    private bool disposed;
 
     /// <summary>
     /// Whether the page on screen is the database's (D34), as the layout found it from the matched page's assembly and never from the
@@ -42,6 +43,11 @@
     protected override async Task OnInitializedAsync()
     {
         State.ScopeChanged += OnScopeChanged;
+
+        // The answer outlives a layout (it is the circuit's), and a layout is re-created when the matched page goes to "Not found" and back
+        // (StudioRoutes renders the two through different branches): the new host's gate must show the spinner until this host has answered,
+        // never the previous host's answer. A no-op on a fresh circuit, and after the subscription, which stays first.
+        Access.Set(ScopeAccess.Unknown);
         wasActive = Active;
 
         // The scope travels in the query string so a pasted link reopens the same thing (plan D9).
@@ -95,7 +101,7 @@
 
         if (!previous && Active && initialized)
         {
-            Access.Set(ScopeAccess.Unknown);
+            SetAccess(ScopeAccess.Unknown);
             _ = InvokeAsync(UpdateAccessAfterLeavingModuleAsync);
         }
     }
@@ -202,7 +208,7 @@
         catch (Exception e) when (e is not OperationCanceledException)
         {
             Logger.LogDebug(e, "The studio could not ask the scope policy after a module's page; the page stays closed");
-            Access.Set(ScopeAccess.Denied);
+            SetAccess(ScopeAccess.Denied);
         }
     }
 
@@ -239,13 +245,25 @@
         {
             // Nothing to be about. The page renders and says so for itself, which is the honest answer
             // both when no Marten store is registered and when the visitor may see none of them.
-            Access.Set(ScopeAccess.Granted);
+            SetAccess(ScopeAccess.Granted);
             return;
         }
 
-        Access.Set(await Authorization.IsAuthorizedAsync(scope)
+        SetAccess(await Authorization.IsAuthorizedAsync(scope)
             ? ScopeAccess.Granted
             : ScopeAccess.Denied);
+    }
+
+    /// <summary>
+    /// Writes the circuit's answer - unless this host has been disposed: the answer belongs to the circuit, a layout that is re-created
+    /// leaves the old host's policy question in flight, and its late answer must not overwrite the new host's.
+    /// </summary>
+    private void SetAccess(ScopeAccess access)
+    {
+        if (!disposed)
+        {
+            Access.Set(access);
+        }
     }
 
     private async Task OnScopeChanged()
@@ -318,6 +336,7 @@
 
     public void Dispose()
     {
+        disposed = true;
         State.ScopeChanged -= OnScopeChanged;
 
         if (locationSubscribed)

@@ -1,18 +1,11 @@
-@using PostgresStudio.Services
-@using PostgresStudio.Services.Health
 @using PostgresStudio.Services.Live
 @using PostgresStudio.Services.Settings
 @implements IAsyncDisposable
 @inject NavigationManager Navigation
-@inject IStudioSettings Settings
-@inject StudioDescriptor Descriptor
+@inject IShellSettings Settings
 @inject StudioShellDescriptor Shell
-@inject StudioState State
-@inject StudioPreferences Preferences
-@inject INavIndicatorService Indicators
+@inject IEnumerable<IStudioModuleRail> Rails
 @inject StudioLiveUpdatesFactory LiveFactory
-@inject HealthMutes HealthMutes
-@inject HealthAlerts HealthAlerts
 @inject IJSRuntime JsRuntime
 
 @*
@@ -37,7 +30,7 @@
             {
                 <li class="ms-sidebar-section" @key="section.Title">@section.Title</li>
 
-                @foreach (StudioNavItem item in section.Items.Where(Shown))
+                @foreach (StudioNavItem item in section.Items.Where(entry => Shown(section, entry)))
                 {
                     <li class="ms-nav-item" @key="item.Label">
                         @if (item.Route is null)
@@ -116,10 +109,11 @@
     /// <summary>
     /// Whether an entry is drawn: every one whose descriptor has no condition, and otherwise what the condition says -
     /// MartenStudio's Dead letters entry is absent while the host hides <c>DeadLetterEvent</c>, failing closed, as a
-    /// hidden document type is absent (D27) and the page it would link to says why if it is reached by its address.
+    /// hidden document type is absent (D27) and the page it would link to says why if it is reached by its address - and
+    /// then what the entry's module says of it, when the module has a rail.
     /// </summary>
-    private bool Shown(StudioNavItem item) =>
-        (item.IsShown is null || item.IsShown(Settings)) && (item.IsShownInScope is null || item.IsShownInScope(State));
+    private bool Shown(StudioNavSection section, StudioNavItem item) =>
+        (item.IsShown is null || item.IsShown(Settings)) && (RailOf(section)?.IsShown(item) ?? true);
 
     private readonly CancellationTokenSource cancellation = new();
 
@@ -130,25 +124,40 @@
     /// <c>StudioLiveUpdates</c> is <c>IAsyncDisposable</c>, so a transient registration would leave the
     /// circuit's container holding one per navigation for the life of the circuit. This component owns
     /// the loop and disposes it. It is a second loop beside the current page's, which costs one extra
-    /// visibility watcher and one cached read per interval: the snapshot cache behind
-    /// <see cref="INavIndicatorService" /> is what keeps it from being a second pair of queries.
+    /// visibility watcher and one cached read per interval: the snapshot cache behind the badges' reader
+    /// is what keeps it from being a second pair of queries.
     /// </remarks>
     private StudioLiveUpdates? live;
 
-    private NavIndicators indicators = NavIndicators.None;
+    /// <summary>The rails of the composed modules that have one (D34): the module's links, its entries' conditions and its badges.</summary>
+    private IStudioModuleRail[] rails = [];
+
+    /// <summary>
+    /// What each rail last read, and every rail's together by badge key. The poll runs on the thread pool and a scope change on the renderer,
+    /// and both write them, so they are written under the lock and the merged answer is replaced whole.
+    /// </summary>
+    private readonly Dictionary<IStudioModuleRail, IReadOnlyDictionary<string, StudioNavBadge>> railBadges = [];
+    private readonly Lock badgesGate = new();
+    private volatile IReadOnlyDictionary<string, StudioNavBadge> badges = new Dictionary<string, StudioNavBadge>(StringComparer.Ordinal);
+
     private string? currentRelativePath;
     private bool started;
     private bool disposed;
 
     protected override async Task OnInitializedAsync()
     {
+        rails = [.. Rails];
+
         UpdateCurrentRelativePath(Navigation.Uri);
         Navigation.LocationChanged += OnLocationChanged;
-        State.ScopeChanged += OnScopeChangedAsync;
-        State.LinkScopeChanged += OnLinkScopeChanged;
-        HealthMutes.Changed += OnHealthMutesChangedAsync;
 
-        await RefreshIndicatorsAsync(cancellation.Token);
+        foreach (IStudioModuleRail rail in rails)
+        {
+            rail.Changed += OnRailChangedAsync;
+            rail.LinksChanged += OnRailLinksChanged;
+        }
+
+        await RefreshBadgesAsync(cancellation.Token);
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -160,13 +169,13 @@
 
         started = true;
 
-        // The browser's muted findings, once per circuit - a JS call, not a query - so the health badge counts
-        // only what this browser has not muted. Its Changed event re-reads the badge.
-        await HealthMutes.LoadAsync(JsRuntime, cancellation.Token);
-
-        // The first interactive look at the health glance only takes note of what is already Critical: those
-        // are on screen already, and a toast saying they just appeared would be false.
-        await HealthAlerts.ObserveAsync(State.ActiveScope, indicators.Health);
+        // Each rail's first interactive work, once: what a module keeps in the browser, and its first look at what is already on screen.
+        // The token is read here, before the awaits.
+        CancellationToken token = cancellation.Token;
+        foreach (IStudioModuleRail rail in rails)
+        {
+            await rail.StartAsync(JsRuntime, token);
+        }
 
         // Leaving (the circuit ending) during the reads above disposes the menu under the awaits: its token source is gone (reading
         // its token throws ObjectDisposedException), and a loop started now would be one nothing disposes.
@@ -182,26 +191,19 @@
         await live.StartAsync(Settings.RefreshInterval, TickAsync, cancellation.Token);
     }
 
-    // The poll runs on the thread pool and a scope change on the renderer, and both write `indicators`. So each hands the
-    // toast the glance of the read it made itself, never the shared field, together with the scope the visitor is on now;
-    // HealthAlerts ignores a glance stamped with any other scope, so a read that the scope outran is not a first look.
     private async Task TickAsync(CancellationToken cancellationToken)
     {
-        if (await RefreshIndicatorsAsync(cancellationToken) is { } read)
-        {
-            await HealthAlerts.ObserveAsync(State.ActiveScope, read.Health);
-        }
-
+        await RefreshBadgesAsync(cancellationToken);
         await InvokeAsync(StateHasChanged);
     }
 
     /// <summary>
-    /// Redraws the rail's links at once when the scope they carry moves (1.2). <see cref="StudioState.ScopeChanged" /> is awaited
-    /// one handler after another, the shell's first, so by the time this component's handler runs the scope has been the new one
-    /// for a policy read; the visitor who clicks a link in that time must get the new scope's, and it is this synchronous event
-    /// that raises the render - before anything is awaited - from the scope being applied.
+    /// Redraws the rail's links at once when the scope they carry moves (1.2). The scope's change is awaited one handler after another,
+    /// the shell's first, so by the time this component's handler runs the scope has been the new one for a policy read; the visitor who
+    /// clicks a link in that time must get the new scope's, and it is this synchronous event that raises the render - before anything is
+    /// awaited - from the scope being applied.
     /// </summary>
-    private void OnLinkScopeChanged()
+    private void OnRailLinksChanged()
     {
         if (disposed)
         {
@@ -211,138 +213,77 @@
         _ = InvokeAsync(StateHasChanged);
     }
 
-    private async Task OnScopeChangedAsync()
-    {
-        // Before the indicator read: the links and the scope-dependent entries (Stores, Tenants) are drawn from state that is
-        // already the new scope's, and a round trip to the indicator service is no reason to leave them stale.
-        if (!disposed)
-        {
-            _ = InvokeAsync(StateHasChanged);
-        }
-
-        NavIndicators? read = await RefreshIndicatorsAsync(cancellation.Token);
-
-        if (started && read is not null)
-        {
-            await HealthAlerts.ObserveAsync(State.ActiveScope, read.Health);
-        }
-
-        await InvokeAsync(StateHasChanged);
-    }
-
-    private async Task OnHealthMutesChangedAsync()
+    private async Task OnRailChangedAsync()
     {
         if (disposed)
         {
             return;
         }
 
-        await RefreshIndicatorsAsync(cancellation.Token);
+        // Before the read: the links and the scope-dependent entries (Stores, Tenants) are drawn from state that is
+        // already the new scope's, and a round trip to the badges' reader is no reason to leave them stale.
+        _ = InvokeAsync(StateHasChanged);
+
+        await RefreshBadgesAsync(cancellation.Token);
         await InvokeAsync(StateHasChanged);
     }
 
     /// <summary>
-    /// Reads the indicators for the active scope, treats every failure as "no badge", and answers what it read - or
-    /// <see langword="null" /> when the read was cancelled or the scope changed while it was in flight.
+    /// Reads every rail's badges and merges them by key. A rail that answers <see langword="null" /> - its read was cancelled, or the scope
+    /// outran it - keeps the badges it last answered: a read the scope outran is not drawn, because the scope change that outran it starts a
+    /// read of its own, and a badge of the old database's counts under the new one would be wrong until the next poll.
     /// </summary>
-    /// <remarks>
-    /// <para>
-    /// The service already answers <c>NavIndicators.None</c> rather than throwing; this is the second
-    /// belt, because the one thing the navigation must never do is stop rendering.
-    /// </para>
-    /// <para>
-    /// A read the scope outran is not drawn: the scope change that outran it starts a read of its own for the new
-    /// scope, and a badge of the old database's counts under the new one would be wrong until the next poll.
-    /// </para>
-    /// </remarks>
-    private async Task<NavIndicators?> RefreshIndicatorsAsync(CancellationToken cancellationToken)
+    private async Task RefreshBadgesAsync(CancellationToken cancellationToken)
     {
-        StudioScope? readFor = State.ActiveScope;
-        NavIndicators read;
+        foreach (IStudioModuleRail rail in rails)
+        {
+            if (await rail.ReadBadgesAsync(cancellationToken) is not { } read)
+            {
+                continue;
+            }
 
-        try
-        {
-            read = await Indicators.ReadAsync(cancellationToken);
-        }
-        catch (OperationCanceledException)
-        {
-            return null;
-        }
-        catch (Exception)
-        {
-            read = NavIndicators.None;
-        }
+            lock (badgesGate)
+            {
+                railBadges[rail] = read;
 
-        if (State.ActiveScope != readFor)
-        {
-            return null;
-        }
+                Dictionary<string, StudioNavBadge> merged = new(StringComparer.Ordinal);
+                foreach (IStudioModuleRail each in rails)
+                {
+                    if (railBadges.TryGetValue(each, out IReadOnlyDictionary<string, StudioNavBadge>? answered))
+                    {
+                        foreach ((string key, StudioNavBadge badge) in answered)
+                        {
+                            merged.TryAdd(key, badge);
+                        }
+                    }
+                }
 
-        indicators = read;
-        return read;
+                badges = merged;
+            }
+        }
     }
 
-    /// <summary>
-    /// The badge an entry wears right now, or <see langword="null" /> for none: the health glance, drawn here, or the
-    /// badge the indicator service read for the entry's key.
-    /// </summary>
-    private StudioNavBadge? BadgeFor(string? key) => key switch
-    {
-        null => null,
+    /// <summary>The badge an entry wears right now, or <see langword="null" /> for none: what its module's rail read for the entry's key.</summary>
+    private StudioNavBadge? BadgeFor(string? key) =>
+        key is not null && badges.TryGetValue(key, out StudioNavBadge? badge) ? badge : null;
 
-        // A count of what this visitor may see, coloured by the worst of it. Findings they are not shown are said in
-        // the tooltip and never counted or drawn on their own: their severity is the gate's to withhold, and a badge
-        // that cannot say how bad would sit on every page of a host whose visitors are short of a gate. An absent badge
-        // is no claim that all is well; the Health page and the Overview say what is withheld.
-        StudioNavBadgeKeys.Health => indicators.Health is { Worst: not null } health
-            ? new StudioNavBadge(
-                (health.Critical + health.Warning).ToString("N0", System.Globalization.CultureInfo.InvariantCulture),
-                health.Critical > 0 ? "ms-nav-badge-danger" : "ms-nav-badge-warning",
-                HealthBadgeTitle(health))
-            : null,
-
-        _ => indicators.Badges.TryGetValue(key, out StudioNavBadge? badge) ? badge : null,
-    };
-
-    /// <summary>The health badge's tooltip and accessible name: what it counts, what it leaves out, and as of when.</summary>
-    private string HealthBadgeTitle(HealthGlance health)
-    {
-        List<string> parts = [];
-
-        if (health.Critical > 0)
-        {
-            parts.Add(health.Critical == 1 ? "1 critical finding" : $"{health.Critical:N0} critical findings");
-        }
-
-        if (health.Warning > 0)
-        {
-            parts.Add(health.Warning == 1 ? "1 warning" : $"{health.Warning:N0} warnings");
-        }
-
-        string withheld = health.Withheld switch
-        {
-            0 => string.Empty,
-            1 => ", and 1 finding not shown to you",
-            _ => $", and {health.Withheld:N0} findings not shown to you",
-        };
-
-        return string.Join(" and ", parts) + withheld + ", as of " + Preferences.FormatInSelectedTimeZone(health.MeasuredAt, "HH:mm");
-    }
-
-    /// <summary>
-    /// The rail's href for a page: the page, carrying the scope the studio is about (1.2). A rail click is a client-side navigation, and
-    /// an address without <c>store=&amp;db=</c> would show the previous scope's page under no scope until the shell rewrote it. Read at
-    /// render, and the rail renders again on every location change and, synchronously, whenever the scope its links carry moves
-    /// (<see cref="StudioState.LinkScopeChanged" />), so it is never older than the address. The scope is
-    /// <see cref="StudioState.LinkScope" />: the one being applied while the catalog is read (a pasted address, a picker just
-    /// moved), else the active one.
-    /// </summary>
-    private string Link(StudioNavSection section, string subPath) =>
+    /// <summary>The rail of the module that contributed <paramref name="section" />, or <see langword="null" /> for a module with none.</summary>
+    private IStudioModuleRail? RailOf(StudioNavSection section) =>
         section.ModuleKey is null
-            ? StudioScopeQuery.Append(StudioLink.To(Settings, subPath), State.LinkScope, Descriptor.SourceQueryParameter)
+            ? null
+            : rails.FirstOrDefault(rail => string.Equals(rail.ModuleKey, section.ModuleKey, StringComparison.Ordinal));
 
-            // A module's link names no host scope (D34): its pages are about their own, and the host's waits in memory.
-            : StudioLink.To(Settings, subPath);
+    /// <summary>
+    /// The rail's href for a page: what its module's links carry (the database's: the scope the studio is about, 1.2), or the bare link of a
+    /// module with no rail (D34: its pages are about their own scope, and the host's waits in memory). Read at render, and the rail renders
+    /// again on every location change and, synchronously, whenever the links change (<see cref="IStudioModuleRail.LinksChanged" />), so it is
+    /// never older than the address.
+    /// </summary>
+    private string Link(StudioNavSection section, string subPath)
+    {
+        string href = StudioLink.To(Settings, subPath);
+        return RailOf(section) is { } rail ? rail.Decorate(href) : href;
+    }
 
     private void UpdateCurrentRelativePath(string uri)
     {
@@ -408,9 +349,12 @@
         disposed = true;
 
         Navigation.LocationChanged -= OnLocationChanged;
-        State.ScopeChanged -= OnScopeChangedAsync;
-        State.LinkScopeChanged -= OnLinkScopeChanged;
-        HealthMutes.Changed -= OnHealthMutesChangedAsync;
+
+        foreach (IStudioModuleRail rail in rails)
+        {
+            rail.Changed -= OnRailChangedAsync;
+            rail.LinksChanged -= OnRailLinksChanged;
+        }
 
         try
         {
