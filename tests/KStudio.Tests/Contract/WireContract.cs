@@ -569,7 +569,10 @@ public abstract class WireContract
         {
             WireReadOutcome.Record record => "record@" + record.Value.Offset,
             WireReadOutcome.PartitionEnd end => "end@" + end.Offset,
-            WireReadOutcome.Failure failure => "failure:" + failure.Error.Code,
+            // The partition and, where the error carries one, the position: "failure:OffsetOutOfRange" alone does not say which read stalled.
+            WireReadOutcome.Failure failure => "failure:" + failure.Error.Code
+                + (failure.Partition is { } partition ? $"({partition.Topic}[{partition.Partition}])" : string.Empty)
+                + (failure.Error is WireError.OffsetOutOfRange { Position: { } position } ? "@" + position : string.Empty),
             _ => x.GetType().Name,
         }));
 }
