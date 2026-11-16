@@ -181,7 +181,7 @@ Phase A changes no package, no public type and no word. It can ship in any relea
 - [x] 3. Add `IShellSettings` under `IStudioSettings` and switch the files of the left column above to it.
 - [x] 4. Split `StudioDescriptor` into the shell's and the database's; `StudioModuleComposition` composes the shell's from
       modules only.
-- [ ] 5. Extend `IStudioModule` (`ScopeGate`, `HeaderSearch`, `HomeRoute`, `IsRoot`) and add `DatabaseStudioModule` in
+- [x] 5. Extend `IStudioModule` (`ScopeGate`, `HeaderSearch`, `HomeRoute`, `IsRoot`) and add `DatabaseStudioModule` in
       `PostgresStudio`, built from either descriptor. Move the layout's scope gate and address rewrite into its
       `ScopeGate` component.
 - [ ] 6. Give the database's audit entries a scope kind and register its `IStudioAuditScopeGate`; the ring has no default
