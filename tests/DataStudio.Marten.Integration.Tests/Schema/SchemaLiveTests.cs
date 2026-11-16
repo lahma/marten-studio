@@ -1,0 +1,472 @@
+using DataStudio.Services;
+using DataStudio.Postgres.Services.Database;
+using DataStudio.Marten.Services.Schema;
+
+using Microsoft.Extensions.DependencyInjection;
+using DataStudio.Postgres.Services;
+using DataStudio.Postgres.Services.Schema;
+
+namespace DataStudio.Marten.Integration.Tests.Schema;
+
+/// <summary>
+/// The Schema screen against a real Postgres, driven through <c>ISchemaDataService</c> so that the
+/// capability gate, the write policy and the audit log are exercised rather than bypassed.
+/// </summary>
+/// <remarks>
+/// Every test owns a schema, because two of them change the database and the order test methods run in
+/// is not something to depend on.
+/// </remarks>
+public class SchemaLiveTests(PostgresFixture fixture)
+{
+    [PostgresFact]
+    public async Task A_database_that_matches_its_configuration_reports_a_match()
+    {
+        await using SchemaFixture schema = await Start(nameof(A_database_that_matches_its_configuration_reports_a_match));
+
+        SchemaCheck check = await schema.Studio.SchemaAsync(x => x.CheckAsync(SchemaFixture.Scope));
+
+        check.Status.Should().Be(SchemaCheckStatus.Matches);
+        check.DifferenceCount.Should().Be(0);
+        check.Objects.Should().BeEmpty();
+        check.Schemas.Should().Contain(schema.Schema).And.Contain(schema.EventSchema);
+        check.AssertionMessage.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [PostgresFact]
+    public async Task An_index_added_to_the_configuration_shows_as_a_difference_and_in_the_preview_SQL()
+    {
+        await using SchemaFixture schema = await Start(nameof(An_index_added_to_the_configuration_shows_as_a_difference_and_in_the_preview_SQL));
+
+        SchemaFixture.StudioHost drifted = schema.Drifted();
+
+        SchemaCheck check = await drifted.SchemaAsync(x => x.CheckAsync(SchemaFixture.Scope));
+        check.Status.Should().Be(SchemaCheckStatus.Differences);
+        check.DifferenceCount.Should().BeGreaterThan(0);
+        check.Objects.Should().Contain(x => x.Name.Contains("mt_doc_customer", StringComparison.Ordinal));
+
+        MigrationPreview preview = await drifted.SchemaAsync(x => x.PreviewAsync(SchemaFixture.Scope));
+        preview.HasSql.Should().BeTrue();
+        preview.Sql.Should().Contain(SchemaFixture.DriftIndexName);
+        preview.ObjectCount.Should().BeGreaterThan(0);
+    }
+
+    /// <summary>Acceptance: the preview reads the catalog and writes to a string. It changes nothing.</summary>
+    [PostgresFact]
+    public async Task Previewing_a_migration_leaves_the_database_exactly_as_it_was()
+    {
+        await using SchemaFixture schema = await Start(nameof(Previewing_a_migration_leaves_the_database_exactly_as_it_was));
+
+        IReadOnlyList<string> before = await schema.IndexNamesAsync("mt_doc_customer");
+
+        SchemaFixture.StudioHost drifted = schema.Drifted();
+        MigrationPreview preview = await drifted.SchemaAsync(x => x.PreviewAsync(SchemaFixture.Scope));
+
+        preview.Sql.Should().Contain(SchemaFixture.DriftIndexName);
+
+        IReadOnlyList<string> after = await schema.IndexNamesAsync("mt_doc_customer");
+
+        after.Should().Equal(before);
+        after.Should().NotContain(SchemaFixture.DriftIndexName);
+    }
+
+    [PostgresFact]
+    public async Task Applying_creates_the_index_and_writes_the_SQL_to_the_audit_log()
+    {
+        await using SchemaFixture schema = await Start(nameof(Applying_creates_the_index_and_writes_the_SQL_to_the_audit_log));
+
+        SchemaFixture.StudioHost drifted = schema.Drifted(options =>
+        {
+            options.Capabilities = MartenStudioCapabilities.All();
+            options.WriteAuthorizationPolicy = SchemaFixture.AllowPolicy;
+        });
+
+        string identity = await drifted.SchemaAsync(x => x.DatabaseIdentityAsync(SchemaFixture.Scope));
+        identity.Should().NotBeNullOrWhiteSpace();
+
+        SchemaApplyResult result = await drifted.SchemaAsync(x => x.ApplyAsync(SchemaFixture.Scope, identity));
+
+        result.Succeeded.Should().BeTrue(result.Message);
+
+        IReadOnlyList<string> after = await schema.IndexNamesAsync("mt_doc_customer");
+        after.Should().Contain(SchemaFixture.DriftIndexName);
+
+        // The database now matches the drifted configuration.
+        SchemaCheck check = await drifted.SchemaAsync(x => x.CheckAsync(SchemaFixture.Scope));
+        check.Status.Should().Be(SchemaCheckStatus.Matches);
+
+        // Audit ring: the action, the capability, and the SQL that ran.
+        StudioActionLogEntry entry = drifted.Audit.GetLatest()
+            .First(x => x.Action == "Apply schema changes" && x.Succeeded);
+
+        entry.Capability.Should().Be(nameof(StudioCapability.ApplySchemaChanges));
+        entry.Message.Should().Contain(SchemaFixture.DriftIndexName);
+
+        // And event 9206, which is the record that survives the process.
+        SchemaFixture.StudioHost.LogEntries
+            .Where(x => x.EventId == 9206)
+            .Should().Contain(x => x.Message.Contains(SchemaFixture.DriftIndexName, StringComparison.Ordinal),
+                "event 9206 carries the SQL that was applied");
+    }
+
+    [PostgresFact]
+    public async Task Applying_is_refused_without_the_capability_and_the_refusal_names_the_option()
+    {
+        await using SchemaFixture schema = await Start(nameof(Applying_is_refused_without_the_capability_and_the_refusal_names_the_option));
+
+        SchemaFixture.StudioHost drifted = schema.Drifted();
+        string identity = await drifted.SchemaAsync(x => x.DatabaseIdentityAsync(SchemaFixture.Scope));
+
+        Func<Task> apply = () => drifted.SchemaAsync(x => x.ApplyAsync(SchemaFixture.Scope, identity));
+
+        StudioCapabilityDeniedException denied = (await apply.Should().ThrowAsync<StudioCapabilityDeniedException>()).Which;
+        denied.Capability.Should().Be(StudioCapability.ApplySchemaChanges);
+        denied.Message.Should().Contain("MartenStudioOptions.Capabilities.ApplySchemaChanges");
+
+        (await schema.IndexNamesAsync("mt_doc_customer")).Should().NotContain(SchemaFixture.DriftIndexName);
+    }
+
+    [PostgresFact]
+    public async Task Applying_is_refused_when_the_write_policy_says_no_even_with_the_capability_on()
+    {
+        await using SchemaFixture schema = await Start(nameof(Applying_is_refused_when_the_write_policy_says_no_even_with_the_capability_on));
+
+        SchemaFixture.StudioHost drifted = schema.Drifted(options =>
+        {
+            options.Capabilities = MartenStudioCapabilities.All();
+            options.WriteAuthorizationPolicy = SchemaFixture.DenyPolicy;
+        });
+
+        string identity = await drifted.SchemaAsync(x => x.DatabaseIdentityAsync(SchemaFixture.Scope));
+
+        Func<Task> apply = () => drifted.SchemaAsync(x => x.ApplyAsync(SchemaFixture.Scope, identity));
+
+        await apply.Should().ThrowAsync<StudioNotAuthorizedException>();
+
+        (await schema.IndexNamesAsync("mt_doc_customer")).Should().NotContain(SchemaFixture.DriftIndexName);
+    }
+
+    [PostgresFact]
+    public async Task Applying_is_refused_when_the_typed_confirmation_does_not_match_the_database()
+    {
+        await using SchemaFixture schema = await Start(nameof(Applying_is_refused_when_the_typed_confirmation_does_not_match_the_database));
+
+        SchemaFixture.StudioHost drifted = schema.Drifted(options => options.Capabilities = MartenStudioCapabilities.All());
+
+        Func<Task> apply = () => drifted.SchemaAsync(x => x.ApplyAsync(SchemaFixture.Scope, "not-the-database"));
+
+        await apply.Should().ThrowAsync<InvalidOperationException>();
+
+        (await schema.IndexNamesAsync("mt_doc_customer")).Should().NotContain(SchemaFixture.DriftIndexName);
+    }
+
+    /// <summary>
+    /// P7-fix B2. The old advice said <c>CreateOrUpdate</c> left an undeclared index alone and only
+    /// <c>AutoCreate.All</c> would drop it. Weasel's <c>TableDelta.WriteUpdate</c> emits
+    /// <c>drop index</c> for every index in <c>Indexes.Extras</c> and reports the table as
+    /// <c>Update</c> - which is what <c>CreateOrUpdate</c> allows. This runs the whole thing: a hand-made
+    /// index, a preview that names the drop, the dialog's destructive list, and an apply that really
+    /// does drop it.
+    /// </summary>
+    [PostgresFact]
+    public async Task An_index_the_configuration_does_not_declare_is_dropped_by_an_apply_and_the_preview_says_so()
+    {
+        await using SchemaFixture schema = await Start(nameof(An_index_the_configuration_does_not_declare_is_dropped_by_an_apply_and_the_preview_says_so));
+
+        const string HandMade = "hand_rolled_customer_name_idx";
+        await schema.CreateIndexAsync(HandMade, "mt_doc_customer", "name");
+
+        (await schema.IndexNamesAsync("mt_doc_customer")).Should().Contain(HandMade);
+
+        SchemaFixture.StudioHost host = schema.Drifted(options =>
+        {
+            options.Capabilities = MartenStudioCapabilities.All();
+            options.WriteAuthorizationPolicy = SchemaFixture.AllowPolicy;
+        });
+
+        // The Indexes tab says it, in the words that matter.
+        SchemaIndexes indexes = await host.SchemaAsync(x => x.IndexesAsync(SchemaFixture.Scope));
+        IndexInfo handMade = indexes.Indexes.Single(x => x.Name == HandMade);
+
+        handMade.DeclaredByMarten.Should().BeFalse();
+        handMade.OnMartenTable.Should().BeTrue();
+        handMade.WouldBeDropped.Should().BeTrue();
+        indexes.WouldBeDroppedCount.Should().BeGreaterThanOrEqualTo(1);
+        handMade.Suggestion.Should().Be(IndexAdvice.UndeclaredSuggestion);
+
+        // The preview says it, and the dialog's destructive block is built from exactly this.
+        MigrationPreview preview = await host.SchemaAsync(x => x.PreviewAsync(SchemaFixture.Scope));
+
+        preview.Sql.Should().Contain("drop index", "Weasel writes one for every index it calls an extra");
+        preview.Sql.Should().Contain(HandMade);
+        preview.IsDestructive.Should().BeTrue();
+        preview.DestructiveStatements.Should().Contain(x =>
+            x.Kind == "drops an index" && x.Statement.Contains(HandMade, StringComparison.Ordinal));
+
+        // And the apply does it, under CreateOrUpdate.
+        string identity = await host.SchemaAsync(x => x.DatabaseIdentityAsync(SchemaFixture.Scope));
+        SchemaApplyResult result = await host.SchemaAsync(x => x.ApplyAsync(SchemaFixture.Scope, identity));
+
+        result.Succeeded.Should().BeTrue(result.Message);
+
+        IReadOnlyList<string> after = await schema.IndexNamesAsync("mt_doc_customer");
+        after.Should().NotContain(HandMade, "AutoCreate.CreateOrUpdate is not additive");
+        after.Should().Contain(SchemaFixture.DriftIndexName, "and the declared one was created in the same run");
+    }
+
+    /// <summary>
+    /// P7-fix B2, the other half: an index the host told Marten to ignore survives the same apply.
+    /// </summary>
+    [PostgresFact]
+    public async Task An_index_named_in_IgnoreIndex_survives_the_apply_and_is_not_flagged()
+    {
+        await using SchemaFixture schema = await Start(nameof(An_index_named_in_IgnoreIndex_survives_the_apply_and_is_not_flagged));
+
+        const string Kept = "kept_customer_name_idx";
+        await schema.CreateIndexAsync(Kept, "mt_doc_customer", "name");
+
+        SchemaFixture.StudioHost host = schema.Drifted(
+            options =>
+            {
+                options.Capabilities = MartenStudioCapabilities.All();
+                options.WriteAuthorizationPolicy = SchemaFixture.AllowPolicy;
+            },
+            ignoredIndex: Kept);
+
+        SchemaIndexes indexes = await host.SchemaAsync(x => x.IndexesAsync(SchemaFixture.Scope));
+        IndexInfo kept = indexes.Indexes.Single(x => x.Name == Kept);
+
+        kept.IgnoredByConfiguration.Should().BeTrue();
+        kept.WouldBeDropped.Should().BeFalse();
+        kept.Suggestion.Should().Be(IndexAdvice.IgnoredSuggestion);
+
+        MigrationPreview preview = await host.SchemaAsync(x => x.PreviewAsync(SchemaFixture.Scope));
+        preview.Sql.Should().NotContain(Kept);
+
+        string identity = await host.SchemaAsync(x => x.DatabaseIdentityAsync(SchemaFixture.Scope));
+        SchemaApplyResult result = await host.SchemaAsync(x => x.ApplyAsync(SchemaFixture.Scope, identity));
+
+        result.Succeeded.Should().BeTrue(result.Message);
+        (await schema.IndexNamesAsync("mt_doc_customer")).Should().Contain(Kept);
+    }
+
+    /// <summary>
+    /// P7-fix follow-up 1. The token an apply arrived with belongs to a Blazor circuit, and a closed tab
+    /// cancelling it mid-migration left the schema in neither shape and wrote no audit entry, because the
+    /// rethrow came before <c>audit.Record</c>. The apply now runs on a token of its own from the moment
+    /// the typed confirmation passes, so a circuit that goes away after the authorization gate does not
+    /// abandon it.
+    /// </summary>
+    [PostgresFact]
+    public async Task A_circuit_that_goes_away_after_the_gate_does_not_abandon_the_apply()
+    {
+        await using SchemaFixture schema = await Start(nameof(A_circuit_that_goes_away_after_the_gate_does_not_abandon_the_apply));
+
+        SchemaFixture.StudioHost host = schema.Drifted(options =>
+        {
+            options.Capabilities = MartenStudioCapabilities.All();
+            options.WriteAuthorizationPolicy = SchemaFixture.AllowAndSignalPolicy;
+        });
+
+        string identity = await host.SchemaAsync(x => x.DatabaseIdentityAsync(SchemaFixture.Scope));
+
+        using var circuit = new CancellationTokenSource();
+
+        // Fires inside the write-authorization check, which is the last step that still honours the
+        // caller's token. Everything after it - the rendered script and the migration itself - is the
+        // studio's own operation. The scope names the database by its identity, as a page's does: an empty
+        // db id is asked about twice, as spelled and then by the identity it matched (SEC-fix F1), and the
+        // hook would fire on the first ask, before the gate has passed.
+        SchemaFixture.OnAuthorized = circuit.Cancel;
+        StudioScope named = SchemaFixture.Scope with { DatabaseId = identity };
+
+        try
+        {
+            SchemaApplyResult result = await host.SchemaAsync(
+                x => x.ApplyAsync(named, identity, circuit.Token));
+
+            result.Succeeded.Should().BeTrue(result.Message);
+        }
+        finally
+        {
+            SchemaFixture.OnAuthorized = null;
+        }
+
+        circuit.IsCancellationRequested.Should().BeTrue("the test's own hook cancelled it");
+
+        (await schema.IndexNamesAsync("mt_doc_customer")).Should().Contain(SchemaFixture.DriftIndexName);
+
+        StudioActionLogEntry entry = host.Audit.GetLatest()
+            .First(x => x.Action == "Apply schema changes" && x.Succeeded);
+
+        entry.Message.Should().Contain(SchemaFixture.DriftIndexName,
+            "the outcome is audited whatever the circuit did");
+    }
+
+    [PostgresFact]
+    public async Task A_refused_typed_confirmation_is_audited_as_a_failure()
+    {
+        await using SchemaFixture schema = await Start(nameof(A_refused_typed_confirmation_is_audited_as_a_failure));
+
+        SchemaFixture.StudioHost drifted = schema.Drifted(options => options.Capabilities = MartenStudioCapabilities.All());
+
+        Func<Task> apply = () => drifted.SchemaAsync(x => x.ApplyAsync(SchemaFixture.Scope, "not-the-database"));
+
+        await apply.Should().ThrowAsync<InvalidOperationException>();
+
+        StudioActionLogEntry entry = drifted.Audit.GetLatest()
+            .First(x => x.Action == "Apply schema changes" && !x.Succeeded);
+
+        entry.Message.Should().Contain("typed confirmation");
+        entry.Capability.Should().Be(nameof(StudioCapability.ApplySchemaChanges));
+    }
+
+    [PostgresFact]
+    public async Task The_tables_tab_lists_the_document_tables_with_their_sizes_and_row_estimates()
+    {
+        await using SchemaFixture schema = await Start(nameof(The_tables_tab_lists_the_document_tables_with_their_sizes_and_row_estimates));
+
+        SchemaTables tables = await schema.Studio.SchemaAsync(x => x.TablesAsync(SchemaFixture.Scope));
+
+        tables.Reason.Should().BeNull();
+        tables.Schemas.Should().Contain(schema.Schema);
+        tables.DatabaseBytes.Should().BeGreaterThan(0);
+
+        TableStats customer = tables.Tables.Single(x => x.Table == "mt_doc_customer");
+        customer.Schema.Should().Be(schema.Schema);
+        customer.CollectionAlias.Should().Be("customer");
+        customer.DocumentTypeName.Should().Be(nameof(SchemaCustomer));
+        customer.TotalBytes.Should().BeGreaterThan(0);
+        customer.Ownership.Owner.Should().Be(DatabaseObjectOwner.MartenDocument);
+        customer.OwnedByThisStore.Should().BeTrue();
+        customer.IsPartitioned.Should().BeFalse();
+
+        // reltuples is -1 until the table has been analyzed, which is a value and not an error (D8).
+        customer.EstimatedRows.Should().BeGreaterThanOrEqualTo(-1);
+
+        tables.Tables.Should().Contain(x => x.Table == "mt_doc_order" && x.CollectionAlias == "order");
+
+        // The event store's tables, by the database browser's classification rather than by the schema
+        // they live in (DB-7).
+        tables.Tables.Where(x => x.Table is "mt_events" or "mt_streams").Should().HaveCount(2)
+            .And.OnlyContain(x => x.Ownership.Owner == DatabaseObjectOwner.MartenEventStore && x.IsEventTable);
+
+        // No capability, so nothing past the store's own structure - and nothing here is anybody else's.
+        tables.Tables.Should().OnlyContain(x => x.Ownership.IsMarten);
+
+        // Sorted by total size, largest first.
+        tables.Tables.Select(x => x.TotalBytes).Should().BeInDescendingOrder();
+    }
+
+    [PostgresFact]
+    public async Task The_indexes_tab_flags_a_never_used_index_and_a_collection_with_only_a_primary_key()
+    {
+        await using SchemaFixture schema = await Start(nameof(The_indexes_tab_flags_a_never_used_index_and_a_collection_with_only_a_primary_key));
+
+        SchemaIndexes indexes = await schema.Studio.SchemaAsync(x => x.IndexesAsync(SchemaFixture.Scope));
+
+        indexes.Reason.Should().BeNull();
+        indexes.Indexes.Should().NotBeEmpty();
+
+        // Nothing has queried the store, so the duplicated-field index has no recorded scans.
+        IndexInfo email = indexes.Indexes.Single(x => x.Name == "mt_doc_customer_idx_email");
+        email.DeclaredByMarten.Should().BeTrue();
+        email.Scans.Should().Be(0);
+        email.CollectionAlias.Should().Be("customer");
+
+        // The primary keys are declared too, even though Marten keeps them on the table rather than in
+        // the index list - an Indexes tab that called every primary key undeclared would be useless.
+        indexes.Indexes.Where(x => x.IsPrimaryKey).Should().OnlyContain(x => x.DeclaredByMarten);
+
+        // Nothing is missing: the database was applied from this very configuration.
+        indexes.Missing.Should().BeEmpty();
+
+        UnindexedCollection note = indexes.Unindexed.Single(x => x.Alias == "note");
+        note.Suggestions.Should().Contain(x => x.Contains("GinIndexJsonData()", StringComparison.Ordinal));
+        note.Suggestions.Should().Contain(x => x.StartsWith("opts.Schema.For<SchemaNote>().Index(", StringComparison.Ordinal));
+    }
+
+    [PostgresFact]
+    public async Task The_indexes_tab_reports_an_index_the_configuration_asks_for_and_the_database_lacks()
+    {
+        await using SchemaFixture schema = await Start(nameof(The_indexes_tab_reports_an_index_the_configuration_asks_for_and_the_database_lacks));
+
+        SchemaFixture.StudioHost drifted = schema.Drifted();
+
+        SchemaIndexes indexes = await drifted.SchemaAsync(x => x.IndexesAsync(SchemaFixture.Scope));
+
+        indexes.Missing.Should().Contain(x => x.Name == SchemaFixture.DriftIndexName);
+        indexes.Missing.Single(x => x.Name == SchemaFixture.DriftIndexName).CollectionAlias.Should().Be("customer");
+    }
+
+    [PostgresFact]
+    public async Task The_functions_tab_lists_Martens_own_functions_with_their_definitions()
+    {
+        await using SchemaFixture schema = await Start(nameof(The_functions_tab_lists_Martens_own_functions_with_their_definitions));
+
+        SchemaFunctions functions = await schema.Studio.SchemaAsync(x => x.FunctionsAsync(SchemaFixture.Scope));
+
+        functions.Reason.Should().BeNull();
+        // Marten 9.35 no longer installs a per-document mt_upsert_<alias> function - the upsert is
+        // written inline by its generated code - so what is here is the shared helper set plus the event
+        // store's own functions. That is a fact about Marten rather than about the studio, and asserting
+        // it here is what will tell us if it ever changes back.
+        functions.Functions.Select(x => x.Name).Should()
+            .Contain("mt_immutable_timestamp")
+            .And.Contain("mt_jsonb_patch")
+            .And.Contain("mt_quick_append_events")
+            .And.NotContain(x => x.StartsWith("mt_upsert_", StringComparison.Ordinal));
+
+        // P7-fix B1: the declared-function set is a list of names plus the event store's own feature
+        // objects, because Marten's SystemFunctions and SequenceFactory are internal and the only public
+        // way to them - AllObjects() - applies migrations. So the list has to be checked against a real
+        // schema, and this is the assertion that fails if Marten ever installs one it does not know.
+        functions.Functions.Should().OnlyContain(x => x.DeclaredByMarten,
+            "every function in a schema Marten owns and nothing else created is one Marten installs - " +
+            "a name missing from SchemaDeclarationReader shows up here as 'undeclared'");
+
+        FunctionInfo appendEvents = functions.Functions.First(x => x.Name == "mt_quick_append_events");
+        appendEvents.Schema.Should().Be(schema.EventSchema);
+        appendEvents.DeclaredByMarten.Should().BeTrue();
+        appendEvents.Signature.Should().StartWith("mt_quick_append_events(");
+
+        // Marten's own bodies need no capability (DB-7): offered to everybody, and read on demand through
+        // the database browser's definition read, which is where the gate lives.
+        appendEvents.Ownership.IsMarten.Should().BeTrue();
+        appendEvents.DefinitionAvailable.Should().BeTrue(appendEvents.DefinitionRefusal);
+        functions.Functions.Should().OnlyContain(x => x.DefinitionAvailable,
+            "every function here is Marten's, in the store's own schemas");
+
+        DatabaseObjectDefinition definition = await schema.Studio.InScopeAsync(services =>
+            services.GetRequiredService<IDatabaseObjectService>().GetDefinitionAsync(SchemaFixture.Scope, appendEvents.Ref));
+
+        definition.Found.Should().BeTrue(definition.Reason);
+        definition.Sql.Should().Contain("CREATE OR REPLACE FUNCTION");
+
+        // And the tokenizer makes sense of the dollar-quoted body rather than swallowing the file.
+        SqlDocument document = SqlTokenizer.Tokenize(definition.Sql!);
+        document.Lines.Should().NotBeEmpty();
+        document.Lines.SelectMany(x => x.Tokens).Should()
+            .Contain(x => x.Kind == SqlTokenKind.String && x.Text.Contains("$function$", StringComparison.Ordinal));
+    }
+
+    [PostgresFact]
+    public async Task The_DDL_tab_produces_a_script_that_names_every_table_the_store_configures()
+    {
+        await using SchemaFixture schema = await Start(nameof(The_DDL_tab_produces_a_script_that_names_every_table_the_store_configures));
+
+        DdlScript script = await schema.Studio.SchemaAsync(x => x.DdlAsync(SchemaFixture.Scope));
+
+        script.Reason.Should().BeNull();
+        script.HasText.Should().BeTrue();
+        script.Bytes.Should().BeGreaterThan(0);
+
+        script.Text.Should().Contain("mt_doc_customer");
+        script.Text.Should().Contain("mt_doc_order");
+        script.Text.Should().Contain("mt_doc_invoice");
+        script.Text.Should().Contain("mt_doc_note");
+        script.Text.Should().Contain(schema.Schema);
+    }
+
+    private Task<SchemaFixture> Start(string name) =>
+        SchemaFixture.StartAsync(fixture, "p7_" + name.ToLowerInvariant()[..Math.Min(name.Length, 40)]);
+}

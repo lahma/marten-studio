@@ -1,0 +1,55 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- KStudio's live suite (AGENTS.md D36): real brokers in containers - apache/kafka 3.9 and 4.x, with SASL and ACLs -
+       through Testcontainers.Kafka. It needs Docker: without it every live test skips with a reason locally and fails on CI. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <!-- Global usings: no Verify here, so `Xunit` is declared rather than inherited. -->
+  <ItemGroup>
+    <Using Include="AwesomeAssertions" />
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="GitHubActionsTestLogger" />
+    <PackageReference Include="AwesomeAssertions" />
+    <PackageReference Include="Testcontainers.Kafka" />
+    <!-- Only for WolverineDiscoveryLiveTests (D43): a real Wolverine host on two brokers, and the adapter reading its configuration. -->
+    <PackageReference Include="WolverineFx.Kafka" />
+  </ItemGroup>
+
+  <!-- Not a package: the shared framework brings the container and logging implementations the engine's real registration is run with
+       (DataStudio.Kafka.Core itself has no framework reference, which KStudioCoreFenceTests holds). -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/DataStudio.Kafka.Core/DataStudio.Kafka.Core.csproj" />
+    <ProjectReference Include="../../src/DataStudio.Kafka/DataStudio.Kafka.csproj" />
+    <ProjectReference Include="../../src/DataStudio.Kafka.Wolverine/DataStudio.Kafka.Wolverine.csproj" />
+    <!-- Only for KafkaFirstNavigationLiveTests' Marten Studio host case (D-SHELL 12.1): KStudio is a module of either studio. Marten arrives through it. -->
+    <ProjectReference Include="../../src/DataStudio.Marten/DataStudio.Marten.csproj" />
+    <!-- Only for SampleSeedTests, SampleHostLiveTests and the sample's live search (SAMPLE): the demo's seed, judge and policies are internal to it
+         (InternalsVisibleTo), and the host is started from its own build output as a child process, as DataStudio.Marten.Integration.Tests starts its sample. -->
+    <ProjectReference Include="../../samples/DataStudio.Sample.Kafka/DataStudio.Sample.Kafka.csproj" />
+  </ItemGroup>
+
+  <!-- The contract suites run here on real brokers: WireContract and WindowContract are compiled into this assembly from the fast suite's
+       sources, with the harness they run over. The fake is not linked, so the live suite can only run them on a broker. -->
+  <ItemGroup>
+    <Compile Include="../DataStudio.Kafka.Tests/Contract/WireContract.cs" Link="Contract/WireContract.cs" />
+    <Compile Include="../DataStudio.Kafka.Tests/Contract/WindowContract.cs" Link="Contract/WindowContract.cs" />
+    <Compile Include="../DataStudio.Kafka.Tests/Contract/ReaderAclContract.cs" Link="Contract/ReaderAclContract.cs" />
+    <Compile Include="../DataStudio.Kafka.Tests/Contract/IContractCluster.cs" Link="Contract/IContractCluster.cs" />
+    <Compile Include="../DataStudio.Kafka.Tests/Contract/EngineHarness.cs" Link="Contract/EngineHarness.cs" />
+    <Compile Include="../DataStudio.Marten.Tests/Support/CapturingLoggerProvider.cs" Link="Support/Linked/CapturingLoggerProvider.cs" />
+  </ItemGroup>
+
+</Project>

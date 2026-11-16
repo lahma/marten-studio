@@ -1,0 +1,135 @@
+using DataStudio.Kafka.Services;
+using DataStudio.Kafka.Tests.Support;
+
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+
+
+namespace DataStudio.Kafka.Tests.Services;
+
+/// <summary>D35: KStudio's capabilities default to off, and the host studio's <c>ReadOnly</c> is the one master switch.</summary>
+public class KafkaCapabilityGuardTests
+{
+    [Fact]
+    public void Every_flag_defaults_to_false()
+    {
+        KafkaStudioCapabilities none = new();
+
+        none.SearchRecords.Should().BeFalse();
+        none.ReadPayloads.Should().BeFalse();
+        KafkaStudioCapabilities.None().SearchRecords.Should().BeFalse();
+        KafkaStudioCapabilities.None().ReadPayloads.Should().BeFalse();
+        new KafkaStudioOptions().Capabilities.SearchRecords.Should().BeFalse();
+        new KafkaStudioOptions().Capabilities.ReadPayloads.Should().BeFalse();
+    }
+
+    [Fact]
+    public void All_turns_every_flag_on()
+    {
+        KafkaStudioCapabilities all = KafkaStudioCapabilities.All();
+
+        typeof(KafkaStudioCapabilities).GetProperties().Where(static x => x.PropertyType == typeof(bool))
+            .Should().NotBeEmpty().And.OnlyContain(property => (bool) property.GetValue(all)!, "All() sets every flag the class has");
+        Enum.GetNames<KafkaCapability>().Should().BeEquivalentTo(
+            typeof(KafkaStudioCapabilities).GetProperties().Where(static x => x.PropertyType == typeof(bool)).Select(static x => x.Name),
+            "one enum member per flag, named identically");
+    }
+
+    [Fact]
+    public void A_capability_is_effective_only_with_the_flag_set_and_ReadOnly_off()
+    {
+        using KafkaStudioHarness off = new();
+        off.Context.Services.GetRequiredService<KafkaCapabilityGuard>().IsEnabled(KafkaCapability.SearchRecords).Should().BeFalse();
+
+        using KafkaStudioHarness on = new(static o => o.Capabilities = KafkaStudioCapabilities.All());
+        KafkaCapabilityGuard guard = on.Context.Services.GetRequiredService<KafkaCapabilityGuard>();
+        guard.IsEnabled(KafkaCapability.SearchRecords).Should().BeTrue();
+
+        on.Context.Options.ReadOnly = true;
+        guard.IsEnabled(KafkaCapability.SearchRecords).Should().BeFalse("the host studio's master switch turns every capability off");
+        guard.IsConfigured(KafkaCapability.SearchRecords).Should().BeTrue();
+    }
+
+    [Fact]
+    public void ReadOnly_names_the_hosts_option()
+    {
+        using KafkaStudioHarness harness = new(static o => o.Capabilities = KafkaStudioCapabilities.All());
+        harness.Context.Options.ReadOnly = true;
+        KafkaCapabilityGuard guard = harness.Context.Services.GetRequiredService<KafkaCapabilityGuard>();
+
+        Action require = () => guard.Require(KafkaCapability.SearchRecords);
+
+        require.Should().Throw<KafkaCapabilityDeniedException>().WithMessage(
+            "KStudio refused 'SearchRecords' because PostgresStudioOptions.ReadOnly is true, which turns every capability off.");
+    }
+
+    [Fact]
+    public void A_refusal_names_the_capability_option()
+    {
+        using KafkaStudioHarness harness = new();
+        KafkaCapabilityGuard guard = harness.Context.Services.GetRequiredService<KafkaCapabilityGuard>();
+
+        Action require = () => guard.Require(KafkaCapability.SearchRecords);
+
+        KafkaCapabilityDeniedException denial = require.Should().Throw<KafkaCapabilityDeniedException>().WithMessage(
+            "KStudio refused 'SearchRecords' because KafkaStudioOptions.Capabilities.SearchRecords is false.").Which;
+        denial.CapabilityOption.Should().Be("KafkaStudioOptions.Capabilities.SearchRecords");
+        denial.Capability.Should().Be(KafkaCapability.SearchRecords);
+    }
+
+    [Fact]
+    public void A_capability_that_is_on_requires_nothing()
+    {
+        using KafkaStudioHarness harness = new(static o => o.Capabilities.SearchRecords = true);
+
+        Action require = () => harness.Context.Services.GetRequiredService<KafkaCapabilityGuard>().Require(KafkaCapability.SearchRecords);
+
+        require.Should().NotThrow();
+    }
+
+    public static TheoryData<string> Offered => new(Enum.GetNames<KafkaCapability>());
+
+    [Theory]
+    [MemberData(nameof(Offered))]
+    public void Every_offered_capability_maps_to_its_flag(string name)
+    {
+        KafkaCapability capability = Enum.Parse<KafkaCapability>(name);
+        KafkaStudioCapabilities only = new();
+        typeof(KafkaStudioCapabilities).GetProperty(capability.ToString())!.SetValue(only, true);
+
+        // Setting only that flag enables only that capability: a member the guard's switch forgot would read as off forever.
+        KafkaCapabilityGuard.ConfiguredIn(only).Should().Equal(capability);
+    }
+
+    [Fact]
+    public void ReadPayloads_without_SearchRecords_is_refused_at_validation()
+    {
+        ServiceCollection services = new();
+        services.AddKafkaStudio(static o => o.Capabilities.ReadPayloads = true);
+        using ServiceProvider provider = services.BuildServiceProvider();
+
+        Action read = () => _ = provider.GetRequiredService<IOptions<KafkaStudioOptions>>().Value;
+
+        read.Should().Throw<OptionsValidationException>().WithMessage(
+            "*KafkaStudioOptions.Capabilities.ReadPayloads needs KafkaStudioOptions.Capabilities.SearchRecords: a value is read only as part of a record a search or a permalink opened*");
+
+        ServiceCollection fine = new();
+        fine.AddKafkaStudio(static o => o.Capabilities = KafkaStudioCapabilities.All());
+        using ServiceProvider ok = fine.BuildServiceProvider();
+        Action readOk = () => _ = ok.GetRequiredService<IOptions<KafkaStudioOptions>>().Value;
+        readOk.Should().NotThrow();
+    }
+
+    [Fact]
+    public void The_options_validation_refuses_a_null_capabilities_object()
+    {
+        ServiceCollection services = new();
+        services.AddKafkaStudio(static o => o.Capabilities = null!);
+        using ServiceProvider provider = services.BuildServiceProvider();
+
+        Action read = () => _ = provider.GetRequiredService<IOptions<KafkaStudioOptions>>().Value;
+
+        read.Should().Throw<OptionsValidationException>().WithMessage(
+            "*KafkaStudioOptions.Capabilities cannot be null: use new KafkaStudioCapabilities() for none, or KafkaStudioCapabilities.All()*");
+    }
+}

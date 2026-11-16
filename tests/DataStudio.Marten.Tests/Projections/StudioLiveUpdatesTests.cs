@@ -1,0 +1,221 @@
+using DataStudio.Services;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.JSInterop;
+using DataStudio.Postgres.Services.Live;
+using DataStudio.Postgres.Services.Settings;
+
+namespace DataStudio.Marten.Tests.Projections;
+
+/// <summary>
+/// The per-page polling loop: it pauses while nobody is looking, it never lets a tick escape as an
+/// unobserved exception, and it gives the browser's .NET reference back.
+/// </summary>
+public class StudioLiveUpdatesTests
+{
+    private static readonly TimeSpan Interval = TimeSpan.FromMilliseconds(25);
+
+    /// <summary>How long a test waits for something that should happen.</summary>
+    private static readonly TimeSpan Generous = TimeSpan.FromSeconds(10);
+
+    /// <summary>How long a test watches for something that should <em>not</em> happen.</summary>
+    private static readonly TimeSpan Window = TimeSpan.FromMilliseconds(400);
+
+    private static CancellationToken Token => TestContext.Current.CancellationToken;
+
+    [Fact]
+    public async Task Starting_watches_the_tab_and_ticks_on_the_interval()
+    {
+        var js = new FakeJsRuntime();
+        await using var updates = new StudioLiveUpdates(js, NullLogger<StudioLiveUpdates>.Instance, DatabaseLiveLogs.For(StudioProduct.MartenStudio));
+
+        var ticked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await updates.StartAsync(Interval, _ =>
+        {
+            ticked.TrySetResult();
+            return Task.CompletedTask;
+        }, Token);
+
+        await ticked.Task.WaitAsync(Generous, Token);
+
+        js.Calls.Should().Contain("martenStudio.visibility.watch");
+        js.DotNetReference.Should().BeOfType<DotNetObjectReference<StudioLiveUpdates>>();
+        js.WatchToken.Should().NotBeNullOrWhiteSpace();
+    }
+
+    /// <summary>
+    /// The watcher list in the browser is keyed on a string this side generates, and <c>unwatch</c> is
+    /// given that same string back.
+    /// </summary>
+    /// <remarks>
+    /// It cannot be keyed on the <see cref="DotNetObjectReference{TValue}" />: Blazor marshals one as an
+    /// id and the browser materialises a fresh wrapper object per call, so a <c>Set</c> keyed on it could
+    /// add and never remove - the document listener stayed attached for the life of the page and every
+    /// closed circuit left another dead reference in it.
+    /// </remarks>
+    [Fact]
+    public async Task The_watch_token_round_trips_from_watch_to_unwatch()
+    {
+        var js = new FakeJsRuntime();
+        var updates = new StudioLiveUpdates(js, NullLogger<StudioLiveUpdates>.Instance, DatabaseLiveLogs.For(StudioProduct.MartenStudio));
+
+        await updates.StartAsync(Interval, static _ => Task.CompletedTask, Token);
+
+        string? token = js.WatchToken;
+        token.Should().NotBeNullOrWhiteSpace();
+        token.Should().MatchRegex("^[0-9a-f]{32}$", "the token is a Guid in 'N' format, which survives the round trip as text");
+
+        await updates.DisposeAsync();
+
+        js.UnwatchToken.Should().Be(token);
+    }
+
+    /// <summary>Two loops on one circuit are two watchers, and they are not keyed on the same thing.</summary>
+    [Fact]
+    public async Task Two_loops_take_two_different_tokens()
+    {
+        var first = new FakeJsRuntime();
+        var second = new FakeJsRuntime();
+
+        await using var one = new StudioLiveUpdates(first, NullLogger<StudioLiveUpdates>.Instance, DatabaseLiveLogs.For(StudioProduct.MartenStudio));
+        await using var two = new StudioLiveUpdates(second, NullLogger<StudioLiveUpdates>.Instance, DatabaseLiveLogs.For(StudioProduct.MartenStudio));
+
+        await one.StartAsync(Interval, static _ => Task.CompletedTask, Token);
+        await two.StartAsync(Interval, static _ => Task.CompletedTask, Token);
+
+        first.WatchToken.Should().NotBe(second.WatchToken);
+    }
+
+    /// <summary>
+    /// A studio left open in a background tab stops querying entirely: that is the whole point of the
+    /// visibility watch (plan D10).
+    /// </summary>
+    [Fact]
+    public async Task A_hidden_tab_pauses_the_polling_and_showing_it_again_resumes_it()
+    {
+        var js = new FakeJsRuntime();
+        await using var updates = new StudioLiveUpdates(js, NullLogger<StudioLiveUpdates>.Instance, DatabaseLiveLogs.For(StudioProduct.MartenStudio));
+
+        TaskCompletionSource ticked = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        await updates.StartAsync(Interval, _ =>
+        {
+            ticked.TrySetResult();
+            return Task.CompletedTask;
+        }, Token);
+
+        await ticked.Task.WaitAsync(Generous, Token);
+
+        // Hidden: nothing more happens, however many intervals go by.
+        updates.OnVisibilityChanged(true);
+        updates.IsHidden.Should().BeTrue();
+
+        ticked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task finished = await Task.WhenAny(ticked.Task, Task.Delay(Window, Token));
+        finished.Should().NotBeSameAs(ticked.Task, "the loop must not tick while the tab is hidden");
+
+        // Shown again: the next tick happens.
+        updates.OnVisibilityChanged(false);
+        await ticked.Task.WaitAsync(Generous, Token);
+    }
+
+    /// <summary>
+    /// A tick that throws is a value, not an unhandled exception: it is kept, it is reported, and the
+    /// loop carries on so that a database which comes back is rendered by the next tick.
+    /// </summary>
+    [Fact]
+    public async Task A_failing_tick_is_reported_as_a_value_and_does_not_stop_the_loop()
+    {
+        var js = new FakeJsRuntime();
+        await using var updates = new StudioLiveUpdates(js, NullLogger<StudioLiveUpdates>.Instance, DatabaseLiveLogs.For(StudioProduct.MartenStudio));
+
+        List<string> reported = [];
+        updates.Failed += exception =>
+        {
+            reported.Add(exception.Message);
+            return Task.CompletedTask;
+        };
+
+        // Ticked by hand only: at the 25 ms interval the timer's own tick raced TickNowAsync under a loaded
+        // full-suite run and reported the failure twice.
+        bool throwNext = true;
+        await updates.StartAsync(TimeSpan.FromHours(1), _ => throwNext
+            ? Task.FromException(new InvalidOperationException("the database went away"))
+            : Task.CompletedTask, Token);
+
+        await updates.TickNowAsync(Token);
+
+        reported.Should().ContainSingle().Which.Should().Be("the database went away");
+        updates.LastError.Should().BeOfType<InvalidOperationException>();
+
+        throwNext = false;
+        await updates.TickNowAsync(Token);
+
+        updates.LastError.Should().BeNull("a tick that worked clears the last failure");
+    }
+
+    /// <summary>
+    /// The browser holds a reference to this object; not giving it back pins the whole component graph
+    /// behind it for the life of the process.
+    /// </summary>
+    [Fact]
+    public async Task Disposing_unwatches_the_tab_and_stops_the_loop()
+    {
+        var js = new FakeJsRuntime();
+        var updates = new StudioLiveUpdates(js, NullLogger<StudioLiveUpdates>.Instance, DatabaseLiveLogs.For(StudioProduct.MartenStudio));
+
+        var ticked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await updates.StartAsync(Interval, _ =>
+        {
+            ticked.TrySetResult();
+            return Task.CompletedTask;
+        }, Token);
+
+        await ticked.Task.WaitAsync(Generous, Token);
+
+        await updates.DisposeAsync();
+
+        js.Unwatched.Should().BeTrue();
+        updates.IsRunning.Should().BeFalse();
+
+        int after = updates.TickCount;
+        await Task.Delay(Window, Token);
+        updates.TickCount.Should().Be(after, "the loop is cancelled on dispose");
+    }
+
+    /// <summary>
+    /// Prerendering has no JavaScript at all. Polling then simply never pauses, which is the safe way
+    /// round: a page that shows stale numbers is worse than one that queries too often.
+    /// </summary>
+    [Fact]
+    public async Task JavaScript_being_unavailable_does_not_stop_the_page_from_polling()
+    {
+        var js = new FakeJsRuntime
+        {
+            Failure = new InvalidOperationException(
+                "JavaScript interop calls cannot be issued at this time. This is because the component is being statically rendered.")
+        };
+
+        await using var updates = new StudioLiveUpdates(js, NullLogger<StudioLiveUpdates>.Instance, DatabaseLiveLogs.For(StudioProduct.MartenStudio));
+
+        var ticked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await updates.StartAsync(Interval, _ =>
+        {
+            ticked.TrySetResult();
+            return Task.CompletedTask;
+        }, Token);
+
+        await ticked.Task.WaitAsync(Generous, Token);
+        updates.IsHidden.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task A_tab_that_starts_hidden_is_known_to_be_hidden()
+    {
+        var js = new FakeJsRuntime { StartsHidden = true };
+        await using var updates = new StudioLiveUpdates(js, NullLogger<StudioLiveUpdates>.Instance, DatabaseLiveLogs.For(StudioProduct.MartenStudio));
+
+        await updates.StartAsync(Interval, static _ => Task.CompletedTask, Token);
+
+        updates.IsHidden.Should().BeTrue();
+    }
+}

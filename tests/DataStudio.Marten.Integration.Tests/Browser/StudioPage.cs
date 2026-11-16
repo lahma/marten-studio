@@ -1,0 +1,656 @@
+using System.Globalization;
+
+using Microsoft.Playwright;
+
+namespace DataStudio.Marten.Integration.Tests.Browser;
+
+/// <summary>
+/// One browser page, with everything the page said and everything the server answered recorded beside it.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>Console and network cleanliness is an assertion, not an eyeball.</b> A Blazor Server page that has
+/// lost its circuit, failed to load its script, or thrown inside a JS initializer still <em>renders</em>:
+/// the prerendered HTML is there and a screenshot looks right. What it does is write to the console and
+/// leave a 404 in the network log. So every scenario asserts zero <c>console.error</c>, zero
+/// <c>console.warn</c>, zero uncaught page errors and no response of 400 or more — which is what turns
+/// "it looked fine" into a test.
+/// </para>
+/// <para>
+/// <b>An expected failure is named by URL.</b> Under a sub-path mount the sample answers 404 for
+/// <c>/marten</c>, and that is the point rather than an annoyance. It is allowed by its exact URL through
+/// <see cref="ExpectStatus" />, never by ignoring the class — an allowance that said "404s are fine"
+/// would also have hidden the missing <c>blazor.web.js</c> this suite exists to catch.
+/// </para>
+/// <para>
+/// <b>Every handler here is synchronous.</b> Playwright's page events are <c>EventHandler&lt;T&gt;</c>,
+/// and an <c>async</c> lambda converted to one is an <c>async void</c> with different spelling —
+/// forbidden in every shape by AGENTS.md hard rule 6. They append to lists under a lock, because
+/// Playwright raises them on its own dispatch loop.
+/// </para>
+/// </remarks>
+internal sealed class StudioPage : IAsyncDisposable
+{
+    /// <summary>The viewport every scenario and every screenshot uses.</summary>
+    public const int ViewportWidth = 1440;
+
+    /// <summary>The viewport every scenario and every screenshot uses.</summary>
+    public const int ViewportHeight = 900;
+
+    private readonly IBrowserContext context;
+    private readonly List<string> consoleProblems = [];
+    private readonly List<string> pageErrors = [];
+    private readonly List<string> failedResponses = [];
+    private readonly List<string> webSockets = [];
+    private readonly List<string> failedRequests = [];
+    private readonly List<string> enhancedNavigations = [];
+    private readonly Dictionary<string, int> expected = new(StringComparer.Ordinal);
+    private readonly Lock gate = new();
+
+    private StudioPage(IBrowserContext context, IPage page, SampleHost host)
+    {
+        this.context = context;
+        Page = page;
+        Host = host;
+
+        // Synchronous by construction; see the note on the type.
+        page.Console += OnConsole;
+        page.PageError += OnPageError;
+        page.Response += OnResponse;
+        page.WebSocket += OnWebSocket;
+        page.RequestFailed += OnRequestFailed;
+        page.Request += OnRequest;
+    }
+
+    /// <summary>
+    /// Every request that was an enhanced navigation - the studio asking the server for a whole page because the visitor moved
+    /// (<c>accept: text/html; blazor-enhanced-nav=on</c>) - as <c>METHOD url</c>. Since 1.2 the studio intercepts its own
+    /// navigation, so a move inside it is rendered by the circuit and this stays empty.
+    /// </summary>
+    public IReadOnlyList<string> EnhancedNavigations
+    {
+        get
+        {
+            lock (gate)
+            {
+                return [.. enhancedNavigations];
+            }
+        }
+    }
+
+    /// <summary>
+    /// Fails if a move inside the studio fetched a page or any request failed: no enhanced navigation (a <c>GET</c> of the page
+    /// that asks for <c>blazor-enhanced-nav=on</c>) and no <see cref="FailedRequests">failed request</see> at all, so no
+    /// <c>net::ERR_ABORTED</c> either.
+    /// </summary>
+    /// <param name="because">What the scenario was doing, for the failure message.</param>
+    public void AssertNoPageFetch(string because)
+    {
+        EnhancedNavigations.Should().BeEmpty(
+            "navigation inside the studio is rendered by the circuit and fetches no page, while " + because + "; these were fetched: "
+            + string.Join(" | ", EnhancedNavigations));
+
+        FailedRequests.Should().BeEmpty(
+            "no request may fail while " + because + " (a cancelled page fetch is net::ERR_ABORTED); these did: "
+            + string.Join(" | ", FailedRequests));
+    }
+
+    /// <summary>
+    /// Every request the browser itself gave up on (<c>net::ERR_ABORTED</c> and its kin), as <c>METHOD url failure</c>.
+    /// Not part of <see cref="AssertClean" />: a page navigated away from mid-request aborts legitimately, so a scenario
+    /// that is about a request asks for the list itself.
+    /// </summary>
+    public IReadOnlyList<string> FailedRequests
+    {
+        get
+        {
+            lock (gate)
+            {
+                return [.. failedRequests];
+            }
+        }
+    }
+
+    /// <summary>The Playwright page.</summary>
+    public IPage Page { get; }
+
+    /// <summary>The host it is pointed at.</summary>
+    public SampleHost Host { get; }
+
+    /// <summary>Every <c>console.error</c> and <c>console.warn</c>, in order.</summary>
+    public IReadOnlyList<string> ConsoleProblems
+    {
+        get
+        {
+            lock (gate)
+            {
+                return [.. consoleProblems];
+            }
+        }
+    }
+
+    /// <summary>Every uncaught exception the page reported.</summary>
+    public IReadOnlyList<string> PageErrors
+    {
+        get
+        {
+            lock (gate)
+            {
+                return [.. pageErrors];
+            }
+        }
+    }
+
+    /// <summary>Every response of 400 or more that was not expected by URL.</summary>
+    public IReadOnlyList<string> FailedResponses
+    {
+        get
+        {
+            lock (gate)
+            {
+                return [.. failedResponses];
+            }
+        }
+    }
+
+    /// <summary>Every WebSocket the page opened, by URL.</summary>
+    public IReadOnlyList<string> WebSockets
+    {
+        get
+        {
+            lock (gate)
+            {
+                return [.. webSockets];
+            }
+        }
+    }
+
+    /// <summary>
+    /// Opens a page against <paramref name="host" />, signed in as <paramref name="user" />.
+    /// </summary>
+    /// <param name="browser">The shared browser.</param>
+    /// <param name="host">The host to drive.</param>
+    /// <param name="user">One of the demo users; the password is the user name.</param>
+    /// <remarks>
+    /// A browser context of its own per scenario, so cookies, <c>localStorage</c> (the studio keeps the
+    /// theme, the time zone and the pinned collections there) and the recorded console never leak from
+    /// one scenario into the next.
+    /// </remarks>
+    public static Task<StudioPage> SignInAsync(IBrowser browser, SampleHost host, string user) =>
+        SignInAsync(browser, host, user, SignInTimeout);
+
+    /// <summary>How long each sign-in step may take in a scenario: generous, because a CI runner is slow.</summary>
+    internal static readonly TimeSpan SignInTimeout = TimeSpan.FromSeconds(60);
+
+    /// <summary>How long the fixture's warm-up may take: the first request to a cold host.</summary>
+    internal static readonly TimeSpan WarmUpTimeout = TimeSpan.FromSeconds(180);
+
+    /// <summary>
+    /// Signs in with an explicit per-step timeout, and says which step ran out of it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The landing is waited for in the page, never through Playwright's navigation events.</b> The form posts,
+    /// the sample answers 302, and the browser loads <c>/</c>. This used to be
+    /// <c>WaitForURLAsync("/", DOMContentLoaded)</c>, which timed out at 60 s in scenarios and at 180 s in the
+    /// fixture's warm-up under load - with Playwright's own log saying <c>"Load" event fired</c> and
+    /// <c>"NetworkIdle" event fired</c>: the page had loaded, and the wait had missed it. Playwright's .NET client
+    /// raises its frame events on the connection's read loop, while a caller's continuation runs on the thread pool,
+    /// and <c>Frame.WaitForLoadStateAsync</c> checks <c>_loadStates.Contains(state)</c> and only then subscribes to
+    /// <c>LoadState</c>. When the click's reply lets the caller in just after the navigation commits - its URL is
+    /// already <c>/</c>, so <c>WaitForURLAsync</c> goes straight to that check - the read loop can add
+    /// DOMContentLoaded and raise its event between the check and the subscription. The wait then sees only
+    /// <c>Load</c> and <c>NetworkIdle</c>, and never the state it asked for. The race is in the client, which is
+    /// why a loaded machine finds it and a warm host would not have helped.
+    /// </para>
+    /// <para>
+    /// A locator wait has no such window: the driver evaluates it in the page, and it holds once the landing page
+    /// says who is signed in - which is the condition the step is about. A wrong password lands on
+    /// <c>/login?error=1</c>, which does not say it, so it still fails, naming this step.
+    /// </para>
+    /// </remarks>
+    internal static async Task<StudioPage> SignInAsync(IBrowser browser, SampleHost host, string user, TimeSpan timeout)
+    {
+        ArgumentNullException.ThrowIfNull(browser);
+        ArgumentNullException.ThrowIfNull(host);
+
+        IBrowserContext context = await browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            ViewportSize = new ViewportSize { Width = ViewportWidth, Height = ViewportHeight },
+            BaseURL = host.BaseAddress.AbsoluteUri,
+            ColorScheme = ColorScheme.Light,
+            TimezoneId = "UTC",
+            Locale = "en-GB",
+        });
+
+        IPage page = await context.NewPageAsync();
+        var studio = new StudioPage(context, page, host);
+
+        float ms = (float) timeout.TotalMilliseconds;
+
+        await Step("open /login", () => page.GotoAsync(
+            host.Url("/login"), new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = ms }));
+        await Step("fill the form", async () =>
+        {
+            await page.FillAsync("#username", user, new PageFillOptions { Timeout = ms });
+            await page.FillAsync("#password", user, new PageFillOptions { Timeout = ms });
+        });
+        await Step("submit", () => page.ClickAsync("form[action='/login'] button[type=submit]", new PageClickOptions { Timeout = ms }));
+
+        // The landing page's own words, waited for by the driver in the page (see the remarks).
+        ILocator signedIn = page.Locator("p", new PageLocatorOptions { HasTextString = "Signed in as" });
+        await Step("land on /", () => signedIn.WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Visible, Timeout = ms }));
+
+        string said = await signedIn.InnerTextAsync(new LocatorInnerTextOptions { Timeout = ms });
+        if (!said.StartsWith("Signed in as " + user + " ", StringComparison.Ordinal)
+            || !string.Equals(page.Url, host.Url("/"), StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"Signing in as '{user}' at {host.BaseAddress} landed on {page.Url}, which says \"{said}\".");
+        }
+
+        return studio;
+
+        async Task Step(string name, Func<Task> action)
+        {
+            try
+            {
+                await action();
+            }
+            catch (TimeoutException exception)
+            {
+                // The host's side of the step, which is the half a browser-side timeout cannot show: whether the
+                // requests reached it, and what it answered.
+                throw new TimeoutException(
+                    $"Signing in as '{user}' at {host.BaseAddress} timed out at step '{name}' after {timeout.TotalSeconds:0} s. "
+                    + $"The page is at {page.Url}. The sample host's (pid {host.ProcessId}) log, last 30 lines:{Environment.NewLine}{host.LogTail(30)}",
+                    exception);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Allows one exact URL to answer <paramref name="status" /> without failing the scenario.
+    /// </summary>
+    /// <param name="absoluteUrl">The URL, exactly as the browser will request it.</param>
+    /// <param name="status">The status it is allowed to answer.</param>
+    /// <remarks>
+    /// It covers the console too, because Chromium writes its own <c>console.error</c> ("Failed to load
+    /// resource: the server responded with a status of 404") for a failed navigation. Allowing the
+    /// response and not the message would only move the failure one assertion along — and relaxing the
+    /// console assertion to "ignore 404 messages" would hide the missing script this suite exists to
+    /// catch. So the allowance is by exact URL on both.
+    /// </remarks>
+    public void ExpectStatus(string absoluteUrl, int status)
+    {
+        lock (gate)
+        {
+            expected[absoluteUrl] = status;
+        }
+    }
+
+    /// <summary>
+    /// Navigates to <paramref name="url" /> and waits until the Blazor circuit has attached.
+    /// </summary>
+    /// <param name="url">An absolute URL.</param>
+    public async Task GoAsync(string url)
+    {
+        await Page.GotoAsync(url, new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded });
+        await WaitForCircuitAsync();
+        await WaitForScopeInUrlAsync();
+        await WaitForInteractiveAsync();
+    }
+
+    /// <summary>
+    /// Waits until the circuit has rendered the shell and the studio has asked for navigation interception: the shell's
+    /// <c>data-ms-interactive</c> marker (1.2).
+    /// </summary>
+    /// <remarks>
+    /// <c>StudioRoutes</c> makes its interop call in its first interactive render, which precedes the shell's render batch that
+    /// carries the marker, so the attribute in the page means a click now is rendered by the circuit. It is the one signal that
+    /// does not depend on whether the address needed a rewrite (<see cref="WaitForScopeInUrlAsync" /> returns at once for an
+    /// address that already carries <c>store=</c>, before the circuit has rendered anything), and it removes the one race left
+    /// in a scenario: a click before interception is on is still an enhanced navigation.
+    /// </remarks>
+    public Task WaitForInteractiveAsync() =>
+        Page.WaitForFunctionAsync(
+            "() => document.querySelector('.ms-studio[data-ms-interactive]') !== null",
+            null,
+            new PageWaitForFunctionOptions { Timeout = 30_000 });
+
+    /// <summary>
+    /// Records every <c>history.pushState</c> and <c>history.replaceState</c> the page makes, from the next document on, so a
+    /// scenario can say how many addresses a gesture wrote. Call it before <see cref="GoAsync" />.
+    /// </summary>
+    public Task RecordHistoryWritesAsync() =>
+        Page.AddInitScriptAsync(
+            "(() => { const writes = window.__msHistoryWrites = []; for (const name of ['pushState', 'replaceState']) { const original = history[name];"
+            + " history[name] = function (state, title, url) { try { writes.push(new URL(url === undefined || url === null ? location.href : url, document.baseURI).href); } catch (e) { } return original.apply(this, arguments); }; } })();");
+
+    /// <summary>The addresses <see cref="RecordHistoryWritesAsync" /> has seen written, in order, in the current document.</summary>
+    public async Task<IReadOnlyList<string>> HistoryWritesAsync() =>
+        await Page.EvaluateAsync<string[]>("() => window.__msHistoryWrites ?? []");
+
+    /// <summary>
+    /// Waits for a condition on <c>window.location</c> (<paramref name="predicate" /> is the body of a JavaScript expression over
+    /// <c>location</c>): the way to wait for an address the circuit wrote, never <c>WaitForURLAsync</c>.
+    /// </summary>
+    /// <param name="predicate">For example <c>location.search.includes('page=2')</c>.</param>
+    public Task WaitForLocationAsync(string predicate) =>
+        Page.WaitForFunctionAsync(
+            "() => " + predicate,
+            null,
+            new PageWaitForFunctionOptions { Timeout = 30_000 });
+
+    /// <summary>
+    /// Waits until the studio has written its active scope into the query string.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the studio's own proof that the circuit attached: <c>StudioLayout.SyncScopeToUrl</c>
+    /// returns without doing anything unless <c>OnAfterRenderAsync(firstRender)</c> has run, which only
+    /// happens on a live circuit — during prerendering a <c>NavigateTo</c> would be a redirect (D9).
+    /// </para>
+    /// <para>
+    /// It is also a navigation, which is the reason a scenario has to wait for it rather than for the
+    /// WebSocket alone. It was measured racing a click: driving the theme picker immediately after the
+    /// socket opened left the control moved and the page re-rendered from the server's copy of the older
+    /// state, so the assertion failed about half the time and only on the slower of the two hosts. Wait
+    /// on the condition, never on a delay.
+    /// </para>
+    /// <para>
+    /// The condition is read in the page by the driver, not with <c>WaitForURLAsync</c>: that call follows the
+    /// URL match with a client-side load-state wait that checks and then subscribes, and can miss an event raised
+    /// between the two (see <see cref="SignInAsync(IBrowser, SampleHost, string, TimeSpan)" />).
+    /// </para>
+    /// </remarks>
+    public Task WaitForScopeInUrlAsync() =>
+        Page.WaitForFunctionAsync(
+            "() => window.location.search.includes('store=')",
+            null,
+            new PageWaitForFunctionOptions { Timeout = 30_000 });
+
+    /// <summary>
+    /// Waits until the page is interactive, not merely prerendered.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The studio is Interactive Server (D2), which means the server renders the whole page once over
+    /// HTTP and <em>then</em> the browser opens a circuit and takes over. Every assertion in this suite
+    /// has to be made after the second step, because the first one happens even when the circuit can
+    /// never attach — which is exactly the failure the sub-path scenario is about.
+    /// </para>
+    /// <para>
+    /// The signal is the circuit's own WebSocket. <c>window.Blazor</c> is defined by the script whether
+    /// or not it connects, and a rendered element is rendered by the prerender, so neither says anything;
+    /// a WebSocket to <c>{path}/_blazor</c> is the circuit and nothing else.
+    /// </para>
+    /// </remarks>
+    public async Task WaitForCircuitAsync()
+    {
+        await Page.WaitForFunctionAsync(
+            "() => window.Blazor !== undefined",
+            null,
+            new PageWaitForFunctionOptions { Timeout = 30_000 });
+
+        string marker = Host.StudioPath + "/_blazor";
+
+        // Wait on the condition, never on a delay: the socket usually exists by the time the script has
+        // defined window.Blazor, but on a cold circuit it is a round trip behind.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        while (!WebSockets.Any(x => x.Contains(marker, StringComparison.Ordinal)))
+        {
+            timeout.Token.ThrowIfCancellationRequested();
+            await Task.Delay(TimeSpan.FromMilliseconds(50), timeout.Token);
+        }
+    }
+
+    /// <summary>
+    /// Proves the circuit is live by making the server re-render, and puts the page in a known theme.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The theme picker is the cheapest universal interactivity probe the studio has: it is in the layout
+    /// so it is on every page, its <c>@onchange</c> runs on the server, and the result is an attribute on
+    /// an element the browser can read back. A prerendered page has the picker and does nothing when it
+    /// is moved.
+    /// </para>
+    /// <para>
+    /// It lives inside the preferences popover now (UX-5), so this opens the popover first and dismisses
+    /// it afterwards. That is not politeness: a closed <c>popover</c> is <c>display: none</c> by the user
+    /// agent's own stylesheet, and Playwright's actionability check for <c>SelectOptionAsync</c> waits for
+    /// a visible element — against the closed menu it does not fail, it hangs for the full timeout. And
+    /// the dismissal is what keeps the menu out of every screenshot the capture run takes afterwards.
+    /// </para>
+    /// </remarks>
+    /// <param name="theme"><c>system</c>, <c>light</c> or <c>dark</c>.</param>
+    public async Task SetThemeAsync(string theme)
+    {
+        await OpenPreferencesAsync();
+
+        await Page.SelectOptionAsync("#ms-theme-select", theme);
+        await Page.Locator(".ms-studio[data-theme='" + theme + "']").WaitForAsync(
+            new LocatorWaitForOptions { Timeout = 15_000 });
+
+        await ClosePreferencesAsync();
+    }
+
+    /// <summary>Opens the preferences popover, or leaves it open if it already is.</summary>
+    public async Task OpenPreferencesAsync()
+    {
+        ILocator popover = Page.Locator("#ms-preferences-popover");
+
+        if (!await popover.IsVisibleAsync())
+        {
+            await Page.ClickAsync(".ms-preferences-button");
+        }
+
+        await popover.WaitForAsync(new LocatorWaitForOptions
+        {
+            State = WaitForSelectorState.Visible,
+            Timeout = 15_000,
+        });
+    }
+
+    /// <summary>
+    /// Dismisses the preferences popover with the key a person would use.
+    /// </summary>
+    /// <remarks>
+    /// Escape rather than <c>hidePopover()</c>, because light dismissal is the path that has to keep
+    /// working: it is the one the component's <c>aria-expanded</c> is driven from, and the one a scripted
+    /// close would never exercise.
+    /// </remarks>
+    public async Task ClosePreferencesAsync()
+    {
+        ILocator popover = Page.Locator("#ms-preferences-popover");
+
+        if (await popover.IsVisibleAsync())
+        {
+            await Page.Keyboard.PressAsync("Escape");
+        }
+
+        await popover.WaitForAsync(new LocatorWaitForOptions
+        {
+            State = WaitForSelectorState.Hidden,
+            Timeout = 15_000,
+        });
+    }
+
+    /// <summary>Writes a screenshot of the whole page to <paramref name="path" />.</summary>
+    /// <remarks>
+    /// The focus is dropped first. <c>&lt;FocusOnNavigate Selector="h1" /&gt;</c> focuses the page heading
+    /// after every navigation, which is right for a screen reader - and Chromium counts a scripted
+    /// navigation as keyboard-shaped, so <c>h1:focus-visible</c> draws its ring and every README image
+    /// came out with a box round its title. A person clicking a nav link with a mouse does not see it.
+    /// </remarks>
+    /// <param name="path">Where to write it.</param>
+    /// <param name="fullPage">Whether to capture past the viewport.</param>
+    /// <param name="clip">
+    /// The part of the page to keep, or <see langword="null" /> for all of it - the default, so every capture that does not
+    /// ask for one is taken exactly as before. With <paramref name="fullPage" /> it is in document coordinates, so it may
+    /// reach below the viewport.
+    /// </param>
+    public async Task ScreenshotAsync(string path, bool fullPage = true, Clip? clip = null)
+    {
+        await Page.EvaluateAsync("() => (document.activeElement instanceof HTMLElement) && document.activeElement.blur()");
+
+        await Page.ScreenshotAsync(new PageScreenshotOptions { Path = path, FullPage = fullPage, Clip = clip });
+    }
+
+    /// <summary>
+    /// How far the studio's content column is wider than itself: <c>.ms-content</c>'s
+    /// <c>scrollWidth - clientWidth</c>, the 0.2.0 UX pass's metric.
+    /// </summary>
+    /// <remarks>
+    /// Anything above zero is a page the shell cuts off on the right (D25): <c>.ms-main</c> hides horizontal
+    /// overflow on purpose, so a wide table that is not in its own scroll region is not scrollable at all,
+    /// and the only symptom is this number. <c>-1</c> means there is no <c>.ms-content</c>, which is a page
+    /// that is not the studio's.
+    /// </remarks>
+    public Task<int> ContentOverflowAsync() =>
+        Page.EvaluateAsync<int>(
+            "() => { const c = document.querySelector('.ms-content'); return c === null ? -1 : c.scrollWidth - c.clientWidth; }");
+
+    /// <summary>Fails the scenario if the content column scrolls sideways - see <see cref="ContentOverflowAsync" />.</summary>
+    /// <param name="where">Which page this is, for the failure message.</param>
+    public async Task AssertNoSidewaysScrollAsync(string where)
+    {
+        int overflow = await ContentOverflowAsync();
+
+        overflow.Should().Be(
+            0,
+            "the shell never scrolls sideways (D25): a wide table sits in its own scroll region, so .ms-content's "
+            + "scrollWidth - clientWidth has to be 0 on " + where + ", and it was " + overflow);
+    }
+
+    /// <summary>
+    /// Where a link really goes: its <c>href</c> resolved against the document's base, the way the browser
+    /// resolves it when it is clicked.
+    /// </summary>
+    /// <remarks>
+    /// The studio's links are relative to a studio-rooted <c>&lt;base href&gt;</c> (D11), so the attribute on
+    /// its own says nothing about a mount path. The attribute rather than the <c>href</c> property, because
+    /// the diagram's nodes are SVG <c>&lt;a&gt;</c> elements, whose <c>href</c> is an animated string rather
+    /// than a URL.
+    /// </remarks>
+    /// <param name="link">An <c>&lt;a&gt;</c>, HTML or SVG.</param>
+    public static Task<string> ResolvedHrefAsync(ILocator link)
+    {
+        ArgumentNullException.ThrowIfNull(link);
+
+        return link.EvaluateAsync<string>(
+            "a => new URL(a.getAttribute('href') ?? a.getAttribute('xlink:href') ?? '', document.baseURI).href");
+    }
+
+    /// <summary>
+    /// Fails the scenario if the page complained or the server refused anything.
+    /// </summary>
+    /// <param name="because">What the scenario was doing, for the failure message.</param>
+    public void AssertClean(string because)
+    {
+        PageErrors.Should().BeEmpty(
+            "an uncaught exception in the page means the circuit is broken or a script threw, while " +
+            because + "; the page reported: " + string.Join(" | ", PageErrors));
+
+        ConsoleProblems.Should().BeEmpty(
+            "a studio page must produce no console error and no console warning while " + because +
+            "; the page said: " + string.Join(" | ", ConsoleProblems));
+
+        FailedResponses.Should().BeEmpty(
+            "no request a studio page makes may answer 400 or more while " + because +
+            "; these did: " + string.Join(" | ", FailedResponses));
+    }
+
+    /// <inheritdoc />
+    public async ValueTask DisposeAsync()
+    {
+        Page.Console -= OnConsole;
+        Page.PageError -= OnPageError;
+        Page.Response -= OnResponse;
+        Page.WebSocket -= OnWebSocket;
+        Page.RequestFailed -= OnRequestFailed;
+        Page.Request -= OnRequest;
+
+        await context.CloseAsync();
+    }
+
+    private void OnConsole(object? sender, IConsoleMessage message)
+    {
+        if (message.Type is not ("error" or "warning"))
+        {
+            return;
+        }
+
+        lock (gate)
+        {
+            // Chromium reports a failed request as a console error located at the request's own URL, so
+            // an allowance made by URL covers it here as well.
+            if (expected.Keys.Any(url => message.Location.StartsWith(url, StringComparison.Ordinal)))
+            {
+                return;
+            }
+
+            consoleProblems.Add(message.Type + ": " + message.Text + " @ " + message.Location);
+        }
+    }
+
+    private void OnPageError(object? sender, string error)
+    {
+        lock (gate)
+        {
+            pageErrors.Add(error);
+        }
+    }
+
+    private void OnResponse(object? sender, IResponse response)
+    {
+        if (response.Status < 400)
+        {
+            return;
+        }
+
+        lock (gate)
+        {
+            if (expected.TryGetValue(response.Url, out int allowed) && allowed == response.Status)
+            {
+                return;
+            }
+
+            failedResponses.Add(string.Format(
+                CultureInfo.InvariantCulture,
+                "{0} {1}",
+                response.Status,
+                response.Url));
+        }
+    }
+
+    private void OnRequestFailed(object? sender, IRequest request)
+    {
+        lock (gate)
+        {
+            failedRequests.Add(request.Method + " " + request.Url + " " + request.Failure);
+        }
+    }
+
+    private void OnRequest(object? sender, IRequest request)
+    {
+        if (!request.Headers.TryGetValue("accept", out string? accept)
+            || !accept.Contains("blazor-enhanced-nav=on", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        lock (gate)
+        {
+            enhancedNavigations.Add(request.Method + " " + request.Url);
+        }
+    }
+
+    private void OnWebSocket(object? sender, IWebSocket socket)
+    {
+        lock (gate)
+        {
+            webSockets.Add(socket.Url);
+        }
+    }
+}

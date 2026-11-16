@@ -1,0 +1,287 @@
+using DataStudio.Services;
+using Marten;
+
+using DataStudio.Marten.Services;
+using DataStudio.Marten.Tests.Support;
+
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using DataStudio.Postgres.Services;
+
+namespace DataStudio.Marten.Tests.Services;
+
+/// <summary>
+/// The audit log: the in-memory ring the Activity page reads, and the copy on the way to the
+/// application's own logger with a pinned event id.
+/// </summary>
+public class StudioActionLogTest
+{
+    private const string DummyConnectionString =
+        "Host=marten-studio-audit-test.invalid;Database=none;Username=none;Password=none";
+
+    private sealed record Harness(
+        StudioActionLog Log,
+        StudioActionLogService Ring,
+        CapturingLoggerProvider Captured,
+        TestAuthenticationStateProvider Users,
+        StudioState State,
+        ServiceProvider Provider) : IDisposable
+    {
+        public void Dispose() => Provider.Dispose();
+    }
+
+    private static Harness CreateHarness()
+    {
+        var options = Options.Create(new MartenStudioOptions());
+        var services = new ServiceCollection();
+        services.AddMarten(x => x.Connection(DummyConnectionString));
+        var provider = services.BuildServiceProvider();
+
+        var users = new TestAuthenticationStateProvider();
+        var authorization = MartenSpine.Authorization(options, new TestStoreAuthorizationService(), users);
+        var (_, catalog, _) = MartenSpine.Scope(
+            options,
+            new MartenStoreRegistry(services),
+            authorization,
+            new TenantDiscovery(options, NullLogger<TenantDiscovery>.Instance),
+            provider);
+        var state = new StudioState(catalog, NullLogger<StudioState>.Instance, new StudioPreferences(new HttpContextAccessor()));
+
+        var ring = new StudioActionLogService();
+        var captured = new CapturingLoggerProvider();
+        var log = new StudioActionLog(new StudioActivity(ring, users, []), captured.CreateFactory().CreateLogger<StudioActionLog>(), users, state, MartenStudioDescriptor.Instance);
+
+        return new Harness(log, ring, captured, users, state, provider);
+    }
+
+    [Fact]
+    public void A_successful_action_lands_in_the_ring_and_in_the_log_as_9200()
+    {
+        using var harness = CreateHarness();
+        harness.Users.SignIn("ops");
+
+        harness.Log.Record("DeleteDocument", "customer/42", succeeded: true, "deleted", StudioCapability.DeleteDocuments);
+
+        var entry = harness.Ring.GetLatest().Should().ContainSingle().Which;
+        entry.User.Should().Be("ops");
+        entry.Action.Should().Be("DeleteDocument");
+        entry.Target.Should().Be("customer/42");
+        entry.Succeeded.Should().BeTrue();
+        entry.Message.Should().Be("deleted");
+        entry.Capability.Should().Be(nameof(StudioCapability.DeleteDocuments));
+
+        var logged = harness.Captured.Entries.Should().ContainSingle().Which;
+        logged.EventId.Id.Should().Be(9200);
+        logged.Level.Should().Be(LogLevel.Information);
+        logged.Message.Should().Contain("ops").And.Contain("DeleteDocument").And.Contain("customer/42");
+    }
+
+    /// <summary>
+    /// Written on failure as well as on success. An audit that only records what worked cannot answer the
+    /// question people actually ask after an incident, which is what someone tried.
+    /// </summary>
+    [Fact]
+    public void A_failed_action_is_recorded_too_as_9201()
+    {
+        using var harness = CreateHarness();
+        harness.Users.SignIn("viewer");
+
+        harness.Log.Record("ArchiveStream", "order-1", succeeded: false, "the stream was already archived");
+
+        harness.Ring.GetLatest().Should().ContainSingle().Which.Succeeded.Should().BeFalse();
+        harness.Captured.Entries.Should().ContainSingle().Which.EventId.Id.Should().Be(9201);
+    }
+
+    [Fact]
+    public void An_unauthenticated_circuit_is_recorded_as_anonymous()
+    {
+        using var harness = CreateHarness();
+
+        harness.Log.Record("RunSql", "select 1", succeeded: true);
+
+        harness.Ring.GetLatest().Should().ContainSingle().Which.User.Should().Be("anonymous");
+    }
+
+    [Fact]
+    public void A_capability_refusal_is_recorded_and_logged_as_9202()
+    {
+        using var harness = CreateHarness();
+        harness.Users.SignIn("viewer");
+
+        var denial = MartenSpine.Denied(StudioCapability.EditDocuments, CapabilityDenialReason.Disabled);
+        harness.Log.RecordCapabilityDenied(denial, "EditDocument", "customer/42");
+
+        harness.Ring.GetLatest().Should().ContainSingle().Which.Succeeded.Should().BeFalse();
+
+        var warning = harness.Captured.Entries.Should().ContainSingle(x => x.EventId.Id == 9202).Which;
+        warning.Level.Should().Be(LogLevel.Warning);
+        warning.Message.Should().Contain("MartenStudioOptions.Capabilities.EditDocuments");
+    }
+
+    /// <summary>
+    /// The refused scope is named in the log and never to the visitor: whoever administers the process
+    /// has to be able to reconstruct the refusal, and the person refused must not learn which stores,
+    /// databases and tenants exist.
+    /// </summary>
+    [Fact]
+    public void A_scope_refusal_is_logged_as_9203_and_names_the_scope()
+    {
+        using var harness = CreateHarness();
+        harness.Users.SignIn("viewer");
+
+        harness.Log.RecordScopeDenied(new StudioScope("invoicing", "srv/db", "acme"), "store-policy", "OpenStore", "invoicing");
+
+        var warning = harness.Captured.Entries.Should().ContainSingle(x => x.EventId.Id == 9203).Which;
+        warning.Level.Should().Be(LogLevel.Warning);
+        warning.Message.Should().Contain("invoicing").And.Contain("srv/db").And.Contain("acme").And.Contain("store-policy");
+
+        harness.Ring.GetLatest().Should().ContainSingle().Which.DatabaseScope()!.StoreKey.Should().Be("invoicing");
+    }
+
+    [Fact]
+    public void The_ring_is_newest_first_and_bounded()
+    {
+        var ring = new StudioActionLogService();
+
+        for (var i = 0; i < StudioActionLogService.MaxEntries + 25; i++)
+        {
+            ring.Record(new StudioActionLogEntry(
+                DateTimeOffset.UnixEpoch.AddSeconds(i), "ops", new DatabaseAuditScope("default", "db", null).ToAuditScope(MartenStudioDescriptor.Key),
+                "Action" + i, "target", true, null, null));
+        }
+
+        var latest = ring.GetLatest();
+
+        latest.Should().HaveCount(StudioActionLogService.MaxEntries);
+        latest[0].Action.Should().Be("Action" + (StudioActionLogService.MaxEntries + 24), "newest first");
+        latest.Should().NotContain(x => x.Action == "Action0", "the oldest fall out");
+    }
+
+    [Fact]
+    public void GetLatest_clamps_what_it_is_asked_for()
+    {
+        var ring = new StudioActionLogService();
+        for (var i = 0; i < 10; i++)
+        {
+            ring.Record(new StudioActionLogEntry(
+                DateTimeOffset.UnixEpoch, "ops", new DatabaseAuditScope("default", "db", null).ToAuditScope(MartenStudioDescriptor.Key), "Action" + i, "target", true, null, null));
+        }
+
+        ring.GetLatest(0).Should().HaveCount(1);
+        ring.GetLatest(3).Should().HaveCount(3);
+        ring.GetLatest(int.MaxValue).Should().HaveCount(10);
+    }
+
+    /// <summary>
+    /// The ring stamps every entry with its own count, so two identical actions are two entries.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="StudioActionLogEntry" /> is a record and has value equality: the same user deleting the
+    /// same document twice produces two entries that are equal to each other, and the Activity page keyed
+    /// its rows on the entry. A duplicate Blazor <c>@key</c> makes the renderer reuse the wrong row.
+    /// </remarks>
+    [Fact]
+    public void Two_identical_actions_get_distinct_sequence_numbers()
+    {
+        var ring = new StudioActionLogService();
+        var entry = new StudioActionLogEntry(
+            DateTimeOffset.UnixEpoch, "ops", new DatabaseAuditScope("default", "db", null).ToAuditScope(MartenStudioDescriptor.Key), "DeleteDocument", "customer/42", true, "deleted", null);
+
+        ring.Record(entry);
+        ring.Record(entry);
+
+        var recorded = ring.GetLatest();
+        recorded.Should().HaveCount(2);
+        recorded.Select(x => x.Sequence).Should().OnlyHaveUniqueItems();
+        recorded[0].Sequence.Should().BeGreaterThan(recorded[1].Sequence, "newest first, and the count only goes up");
+
+        // Without the sequence the two are the same object as far as any key is concerned.
+        (recorded[0] with { Sequence = 0 }).Should().Be(recorded[1] with { Sequence = 0 });
+    }
+
+    /// <summary>
+    /// All twelve audit ids are declared from the first packet that logs any of them, so the numbers are
+    /// reserved rather than assigned in the order features happen to land. 9212-9220 are the operational
+    /// anomalies DB-0 added, each logged at the level <c>StudioLogThrottle</c> chose.
+    /// </summary>
+    /// <remarks>
+    /// One id space, two declaring classes since 0.5's split (PS-1a): the shared <c>StudioLog</c> and MartenStudio's
+    /// <c>MartenLog</c>. The ids are checked across both, so an event moved from one to the other keeps its number and a
+    /// number is never declared twice.
+    /// </remarks>
+    [Fact]
+    public void Every_reserved_event_id_exists_exactly_once()
+    {
+        var declared = new[] { typeof(StudioLog), typeof(MartenLog) }
+            .SelectMany(static type => type.GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static))
+            .Select(x => x.GetCustomAttributes(typeof(LoggerMessageAttribute), inherit: false).FirstOrDefault())
+            .OfType<LoggerMessageAttribute>()
+            .Select(x => x.EventId)
+            .Order()
+            .ToArray();
+
+        // 9212-9220 are DB-0's throttled anomalies and 9221 DB-0-fix-2's (a store policy that threw while the
+        // tenant listing was filtered); 9230 is the database browser's startup warning (DB-1, 9230-9234);
+        // 9235-9237 are its row reads (DB-3, 9235-9239): the filter and key values the ring never holds, and
+        // the throttled read failure. 9222 is the health advisor's throttled check failure (H1). 9245 and 9246
+        // are Database > Sessions' (H3, 9245-9249): the first details read, and the throttled read failure.
+        // 9225 and 9226 are 1.2-PROJ's: an orphaned progression row being removed, and a removal the service refused at the click.
+        // 9227 is 1.2-SHAPE's: a documents shape check that finished, at Debug; 9228 is the events check's, in the same words.
+        // 9229 is TENANT-DB's: the search for the database that holds a link's tenant stopped at its bound of databases, at Debug.
+        // 9265 is the Tenants overview's (1.2: the first read of its activity-gated columns). 9260-9264 are LINQ mode's (F7): a run, a refusal, a Postgres failure, an unexpected exception, and the
+        // advice it could not give. 9270 is the opt-in health export's throttled failure (H8, 9270-9274). 9280 is
+        // the statement checks' (H7, 9280-9284): a statement T02 could not plan, and a plan's prepared statement it
+        // could not take back, both at Debug. 9290 is the server checks' platform detector (H10, 9290-9294), at Debug.
+        // 9320 is DEPS' (9320-9329): a dead-letter rewind Marten refused as an unknown subscription, kept with Marten's
+        // own words, which the page and the audit are not given. 9410 is W5-CAP's (9410-9419): the Storage page's throttled
+        // read failure. 9420 and 9421 are W5-V1's (9420-9429): a bloat measure the visitor pressed that failed, and one
+        // refused for an expected reason, at Debug. 9430 and 9431 are W5-R2's (9430-9439): the Replication page's throttled
+        // facts read failure and a tablespace size the visitor asked for that failed. 9440 is W5-S2's (9440-9449): the
+        // Server page's throttled facts read failure. 9500 and 9501 are W5-AUR's (9500-9509): the host's capacity source
+        // that threw, and Aurora's own reads that failed, both throttled.
+        // 9450-9452 are W5-Q1's (9450-9459): the Statements page refused by its gate at Debug, its throttled read
+        // failure, and its first read in a circuit, the audit line.
+        // 9250 and 9251 are W5-API's (9250-9254): one call of the diagnostics API, at Debug, and a section of a snapshot that
+        // could not be read, throttled.
+        // 9223 and 9224 are 1.2-H-C's: a finding's on-demand action the visitor pressed that failed (Warning, one line per press),
+        // and one refused for an expected reason (Debug).
+        // 9460-9462 are 1.0-C43's (9460-9469), the opt-in connection history's sampler: a round that failed and a server that
+        // could not be sampled, both throttled, and a source it could not list, at Debug. 9463 and 9464 are #46's: a backlog of samples the
+        // store refused, written (Information, once per drain) or outgrown (throttled). 9490 is 1.1's: an AcceptedChecks entry for a
+        // retired check, accepted and ignored, once per code at Information.
+        declared.Should().Equal(
+            9200, 9201, 9202, 9203, 9204, 9205, 9206, 9207, 9208, 9209, 9210, 9211,
+            9212, 9213, 9214, 9215, 9216, 9217, 9218, 9219, 9220, 9221, 9222, 9223, 9224, 9225, 9226, 9227, 9228, 9229, 9230, 9235, 9236, 9237, 9245,
+            9246, 9250, 9251, 9260, 9261, 9262, 9263, 9264, 9265, 9270, 9280, 9281, 9290, 9320, 9410, 9420, 9421, 9430, 9431, 9440,
+            9450, 9451, 9452, 9460, 9461, 9462, 9463, 9464, 9490, 9500, 9501);
+    }
+
+    /// <summary>
+    /// The split itself: the shared class declares only the events every studio logs, and MartenStudio's the ones only it
+    /// logs - so no later packet needs to add a method to the shared class to log a Marten fact, or the reverse.
+    /// </summary>
+    [Fact]
+    public void The_shared_and_the_Marten_events_are_split_by_who_logs_them()
+    {
+        static int[] Ids(Type type) =>
+        [
+            .. type
+                .GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)
+                .Select(static x => x.GetCustomAttributes(typeof(LoggerMessageAttribute), inherit: false).FirstOrDefault())
+                .OfType<LoggerMessageAttribute>()
+                .Select(static x => x.EventId)
+                .Order(),
+        ];
+
+        Ids(typeof(StudioLog)).Should().Equal(
+            9200, 9201, 9202, 9203, 9204, 9205, 9210, 9213, 9214, 9219, 9220, 9221, 9222, 9223, 9224, 9229, 9230, 9235, 9236, 9237,
+            9245, 9246, 9250, 9251, 9270, 9280, 9281, 9290, 9410, 9420, 9421, 9430, 9431, 9440, 9450, 9451, 9452, 9460, 9461, 9462, 9463, 9464,
+            9490, 9500, 9501);
+
+        Ids(typeof(MartenLog)).Should().Equal(
+            9206, 9207, 9208, 9209, 9211, 9212, 9215, 9216, 9217, 9218, 9225, 9226, 9227, 9228, 9260, 9261, 9262, 9263, 9264, 9265, 9320);
+    }
+}
