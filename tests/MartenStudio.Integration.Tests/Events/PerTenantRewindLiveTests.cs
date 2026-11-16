@@ -321,7 +321,7 @@ public class PerTenantRewindLiveTests(PostgresFixture postgres) : IAsyncLifetime
             .First(static x => x.Action == EventDataService.RewindSubscriptionAction);
         entry.Succeeded.Should().BeFalse();
         entry.Message.Should().Be("Not authorized for this store, database or tenant.");
-        entry.TenantId.Should().Be(Globex);
+        entry.DatabaseScope()!.TenantId.Should().Be(Globex);
 
         logs.Lines.Should().Contain(static x => x.EventId.Id == 9203 && x.Message.Contains(Globex, StringComparison.Ordinal),
             "a scope denial is logged as one");

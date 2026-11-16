@@ -546,7 +546,7 @@ public class StreamCompactionLiveTests(StreamCompactionFixture fixture) : IClass
         (await fixture.CompactedVersionAsync(fixture.ConjoinedSchema, id, StreamCompactionFixture.TenantB)).Should().Be(0);
 
         StudioActionLogEntry entry = Latest(studio);
-        entry.TenantId.Should().Be(StreamCompactionFixture.TenantA, "authorized and audited as (store, db, tenant)");
+        entry.DatabaseScope()!.TenantId.Should().Be(StreamCompactionFixture.TenantA, "authorized and audited as (store, db, tenant)");
         entry.Message.Should().EndWith("in tenant " + StreamCompactionFixture.TenantA);
     }
 

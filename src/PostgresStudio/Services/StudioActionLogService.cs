@@ -5,9 +5,7 @@ namespace PostgresStudio.Services;
 /// </summary>
 /// <param name="Timestamp">When it happened, in UTC.</param>
 /// <param name="User">Who the circuit belonged to, or <c>anonymous</c>.</param>
-/// <param name="StoreKey">The store the action was aimed at.</param>
-/// <param name="DatabaseId">Marten's database identity, never a connection string.</param>
-/// <param name="TenantId">The tenant in scope, or <see langword="null" /> for a view spanning all of them.</param>
+/// <param name="Scope">What the action was aimed at, in the words of the module that recorded it.</param>
 /// <param name="Action">What was done, named the way the page names it (for example <c>DeleteDocument</c>).</param>
 /// <param name="Target">What it was done to - an alias and an id, a stream, a projection.</param>
 /// <param name="Succeeded">Whether it worked. Failures are recorded too, which is the point.</param>
@@ -16,9 +14,7 @@ namespace PostgresStudio.Services;
 internal sealed record StudioActionLogEntry(
     DateTimeOffset Timestamp,
     string User,
-    string StoreKey,
-    string DatabaseId,
-    string? TenantId,
+    StudioAuditScope Scope,
     string Action,
     string Target,
     bool Succeeded,
@@ -37,25 +33,14 @@ internal sealed record StudioActionLogEntry(
     /// a timestamp, and the ring is already ordered by insertion.
     /// </remarks>
     public long Sequence { get; init; }
-
-    /// <summary>
-    /// <see langword="null" /> for the host studio's own scope (every entry before a module existed); a module's key otherwise (D34). An
-    /// entry with a kind is judged only by that kind's <see cref="IStudioAuditScopeGate" />, never by the host's store policy.
-    /// </summary>
-    public string? ScopeKind { get; init; }
-
-    /// <summary>What the Activity screen's Scope column shows for a module's entry (<c>primary · tenant-a</c>). Bounded like <see cref="Target" />.</summary>
-    public string? ScopeLabel { get; init; }
-
-    /// <summary>The module's own immutable scope value, read only by that module's <see cref="IStudioAuditScopeGate" />.</summary>
-    public object? ModuleScope { get; init; }
 }
 
 /// <summary>A module's scope as the audit records it (D34).</summary>
-/// <param name="Kind">The module's key, which names the gate that judges the entry.</param>
-/// <param name="Label">What the Activity screen's Scope column shows.</param>
-/// <param name="Value">The module's own scope value, read only by its gate.</param>
-internal sealed record StudioModuleAuditScope(string Kind, string Label, object Value);
+/// <param name="Kind">The module's key, which names the <see cref="IStudioAuditScopeGate" /> that judges the entry.</param>
+/// <param name="Label">What the Activity page's Scope cell shows, in parts; the page joins them with a separator.</param>
+/// <param name="Title">The Scope cell's <c>title</c>: the same scope spelled out.</param>
+/// <param name="Value">The module's own immutable scope value, read only by its gate.</param>
+internal sealed record StudioAuditScope(string Kind, IReadOnlyList<string> Label, string Title, object Value);
 
 /// <summary>
 /// The process's ring of recent actions, newest first.

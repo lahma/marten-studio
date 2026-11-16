@@ -310,7 +310,7 @@ public class MultiDatabaseEventsTests(MultiDatabaseStoreFixture fixture) : IClas
         Events.Audit.GetLatest().Should().Contain(x =>
             x.Action == "Archive stream"
             && x.Succeeded
-            && x.DatabaseId == Events.DatabaseB.Id.Identity);
+            && x.DatabaseScope()!.DatabaseId == Events.DatabaseB.Id.Identity);
     }
 
     /// <summary>

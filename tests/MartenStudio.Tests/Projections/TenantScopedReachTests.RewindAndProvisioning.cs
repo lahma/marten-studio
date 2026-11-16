@@ -56,8 +56,8 @@ public partial class TenantScopedReachTests
             .Should().ContainSingle(static x => x.Action == EventDataService.RewindSubscriptionAction).Subject;
 
         entry.Succeeded.Should().BeFalse();
-        entry.TenantId.Should().BeNull("the audit records the tenant-less scope that was refused, not the one asked from");
-        entry.DatabaseId.Should().Be(harness.Database);
+        entry.DatabaseScope()!.TenantId.Should().BeNull("the audit records the tenant-less scope that was refused, not the one asked from");
+        entry.DatabaseScope()!.DatabaseId.Should().Be(harness.Database);
     }
 
     /// <summary>

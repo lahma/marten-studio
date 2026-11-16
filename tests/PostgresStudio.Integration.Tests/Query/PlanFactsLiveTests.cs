@@ -351,7 +351,7 @@ public class PlanFactsLiveTests(PlanFactsLiveTests.Fixture database) : IClassFix
         values.Target.Should().Be("public.orders");
         values.Capability.Should().Be(nameof(StudioCapability.BrowseDatabase));
         values.Succeeded.Should().BeTrue();
-        values.TenantId.Should().BeNull();
+        values.DatabaseScope()!.TenantId.Should().BeNull();
 
         StudioActionLogEntry read = ring.Should().ContainSingle(static x => x.Action == PlanFactsService.FactsAction).Subject;
         read.Capability.Should().Be(nameof(StudioCapability.RunSql));

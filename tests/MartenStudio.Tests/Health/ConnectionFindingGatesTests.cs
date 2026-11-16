@@ -138,7 +138,7 @@ public class ConnectionFindingGatesTests
         StudioActionLogEntry entry = ActivityEntries(harness).Should().ContainSingle("the page's interval reads repeat the signature, and the badge shows no evidence").Subject;
         entry.Succeeded.Should().BeTrue();
         entry.Capability.Should().Be(nameof(StudioCapability.ViewDatabaseActivity));
-        entry.TenantId.Should().BeNull("a session belongs to no tenant");
+        entry.DatabaseScope()!.TenantId.Should().BeNull("a session belongs to no tenant");
         entry.Message.Should().Contain("C91, C92, C93, C94");
 
         foreach (string value in Identifying)

@@ -124,7 +124,11 @@ internal static class StudioCoreRegistration
         services.TryAddScoped<IStudioScopeCatalog, StudioScopeCatalog>();
         services.TryAddScoped<StudioAuthorization>();
         services.TryAddScoped<StudioSourceResolver>();
+        services.TryAddScoped<StudioActivity>();
         services.TryAddScoped<StudioActionLog>();
+
+        // The database's half of what a visitor may read of the ring: its entries are judged here, as every module's are by its own gate.
+        services.TryAddEnumerable(ServiceDescriptor.Scoped<IStudioAuditScopeGate, DatabaseAuditGate>());
         services.TryAddScoped<ToastService>();
 
         // A factory rather than the loop itself: StudioLiveUpdates is IAsyncDisposable, and a transient

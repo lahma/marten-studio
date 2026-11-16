@@ -91,7 +91,7 @@ public class DocumentWriteServiceTests
         var ring = new StudioActionLogService();
         var captured = new CapturingLoggerProvider();
         var factory = captured.CreateFactory();
-        var audit = new StudioActionLog(ring, factory.CreateLogger<StudioActionLog>(), users, state);
+        var audit = new StudioActionLog(new StudioActivity(ring, users, []), factory.CreateLogger<StudioActionLog>(), users, state, MartenStudioDescriptor.Instance);
 
         var service = new DocumentWriteService(
             MartenSpine.Guard(wrapped),

@@ -21,7 +21,7 @@ public class KafkaActionLogTests
     {
         using KafkaStudioHarness harness = new();
         CapturingLoggerProvider captured = new();
-        KafkaActionLog log = new(harness.Context.ActionLog, captured.CreateFactory().CreateLogger<KafkaActionLog>(), harness.Visitor);
+        KafkaActionLog log = new(harness.Context.ActivityRing, captured.CreateFactory().CreateLogger<KafkaActionLog>(), harness.Visitor);
         KafkaCapabilityDeniedException denial = new(KafkaCapability.SearchRecords, PostgresStudio.Services.CapabilityDenialReason.Disabled, "PostgresStudioOptions.ReadOnly");
 
         log.RecordCapabilityDenied(KafkaStudioHarness.Primary, ["orders.v1"], denial, "SearchRecords", "orders.v1");
@@ -30,7 +30,7 @@ public class KafkaActionLogTests
         entry.Succeeded.Should().BeFalse();
         entry.Capability.Should().Be("SearchRecords");
         entry.Message.Should().Contain("KafkaStudioOptions.Capabilities.SearchRecords");
-        entry.ScopeKind.Should().Be("kafka");
+        entry.Scope.Kind.Should().Be("kafka");
         captured.Entries.Should().ContainSingle().Which.Should().Match<CapturedLogEntry>(
             static x => x.EventId.Id == 9602 && x.Level == LogLevel.Warning && x.Message.Contains("KafkaStudioOptions.Capabilities.SearchRecords", StringComparison.Ordinal));
     }
@@ -40,7 +40,7 @@ public class KafkaActionLogTests
     {
         using KafkaStudioHarness harness = new();
         CapturingLoggerProvider captured = new();
-        KafkaActionLog log = new(harness.Context.ActionLog, captured.CreateFactory().CreateLogger<KafkaActionLog>(), harness.Visitor);
+        KafkaActionLog log = new(harness.Context.ActivityRing, captured.CreateFactory().CreateLogger<KafkaActionLog>(), harness.Visitor);
 
         log.RecordClusterDenied(KafkaStudioHarness.Primary, "secrets.v1", ["secrets.v1"], "kafka-topics", "SearchRecords", "secrets.v1", KafkaCapability.SearchRecords);
 
@@ -59,7 +59,8 @@ public class KafkaActionLogTests
 
         StudioActionLogEntry entry = harness.Context.Services.GetRequiredService<StudioActionLogService>().GetLatest().Should().ContainSingle().Which;
         entry.Target.Should().HaveLength(KafkaActionLog.MaxTargetLength + 1).And.EndWith("…");
-        entry.ScopeLabel.Should().HaveLength(KafkaActionLog.MaxTargetLength + 1).And.EndWith("…");
+        entry.Scope.Label.Should().ContainSingle().Which.Should().HaveLength(KafkaActionLog.MaxTargetLength + 1).And.EndWith("…");
+        entry.Scope.Title.Should().HaveLength(KafkaActionLog.MaxTargetLength + 1).And.EndWith("…");
     }
 
     [Fact]

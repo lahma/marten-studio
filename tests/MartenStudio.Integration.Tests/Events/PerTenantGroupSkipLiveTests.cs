@@ -258,7 +258,7 @@ public class PerTenantGroupSkipLiveTests(PerTenantGroupSkipFixture fixture) : IC
 
             StudioActionLogEntry entry = fixture.Audit.GetLatest()[0];
             entry.Action.Should().Be(EventDataService.SkipGroupAction);
-            entry.TenantId.Should().Be(PerTenantGroupSkipFixture.Acme);
+            entry.DatabaseScope()!.TenantId.Should().Be(PerTenantGroupSkipFixture.Acme);
 
             outcome.Should().BeNull();
             (await fixture.IsSkippedAsync(PerTenantGroupSkipFixture.Acme, sequence)).Should().BeTrue();

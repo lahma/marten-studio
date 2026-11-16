@@ -181,7 +181,7 @@ public class KafkaRecordServiceTests
         await records.RecordValueViewAsync(rig.Entry, read.Value.Record!, Ct);
 
         read.Value.Record!.ValueText.Should().Contain(ValueSentinel, "the visitor is shown the value");
-        string everything = string.Join('\n', rig.Ring.Select(static x => string.Join('|', x.User, x.Action, x.Target, x.Message, x.Capability, x.ScopeLabel)))
+        string everything = string.Join('\n', rig.Ring.Select(static x => string.Join('|', x.User, x.Action, x.Target, x.Message, x.Capability, string.Join(' ', x.Scope.Label), x.Scope.Title)))
             + string.Join('\n', rig.Logs.Entries.Select(static x => x.Message));
         everything.Should().NotContain(ValueSentinel);
         rig.Logs.Entries.Should().ContainSingle(static x => x.EventId.Id == 9605);

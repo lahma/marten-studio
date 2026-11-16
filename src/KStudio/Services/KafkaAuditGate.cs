@@ -21,23 +21,27 @@ internal sealed class KafkaAuditGate(KafkaAuthorization authorization, KafkaCapa
     public string Kind => KafkaStudioText.Key;
 
     /// <inheritdoc />
-    public IStudioAuditSweep BeginSweep(ClaimsPrincipal user)
+    public IStudioAuditSweep BeginSweep(Func<ValueTask<ClaimsPrincipal>> principal)
     {
-        ArgumentNullException.ThrowIfNull(user);
+        ArgumentNullException.ThrowIfNull(principal);
 
-        return new Sweep(user, authorization, capabilities);
+        return new Sweep(principal, authorization, capabilities);
     }
 
     /// <summary>One sweep: the answers are this visitor's, kept for the sweep only and never where another circuit could read them.</summary>
-    private sealed class Sweep(ClaimsPrincipal user, KafkaAuthorization authorization, KafkaCapabilityGuard capabilities) : IStudioAuditSweep
+    private sealed class Sweep(Func<ValueTask<ClaimsPrincipal>> principal, KafkaAuthorization authorization, KafkaCapabilityGuard capabilities) : IStudioAuditSweep
     {
         private readonly Dictionary<Question, bool> answers = [];
+        private ClaimsPrincipal? user;
 
         public async ValueTask<bool> IsVisibleAsync(StudioActionLogEntry entry, CancellationToken cancellationToken)
         {
             ArgumentNullException.ThrowIfNull(entry);
 
-            if (entry.ModuleScope is not KafkaAuditScope scope)
+            // The visitor is fetched with the first entry of this kind, where it used to be handed in when the sweep began.
+            user ??= await principal().ConfigureAwait(false);
+
+            if (entry.Scope.Value is not KafkaAuditScope scope)
             {
                 return false;
             }
@@ -129,7 +133,7 @@ internal sealed class KafkaAuditGate(KafkaAuthorization authorization, KafkaCapa
             }
 
             bool answer = await authorization
-                .IsAuthorizedAsync(user, scope.Cluster, scope.TenantId, topic, capability, cancellationToken)
+                .IsAuthorizedAsync(user!, scope.Cluster, scope.TenantId, topic, capability, cancellationToken)
                 .ConfigureAwait(false);
             answers[question] = answer;
             return answer;

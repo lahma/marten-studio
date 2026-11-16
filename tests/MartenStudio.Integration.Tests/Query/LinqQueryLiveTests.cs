@@ -269,7 +269,7 @@ public class LinqQueryLiveTests(PostgresFixture fixture) : IAsyncLifetime
 
         Ids(result).Should().Equal(LinqQueryHarness.AcmeAda);
         result.Plan!.UnavailableReason.Should().Be(LinqQueryService.PlanRefusedMessage);
-        acmeOnly.Ring.GetLatest().Should().Contain(static x => x.Action == LinqQueryService.LinqExplainAction && !x.Succeeded && x.TenantId == null);
+        acmeOnly.Ring.GetLatest().Should().Contain(static x => x.Action == LinqQueryService.LinqExplainAction && !x.Succeeded && x.DatabaseScope()!.TenantId == null);
         acmeOnly.Logs.Entries.Should().Contain(static x => x.EventId == 9203);
     }
 
@@ -303,7 +303,7 @@ public class LinqQueryLiveTests(PostgresFixture fixture) : IAsyncLifetime
             .And.OnlyContain(x => x.StoreName == "default" && x.DatabaseIdentifier == identity,
                 "a tenant-less question is about the database as a whole, named as the policy is promised - never DEFAULT or an empty ?db=");
         canonical.Ring.GetLatest().Should().Contain(x =>
-            x.Action == LinqQueryService.LinqExplainAction && !x.Succeeded && x.TenantId == null && x.StoreKey == "default" && x.DatabaseId == identity);
+            x.Action == LinqQueryService.LinqExplainAction && !x.Succeeded && x.DatabaseScope()!.TenantId == null && x.DatabaseScope()!.StoreKey == "default" && x.DatabaseScope()!.DatabaseId == identity);
     }
 
     [LinqLiveFact]
@@ -343,7 +343,7 @@ public class LinqQueryLiveTests(PostgresFixture fixture) : IAsyncLifetime
             .First(static x => x.Action == LinqQueryService.LinqQueryAction && x.Target.Contains("audited-whole", StringComparison.Ordinal));
 
         entry.Succeeded.Should().BeTrue();
-        entry.TenantId.Should().BeNull("the collection is not divided by tenant, so the read was the database's");
+        entry.DatabaseScope()!.TenantId.Should().BeNull("the collection is not divided by tenant, so the read was the database's");
     }
 
     // ------------------------------------------------------------------------------------------------

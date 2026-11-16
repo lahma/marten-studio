@@ -94,7 +94,10 @@ public class StudioRegistrationTests
         (typeof(IStudioScopeCatalog), ServiceLifetime.Scoped, How.Type, typeof(StudioScopeCatalog)),
         (typeof(StudioAuthorization), ServiceLifetime.Scoped, How.Type, typeof(StudioAuthorization)),
         (typeof(StudioSourceResolver), ServiceLifetime.Scoped, How.Type, typeof(StudioSourceResolver)),
+        // Shell A2c: the ring's neutral way in and out, and the database's own gate on what a visitor may read of it.
+        (typeof(StudioActivity), ServiceLifetime.Scoped, How.Type, typeof(StudioActivity)),
         (typeof(StudioActionLog), ServiceLifetime.Scoped, How.Type, typeof(StudioActionLog)),
+        (typeof(IStudioAuditScopeGate), ServiceLifetime.Scoped, How.Type, typeof(DatabaseAuditGate)),
         (typeof(ToastService), ServiceLifetime.Scoped, How.Type, typeof(ToastService)),
         (typeof(StudioSnapshotCache), ServiceLifetime.Singleton, How.Type, typeof(StudioSnapshotCache)),
         (typeof(StudioLiveUpdatesFactory), ServiceLifetime.Scoped, How.Type, typeof(StudioLiveUpdatesFactory)),

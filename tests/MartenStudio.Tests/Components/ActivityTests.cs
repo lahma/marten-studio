@@ -3,7 +3,6 @@ using Bunit;
 using MartenStudio.Components.Pages;
 using MartenStudio.Services;
 
-using Microsoft.Extensions.DependencyInjection;
 using PostgresStudio.Components.Pages;
 using PostgresStudio.Services;
 
@@ -156,6 +155,26 @@ public class ActivityTests
         page.Find("tbody tr td").TextContent.Trim().Should().EndWith("+00:00");
     }
 
+    /// <summary>
+    /// The page follows the visitor's time zone live, through the preferences themselves: it holds no reference to the database's state to hear a
+    /// scope change through (A2c), and a time zone change is the only change of the circuit that alters what it draws.
+    /// </summary>
+    [Fact]
+    public async Task A_time_zone_change_after_the_first_render_is_drawn()
+    {
+        using var context = new StudioComponentContext();
+        context.Preferences.SelectedTimeZoneId = TimeZoneInfo.Utc.Id;
+        Record(context, "ops", "DeleteDocument", succeeded: true);
+
+        var page = context.Render<Activity>();
+        page.Find("tbody tr td").TextContent.Trim().Should().EndWith("+00:00");
+
+        context.Preferences.SelectedTimeZoneId = "Asia/Kolkata";
+        await page.InvokeAsync(context.Preferences.NotifyChangedAsync);
+
+        page.WaitForAssertion(() => page.Find("tbody tr td").TextContent.Trim().Should().EndWith("+05:30"));
+    }
+
     // -------------------------------------------------------------------------------------------
     // The ring is process-wide, so what it shows is not
     // -------------------------------------------------------------------------------------------
@@ -270,7 +289,7 @@ public class ActivityTests
     }
 
     /// <summary>
-    /// The Overview's recent activity is the same filter over the same ring (<see cref="StudioActionLog.GetVisibleAsync" />):
+    /// The Overview's recent activity is the same filter over the same ring (<see cref="StudioActivity.GetVisibleAsync" />):
     /// a visitor the write policy refuses the browser does not see an operator's reads there either.
     /// </summary>
     [Fact]
@@ -357,7 +376,7 @@ public class ActivityTests
         List<StudioActionLogEntry> visible = await VisibleAsync(context);
 
         context.AuthorizationService.Calls.Should().HaveCount(6, "three scopes, two policies each");
-        visible.Should().HaveCount(200).And.OnlyContain(static x => x.DatabaseId != "db-1");
+        visible.Should().HaveCount(200).And.OnlyContain(static x => x.DatabaseScope()!.DatabaseId != "db-1");
     }
 
     /// <summary>And the next sweep asks again: a policy's answer may have changed, and nothing outlives the sweep.</summary>
@@ -395,10 +414,7 @@ public class ActivityTests
     }
 
     private static ValueTask<List<StudioActionLogEntry>> VisibleAsync(StudioComponentContext context) =>
-        context.ActionLog.GetVisibleAsync(
-            context.Services.GetRequiredService<StudioAuthorization>(),
-            context.Services.GetRequiredService<StudioCapabilityGuard>(),
-            cancellationToken: Xunit.TestContext.Current.CancellationToken);
+        context.ActivityRing.GetVisibleAsync(cancellationToken: Xunit.TestContext.Current.CancellationToken);
 
     [Fact]
     public void With_no_store_policy_configured_nothing_is_filtered_out()

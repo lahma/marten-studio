@@ -3,8 +3,6 @@ using Bunit;
 using KStudio.Services;
 using KStudio.Tests.Support;
 
-using Microsoft.Extensions.DependencyInjection;
-
 using PostgresStudio.Components.Pages;
 using PostgresStudio.Services;
 
@@ -19,10 +17,7 @@ public class KafkaAuditTests
     private static CancellationToken Ct => Xunit.TestContext.Current.CancellationToken;
 
     private static ValueTask<List<StudioActionLogEntry>> Visible(KafkaStudioHarness harness) =>
-        harness.Context.ActionLog.GetVisibleAsync(
-            harness.Context.Services.GetRequiredService<StudioAuthorization>(),
-            harness.Context.Services.GetRequiredService<StudioCapabilityGuard>(),
-            cancellationToken: Ct);
+        harness.Context.ActivityRing.GetVisibleAsync(cancellationToken: Ct);
 
     private static void Record(KafkaStudioHarness harness, string[] topics, KafkaCapability? capability = null, KafkaClusterEntry? cluster = null) =>
         harness.ActionLog.Record(cluster ?? KafkaStudioHarness.Primary, topics, "SearchRecords", string.Join(", ", topics), succeeded: true, "done", capability);
@@ -35,14 +30,13 @@ public class KafkaAuditTests
         Record(harness, ["orders.v1"], cluster: new KafkaClusterEntry("primary", "tenant-a", "Primary", null));
 
         StudioActionLogEntry entry = (await Visible(harness)).Should().ContainSingle().Which;
-        entry.ScopeKind.Should().Be("kafka");
-        entry.ScopeLabel.Should().Be("Primary · tenant-a");
-        KafkaAuditScope scope = entry.ModuleScope.Should().BeOfType<KafkaAuditScope>().Which;
+        entry.Scope.Kind.Should().Be("kafka");
+        entry.Scope.Label.Should().Equal("Primary · tenant-a");
+        entry.Scope.Title.Should().Be("Primary · tenant-a");
+        KafkaAuditScope scope = entry.Scope.Value.Should().BeOfType<KafkaAuditScope>().Which;
         (scope.Cluster, scope.TenantId, scope.Topics).Should().Be(("primary", "tenant-a", scope.Topics));
         scope.Topics.Should().Equal("orders.v1");
-        entry.StoreKey.Should().Be("(module)", "a module entry names no store, so no host policy can recognise it");
-        entry.DatabaseId.Should().Be("(module)");
-        entry.TenantId.Should().BeNull();
+        entry.DatabaseScope().Should().BeNull("a module entry names no store, so no host policy can recognise it");
     }
 
     [Fact]
@@ -149,8 +143,8 @@ public class KafkaAuditTests
     public async Task An_entry_of_a_kind_no_gate_answers_for_is_hidden()
     {
         using KafkaStudioHarness harness = new();
-        harness.Context.Services.GetRequiredService<StudioActionLog>().RecordModule(
-            new StudioModuleAuditScope("removed-module", "somewhere", new object()), "Anything", "target", succeeded: true);
+        harness.Context.ActivityRing.Record(
+            new StudioAuditScope("removed-module", ["somewhere"], "somewhere", new object()), "Anything", "target", succeeded: true);
 
         (await Visible(harness)).Should().BeEmpty("fail closed");
     }
@@ -161,7 +155,7 @@ public class KafkaAuditTests
         using KafkaStudioHarness harness = new();
         harness.Context.ActionLog.Record("OpenDocument", "orders/1", succeeded: true, "done");
 
-        (await Visible(harness)).Should().ContainSingle().Which.ScopeKind.Should().BeNull();
+        (await Visible(harness)).Should().ContainSingle().Which.DatabaseScope().Should().NotBeNull("the studio's own entry carries the database's scope, under the database module's key");
     }
 
     [Fact]
@@ -204,8 +198,8 @@ public class KafkaAuditTests
         List<StudioActionLogEntry> visible = await Visible(harness);
 
         StudioActionLogEntry entry = visible.Should().ContainSingle().Which;
-        entry.ScopeLabel.Should().Be("Wolverine · acme");
-        KafkaAuditScope scope = entry.ModuleScope.Should().BeOfType<KafkaAuditScope>().Which;
+        entry.Scope.Label.Should().Equal("Wolverine · acme");
+        KafkaAuditScope scope = entry.Scope.Value.Should().BeOfType<KafkaAuditScope>().Which;
         (scope.Cluster, scope.TenantId).Should().Be(("wolverine", "acme"));
         harness.Authorization.KafkaCalls.Should().OnlyContain(static x => x.Resource.Cluster == "wolverine");
     }

@@ -93,8 +93,8 @@ public class DatabaseGateLiveTests(DatabaseGateLiveTests.Fixture database) : ICl
 
         StudioActionLogEntry entry = host.Ring.GetLatest().Should().ContainSingle(static x => x.Action == DatabaseAccess.ListAction).Subject;
         entry.Succeeded.Should().BeFalse("a schema outside the gate is refused, and the refusal is audited");
-        entry.DatabaseId.Should().Be("default");
-        entry.TenantId.Should().BeNull();
+        entry.DatabaseScope()!.DatabaseId.Should().Be("default");
+        entry.DatabaseScope()!.TenantId.Should().BeNull();
     }
 
     [PostgresFact]

@@ -154,7 +154,7 @@ public class FirstNavigationLiveTests(PostgresFixture postgres)
         IHealthService health = circuit.Get<IHealthService>();
         HealthReport regular = await health.GetReportAsync(scope, HealthReportRequest.Regular, Token);
         regular.Refusal.Should().Be(HealthRefusal.None, regular.Reason);
-        _ = await circuit.Get<StudioActionLog>().GetVisibleAsync(circuit.Get<StudioAuthorization>(), circuit.Get<StudioCapabilityGuard>(), 10, Token);
+        _ = await circuit.Get<StudioActivity>().GetVisibleAsync(10, Token);
 
         // The database browser: every kind, every object, every definition, every relation's rows.
         ITableRowService rows = circuit.Get<ITableRowService>();

@@ -19,15 +19,20 @@ public class ModuleAuditEntryTests
 
         public string Kind { get; } = kind;
 
-        public IStudioAuditSweep BeginSweep(ClaimsPrincipal user)
+        public IStudioAuditSweep BeginSweep(Func<ValueTask<ClaimsPrincipal>> principal)
         {
             Sweeps++;
-            return new Sweep(visible);
+            return new Sweep(visible, principal);
         }
 
-        private sealed class Sweep(Func<StudioActionLogEntry, bool> visible) : IStudioAuditSweep
+        /// <summary>A gate that always asks for the visitor, as a module's does: the sweep fetches the principal for the first and shares it.</summary>
+        private sealed class Sweep(Func<StudioActionLogEntry, bool> visible, Func<ValueTask<ClaimsPrincipal>> principal) : IStudioAuditSweep
         {
-            public ValueTask<bool> IsVisibleAsync(StudioActionLogEntry entry, CancellationToken cancellationToken) => ValueTask.FromResult(visible(entry));
+            public async ValueTask<bool> IsVisibleAsync(StudioActionLogEntry entry, CancellationToken cancellationToken)
+            {
+                await principal();
+                return visible(entry);
+            }
         }
     }
 
@@ -41,13 +46,10 @@ public class ModuleAuditEntryTests
         });
 
     private static ValueTask<List<StudioActionLogEntry>> Visible(PostgresStudioComponentContext context) =>
-        context.ActionLog.GetVisibleAsync(
-            context.Services.GetRequiredService<StudioAuthorization>(),
-            context.Services.GetRequiredService<StudioCapabilityGuard>(),
-            cancellationToken: TestContext.Current.CancellationToken);
+        context.ActivityRing.GetVisibleAsync(cancellationToken: TestContext.Current.CancellationToken);
 
     private static void RecordModule(PostgresStudioComponentContext context, string kind = "fake") =>
-        context.ActionLog.RecordModule(new StudioModuleAuditScope(kind, "label", new object()), "Act", "target", succeeded: true, "done", "Cap");
+        context.ActivityRing.Record(new StudioAuditScope(kind, ["label"], "label", new object()), "Act", "target", succeeded: true, "done", "Cap");
 
     [Fact]
     public async Task A_module_entry_is_never_judged_by_the_store_policy()
@@ -60,9 +62,9 @@ public class ModuleAuditEntryTests
 
         StudioActionLogEntry entry = (await Visible(context)).Should().ContainSingle("the host's policy refuses every source and is not asked").Which;
 
-        entry.ScopeKind.Should().Be("fake");
-        entry.ScopeLabel.Should().Be("label");
-        entry.StoreKey.Should().Be("(module)");
+        entry.Scope.Kind.Should().Be("fake");
+        entry.Scope.Label.Should().Equal("label");
+        entry.DatabaseScope().Should().BeNull("a module's entry names no store, so no host policy can recognise it");
         context.AuthorizationService.Calls.Should().BeEmpty();
     }
 
@@ -122,10 +124,7 @@ public class ModuleAuditEntryTests
         RecordModule(context);
         RecordModule(context);
 
-        List<StudioActionLogEntry> two = await context.ActionLog.GetVisibleAsync(
-            context.Services.GetRequiredService<StudioAuthorization>(),
-            context.Services.GetRequiredService<StudioCapabilityGuard>(),
-            take: 2,
+        List<StudioActionLogEntry> two = await context.ActivityRing.GetVisibleAsync(take: 2,
             cancellationToken: TestContext.Current.CancellationToken);
 
         two.Should().HaveCount(2);

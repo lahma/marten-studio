@@ -612,7 +612,7 @@ public class DeadLetterGroupsLiveTests(DeadLetterGroupsFixture fixture) : IClass
             await skipping.Should().ThrowAsync<StudioNotAuthorizedException>();
             (await fixture.SkippedAsync(fixture.GlobexPoison)).Should().BeEmpty();
             fixture.Audit.GetLatest()[0].Should().Match<StudioActionLogEntry>(static x =>
-                x.Action == EventDataService.SkipGroupAction && !x.Succeeded && x.TenantId == DeadLetterGroupsFixture.Globex);
+                x.Action == EventDataService.SkipGroupAction && !x.Succeeded && x.DatabaseScope()!.TenantId == DeadLetterGroupsFixture.Globex);
         }
         finally
         {

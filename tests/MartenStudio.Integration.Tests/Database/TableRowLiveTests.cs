@@ -600,7 +600,7 @@ public class TableRowLiveTests(TableRowLiveTests.Fixture fixture) : IClassFixtur
 
             List<StudioActionLogEntry> audited = [.. host.Ring.GetLatest().Where(x => x.Target == schema + "." + table)];
             audited.Should().HaveCount(5, what + ": one audited refusal per call");
-            audited.Should().OnlyContain(static x => !x.Succeeded && x.TenantId == null, what);
+            audited.Should().OnlyContain(static x => !x.Succeeded && x.DatabaseScope()!.TenantId == null, what);
         }
     }
 
@@ -631,7 +631,7 @@ public class TableRowLiveTests(TableRowLiveTests.Fixture fixture) : IClassFixtur
         policy.Calls.Should().OnlyContain(static x => x.Resource.TenantId == null);
         policy.Calls.Should().Contain(static x => x.Resource.Capability == nameof(StudioCapability.BrowseDatabase));
 
-        host.Ring.GetLatest().Should().OnlyContain(static x => x.TenantId == null);
+        host.Ring.GetLatest().Should().OnlyContain(static x => x.DatabaseScope()!.TenantId == null);
     }
 
     /// <summary>
@@ -698,7 +698,7 @@ public class TableRowLiveTests(TableRowLiveTests.Fixture fixture) : IClassFixtur
         entries.Should().HaveCount(2);
         entries[0].Action.Should().Be(TableRowService.FilterAction);
         entries[0].Message.Should().Contain("status");
-        entries.Should().OnlyContain(static x => x.Succeeded && x.TenantId == null);
+        entries.Should().OnlyContain(static x => x.Succeeded && x.DatabaseScope()!.TenantId == null);
         entries.Select(static x => x.Message + " " + x.Target + " " + x.Action).Should().NotContain(static x => x.Contains("approved", StringComparison.Ordinal),
             "the ring is readable by anyone with the read policy; values go to the log");
 

@@ -162,7 +162,9 @@ internal class StudioComponentContext : BunitContext
         Services.AddSingleton<IStudioModuleRail, DatabaseModuleRail>();
         Services.AddSingleton<ToastService>();
         Services.AddSingleton<StudioActionLogService>();
+        Services.AddSingleton<StudioActivity>();
         Services.AddSingleton<StudioActionLog>();
+        Services.AddSingleton<IStudioAuditScopeGate, DatabaseAuditGate>();
 
         // What the layout reads to decide whether to draw the "served to anyone" banner. The real
         // singleton, so a test says what it says by handing it real endpoint metadata. Constructed
@@ -246,6 +248,9 @@ internal class StudioComponentContext : BunitContext
     public ToastService Toasts => Services.GetRequiredService<ToastService>();
 
     public StudioActionLog ActionLog => Services.GetRequiredService<StudioActionLog>();
+
+    /// <summary>The ring's neutral way in and out: what the Activity page and the Overview read through.</summary>
+    public StudioActivity ActivityRing => Services.GetRequiredService<StudioActivity>();
 
     /// <summary>Where the browser is now.</summary>
     public string CurrentUri => Services.GetRequiredService<NavigationManager>().Uri;

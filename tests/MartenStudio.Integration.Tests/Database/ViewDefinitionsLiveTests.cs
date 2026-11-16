@@ -233,7 +233,7 @@ public class ViewDefinitionsLiveTests(ViewDefinitionsLiveTests.Fixture fixture) 
         StudioActionLogEntry entry = host.Ring.GetLatest().Should().ContainSingle(static x => x.Action == DatabaseAccess.DefinitionAction).Subject;
         entry.Succeeded.Should().BeFalse();
         entry.Capability.Should().Be(nameof(MartenStudioCapabilities.ViewDefinitions));
-        entry.TenantId.Should().BeNull("the refused scope is the database as a whole");
+        entry.DatabaseScope()!.TenantId.Should().BeNull("the refused scope is the database as a whole");
         entry.Target.Should().Be(fixture.LegacySchema + ".populated_stats");
 
         DatabaseBrowserOverview overview = await host.ObjectsAsync(x => x.GetOverviewAsync(BrowserHost.Scope, Token));

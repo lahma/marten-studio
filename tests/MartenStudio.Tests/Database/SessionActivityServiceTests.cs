@@ -361,7 +361,7 @@ public class SessionActivityServiceTests
         harness.Policies.Calls.Where(x => x.Resource.Capability is null && x.Resource.DatabaseIdentifier == identity)
             .Should().NotBeEmpty("the store policy is asked about the identity too, beside the resolver's own question");
 
-        harness.Ring.Should().ContainSingle().Which.DatabaseId.Should().Be(identity, "the audit names the resource the policy was shown");
+        harness.Ring.Should().ContainSingle().Which.DatabaseScope()!.DatabaseId.Should().Be(identity, "the audit names the resource the policy was shown");
     }
 
     /// <summary>The refusing half: a policy that grants only the empty spelling is not asked about it, and refuses.</summary>
@@ -379,7 +379,7 @@ public class SessionActivityServiceTests
 
         StudioActionLogEntry entry = harness.Ring.Should().ContainSingle().Subject;
         entry.Succeeded.Should().BeFalse();
-        entry.DatabaseId.Should().Be(identity);
+        entry.DatabaseScope()!.DatabaseId.Should().Be(identity);
     }
 
     /// <summary>
@@ -403,7 +403,7 @@ public class SessionActivityServiceTests
 
         harness.Policies.Calls.Where(static x => x.Resource.Capability is not null).Should().NotBeEmpty()
             .And.OnlyContain(static x => x.Resource.StoreName == "default");
-        harness.Ring.Should().ContainSingle().Which.StoreKey.Should().Be("default");
+        harness.Ring.Should().ContainSingle().Which.DatabaseScope()!.StoreKey.Should().Be("default");
     }
 
     [Fact]

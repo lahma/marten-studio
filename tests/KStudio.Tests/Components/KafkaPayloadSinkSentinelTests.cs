@@ -137,7 +137,7 @@ public class KafkaPayloadSinkSentinelTests
             markup.Should().NotContain(x => x.Contains(sentinel, StringComparison.Ordinal), "no rendered markup holds " + sentinel);
             rig.Studio.Navigation.Reported.Select(static x => x.Uri).Concat(rig.Studio.Navigation.Requests.Select(static x => x.Uri))
                 .Should().NotContain(x => x.Contains(sentinel, StringComparison.Ordinal) || Uri.UnescapeDataString(x).Contains(sentinel, StringComparison.Ordinal), "no address holds " + sentinel);
-            rig.Ring.Select(static x => string.Join('|', x.User, x.Action, x.Target, x.Message, x.Capability, x.ScopeLabel)).Should().NotContain(x => x.Contains(sentinel, StringComparison.Ordinal));
+            rig.Ring.Select(static x => string.Join('|', x.User, x.Action, x.Target, x.Message, x.Capability, string.Join(' ', x.Scope.Label), x.Scope.Title)).Should().NotContain(x => x.Contains(sentinel, StringComparison.Ordinal));
             rig.CircuitLogs.Entries.Concat(rig.Logs.Entries).Select(static x => x.Message).Should().NotContain(x => x.Contains(sentinel, StringComparison.Ordinal));
             rig.Toasts.Messages.Select(static x => x.Message).Should().NotContain(x => x.Contains(sentinel, StringComparison.Ordinal));
             rig.Studio.Context.JSInterop.Invocations

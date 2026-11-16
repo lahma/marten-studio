@@ -166,7 +166,7 @@ internal sealed class StudioCapabilityGuard
     /// Three of them read beyond the store's own documents and events (the console, the database browser, and the
     /// browser's definitions alone), one names other sessions and their statements (<c>ViewDatabaseActivity</c>), and
     /// one evaluates a typed expression in this process (<c>RunLinqQueries</c>). What they share is the rule
-    /// <c>StudioActionLog.GetVisibleAsync</c> applies to an audit entry recorded under one of them: it names
+    /// <c>DatabaseAuditGate</c> applies to an audit entry recorded under one of them: it names
     /// what was read, so it is shown only to a visitor who may make the same read.
     /// </para>
     /// </remarks>

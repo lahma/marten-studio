@@ -134,7 +134,7 @@ public class TableRowAuditMultiDatabaseLiveTests(TableRowAuditMultiDatabaseLiveT
         List<StudioActionLogEntry> entries = [.. host.Ring.GetLatest().Where(static x => x.Target == "legacy.things")];
 
         entries.Should().HaveCount(2, "legacy.things in B is other rows than legacy.things in A");
-        entries.Select(static x => x.DatabaseId).Should().BeEquivalentTo([fixture.DatabaseA.Id.Identity, fixture.DatabaseB.Id.Identity]);
+        entries.Select(static x => x.DatabaseScope()!.DatabaseId).Should().BeEquivalentTo([fixture.DatabaseA.Id.Identity, fixture.DatabaseB.Id.Identity]);
 
         await rows.ListRowsAsync(inA, "legacy", "things", request, token);
         host.Ring.GetLatest().Where(static x => x.Target == "legacy.things").Should().HaveCount(2, "a refresh in A is still A's opening");

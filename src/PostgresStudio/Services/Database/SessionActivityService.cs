@@ -20,7 +20,7 @@ namespace PostgresStudio.Services.Database;
 /// by the resolver before anything is looked up; then the store policy and the write policy, one at a time and
 /// both tenant-less, so the refusal and event 9203 name the one that said no. Every refusal of the details is
 /// audited, under <c>ViewDatabaseActivity</c>, so the Activity screen shows it only to a visitor who may make the
-/// same read (<c>StudioActionLog.GetVisibleAsync</c>).
+/// same read (<c>DatabaseAuditGate</c>).
 /// </para>
 /// <para>
 /// <b>About the store and database the scope resolved to, by their own names</b> (AGENTS.md D29). The resolver has to

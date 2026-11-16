@@ -277,7 +277,7 @@ public class SqlConsoleLiveTests(PostgresFixture fixture) : IAsyncLifetime
         entry.Message.Should().Contain("1 rows");
         entry.Capability.Should().Be(nameof(StudioCapability.RunSql));
         entry.User.Should().Be("ops");
-        entry.StoreKey.Should().Be(harness.Scope.StoreKey);
+        entry.DatabaseScope()!.StoreKey.Should().Be(harness.Scope.StoreKey);
     }
 
     [PostgresFact]

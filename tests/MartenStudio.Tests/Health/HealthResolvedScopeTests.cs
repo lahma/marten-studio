@@ -122,7 +122,7 @@ public class HealthResolvedScopeTests
 
         StudioActionLogEntry shown = harness.Services.GetRequiredService<StudioActionLogService>().GetLatest()
             .Should().ContainSingle(static x => x.Action == HealthService.ActivityAction).Subject;
-        shown.StoreKey.Should().Be("default", "the audit names the store the policy was asked about");
+        shown.DatabaseScope()!.StoreKey.Should().Be("default", "the audit names the store the policy was asked about");
     }
 
     // ----------------------------------------------------------------------------------------------

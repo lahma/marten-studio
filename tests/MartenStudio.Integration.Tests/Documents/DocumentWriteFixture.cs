@@ -126,7 +126,7 @@ public abstract class DocumentWriteFixture(PostgresFixture postgres) : IAsyncLif
         var catalog = new StudioScopeCatalog(sources, authorization, NullLogger<StudioScopeCatalog>.Instance);
 
         var state = new StudioState(catalog, NullLogger<StudioState>.Instance, new StudioPreferences(new HttpContextAccessor()));
-        var audit = new StudioActionLog(Ring, Logs.CreateLogger<StudioActionLog>(), Users, state);
+        var audit = new StudioActionLog(new StudioActivity(Ring, Users, []), Logs.CreateLogger<StudioActionLog>(), Users, state, MartenStudioDescriptor.Instance);
 
         return new DocumentWriteService(
             new StudioCapabilityGuard(settings),

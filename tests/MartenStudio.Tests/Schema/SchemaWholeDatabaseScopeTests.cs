@@ -53,7 +53,7 @@ public class SchemaWholeDatabaseScopeTests
         StudioActionLogEntry entry = harness.Ring.GetLatest().Should()
             .Contain(static x => x.Action == "Apply schema changes").Which;
         entry.Succeeded.Should().BeFalse();
-        entry.TenantId.Should().BeNull("the refusal is audited against the tenant-less scope");
+        entry.DatabaseScope()!.TenantId.Should().BeNull("the refusal is audited against the tenant-less scope");
     }
 
     /// <summary>
@@ -75,7 +75,7 @@ public class SchemaWholeDatabaseScopeTests
         harness.Policies.Calls.Should().NotContain(static x =>
             x.Resource.Capability == nameof(StudioCapability.ApplySchemaChanges) && x.Resource.TenantId != null);
 
-        harness.Ring.GetLatest().Should().Contain(static x => x.Action == "Apply schema changes" && !x.Succeeded && x.TenantId == null);
+        harness.Ring.GetLatest().Should().Contain(static x => x.Action == "Apply schema changes" && !x.Succeeded && x.DatabaseScope()!.TenantId == null);
     }
 
     /// <summary>The same visitor is refused the script, the check and the preview, as values naming the store policy.</summary>
@@ -95,7 +95,7 @@ public class SchemaWholeDatabaseScopeTests
         harness.Policies.Calls.Should().OnlyContain(static x => x.Resource.TenantId == null,
             "the store policy is asked about the database as a whole first, before any tenant is looked up");
         harness.Ring.GetLatest().Where(static x => x.Action is "Generate schema script" or "Check schema" or "Preview schema migration")
-            .Should().HaveCount(3).And.OnlyContain(static x => !x.Succeeded && x.TenantId == null);
+            .Should().HaveCount(3).And.OnlyContain(static x => !x.Succeeded && x.DatabaseScope()!.TenantId == null);
     }
 
     /// <summary>A store over an unreachable host, two known tenants, every capability, and the two policies.</summary>

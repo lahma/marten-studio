@@ -17,7 +17,7 @@ public class KafkaSearchServiceTests
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     private static string All(StudioActionLogEntry entry) =>
-        string.Join('\n', entry.User, entry.Action, entry.Target, entry.Message, entry.Capability, entry.ScopeLabel, entry.ModuleScope?.ToString());
+        string.Join('\n', entry.User, entry.Action, entry.Target, entry.Message, entry.Capability, string.Join(' ', entry.Scope.Label), entry.Scope.Title, entry.Scope.Value.ToString());
 
     [Fact]
     public async Task StartAsync_asks_the_capability_and_both_policies_again()

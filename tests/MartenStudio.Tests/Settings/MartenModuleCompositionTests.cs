@@ -1,6 +1,9 @@
+using System.Reflection;
+
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
+using PostgresStudio.Components;
 using PostgresStudio.Services;
 using PostgresStudio.Services.Settings;
 
@@ -52,6 +55,46 @@ public class MartenModuleCompositionTests
     private static readonly MartenStudio.Services.MartenStudioSettings Settings = MartenStudio.Services.MartenStudioSettings.Of(Options.Create(new MartenStudioOptions()));
 
     private static DatabaseStudioModule Database() => new(Host, Settings, new StudioCapabilityGuard(Settings));
+
+    /// <summary>
+    /// Every page template of every assembly of the database's descriptor, as the dashboard-relative path that reaches it (a parameter segment is given a
+    /// value): not only the rail's routes, but the pages a link alone reaches, such as a detail page.
+    /// </summary>
+    private static string[] EveryPagePath(StudioDescriptor descriptor)
+    {
+        List<string> paths = [];
+
+        foreach (StudioPageAssembly pageAssembly in descriptor.PageAssemblies)
+        {
+            foreach (Type type in pageAssembly.Assembly.GetTypes().Where(static x => typeof(Microsoft.AspNetCore.Components.IComponent).IsAssignableFrom(x)))
+            {
+                foreach (Microsoft.AspNetCore.Components.RouteAttribute route in type.GetCustomAttributes<Microsoft.AspNetCore.Components.RouteAttribute>())
+                {
+                    string relative = route.Template[pageAssembly.CompileTimeRoot.Length..].TrimStart('/');
+                    paths.Add(string.Join('/', relative.Length == 0 ? [] : relative.Split('/').Select(static x => x.StartsWith('{') ? "value" : x)));
+                }
+            }
+        }
+
+        return [.. paths.Distinct()];
+    }
+
+    [Fact]
+    public void The_composed_route_table_matches_every_page_of_both_assemblies_as_the_databases_own_does()
+    {
+        StudioShellDescriptor shell = StudioModuleComposition.Compose(Host, [Database()]);
+        StudioRouteTable own = new(Host.PageAssemblies);
+        string[] paths = EveryPagePath(Host);
+
+        paths.Should().HaveCountGreaterThan(30, "Marten Studio's own pages and PostgresStudio's are all compared, not the rail's entries alone")
+            .And.Contain("documents/value/doc", "a page only a link reaches is among them").And.Contain("database/row");
+        foreach (string path in paths)
+        {
+            Microsoft.AspNetCore.Components.RouteData? expected = own.Match(path);
+            expected.Should().NotBeNull("'{0}' is a page of the database's own", path);
+            shell.Routes.Match(path)!.PageType.Should().Be(expected!.PageType, "'{0}' is the same page in the composed table", path);
+        }
+    }
 
     [Fact]
     public void No_other_module_registered_resolves_the_database_as_the_one_root_module()

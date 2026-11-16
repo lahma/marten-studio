@@ -1,3 +1,5 @@
+using System.Reflection;
+
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
@@ -101,6 +103,46 @@ public class StudioModuleCompositionTests
     /// </summary>
     private static (string Title, (string Label, string? Route, string Icon, string? BadgeKey, string? Title, bool HasIsShown, string? ShownWhen)[] Items) Shape(StudioNavSection section) =>
         (section.Title, [.. section.Items.Select(static i => (i.Label, i.Route, i.Icon, i.BadgeKey, i.Title, i.IsShown is not null, i.ShownWhen))]);
+
+    /// <summary>
+    /// Every page template of every assembly of the database's descriptor, as the dashboard-relative path that reaches it (a parameter segment is given a
+    /// value): not only the rail's routes, but the pages a link alone reaches, such as a detail page.
+    /// </summary>
+    private static string[] EveryPagePath(StudioDescriptor descriptor)
+    {
+        List<string> paths = [];
+
+        foreach (StudioPageAssembly pageAssembly in descriptor.PageAssemblies)
+        {
+            foreach (Type type in pageAssembly.Assembly.GetTypes().Where(static x => typeof(Microsoft.AspNetCore.Components.IComponent).IsAssignableFrom(x)))
+            {
+                foreach (Microsoft.AspNetCore.Components.RouteAttribute route in type.GetCustomAttributes<Microsoft.AspNetCore.Components.RouteAttribute>())
+                {
+                    string relative = route.Template[pageAssembly.CompileTimeRoot.Length..].TrimStart('/');
+                    paths.Add(string.Join('/', relative.Length == 0 ? [] : relative.Split('/').Select(static x => x.StartsWith('{') ? "value" : x)));
+                }
+            }
+        }
+
+        return [.. paths.Distinct()];
+    }
+
+    [Fact]
+    public void The_composed_route_table_matches_every_page_of_the_database_as_the_databases_own_does()
+    {
+        StudioShellDescriptor shell = Compose();
+        StudioRouteTable own = new(Host.PageAssemblies);
+        string[] paths = EveryPagePath(Host);
+
+        paths.Should().HaveCountGreaterThan(15, "every page of the assembly is compared, not the rail's entries alone")
+            .And.Contain("database/row", "a page only a link reaches is among them");
+        foreach (string path in paths)
+        {
+            Microsoft.AspNetCore.Components.RouteData? expected = own.Match(path);
+            expected.Should().NotBeNull("'{0}' is a page of the database's own", path);
+            shell.Routes.Match(path)!.PageType.Should().Be(expected!.PageType, "'{0}' is the same page in the composed table", path);
+        }
+    }
 
     [Fact]
     public void No_module_registered_resolves_the_database_as_the_one_root_module()

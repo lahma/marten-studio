@@ -19,9 +19,7 @@
 @inject HealthMutes HealthMutes
 @inject IJSRuntime JsRuntime
 @inject StudioState State
-@inject StudioActionLog ActionLog
-@inject StudioAuthorization Authorization
-@inject StudioCapabilityGuard Capabilities
+@inject StudioActivity ActivityRing
 @inject StudioLiveUpdatesFactory LiveFactory
 @inject IOptions<MartenStudioOptions> Options
 
@@ -1110,7 +1108,7 @@
     /// the sweep.
     /// </para>
     /// <para>
-    /// <b>Through <see cref="StudioActionLog.GetVisibleAsync" />, which is where that rule lives.</b>
+    /// <b>Through <see cref="StudioActivity.GetVisibleAsync" />, which is where that rule lives.</b>
     /// The bound is its <c>take</c> argument rather than a loop here, because a sweep wants the
     /// authentication state once - and because the Activity screen filters the same ring and the two must
     /// not drift: a database-browser read or a SQL console run is shown only to a visitor who may make
@@ -1122,7 +1120,7 @@
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        return await ActionLog.GetVisibleAsync(Authorization, Capabilities, RecentCount, cancellationToken);
+        return await ActivityRing.GetVisibleAsync(RecentCount, cancellationToken);
     }
 
     private string Link(string route) => EventLinks.To(Options.Value, route, State.ActiveScope);

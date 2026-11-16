@@ -1528,7 +1528,7 @@ internal sealed class LinqQueryService : ILinqQueryService
         /// The scope the audit entries are recorded under: the request's own, or - for a collection not divided by
         /// tenant, read from a tenant scope - the database as a whole, which is what such a read reaches. The ring
         /// shows an entry under <c>RunLinqQueries</c> only to a visitor who may make the same read
-        /// (<c>StudioActionLog.GetVisibleAsync</c>), so the entry carries the question the read was asked.
+        /// (<c>DatabaseAuditGate</c>), so the entry carries the question the read was asked.
         /// </summary>
         public StudioScope AuditScope { get; init; } = Scope;
 

@@ -80,4 +80,55 @@ public class DatabaseScopeAccessLifetimeTests
         routes.Find("h1").TextContent.Trim().Should().Be("Not found");
         routes.FindAll(".ms-empty-title").Should().BeEmpty("the refusal was never drawn");
     }
+
+    /// <summary>
+    /// The way back (review of A2a, F1, the leg the first test does not take): from "Not found", whose layout the circuit's gate had admitted, to a page
+    /// whose scope the policy now refuses. The re-created layout's gate shows the spinner until its own host has answered, then the refusal - never the
+    /// page, and never the previous layout's Granted.
+    /// </summary>
+    [Fact]
+    public async Task The_way_back_from_Not_found_to_a_page_whose_scope_is_refused_shows_the_spinner_then_the_refusal_and_never_the_body()
+    {
+        ClickableNavigationManager navigation = new();
+
+        await using StudioComponentContext context = new(services =>
+        {
+            services.AddSingleton<NavigationManager>(navigation);
+            services.AddSingleton<INavigationInterception, QuietNavigationInterception>();
+            services.AddSingleton<IScrollToLocationHash, QuietScrollToLocationHash>();
+        });
+
+        context.Options.RefreshInterval = TimeSpan.FromMinutes(5);
+        context.StoreInfo.WithStore("default", "Default", databaseIdentity: "db-a");
+        context.Catalog.WithStore("default", "Default", databaseIdentities: "db-a");
+        context.WithPolicy("default");
+
+        DatabaseScopeAccess access = context.Services.GetRequiredService<DatabaseScopeAccess>();
+
+        // The first layout, on the Overview: admitted. Then "Not found", in a layout of its own: admitted as well.
+        IRenderedComponent<StudioRoutes> routes = context.Render<StudioRoutes>();
+        routes.WaitForAssertion(() => access.Value.Should().Be(ScopeAccess.Granted));
+        await routes.InvokeAsync(() => navigation.NavigateTo("no-such-page"));
+        routes.WaitForAssertion(() => routes.Find("h1").TextContent.Trim().Should().Be("Not found"));
+        access.Value.Should().Be(ScopeAccess.Granted);
+
+        // The policy now refuses the scope, and answers slowly. The way back to a page re-creates the layout again.
+        TaskCompletionSource answer = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        context.AuthorizationService.DenyEverything();
+        context.AuthorizationService.Gate = answer;
+        int asked = context.AuthorizationService.Calls.Count;
+        await routes.InvokeAsync(() => navigation.NavigateTo(string.Empty));
+        routes.WaitForAssertion(() => context.AuthorizationService.Calls.Count.Should().BeGreaterThan(asked, "the new host asked"));
+
+        access.Value.Should().Be(ScopeAccess.Unknown, "the previous layout's Granted is not this layout's answer");
+        routes.FindAll(".ms-loading-spinner").Should().ContainSingle();
+        routes.FindAll(".ms-empty-title").Should().BeEmpty("nothing is refused or shown before the policy has answered");
+        routes.FindAll("h1").Should().BeEmpty("neither the page nor 'Not found' is drawn");
+
+        answer.SetResult();
+        routes.WaitForAssertion(() => access.Value.Should().Be(ScopeAccess.Denied));
+        routes.WaitForAssertion(() => routes.FindAll(".ms-empty-title").Should().ContainSingle("the refusal is drawn"));
+        routes.FindAll(".ms-loading-spinner").Should().BeEmpty();
+        routes.FindAll("h1").Should().BeEmpty("the page is never drawn for a refused scope");
+    }
 }

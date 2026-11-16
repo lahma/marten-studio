@@ -102,8 +102,8 @@ public class ConnectionPageLiveTests(PostgresFixture postgres)
             row.TlsOn.Should().Be(0);
             row.OldestConnection.Should().NotBeNull();
 
-            IReadOnlyList<StudioActionLogEntry> ring = await circuit.Get<StudioActionLog>()
-                .GetVisibleAsync(circuit.Get<StudioAuthorization>(), circuit.Get<StudioCapabilityGuard>(), 50, Token);
+            IReadOnlyList<StudioActionLogEntry> ring = await circuit.Get<StudioActivity>()
+                .GetVisibleAsync(50, Token);
 
             ring.Should().Contain(static x => x.Action == ConnectionInsightService.ApplicationsAction && x.Succeeded);
 

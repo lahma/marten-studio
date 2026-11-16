@@ -72,7 +72,7 @@ public class ProgressionCorrectionReachTests
         StudioActionLogEntry refusal = harness.Ring.GetLatest()
             .Should().ContainSingle(x => x.Action == action && !x.Succeeded).Subject;
 
-        refusal.DatabaseId.Should().Be(harness.Secondary, "the audit names the database that was refused, not the one asked for");
+        refusal.DatabaseScope()!.DatabaseId.Should().Be(harness.Secondary, "the audit names the database that was refused, not the one asked for");
     }
 
     /// <summary>

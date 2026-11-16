@@ -77,7 +77,7 @@ public class SqlConsoleReachLiveTests(PostgresFixture fixture) : IAsyncLifetime
             .First(static x => x.Action == SqlConsoleService.RunSqlAction);
 
         entry.Succeeded.Should().BeFalse();
-        entry.TenantId.Should().BeNull("the audit names the question that was refused");
+        entry.DatabaseScope()!.TenantId.Should().BeNull("the audit names the question that was refused");
 
         harness.Logs.Should().Contain(
             static x => x.EventId == 9203 && x.Message.Contains(QueryHarness.AcmeOnlyPolicy, StringComparison.Ordinal),

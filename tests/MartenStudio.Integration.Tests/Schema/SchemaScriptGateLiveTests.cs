@@ -100,10 +100,10 @@ public class SchemaScriptGateLiveTests(PostgresFixture fixture)
 
         // Audited, against the database as a whole - the question that was refused.
         IReadOnlyList<StudioActionLogEntry> ring = host.Audit.GetLatest();
-        ring.Should().Contain(static x => x.Action == "Generate schema script" && !x.Succeeded && x.TenantId == null);
+        ring.Should().Contain(static x => x.Action == "Generate schema script" && !x.Succeeded && x.DatabaseScope()!.TenantId == null);
         ring.Should().Contain(static x => x.Action == "Check schema" && !x.Succeeded);
         ring.Should().Contain(static x => x.Action == "Preview schema migration" && !x.Succeeded);
-        ring.Should().Contain(static x => x.Action == "Apply schema changes" && !x.Succeeded && x.TenantId == null);
+        ring.Should().Contain(static x => x.Action == "Apply schema changes" && !x.Succeeded && x.DatabaseScope()!.TenantId == null);
         ring.Should().NotContain(static x => x.Action == "Apply schema changes" && x.Succeeded);
 
         policy.Calls.Should().Contain(static x => x.Policy == StorePolicy && x.Resource.TenantId == null,
@@ -141,7 +141,7 @@ public class SchemaScriptGateLiveTests(PostgresFixture fixture)
         policy.Calls.Should().NotContain(static x => x.Resource.Capability == nameof(StudioCapability.ApplySchemaChanges) && x.Resource.TenantId != null,
             "the visitor's tenant is never the question an apply asks");
 
-        host.Audit.GetLatest().Should().Contain(static x => x.Action == "Apply schema changes" && !x.Succeeded && x.TenantId == null);
+        host.Audit.GetLatest().Should().Contain(static x => x.Action == "Apply schema changes" && !x.Succeeded && x.DatabaseScope()!.TenantId == null);
         (await Host.IndexNamesAsync(fixture, "db7f_apply_tenant")).Should().Equal(before, "nothing ran");
     }
 

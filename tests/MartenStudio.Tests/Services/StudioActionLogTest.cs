@@ -51,7 +51,7 @@ public class StudioActionLogTest
 
         var ring = new StudioActionLogService();
         var captured = new CapturingLoggerProvider();
-        var log = new StudioActionLog(ring, captured.CreateFactory().CreateLogger<StudioActionLog>(), users, state);
+        var log = new StudioActionLog(new StudioActivity(ring, users, []), captured.CreateFactory().CreateLogger<StudioActionLog>(), users, state, MartenStudioDescriptor.Instance);
 
         return new Harness(log, ring, captured, users, state, provider);
     }
@@ -137,7 +137,7 @@ public class StudioActionLogTest
         warning.Level.Should().Be(LogLevel.Warning);
         warning.Message.Should().Contain("invoicing").And.Contain("srv/db").And.Contain("acme").And.Contain("store-policy");
 
-        harness.Ring.GetLatest().Should().ContainSingle().Which.StoreKey.Should().Be("invoicing");
+        harness.Ring.GetLatest().Should().ContainSingle().Which.DatabaseScope()!.StoreKey.Should().Be("invoicing");
     }
 
     [Fact]
@@ -148,7 +148,7 @@ public class StudioActionLogTest
         for (var i = 0; i < StudioActionLogService.MaxEntries + 25; i++)
         {
             ring.Record(new StudioActionLogEntry(
-                DateTimeOffset.UnixEpoch.AddSeconds(i), "ops", "default", "db", null,
+                DateTimeOffset.UnixEpoch.AddSeconds(i), "ops", new DatabaseAuditScope("default", "db", null).ToAuditScope(MartenStudioDescriptor.Key),
                 "Action" + i, "target", true, null, null));
         }
 
@@ -166,7 +166,7 @@ public class StudioActionLogTest
         for (var i = 0; i < 10; i++)
         {
             ring.Record(new StudioActionLogEntry(
-                DateTimeOffset.UnixEpoch, "ops", "default", "db", null, "Action" + i, "target", true, null, null));
+                DateTimeOffset.UnixEpoch, "ops", new DatabaseAuditScope("default", "db", null).ToAuditScope(MartenStudioDescriptor.Key), "Action" + i, "target", true, null, null));
         }
 
         ring.GetLatest(0).Should().HaveCount(1);
@@ -187,7 +187,7 @@ public class StudioActionLogTest
     {
         var ring = new StudioActionLogService();
         var entry = new StudioActionLogEntry(
-            DateTimeOffset.UnixEpoch, "ops", "default", "db", null, "DeleteDocument", "customer/42", true, "deleted", null);
+            DateTimeOffset.UnixEpoch, "ops", new DatabaseAuditScope("default", "db", null).ToAuditScope(MartenStudioDescriptor.Key), "DeleteDocument", "customer/42", true, "deleted", null);
 
         ring.Record(entry);
         ring.Record(entry);

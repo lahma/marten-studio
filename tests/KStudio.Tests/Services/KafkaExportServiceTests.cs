@@ -584,7 +584,7 @@ public class KafkaExportServiceTests
         await rig.Export().ExportAsync(InputOf(rig, planned, matches, result), new Capture().DeliverAsync, Ct);
 
         StudioActionLogEntry entry = Exports(rig).Single();
-        string all = string.Join('\n', entry.Target, entry.Message, entry.ScopeLabel);
+        string all = string.Join('\n', entry.Target, entry.Message, string.Join(' ', entry.Scope.Label), entry.Scope.Title);
         all.Should().Contain("<redacted>").And.NotContain(Sentinel);
         rig.Logs.Entries.Single(static x => x.EventId.Id == 9606).Message.Should().Contain("<redacted>").And.NotContain(Sentinel);
     }

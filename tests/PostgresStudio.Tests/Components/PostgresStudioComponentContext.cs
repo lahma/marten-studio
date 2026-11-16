@@ -133,7 +133,9 @@ internal sealed class PostgresStudioComponentContext : BunitContext
         Services.AddSingleton<IStudioModuleRail, DatabaseModuleRail>();
         Services.AddSingleton<ToastService>();
         Services.AddSingleton<StudioActionLogService>();
+        Services.AddSingleton<StudioActivity>();
         Services.AddSingleton<StudioActionLog>();
+        Services.AddSingleton<IStudioAuditScopeGate, DatabaseAuditGate>();
 
         MappedEndpoints = new StudioMappedEndpoints();
         Services.AddSingleton(MappedEndpoints);
@@ -187,6 +189,9 @@ internal sealed class PostgresStudioComponentContext : BunitContext
     public StudioPreferences Preferences => Services.GetRequiredService<StudioPreferences>();
 
     public StudioActionLog ActionLog => Services.GetRequiredService<StudioActionLog>();
+
+    /// <summary>The ring's neutral way in and out: what the Activity page and the Overview read through.</summary>
+    public StudioActivity ActivityRing => Services.GetRequiredService<StudioActivity>();
 
     public string CurrentUri => Services.GetRequiredService<NavigationManager>().Uri;
 

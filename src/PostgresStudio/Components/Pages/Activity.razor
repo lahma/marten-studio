@@ -3,12 +3,9 @@
 @using PostgresStudio.Services.Settings
 @using PostgresStudio.Components.Shared
 @implements IDisposable
-@inject IStudioSettings Settings
-@inject StudioActionLog ActionLog
-@inject StudioState State
+@inject IShellSettings Settings
+@inject StudioActivity ActivityRing
 @inject StudioPreferences Preferences
-@inject StudioAuthorization Authorization
-@inject StudioCapabilityGuard Capabilities
 @inject StudioShellDescriptor Descriptor
 
 <PageTitle>Activity</PageTitle>
@@ -69,14 +66,15 @@
                                 @* The separators are text and not `aria-hidden` decoration: hiding them
                                    would leave a screen reader reading the three values run together as
                                    one word, and a dot between them is how the cell reads out loud too. *@
-                                @if (entry.ScopeKind is not null)
+                                @* A module's entry says its own scope (D34), in as many parts as the module has. *@
+                                @for (int part = 0; part < entry.Scope.Label.Count; part++)
                                 {
-                                    @* A module's entry says its own scope (D34): the cluster, not a store, a database and a tenant. *@
-                                    @entry.ScopeLabel
-                                }
-                                else
-                                {
-                                    @entry.StoreKey<span class="ms-activity-scope-separator"> · </span>@entry.DatabaseId<span class="ms-activity-scope-separator"> · </span>@(entry.TenantId ?? "all")
+                                    if (part > 0)
+                                    {
+                                        <span class="ms-activity-scope-separator"> · </span>
+                                    }
+
+                                    @entry.Scope.Label[part]
                                 }
                             </td>
                             <td class="ms-table-cell">@entry.Action</td>
@@ -113,20 +111,17 @@
     private static string Outcome(StudioActionLogEntry entry) => entry.Succeeded ? "succeeded" : "failed";
 
     /// <summary>
-    /// The three values behind the Scope cell, spelled out, for its <c>title</c>.
+    /// The scope behind the Scope cell, spelled out by the module that recorded it, for its <c>title</c>.
     /// </summary>
     /// <remarks>
-    /// The cell reads <c>default · localhost.marten · all</c>, which is short enough for the column and
+    /// A cell reads <c>default · localhost.marten · all</c>, which is short enough for the column and
     /// ambiguous on its own about which dot-separated part is which. The title says.
     /// </remarks>
-    private static string ScopeTitle(StudioActionLogEntry entry) =>
-        entry.ScopeKind is not null
-            ? entry.ScopeLabel ?? entry.ScopeKind
-            : "Store " + entry.StoreKey + ", database " + entry.DatabaseId + ", tenant " + (entry.TenantId ?? "all");
+    private static string ScopeTitle(StudioActionLogEntry entry) => entry.Scope.Title;
 
     protected override async Task OnInitializedAsync()
     {
-        State.ScopeChanged += OnScopeChanged;
+        Preferences.Changed += OnPreferencesChanged;
         await ReloadAsync();
     }
 
@@ -135,13 +130,12 @@
     /// </summary>
     /// <remarks>
     /// The ring is process-wide and every circuit writes into it, so it is the one place in the studio
-    /// where one visitor's actions can be read by another. <see cref="StudioActionLog.GetVisibleAsync" />
-    /// decides, entry by entry - the store policy against the scope the action was aimed at, and a read
-    /// beyond the store only for a visitor who may make it - and the Overview asks it the same way.
+    /// where one visitor's actions can be read by another. <see cref="StudioActivity.GetVisibleAsync" />
+    /// decides, entry by entry, through the gate of the module that wrote it, and the Overview asks it the same way.
     /// </remarks>
     private async Task ReloadAsync()
     {
-        List<StudioActionLogEntry> allowed = await ActionLog.GetVisibleAsync(Authorization, Capabilities);
+        List<StudioActionLogEntry> allowed = await ActivityRing.GetVisibleAsync();
 
         if (string.IsNullOrWhiteSpace(filter))
         {
@@ -164,7 +158,12 @@
         visible = matches;
     }
 
-    private async Task OnScopeChanged()
+    /// <summary>
+    /// A time zone change reads the ring again and draws it again, as the page always did. The page does not follow the
+    /// visitor's scope any more: what the ring shows a visitor never depended on the scope on screen, so a scope change has
+    /// nothing to re-judge, and the page keeps no reference to the database's state to hear of one.
+    /// </summary>
+    private async Task OnPreferencesChanged()
     {
         await ReloadAsync();
         await InvokeAsync(StateHasChanged);
@@ -179,6 +178,6 @@
 
     public void Dispose()
     {
-        State.ScopeChanged -= OnScopeChanged;
+        Preferences.Changed -= OnPreferencesChanged;
     }
 }

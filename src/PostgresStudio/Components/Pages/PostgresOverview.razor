@@ -18,9 +18,7 @@
 @inject HealthMutes HealthMutes
 @inject IJSRuntime JsRuntime
 @inject StudioState State
-@inject StudioActionLog ActionLog
-@inject StudioAuthorization Authorization
-@inject StudioCapabilityGuard Capabilities
+@inject StudioActivity ActivityRing
 @inject StudioLiveUpdatesFactory LiveFactory
 @inject IStudioSettings Settings
 @inject StudioDescriptor Descriptor
@@ -521,7 +519,7 @@
         CancellationToken token = pageCancellation.Token;
 
         (List<StudioActionLogEntry>? readActivity, activityError) = await ReadAsync(
-            async () => await ActionLog.GetVisibleAsync(Authorization, Capabilities, RecentCount, token),
+            async () => await ActivityRing.GetVisibleAsync(RecentCount, token),
             activity,
             activityError);
 

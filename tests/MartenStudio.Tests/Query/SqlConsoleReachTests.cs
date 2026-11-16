@@ -78,7 +78,7 @@ public class SqlConsoleReachTests
         StudioActionLogEntry entry = harness.Ring.GetLatest().Should().ContainSingle().Subject;
         entry.Action.Should().Be(SqlConsoleService.RunSqlAction);
         entry.Succeeded.Should().BeFalse();
-        entry.TenantId.Should().BeNull("the audit records the scope that was refused - the database as a whole");
+        entry.DatabaseScope()!.TenantId.Should().BeNull("the audit records the scope that was refused - the database as a whole");
     }
 
     /// <summary>
@@ -101,7 +101,7 @@ public class SqlConsoleReachTests
                 && x.Resource.TenantId == null
                 && x.Resource.Capability == nameof(StudioCapability.RunSql));
 
-        harness.Ring.GetLatest().Should().ContainSingle().Which.TenantId.Should().BeNull();
+        harness.Ring.GetLatest().Should().ContainSingle().Which.DatabaseScope()!.TenantId.Should().BeNull();
     }
 
     /// <summary>
@@ -226,7 +226,7 @@ public class SqlConsoleReachTests
         StudioActionLogEntry entry = harness.Ring.GetLatest().Should().ContainSingle().Subject;
         entry.Action.Should().Be(QueryService.ExplainAction);
         entry.Succeeded.Should().BeFalse();
-        entry.TenantId.Should().BeNull();
+        entry.DatabaseScope()!.TenantId.Should().BeNull();
         entry.Capability.Should().Be(nameof(StudioCapability.RunSql));
     }
 
@@ -263,7 +263,7 @@ public class SqlConsoleReachTests
 
         plan.UnavailableReason.Should().BeNull("the gate let it through");
         plan.Error.Should().NotBeNull("nothing is listening at this connection string");
-        harness.Ring.GetLatest().Should().ContainSingle().Which.TenantId.Should().BeNull();
+        harness.Ring.GetLatest().Should().ContainSingle().Which.DatabaseScope()!.TenantId.Should().BeNull();
     }
 
     [Theory]
@@ -338,7 +338,7 @@ public class SqlConsoleReachTests
 
         result.Refusal.Should().Be(PostgresStudio.Services.Database.DatabaseRefusal.WritePolicy, result.Reason);
         harness.Ring.GetLatest().Should().Contain(x => x.Action == DocumentDataService.WhatIfAction && !x.Succeeded
-            && x.StoreKey == MartenStoreRegistry.DefaultStoreKey && x.DatabaseId == harness.Database,
+            && x.DatabaseScope()!.StoreKey == MartenStoreRegistry.DefaultStoreKey && x.DatabaseScope()!.DatabaseId == harness.Database,
             "the refusal is audited against the resource the policy refused");
     }
 

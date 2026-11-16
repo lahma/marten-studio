@@ -16,14 +16,14 @@ internal sealed record KafkaAuditScope(string Cluster, string? TenantId, IReadOn
 
 /// <summary>
 /// What a Kafka service calls when a visitor does, or is refused, something worth keeping: the process-wide Activity ring through the
-/// studio's <see cref="StudioActionLog" />, under the module's own scope, and KStudio's own log events (D34). Written on failure as well as on
+/// studio's <see cref="StudioActivity" />, under the module's own scope, and KStudio's own log events (D34). Written on failure as well as on
 /// success (AGENTS.md hard rule 5).
 /// </summary>
-/// <param name="audit">The studio's audit, whose ring this writes into.</param>
+/// <param name="activity">The studio's way into the ring, which this writes through.</param>
 /// <param name="logger">Where events 9602 and 9603 go.</param>
 /// <param name="authenticationStateProvider">Who is asking.</param>
 internal sealed class KafkaActionLog(
-    StudioActionLog audit,
+    StudioActivity activity,
     ILogger<KafkaActionLog> logger,
     AuthenticationStateProvider authenticationStateProvider)
 {
@@ -55,8 +55,9 @@ internal sealed class KafkaActionLog(
         ArgumentNullException.ThrowIfNull(cluster);
         ArgumentNullException.ThrowIfNull(topics);
 
-        audit.RecordModule(
-            new StudioModuleAuditScope(KafkaStudioText.Key, Bounded(cluster.Label), new KafkaAuditScope(cluster.Cluster, cluster.TenantId, [.. topics])),
+        string label = Bounded(cluster.Label);
+        activity.Record(
+            new StudioAuditScope(KafkaStudioText.Key, [label], label, new KafkaAuditScope(cluster.Cluster, cluster.TenantId, [.. topics])),
             action,
             Bounded(target),
             succeeded,
@@ -118,7 +119,7 @@ internal sealed class KafkaActionLog(
 
     /// <summary>
     /// Who the circuit belongs to, or a placeholder. Read from the already-completed task rather than awaited: a circuit's authentication state
-    /// is settled long before a visitor can click anything (<see cref="StudioActionLog" />'s own rule).
+    /// is settled long before a visitor can click anything (<see cref="StudioActivity" />'s own rule).
     /// </summary>
     private string UserName()
     {

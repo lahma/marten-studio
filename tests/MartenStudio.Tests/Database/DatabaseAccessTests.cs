@@ -178,7 +178,7 @@ public class DatabaseAccessTests
         CapturedLogEntry refused = logs.Entries.Should().ContainSingle(static x => x.EventId.Id == 9203).Which;
         refused.Message.Should().EndWith("by policy " + expectedPolicy);
 
-        harness.Ring.GetLatest().Should().ContainSingle().Which.TenantId.Should().BeNull();
+        harness.Ring.GetLatest().Should().ContainSingle().Which.DatabaseScope()!.TenantId.Should().BeNull();
 
         DatabasePolicyAnswer page = await harness.Access.EvaluatePoliciesAsync(TenantScope, Token);
         page.Refusal.Should().Be(grant.Refusal, "the page names the same policy the enforcement named");
@@ -338,7 +338,7 @@ public class DatabaseAccessTests
         StudioActionLogEntry entry = harness.Ring.GetLatest().Should().ContainSingle().Which;
         entry.Succeeded.Should().BeFalse();
         entry.Action.Should().Be(DatabaseAccess.RowsAction);
-        entry.TenantId.Should().BeNull();
+        entry.DatabaseScope()!.TenantId.Should().BeNull();
         entry.Capability.Should().Be(nameof(StudioCapability.BrowseDatabase));
     }
 
@@ -549,7 +549,7 @@ public class DatabaseAccessTests
     /// never as an exception. The store policy's refusal of a list, an object or a definition is audited - its
     /// sentence is the one a missing store gets, and the trail is where the difference is kept - and, POLISH
     /// P2, under <c>BrowseDatabase</c>: its target is the name somebody asked the browser for, and Activity
-    /// shows such a name only to a visitor who may browse (<see cref="StudioActionLog.GetVisibleAsync" />).
+    /// shows such a name only to a visitor who may browse (<see cref="DatabaseAuditGate" />).
     /// Recorded with no capability, the refused <c>schema.relation</c> was shown to every store-policy reader.
     /// </summary>
     [Fact]

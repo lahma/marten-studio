@@ -58,7 +58,7 @@ public class DatabaseAccessLiveTests(DatabaseAccessLiveTests.Fixture fixture) : 
         (await Rows(fixture.LegacySchema, "no_such_table")).Refusal.Should().Be(DatabaseRefusal.NotFound);
 
         host.Ring.GetLatest().Where(static x => x.Action == DatabaseAccess.RowsAction)
-            .Should().HaveCount(6).And.OnlyContain(static x => !x.Succeeded && x.TenantId == null);
+            .Should().HaveCount(6).And.OnlyContain(static x => !x.Succeeded && x.DatabaseScope()!.TenantId == null);
     }
 
     /// <summary>
@@ -172,7 +172,7 @@ public class DatabaseAccessLiveTests(DatabaseAccessLiveTests.Fixture fixture) : 
         StudioActionLogEntry entry = host.Ring.GetLatest().Should().ContainSingle().Which;
         entry.Action.Should().Be(DatabaseAccess.DefinitionAction);
         entry.Succeeded.Should().BeFalse();
-        entry.TenantId.Should().BeNull("the refused scope is the database as a whole");
+        entry.DatabaseScope()!.TenantId.Should().BeNull("the refused scope is the database as a whole");
         entry.Target.Should().Be(fixture.LegacySchema + ".job_summary");
 
         policy.Calls.Should().Contain(static x => x.Resource.TenantId == null,

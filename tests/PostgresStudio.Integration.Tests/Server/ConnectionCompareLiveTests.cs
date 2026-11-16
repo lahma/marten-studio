@@ -81,8 +81,8 @@ public class ConnectionCompareLiveTests(PostgresFixture postgres)
 
             listener.Pending().Should().BeFalse("the pasted string was parsed and never connected to");
 
-            IReadOnlyList<StudioActionLogEntry> ring = await circuit.Get<StudioActionLog>()
-                .GetVisibleAsync(circuit.Get<StudioAuthorization>(), circuit.Get<StudioCapabilityGuard>(), 50, Token);
+            IReadOnlyList<StudioActionLogEntry> ring = await circuit.Get<StudioActivity>()
+                .GetVisibleAsync(50, Token);
 
             ring.Should().BeEmpty("a comparison reads nothing and runs nothing, so it is not audited");
 

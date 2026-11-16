@@ -158,7 +158,7 @@ public class RewindReachLiveTests(PostgresFixture postgres) : IAsyncLifetime
             .First(static x => x.Action == EventDataService.RewindSubscriptionAction);
 
         entry.Succeeded.Should().BeFalse();
-        entry.TenantId.Should().BeNull("the audit names the tenant-less scope that was refused");
+        entry.DatabaseScope()!.TenantId.Should().BeNull("the audit names the tenant-less scope that was refused");
     }
 
     /// <summary>

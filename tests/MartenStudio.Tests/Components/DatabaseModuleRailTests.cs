@@ -1,5 +1,7 @@
 using JasperFx.Descriptors;
 
+using MartenStudio.Tests.Support;
+
 using Microsoft.Extensions.DependencyInjection;
 
 using PostgresStudio.Services;
@@ -18,10 +20,45 @@ public class DatabaseModuleRailTests
 {
     private static CancellationToken Token => Xunit.TestContext.Current.CancellationToken;
 
+    /// <summary>A host of the rail, as a menu is one: it reads when told that something changed, and does nothing once it is gone.</summary>
+    private sealed class Host
+    {
+        public bool Gone { get; set; }
+
+        public Func<Task> Handler { get; init; } = null!;
+    }
+
     private sealed record Rig(StudioComponentContext Context, IStudioModuleRail Rail, StudioScope Scope)
     {
         /// <summary>A host, as <c>NavMenu</c> is one: it reads when told that something changed.</summary>
         public void Attach() => Rail.Changed += async () => await Rail.ReadBadgesAsync(Token);
+
+        /// <summary>A host that can go: a menu that was disposed answers a change it is still told of by doing nothing.</summary>
+        public Host AttachHost()
+        {
+            Host host = new();
+            Host attached = new()
+            {
+                Handler = async () =>
+                {
+                    if (!host.Gone)
+                    {
+                        await Rail.ReadBadgesAsync(Token);
+                    }
+                },
+            };
+
+            host = attached;
+            Rail.Changed += attached.Handler;
+            return attached;
+        }
+
+        /// <summary>The host goes: it is disposed and unsubscribes.</summary>
+        public void Detach(Host host)
+        {
+            host.Gone = true;
+            Rail.Changed -= host.Handler;
+        }
 
         /// <summary>The glance a read answers: these findings Critical, for the scope the visitor is on.</summary>
         public HealthGlance Glance(params string[] criticals) =>
@@ -166,5 +203,84 @@ public class DatabaseModuleRailTests
 
         rig.Rail.IsShown(new StudioNavItem("Plain", "plain", "grid")).Should().BeTrue("no key, no condition");
         rig.Rail.IsShown(new StudioNavItem("Odd", "odd", "grid") { ShownWhen = "made-up" }).Should().BeFalse("an unknown key fails closed");
+    }
+
+    /// <summary>
+    /// Review of A2b, F2: <c>HealthMutes</c> walks a snapshot of its handlers, so the relay of a host that has gone can still be called while a
+    /// mutes change is being told. It must set nothing: its note ("this read is a mutes change's, take note of nothing") would be consumed by the
+    /// next host's first scope change, which would then not take note of a finding that turned Critical in between.
+    /// </summary>
+    [Fact]
+    public async Task A_host_that_has_gone_cannot_leave_the_mutes_note_for_the_next_host()
+    {
+        await using StudioComponentContext context = new();
+        Rig rig = await StartAsync(context);
+        HealthMutes mutes = context.Services.GetRequiredService<HealthMutes>();
+        await mutes.LoadAsync(context.JSInterop.JSRuntime, Token);
+
+        // An earlier listener of the mutes change that is still working when the layout is re-created.
+        TaskCompletionSource entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        mutes.Changed += async () =>
+        {
+            entered.TrySetResult();
+            await release.Task.Bounded();
+        };
+
+        Host first = rig.AttachHost();
+        context.NavBadges.Health = rig.Glance();
+        await rig.Rail.ReadBadgesAsync(Token);
+        await rig.Rail.StartAsync(context.JSInterop.JSRuntime, Token);
+
+        Task mute = mutes.SetAsync(context.JSInterop.JSRuntime, "default|db-a|K09", muted: true, Token);
+        await entered.Task.Bounded();
+
+        // The layout is re-created while the mutes change is being told: the first host is gone, the second starts.
+        rig.Detach(first);
+        rig.AttachHost();
+        await rig.Rail.ReadBadgesAsync(Token);
+        await rig.Rail.StartAsync(context.JSInterop.JSRuntime, Token);
+
+        // The snapshot reaches the first host's relay now.
+        release.SetResult();
+        await mute;
+
+        // A finding turns Critical and the visitor changes scope: the second host's read takes note of it, as no mutes change was its own.
+        context.NavBadges.Health = rig.Glance("K01");
+        await context.State.NotifyAsync();
+
+        rig.Toasted.Should().ContainSingle().Which.Should().Contain("K01 is broken", "the gone host's relay left no note for this read to consume");
+    }
+
+    /// <summary>Review of A2b, F3: a host that attaches starts afresh - a re-created layout's scope change before its own start takes note of nothing.</summary>
+    [Fact]
+    public async Task A_re_attached_host_has_not_started_until_it_starts()
+    {
+        await using StudioComponentContext context = new();
+        Rig rig = await StartAsync(context);
+
+        Host first = rig.AttachHost();
+        context.NavBadges.Health = rig.Glance();
+        await rig.Rail.ReadBadgesAsync(Token);
+        await rig.Rail.StartAsync(context.JSInterop.JSRuntime, Token);
+
+        // The layout is re-created: the first host goes, a second attaches and has read once, and has not started.
+        rig.Detach(first);
+        rig.AttachHost();
+        await rig.Rail.ReadBadgesAsync(Token);
+
+        context.NavBadges.Health = rig.Glance("K01");
+        await context.State.NotifyAsync();
+
+        rig.Toasted.Should().BeEmpty("the new host has not started, and nothing is taken note of before the start");
+
+        // The start looks at the last read, which the circuit's toast has not seen Critical before, so K01 is told now; and after it a scope change takes note again.
+        await rig.Rail.StartAsync(context.JSInterop.JSRuntime, Token);
+        rig.Toasted.Should().ContainSingle().Which.Should().Contain("K01 is broken");
+
+        context.NavBadges.Health = rig.Glance("K01", "K02");
+        await context.State.NotifyAsync();
+
+        rig.Toasted.Should().HaveCount(2).And.Contain(static x => x.Contains("K02 is broken", StringComparison.Ordinal));
     }
 }

@@ -279,14 +279,14 @@ public class SingleTenantedEventsScopeLiveTests(SingleTenantedEventsFixture fixt
         entry.Action.Should().Be(EventDataService.ArchiveStreamAction);
         entry.Succeeded.Should().BeFalse("refused, and audited as refused (hard rule 5)");
         entry.Message.Should().Be(EventDataService.StreamNotInScopeMessage);
-        entry.TenantId.Should().Be(SingleTenantedEventsFixture.Acme);
+        entry.DatabaseScope()!.TenantId.Should().Be(SingleTenantedEventsFixture.Acme);
         entry.Capability.Should().Be(nameof(StudioCapability.ArchiveStreams));
 
         await fixture.Events.ArchiveStreamAsync(fixture.GlobexScope, id.ToString(), Token);
 
         (await fixture.IsArchivedAsync(id)).Should().BeTrue("from the stream's own tenant it is archived");
         fixture.Audit.GetLatest().First(x => x.Target == id.ToString())
-            .Should().Match<StudioActionLogEntry>(static x => x.Succeeded && x.TenantId == SingleTenantedEventsFixture.Globex);
+            .Should().Match<StudioActionLogEntry>(static x => x.Succeeded && x.DatabaseScope()!.TenantId == SingleTenantedEventsFixture.Globex);
     }
 
     /// <summary>
@@ -313,7 +313,7 @@ public class SingleTenantedEventsScopeLiveTests(SingleTenantedEventsFixture fixt
         (await fixture.EventCountAsync(toCompact)).Should().Be(3, "nothing was deleted");
 
         fixture.NarrowAudit.GetLatest().Where(x => x.Target == toArchive.ToString() || x.Target == toCompact.ToString())
-            .Should().HaveCount(2).And.OnlyContain(static x => !x.Succeeded && x.TenantId == null,
+            .Should().HaveCount(2).And.OnlyContain(static x => !x.Succeeded && x.DatabaseScope()!.TenantId == null,
                 "each refusal is audited against the database as a whole, the question that was refused");
 
         // The control: the same visitor archives an acme stream that holds only acme's events.
@@ -344,7 +344,7 @@ public class SingleTenantedEventsScopeLiveTests(SingleTenantedEventsFixture fixt
         StudioActionLogEntry entry = fixture.Audit.GetLatest()
             .First(x => x.Action == EventDataService.CompactStreamAction && x.Target == id.ToString());
         entry.Succeeded.Should().BeFalse();
-        entry.TenantId.Should().Be(SingleTenantedEventsFixture.Acme);
+        entry.DatabaseScope()!.TenantId.Should().Be(SingleTenantedEventsFixture.Acme);
 
         StreamState stream = await fixture.Events.GetStreamAsync(fixture.GlobexScope, id.ToString(), Token);
         CompactionPlan plan = await fixture.Events.DescribeCompactionAsync(fixture.GlobexScope, stream, Token);

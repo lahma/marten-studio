@@ -281,7 +281,7 @@ public class LinqEventQueryServiceTests
         result.EventScope.Should().Be(new LinqEventScope(Acme, CrossTenant: false, ArchivedFilter.Exclude, WholeDatabase: false, PerTenantSequences: false));
         harness.Policies.Calls.Should().NotContain(static x => x.Resource.TenantId == null && x.Resource.Capability == nameof(StudioCapability.RunLinqQueries),
             "the whole database is never asked when Marten narrows the read");
-        harness.Ring.GetLatest()[0].TenantId.Should().Be(Acme);
+        harness.Ring.GetLatest()[0].DatabaseScope()!.TenantId.Should().Be(Acme);
     }
 
     /// <summary>
@@ -304,7 +304,7 @@ public class LinqEventQueryServiceTests
 
         StudioActionLogEntry entry = harness.Ring.GetLatest()[0];
         entry.Succeeded.Should().BeFalse();
-        entry.TenantId.Should().BeNull();
+        entry.DatabaseScope()!.TenantId.Should().BeNull();
         entry.Action.Should().Be(LinqQueryService.LinqEventQueryAction);
     }
 
@@ -319,7 +319,7 @@ public class LinqEventQueryServiceTests
         result.EventScope!.WholeDatabase.Should().BeTrue();
         result.EventScope.TenantId.Should().BeNull("Marten narrowed nothing");
         result.Sql.Should().NotContain("d.tenant_id");
-        harness.Ring.GetLatest()[0].TenantId.Should().BeNull("audited against the scope that was asked");
+        harness.Ring.GetLatest()[0].DatabaseScope()!.TenantId.Should().BeNull("audited against the scope that was asked");
     }
 
     [DynamicLinqFact]

@@ -110,7 +110,7 @@ public class OrphanedProgressionRemovalPartitionedLiveTests(PostgresFixture post
         StudioActionLogEntry entry = Provider.GetRequiredService<StudioActionLogService>().GetLatest()
             .Should().ContainSingle(x => x.Action == ProjectionDataService.RemoveOrphanAction && x.Succeeded).Subject;
 
-        entry.TenantId.Should().BeNull("the URL named tenant acme, and the audit does not");
+        entry.DatabaseScope()!.TenantId.Should().BeNull("the URL named tenant acme, and the audit does not");
         entry.Target.Should().Be($"{Retired}:All:{Acme}");
     }
 
@@ -123,7 +123,7 @@ public class OrphanedProgressionRemovalPartitionedLiveTests(PostgresFixture post
 
         Provider.GetRequiredService<StudioActionLogService>().GetLatest()
             .Where(static x => x.Action == ProjectionDataService.RemoveOrphanAction)
-            .Should().HaveCount(2).And.OnlyContain(static x => x.TenantId == null);
+            .Should().HaveCount(2).And.OnlyContain(static x => x.DatabaseScope()!.TenantId == null);
     }
 
     private async Task<ProjectionsView> ViewAsync(string? tenantId)

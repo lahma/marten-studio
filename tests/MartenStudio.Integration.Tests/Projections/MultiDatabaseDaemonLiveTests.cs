@@ -389,10 +389,10 @@ public class MultiDatabaseDaemonLiveTests(PostgresFixture postgres) : IAsyncLife
         // throws with the refused scope on it, and that is only worth anything because the catch records
         // `denied.Scope`; recording the requested scope - which is what it used to do - threw the one new
         // fact away and left an entry naming a database nothing was wrong with.
-        refusal.DatabaseId.Should().Be(
+        refusal.DatabaseScope()!.DatabaseId.Should().Be(
             hidden,
             "an audit entry for a refusal has to say which database was refused");
-        refusal.DatabaseId.Should().NotBe(visible);
+        refusal.DatabaseScope()!.DatabaseId.Should().NotBe(visible);
 
         logs.EventIds.Should().Contain(9203, "a scope denial is logged as one");
 
@@ -452,7 +452,7 @@ public class MultiDatabaseDaemonLiveTests(PostgresFixture postgres) : IAsyncLife
             StudioActionLogEntry refusal = restricted.GetRequiredService<StudioActionLogService>().GetLatest()
                 .Should().ContainSingle(x => x.Action == action && !x.Succeeded).Subject;
 
-            refusal.DatabaseId.Should().Be(hidden, "the audit names the database that was refused");
+            refusal.DatabaseScope()!.DatabaseId.Should().Be(hidden, "the audit names the database that was refused");
             logs.EventIds.Should().Contain(9203, "a scope denial is logged as one");
         }
 

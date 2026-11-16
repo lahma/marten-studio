@@ -152,10 +152,11 @@ public partial class RefusalLogValuesTests
         CapturingLoggerProvider captured = new();
         StudioActionLogService ring = new();
         StudioActionLog log = new(
-            ring,
+            new StudioActivity(ring, users, []),
             captured.CreateFactory().CreateLogger<StudioActionLog>(),
             users,
-            new StudioState(catalog, NullLogger<StudioState>.Instance, new StudioPreferences(new HttpContextAccessor())));
+            new StudioState(catalog, NullLogger<StudioState>.Instance, new StudioPreferences(new HttpContextAccessor())),
+            MartenStudioDescriptor.Instance);
 
         log.RecordScopeDenied(new StudioScope(HostileStoreKey, HostileDatabaseId, "acme\nforged"), "studio-store", "Read rows", HostileStatement);
         log.RecordCapabilityDenied(
@@ -168,7 +169,7 @@ public partial class RefusalLogValuesTests
         captured.Entries.Single(static x => x.EventId.Id == 9203).Message.Should()
             .Contain(StudioLogValue.Cap(HostileStoreKey)).And.Contain(StudioLogValue.Cap(HostileDatabaseId)).And.Contain("acme\\nforged");
 
-        ring.GetLatest().Should().Contain(static x => x.StoreKey == HostileStoreKey,
+        ring.GetLatest().Should().Contain(static x => x.DatabaseScope()!.StoreKey == HostileStoreKey,
             "the Activity ring keeps what was asked, for the policy entry by entry; only the log is capped");
     }
 

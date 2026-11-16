@@ -677,8 +677,9 @@ internal sealed class RebuiltElsewhereCheck : HealthCheck<RebuildFacts>
         {
             if (entry.Succeeded
                 && string.Equals(entry.Action, EventDataService.RewindSubscriptionAction, StringComparison.Ordinal)
-                && Same(entry.StoreKey, context.StoreKey)
-                && Same(entry.DatabaseId, context.DatabaseId)
+                && entry.DatabaseScope() is { } scope
+                && Same(scope.StoreKey, context.StoreKey)
+                && Same(scope.DatabaseId, context.DatabaseId)
                 && entry.Target.IndexOf(Separator, StringComparison.Ordinal) is var cut and > 0)
             {
                 rewinds.Add(new StudioRewind(entry.Target[..cut], entry.Timestamp));

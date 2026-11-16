@@ -52,7 +52,7 @@ public class EventMutationScopeAuditTests
         entry.Succeeded.Should().BeFalse();
         entry.Message.Should().Contain(said);
         entry.Capability.Should().Be(nameof(StudioCapability.ArchiveStreams));
-        entry.StoreKey.Should().Be(storeKey, "recorded against the scope that was asked for");
+        entry.DatabaseScope()!.StoreKey.Should().Be(storeKey, "recorded against the scope that was asked for");
     }
 
     [Fact]
@@ -112,7 +112,7 @@ public class EventMutationScopeAuditTests
         entry.Action.Should().Be(EventDataService.ArchiveStreamAction);
         entry.Succeeded.Should().BeFalse();
         entry.Message.Should().Be(EventDataService.ArchiveTenantRequiredMessage);
-        entry.TenantId.Should().BeNull();
+        entry.DatabaseScope()!.TenantId.Should().BeNull();
 
         Func<Task> scoped = () => harness.Events.ArchiveStreamAsync(harness.Scope with { TenantId = "acme" }, StreamId, Token);
 

@@ -155,7 +155,7 @@ public class AuroraServiceTests
         view.Refused.Should().BeNull();
         view.SessionsShown.Should().BeTrue();
         harness.Reader.Tenants.Should().OnlyContain(static x => x == null);
-        harness.Ring.Single().TenantId.Should().BeNull("the audit names the database as a whole");
+        harness.Ring.Single().DatabaseScope()!.TenantId.Should().BeNull("the audit names the database as a whole");
     }
 
     private static AuroraFacts Facts()

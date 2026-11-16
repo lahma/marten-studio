@@ -87,7 +87,7 @@ internal sealed class KafkaSearchRig : IAsyncDisposable
     {
         IServiceProvider services = Studio.Context.Services;
         KafkaActionLog actionLog = new(
-            Studio.Context.ActionLog,
+            Studio.Context.ActivityRing,
             Logs.CreateFactory().CreateLogger<KafkaActionLog>(),
             Studio.Visitor);
 
@@ -109,7 +109,7 @@ internal sealed class KafkaSearchRig : IAsyncDisposable
     {
         IServiceProvider services = Studio.Context.Services;
         KafkaActionLog actionLog = new(
-            Studio.Context.ActionLog,
+            Studio.Context.ActivityRing,
             Logs.CreateFactory().CreateLogger<KafkaActionLog>(),
             Studio.Visitor);
 
@@ -130,7 +130,7 @@ internal sealed class KafkaSearchRig : IAsyncDisposable
     {
         IServiceProvider services = Studio.Context.Services;
         KafkaActionLog actionLog = new(
-            Studio.Context.ActionLog,
+            Studio.Context.ActivityRing,
             Logs.CreateFactory().CreateLogger<KafkaActionLog>(),
             Studio.Visitor);
 
@@ -154,7 +154,7 @@ internal sealed class KafkaSearchRig : IAsyncDisposable
     {
         IServiceProvider services = Studio.Context.Services;
         KafkaActionLog actionLog = new(
-            Studio.Context.ActionLog,
+            Studio.Context.ActivityRing,
             Logs.CreateFactory().CreateLogger<KafkaActionLog>(),
             Studio.Visitor);
 
@@ -174,7 +174,7 @@ internal sealed class KafkaSearchRig : IAsyncDisposable
     {
         IServiceProvider services = Studio.Context.Services;
         KafkaActionLog actionLog = new(
-            Studio.Context.ActionLog,
+            Studio.Context.ActivityRing,
             Logs.CreateFactory().CreateLogger<KafkaActionLog>(),
             Studio.Visitor);
 

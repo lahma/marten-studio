@@ -110,8 +110,8 @@ public partial class TenantScopedReachTests
         StudioActionLogEntry entry = harness.Ring.GetLatest()
             .Should().ContainSingle(x => x.Action == action && !x.Succeeded).Subject;
 
-        entry.DatabaseId.Should().Be(harness.Database);
-        entry.TenantId.Should().BeNull("the audit names what was refused, which is the whole database");
+        entry.DatabaseScope()!.DatabaseId.Should().Be(harness.Database);
+        entry.DatabaseScope()!.TenantId.Should().BeNull("the audit names what was refused, which is the whole database");
     }
 
     /// <summary>

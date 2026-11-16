@@ -28,78 +28,33 @@ internal sealed class StudioActionLog
     /// <summary>What an entry says about a view that is not filtered to one tenant.</summary>
     private const string AllTenants = "(all)";
 
-    private readonly StudioActionLogService store;
+    private readonly StudioActivity activity;
     private readonly ILogger<StudioActionLog> logger;
     private readonly AuthenticationStateProvider authenticationStateProvider;
     private readonly StudioState state;
+    private readonly StudioDescriptor descriptor;
     private readonly StudioText text;
-    private readonly IReadOnlyList<IStudioAuditScopeGate> scopeGates;
 
-    /// <param name="store">The ring.</param>
+    /// <param name="activity">The ring's neutral way in and out.</param>
     /// <param name="logger">Where events 9200-9203 go.</param>
     /// <param name="authenticationStateProvider">Who is asking.</param>
     /// <param name="state">The circuit's active scope.</param>
+    /// <param name="descriptor">The studio's descriptor, whose key is the database module's: the kind its entries are recorded under.</param>
     /// <param name="settings">The studio's settings, whose words the events are logged in (<see cref="StudioText.Of" />).</param>
-    /// <param name="scopeGates">The registered modules' audit gates; none in a host with no module.</param>
     public StudioActionLog(
-        StudioActionLogService store,
+        StudioActivity activity,
         ILogger<StudioActionLog> logger,
         AuthenticationStateProvider authenticationStateProvider,
         StudioState state,
-        IStudioSettings? settings = null,
-        IEnumerable<IStudioAuditScopeGate>? scopeGates = null)
+        StudioDescriptor descriptor,
+        IStudioSettings? settings = null)
     {
-        this.store = store;
+        this.activity = activity;
         this.logger = logger;
         this.authenticationStateProvider = authenticationStateProvider;
         this.state = state;
+        this.descriptor = descriptor;
         text = StudioText.Of(settings);
-        this.scopeGates = scopeGates is null ? [] : [.. scopeGates];
-    }
-
-    /// <summary>
-    /// Placeholder store and database of a module's entry: any code that still judged it by the host's store policy would ask about a
-    /// store no policy recognises, the safe direction.
-    /// </summary>
-    private const string ModulePlaceholder = "(module)";
-
-    /// <summary>
-    /// Records one action of a module into the ring (D34), under the module's own scope rather than the host's. Written on failure as
-    /// well as on success. The ring entry only: the module logs its own event, because the host's templates name a store, a database
-    /// and a tenant.
-    /// </summary>
-    /// <param name="scope">The module's scope: its kind, the label the Activity screen shows and its own value for its gate.</param>
-    /// <param name="action">What was done.</param>
-    /// <param name="target">What it was done to.</param>
-    /// <param name="succeeded">Whether it worked.</param>
-    /// <param name="message">The outcome, or the reason it failed.</param>
-    /// <param name="capability">The capability it required, when it required one.</param>
-    public void RecordModule(
-        StudioModuleAuditScope scope,
-        string action,
-        string target,
-        bool succeeded,
-        string? message = null,
-        string? capability = null)
-    {
-        ArgumentNullException.ThrowIfNull(scope);
-
-        store.Record(new StudioActionLogEntry(
-            Timestamp: DateTimeOffset.UtcNow,
-            User: UserName(),
-            StoreKey: ModulePlaceholder,
-            DatabaseId: ModulePlaceholder,
-            TenantId: null,
-            Action: action,
-            Target: target,
-            Succeeded: succeeded,
-            Message: message,
-            Capability: capability)
-        {
-            ScopeKind = scope.Kind,
-            ScopeLabel = scope.Label,
-            ModuleScope = scope.Value,
-        });
     }
 
     /// <summary>
@@ -125,17 +80,13 @@ internal sealed class StudioActionLog
         string? tenantId = effective?.TenantId;
         string user = UserName();
 
-        store.Record(new StudioActionLogEntry(
-            Timestamp: DateTimeOffset.UtcNow,
-            User: user,
-            StoreKey: storeKey,
-            DatabaseId: databaseId,
-            TenantId: tenantId,
-            Action: action,
-            Target: target,
-            Succeeded: succeeded,
-            Message: message,
-            Capability: capability?.ToString()));
+        activity.Record(
+            new DatabaseAuditScope(storeKey, databaseId, tenantId).ToAuditScope(descriptor.Key),
+            action,
+            target,
+            succeeded,
+            message,
+            capability?.ToString());
 
         if (succeeded)
         {
@@ -172,7 +123,7 @@ internal sealed class StudioActionLog
     /// <paramref name="capability" /> is the capability the refused read needed - the one the write policy
     /// refused, or, for a database-browser read the store policy refused first, <c>BrowseDatabase</c>: it puts
     /// the entry under the same rule as a read of that capability on the Activity screen
-    /// (<see cref="GetVisibleAsync" />), so the name somebody was refused is shown only to a visitor who may
+    /// (<see cref="DatabaseAuditGate" />), so the name somebody was refused is shown only to a visitor who may
     /// make that read.
     /// </para>
     /// </remarks>
@@ -189,177 +140,9 @@ internal sealed class StudioActionLog
         logger.ScopeAuthorizationDenied(text.Product, UserName(), scope.StoreKey, scope.DatabaseId, scope.TenantId ?? AllTenants, policyName);
     }
 
-    /// <summary>
-    /// The entries of the ring this circuit's visitor may read, newest first - what the Activity screen and the
-    /// Overview's recent activity both show, so the two cannot disagree.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <b>The store policy, entry by entry</b>, against the store, database and tenant the action was aimed at:
-    /// the ring is process-wide and every circuit writes into it, so it is the one place one visitor's actions
-    /// can be read by another. An entry whose scope was never settled carries a placeholder store key, which no
-    /// policy recognises; that is the safe direction.
-    /// </para>
-    /// <para>
-    /// <b>And a read beyond the store only for somebody who may make it.</b> An entry recorded under
-    /// <c>BrowseDatabase</c> or <c>RunSql</c> names what was read - a non-Marten table and the columns a
-    /// filter was on, up to two hundred characters of a statement - and the store policy says nothing about
-    /// who may learn those: a visitor the write policy refuses the browser would read, here, the tables and
-    /// columns an operator browsed. So such an entry is kept only while the capability is on for the process
-    /// and the write policy, asked with the capability named against the entry's own scope, passes this
-    /// visitor - the question the service asked before the read could run (<see cref="StudioCapabilityGuard.ReadsBeyondTheStore" />).
-    /// </para>
-    /// <para>
-    /// <b>Bounded.</b> <paramref name="take" /> stops the sweep at the last entry a panel draws, the principal
-    /// is fetched once - and only when a policy is configured at all - and each question is asked once per
-    /// sweep: the answers are remembered for the sweep by store, database, tenant and capability, because the
-    /// ring is five hundred entries that are nearly always about a handful of scopes, and a panel refreshed
-    /// every interval must not pay a thousand policy evaluations to draw fifteen rows. Only for the sweep:
-    /// the next one asks again, as a policy's answer may have changed, and the answers are this visitor's and
-    /// are never kept where another circuit could read them.
-    /// </para>
-    /// </remarks>
-    /// <param name="authorization">The circuit's policy evaluator.</param>
-    /// <param name="capabilities">Which capabilities the process has on.</param>
-    /// <param name="take">Stop after this many are kept, or <see langword="null" /> for all of them.</param>
-    /// <param name="cancellationToken">Checked between entries, so a page that went away stops asking.</param>
-    public async ValueTask<List<StudioActionLogEntry>> GetVisibleAsync(
-        StudioAuthorization authorization,
-        StudioCapabilityGuard capabilities,
-        int? take = null,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(authorization);
-        ArgumentNullException.ThrowIfNull(capabilities);
-
-        IReadOnlyList<StudioActionLogEntry> entries = store.GetLatest();
-        int limit = take is { } wanted ? Math.Max(wanted, 0) : int.MaxValue;
-
-        bool storePolicy = !string.IsNullOrWhiteSpace(authorization.PolicyFor(null));
-        System.Security.Claims.ClaimsPrincipal? user = null;
-        Dictionary<SweepQuestion, bool> answers = [];
-        Dictionary<string, IStudioAuditSweep?> moduleSweeps = new(StringComparer.Ordinal);
-
-        List<StudioActionLogEntry> visible = new(Math.Min(entries.Count, limit));
-
-        foreach (StudioActionLogEntry entry in entries)
-        {
-            if (visible.Count >= limit)
-            {
-                break;
-            }
-
-            cancellationToken.ThrowIfCancellationRequested();
-
-            // A module's entry (D34) is judged only by its own kind's gate: never by the host's store policy, which is written for the
-            // host's resources, and hidden when no gate answers for its kind (a ring written before a module was removed).
-            if (entry.ScopeKind is not null)
-            {
-                if (!moduleSweeps.TryGetValue(entry.ScopeKind, out IStudioAuditSweep? sweep))
-                {
-                    IStudioAuditScopeGate? gate = scopeGates.FirstOrDefault(x => string.Equals(x.Kind, entry.ScopeKind, StringComparison.Ordinal));
-                    if (gate is not null)
-                    {
-                        user ??= await PrincipalAsync().ConfigureAwait(false);
-                    }
-
-                    sweep = gate?.BeginSweep(user!);
-                    moduleSweeps[entry.ScopeKind] = sweep;
-                }
-
-                if (sweep is not null && await sweep.IsVisibleAsync(entry, cancellationToken).ConfigureAwait(false))
-                {
-                    visible.Add(entry);
-                }
-
-                continue;
-            }
-
-            StudioScope scope = new(entry.StoreKey, entry.DatabaseId, entry.TenantId);
-
-            if (storePolicy && !await AskAsync(scope, capability: null).ConfigureAwait(false))
-            {
-                continue;
-            }
-
-            if (ReadBeyondTheStore(entry) is { } capability)
-            {
-                // The read an entry names is the visitor's to see if it, or a capability that implies it
-                // (BrowseDatabase implies ViewDefinitions), is on for the process and the write policy passes them.
-                bool mayRead = false;
-
-                foreach (StudioCapability candidate in (StudioCapability[]) [capability, .. StudioCapabilityGuard.ImpliedBy(capability)])
-                {
-                    if (!capabilities.IsEnabled(candidate))
-                    {
-                        continue;
-                    }
-
-                    if (string.IsNullOrWhiteSpace(authorization.PolicyFor(candidate.ToString()))
-                        || await AskAsync(scope, candidate.ToString()).ConfigureAwait(false))
-                    {
-                        mayRead = true;
-                        break;
-                    }
-                }
-
-                if (!mayRead)
-                {
-                    continue;
-                }
-            }
-
-            visible.Add(entry);
-        }
-
-        return visible;
-
-        async ValueTask<bool> AskAsync(StudioScope scope, string? capability)
-        {
-            SweepQuestion question = new(scope.StoreKey, scope.DatabaseId, scope.TenantId, capability);
-
-            if (answers.TryGetValue(question, out bool known))
-            {
-                return known;
-            }
-
-            user ??= await PrincipalAsync().ConfigureAwait(false);
-
-            bool answer = await authorization.IsAuthorizedAsync(user, scope, capability, cancellationToken).ConfigureAwait(false);
-            answers[question] = answer;
-            return answer;
-        }
-    }
-
-    /// <summary>
-    /// One policy question of a <see cref="GetVisibleAsync" /> sweep: compared ordinally on every part, so two
-    /// entries share an answer only when the policy would have been shown the very same resource.
-    /// </summary>
-    private readonly record struct SweepQuestion(string StoreKey, string DatabaseId, string? TenantId, string? Capability);
-
-    /// <summary>The read beyond the store an entry was recorded under, or <see langword="null" />.</summary>
-    private static StudioCapability? ReadBeyondTheStore(StudioActionLogEntry entry)
-    {
-        foreach (StudioCapability capability in StudioCapabilityGuard.ReadsBeyondTheStore)
-        {
-            if (string.Equals(entry.Capability, capability.ToString(), StringComparison.Ordinal))
-            {
-                return capability;
-            }
-        }
-
-        return null;
-    }
-
-    private async Task<System.Security.Claims.ClaimsPrincipal> PrincipalAsync()
-    {
-        AuthenticationState state = await authenticationStateProvider.GetAuthenticationStateAsync().ConfigureAwait(false);
-        return state.User;
-    }
-
     /// <inheritdoc cref="StudioActionLogService.GetLatest" />
     public IReadOnlyList<StudioActionLogEntry> GetLatest(int maxCount = StudioActionLogService.MaxEntries) =>
-        store.GetLatest(maxCount);
+        activity.GetLatest(maxCount);
 
     /// <summary>
     /// Who the circuit belongs to, or a placeholder when nothing has said.

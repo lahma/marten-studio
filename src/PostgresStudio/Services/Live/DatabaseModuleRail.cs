@@ -146,10 +146,22 @@ internal sealed class DatabaseModuleRail : IStudioModuleRail
                 return;
             }
 
-            // The read a mutes change causes is not a poll: it redraws the badge and takes note of nothing (ReadBadgesAsync).
-            Func<Task> onMutes = () =>
+            // The read a mutes change causes is not a poll: it redraws the badge and takes note of nothing (ReadBadgesAsync). The note is made
+            // only while this relay's host is still attached: HealthMutes walks a snapshot of its handlers, so a relay whose host has gone can still
+            // be called, and it must do what a gone host's handler does - nothing - or its flag would be consumed by the next host's first read.
+            Func<Task>? onMutes = null;
+            onMutes = () =>
             {
-                Interlocked.Exchange(ref readForMutes, 1);
+                lock (gate)
+                {
+                    if (!hosts.Exists(x => ReferenceEquals(x.OnMutes, onMutes)))
+                    {
+                        return Task.CompletedTask;
+                    }
+
+                    Interlocked.Exchange(ref readForMutes, 1);
+                }
+
                 return value();
             };
 

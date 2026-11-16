@@ -267,7 +267,7 @@ internal sealed class DatabaseAccess
     /// The entry is recorded under <c>BrowseDatabase</c>, as every other refusal of a browser read is: its
     /// target is the <c>schema.relation</c> somebody asked the browser for, and the Activity screen and the
     /// Overview show such a name only to a visitor who may browse the database themselves
-    /// (<see cref="StudioActionLog.GetVisibleAsync" />). Recorded with no capability it was shown to every
+    /// (<see cref="DatabaseAuditGate" />). Recorded with no capability it was shown to every
     /// reader the store policy passes - the one audience the refusal says was not allowed to see it.
     /// </remarks>
     /// <param name="scope">The visitor's scope.</param>
@@ -558,7 +558,7 @@ internal sealed class DatabaseAccess
         if (!await authorization.IsAuthorizedAsync(tenantless, StudioCapability.BrowseDatabase, cancellationToken).ConfigureAwait(false))
         {
             // Named BrowseDatabase in the ring, so the Activity screen shows the refusal - and the name it was
-            // aimed at - only to a visitor who may browse too (StudioActionLog.GetVisibleAsync).
+            // aimed at - only to a visitor who may browse too (DatabaseAuditGate).
             audit.RecordScopeDenied(tenantless, WritePolicyName(settings), action, target, StudioCapability.BrowseDatabase);
             return new DatabaseBrowseGrant(null, DatabaseRefusal.WritePolicy, settings.Text.BrowseWritePolicyDenial);
         }

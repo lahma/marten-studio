@@ -300,7 +300,7 @@ public class PerTenantSkipLiveTests(PerTenantSkipFixture fixture) : IClassFixtur
                 .First(x => x.Action == EventDataService.SkipEventAction && x.Target == target);
             entry.Succeeded.Should().BeFalse();
             entry.Message.Should().Be("Not authorized for this store, database or tenant.");
-            entry.TenantId.Should().Be(PerTenantSkipFixture.Globex);
+            entry.DatabaseScope()!.TenantId.Should().Be(PerTenantSkipFixture.Globex);
 
             fixture.Logs.Lines.Should().Contain(static x => x.EventId.Id == 9203 && x.Message.Contains(PerTenantSkipFixture.Globex, StringComparison.Ordinal),
                 "a scope denial is logged as one");

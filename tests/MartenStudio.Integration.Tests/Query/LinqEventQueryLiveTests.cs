@@ -393,7 +393,7 @@ public class LinqEventQueryLiveTests(PostgresFixture fixture) : IAsyncLifetime
         result.EventRows.Should().NotBeEmpty().And.OnlyContain(static x => x.TenantId == LinqEventHarness.Acme);
         result.Plan!.UnavailableReason.Should().Be(LinqQueryService.PlanRefusedMessage);
         acmeOnly.Ring.GetLatest().Should().Contain(static x =>
-            x.Action == LinqQueryService.LinqEventExplainAction && !x.Succeeded && x.TenantId == null);
+            x.Action == LinqQueryService.LinqEventExplainAction && !x.Succeeded && x.DatabaseScope()!.TenantId == null);
     }
 
     [LinqEventLiveFact]
@@ -474,7 +474,7 @@ public class LinqEventQuerySingleTenantedLiveTests(PostgresFixture fixture) : IA
         (await run.Should().ThrowAsync<StudioNotAuthorizedException>()).Which.Scope.TenantId.Should().BeNull();
 
         harness.Ring.GetLatest().Should().Contain(static x =>
-            x.Action == LinqQueryService.LinqEventQueryAction && !x.Succeeded && x.TenantId == null);
+            x.Action == LinqQueryService.LinqEventQueryAction && !x.Succeeded && x.DatabaseScope()!.TenantId == null);
     }
 
     [LinqEventLiveFact]
@@ -492,7 +492,7 @@ public class LinqEventQuerySingleTenantedLiveTests(PostgresFixture fixture) : IA
         result.EventScope!.WholeDatabase.Should().BeTrue();
         result.EventScope.TenantId.Should().BeNull("Marten narrowed nothing");
         open.Ring.GetLatest().Should().Contain(static x =>
-            x.Action == LinqQueryService.LinqEventQueryAction && x.Succeeded && x.TenantId == null);
+            x.Action == LinqQueryService.LinqEventQueryAction && x.Succeeded && x.DatabaseScope()!.TenantId == null);
     }
 }
 

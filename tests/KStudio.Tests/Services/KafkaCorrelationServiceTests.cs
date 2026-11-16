@@ -23,7 +23,7 @@ public class KafkaCorrelationServiceTests
     private static CorrelationKeySet Keys(string value, string kind = "correlation") => CorrelationKeySet.Seed(kind, value);
 
     private static string All(StudioActionLogEntry entry) =>
-        string.Join('\n', entry.User, entry.Action, entry.Target, entry.Message, entry.Capability, entry.ScopeLabel, entry.ModuleScope?.ToString());
+        string.Join('\n', entry.User, entry.Action, entry.Target, entry.Message, entry.Capability, string.Join(' ', entry.Scope.Label), entry.Scope.Title, entry.Scope.Value.ToString());
 
     private static async Task<(KafkaScanResult Result, List<KafkaMatch> Matches)> RunAsync(KafkaCorrelationService related, KafkaRelatedPlanned planned)
     {

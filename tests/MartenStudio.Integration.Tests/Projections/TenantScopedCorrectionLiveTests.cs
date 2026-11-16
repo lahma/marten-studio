@@ -307,8 +307,8 @@ public class TenantScopedCorrectionLiveTests(PostgresFixture postgres) : IAsyncL
             StudioActionLogEntry entry = Ring.GetLatest()
                 .Should().ContainSingle(x => x.Action == action && !x.Succeeded).Subject;
 
-            entry.DatabaseId.Should().Be(Database);
-            entry.TenantId.Should().BeNull("the refused question was the database as a whole");
+            entry.DatabaseScope()!.DatabaseId.Should().Be(Database);
+            entry.DatabaseScope()!.TenantId.Should().BeNull("the refused question was the database as a whole");
 
             logs.Lines.Should().Contain(x => x.EventId.Id == 9203, "a scope denial is logged as one");
         }

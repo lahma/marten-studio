@@ -16,10 +16,7 @@ public class KafkaExportCapabilityTests
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     private static ValueTask<List<StudioActionLogEntry>> Visible(KafkaStudioHarness harness) =>
-        harness.Context.ActionLog.GetVisibleAsync(
-            harness.Context.Services.GetRequiredService<StudioAuthorization>(),
-            harness.Context.Services.GetRequiredService<StudioCapabilityGuard>(),
-            cancellationToken: Ct);
+        harness.Context.ActivityRing.GetVisibleAsync(cancellationToken: Ct);
 
     private static void Record(KafkaStudioHarness harness, string[] topics, KafkaCapability capability) =>
         harness.ActionLog.Record(KafkaStudioHarness.Primary, topics, capability.ToString(), string.Join(", ", topics), succeeded: true, "done", capability);

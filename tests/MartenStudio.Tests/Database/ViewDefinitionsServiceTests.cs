@@ -58,7 +58,7 @@ public class ViewDefinitionsServiceTests
         entry.Action.Should().Be(DatabaseAccess.DefinitionAction);
         entry.Succeeded.Should().BeFalse();
         entry.Capability.Should().Be(nameof(StudioCapability.ViewDefinitions));
-        entry.TenantId.Should().BeNull("the refused scope is the database as a whole");
+        entry.DatabaseScope()!.TenantId.Should().BeNull("the refused scope is the database as a whole");
         entry.Target.Should().Be("legacy.job_summary");
 
         harness.Policies.Calls.Where(static x => x.Resource.Capability is not null).Select(static x => x.Resource.Capability)
