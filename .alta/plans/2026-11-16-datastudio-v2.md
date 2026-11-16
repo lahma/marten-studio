@@ -1,6 +1,6 @@
 ---
 title: DataStudio 2.0: one shell, three modules, clean names
-status: draft
+status: approved
 created: 2026-11-16
 summary: Ship the family as DataStudio 2.0 with no legacy. Seven packages under one name, one registration call, every module under its own address. It replaces phases B and C of the shell plan; phase A is done and is its starting point.
 ---
@@ -46,7 +46,7 @@ flowchart TD
 | `KStudio.Wolverine` | `DataStudio.Kafka.Wolverine` | `DataStudio.Kafka` |
 
 All seven ship at one version, each pinned exactly to the ones below it, with the startup version guards 1.x has. The
-Kafka three stop being a preview only when you say so (`KStudioPrereleaseLabel` becomes `KafkaPrereleaseLabel`).
+Kafka three stay a preview in 2.0 (`KStudioPrereleaseLabel` becomes `KafkaPrereleaseLabel`, still `preview.1`).
 The old ids get no 2.0 release; they are deprecated on nuget.org with a pointer to their successor.
 
 ### What a host writes
@@ -140,7 +140,8 @@ Each step ends with every suite it can reach green. Steps 1 to 3 change no behav
       `src/KStudio.Wolverine` → `src/DataStudio.Kafka.Wolverine`; the seven test projects and the samples follow
       (`tests/DataStudio.Marten.Tests`, `samples/DataStudio.Sample.Marten`, …). Every `InternalsVisibleTo`, version
       guard, fence, `postgres-studio.slnf` (→ `datastudio-postgres.slnf`), MSBuild property name and
-      `docs/maintainers/layout.md` row follows. Public type names do not change in this step.
+      `docs/maintainers/layout.md` row follows, and `marten-studio.slnx` becomes `data-studio.slnx` (the build scripts,
+      the workflows' attributes and the docs that name it follow). Public type names do not change in this step.
 - [ ] 3. **Extract `src/DataStudio`** from `src/DataStudio.Postgres/Shell/`: the folder, `wwwroot/`, the JSON toolkit
       (`Components/Json`, `Services/Json`) and the `Microsoft.AspNetCore.App.Internal.Assets` reference. Copy the two
       engine helpers with parity tests. `DataStudio.Postgres` and `DataStudio.Kafka` reference it with an exact pin and
@@ -188,24 +189,16 @@ Each step ends with every suite it can reach green. Steps 1 to 3 change no behav
 | Product and package family | `DataStudio`, seven packages | Decided 2026-11-16. |
 | Legacy | None: no old ids, calls, addresses or forwarding | Decided 2026-11-16: "drop legacy and aim for optimal APIs and naming". |
 | The engine's id | `DataStudio.Postgres.Diagnostics` | It is usable alone, so it keeps a name that says what it is; only the family prefix changes. |
-| Option and capability names | `PostgresOptions`, `MartenOptions`, `KafkaOptions`, `…Capabilities` | The package and the `Add…` call already say "DataStudio"; "Studio" in every type name is noise. |
+| Option and capability names | `PostgresOptions`, `MartenOptions`, `KafkaOptions`, `…Capabilities` | Decided 2026-11-16. The package and the `Add…` call already say "DataStudio"; "Studio" in every type name is noise. |
 | Where the `Add…` extensions live | Namespace `DataStudio`, in each module's assembly | One `using` lights up every installed module. |
 | Seams between modules | Internal, `InternalsVisibleTo`, exact pins | A public plug-in API is still a surface nobody asked for. |
 | Order | Rename, then extract, then change behaviour | Two mechanical steps that tests can prove, before anything a visitor sees moves. |
 | CSS prefix, script global, cookie names | Kept | Internal, and a saved theme survives. |
+| One wording | Yes: no sentence or log message of 1.x has to stay | Decided 2026-11-16. |
+| The solution file | `marten-studio.slnx` becomes `data-studio.slnx` (step 2); the repository's own name is the owner's to change on GitHub | Decided 2026-11-16. |
+| Kafka's three packages | Stay a preview: `2.0.0-preview.1` beside the family's `2.0.0` | Decided 2026-11-16. |
 
-> **Open 1: `PostgresOptions` or another name.** `PostgresOptions` reads well beside `AddPostgres()`, but a host file
-> that also uses Npgsql or EF Core has many `Postgres…` and `Npgsql…` types nearby. The alternative is
-> `PostgresModuleOptions` (and `MartenModuleOptions`, `KafkaModuleOptions`).
->
-> **Open 2: one wording (step 6).** It removes a real duplication, and it changes sentences and log messages a 1.x
-> Marten Studio host has seen since 0.4. Say if any wording must stay.
->
-> **Open 3: the repository and solution names.** `marten-studio` and `marten-studio.slnx` no longer describe the
-> product. Renaming the repository is yours to do on GitHub; the plan renames the solution file only if you say so.
->
-> **Open 4: Kafka's preview label.** The three Kafka packages are `-preview.1` today. 2.0 can graduate them or keep
-> the label.
+No decision is open: the option names, the one wording, the solution file and the Kafka label were settled on 2026-11-16.
 
 ## Risks
 
