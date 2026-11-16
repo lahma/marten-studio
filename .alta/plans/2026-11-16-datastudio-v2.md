@@ -102,7 +102,7 @@ Every module sits under a segment of its own, and the shell owns the rest. There
 
 | Page | Address under the mount `/studio` |
 |---|---|
-| Front page | `/studio`: one tile per module with its headline numbers, or a redirect when there is one module |
+| Front page | `/studio`: one tile per module (name, a sentence, a link), or a redirect when there is one module |
 | Activity | `/studio/activity` |
 | Marten | `/studio/marten/documents`, `/studio/marten/streams`, `/studio/marten/projections`, … |
 | Postgres (also in a Marten host, over its databases) | `/studio/postgres/health`, `/studio/postgres/tables`, `/studio/postgres/query`, … |
@@ -157,8 +157,9 @@ Each step ends with every suite it can reach green. Steps 1 to 3 change no behav
       line by line.
 - [ ] 5. **Addresses.** Every module keeps its root as a segment; remove `IsRoot`; `StudioPageRoutes.BaseRelative`, the
       route table, the scope-query rewrite and the rail's active match take the Postgres segment; the diagnostics read
-      model's page paths become relative to the Postgres module's root. The shell's front page (tiles or redirect) and
-      `/studio/activity`.
+      model's page paths stay relative to the mount and start with `postgres/`. The shell's front page (a tile per
+      module, or a redirect when there is one) and `/studio/activity`. The tiles carry a name, a sentence and a link:
+      headline numbers need a gated read per module and are a follow-up.
 - [ ] 6. **One wording.** Remove `StudioProduct`, merge `StudioLog` and `PostgresStudioLog` (same event ids, one
       template each), move module-specific sentences to their module, retire `StudioTextPinTests`. Shortcuts move to
       the Postgres module; the chip and the banner get their single templates.
