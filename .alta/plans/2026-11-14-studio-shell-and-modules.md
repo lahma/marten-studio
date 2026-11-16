@@ -1,6 +1,6 @@
 ---
 title: A studio shell that Postgres, Marten and Kafka attach to
-status: in-progress
+status: done
 created: 2026-11-14
 summary: Extract the shell (mount, layout, rail, Activity, assets) from PostgresStudio into a package of its own, make the database a module like Kafka, and add AddDataStudio().AddMarten().AddKafka(). A Kafka-only host then needs no Postgres, and every existing registration keeps working.
 ---
@@ -191,13 +191,9 @@ Phase A changes no package, no public type and no word. It can ship in any relea
 
 **Phase B: the package and the registration**
 
-> **Re-plan before phase B starts** (2026-11-16). Phase B was written to keep 1.x working: legacy registration calls
-> beside the new one, shell settings adapted from each studio's options, old names and addresses kept. With 2.0 and no
-> legacy, steps 8 to 16 get simpler and partly different: one registration (`AddDataStudio().Add…()`), one options
-> object for the shell, every module under its own segment from the start (phase C folds in), namespaces and type
-> names chosen fresh, the rules table of *Registration* reduced to what a new host can write. The steps below are
-> the 1.x-compatible version and are **not** to be executed as written: a v2 design (public API first, then names,
-> then the steps) replaces them and is reviewed before any of it is built.
+> **Superseded (2026-11-16).** Phase A above is done and verified. Phases B and C are replaced by
+> `2026-11-16-datastudio-v2.md`: 2.0, no legacy, `DataStudio.*` names. The steps below are the 1.x-compatible
+> version, kept for the record and **not** to be executed.
 
 - [ ] 8. Create `src/DataStudio/` and move `Shell/`, `wwwroot/`, the JSON toolkit and the assets-pack reference into it.
       `PostgresStudio` and `KStudio` reference it, each packed with an exact pin and a version guard, as D30 does.
