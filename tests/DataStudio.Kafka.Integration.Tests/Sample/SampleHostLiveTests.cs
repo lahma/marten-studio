@@ -94,7 +94,7 @@ public class SampleHostLiveTests(SampleHostFixture fixture) : IClassFixture<Samp
     public async Task The_pages_answer_for_each_user_and_send_a_visitor_with_no_session_to_the_sign_in()
     {
         using HttpClient anonymous = fixture.NewClient(followRedirects: false);
-        using HttpResponseMessage redirected = await anonymous.GetAsync(new Uri("/marten/kafka", UriKind.Relative), Token);
+        using HttpResponseMessage redirected = await anonymous.GetAsync(new Uri("/studio/kafka", UriKind.Relative), Token);
         redirected.StatusCode.Should().Be(HttpStatusCode.Redirect);
         redirected.Headers.Location!.OriginalString.Should().Contain("/login");
 
@@ -102,7 +102,7 @@ public class SampleHostLiveTests(SampleHostFixture fixture) : IClassFixture<Samp
         {
             using HttpClient client = await fixture.SignedInAsync(user, Token);
 
-            foreach (string page in new[] { "/marten/kafka", "/marten/kafka/search", "/marten/kafka/settings", "/marten/kafka/topic?cluster=local&topic=orders.v1" })
+            foreach (string page in new[] { "/studio/kafka", "/studio/kafka/search", "/studio/kafka/settings", "/studio/kafka/topic?cluster=local&topic=orders.v1" })
             {
                 using HttpResponseMessage response = await client.GetAsync(new Uri(page, UriKind.Relative), Token);
                 response.StatusCode.Should().Be(HttpStatusCode.OK, $"{user} opening {page}");

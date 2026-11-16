@@ -31,7 +31,7 @@ internal sealed class SampleHost : IAsyncDisposable
     public const string Project = "DataStudio.Sample.Postgres";
 
     /// <summary>Where the sample mounts the studio.</summary>
-    public const string DefaultStudioPath = "/postgres";
+    public const string DefaultStudioPath = "/studio";
 
     /// <summary>The <c>ConnectionStrings:</c> key the sample reads its admin database from.</summary>
     public const string ConnectionStringName = "Postgres";

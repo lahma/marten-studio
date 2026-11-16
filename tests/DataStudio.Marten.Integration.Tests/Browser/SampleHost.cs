@@ -563,5 +563,5 @@ internal sealed class SampleHost : IAsyncDisposable
 internal sealed record SampleApp(string Project, string ConnectionStringName, string DefaultStudioPath)
 {
     /// <summary>The Marten sample: <c>samples/DataStudio.Sample.Marten</c>.</summary>
-    public static SampleApp Marten { get; } = new("DataStudio.Sample.Marten", "Marten", "/marten");
+    public static SampleApp Marten { get; } = new("DataStudio.Sample.Marten", "Marten", "/studio");
 }

@@ -39,32 +39,32 @@ public class PostgresStudioSampleHostTests
     {
         await using SampleHost host = await SampleHost.StartAsync(connectionString: null, cancellationToken: Token);
 
-        host.StudioPath.Should().Be("/postgres");
+        host.StudioPath.Should().Be("/studio");
         host.Log.Should().Contain("throwaway PostgreSQL container was started", "D18's banner says what the sample did");
         host.Log.Should().Contain("no - a fresh container", "this sample does not reuse a container unless asked");
         host.Log.Should().NotContain(DataStudio.Sample.Postgres.SampleArguments.ReadOnlyNotice, "its own throwaway container is the demo's to write to");
 
         using (HttpClient anonymous = Client(host))
         {
-            using HttpResponseMessage refused = await anonymous.GetAsync(new Uri("/postgres", UriKind.Relative), Token);
+            using HttpResponseMessage refused = await anonymous.GetAsync(new Uri("/studio", UriKind.Relative), Token);
             refused.StatusCode.Should().Be(HttpStatusCode.Redirect, "the mapping requires the PostgresStudio policy");
             refused.Headers.Location!.OriginalString.Should().Contain("/login");
         }
 
         using HttpClient admin = await SignInAsync(host, "admin");
 
-        using (HttpResponseMessage page = await admin.GetAsync(new Uri("/postgres", UriKind.Relative), Token))
+        using (HttpResponseMessage page = await admin.GetAsync(new Uri("/studio", UriKind.Relative), Token))
         {
             page.StatusCode.Should().Be(HttpStatusCode.OK, host.LogTail());
 
             string html = await page.Content.ReadAsStringAsync(Token);
-            html.Should().Contain("<title>Postgres Studio</title>");
-            html.Should().Contain("<base href=\"/postgres/\"");
+            html.Should().Contain("<title>Data Studio</title>");
+            html.Should().Contain("<base href=\"/studio/\"");
             html.Should().Contain("<option value=\"default\"", "the admin database is the application's unkeyed NpgsqlDataSource");
             html.Should().Contain("<option value=\"tenants\"", "the tenant databases are a second source, AddDatabaseSource(\"tenants\")");
         }
 
-        using (HttpResponseMessage tenants = await admin.GetAsync(new Uri("/postgres?store=tenants", UriKind.Relative), Token))
+        using (HttpResponseMessage tenants = await admin.GetAsync(new Uri("/studio?store=tenants", UriKind.Relative), Token))
         {
             tenants.StatusCode.Should().Be(HttpStatusCode.OK, host.LogTail());
 
@@ -75,14 +75,14 @@ public class PostgresStudioSampleHostTests
             }
         }
 
-        using (HttpResponseMessage script = await admin.GetAsync(new Uri("/postgres/_framework/blazor.web.js", UriKind.Relative), Token))
+        using (HttpResponseMessage script = await admin.GetAsync(new Uri("/studio/_framework/blazor.web.js", UriKind.Relative), Token))
         {
             script.StatusCode.Should().Be(HttpStatusCode.OK, "D22: the sample sets no RequiresAspNetWebAssets and still serves the script");
             (await script.Content.ReadAsByteArrayAsync(Token)).Should().NotBeEmpty();
         }
 
         using (HttpResponseMessage negotiate = await admin.PostAsync(
-            new Uri("/postgres/_blazor/negotiate?negotiateVersion=1", UriKind.Relative), content: null, Token))
+            new Uri("/studio/_blazor/negotiate?negotiateVersion=1", UriKind.Relative), content: null, Token))
         {
             negotiate.StatusCode.Should().Be(HttpStatusCode.OK, "the circuit can be negotiated, so the studio becomes interactive");
         }

@@ -84,8 +84,8 @@
   </Target>
 
   <!-- Exactly its own DataStudio, for the same reason and by the same mechanism as DataStudioPostgresPinsDiagnosticsExactly above: the shell grants this
-       assembly its internals (and the other way round), so DataStudio [x.y.z] goes into the nuspec, not NuGet's default >=. A host that ends up with another
-       DataStudio anyway is stopped at startup by Internal/DataStudioShellVersionGuard.cs. -->
+       assembly its internals (no module grants the shell its own), so DataStudio [x.y.z] goes into the nuspec, not NuGet's default >=. A host that ends up with
+       another DataStudio anyway is stopped at startup by Internal/PostgresStudioDiagnosticsVersionGuard.cs, which checks the shell beside the engine. -->
   <Target Name="DataStudioPostgresPinsShellExactly" AfterTargets="_GetProjectReferenceVersions">
     <ItemGroup>
       <_ProjectReferencesWithVersions Condition="'%(Filename)' == 'DataStudio'">

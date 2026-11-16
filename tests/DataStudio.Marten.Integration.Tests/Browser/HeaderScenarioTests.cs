@@ -32,7 +32,7 @@ public class HeaderScenarioTests(BrowserSuiteFixture fixture)
 
             string clipboard = await page.EvaluateAsync<string>("() => navigator.clipboard.readText()");
             clipboard.Should().Be(page.Url);
-            clipboard.Should().Contain("/marten").And.Contain("store=");
+            clipboard.Should().Contain("/studio").And.Contain("store=");
 
             studio.AssertClean("copying the page's link");
         });

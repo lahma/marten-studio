@@ -153,7 +153,7 @@ public class UxFixBBrowserTests(BrowserSuiteFixture fixture)
             // Counts every request for the Query page's own address and lets it through: after the load above, any is a page fetch.
             int pageRequests = 0;
             await studio.Page.RouteAsync(
-                static url => url.Contains("/marten/query", StringComparison.Ordinal),
+                static url => url.Contains("/studio/query", StringComparison.Ordinal),
                 async route =>
                 {
                     Interlocked.Increment(ref pageRequests);

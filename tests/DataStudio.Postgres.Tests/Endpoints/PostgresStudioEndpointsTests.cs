@@ -76,7 +76,7 @@ public class PostgresStudioEndpointsTests
 
             string body = await page.Content.ReadAsStringAsync(Token);
             body.Should().Contain("<base href=\"/studio/\"");
-            body.Should().Contain("<title>Postgres Studio</title>");
+            body.Should().Contain("<title>Data Studio</title>");
             body.Should().Contain("<link rel=\"stylesheet\" href=\"_content/DataStudio/css/studio.css\"");
             body.Should().Contain("<script src=\"_framework/blazor.web.js\">");
             body.Should().Contain("<link rel=\"icon\" type=\"image/svg+xml\" href=\"_content/DataStudio/favicon.svg\"", "the document names its own icon (issue #33)");

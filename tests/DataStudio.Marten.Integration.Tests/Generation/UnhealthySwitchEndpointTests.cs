@@ -204,7 +204,7 @@ public class UnhealthySwitchEndpointTests
         error.Should().Contain("refused here");
         app.Board.TryTurnOn(UnhealthySwitchKind.IdleInTransaction, out error).Should().BeTrue(error);
 
-        string html = UnhealthySwitchesPanel.Render(true, true, "token", "/marten", null, app.Board);
+        string html = UnhealthySwitchesPanel.Render(true, true, "token", "/studio", null, app.Board);
         html.Should().Contain("was configured (ConnectionStrings:Marten); it is not the sample&#39;s throwaway container");
         Section(html, "pool-hog").Should().Contain("data-field=\"refused\">Pool hog is refused here").And.Contain("<button type=\"submit\" disabled>Turn on</button>");
         Section(html, "pinned-gap").Should().Contain("<button type=\"submit\" disabled>Turn on</button>");
@@ -342,7 +342,7 @@ public class UnhealthySwitchEndpointTests
         app.Board.TryTurnOn(UnhealthySwitchKind.IdleInTransaction, out string? error).Should().BeTrue(error);
         await app.WaitForAsync(UnhealthySwitchKind.IdleInTransaction, UnhealthySwitchState.On);
 
-        string section = Section(UnhealthySwitchesPanel.Render(true, true, "token", "/marten", null, app.Board), "idle-in-transaction");
+        string section = Section(UnhealthySwitchesPanel.Render(true, true, "token", "/studio", null, app.Board), "idle-in-transaction");
 
         DateTimeOffset at = app.Board.Status(UnhealthySwitchKind.IdleInTransaction).TurnsOffAt!.Value;
 
@@ -361,7 +361,7 @@ public class UnhealthySwitchEndpointTests
     {
         using UnhealthySwitchBoard board = TestApp.NewBoard(out _);
 
-        string html = UnhealthySwitchesPanel.Render(enabled, isAdmin, "token", "/marten", "ignored", board);
+        string html = UnhealthySwitchesPanel.Render(enabled, isAdmin, "token", "/studio", "ignored", board);
 
         html.Should().Contain("Make it unhealthy").And.Contain(why);
         html.Should().NotContain("<form").And.NotContain("ignored").And.NotContain("token");

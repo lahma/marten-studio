@@ -202,6 +202,9 @@ internal sealed class StudioCapabilityGuard
     /// <summary>Whether the master switch is on, which turns every capability off.</summary>
     public bool ReadOnly => settings.ReadOnly;
 
+    /// <summary>The master switch that is on, as a host spells it: the shell's <c>DataStudioOptions.ReadOnly</c> when that is on, else this module's own.</summary>
+    public string ReadOnlyOptionName => settings.ReadOnlyOptionName;
+
     /// <summary>How many of the offered capabilities are effectively enabled.</summary>
     public int EnabledCount
     {

@@ -51,16 +51,16 @@ public class PostgresStudioSampleDatabaseHostTests(PostgresFixture postgres)
 
                 // The configured database is the one source with a database: the tenants source lists none without the
                 // directory, so the picker - drawn only for two or more listed sources - is not drawn at all.
-                using (HttpResponseMessage page = await client.GetAsync(new Uri("/postgres", UriKind.Relative), Token))
+                using (HttpResponseMessage page = await client.GetAsync(new Uri("/studio", UriKind.Relative), Token))
                 {
                     page.StatusCode.Should().Be(HttpStatusCode.OK, host.LogTail());
 
                     string html = await page.Content.ReadAsStringAsync(Token);
-                    html.Should().Contain("<title>Postgres Studio</title>");
+                    html.Should().Contain("<title>Data Studio</title>");
                     html.Should().NotContain("<option value=\"tenants\"", "a host source with no directory lists no database");
                 }
 
-                using (HttpResponseMessage tenants = await client.GetAsync(new Uri("/postgres?store=tenants", UriKind.Relative), Token))
+                using (HttpResponseMessage tenants = await client.GetAsync(new Uri("/studio?store=tenants", UriKind.Relative), Token))
                 {
                     tenants.StatusCode.Should().Be(HttpStatusCode.OK, host.LogTail());
                     (await tenants.Content.ReadAsStringAsync(Token)).Should().NotContain("<option value=\"tenant_a\"");
@@ -100,7 +100,7 @@ public class PostgresStudioSampleDatabaseHostTests(PostgresFixture postgres)
             (await DemoSchemasInAsync(admin)).Should().BeEquivalentTo(DemoSchemas);
 
             using HttpClient client = await PostgresStudioSampleHostTests.SignInAsync(host, "admin");
-            using HttpResponseMessage tenants = await client.GetAsync(new Uri("/postgres?store=tenants", UriKind.Relative), Token);
+            using HttpResponseMessage tenants = await client.GetAsync(new Uri("/studio?store=tenants", UriKind.Relative), Token);
             (await tenants.Content.ReadAsStringAsync(Token)).Should().Contain("<option value=\"tenant_a\"", host.LogTail());
         }
         finally

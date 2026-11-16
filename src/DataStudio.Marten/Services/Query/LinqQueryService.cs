@@ -216,7 +216,7 @@ internal sealed class LinqQueryService : ILinqQueryService
         {
             return capabilities.ReadOnly
                 ? new LinqModeStatus(LinqAvailability.ReadOnly,
-                    "MartenStudioOptions.ReadOnly is true, which turns every capability off, LINQ mode included.", [])
+                    capabilities.ReadOnlyOptionName + " is true, which turns every capability off, LINQ mode included.", [])
                 : new LinqModeStatus(LinqAvailability.CapabilityOff,
                     "Set " + StudioCapabilityGuard.OptionName(StudioCapability.RunLinqQueries) + " to true to run LINQ queries here.", []);
         }

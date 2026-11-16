@@ -36,8 +36,8 @@
     <!-- The JasperFx source generator Marten bundles is taken out of this compilation by the
          MartenStudioWithoutTheJasperFxSourceGenerator target at the end of this file. -->
     <PackageReference Include="Marten" />
-    <!-- The shared studio. Its Microsoft.AspNetCore.App.Internal.Assets reference - blazor.web.js for the
-         host, D22 - lives in DataStudio.Postgres.csproj now and reaches the host through this reference: two
+    <!-- The shared studio. The Microsoft.AspNetCore.App.Internal.Assets reference - blazor.web.js for the
+         host, D22 - lives in DataStudio.csproj (the shell) and reaches the host through this reference and DataStudio.Postgres's: two
          hops, measured by PS-0 on 2026-10-20 (200 for /_framework/blazor.web.js and under {Path}). -->
     <ProjectReference Include="../DataStudio.Postgres/DataStudio.Postgres.csproj" />
   </ItemGroup>

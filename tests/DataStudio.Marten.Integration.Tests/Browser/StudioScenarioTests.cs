@@ -96,7 +96,7 @@ public class StudioScenarioTests(BrowserSuiteFixture fixture)
             await studio.SetThemeAsync("light");
 
             studio.WebSockets.Should().Contain(
-                x => x.Contains("/marten/_blazor", StringComparison.Ordinal),
+                x => x.Contains("/studio/_blazor", StringComparison.Ordinal),
                 "the studio takes its own /_blazor under its mount path");
 
             studio.AssertClean("opening the Overview as admin and moving the theme picker");
@@ -298,7 +298,7 @@ public class StudioScenarioTests(BrowserSuiteFixture fixture)
 
             // The one documented exception, allowed by its exact URL rather than by its class: with the
             // studio at /ops/marten there is nothing at /marten, and a 404 is the correct answer.
-            string unmounted = host.Url("/marten");
+            string unmounted = host.Url("/studio");
             studio.ExpectStatus(unmounted, 404);
 
             IResponse? missing = await studio.Page.GotoAsync(unmounted);

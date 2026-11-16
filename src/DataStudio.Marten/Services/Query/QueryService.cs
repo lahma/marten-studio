@@ -482,7 +482,7 @@ internal sealed class QueryService : IQueryService
         {
             return ExplainResult.Unavailable(
                 capabilities.ReadOnly
-                    ? "No plan: MartenStudioOptions.ReadOnly is true, and a plan has to be fetched from Postgres."
+                    ? "No plan: " + capabilities.ReadOnlyOptionName + " is true, and a plan has to be fetched from Postgres."
                     : "No plan: fetching one runs EXPLAIN, which needs " +
                       capabilities.OptionFor(StudioCapability.RunSql) + ".");
         }

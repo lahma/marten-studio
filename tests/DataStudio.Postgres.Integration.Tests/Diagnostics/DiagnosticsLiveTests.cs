@@ -238,8 +238,8 @@ public class DiagnosticsLiveTests(PostgresVersionMatrix matrix, PostgresFixture 
             string address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.First();
             using HttpClient client = new() { BaseAddress = new Uri(address) };
 
-            (await client.GetAsync("/postgres", Token)).StatusCode.Should().Be(System.Net.HttpStatusCode.NotFound);
-            (await client.GetAsync("/postgres/health", Token)).StatusCode.Should().Be(System.Net.HttpStatusCode.NotFound);
+            (await client.GetAsync("/studio", Token)).StatusCode.Should().Be(System.Net.HttpStatusCode.NotFound);
+            (await client.GetAsync("/studio/health", Token)).StatusCode.Should().Be(System.Net.HttpStatusCode.NotFound);
             (await client.GetStringAsync("/", Token)).Should().Be("the host's own page");
 
             PostgresDiagnosticsSnapshot snapshot = await app.Services.GetRequiredService<IPostgresDiagnostics>()

@@ -39,7 +39,7 @@ public class PostgresStudioScenarioTests(BrowserSuiteFixture fixture)
             await studio.GoAsync(fixture.Host.StudioUrl());
 
             (await page.Locator("h1.ms-page-title").InnerTextAsync()).Trim().Should().Be("Overview");
-            (await page.Locator(".ms-sidebar-brand-text").InnerTextAsync()).Trim().Should().Be("Postgres Studio", "PostgresStudioOptions.Title's default");
+            (await page.Locator(".ms-sidebar-brand-text").InnerTextAsync()).Trim().Should().Be("Data Studio", "DataStudioOptions.Title's default");
 
             ILocator server = page.Locator(".ms-pg-overview-server");
             await server.WaitForAsync();

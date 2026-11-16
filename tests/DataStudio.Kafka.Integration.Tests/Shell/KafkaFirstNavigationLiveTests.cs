@@ -92,7 +92,7 @@ public abstract class KafkaFirstNavigationLiveTests(KafkaFixture kafka)
     [KafkaFact]
     public Task Opening_every_kafka_page_creates_no_topic_commits_no_offset_leaves_no_group_writes_no_row_and_calls_no_broker_while_prerendering() =>
         WalkAsync(
-            "/postgres",
+            "/studio",
             static (builder, postgres) =>
             {
                 builder.Services.AddSingleton(NpgsqlDataSource.Create(postgres.ConnectionString));
@@ -108,7 +108,7 @@ public abstract class KafkaFirstNavigationLiveTests(KafkaFixture kafka)
     [KafkaFact]
     public Task Opening_every_kafka_page_of_a_marten_studio_host_creates_no_topic_commits_no_offset_leaves_no_group_writes_no_row_and_calls_no_broker_while_prerendering() =>
         WalkAsync(
-            "/marten",
+            "/studio",
             static (builder, postgres) =>
             {
                 builder.Services.AddMarten(options =>

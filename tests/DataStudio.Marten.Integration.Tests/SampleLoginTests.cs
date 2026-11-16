@@ -83,8 +83,8 @@ public class SampleLoginTests
     /// both. Checking only for <c>//</c> leaves the form usable as the redirect in a phishing link.
     /// </summary>
     [Theory]
-    [InlineData("/marten", "/marten")]
-    [InlineData("/marten/activity?store=default", "/marten/activity?store=default")]
+    [InlineData("/studio", "/studio")]
+    [InlineData("/studio/activity?store=default", "/studio/activity?store=default")]
     [InlineData("/", "/")]
     [InlineData("//evil.example", "/")]
     [InlineData("/\\evil.example", "/")]
@@ -142,7 +142,7 @@ public class SampleLoginTests
             {
                 ["username"] = "admin",
                 ["password"] = "admin",
-                ["returnUrl"] = "/marten",
+                ["returnUrl"] = "/studio",
             });
 
             using HttpResponseMessage response = await client.PostAsync(new Uri("/login", UriKind.Relative), form, Token);
@@ -191,14 +191,14 @@ public class SampleLoginTests
 
             using HttpRequestMessage request = new(HttpMethod.Post, new Uri("/login", UriKind.Relative))
             {
-                Content = SignInForm(token, "admin", "/marten"),
+                Content = SignInForm(token, "admin", "/studio"),
             };
             request.Headers.Add("Cookie", cookies);
 
             using HttpResponseMessage response = await client.SendAsync(request, Token);
 
             response.StatusCode.Should().Be(HttpStatusCode.Redirect);
-            response.Headers.Location!.OriginalString.Should().Be("/marten");
+            response.Headers.Location!.OriginalString.Should().Be("/studio");
             response.Headers.GetValues("Set-Cookie").Should().Contain(static x => x.StartsWith(".AspNetCore.Cookies", StringComparison.Ordinal));
         }
         finally
@@ -219,7 +219,7 @@ public class SampleLoginTests
 
             using HttpRequestMessage request = new(HttpMethod.Post, new Uri("/login", UriKind.Relative))
             {
-                Content = SignInForm(token, "admin", "/marten"),
+                Content = SignInForm(token, "admin", "/studio"),
             };
             request.Headers.Add("Cookie", cookies);
             request.Content = new FormUrlEncodedContent(new Dictionary<string, string>(StringComparer.Ordinal)
@@ -227,7 +227,7 @@ public class SampleLoginTests
                 [LoginEndpoints.AntiforgeryFieldName] = token,
                 ["username"] = "admin",
                 ["password"] = "not-the-password",
-                ["returnUrl"] = "/marten",
+                ["returnUrl"] = "/studio",
             });
 
             using HttpResponseMessage response = await client.SendAsync(request, Token);
