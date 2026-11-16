@@ -194,7 +194,7 @@ public class ProgressionCorrectionReachTests
                 tenancy.AddMultipleTenantDatabase(SecondaryConnectionString, "secondary").ForTenants(SecondaryTenant);
             }));
 
-            services.AddMartenStudio(options =>
+            services.AddDataStudio().AddMarten(options =>
             {
                 options.Capabilities = MartenStudioCapabilities.All();
                 options.StoreAuthorizationPolicy = storePolicy;

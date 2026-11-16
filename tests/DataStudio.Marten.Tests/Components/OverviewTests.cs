@@ -714,7 +714,7 @@ public class OverviewTests
 
         // No poll tick while the test runs: a tick is a third run, and on a loaded machine the default interval passes before the
         // test is done (the feed count below is of the two runs the test makes).
-        context.Options.RefreshInterval = TimeSpan.FromMinutes(5);
+        context.ShellOptions.RefreshInterval = TimeSpan.FromMinutes(5);
 
         var page = context.Render<Overview>();
         page.StatCardValue("Streams").Should().Be("~1,200");

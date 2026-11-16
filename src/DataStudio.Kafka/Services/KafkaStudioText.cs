@@ -95,12 +95,6 @@ internal static class KafkaStudioText
         "The settings this application handed KStudio for this cluster, one by one. A secret shows only whether it is set; a path is shown and the "
         + "file is never read; a setting KStudio does not know is listed with its value withheld.";
 
-    /// <summary>The refusal of a host that registered no studio, at start.</summary>
-    public const string NoStudio =
-        "AddKafkaStudio() was called in an application that registered no studio. KStudio is a module of Marten Studio or Postgres Studio: "
-        + "call services.AddMartenStudio() or services.AddPostgresStudio() as well, and map that studio with app.MapMartenStudio() or "
-        + "app.MapPostgresStudio(); the Kafka pages are served under its path, at /kafka.";
-
     /// <summary>The refusal of a host that enabled a capability no policy answers, at start.</summary>
     /// <param name="capabilities">The capabilities enabled, comma separated.</param>
     /// <param name="readOnlyOption">The host studio's master switch, spelled as its options spell it.</param>

@@ -222,9 +222,8 @@ public class OrphanedProgressionRemovalLiveTests(PostgresFixture postgres) : IAs
         services.AddAuthorization();
         services.AddSingleton<AuthenticationStateProvider, AnonymousAuthenticationStateProvider>();
         services.AddMarten(options => Configure(options, projectionName, version, gate));
-        services.AddMartenStudio(static options =>
+        services.AddDataStudio().AddMarten(static options =>
         {
-            options.AuthorizationPolicy = null;
             options.Capabilities.CorrectProgression = true;
         });
 

@@ -58,11 +58,11 @@ public class HeaderAdditionsTests
             .FindAll(".ms-back-link").Should().BeEmpty();
 
         using PostgresStudioComponentContext with = Context();
-        with.Options.ApplicationPath = "/";
+        with.ShellOptions.ApplicationPath = "/";
         IElement link = with.Render<StudioLayout>(parameters => parameters.Add(x => x.Body, static builder => builder.AddContent(0, string.Empty)))
             .Find(".ms-header-right > a.ms-back-link");
 
-        link.GetAttribute("href").Should().Be("/", "not re-rooted under /postgres");
+        link.GetAttribute("href").Should().Be("/", "not re-rooted under /studio");
         link.TextContent.Trim().Should().Be("Back to application");
     }
 

@@ -48,7 +48,7 @@ public class ConnectionChecksSeamTests
     public void A_host_accepts_each_check_in_Marten_Studio_and_in_Postgres_Studio()
     {
         ServiceCollection marten = new();
-        marten.AddMartenStudio(options =>
+        marten.AddDataStudio().AddMarten(options =>
         {
             foreach ((string code, _, _) in Checks)
             {
@@ -60,7 +60,7 @@ public class ConnectionChecksSeamTests
         martenProvider.GetRequiredService<IOptions<MartenStudioOptions>>().Value.AcceptedChecks.Keys.Should().BeEquivalentTo(Checks.Select(static x => x.Code));
 
         ServiceCollection postgres = new();
-        postgres.AddPostgresStudio(options =>
+        postgres.AddDataStudio().AddPostgres(options =>
         {
             foreach ((string code, _, _) in Checks)
             {

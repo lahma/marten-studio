@@ -248,9 +248,8 @@ public class ExtendedProgressionLiveTests(PostgresFixture postgres) : IAsyncLife
             options.Projections.Add(new DailySalesProjection(), ProjectionLifecycle.Async);
         });
 
-        services.AddMartenStudio(options =>
+        services.AddDataStudio().AddMarten(options =>
         {
-            options.AuthorizationPolicy = null;
             options.DiscoverTenantIds = false;
         });
 

@@ -165,7 +165,7 @@ public sealed class StudioPreferencesTests
     public void AddPostgresStudio_registers_one_settings_object_under_both_interfaces()
     {
         ServiceCollection services = new();
-        services.AddPostgresStudio();
+        services.AddDataStudio().AddPostgres();
         using ServiceProvider provider = services.BuildServiceProvider();
 
         provider.GetRequiredService<IShellSettings>().Should().BeSameAs(provider.GetRequiredService<IStudioSettings>());

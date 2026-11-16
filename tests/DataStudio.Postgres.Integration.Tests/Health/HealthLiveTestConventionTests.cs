@@ -121,7 +121,7 @@ public class HealthLiveTestConventionTests
         ServiceCollection services = new();
         services.AddLogging();
         services.AddAuthorization();
-        services.AddPostgresStudio();
+        services.AddDataStudio().AddPostgres();
         services.AddScoped<AuthenticationStateProvider, DataStudio.Marten.Tests.Support.TestAuthenticationStateProvider>();
 
         using ServiceProvider provider = services.BuildServiceProvider();

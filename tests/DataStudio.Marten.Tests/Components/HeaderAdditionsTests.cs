@@ -128,7 +128,7 @@ public class HeaderAdditionsTests
     public void The_link_goes_to_the_path_exactly_as_written_and_is_not_rooted_under_the_mount(string path)
     {
         using StudioComponentContext context = Context();
-        context.Options.ApplicationPath = path;
+        context.ShellOptions.ApplicationPath = path;
         context.Catalog.WithStore("default", "Default", databaseIdentities: "localhost.marten");
 
         IRenderedComponent<StudioLayout> layout = context.Render<StudioLayout>(parameters => parameters.Add(x => x.Body, Body));

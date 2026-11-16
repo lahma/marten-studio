@@ -58,9 +58,8 @@ internal sealed class TenancyStudio : IAsyncDisposable
         extra?.Invoke(services);
 
         // Tenant discovery stays on: tier 2 and tier 3 are part of what a first navigation does.
-        services.AddMartenStudio(options =>
+        services.AddDataStudio().AddMarten(options =>
         {
-            options.AuthorizationPolicy = null;
             studio?.Invoke(options);
         });
 

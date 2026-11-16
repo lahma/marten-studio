@@ -293,7 +293,7 @@ public class SessionsPageTests
         SessionPoolObserver pools = fixture.Pools;
         CancellationToken cancel = Xunit.TestContext.Current.CancellationToken;
 
-        context.Options.RefreshInterval = TimeSpan.FromMilliseconds(20);
+        context.ShellOptions.RefreshInterval = TimeSpan.FromMilliseconds(20);
         context.Options.HealthInterval = TimeSpan.FromMilliseconds(20);
 
         var page = context.Render<Sessions>();

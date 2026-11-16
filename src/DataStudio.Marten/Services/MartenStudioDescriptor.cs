@@ -1,7 +1,6 @@
 using System.Collections.Frozen;
 
 using DataStudio.Services.Settings;
-using DataStudio.Marten.Components;
 using DataStudio.Marten.Services.Events;
 using DataStudio.Postgres.Services.Live;
 using DataStudio.Postgres.Services.Settings;
@@ -45,8 +44,11 @@ internal static class MartenStudioDescriptor
     /// <summary>The descriptor every MartenStudio service and component reads.</summary>
     public static StudioDescriptor Instance { get; } = Create();
 
-    /// <summary>What <c>AddMartenStudio()</c> claims, so a second studio in the same container is refused.</summary>
-    public static StudioRegistrationMarker Marker { get; } = new(Key, "Marten Studio", "AddMartenStudio()");
+    /// <summary>The compile-time root every Marten page's <c>@page</c> starts with, which the mapping strips.</summary>
+    internal const string PageRoot = "/marten";
+
+    /// <summary>What <c>AddMarten()</c> claims, so a second database module in the same container is refused.</summary>
+    public static StudioRegistrationMarker Marker { get; } = new(Key, "the Marten module", "AddMarten()");
 
     private static StudioDescriptor Create() => new()
     {
@@ -54,9 +56,8 @@ internal static class MartenStudioDescriptor
         ProductName = "Marten Studio",
         PageAssemblies =
         [
-            new StudioPageAssembly(typeof(MartenStudioApp).Assembly, MartenStudioOptions.DefaultPath),
+            new StudioPageAssembly(typeof(Components.Pages.Overview).Assembly, PageRoot),
             new StudioPageAssembly(typeof(DataStudio.Postgres.Components.Pages.StudioHome).Assembly, "/postgres"),
-            StudioDescriptor.ShellPages,
         ],
         // The shared checks, the diagnostics engine's and PostgresStudio's own (the studio-posture ones), run against any source;
         // MartenStudio's own read the store and only ever run against one. Every source MartenStudio has is a Marten store, so
@@ -65,7 +66,7 @@ internal static class MartenStudioDescriptor
         [
             new StudioHealthCheckAssembly(typeof(HealthCheckRegistry).Assembly),
             new StudioHealthCheckAssembly(typeof(StudioDescriptor).Assembly),
-            new StudioHealthCheckAssembly(typeof(MartenStudioApp).Assembly, MartenStoreOnly),
+            new StudioHealthCheckAssembly(typeof(Components.Pages.Overview).Assembly, MartenStoreOnly),
         ],
         Navigation = Navigation,
         OverviewComponent = typeof(Components.Pages.Overview),
@@ -77,15 +78,6 @@ internal static class MartenStudioDescriptor
         ExposedContent = "every document, event stream and schema in this process",
         ExtraShortcuts = MartenStudioShortcuts.Groups,
         CreateResource = static (scope, capability) => scope.ToResource(capability),
-        Surface = "Marten Studio",
-        Exposure = "Marten Studio is mapped with no authorization. Its pages can read and edit every document in every Marten "
-            + "store in this process, archive event streams, control the projection daemon, apply schema changes and run SQL, "
-            + "so Marten Studio refuses to start rather than serve that by accident. Say which you meant:",
-        Remedies = """
-              - app.MapMartenStudio().RequireAuthorization() authorizes its pages and its Blazor circuit;
-              - services.AddMartenStudio(options => options.AuthorizationPolicy = "...") authorizes those and the static assets with them;
-              - app.MapMartenStudio().AllowAnonymous() serves it to anyone, deliberately.
-            """,
     };
 
     /// <summary>The sidebar, as it has been since 0.3.0's database section.</summary>

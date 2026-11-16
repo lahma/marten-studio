@@ -78,7 +78,7 @@ public class DaemonLockIdsMultiDatabaseLiveTests(PostgresFixture postgres)
 
         builder.Services.AddAuthorization();
         builder.Services.AddSingleton<AuthenticationStateProvider, Anonymous>();
-        builder.Services.AddMartenStudio(static options => options.Capabilities = MartenStudioCapabilities.All());
+        builder.Services.AddDataStudio().AddMarten(static options => options.Capabilities = MartenStudioCapabilities.All());
 
         using IHost host = builder.Build();
         IDocumentStore store = host.Services.GetRequiredService<IDocumentStore>();

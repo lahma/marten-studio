@@ -159,10 +159,8 @@ public class RelationshipsNoDdlLiveTests(PostgresFixture fixture)
             options.Schema.For<NumberedNote>().ForeignKey<NumberedThing>(x => x.ThingId);
         });
 
-        services.AddMartenStudio(options =>
+        services.AddDataStudio().AddMarten(options =>
         {
-            options.AuthorizationPolicy = null;
-
             if (browse)
             {
                 options.Capabilities = MartenStudioCapabilities.All();

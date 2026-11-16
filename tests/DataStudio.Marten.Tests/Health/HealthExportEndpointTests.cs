@@ -56,7 +56,7 @@ public class HealthExportEndpointTests
             options.Connection(HealthExportHarness.Refused(HealthExportHarness.SecretDatabase));
             options.DatabaseSchemaName = "health_export_endpoint";
         });
-        builder.Services.AddMartenStudio();
+        builder.Services.AddDataStudio().AddMarten();
         builder.Services.AddHealthChecks().AddMartenStudio();
 
         WebApplication app = builder.Build();

@@ -57,7 +57,7 @@ public class StoreInfoServiceVersionTests
             options.DatabaseSchemaName = "cl1_version";
             options.Tenancy = (ITenancy) (object) ThrowingDefaultTenancy.Over(options.Tenancy, new InvalidOperationException("a host's own tenancy"));
         });
-        services.AddMartenStudio(static options => options.QueryTimeout = TimeSpan.FromSeconds(5));
+        services.AddDataStudio().AddMarten(static options => options.QueryTimeout = TimeSpan.FromSeconds(5));
         services.AddScoped<AuthenticationStateProvider>(_ => users);
 
         await using ServiceProvider provider = services.BuildServiceProvider();

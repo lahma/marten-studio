@@ -98,7 +98,7 @@ public class LockWaitClassifierTests
             options.DatabaseSchemaName = "c06_classifier";
             options.Schema.For<HealthOrderDoc>();
         });
-        services.AddMartenStudio();
+        services.AddDataStudio().AddMarten();
         services.RemoveAll<AuthenticationStateProvider>();
 
         await using ServiceProvider provider = services.BuildServiceProvider();

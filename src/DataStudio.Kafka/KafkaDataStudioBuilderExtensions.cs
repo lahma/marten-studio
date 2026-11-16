@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 
 using DataStudio.Services.Settings;
 using DataStudio.Services;
+using DataStudio.Kafka;
 using DataStudio.Kafka.Core.Clusters;
 using DataStudio.Kafka.Internal;
 using DataStudio.Kafka.Services;
@@ -11,54 +12,56 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 
-namespace DataStudio.Kafka;
+namespace DataStudio;
 
-/// <summary>Registers KStudio, the Kafka module of the studio the host registered.</summary>
-public static class KafkaStudioServiceCollectionExtensions
+/// <summary>Adds the Kafka module to Data Studio.</summary>
+public static class KafkaDataStudioBuilderExtensions
 {
     /// <summary>
-    /// Adds the Kafka module to the studio the host registered with <c>AddMartenStudio()</c> or <c>AddPostgresStudio()</c>: its pages, rail
-    /// section, cluster selector, capabilities and audit entries join that studio's own (D34).
+    /// Adds the Kafka module to the studio: its pages, rail section, cluster selector, capabilities and audit entries join the shell's own (D34).
     /// </summary>
     /// <remarks>
     /// <para>
-    /// There is no <c>MapKafkaStudio()</c>: the studio's own map call serves the Kafka pages under its path, at <c>/kafka</c>. This may be
-    /// called before or after the studio's own <c>Add*Studio()</c>, and twice; the host is refused at start when it registered no studio,
-    /// and when a capability is on that no policy answers.
+    /// There is no map call of its own: <c>MapDataStudio()</c> serves the Kafka pages under the studio's path, at <c>/kafka</c>. The module needs no
+    /// database module and no database; it may be called twice, and the host is refused at start when a capability is on that no policy answers.
     /// </para>
     /// <para>
     /// Nothing here connects to Kafka, creates a topic or commits an offset, and nothing is a hosted service but the startup guard.
     /// </para>
     /// </remarks>
-    /// <param name="services">The service collection.</param>
+    /// <param name="builder">The builder <c>AddDataStudio()</c> returned.</param>
     /// <param name="configure">Registers the clusters and topics, and sets the policies and capabilities.</param>
-    /// <returns>The same collection, so calls can be chained.</returns>
-    /// <exception cref="ArgumentNullException"><paramref name="services" /> is null.</exception>
+    /// <returns>The same builder, so calls can be chained.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="builder" /> is null.</exception>
     /// <exception cref="InvalidOperationException">
     /// The application was deployed without the DataStudio (the shell) or DataStudio.Kafka.Core build this one was released
     /// with, or with another version of it.
     /// </exception>
-    public static IServiceCollection AddKafkaStudio(
-        this IServiceCollection services,
+    public static DataStudioBuilder AddKafka(
+        this DataStudioBuilder builder,
         Action<KafkaStudioOptions>? configure = null)
     {
-        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(builder);
 
-        // Before anything that names a DataStudio or DataStudio.Kafka.Core type: this body names none, so the JIT can compile it and the
-        // guard can say what is wrong even when NuGet left one of them out of the deployment. Everything else is in
-        // AddKafkaStudioServices, which is NoInlining so that it is compiled only once the guard has passed.
+        // Before anything that names a DataStudio.Kafka.Core type: this body names none, so the JIT can compile it and the
+        // guard can say what is wrong even when NuGet left one of the packages out of the deployment. Everything else is in
+        // AddKafkaServices, which is NoInlining so that it is compiled only once the guard has passed.
         // KStudioVersionGuardTests scans this method's IL to keep it that way.
         KStudioVersionGuard.Ensure();
 
-        return AddKafkaStudioServices(services, configure);
+        AddKafkaServices(builder, configure);
+
+        return builder;
     }
 
-    /// <summary>The body of <see cref="AddKafkaStudio" />, once the studio and the engine are known to be the right builds.</summary>
+    /// <summary>The body of <see cref="AddKafka" />, once the shell and the engine are known to be the right builds.</summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static IServiceCollection AddKafkaStudioServices(
-        IServiceCollection services,
+    private static void AddKafkaServices(
+        DataStudioBuilder builder,
         Action<KafkaStudioOptions>? configure)
     {
+        IServiceCollection services = builder.Services;
+
         // The module itself: TryAddEnumerable deduplicates by implementation type, so a second call adds it once.
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IStudioModule, KafkaStudioModule>());
 
@@ -79,7 +82,7 @@ public static class KafkaStudioServiceCollectionExtensions
         // The host's external links (D44): refused at the first read of the options, which the startup guard makes at host start.
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IValidateOptions<KafkaStudioOptions>, KafkaExternalLinkOptionsValidator>());
 
-        // The engine: the options object answers both seams, as a studio's does (D30).
+        // The engine: the options object answers both seams, as a database module's does (D30).
         KStudioEngineRegistration.Add(
             services,
             static provider => provider.GetRequiredService<IOptions<KafkaStudioOptions>>().Value,
@@ -120,9 +123,7 @@ public static class KafkaStudioServiceCollectionExtensions
         // Which of the module's audit entries a visitor may read (D34): its own gate, never the host's store policy.
         services.TryAddEnumerable(ServiceDescriptor.Scoped<IStudioAuditScopeGate, KafkaAuditGate>());
 
-        // Refuses to start a host that registered no studio, and one with a capability no policy answers.
+        // Refuses to start a host with a capability no policy answers.
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, KafkaStudioStartupGuard>());
-
-        return services;
     }
 }

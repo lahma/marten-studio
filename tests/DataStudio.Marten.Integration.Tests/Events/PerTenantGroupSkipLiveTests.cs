@@ -89,7 +89,7 @@ public sealed class PerTenantGroupSkipFixture(PostgresFixture postgres) : IAsync
         services.AddSingleton<IDocumentStore>(Store);
         services.AddSingleton<IAuthorizationService>(Policy);
         services.AddSingleton(new DeadLetterGroupCache(groupClock, TimeSpan.FromSeconds(5)));
-        services.AddMartenStudio(static options =>
+        services.AddDataStudio().AddMarten(static options =>
         {
             options.Capabilities = MartenStudioCapabilities.All();
             options.StoreAuthorizationPolicy = "studio-store";

@@ -76,7 +76,7 @@ internal sealed class KafkaStudioModule(IOptions<KafkaStudioOptions> options) : 
     public string HomeRoute => "kafka";
 
     /// <inheritdoc />
-    public string? ExposedSentence => KafkaStudioText.ExposedSentence;
+    public string ExposedSentence => KafkaStudioText.ExposedSentence;
 
     /// <inheritdoc />
     public IReadOnlyList<StudioModuleCapabilityGroup> CapabilityGroups =>

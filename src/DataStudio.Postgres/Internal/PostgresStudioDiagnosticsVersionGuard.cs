@@ -4,12 +4,12 @@ using System.Runtime.CompilerServices;
 namespace DataStudio.Postgres.Internal;
 
 /// <summary>
-/// Refuses to start Postgres Studio beside any DataStudio.Postgres.Diagnostics or DataStudio (the shell) but its own build - including none at all.
+/// Refuses to start the Postgres module beside any DataStudio.Postgres.Diagnostics or DataStudio (the shell) but its own build - including none at all.
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Why.</b> PostgresStudio and DataStudio.Postgres.Diagnostics are one program split in two files: the engine grants
-/// PostgresStudio its internals, so PostgresStudio 0.11.0 beside DataStudio.Postgres.Diagnostics 0.11.1 is a
+/// <b>Why.</b> DataStudio.Postgres and DataStudio.Postgres.Diagnostics are one program split in two files: the engine grants
+/// DataStudio.Postgres its internals, so DataStudio.Postgres 2.0.0 beside DataStudio.Postgres.Diagnostics 2.0.1 is a
 /// <see cref="MissingMethodException" /> on the first internal signature that moved. The nuspec pins
 /// <c>DataStudio.Postgres.Diagnostics [&lt;version&gt;]</c> exactly (<c>DataStudio.Postgres.csproj</c>), and NuGet enforces that pin
 /// everywhere but one place: with <c>CentralPackageTransitivePinningEnabled</c> and a central <c>PackageVersion</c> for
@@ -20,7 +20,7 @@ namespace DataStudio.Postgres.Internal;
 /// </para>
 /// <para>
 /// <b>What the split and the scan are for.</b> This type names no DataStudio.Postgres.Diagnostics or DataStudio type, and neither does the
-/// public <c>AddPostgresStudio</c> that calls it first: everything that does is behind a
+/// public <c>AddPostgres</c> that calls it first: everything that does is behind a
 /// <see cref="MethodImplOptions.NoInlining" /> method, so the JIT resolves none of it until this guard has passed. The
 /// assembly is loaded by name, from a <see cref="MethodImplOptions.NoInlining" /> method of its own.
 /// <c>PostgresStudioDiagnosticsVersionGuardTests</c> scans the IL of both to keep it that way, because in every test host
@@ -29,16 +29,16 @@ namespace DataStudio.Postgres.Internal;
 /// guard could say why.
 /// </para>
 /// <para>
-/// <b>What it cannot cover.</b> <c>AddPostgresStudio</c>'s own parameter type, <c>Action&lt;PostgresStudioOptions&gt;</c>,
+/// <b>What it cannot cover.</b> <c>AddPostgres</c>'s own parameter type, <c>Action&lt;PostgresStudioOptions&gt;</c>,
 /// names a type that derives from the engine's <c>PostgresDiagnosticsOptions</c>, so the runtime loads the engine to compile
-/// <c>AddPostgresStudio</c> itself, in every host, with a <c>configure</c> lambda or without, before the guard's first line.
-/// A deployment with no engine, or an older one, therefore fails in the loader when <c>AddPostgresStudio</c> is first called,
+/// <c>AddPostgres</c> itself, in every host, with a <c>configure</c> lambda or without, before the guard's first line.
+/// A deployment with no engine, or an older one, therefore fails in the loader when <c>AddPostgres</c> is first called,
 /// with a <see cref="FileNotFoundException" /> that names <c>DataStudio.Postgres.Diagnostics</c> and the version it wants (measured
-/// on 2026-11-01 against throwaway hosts: the engine missing, and an older 0.9.0 under a 0.10.0 PostgresStudio). This guard
+/// on 2026-11-01 against throwaway hosts: the engine missing, and an older 0.9.0 under a 0.10.0 DataStudio.Postgres). This guard
 /// is what answers a <em>newer</em> engine, or another commit of the same version, with the central-pin message. The shell is the
-/// same case one package down: <c>PostgresStudioOptions</c> implements the shell's <c>IShellSettings</c>, so the loader needs
+/// same case one package down: <c>AddPostgres</c> extends the shell's <c>DataStudioBuilder</c>, so the loader needs
 /// <c>DataStudio</c> too before the guard's first line, and the guard answers a newer shell or another commit of the same version.
-/// <c>MartenStudio</c>'s <c>PostgresStudioVersionGuard</c> names no options type before it runs and covers all three cases
+/// <c>DataStudio.Marten</c>'s <c>PostgresStudioVersionGuard</c> names no options type before it runs and covers all three cases
 /// for a Marten host.
 /// </para>
 /// <para>
@@ -58,14 +58,14 @@ internal static class PostgresStudioDiagnosticsVersionGuard
     internal const string ShellAssemblyName = "DataStudio";
 
     /// <summary>
-    /// Throws unless the DataStudio.Postgres.Diagnostics and the DataStudio this process loads are the builds this PostgresStudio was packed with.
+    /// Throws unless the DataStudio.Postgres.Diagnostics and the DataStudio this process loads are the builds this DataStudio.Postgres was packed with.
     /// </summary>
     /// <exception cref="InvalidOperationException">Either is missing, or is another version.</exception>
     [MethodImpl(MethodImplOptions.NoInlining)]
     public static void Ensure() => Ensure(typeof(PostgresStudioDiagnosticsVersionGuard).Assembly, LoadDiagnostics, LoadShell);
 
     /// <summary>The check for the engine alone, with the two assemblies supplied - a seam the tests use.</summary>
-    /// <param name="postgresStudio">PostgresStudio's own assembly, whose version is the one required.</param>
+    /// <param name="postgresStudio">DataStudio.Postgres' own assembly, whose version is the one required.</param>
     /// <param name="loadDiagnostics">Loads the engine's assembly; may throw <see cref="FileNotFoundException" />.</param>
     /// <exception cref="InvalidOperationException">DataStudio.Postgres.Diagnostics is missing, or is another version.</exception>
     internal static void Ensure(Assembly postgresStudio, Func<Assembly> loadDiagnostics) =>
@@ -75,7 +75,7 @@ internal static class PostgresStudioDiagnosticsVersionGuard
     /// The whole check, with the three assemblies supplied - a seam the tests use: the engine first, then the shell
     /// (<c>DataStudio</c>, v2 step 3), which this assembly names in every signature and a deployment can lack or skew in the same way.
     /// </summary>
-    /// <param name="postgresStudio">PostgresStudio's own assembly, whose version is the one required.</param>
+    /// <param name="postgresStudio">DataStudio.Postgres' own assembly, whose version is the one required.</param>
     /// <param name="loadDiagnostics">Loads the engine's assembly; may throw <see cref="FileNotFoundException" />.</param>
     /// <param name="loadShell">Loads the shell's assembly; may throw <see cref="FileNotFoundException" />.</param>
     /// <exception cref="InvalidOperationException">Either is missing, or is another version.</exception>
@@ -85,9 +85,9 @@ internal static class PostgresStudioDiagnosticsVersionGuard
         EnsureAssembly(ShellAssemblyName, postgresStudio, loadShell);
     }
 
-    /// <summary>One required assembly: loaded, and the same build as PostgresStudio's own.</summary>
+    /// <summary>One required assembly: loaded, and the same build as DataStudio.Postgres' own.</summary>
     /// <param name="name">The required package, <c>DataStudio.Postgres.Diagnostics</c> or <c>DataStudio</c>.</param>
-    /// <param name="postgresStudio">PostgresStudio's own assembly, whose version is the one required.</param>
+    /// <param name="postgresStudio">DataStudio.Postgres' own assembly, whose version is the one required.</param>
     /// <param name="load">Loads the required assembly; may throw <see cref="FileNotFoundException" />.</param>
     private static void EnsureAssembly(string name, Assembly postgresStudio, Func<Assembly> load)
     {
@@ -102,11 +102,11 @@ internal static class PostgresStudioDiagnosticsVersionGuard
         catch (FileNotFoundException e)
         {
             throw new InvalidOperationException(
-                $"PostgresStudio {required} needs {name} {required} exactly, and this application was " +
+                $"DataStudio.Postgres {required} needs {name} {required} exactly, and this application was " +
                 $"deployed without {name}. The usual cause is a central PackageVersion for " +
                 $"{name} at another version under CentralPackageTransitivePinningEnabled: NuGet then " +
                 $"drops {name} from the graph without a warning. The packages are released together: pin " +
-                $"{name} to {required}, or remove its PackageVersion row and let PostgresStudio bring it.",
+                $"{name} to {required}, or remove its PackageVersion row and let DataStudio.Postgres bring it.",
                 e);
         }
 
@@ -124,19 +124,19 @@ internal static class PostgresStudioDiagnosticsVersionGuard
         string shownFound = commits ? loadedVersion! : ReleaseVersion(loadedVersion);
 
         throw new InvalidOperationException(
-            $"PostgresStudio {shownRequired} needs {name} {shownRequired} exactly, and found " +
+            $"DataStudio.Postgres {shownRequired} needs {name} {shownRequired} exactly, and found " +
             $"{name} {shownFound}. The packages are released together and must be upgraded together: a " +
             $"central PackageVersion or a PackageReference for {name} must say {required}, or be removed " +
-            "and let PostgresStudio bring it.");
+            "and let DataStudio.Postgres bring it.");
     }
     /// <summary>
     /// Whether two informational versions name the same build. When both assemblies are Release builds and both carry
     /// build metadata - the <c>+&lt;commit&gt;</c> SourceLink appends - the whole strings must match, so two packed builds of
     /// one version from different commits are told apart. Otherwise the release versions (the part before the <c>+</c>)
     /// must match: a Debug build is a development tree, where an IDE's incremental build after a commit recompiles
-    /// PostgresStudio with the new commit and leaves an unchanged engine with the old one, and that is not a skew.
+    /// DataStudio.Postgres with the new commit and leaves an unchanged engine with the old one, and that is not a skew.
     /// </summary>
-    /// <param name="postgresStudio">PostgresStudio's informational version.</param>
+    /// <param name="postgresStudio">DataStudio.Postgres' informational version.</param>
     /// <param name="diagnostics">DataStudio.Postgres.Diagnostics' informational version.</param>
     /// <param name="bothRelease">Whether both assemblies say <c>[AssemblyConfiguration("Release")]</c>, as every pack does.</param>
     internal static bool SameBuild(string? postgresStudio, string? diagnostics, bool bothRelease) =>

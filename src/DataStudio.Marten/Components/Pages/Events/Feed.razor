@@ -1,6 +1,7 @@
 @page "/marten/events/feed"
 @using System.Globalization
 @using Microsoft.Extensions.Options
+@using DataStudio.Postgres.Services.Settings
 @using DataStudio.Marten.Services
 @using DataStudio.Marten.Services.Events
 @using DataStudio.Marten.Services.Live
@@ -14,6 +15,7 @@
 @inject IJSRuntime JsRuntime
 @inject StudioLiveUpdatesFactory LiveFactory
 @inject IOptions<MartenStudioOptions> Options
+@inject IStudioSettings StudioSettings
 @inject StudioCapabilityGuard Capabilities
 
 <PageTitle>Event feed</PageTitle>
@@ -348,7 +350,7 @@
 
             return IsTabHidden
                 ? "paused - this tab is in the background"
-                : $"polling every {Options.Value.RefreshInterval.TotalSeconds.ToString("0.#", CultureInfo.InvariantCulture)}s";
+                : $"polling every {StudioSettings.RefreshInterval.TotalSeconds.ToString("0.#", CultureInfo.InvariantCulture)}s";
         }
     }
 
@@ -408,7 +410,7 @@
         live = LiveFactory.Create();
         live.Failed += OnPollFailedAsync;
 
-        await live.StartAsync(Options.Value.RefreshInterval, TickAsync, pageCancellation.Token);
+        await live.StartAsync(StudioSettings.RefreshInterval, TickAsync, pageCancellation.Token);
     }
 
     private async Task ApplyScopeFromQueryAsync()

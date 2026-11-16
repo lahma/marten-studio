@@ -4,26 +4,26 @@ using System.Runtime.CompilerServices;
 namespace DataStudio.Kafka.Internal;
 
 /// <summary>
-/// Refuses to start KStudio beside any DataStudio (the shell) or DataStudio.Kafka.Core but its own build - including none at all.
+/// Refuses to start the Kafka module beside any DataStudio (the shell) or DataStudio.Kafka.Core but its own build - including none at all.
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Why.</b> KStudio, DataStudio and DataStudio.Kafka.Core are one program split in three files: the shell grants KStudio its internals,
+/// <b>Why.</b> DataStudio.Kafka, DataStudio and DataStudio.Kafka.Core are one program split in three files: the shell grants DataStudio.Kafka its internals,
 /// and DataStudio.Kafka.Core grants it its own, so one skewed assembly is a <see cref="MissingMethodException" /> on the first
 /// internal signature that moved. The nuspec pins the others exactly, and NuGet enforces that pin everywhere but one place: with
 /// <c>CentralPackageTransitivePinningEnabled</c> and a central <c>PackageVersion</c> for one of them at another version, the SDK's resolver
 /// drops it from the graph without a diagnostic - a green build and a <see cref="FileNotFoundException" /> at startup (measured by PS-0,
-/// 2026-10-20, for the database module; MartenStudio's <c>PostgresStudioVersionGuard</c> is this guard's model).
+/// 2026-10-20, for the database module; DataStudio.Marten's <c>PostgresStudioVersionGuard</c> is this guard's model).
 /// </para>
 /// <para>
 /// <b>How it can run at all when one is missing.</b> This type names no DataStudio or DataStudio.Kafka.Core type, and neither does the public
-/// <c>AddKafkaStudio</c> that calls it first: everything that does is behind a <see cref="MethodImplOptions.NoInlining" /> method, so the JIT
+/// <c>AddKafka</c> that calls it first: everything that does is behind a <see cref="MethodImplOptions.NoInlining" /> method, so the JIT
 /// resolves none of it until this guard has passed. Each assembly is loaded by name, from a <see cref="MethodImplOptions.NoInlining" /> method of
 /// its own. <c>KStudioVersionGuardTests</c> scans the IL of both to keep it that way.
 /// </para>
 /// <para>
 /// <b>The caveat.</b> <c>KafkaStudioOptions</c> derives from a DataStudio.Kafka.Core type, so the runtime loads DataStudio.Kafka.Core to compile
-/// <c>AddKafkaStudio</c> itself: a <em>missing or older</em> DataStudio.Kafka.Core fails in the loader with a <see cref="FileNotFoundException" /> that
+/// <c>AddKafka</c> itself: a <em>missing or older</em> DataStudio.Kafka.Core fails in the loader with a <see cref="FileNotFoundException" /> that
 /// names it, before this guard runs. The guard explains a newer one and another build of the same version. A missing or mismatched DataStudio
 /// is always the guard's message.
 /// </para>
@@ -34,9 +34,9 @@ namespace DataStudio.Kafka.Internal;
 /// part before the <c>+</c> is compared.
 /// </para>
 /// <para>
-/// <b>The preview label (K8).</b> KStudio, DataStudio.Kafka.Core and DataStudio.Kafka.Wolverine pack at <c>&lt;version&gt;-&lt;label&gt;</c> (<c>1.3.0-preview.1</c>), the
-/// family beside them at <c>&lt;version&gt;</c>. So DataStudio.Kafka.Core is compared with KStudio's own informational version, label and all, and
-/// DataStudio with the <em>family version</em>: KStudio's with the label taken off, the label being the
+/// <b>The preview label (K8).</b> DataStudio.Kafka, DataStudio.Kafka.Core and DataStudio.Kafka.Wolverine pack at <c>&lt;version&gt;-&lt;label&gt;</c> (<c>1.3.0-preview.1</c>), the
+/// family beside them at <c>&lt;version&gt;</c>. So DataStudio.Kafka.Core is compared with DataStudio.Kafka's own informational version, label and all, and
+/// DataStudio with the <em>family version</em>: DataStudio.Kafka's with the label taken off, the label being the
 /// <c>KafkaPrereleaseLabel</c> assembly metadata the three projects stamp. Without that metadata (a build that emptied the label) nothing is
 /// taken off. A different label, or a family assembly of another version, still fails.
 /// </para>
@@ -53,7 +53,7 @@ internal static class KStudioVersionGuard
     internal const string PrereleaseLabelMetadataKey = "KafkaPrereleaseLabel";
 
     /// <summary>
-    /// Throws unless the DataStudio and DataStudio.Kafka.Core this process loads are the builds this KStudio was packed
+    /// Throws unless the DataStudio and DataStudio.Kafka.Core this process loads are the builds this DataStudio.Kafka was packed
     /// with.
     /// </summary>
     /// <exception cref="InvalidOperationException">Any is missing, or is another version.</exception>
@@ -64,7 +64,7 @@ internal static class KStudioVersionGuard
     /// <summary>
     /// The whole check, with the loaders supplied - the seam the tests use: the shell first, then DataStudio.Kafka.Core.
     /// </summary>
-    /// <param name="kStudio">KStudio's own assembly, whose version is the one required.</param>
+    /// <param name="kStudio">DataStudio.Kafka's own assembly, whose version is the one required.</param>
     /// <param name="loadShell">Loads the shell's assembly; may throw <see cref="FileNotFoundException" />.</param>
     /// <param name="loadEngine">Loads DataStudio.Kafka.Core; may throw <see cref="FileNotFoundException" />.</param>
     /// <exception cref="InvalidOperationException">Any is missing, or is another version.</exception>
@@ -73,14 +73,14 @@ internal static class KStudioVersionGuard
         Func<Assembly> loadShell,
         Func<Assembly> loadEngine)
     {
-        EnsureAssembly(ShellAssemblyName, "KStudio", kStudio, loadShell, family: true);
-        EnsureAssembly(EngineAssemblyName, "KStudio", kStudio, loadEngine, family: false);
+        EnsureAssembly(ShellAssemblyName, "DataStudio.Kafka", kStudio, loadShell, family: true);
+        EnsureAssembly(EngineAssemblyName, "DataStudio.Kafka", kStudio, loadEngine, family: false);
     }
 
-    /// <summary>One required assembly: loaded, and the same build as KStudio's own.</summary>
+    /// <summary>One required assembly: loaded, and the same build as DataStudio.Kafka's own.</summary>
     /// <param name="name">The required package.</param>
     /// <param name="bringer">The package whose reference brings it, which a host that removes its pin lets do so.</param>
-    /// <param name="kStudio">KStudio's own assembly, whose version is the one required.</param>
+    /// <param name="kStudio">DataStudio.Kafka's own assembly, whose version is the one required.</param>
     /// <param name="load">Loads the required assembly; may throw <see cref="FileNotFoundException" />.</param>
     /// <param name="family">Whether the required assembly is the family's, at the version without KStudio's preview label.</param>
     private static void EnsureAssembly(string name, string bringer, Assembly kStudio, Func<Assembly> load, bool family)
@@ -97,7 +97,7 @@ internal static class KStudioVersionGuard
         catch (FileNotFoundException e)
         {
             throw new InvalidOperationException(
-                $"KStudio {ReleaseVersion(self)} needs {name} {required} exactly, and this application was deployed " +
+                $"DataStudio.Kafka {ReleaseVersion(self)} needs {name} {required} exactly, and this application was deployed " +
                 $"without {name}. The usual cause is a central PackageVersion for {name} at another " +
                 $"version under CentralPackageTransitivePinningEnabled: NuGet then drops {name} from the graph " +
                 $"without a warning. The packages are released together: pin {name} to {required}, or remove " +
@@ -120,7 +120,7 @@ internal static class KStudioVersionGuard
         string shownFound = commits ? loadedVersion! : ReleaseVersion(loadedVersion);
 
         throw new InvalidOperationException(
-            $"KStudio {shownSelf} needs {name} {shownRequired} exactly, and found {name} " +
+            $"DataStudio.Kafka {shownSelf} needs {name} {shownRequired} exactly, and found {name} " +
             $"{shownFound}. The packages are released together and must be upgraded together: a central " +
             $"PackageVersion or a PackageReference for {name} must say {required}, or be removed and let " +
             $"{bringer} bring it.");
@@ -130,7 +130,7 @@ internal static class KStudioVersionGuard
     /// Whether two informational versions name the same build. When both assemblies are Release builds and both carry build metadata - the
     /// <c>+&lt;commit&gt;</c> SourceLink appends - the whole strings must match; otherwise the release versions (the part before the <c>+</c>) must.
     /// </summary>
-    /// <param name="kStudio">KStudio's informational version.</param>
+    /// <param name="kStudio">DataStudio.Kafka's informational version.</param>
     /// <param name="other">The other assembly's informational version.</param>
     /// <param name="bothRelease">Whether both assemblies say <c>[AssemblyConfiguration("Release")]</c>, as every pack does.</param>
     internal static bool SameBuild(string? kStudio, string? other, bool bothRelease) =>
@@ -147,11 +147,11 @@ internal static class KStudioVersionGuard
             StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
-    /// An informational version without KStudio's preview label: <c>1.3.0-preview.1+5f1c2a9d</c> is <c>1.3.0+5f1c2a9d</c> for the label
-    /// <c>preview.1</c>, which is the version the family packages beside KStudio carry. Unchanged when there is no label, or when the version
+    /// An informational version without DataStudio.Kafka's preview label: <c>1.3.0-preview.1+5f1c2a9d</c> is <c>1.3.0+5f1c2a9d</c> for the label
+    /// <c>preview.1</c>, which is the version the family packages beside DataStudio.Kafka carry. Unchanged when there is no label, or when the version
     /// does not end its release part with exactly <c>-&lt;label&gt;</c> (so another label is left to fail the comparison).
     /// </summary>
-    /// <param name="informationalVersion">KStudio's informational version as the assembly carries it.</param>
+    /// <param name="informationalVersion">DataStudio.Kafka's informational version as the assembly carries it.</param>
     /// <param name="label">The preview label, or <see langword="null" /> or empty for none.</param>
     internal static string? FamilyVersion(string? informationalVersion, string? label)
     {

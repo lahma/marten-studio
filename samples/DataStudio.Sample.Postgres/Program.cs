@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 
 using Npgsql;
 
+using DataStudio;
 using DataStudio.Postgres;
 using DataStudio.Sample.Postgres;
 using DataStudio.Sample.Postgres.Auth;
@@ -56,39 +57,44 @@ builder.Services.AddSingleton(_ => NpgsqlDataSource.Create(connectionString));
 builder.Services.AddSingleton(services =>
     new SampleTenantDatabases(services.GetRequiredService<NpgsqlDataSource>(), connectionString));
 
-builder.Services.AddPostgresStudio(options =>
-{
-    // Who gets in, and who may use each capability: the studio evaluates both against the host's own authorization,
-    // and never authenticates anybody itself. The write policy is asked about each capability by name.
-    options.AuthorizationPolicy = SamplePolicies.Studio;
-    options.WriteAuthorizationPolicy = SamplePolicies.StudioCapability;
+builder.Services
+    .AddDataStudio(studio =>
+    {
+        // Who gets in: the shell evaluates it against the host's own authorization, and never authenticates anybody itself.
+        studio.AuthorizationPolicy = SamplePolicies.Studio;
+    })
+    .AddPostgres(options =>
+    {
+        // Who may use each capability: the module evaluates it against the host's own authorization. The write policy is asked
+        // about each capability by name.
+        options.WriteAuthorizationPolicy = SamplePolicies.StudioCapability;
 
-    // All four are off until the host says otherwise: reading rows and definitions, reading definitions alone, other
-    // sessions' statements, and the SQL console. `All()` is the one-line, greppable opt-in; `ReadOnly` overrides it
-    // whatever it says.
-    options.Capabilities = PostgresStudioCapabilities.All();
+        // All four are off until the host says otherwise: reading rows and definitions, reading definitions alone, other
+        // sessions' statements, and the SQL console. `All()` is the one-line, greppable opt-in; the shell's `ReadOnly` overrides it
+        // whatever it says.
+        options.Capabilities = PostgresStudioCapabilities.All();
 
-    // `public` is browsable only while nothing names a schema: a list replaces that default rather than adding to it, so
-    // `public` - where every tenant database keeps its tables - is named first. The others are the admin database's:
-    // Quartz.NET's job store, a legacy schema of catalog edge cases, and the application's own tables. "*" would open
-    // every schema the role can use - fine for a scratch database, not for a shared one.
-    options.BrowsableSchemas.Add("public");
-    options.BrowsableSchemas.Add(RelationalDemoSchema.QuartzSchemaName);
-    options.BrowsableSchemas.Add(RelationalDemoSchema.LegacySchemaName);
-    options.BrowsableSchemas.Add(RelationalDemoSchema.SampleSchemaName);
+        // `public` is browsable only while nothing names a schema: a list replaces that default rather than adding to it, so
+        // `public` - where every tenant database keeps its tables - is named first. The others are the admin database's:
+        // Quartz.NET's job store, a legacy schema of catalog edge cases, and the application's own tables. "*" would open
+        // every schema the role can use - fine for a scratch database, not for a shared one.
+        options.BrowsableSchemas.Add("public");
+        options.BrowsableSchemas.Add(RelationalDemoSchema.QuartzSchemaName);
+        options.BrowsableSchemas.Add(RelationalDemoSchema.LegacySchemaName);
+        options.BrowsableSchemas.Add(RelationalDemoSchema.SampleSchemaName);
 
-    // The tenant databases, as a second source beside "default": the studio lists them through the application, and
-    // asks it for a tenant's data source only when somebody opens that tenant.
-    options.AddDatabaseSource("tenants", static services => services.GetRequiredService<SampleTenantDatabases>());
-});
+        // The tenant databases, as a second source beside "default": the studio lists them through the application, and
+        // asks it for a tenant's data source only when somebody opens that tenant.
+        options.AddDatabaseSource("tenants", static services => services.GetRequiredService<SampleTenantDatabases>());
+    });
 #endregion
 
 // Outside the README's snippet on purpose: the header's "Back to application" link, to the sample's own landing page. Absent
 // unless a host sets it; a path that starts with "/" or an absolute http(s) URL, and never re-rooted under the mount path.
-builder.Services.Configure<PostgresStudioOptions>(static options => options.ApplicationPath = "/");
+builder.Services.Configure<DataStudioOptions>(static options => options.ApplicationPath = "/");
 
 #region readme_health
-// Optional, and AddPostgresStudio() does not do it for you: the health advisor's checks as one ASP.NET Core health
+// Optional, and AddPostgres() does not do it for you: the health advisor's checks as one ASP.NET Core health
 // check. It reports codes and counts, never a name, and runs the checks at most once per HealthInterval however often
 // the endpoint is probed.
 builder.Services.AddHealthChecks().AddPostgresStudio(tags: ["postgres"]);
@@ -113,7 +119,7 @@ app.UseAntiforgery();
 app.MapStaticAssets();
 
 #region readme_map
-app.MapPostgresStudio().RequireAuthorization(SamplePolicies.Studio);
+app.MapDataStudio().RequireAuthorization(SamplePolicies.Studio);
 #endregion
 
 app.MapLogin();
@@ -154,7 +160,7 @@ app.MapGet("/", (HttpContext context, IAntiforgery antiforgery) =>
           <p>{{who}}</p>
           {{readOnly}}
           <ul>
-            <li><a href="/postgres">Open Postgres Studio</a> &mdash; mounted at <code>/postgres</code>, with the admin
+            <li><a href="/studio">Open Postgres Studio</a> &mdash; mounted at <code>/studio</code>, with the admin
               database as the source <code>default</code> and <code>tenant_a</code>, <code>tenant_b</code> and
               <code>tenant_c</code> under the source <code>tenants</code></li>
             <li><a href="/login">Sign in</a> as <code>admin</code>, <code>ops</code> or <code>viewer</code> (the password is the user name)</li>

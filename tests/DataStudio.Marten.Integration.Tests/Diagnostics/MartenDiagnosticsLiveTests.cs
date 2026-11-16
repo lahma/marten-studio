@@ -99,7 +99,7 @@ public class MartenDiagnosticsLiveTests(PostgresFixture postgres)
             options.DatabaseSchemaName = "dx_api_master";
             options.Schema.For<TenancyNote>().MultiTenanted();
         });
-        services.AddMartenStudio(static options => options.AuthorizationPolicy = null);
+        services.AddDataStudio().AddMarten();
 
         await using (ServiceProvider provider = services.BuildServiceProvider())
         {
@@ -143,7 +143,7 @@ public class MartenDiagnosticsLiveTests(PostgresFixture postgres)
             options.Events.AddEventType<HealthPing>();
             store(options);
         });
-        services.AddMartenStudio();
+        services.AddDataStudio().AddMarten();
 
         return services.BuildServiceProvider();
     }

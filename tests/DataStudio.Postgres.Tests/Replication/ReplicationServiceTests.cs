@@ -308,7 +308,7 @@ public class ReplicationServiceTests
             ServiceCollection services = new();
             services.AddLogging(builder => builder.AddProvider(logs).SetMinimumLevel(Microsoft.Extensions.Logging.LogLevel.Trace));
             services.AddSingleton(NpgsqlDataSource.Create(Refused));
-            services.AddPostgresStudio(options =>
+            services.AddDataStudio().AddPostgres(options =>
             {
                 if (policies)
                 {

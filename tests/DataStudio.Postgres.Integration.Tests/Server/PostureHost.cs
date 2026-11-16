@@ -75,7 +75,7 @@ internal sealed class PostureHost : IAsyncDisposable
         Register(builder.Services, connectionString, options, environment: null);
 
         WebApplication app = builder.Build();
-        map(app.MapPostgresStudio());
+        map(app.MapDataStudio());
 
         await app.StartAsync(TestContext.Current.CancellationToken);
 
@@ -131,7 +131,7 @@ internal sealed class PostureHost : IAsyncDisposable
             collection.AddSingleton<IHostEnvironment>(new Environment(environment));
         }
 
-        collection.AddPostgresStudio(studio =>
+        collection.AddDataStudio().AddPostgres(studio =>
         {
             studio.BrowsableSchemas.Clear();
             studio.BrowsableSchemas.Add("public");

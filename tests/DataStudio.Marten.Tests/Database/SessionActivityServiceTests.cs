@@ -513,7 +513,7 @@ public class SessionActivityServiceTests
                 });
             }
 
-            services.AddMartenStudio(options =>
+            services.AddDataStudio().AddMarten(options =>
             {
                 if (policies)
                 {

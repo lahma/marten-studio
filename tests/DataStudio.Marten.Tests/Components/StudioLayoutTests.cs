@@ -462,7 +462,7 @@ public class StudioLayoutTests
     public void The_nav_links_honour_the_configured_path()
     {
         using var context = new StudioComponentContext();
-        context.Options.Path = "/ops/marten";
+        context.ShellOptions.Path = "/ops/marten";
         context.Options.Capabilities.RunSql = true; // Plan is in the rail only while RunSql is on (issue #37)
 
         var layout = RenderLayout(context);

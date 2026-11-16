@@ -242,7 +242,7 @@ public class LinqQueryAuditTests
                 options.Schema.For<LinqSecret>();
             });
             services?.Invoke(collection);
-            collection.AddMartenStudio(options =>
+            collection.AddDataStudio().AddMarten(options =>
             {
                 options.StoreAuthorizationPolicy = "store-policy";
                 options.WriteAuthorizationPolicy = "write-policy";

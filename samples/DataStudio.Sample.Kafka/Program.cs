@@ -4,7 +4,7 @@ using JasperFx.Events.Daemon;
 
 using Marten;
 
-using DataStudio.Kafka;
+using DataStudio;
 using DataStudio.Sample.Kafka;
 using DataStudio.Sample.Kafka.Auth;
 using DataStudio.Sample.Kafka.Kafka;
@@ -75,7 +75,7 @@ builder.Services
 builder.Services.AddAuthorization(SamplePolicies.Configure);
 SampleKafkaPolicies.AddHandlers(builder.Services);
 
-// The Marten half of the studio runs over the demo store: KStudio is a module of the studio it joins, and this sample hosts Marten Studio.
+// The Marten module of the studio runs over the demo store: Kafka is a module of the same Data Studio, beside it.
 builder.Services.AddSingleton(new SampleSeeding(GrantConsoleRole: false));
 // The sample's Wolverine application (D-CORR decision 11) creates topics of its own (AutoProvision) and produces to them, so it runs where the seed
 // may: on the throwaway broker, or on a configured one the host was told it may generate data in. Elsewhere the sample is the browser it was.
@@ -96,9 +96,13 @@ builder.Services
     .AddAsyncDaemon(DaemonMode.Solo)
     .InitializeWith<SampleDataSeeder>();
 
-builder.Services.AddMartenStudio(options =>
+DataStudioBuilder studio = builder.Services.AddDataStudio(options =>
 {
     options.AuthorizationPolicy = SamplePolicies.Studio;
+});
+
+studio.AddMarten(options =>
+{
     options.WriteAuthorizationPolicy = SamplePolicies.StudioWrite;
     options.Capabilities = MartenStudioCapabilities.All();
 
@@ -109,7 +113,7 @@ builder.Services.AddMartenStudio(options =>
 });
 
 // The header's "Back to application" link, to the sample's own landing page.
-builder.Services.Configure<MartenStudioOptions>(static options => options.ApplicationPath = "/");
+builder.Services.Configure<DataStudioOptions>(static options => options.ApplicationPath = "/");
 
 if (wolverine)
 {
@@ -124,7 +128,7 @@ if (wolverine)
     builder.Services.AddHostedService<SampleTicker>();
 }
 
-builder.Services.AddKafkaStudio(o =>
+studio.AddKafka(o =>
 {
     SampleKafkaRegistration.Configure(o, kafka.BootstrapServers, builder.Configuration);
 
@@ -150,7 +154,7 @@ app.UseAuthorization();
 app.UseAntiforgery();
 app.MapStaticAssets();
 
-app.MapMartenStudio().RequireAuthorization(SamplePolicies.Studio);
+app.MapDataStudio().RequireAuthorization(SamplePolicies.Studio);
 app.MapLogin();
 
 app.MapGet("/", (HttpContext context, IAntiforgery antiforgery) =>
@@ -179,8 +183,8 @@ app.MapGet("/", (HttpContext context, IAntiforgery antiforgery) =>
           <h1>KStudio sample</h1>
           <p>{{who}}</p>
           <ul>
-            <li><a href="/marten/kafka">Open KStudio</a> &mdash; the Kafka pages of Marten Studio, mounted at <code>/marten</code></li>
-            <li><a href="/marten">Open Marten Studio</a></li>
+            <li><a href="/studio/kafka">Open KStudio</a> &mdash; the Kafka pages of Data Studio, mounted at <code>/studio</code></li>
+            <li><a href="/studio">Open Marten Studio</a></li>
             <li><a href="/login">Sign in</a> as <code>admin</code> (every topic) or <code>support</code> (<code>orders.*</code> and <code>checkout.*</code> only); the password is the user name</li>
           </ul>
           <p>Try, as <code>support</code>, in Search over the last 24 hours of <code>orders.v1</code>: <code>header.correlation-id = 'c-0042'</code></p>

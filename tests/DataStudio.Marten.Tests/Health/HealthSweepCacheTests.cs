@@ -107,7 +107,7 @@ public class HealthSweepCacheTests
     public void The_studio_registers_no_hosted_service_and_no_timer_for_the_advisor()
     {
         ServiceCollection services = new();
-        services.AddMartenStudio();
+        services.AddDataStudio().AddMarten();
 
         services.Where(static x => !x.IsKeyedService && x.ServiceType == typeof(IHostedService))
             .Select(static x => x.ImplementationType?.Namespace ?? x.ImplementationFactory?.Method.DeclaringType?.Namespace ?? string.Empty)

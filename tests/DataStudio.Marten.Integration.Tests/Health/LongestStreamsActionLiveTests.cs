@@ -387,7 +387,7 @@ public class LongestStreamsActionLiveTests(PostgresFixture postgres)
             services.AddSingleton<AuthenticationStateProvider, Anonymous>();
             services.AddSingleton<IDocumentStore>(store);
             services.AddSingleton<IAuthorizationService>(policy);
-            services.AddMartenStudio(options =>
+            services.AddDataStudio().AddMarten(options =>
             {
                 options.StoreAuthorizationPolicy = "studio-store";
                 options.WriteAuthorizationPolicy = "studio-write";

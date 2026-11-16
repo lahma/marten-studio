@@ -385,7 +385,7 @@ public class PgVectorConsoleLiveTests(PgVectorServerFixture server) : IClassFixt
                 options.AutoCreateSchemaObjects = JasperFx.AutoCreate.None;
             });
 
-            services.AddMartenStudio(options => options.Capabilities.RunSql = true);
+            services.AddDataStudio().AddMarten(options => options.Capabilities.RunSql = true);
 
             return new Host(services.BuildServiceProvider());
         }

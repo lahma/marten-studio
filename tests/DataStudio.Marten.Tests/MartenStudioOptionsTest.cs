@@ -1,3 +1,4 @@
+using DataStudio.Marten.Services;
 using DataStudio.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -18,7 +19,7 @@ public class MartenStudioOptionsTest
     private static MartenStudioOptions Resolve(Action<MartenStudioOptions> configure)
     {
         var services = new ServiceCollection();
-        services.AddMartenStudio(configure);
+        services.AddDataStudio().AddMarten(configure);
         using var provider = services.BuildServiceProvider();
         return provider.GetRequiredService<IOptions<MartenStudioOptions>>().Value;
     }
@@ -30,9 +31,6 @@ public class MartenStudioOptionsTest
     {
         var options = Resolve(static _ => { });
 
-        options.Path.Should().Be("/marten");
-        options.Title.Should().Be("Marten Studio");
-        options.AuthorizationPolicy.Should().BeNull();
         options.StoreAuthorizationPolicy.Should().BeNull();
         options.WriteAuthorizationPolicy.Should().BeNull();
         options.ReadOnly.Should().BeFalse();
@@ -43,7 +41,6 @@ public class MartenStudioOptionsTest
         options.MaxSqlConsoleRows.Should().Be(500);
         options.SqlConsoleRole.Should().BeNull();
         options.ExactCountThreshold.Should().Be(100_000);
-        options.RefreshInterval.Should().Be(TimeSpan.FromSeconds(5));
         options.HealthInterval.Should().Be(TimeSpan.FromSeconds(60));
         options.RebuildShardTimeout.Should().Be(TimeSpan.FromHours(1));
         options.IsDocumentTypeVisible.Should().BeNull();
@@ -62,92 +59,6 @@ public class MartenStudioOptionsTest
         {
             Support.MartenSpine.Guard(Options.Create(options)).IsEnabled(capability).Should().BeFalse();
         }
-    }
-
-    [Theory]
-    [InlineData("")]
-    [InlineData("   ")]
-    [InlineData("marten")]
-    public void A_path_that_is_not_rooted_is_refused(string path)
-    {
-        ResolveAction(options => options.Path = path).Should().Throw<OptionsValidationException>()
-            .WithMessage("*must start with '/'*");
-    }
-
-    [Theory]
-    [InlineData("/tenant{env}")]
-    [InlineData("/ops/../marten")]
-    [InlineData("/ops/./marten")]
-    [InlineData("/ops?x=1")]
-    [InlineData("/ops#frag")]
-    [InlineData("/ops//marten")]
-    public void A_path_that_is_not_a_plain_url_path_is_refused(string path)
-    {
-        ResolveAction(options => options.Path = path).Should().Throw<OptionsValidationException>()
-            .WithMessage("*simple URL path*");
-    }
-
-    [Theory]
-    [InlineData("/marten")]
-    [InlineData("/ops/marten")]
-    [InlineData("/a/b/c/d")]
-    public void A_plain_rooted_path_is_accepted(string path)
-    {
-        Resolve(options => options.Path = path).Path.Should().Be(path);
-    }
-
-    /// <summary>1.2-HEADER: no link unless the host sets one.</summary>
-    [Fact]
-    public void ApplicationPath_is_null_by_default()
-    {
-        Resolve(static _ => { }).ApplicationPath.Should().BeNull();
-    }
-
-    [Theory]
-    [InlineData("/")]
-    [InlineData("/app")]
-    [InlineData("/ops/portal?tab=1")]
-    [InlineData("http://localhost:5000/")]
-    [InlineData("https://example.com/app")]
-    [InlineData("HTTPS://EXAMPLE.COM")]
-    public void An_application_path_that_is_rooted_or_an_absolute_http_url_is_accepted(string path)
-    {
-        Resolve(options => options.ApplicationPath = path).ApplicationPath.Should().Be(path);
-    }
-
-    [Theory]
-    [InlineData("")]
-    [InlineData("   ")]
-    [InlineData("app")]
-    [InlineData("../app")]
-    [InlineData("//evil.example/app")]
-    [InlineData("/\\evil.example")]
-    [InlineData("/app with space")]
-    [InlineData("ftp://example.com/")]
-    [InlineData("javascript:alert(1)")]
-    [InlineData("https://")]
-    [InlineData("mailto:ops@example.com")]
-    [InlineData("https://user:pass@evil.com/")]
-    [InlineData("https://app.example.com@evil.com/")]
-    [InlineData("JAVASCRIPT:alert(1)")]
-    [InlineData("data:text/html,x")]
-    [InlineData(" javascript:x")]
-    [InlineData("\\\\evil.com\\x")]
-    [InlineData("/app")]
-    public void An_application_path_that_is_neither_is_refused_at_startup(string path)
-    {
-        ResolveAction(options => options.ApplicationPath = path).Should().Throw<OptionsValidationException>()
-            .WithMessage("*MartenStudioOptions.ApplicationPath must be null*absolute http or https URL*");
-    }
-
-    /// <summary>1.2-FINAL-FIX: a host with <c>https://user@host/</c> is told why it failed, not just which shapes are allowed.</summary>
-    [Theory]
-    [InlineData("https://user@host.example/")]
-    [InlineData("https://user:pass@host.example/")]
-    public void An_application_URL_with_user_information_is_refused_and_the_message_says_so(string path)
-    {
-        ResolveAction(options => options.ApplicationPath = path).Should().Throw<OptionsValidationException>()
-            .WithMessage("*MartenStudioOptions.ApplicationPath must be null*no user information*'https://user@host/'*");
     }
 
     [Theory]
@@ -239,15 +150,6 @@ public class MartenStudioOptionsTest
             .Should().Throw<OptionsValidationException>().WithMessage("*ExactCountThreshold*");
     }
 
-    [Theory]
-    [InlineData(999)]
-    [InlineData(300_001)]
-    public void A_refresh_interval_outside_one_second_to_five_minutes_is_refused(int milliseconds)
-    {
-        ResolveAction(options => options.RefreshInterval = TimeSpan.FromMilliseconds(milliseconds))
-            .Should().Throw<OptionsValidationException>().WithMessage("*RefreshInterval*");
-    }
-
     /// <summary>
     /// H1: the advisor's cadence is bounded like RefreshInterval is - fifteen seconds to an hour - because several
     /// checks scan the lock table and the process array.
@@ -263,7 +165,7 @@ public class MartenStudioOptionsTest
     }
 
     /// <summary>
-    /// "Never shorter than RefreshInterval" is a clamp, not a startup error: a host that already polls every two
+    /// "Never shorter than the shell's RefreshInterval" is a clamp, not a startup error: a host that already polls every two
     /// minutes must not be refused a start by an option it never set.
     /// </summary>
     [Theory]
@@ -273,14 +175,12 @@ public class MartenStudioOptionsTest
     [InlineData(60_000, 60_000, 60_000)]
     public void The_advisor_never_runs_faster_than_the_pages_poll(int healthMilliseconds, int refreshMilliseconds, int effectiveMilliseconds)
     {
-        MartenStudioOptions options = Resolve(options =>
-        {
-            options.HealthInterval = TimeSpan.FromMilliseconds(healthMilliseconds);
-            options.RefreshInterval = TimeSpan.FromMilliseconds(refreshMilliseconds);
-        });
+        MartenStudioOptions options = Resolve(options => options.HealthInterval = TimeSpan.FromMilliseconds(healthMilliseconds));
+        DataStudioOptions shell = new() { RefreshInterval = TimeSpan.FromMilliseconds(refreshMilliseconds) };
 
         options.HealthInterval.Should().Be(TimeSpan.FromMilliseconds(healthMilliseconds));
-        options.EffectiveHealthInterval.Should().Be(TimeSpan.FromMilliseconds(effectiveMilliseconds));
+        MartenStudioSettings.Of(options, new DataStudio.Services.Settings.ShellSettings(Options.Create(shell))).EffectiveHealthInterval
+            .Should().Be(TimeSpan.FromMilliseconds(effectiveMilliseconds), "the shell's RefreshInterval is the floor");
     }
 
     [Fact]
@@ -297,62 +197,6 @@ public class MartenStudioOptionsTest
     {
         ResolveAction(options => options.KnownTenantIds.Add(tenantId))
             .Should().Throw<OptionsValidationException>().WithMessage("*KnownTenantIds*");
-    }
-
-    // -------------------------------------------------------------------------------------------
-    // The derived-path cache
-    // -------------------------------------------------------------------------------------------
-
-    /// <summary>
-    /// <c>MapMartenStudio(pattern)</c> writes the pattern back onto the resolved options instance, so the
-    /// three derived values have to follow it rather than being frozen at first read.
-    /// </summary>
-    [Fact]
-    public void The_derived_path_cache_follows_a_path_that_changes()
-    {
-        var options = new MartenStudioOptions();
-
-        options.TrimmedPath.Should().Be("/marten");
-        options.EscapedPath.Should().Be("/marten");
-        options.HasCustomPath.Should().BeFalse();
-
-        options.Path = "/ops/marten";
-
-        options.TrimmedPath.Should().Be("/ops/marten");
-        options.EscapedPath.Should().Be("/ops/marten");
-        options.HasCustomPath.Should().BeTrue();
-
-        options.Path = "/marten";
-
-        options.TrimmedPath.Should().Be("/marten");
-        options.HasCustomPath.Should().BeFalse();
-    }
-
-    [Theory]
-    [InlineData("/marten/", "/marten")]
-    [InlineData("marten", "/marten")]
-    [InlineData("  /ops/marten  ", "/ops/marten")]
-    [InlineData("/", "/marten")]
-    [InlineData("", "/marten")]
-    public void The_trimmed_path_normalizes_what_a_host_may_have_written(string path, string expected)
-    {
-        new MartenStudioOptions { Path = path }.TrimmedPath.Should().Be(expected);
-    }
-
-    [Fact]
-    public void The_escaped_path_is_what_a_browser_puts_in_the_url()
-    {
-        var options = new MartenStudioOptions { Path = "/ops/märten studio" };
-
-        options.EscapedPath.Should().Be("/ops/m%C3%A4rten%20studio");
-        options.HasCustomPath.Should().BeTrue();
-    }
-
-    [Fact]
-    public void A_path_differing_only_in_casing_is_not_a_custom_path()
-    {
-        // Route matching is case-insensitive, so /Marten is the default path wearing a hat.
-        new MartenStudioOptions { Path = "/Marten" }.HasCustomPath.Should().BeFalse();
     }
 
     // -------------------------------------------------------------------------------------------

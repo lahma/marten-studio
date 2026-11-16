@@ -30,15 +30,15 @@ public class StudioSpineTests
     // ---------------------------------------------------------------------------------------------
 
     [Fact]
-    public void The_settings_read_the_options_live_so_a_path_written_after_startup_is_seen()
+    public void The_settings_read_the_shells_options_live_so_a_path_written_after_startup_is_seen()
     {
-        MartenStudioOptions options = new();
-        MartenStudioSettings settings = MartenSpine.Settings(options);
+        DataStudioOptions options = new();
+        MartenStudioSettings settings = MartenStudioSettings.Of(new MartenStudioOptions(), new ShellSettings(Options.Create(options)));
 
-        settings.TrimmedPath.Should().Be("/marten");
+        settings.TrimmedPath.Should().Be("/studio");
         settings.HasCustomPath.Should().BeFalse();
 
-        // What MapMartenStudio(pattern) does to the resolved instance.
+        // What MapDataStudio(pattern) does to the resolved instance.
         options.Path = "/ops/my studio/";
 
         settings.TrimmedPath.Should().Be("/ops/my studio");
@@ -81,7 +81,6 @@ public class StudioSpineTests
         {
             StoreAuthorizationPolicy = "store",
             WriteAuthorizationPolicy = "write",
-            AuthorizationPolicy = "endpoint",
             MaxInlineDocumentBytes = 1234,
             SqlConsoleRole = "studio_reader",
             IsDocumentTypeVisible = static _ => false,
@@ -92,7 +91,6 @@ public class StudioSpineTests
 
         settings.ScopePolicy.Should().Be("store");
         settings.WritePolicy.Should().Be("write");
-        settings.AuthorizationPolicy.Should().Be("endpoint");
         settings.MaxInlineValueBytes.Should().Be(1234);
         settings.SqlConsoleRole.Should().Be("studio_reader");
         settings.BrowsableSchemas.Should().Equal("legacy");
@@ -148,8 +146,8 @@ public class StudioSpineTests
     public void Registering_the_same_studio_twice_is_allowed_and_a_second_studio_is_refused()
     {
         ServiceCollection services = new();
-        services.AddMartenStudio();
-        services.AddMartenStudio();
+        services.AddDataStudio().AddMarten();
+        services.AddDataStudio().AddMarten();
 
         services.Count(static x => x.ServiceType == typeof(StudioRegistrationMarker)).Should().Be(1);
 
@@ -165,7 +163,7 @@ public class StudioSpineTests
         ServiceCollection services = new();
         services.AddLogging();
         services.AddMarten(x => x.Connection(DummyConnectionString));
-        services.AddMartenStudio();
+        services.AddDataStudio().AddMarten();
 
         await using ServiceProvider provider = services.BuildServiceProvider();
         await using AsyncServiceScope scope = provider.CreateAsyncScope();

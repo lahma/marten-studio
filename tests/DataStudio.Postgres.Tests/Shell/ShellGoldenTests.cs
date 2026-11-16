@@ -28,10 +28,10 @@ public class ShellGoldenTests
         WebApplicationBuilder builder = WebApplication.CreateBuilder();
         builder.WebHost.UseTestServer();
         builder.Services.AddSingleton(NpgsqlDataSource.Create(ConnectionString));
-        builder.Services.AddPostgresStudio(configure);
+        builder.Services.AddDataStudio().AddPostgres(configure);
 
         WebApplication app = builder.Build();
-        app.MapPostgresStudio().AllowAnonymous();
+        app.MapDataStudio().AllowAnonymous();
         return app;
     }
 

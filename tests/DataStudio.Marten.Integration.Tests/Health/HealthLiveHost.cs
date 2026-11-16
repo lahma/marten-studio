@@ -136,7 +136,7 @@ internal sealed class HealthLiveHost : IAsyncDisposable
             store?.Invoke(options);
         });
 
-        collection.AddMartenStudio(options => studio?.Invoke(options));
+        collection.AddDataStudio().AddMarten(options => studio?.Invoke(options));
         services?.Invoke(collection);
 
         return new HealthLiveHost(collection.BuildServiceProvider(), logs, schema);

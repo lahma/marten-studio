@@ -27,7 +27,7 @@ public class PostgresStudioRegistrationGuardTests
         WebApplicationBuilder builder = WebApplication.CreateBuilder();
         builder.WebHost.UseTestServer();
         builder.Services.AddSingleton(NpgsqlDataSource.Create("Host=127.0.0.1;Port=1;Database=app;Username=app"));
-        builder.Services.AddPostgresStudio();
+        builder.Services.AddDataStudio().AddPostgres();
         configureBuilder?.Invoke(builder);
         return builder.Build();
     }
@@ -51,7 +51,7 @@ public class PostgresStudioRegistrationGuardTests
     public async Task A_mapping_that_answers_nothing_refuses_to_start_and_names_PostgresStudios_remedies()
     {
         await using WebApplication app = CreateApp();
-        app.MapPostgresStudio();
+        app.MapDataStudio();
 
         Exception? failure = await StartAndStopAsync(app);
 
@@ -69,7 +69,7 @@ public class PostgresStudioRegistrationGuardTests
     {
         await using WebApplication app = CreateApp(static builder =>
             builder.Services.AddAuthorization(static options => options.AddPolicy("ops", static policy => policy.RequireAssertion(static _ => true))));
-        app.MapPostgresStudio().RequireAuthorization("ops");
+        app.MapDataStudio().RequireAuthorization("ops");
 
         (await StartAndStopAsync(app)).Should().BeNull();
     }
@@ -78,7 +78,7 @@ public class PostgresStudioRegistrationGuardTests
     public async Task AllowAnonymous_at_the_map_site_satisfies_the_guard()
     {
         await using WebApplication app = CreateApp();
-        app.MapPostgresStudio().AllowAnonymous();
+        app.MapDataStudio().AllowAnonymous();
 
         (await StartAndStopAsync(app)).Should().BeNull();
     }
@@ -89,7 +89,7 @@ public class PostgresStudioRegistrationGuardTests
         await using WebApplication app = CreateApp(static builder =>
             builder.Services.AddAuthorization(static options =>
                 options.FallbackPolicy = new AuthorizationPolicyBuilder().RequireAssertion(static _ => true).Build()));
-        app.MapPostgresStudio();
+        app.MapDataStudio();
 
         (await StartAndStopAsync(app)).Should().BeNull();
     }
@@ -99,8 +99,8 @@ public class PostgresStudioRegistrationGuardTests
     {
         ServiceCollection services = new();
 
-        services.AddPostgresStudio();
-        services.AddPostgresStudio();
+        services.AddDataStudio().AddPostgres();
+        services.AddDataStudio().AddPostgres();
 
         services.Count(static x => x.ServiceType == typeof(StudioRegistrationMarker)).Should().Be(1);
         services.Count(static x => x.ServiceType == typeof(StudioDescriptor)).Should().Be(1);
@@ -116,7 +116,7 @@ public class PostgresStudioRegistrationGuardTests
         ServiceCollection services = new();
         StudioRegistrationMarker.Claim(services, new StudioRegistrationMarker("marten", "Marten Studio", "AddMartenStudio()"));
 
-        Action add = () => services.AddPostgresStudio();
+        Action add = () => services.AddDataStudio().AddPostgres();
 
         add.Should().Throw<InvalidOperationException>()
             .WithMessage("AddPostgresStudio() was called in an application that already registered Marten Studio with AddMartenStudio().*One studio per application*");
@@ -136,8 +136,8 @@ public class PostgresStudioRegistrationGuardTests
         builder.Services.AddSingleton(new StudioRegistrationMarker("marten", "Marten Studio", "AddMartenStudio()"));
         await using WebApplication app = builder.Build();
 
-        Action map = () => app.MapPostgresStudio();
-        Action pattern = () => app.MapPostgresStudio("/db");
+        Action map = () => app.MapDataStudio();
+        Action pattern = () => app.MapDataStudio("/db");
 
         map.Should().Throw<InvalidOperationException>().WithMessage(
             "MapPostgresStudio() was called in an application that registered Marten Studio with AddMartenStudio(). "
@@ -150,7 +150,7 @@ public class PostgresStudioRegistrationGuardTests
     public void The_health_check_export_is_registered_once_under_its_name()
     {
         ServiceCollection services = new();
-        services.AddPostgresStudio();
+        services.AddDataStudio().AddPostgres();
         services.AddHealthChecks()
             .AddPostgresStudio(tags: ["ready"])
             .AddPostgresStudio("postgres-studio-live", failureStatus: HealthStatus.Degraded);

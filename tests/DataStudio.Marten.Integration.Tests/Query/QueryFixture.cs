@@ -185,7 +185,7 @@ internal sealed class QueryHarness : IAsyncDisposable
             configureStore?.Invoke(options);
         });
 
-        services.AddMartenStudio(options =>
+        services.AddDataStudio().AddMarten(options =>
         {
             options.Capabilities.RunSql = true;
             options.QueryTimeout = TimeSpan.FromSeconds(30);

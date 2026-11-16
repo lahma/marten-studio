@@ -67,7 +67,7 @@ public class StoresPageTests
     public async Task Polling_reads_the_glances_and_never_the_stores_again()
     {
         await using StudioComponentContext context = new();
-        context.Options.RefreshInterval = TimeSpan.FromMilliseconds(50);
+        context.ShellOptions.RefreshInterval = TimeSpan.FromMilliseconds(50);
         context.StoreInfo.WithDatabases("default", "Default", "db-a");
 
         IRenderedComponent<Stores> page = context.Render<Stores>();

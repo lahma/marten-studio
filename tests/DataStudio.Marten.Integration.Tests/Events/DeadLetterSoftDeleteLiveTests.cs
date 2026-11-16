@@ -91,9 +91,8 @@ public class DeadLetterSoftDeleteLiveTests(PostgresFixture fixture)
             options.Policies.AllDocumentsSoftDeleted();
         });
 
-        services.AddMartenStudio(static options =>
+        services.AddDataStudio().AddMarten(static options =>
         {
-            options.AuthorizationPolicy = null;
             options.DiscoverTenantIds = false;
             options.Capabilities = MartenStudioCapabilities.All();
         });

@@ -351,7 +351,7 @@ internal sealed class HealthHarness : IAsyncDisposable
 
         before?.Invoke(services);
 
-        services.AddMartenStudio(options =>
+        services.AddDataStudio().AddMarten(options =>
         {
             if (policies)
             {

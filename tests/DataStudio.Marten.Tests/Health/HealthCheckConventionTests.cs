@@ -50,7 +50,7 @@ public class HealthCheckConventionTests
     {
         ServiceCollection services = new();
         services.AddLogging();
-        services.AddMartenStudio();
+        services.AddDataStudio().AddMarten();
 
         using ServiceProvider provider = services.BuildServiceProvider();
         HealthCheckRegistry registry = provider.GetRequiredService<HealthCheckRegistry>();

@@ -236,7 +236,7 @@ public class LinqQueryServiceTests
                 options.Schema.For<LinqOrder>();
                 options.Schema.For<LinqSecret>();
             });
-            services.AddMartenStudio(options =>
+            services.AddDataStudio().AddMarten(options =>
             {
                 options.StoreAuthorizationPolicy = StorePolicy;
                 options.WriteAuthorizationPolicy = WritePolicy;

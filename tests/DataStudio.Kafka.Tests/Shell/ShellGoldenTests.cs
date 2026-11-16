@@ -37,8 +37,8 @@ public class ShellGoldenTests
             ["_content/DataStudio/css/studio.css"] = ":root { }"u8.ToArray(),
         });
         builder.Services.AddSingleton(NpgsqlDataSource.Create(ConnectionString));
-        builder.Services.AddPostgresStudio(allCapabilities ? static options => options.Capabilities = PostgresStudioCapabilities.All() : null);
-        builder.Services.AddKafkaStudio(options =>
+        builder.Services.AddDataStudio().AddPostgres(allCapabilities ? static options => options.Capabilities = PostgresStudioCapabilities.All() : null);
+        builder.Services.AddDataStudio().AddKafka(options =>
         {
             options.Capabilities = KafkaStudioCapabilities.All();
             options.ClusterAuthorizationPolicy = "kafka";   // the startup guard wants a policy named; prerendering evaluates none
@@ -46,7 +46,7 @@ public class ShellGoldenTests
         });
 
         WebApplication app = builder.Build();
-        app.MapPostgresStudio().AllowAnonymous();
+        app.MapDataStudio().AllowAnonymous();
         return app;
     }
 

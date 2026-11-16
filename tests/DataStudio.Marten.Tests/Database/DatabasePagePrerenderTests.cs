@@ -298,7 +298,7 @@ public class DatabasePagePrerenderTests
                 builder.AddProvider(logs);
             });
             services.AddMarten(static options => options.Connection(DummyConnectionString));
-            services.AddMartenStudio(configure);
+            services.AddDataStudio().AddMarten(configure);
             services.AddSingleton<IAuthorizationService>(policies);
             services.AddScoped<AuthenticationStateProvider>(_ => users);
 

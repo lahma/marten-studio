@@ -266,7 +266,7 @@ public class ViewDefinitionsServiceTests
             var services = new ServiceCollection();
             services.AddLogging();
             services.AddMarten(x => x.Connection(DummyConnectionString));
-            services.AddMartenStudio(options =>
+            services.AddDataStudio().AddMarten(options =>
             {
                 options.StoreAuthorizationPolicy = StorePolicy;
                 options.WriteAuthorizationPolicy = WritePolicy;

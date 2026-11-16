@@ -53,9 +53,12 @@ public class ProjectionLagHistoryLiveTests(PostgresFixture postgres)
                 slow.Options.BatchSize = 1;
                 options.Projections.Add(slow, ProjectionLifecycle.Async);
             },
-            studio: options => options.RefreshInterval = TimeSpan.FromSeconds(1),
-            services: services => services.AddSingleton(provider =>
-                new ProjectionLagHistory(provider.GetService<HealthDatabaseBound>(), TimeSpan.FromMilliseconds(500))));
+            services: services =>
+            {
+                services.Configure<DataStudioOptions>(static options => options.RefreshInterval = TimeSpan.FromSeconds(1));
+                services.AddSingleton(provider =>
+                    new ProjectionLagHistory(provider.GetService<HealthDatabaseBound>(), TimeSpan.FromMilliseconds(500)));
+            });
 
     /// <summary>What the projections screen's view says of the gated shard right now, as one poll would read it.</summary>
     private static async Task<(ShardProgress? Shard, ShardLagHistory? History)> PollAsync(DaemonHealthHost host)

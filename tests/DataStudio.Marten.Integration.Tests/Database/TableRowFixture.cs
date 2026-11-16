@@ -229,7 +229,7 @@ internal sealed class RowsHost(ServiceProvider provider) : IAsyncDisposable
             options.AutoCreateSchemaObjects = AutoCreate.None;
         });
 
-        services.AddMartenStudio(options =>
+        services.AddDataStudio().AddMarten(options =>
         {
             options.Capabilities.BrowseDatabase = true;
             options.BrowsableSchemas.Add("quartz");

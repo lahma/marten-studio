@@ -14,7 +14,7 @@ public class DiagnosticsRegistrationTests
     public void The_engine_after_MartenStudio_is_refused_with_the_sentence()
     {
         ServiceCollection services = new();
-        services.AddMartenStudio();
+        services.AddDataStudio().AddMarten();
 
         Action add = () => services.AddPostgresDiagnostics();
 
@@ -29,7 +29,7 @@ public class DiagnosticsRegistrationTests
         services.AddPostgresDiagnostics();
         int before = services.Count;
 
-        Action add = () => services.AddMartenStudio();
+        Action add = () => services.AddDataStudio().AddMarten();
 
         add.Should().Throw<InvalidOperationException>()
             .Which.Message.Should().Contain("AddMartenStudio()").And.Contain("already registers the diagnostics engine").And.Contain("Remove AddPostgresDiagnostics()");
@@ -40,7 +40,7 @@ public class DiagnosticsRegistrationTests
     public void MartenStudio_alone_registers_the_diagnostics_api_once()
     {
         ServiceCollection services = new();
-        services.AddMartenStudio();
+        services.AddDataStudio().AddMarten();
 
         services.Where(static x => x.ServiceType == typeof(DataStudio.Postgres.IPostgresDiagnostics)).Should().ContainSingle()
             .Which.Lifetime.Should().Be(ServiceLifetime.Singleton);

@@ -89,7 +89,7 @@ public class RewindSubscriptionLiveTests(PostgresFixture postgres) : IAsyncLifet
         builder.Services.AddAuthorization();
         builder.Services.AddSingleton<AuthenticationStateProvider, StubAuthenticationStateProvider>();
 
-        builder.Services.AddMartenStudio(options =>
+        builder.Services.AddDataStudio().AddMarten(options =>
         {
             options.Capabilities = MartenStudioCapabilities.All();
             options.DiscoverTenantIds = false;

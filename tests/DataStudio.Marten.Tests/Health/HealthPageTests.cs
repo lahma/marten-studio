@@ -419,7 +419,7 @@ public class HealthPageTests
     [Fact]
     public async Task A_Critical_that_appears_while_somebody_watches_is_toasted_once()
     {
-        await using StudioComponentContext context = await ReadyAsync(static x => x.Options.RefreshInterval = TimeSpan.FromMilliseconds(20));
+        await using StudioComponentContext context = await ReadyAsync(static x => x.ShellOptions.RefreshInterval = TimeSpan.FromMilliseconds(20));
 
         // Stamped with the scope they are read for, as the real health service stamps a glance: the toast ignores one
         // read for any other scope.

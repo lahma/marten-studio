@@ -162,7 +162,7 @@ public class EventMutationScopeAuditTests
 
             configure?.Invoke(services);
 
-            services.AddMartenStudio(static options =>
+            services.AddDataStudio().AddMarten(static options =>
             {
                 options.Capabilities = MartenStudioCapabilities.All();
                 options.QueryTimeout = TimeSpan.FromSeconds(5);

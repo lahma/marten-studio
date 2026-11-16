@@ -16,7 +16,7 @@ public class PublicApiTest
 {
     private static readonly Assembly Core = Assembly.Load("DataStudio.Kafka.Core");
 
-    private static readonly Assembly Module = typeof(KafkaStudioServiceCollectionExtensions).Assembly;
+    private static readonly Assembly Module = typeof(KafkaDataStudioBuilderExtensions).Assembly;
 
     [Fact]
     public async Task The_engine_public_api_has_not_changed_unintentionally()

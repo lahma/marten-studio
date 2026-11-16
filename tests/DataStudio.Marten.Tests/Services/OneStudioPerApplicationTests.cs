@@ -1,6 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
 
-using DataStudio.Postgres;
 using DataStudio.Postgres.Services.Settings;
 
 namespace DataStudio.Marten.Tests.Services;
@@ -16,9 +15,9 @@ public class OneStudioPerApplicationTests
     public void AddPostgresStudio_after_AddMartenStudio_is_refused_and_says_why()
     {
         ServiceCollection services = new();
-        services.AddMartenStudio();
+        services.AddDataStudio().AddMarten();
 
-        Action add = () => services.AddPostgresStudio();
+        Action add = () => services.AddDataStudio().AddPostgres();
 
         add.Should().Throw<InvalidOperationException>().WithMessage(
             "AddPostgresStudio() was called in an application that already registered Marten Studio with AddMartenStudio(). "
@@ -35,9 +34,9 @@ public class OneStudioPerApplicationTests
     public void AddMartenStudio_after_AddPostgresStudio_is_refused_and_says_why()
     {
         ServiceCollection services = new();
-        services.AddPostgresStudio();
+        services.AddDataStudio().AddPostgres();
 
-        Action add = () => services.AddMartenStudio();
+        Action add = () => services.AddDataStudio().AddMarten();
 
         add.Should().Throw<InvalidOperationException>().WithMessage(
             "AddMartenStudio() was called in an application that already registered Postgres Studio with AddPostgresStudio(). "

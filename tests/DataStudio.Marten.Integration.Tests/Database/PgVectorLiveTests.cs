@@ -413,7 +413,7 @@ public class PgVectorLiveTests(PgVectorServerFixture server) : IClassFixture<PgV
             options.Schema.For<VectorThing>();
         });
 
-        services.AddMartenStudio(options =>
+        services.AddDataStudio().AddMarten(options =>
         {
             options.Capabilities.BrowseDatabase = true;
 

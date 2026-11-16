@@ -19,7 +19,7 @@ public class PostgresStudioOptionsTests
     private static PostgresStudioOptions Resolve(Action<PostgresStudioOptions> configure)
     {
         ServiceCollection services = new();
-        services.AddPostgresStudio(configure);
+        services.AddDataStudio().AddPostgres(configure);
         using ServiceProvider provider = services.BuildServiceProvider();
         return provider.GetRequiredService<IOptions<PostgresStudioOptions>>().Value;
     }
@@ -31,9 +31,6 @@ public class PostgresStudioOptionsTests
     {
         PostgresStudioOptions options = new();
 
-        options.Path.Should().Be("/postgres");
-        options.Title.Should().Be("Postgres Studio");
-        options.AuthorizationPolicy.Should().BeNull();
         options.SourceAuthorizationPolicy.Should().BeNull();
         options.WriteAuthorizationPolicy.Should().BeNull();
         options.ReadOnly.Should().BeFalse();
@@ -47,7 +44,6 @@ public class PostgresStudioOptionsTests
         options.MaxSqlConsoleRows.Should().Be(500);
         options.SqlConsoleRole.Should().BeNull();
         options.ExactCountThreshold.Should().Be(100_000);
-        options.RefreshInterval.Should().Be(TimeSpan.FromSeconds(5));
         options.HealthInterval.Should().Be(TimeSpan.FromSeconds(60));
         options.BrowsableSchemas.Should().BeEmpty("the default is applied after configuration, only when nothing named a schema");
         options.IncludeDefaultDataSource.Should().BeTrue();
@@ -91,7 +87,6 @@ public class PostgresStudioOptionsTests
     {
         PostgresStudioOptions options = Resolve(static options =>
         {
-            options.Path = "/ops/db";
             options.BrowsableSchemas.Add("qrtz");
             options.AddDataSource("orders", static sp => sp.GetRequiredKeyedService<NpgsqlDataSource>("orders"));
             options.AddDatabaseSource("tenants.v2", static _ => throw new InvalidOperationException("never asked here"));
@@ -124,7 +119,7 @@ public class PostgresStudioOptionsTests
             .Build();
 
         ServiceCollection services = new();
-        services.AddPostgresStudio();
+        services.AddDataStudio().AddPostgres();
         services.Configure<PostgresStudioOptions>(configuration.GetSection("PostgresStudio"));
         using ServiceProvider provider = services.BuildServiceProvider();
 
@@ -206,61 +201,6 @@ public class PostgresStudioOptionsTests
     }
 
     [Theory]
-    [InlineData("postgres")]
-    [InlineData("/a/{id}")]
-    [InlineData("/a/../b")]
-    public void An_invalid_path_fails(string path)
-    {
-        ResolveAction(options => options.Path = path).Should().Throw<OptionsValidationException>().WithMessage("PostgresStudioOptions.Path*");
-    }
-
-    /// <summary>1.2-HEADER: no link unless the host sets one, and MartenStudio's rule in PostgresStudio's names.</summary>
-    [Fact]
-    public void ApplicationPath_is_null_by_default()
-    {
-        Resolve(static _ => { }).ApplicationPath.Should().BeNull();
-    }
-
-    [Theory]
-    [InlineData("/")]
-    [InlineData("/app")]
-    [InlineData("https://example.com/app")]
-    public void An_application_path_that_is_rooted_or_an_absolute_http_url_is_accepted(string path)
-    {
-        Resolve(options => options.ApplicationPath = path).ApplicationPath.Should().Be(path);
-    }
-
-    [Theory]
-    [InlineData("")]
-    [InlineData("app")]
-    [InlineData("//evil.example/app")]
-    [InlineData("/\\evil.example")]
-    [InlineData("/app with space")]
-    [InlineData("javascript:alert(1)")]
-    [InlineData("https://user:pass@evil.com/")]
-    [InlineData("https://app.example.com@evil.com/")]
-    [InlineData("JAVASCRIPT:alert(1)")]
-    [InlineData("data:text/html,x")]
-    [InlineData(" javascript:x")]
-    [InlineData("\\\\evil.com\\x")]
-    [InlineData("/app")]
-    public void An_application_path_that_is_neither_is_refused_at_startup(string path)
-    {
-        ResolveAction(options => options.ApplicationPath = path).Should().Throw<OptionsValidationException>()
-            .WithMessage("*PostgresStudioOptions.ApplicationPath must be null*absolute http or https URL*");
-    }
-
-    /// <summary>1.2-FINAL-FIX: a host with <c>https://user@host/</c> is told why it failed, not just which shapes are allowed.</summary>
-    [Theory]
-    [InlineData("https://user@host.example/")]
-    [InlineData("https://user:pass@host.example/")]
-    public void An_application_URL_with_user_information_is_refused_and_the_message_says_so(string path)
-    {
-        ResolveAction(options => options.ApplicationPath = path).Should().Throw<OptionsValidationException>()
-            .WithMessage("*PostgresStudioOptions.ApplicationPath must be null*no user information*'https://user@host/'*");
-    }
-
-    [Theory]
     [InlineData(0)]
     [InlineData(64 * 1024 * 1024 + 1)]
     public void MaxInlineValueBytes_is_bounded(int bytes)
@@ -278,7 +218,6 @@ public class PostgresStudioOptionsTests
         ResolveAction(static options => options.MaxSqlConsoleRows = 0).Should().Throw<OptionsValidationException>().WithMessage("*PostgresStudioOptions.MaxSqlConsoleRows*");
         ResolveAction(static options => options.SqlConsoleRole = "bad role").Should().Throw<OptionsValidationException>().WithMessage("*PostgresStudioOptions.SqlConsoleRole*");
         ResolveAction(static options => options.ExactCountThreshold = -1).Should().Throw<OptionsValidationException>().WithMessage("*PostgresStudioOptions.ExactCountThreshold*");
-        ResolveAction(static options => options.RefreshInterval = TimeSpan.Zero).Should().Throw<OptionsValidationException>().WithMessage("*PostgresStudioOptions.RefreshInterval*");
         ResolveAction(static options => options.HealthInterval = TimeSpan.FromSeconds(1)).Should().Throw<OptionsValidationException>().WithMessage("*PostgresStudioOptions.HealthInterval*");
         ResolveAction(static options => options.Capabilities = null!).Should().Throw<OptionsValidationException>().WithMessage("*PostgresStudioCapabilities.All()*");
         ResolveAction(static options => options.BrowsableSchemas.Add("a\"b")).Should().Throw<OptionsValidationException>().WithMessage("*PostgresStudioOptions.BrowsableSchemas*");

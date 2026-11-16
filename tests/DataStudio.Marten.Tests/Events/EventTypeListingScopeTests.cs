@@ -50,7 +50,7 @@ public sealed class EventTypeListingScopeTests : IAsyncDisposable
                 return Task.FromResult(new EventTypeList([new EventTypeInfo("order_placed", "Shop.OrderPlaced", true, 5, 1, 5)], CountsLoaded: true));
             }));
 
-        services.AddMartenStudio(options => options.StoreAuthorizationPolicy = Policy);
+        services.AddDataStudio().AddMarten(options => options.StoreAuthorizationPolicy = Policy);
 
         // After it, so these win: the policy knows people by name, and the provider is the framework's own, scoped per visitor.
         services.AddSingleton<IAuthorizationService>(new NamedVisitors("alice", "bob"));

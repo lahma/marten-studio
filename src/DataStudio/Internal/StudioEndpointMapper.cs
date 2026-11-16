@@ -42,14 +42,14 @@ using Microsoft.Net.Http.Headers;
 namespace DataStudio.Internal;
 
 /// <summary>
-/// Maps one studio's pages, circuit and assets under its mount path - D11's sub-path mounting, ported from
-/// Quartz.Dashboard, shared by every studio.
+/// Maps the shell's pages, circuit and assets under its mount path - D11's sub-path mounting, ported from
+/// Quartz.Dashboard, serving every registered module.
 /// </summary>
 /// <remarks>
 /// <para>
-/// A studio's public <c>Map*Studio()</c> validates its pattern, writes it onto its options and calls
-/// <see cref="Map{TRoot}" /> with its root component; everything after that is here, driven by the studio's
-/// <c>StudioDescriptor</c> and <c>IStudioSettings</c> and by nothing a studio's own types say.
+/// <c>MapDataStudio()</c> validates its pattern, writes it onto the shell's options and calls
+/// <see cref="Map{TRoot}" /> with its root component; everything after that is here, driven by the shell's
+/// descriptor and settings and by nothing a module's own types say.
 /// </para>
 /// <para>
 /// <b>Pages are re-rooted per assembly.</b> A page endpoint is rebased when its component's assembly is one of
@@ -92,33 +92,28 @@ internal static class StudioEndpointMapper
     private static readonly ConcurrentDictionary<string, (long Length, DateTimeOffset LastModified, EntityTagHeaderValue ETag)> ETagCache = new();
 
     /// <summary>
-    /// Refuses a <c>Map*Studio()</c> call for a studio other than the one this application registered: the shared services
-    /// it would map - settings, descriptor, sources - are the registered studio's, so <c>MapPostgresStudio()</c> in a
-    /// Marten Studio application would serve Marten Studio's pages under PostgresStudio's name, and the reverse. Asked
-    /// first, before a map call writes anything onto an options instance. An application that registered no studio at all
-    /// is left to fail as it always has, on the first service it lacks.
+    /// Refuses a <c>MapDataStudio()</c> call in an application that did not call <c>AddDataStudio()</c>, or that added no module to it: the shell
+    /// maps what its modules registered, and with none there is nothing to serve. Asked first, before a map call writes anything onto an options
+    /// instance.
     /// </summary>
     /// <param name="builder">The host's endpoint route builder.</param>
-    /// <param name="expected">The studio the map call belongs to.</param>
-    /// <param name="mapMethod">The map call, as a host spells it: <c>MapPostgresStudio()</c>.</param>
-    /// <exception cref="InvalidOperationException">Another studio is registered.</exception>
-    internal static void RequireRegistered(IEndpointRouteBuilder builder, StudioRegistrationMarker expected, string mapMethod)
+    /// <exception cref="InvalidOperationException">The shell was never added, or no module was.</exception>
+    internal static void RequireRegistered(IEndpointRouteBuilder builder)
     {
         ArgumentNullException.ThrowIfNull(builder);
-        ArgumentNullException.ThrowIfNull(expected);
 
-        if (builder.ServiceProvider.GetService<StudioRegistrationMarker>() is { } registered
-            && !string.Equals(registered.Key, expected.Key, StringComparison.Ordinal))
+        if (builder.ServiceProvider.GetService<ShellRegistrationMarker>() is null)
         {
-            string registeredMap = registered.RegisteredBy.StartsWith("Add", StringComparison.Ordinal)
-                ? "Map" + registered.RegisteredBy[3..]
-                : registered.RegisteredBy;
-
             throw new InvalidOperationException(
-                $"{mapMethod} was called in an application that registered {registered.ProductName} with {registered.RegisteredBy}. "
-                + $"Map the studio the application registered - app.{registeredMap} - or register {expected.ProductName} with "
-                + $"{expected.RegisteredBy} in its place: one studio per application, and the services a map call serves are the "
-                + "registered studio's.");
+                "MapDataStudio() was called in an application that did not call AddDataStudio(). Register the shell first, and add a module to it: "
+                + "services.AddDataStudio().AddPostgres() (or any other installed module's Add... call), then app.MapDataStudio().");
+        }
+
+        if (!builder.ServiceProvider.GetServices<IStudioModule>().Any())
+        {
+            throw new InvalidOperationException(
+                "MapDataStudio() was called in an application whose Data Studio has no module: the shell serves what its modules register. "
+                + "Add one to AddDataStudio(): AddPostgres(), AddMarten() or the Add... call of another installed module.");
         }
     }
 
@@ -144,6 +139,12 @@ internal static class StudioEndpointMapper
         builder.ServiceProvider.GetRequiredService<StudioMappedEndpoints>().Track(builder);
 
         string studioPath = settings.TrimmedPath;
+
+        // A shell whose modules all keep their own segment (Kafka alone) has no page at the mount itself: its front address leads to the
+        // first module's home. A circuit's own navigation to it is handled by the router (StudioRoutes).
+        RouteHandlerBuilder? front = descriptor.Root is null && descriptor.First is { } first
+            ? MapStudioFront(builder, studioPath, first.HomeRoute)
+            : null;
 
         // The pages already carry their compile-time root in their @page directives, so the components root is mapped
         // at the application root and everything it produced is re-rooted below.
@@ -228,6 +229,7 @@ internal static class StudioEndpointMapper
             // FallbackPolicy.
             components.RequireAuthorization(policyName);
             frameworkFiles?.RequireAuthorization(policyName);
+            front?.RequireAuthorization(policyName);
         }
         else
         {
@@ -253,13 +255,27 @@ internal static class StudioEndpointMapper
         // every remedy the failure message lists reaches both, and an unauthorized circuit is the more
         // dangerous of the two because it is the one that runs components. The static assets have already
         // decided for themselves above and are package content, so they are not the guard's business.
-        StudioEndpointMarker pageMarker = new(descriptor.Surface, descriptor.Remedies, isPage: true) { Exposure = descriptor.Exposure };
-        StudioEndpointMarker circuitMarker = new(descriptor.Surface, descriptor.Remedies, isPage: false) { Exposure = descriptor.Exposure };
+        StudioEndpointMarker pageMarker = new(StudioShellIdentity.Surface, StudioShellIdentity.Remedies, isPage: true) { Exposure = descriptor.Exposure };
+        StudioEndpointMarker circuitMarker = new(StudioShellIdentity.Surface, StudioShellIdentity.Remedies, isPage: false) { Exposure = descriptor.Exposure };
         components.Add(endpointBuilder =>
             endpointBuilder.Metadata.Add(IsStudioPage(endpointBuilder, descriptor.PageAssemblies) ? pageMarker : circuitMarker));
 
-        return new StudioConventionBuilder(components, hub: null, frameworkFiles);
+        front?.WithMetadata(pageMarker);
+
+        return new StudioConventionBuilder(components, front, frameworkFiles);
     }
+
+    /// <summary>
+    /// The shell's front address when no module is the root: <c>{mount}</c> answers a temporary redirect to the first module's home, keeping the
+    /// query string (a scope in a pasted link survives). Governed exactly as the pages are: the shell's policy when there is one, else whatever the
+    /// caller says about the mapping.
+    /// </summary>
+    private static RouteHandlerBuilder MapStudioFront(IEndpointRouteBuilder builder, string studioPath, string homeRoute) =>
+        builder.MapGet(
+            studioPath,
+            (HttpContext context) => Results.Redirect(
+                string.Concat(context.Request.PathBase.Value, studioPath, "/", homeRoute, context.Request.QueryString.Value),
+                permanent: false));
 
     /// <summary>
     /// Moves one endpoint of the studio's own <c>MapRazorComponents</c> call under the mount path.

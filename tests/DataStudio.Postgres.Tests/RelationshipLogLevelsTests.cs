@@ -78,7 +78,7 @@ public class RelationshipLogLevelsTests
         services.AddAuthorization(static options => options.AddPolicy(SourcePolicy, static policy => policy.RequireAssertion(
             static context => context.Resource is PostgresStudioResource { SourceName: not RefusedSource })));
         services.AddSingleton(_ => NpgsqlDataSource.Create("Host=postgres-studio-relationship-log.invalid;Database=none;Username=none;Password=none"));
-        services.AddPostgresStudio(static options =>
+        services.AddDataStudio().AddPostgres(static options =>
         {
             options.SourceAuthorizationPolicy = SourcePolicy;
             options.AddDatabaseSource("tenants", static _ => new UnreadableDatabases());

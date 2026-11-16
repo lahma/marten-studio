@@ -571,9 +571,8 @@ public class SchemaAlignmentLiveTests(PostgresFixture fixture)
             options.Storage.ExtendedSchemaObjects.Add(extended);
         });
 
-        services.AddMartenStudio(options =>
+        services.AddDataStudio().AddMarten(options =>
         {
-            options.AuthorizationPolicy = null;
             options.IsDocumentTypeVisible = static type => type != typeof(AlignSecret);
 
             if (open)

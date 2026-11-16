@@ -100,8 +100,8 @@ public class AddPostgresDiagnosticsTests
         { "console role", "PostgresDiagnosticsOptions.SqlConsoleRole must be a plain Postgres identifier" },
         { "health interval", "PostgresDiagnosticsOptions.HealthInterval must be between fifteen seconds and one hour" },
         { "schema", "PostgresDiagnosticsOptions.BrowsableSchemas entries must each be" },
-        { "studio code", "PostgresDiagnosticsOptions.AcceptedChecks key 'K05' is not a health check code PostgresStudio.Diagnostics runs" },
-        { "unknown code", "PostgresDiagnosticsOptions.AcceptedChecks key 'Z99' is not a health check code PostgresStudio.Diagnostics runs" },
+        { "studio code", "PostgresDiagnosticsOptions.AcceptedChecks key 'K05' is not a health check code DataStudio.Postgres.Diagnostics runs" },
+        { "unknown code", "PostgresDiagnosticsOptions.AcceptedChecks key 'Z99' is not a health check code DataStudio.Postgres.Diagnostics runs" },
         { "blank reason", "PostgresDiagnosticsOptions.AcceptedChecks['C01'] needs a reason" },
     };
 
@@ -170,7 +170,7 @@ public class AddPostgresDiagnosticsTests
     {
         ServiceCollection services = Engine();
 
-        Action add = () => services.AddPostgresStudio();
+        Action add = () => services.AddDataStudio().AddPostgres();
 
         add.Should().Throw<InvalidOperationException>()
             .Which.Message.Should().Contain("already registers the diagnostics engine").And.Contain("Remove AddPostgresDiagnostics()");
@@ -185,7 +185,7 @@ public class AddPostgresDiagnosticsTests
         services.AddAuthorization();
         services.AddSingleton<AuthenticationStateProvider, Nobody>();
         services.AddSingleton(NpgsqlDataSource.Create(Unreachable));
-        services.AddPostgresStudio();
+        services.AddDataStudio().AddPostgres();
 
         Action add = () => services.AddPostgresDiagnostics();
 
@@ -201,7 +201,7 @@ public class AddPostgresDiagnosticsTests
         services.AddAuthorization();
         services.AddSingleton<AuthenticationStateProvider, Nobody>();
         services.AddSingleton(NpgsqlDataSource.Create(Unreachable));
-        services.AddPostgresStudio(static options =>
+        services.AddDataStudio().AddPostgres(static options =>
         {
             options.QueryTimeout = TimeSpan.FromSeconds(12);
             options.AddDataSource("reporting", static provider => provider.GetRequiredService<NpgsqlDataSource>());

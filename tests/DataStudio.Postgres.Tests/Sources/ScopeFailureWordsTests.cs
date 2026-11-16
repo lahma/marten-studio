@@ -136,7 +136,7 @@ public class ScopeFailureWordsTests
 
         ServiceCollection services = new();
         services.AddLogging();
-        services.AddPostgresStudio(options => options.AddDatabaseSource("tenants", _ => new FailingSource(failure ?? Named)));
+        services.AddDataStudio().AddPostgres(options => options.AddDatabaseSource("tenants", _ => new FailingSource(failure ?? Named)));
         services.AddScoped<AuthenticationStateProvider>(_ => users);
 
         return services.BuildServiceProvider();

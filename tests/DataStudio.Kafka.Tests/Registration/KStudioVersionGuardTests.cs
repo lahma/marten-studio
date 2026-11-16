@@ -61,12 +61,12 @@ public class KStudioVersionGuardTests
         KStudioVersionGuard.InformationalVersion(Kafka).Should().Be(KStudioVersionGuard.InformationalVersion(Module), "DataStudio.Kafka.Core is KStudio's own, label and all");
 
         FluentActions.Invoking(KStudioVersionGuard.Ensure).Should().NotThrow();
-        FluentActions.Invoking(() => new ServiceCollection().AddKafkaStudio()).Should().NotThrow();
+        FluentActions.Invoking(() => new ServiceCollection().AddDataStudio().AddKafka()).Should().NotThrow();
     }
 
     [Theory]
-    [InlineData("DataStudio", "KStudio")]
-    [InlineData("DataStudio.Kafka.Core", "KStudio")]
+    [InlineData("DataStudio", "DataStudio.Kafka")]
+    [InlineData("DataStudio.Kafka.Core", "DataStudio.Kafka")]
     public void A_missing_assembly_is_refused_and_the_central_pin_is_named(string missing, string bringer)
     {
         FileNotFoundException notFound = new("Could not load file or assembly '" + missing + "'.", missing);
@@ -84,7 +84,7 @@ public class KStudioVersionGuardTests
 
         refusal.InnerException.Should().BeSameAs(notFound);
         refusal.Message.Should()
-            .Contain($"KStudio {self} needs {missing} {required} exactly")
+            .Contain($"DataStudio.Kafka {self} needs {missing} {required} exactly")
             .And.Contain("deployed without " + missing)
             .And.Contain("central PackageVersion for " + missing)
             .And.Contain("CentralPackageTransitivePinningEnabled")
@@ -105,7 +105,7 @@ public class KStudioVersionGuardTests
                 () => other == "DataStudio.Kafka.Core" ? WithVersion("0.5.1") : module))
             .Should().Throw<InvalidOperationException>()
             .Which.Message.Should()
-            .Contain($"KStudio 0.5.0 needs {other} 0.5.0 exactly, and found {other} 0.5.1.")
+            .Contain($"DataStudio.Kafka 0.5.0 needs {other} 0.5.0 exactly, and found {other} 0.5.1.")
             .And.Contain("upgraded together")
             .And.Contain($"for {other} must say 0.5.0");
     }
@@ -117,7 +117,7 @@ public class KStudioVersionGuardTests
 
         FluentActions.Invoking(() => KStudioVersionGuard.Ensure(module, () => module, () => WithVersion("0.5.0+0b7e3c41", "Release")))
             .Should().Throw<InvalidOperationException>()
-            .Which.Message.Should().Contain("KStudio 0.5.0+5f1c2a9d needs DataStudio.Kafka.Core 0.5.0+5f1c2a9d exactly, and found DataStudio.Kafka.Core 0.5.0+0b7e3c41.");
+            .Which.Message.Should().Contain("DataStudio.Kafka 0.5.0+5f1c2a9d needs DataStudio.Kafka.Core 0.5.0+5f1c2a9d exactly, and found DataStudio.Kafka.Core 0.5.0+0b7e3c41.");
     }
 
     [Theory]
@@ -167,7 +167,7 @@ public class KStudioVersionGuardTests
                 () => module))
             .Should().Throw<InvalidOperationException>()
             .Which.Message.Should()
-            .Contain($"KStudio 1.3.0-preview.1 needs {other} 1.3.0 exactly, and found {other} 1.3.1.")
+            .Contain($"DataStudio.Kafka 1.3.0-preview.1 needs {other} 1.3.0 exactly, and found {other} 1.3.1.")
             .And.Contain($"for {other} must say 1.3.0");
     }
 
@@ -192,7 +192,7 @@ public class KStudioVersionGuardTests
 
         FluentActions.Invoking(() => KStudioVersionGuard.Ensure(module, () => WithVersion("1.3.0"), () => WithVersion(core)))
             .Should().Throw<InvalidOperationException>()
-            .Which.Message.Should().Contain($"KStudio 1.3.0-preview.1 needs DataStudio.Kafka.Core 1.3.0-preview.1 exactly, and found DataStudio.Kafka.Core {core}.");
+            .Which.Message.Should().Contain($"DataStudio.Kafka 1.3.0-preview.1 needs DataStudio.Kafka.Core 1.3.0-preview.1 exactly, and found DataStudio.Kafka.Core {core}.");
     }
 
     /// <summary>After graduation (the label emptied) nothing is stamped and nothing is taken off: all three are one version again.</summary>
@@ -256,11 +256,11 @@ public class KStudioVersionGuardTests
         KStudioVersionGuard.ReleaseVersion(informational).Should().Be(expected);
     }
 
-    /// <summary>The public <c>AddKafkaStudio</c> and the guard name no DataStudio or DataStudio.Kafka.Core type or member, so the JIT can compile them when either is absent.</summary>
+    /// <summary>The public <c>AddKafka</c> and the guard name no DataStudio or DataStudio.Kafka.Core type or member (but the shell's <c>DataStudioBuilder</c>, its own first parameter, which the body only hands on), so the JIT can compile them when either is absent.</summary>
     [Fact]
-    public void Neither_AddKafkaStudio_nor_the_guard_names_a_shell_or_engine_member()
+    public void Neither_AddKafka_nor_the_guard_names_a_shell_or_engine_member()
     {
-        MethodBase[] methods = [AddKafkaStudio, .. GuardMethods()];
+        MethodBase[] methods = [AddKafka, .. GuardMethods()];
 
         methods.Should().HaveCountGreaterThan(4, "the public method, the guard's checks and its two loaders are all scanned");
         methods.SelectMany(ForbiddenMembersIn).Should().BeEmpty(
@@ -272,7 +272,7 @@ public class KStudioVersionGuardTests
     [Fact]
     public void The_scan_finds_the_members_where_they_are_meant_to_be()
     {
-        MethodInfo services = typeof(KafkaStudioServiceCollectionExtensions).GetMethod("AddKafkaStudioServices", Declared)!;
+        MethodInfo services = typeof(KafkaDataStudioBuilderExtensions).GetMethod("AddKafkaServices", Declared)!;
 
         services.Should().NotBeNull();
         ForbiddenMembersIn(services).Should().Contain(static x => x.Contains("KStudioEngineRegistration", StringComparison.Ordinal));
@@ -282,7 +282,7 @@ public class KStudioVersionGuardTests
     [Fact]
     public void What_names_the_other_assemblies_is_never_inlined_into_what_runs_before_the_guard()
     {
-        MethodInfo services = typeof(KafkaStudioServiceCollectionExtensions).GetMethod("AddKafkaStudioServices", Declared)!;
+        MethodInfo services = typeof(KafkaDataStudioBuilderExtensions).GetMethod("AddKafkaServices", Declared)!;
         MethodInfo ensure = typeof(KStudioVersionGuard).GetMethod(nameof(KStudioVersionGuard.Ensure), Type.EmptyTypes)!;
 
         foreach (MethodInfo method in new[]
@@ -298,10 +298,10 @@ public class KStudioVersionGuardTests
         }
     }
 
-    private static MethodInfo AddKafkaStudio =>
-        typeof(KafkaStudioServiceCollectionExtensions).GetMethod(
-            nameof(KafkaStudioServiceCollectionExtensions.AddKafkaStudio),
-            [typeof(IServiceCollection), typeof(Action<KafkaStudioOptions>)])!;
+    private static MethodInfo AddKafka =>
+        typeof(KafkaDataStudioBuilderExtensions).GetMethod(
+            nameof(KafkaDataStudioBuilderExtensions.AddKafka),
+            [typeof(DataStudioBuilder), typeof(Action<KafkaStudioOptions>)])!;
 
     private static AssemblyBuilder WithVersion(string informationalVersion, string? configuration = "Release", string? label = null)
     {
@@ -415,6 +415,7 @@ public class KStudioVersionGuardTests
     /// <summary>A type of DataStudio or DataStudio.Kafka.Core: the two assemblies the guard checks.</summary>
     private static bool IsForbidden(Type type) =>
         !type.IsGenericParameter
+        && type != typeof(DataStudioBuilder)
         && type.Assembly.GetName().Name is KStudioVersionGuard.ShellAssemblyName
             or KStudioVersionGuard.EngineAssemblyName;
 }

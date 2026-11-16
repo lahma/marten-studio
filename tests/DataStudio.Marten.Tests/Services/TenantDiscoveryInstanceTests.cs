@@ -256,7 +256,7 @@ public class TenantDiscoveryInstanceTests
         services.AddLogging();
         services.AddAuthorization();
         services.AddSingleton<IDocumentStore>(store);
-        services.AddMartenStudio(static _ => { });
+        services.AddDataStudio().AddMarten(static _ => { });
         services.AddScoped<AuthenticationStateProvider>(_ => users);
 
         await using ServiceProvider provider = services.BuildServiceProvider();
@@ -343,7 +343,7 @@ public class TenantDiscoveryInstanceTests
         services.AddLogging();
         services.AddAuthorization();
         services.AddSingleton<IDocumentStore>(store);
-        services.AddMartenStudio(static _ => { });
+        services.AddDataStudio().AddMarten(static _ => { });
         services.AddScoped<AuthenticationStateProvider>(_ => users);
 
         await using ServiceProvider provider = services.BuildServiceProvider();

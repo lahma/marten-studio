@@ -186,7 +186,7 @@ internal sealed partial class ProjectionDataService
 
         HealthHistoryView history = raw.VisibleAt(wholeDatabase ? HealthGate.Database : HealthGate.None);
 
-        TimeSpan freshness = options.Value.EffectiveHealthInterval * 3;
+        TimeSpan freshness = settings.EffectiveHealthInterval * 3;
         if (freshness < TimeSpan.FromMinutes(5))
         {
             freshness = TimeSpan.FromMinutes(5);
@@ -264,7 +264,7 @@ internal sealed partial class ProjectionDataService
         await using HealthConnection connection = new(resolved.Target);
         HealthSqlRunner sql = new(connection, sessionOptions, observer: null);
         HealthCheckContext context = new(
-            resolved, MartenStudioSettings.Of(options), MartenStudioRuntime.Current, NoServices.Instance, sql, DateTimeOffset.UtcNow,
+            resolved, settings, MartenStudioRuntime.Current, NoServices.Instance, sql, DateTimeOffset.UtcNow,
             new HealthSweepMemo(), cancellationToken);
 
         EventStoreRelations shape = await EventHealth.ShapeAsync(context, cancellationToken).ConfigureAwait(false);

@@ -143,7 +143,7 @@ internal sealed class HealthExportHarness : IAsyncDisposable
                 }
             });
 
-            services.AddMartenStudio(options => studio?.Invoke(options));
+            services.AddDataStudio().AddMarten(options => studio?.Invoke(options));
         }
 
         IHealthChecksBuilder builder = services.AddHealthChecks();

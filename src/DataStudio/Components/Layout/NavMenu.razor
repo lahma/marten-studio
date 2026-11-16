@@ -70,9 +70,9 @@
 
     <p class="ms-rail-credit">
         <span class="ms-rail-credit-line">@Settings.ProductName @StudioVersion</span>
-        @foreach (IStudioModule module in Shell.Modules.Where(static x => !x.IsRoot))
+        @foreach (IStudioModule module in Shell.Modules)
         {
-            @* A module is named where the product is (D34); the root is the studio itself, which the line above names; with none the markup is what it was. *@
+            @* Every module is named beside the product (D34): the shell's own name is Data Studio, and what it shows is the modules'. *@
             <span class="ms-rail-credit-line" @key="module.Key">@module.ProductName</span>
         }
         <span class="ms-rail-credit-line"><a href="https://github.com/lahma/marten-studio/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT licensed</a></span>

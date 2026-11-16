@@ -48,8 +48,8 @@ public class KafkaTailCircuitTests
     public void The_module_registers_its_handler_once_and_both_are_the_circuits_own()
     {
         ServiceCollection services = [];
-        services.AddKafkaStudio(static _ => { });
-        services.AddKafkaStudio(static _ => { });
+        services.AddDataStudio().AddKafka(static _ => { });
+        services.AddDataStudio().AddKafka(static _ => { });
 
         services.Where(static x => x.ServiceType == typeof(CircuitHandler) && x.ImplementationType == typeof(KafkaTailCircuitHandler))
             .Should().ContainSingle().Which.Lifetime.Should().Be(ServiceLifetime.Scoped);

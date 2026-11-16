@@ -28,7 +28,7 @@ public sealed class ShellSettingsTests
     public void AddMartenStudio_registers_one_settings_object_under_both_interfaces()
     {
         ServiceCollection services = new();
-        services.AddMartenStudio();
+        services.AddDataStudio().AddMarten();
         using ServiceProvider provider = services.BuildServiceProvider();
 
         provider.GetRequiredService<IShellSettings>().Should().BeSameAs(provider.GetRequiredService<IStudioSettings>());

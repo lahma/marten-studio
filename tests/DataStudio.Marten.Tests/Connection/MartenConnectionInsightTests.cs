@@ -748,7 +748,7 @@ public class MartenConnectionInsightTests
             });
 
             services?.Invoke(collection, marten);
-            collection.AddMartenStudio();
+            collection.AddDataStudio().AddMarten();
 
             return new Rig(collection.BuildServiceProvider());
         }

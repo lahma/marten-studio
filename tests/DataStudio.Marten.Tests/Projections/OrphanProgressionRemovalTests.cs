@@ -164,7 +164,7 @@ public class OrphanProgressionRemovalTests
                 tenancy.AddMultipleTenantDatabase(SecondaryConnectionString, "secondary").ForTenants(SecondaryTenant);
             }));
 
-            services.AddMartenStudio(options =>
+            services.AddDataStudio().AddMarten(options =>
             {
                 options.Capabilities = new MartenStudioCapabilities { CorrectProgression = correctProgression };
                 options.StoreAuthorizationPolicy = StorePolicy;

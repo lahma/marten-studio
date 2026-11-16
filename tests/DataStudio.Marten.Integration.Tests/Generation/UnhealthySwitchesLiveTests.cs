@@ -8,7 +8,6 @@ using DataStudio.Sample.Marten.Domain;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
 
 using Npgsql;
 
@@ -558,7 +557,7 @@ public class UnhealthySwitchesLiveTests(PostgresFixture postgres)
             ("table", UnhealthyDemoStore.BloatTableName));
 
     private static TimeSpan Interval(ConnectionsLiveHost host) =>
-        host.Provider.GetRequiredService<IOptions<MartenStudioOptions>>().Value.EffectiveHealthInterval;
+        host.Provider.GetRequiredService<DataStudio.Postgres.Services.Settings.IStudioSettings>().EffectiveHealthInterval;
 
     /// <summary>The number the pinned gap holds: the switch's own report names it, and the sequence is one past the mark.</summary>
     private async Task<long> HeldNumberAsync(DaemonHealthHost host)

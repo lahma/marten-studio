@@ -1,12 +1,10 @@
 using Npgsql;
 
-using DataStudio.Postgres.Services.Settings;
-
 namespace DataStudio.Postgres;
 
 /// <summary>
-/// Options for Postgres Studio, configured through <c>AddPostgresStudio(Action&lt;PostgresStudioOptions&gt;)</c>.
-/// Validation runs when the options are first read, which <c>MapPostgresStudio()</c> does at startup.
+/// Options for the Postgres module of Data Studio, configured through <c>AddPostgres(Action&lt;PostgresStudioOptions&gt;)</c>.
+/// Validation runs when the options are first read, which <c>MapDataStudio()</c> does at startup.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -17,40 +15,13 @@ namespace DataStudio.Postgres;
 /// application's own data sources, with their role, TLS and settings, and adds no new place that holds credentials.
 /// </para>
 /// <para>
-/// The members mirror <c>MartenStudioOptions</c> where both studios have the setting, with the same defaults and the
-/// same bounds, so a host that knows one knows the other.
+/// The members mirror <c>MartenStudioOptions</c> where both modules have the setting, with the same defaults and the
+/// same bounds, so a host that knows one knows the other. Where the studio is mounted, what it is called, who gets in and how often a
+/// live page polls are the shell's (<c>DataStudioOptions</c>); <see cref="ReadOnly" /> here turns only this module's capabilities off.
 /// </para>
 /// </remarks>
 public sealed class PostgresStudioOptions : PostgresDiagnosticsOptions
 {
-    internal const string DefaultPath = "/postgres";
-
-    /// <summary>
-    /// The path the studio is mounted at. Must start with <c>/</c> and be a plain routable path (no route parameters,
-    /// query or fragment). <c>MapPostgresStudio(pattern)</c> overrides it.
-    /// </summary>
-    public string Path { get; set; } = DefaultPath;
-
-    /// <summary>The title shown in the browser tab and the header.</summary>
-    public string Title { get; set; } = "Postgres Studio";
-
-    /// <summary>
-    /// Where the header's "Back to application" link goes, or <see langword="null" /> (the default) for no link. Either a
-    /// host-relative path that starts with a single <c>/</c> (<c>/</c>, <c>/app</c>) or an absolute <c>http</c> or
-    /// <c>https</c> URL without user information. It is used exactly as written and is never re-rooted under the studio's mount
-    /// path, so <c>/</c> is the host's own front page, not the studio's. A host that runs behind <c>UsePathBase</c> includes its
-    /// base (<c>/myapp/</c>): the option is not rewritten for it. Validated at startup.
-    /// </summary>
-    public string? ApplicationPath { get; set; }
-
-    /// <summary>
-    /// When set, the policy applied to every studio endpoint: pages, the Blazor circuit and the static assets. When
-    /// <see langword="null" /> the studio adds no policy of its own and refuses to start unless the mapping calls
-    /// <c>RequireAuthorization()</c> or <c>AllowAnonymous()</c>, or the host has an
-    /// <c>AuthorizationOptions.FallbackPolicy</c>.
-    /// </summary>
-    public string? AuthorizationPolicy { get; set; }
-
     /// <summary>
     /// When set, evaluated against a <see cref="PostgresStudioResource" /> (with a <see langword="null" /> capability)
     /// before a source or database is listed, framed or read.
@@ -65,7 +36,8 @@ public sealed class PostgresStudioOptions : PostgresDiagnosticsOptions
     public string? WriteAuthorizationPolicy { get; set; }
 
     /// <summary>
-    /// Master switch: when <see langword="true" /> every capability is off regardless of <see cref="Capabilities" />.
+    /// This module's master switch: when <see langword="true" /> every capability of the module is off regardless of <see cref="Capabilities" />.
+    /// The shell's <c>DataStudioOptions.ReadOnly</c> turns off every module's.
     /// </summary>
     public bool ReadOnly { get; set; }
 
@@ -93,18 +65,6 @@ public sealed class PostgresStudioOptions : PostgresDiagnosticsOptions
     /// cannot be negative.
     /// </summary>
     public long ExactCountThreshold { get; set; } = 100_000;
-
-    /// <summary>
-    /// How often live pages poll for changes. Between one second and five minutes. Polling pauses while the tab is
-    /// hidden.
-    /// </summary>
-    public TimeSpan RefreshInterval { get; set; } = TimeSpan.FromSeconds(5);
-
-    /// <summary>
-    /// The cadence the advisor really runs at: <c>HealthInterval</c>, or <see cref="RefreshInterval" /> when that
-    /// is longer.
-    /// </summary>
-    internal TimeSpan EffectiveHealthInterval => HealthInterval >= RefreshInterval ? HealthInterval : RefreshInterval;
 
     /// <summary>
     /// Lists one more of the application's own data sources under <paramref name="name" />, as
@@ -136,33 +96,5 @@ public sealed class PostgresStudioOptions : PostgresDiagnosticsOptions
     {
         base.AddDatabaseSource(name, resolve);
         return this;
-    }
-
-    /// <summary>
-    /// <see cref="Path" /> normalized to a rooted path without a trailing slash, falling back to
-    /// <see cref="DefaultPath" /> when unset or empty.
-    /// </summary>
-    internal string TrimmedPath => PathCache.Trimmed;
-
-    /// <summary>Whether <see cref="Path" /> differs from the compile-time default <c>/postgres</c>.</summary>
-    internal bool HasCustomPath => PathCache.HasCustom;
-
-    /// <summary><see cref="TrimmedPath" /> percent-encoded, as browsers emit it in request URIs and the &lt;base href&gt;.</summary>
-    internal string EscapedPath => PathCache.Escaped;
-
-    private StudioPath? pathCache;
-
-    /// <summary>
-    /// Values derived from <see cref="Path" />, computed once per value and held behind one reference, so a concurrent
-    /// reader always observes a fully populated instance even if the option is written mid-render.
-    /// </summary>
-    private StudioPath PathCache
-    {
-        get
-        {
-            StudioPath cache = StudioPath.Of(Path, DefaultPath, pathCache);
-            pathCache = cache;
-            return cache;
-        }
     }
 }

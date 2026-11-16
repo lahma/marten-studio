@@ -467,7 +467,7 @@ public class ConnectionInsightServiceTests
                 options.Schema.For<ConnectionNote>();
             });
 
-            services.AddMartenStudio(options =>
+            services.AddDataStudio().AddMarten(options =>
             {
                 if (policies)
                 {

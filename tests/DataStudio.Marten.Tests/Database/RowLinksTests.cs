@@ -79,13 +79,13 @@ public class RowLinksTests
     {
         SafeReturnLink.Sanitize("database/object?schema=quartz&name=qrtz_triggers&tab=rows", Settings, DatabaseLinks.ObjectRoute)
             .Should().Be("database/object?schema=quartz&name=qrtz_triggers&tab=rows");
-        SafeReturnLink.Sanitize("marten/database/object?schema=quartz", Settings, DatabaseLinks.ObjectRoute).Should().NotBeNull();
+        SafeReturnLink.Sanitize("studio/database/object?schema=quartz", Settings, DatabaseLinks.ObjectRoute).Should().NotBeNull();
 
         SafeReturnLink.Sanitize("documents/customer", Settings, DatabaseLinks.ObjectRoute).Should().BeNull();
         SafeReturnLink.Sanitize("javascript:alert(1)", Settings, DatabaseLinks.ObjectRoute).Should().BeNull();
         SafeReturnLink.Sanitize("//evil.example/database/object", Settings, DatabaseLinks.ObjectRoute).Should().BeNull();
 
-        SafeReturnLink.Sanitize("documents/customer", Options).Should().Be("documents/customer", "the documents list's rule is unchanged");
+        SafeReturnLink.Sanitize("documents/customer", Settings).Should().Be("documents/customer", "the documents list's rule is unchanged");
     }
 
     // ----------------------------------------------------------------------------------------------

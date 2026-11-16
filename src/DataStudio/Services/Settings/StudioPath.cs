@@ -1,4 +1,4 @@
-namespace DataStudio.Postgres.Services.Settings;
+namespace DataStudio.Services.Settings;
 
 /// <summary>
 /// A studio's mount path, as every path-shaped value derives from it: rooted and trimmed, percent-encoded, and

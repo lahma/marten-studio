@@ -228,7 +228,7 @@ public class DeadLetterVisibilityTests
                 configure?.Invoke(options);
             });
 
-            services.AddMartenStudio(options =>
+            services.AddDataStudio().AddMarten(options =>
             {
                 options.Capabilities = MartenStudioCapabilities.All();
                 options.IsDocumentTypeVisible = isVisible;

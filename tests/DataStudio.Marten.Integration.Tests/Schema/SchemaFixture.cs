@@ -222,9 +222,8 @@ internal sealed class SchemaFixture : IAsyncDisposable
             options.Events.AddEventType<SchemaThingHappened>();
         });
 
-        services.AddMartenStudio(options =>
+        services.AddDataStudio().AddMarten(options =>
         {
-            options.AuthorizationPolicy = null;
             configure?.Invoke(options);
         });
 

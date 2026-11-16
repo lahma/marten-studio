@@ -46,7 +46,7 @@ public class DiagnosticsOnlyLiveTests(PostgresFixture postgres)
         studio.AddAuthorization();
         studio.AddSingleton<AuthenticationStateProvider, Nobody>();
         studio.AddSingleton(_ => NpgsqlDataSource.Create(owned[0]));
-        studio.AddPostgresStudio();
+        studio.AddDataStudio().AddPostgres();
 
         await using ServiceProvider engineProvider = engine.BuildServiceProvider(validateScopes: true);
         await using ServiceProvider studioProvider = studio.BuildServiceProvider(validateScopes: true);

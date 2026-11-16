@@ -298,9 +298,6 @@ public class StoragePageTests
             SourceLabel = descriptor.SourceLabel,
             ExposedContent = descriptor.ExposedContent,
             CreateResource = descriptor.CreateResource,
-            Surface = descriptor.Surface,
-            Exposure = descriptor.Exposure,
-            Remedies = descriptor.Remedies,
         };
     }
 

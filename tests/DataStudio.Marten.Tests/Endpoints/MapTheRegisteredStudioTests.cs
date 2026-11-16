@@ -4,7 +4,6 @@ using Microsoft.Extensions.DependencyInjection;
 
 using Npgsql;
 
-using DataStudio.Postgres;
 
 namespace DataStudio.Marten.Tests.Endpoints;
 
@@ -26,9 +25,9 @@ public class MapTheRegisteredStudioTests
     [Fact]
     public async Task MapPostgresStudio_in_a_Marten_Studio_application_is_refused_and_says_why()
     {
-        await using WebApplication app = App(static services => services.AddMartenStudio());
+        await using WebApplication app = App(static services => services.AddDataStudio().AddMarten());
 
-        Action map = () => app.MapPostgresStudio();
+        Action map = () => app.MapDataStudio();
 
         map.Should().Throw<InvalidOperationException>().WithMessage(
             "MapPostgresStudio() was called in an application that registered Marten Studio with AddMartenStudio(). "
@@ -43,11 +42,11 @@ public class MapTheRegisteredStudioTests
         await using WebApplication app = App(static services =>
         {
             services.AddSingleton(NpgsqlDataSource.Create("Host=127.0.0.1;Port=1;Database=app;Username=app"));
-            services.AddPostgresStudio();
+            services.AddDataStudio().AddPostgres();
         });
 
-        Action map = () => app.MapMartenStudio();
-        Action pattern = () => app.MapMartenStudio("/ops/marten");
+        Action map = () => app.MapDataStudio();
+        Action pattern = () => app.MapDataStudio("/ops/marten");
 
         map.Should().Throw<InvalidOperationException>().WithMessage(
             "MapMartenStudio() was called in an application that registered Postgres Studio with AddPostgresStudio(). "
@@ -58,14 +57,14 @@ public class MapTheRegisteredStudioTests
     [Fact]
     public async Task Each_studio_maps_in_its_own_application()
     {
-        await using WebApplication marten = App(static services => services.AddMartenStudio());
-        ((Action) (() => marten.MapMartenStudio().AllowAnonymous())).Should().NotThrow();
+        await using WebApplication marten = App(static services => services.AddDataStudio().AddMarten());
+        ((Action) (() => marten.MapDataStudio().AllowAnonymous())).Should().NotThrow();
 
         await using WebApplication postgres = App(static services =>
         {
             services.AddSingleton(NpgsqlDataSource.Create("Host=127.0.0.1;Port=1;Database=app;Username=app"));
-            services.AddPostgresStudio();
+            services.AddDataStudio().AddPostgres();
         });
-        ((Action) (() => postgres.MapPostgresStudio().AllowAnonymous())).Should().NotThrow();
+        ((Action) (() => postgres.MapDataStudio().AllowAnonymous())).Should().NotThrow();
     }
 }

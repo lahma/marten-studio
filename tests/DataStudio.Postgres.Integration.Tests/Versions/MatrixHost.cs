@@ -96,7 +96,7 @@ internal sealed class MatrixHost : IAsyncDisposable
         collection.AddAuthorization();
         collection.AddSingleton<AuthenticationStateProvider, Anonymous>();
         collection.AddSingleton(NpgsqlDataSource.Create(own.ConnectionString));
-        collection.AddPostgresStudio(studio =>
+        collection.AddDataStudio().AddPostgres(studio =>
         {
             studio.BrowsableSchemas.Clear();
 

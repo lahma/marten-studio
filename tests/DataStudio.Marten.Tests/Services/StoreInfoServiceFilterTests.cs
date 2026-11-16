@@ -117,7 +117,7 @@ public class StoreInfoServiceFilterTests
                 options.DatabaseSchemaName = "scope1_other";
                 options.Tenancy = (ITenancy) (object) CountedTenancy(options.Tenancy, otherEnumerations);
             });
-            services.AddMartenStudio(static options => options.QueryTimeout = TimeSpan.FromSeconds(5));
+            services.AddDataStudio().AddMarten(static options => options.QueryTimeout = TimeSpan.FromSeconds(5));
 
             // The default store cannot be had: its factory counts the ask and throws, which the registry reports as a store that will not build.
             services.Replace(ServiceDescriptor.Singleton<IDocumentStore>(_ =>

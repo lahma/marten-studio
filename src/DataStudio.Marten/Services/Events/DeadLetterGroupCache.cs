@@ -1,6 +1,5 @@
-using Microsoft.Extensions.Options;
-
 using DataStudio.Postgres.Services.Live;
+using DataStudio.Postgres.Services.Settings;
 
 namespace DataStudio.Marten.Services.Events;
 
@@ -28,8 +27,8 @@ internal sealed class DeadLetterGroupCache
 
     private readonly int lettersGrouped = DeadLetterGroupLimits.MaxLettersGrouped;
 
-    public DeadLetterGroupCache(IOptions<MartenStudioOptions> options)
-        : this(TimeProvider.System, options.Value.RefreshInterval)
+    public DeadLetterGroupCache(IStudioSettings settings)
+        : this(TimeProvider.System, settings.RefreshInterval)
     {
     }
 

@@ -4,19 +4,18 @@ using DataStudio.Services;
 namespace DataStudio.Postgres.Services.Settings;
 
 /// <summary>
-/// What makes one studio this studio: its name, its pages, its navigation, how it names a source, and how it builds the
+/// What makes one database module this module: its name, its pages, its navigation, how it names a source, and how it builds the
 /// resource an authorization handler is asked about.
 /// </summary>
 /// <remarks>
 /// <para>
-/// A singleton, registered by a studio's <c>Add*Studio()</c> and read by every shared service and component in place of
-/// that studio's own types. Nothing on it is about a visitor, and nothing on it does IO: it is data plus two pure
+/// A singleton, registered by a module's <c>Add…()</c> and read by every shared service and component in place of
+/// that module's own types. Nothing on it is about a visitor, and nothing on it does IO: it is data plus two pure
 /// functions (<see cref="CreateResource" />, and each navigation entry's optional <see cref="StudioNavItem.IsShown" />).
 /// </para>
 /// <para>
-/// <b>Text is here so that shared markup says the right noun.</b> A page refusal says "this Marten store" in MartenStudio;
-/// the same shared component says what <c>SourceNoun</c> says in any other studio. Every sentence it feeds keeps
-/// MartenStudio's wording exactly as it was, so registering the descriptor changed nothing a host or a visitor reads.
+/// <b>Text is here so that shared markup says the right noun.</b> A page refusal says "this Marten store" in the Marten module;
+/// the same shared component says what <c>SourceNoun</c> says in any other module.
 /// </para>
 /// </remarks>
 internal sealed class StudioDescriptor : DiagnosticsDescriptor
@@ -27,12 +26,6 @@ internal sealed class StudioDescriptor : DiagnosticsDescriptor
     /// list (<see cref="StudioShellDescriptor.PageAssemblies" />); a relative route two of them claim is an error.
     /// </summary>
     public required IReadOnlyList<StudioPageAssembly> PageAssemblies { get; init; }
-
-    /// <summary>
-    /// The shell's own pages (v2 step 3: Activity), as a page assembly of the database module: <c>/postgres/activity</c> keeps its address
-    /// until step 5 gives the shell its own, so the module whose root it is names the assembly. Both studios list it beside their own.
-    /// </summary>
-    public static StudioPageAssembly ShellPages { get; } = new(typeof(StudioShellDescriptor).Assembly, "/postgres");
 
     /// <summary>
     /// The sidebar, section by section, built for the settings the studio is registered with: an entry whose condition needs more than the
@@ -54,7 +47,7 @@ internal sealed class StudioDescriptor : DiagnosticsDescriptor
     public required Type QueryComponent { get; init; }
 
     /// <summary>
-    /// What a page served to anyone exposes, in the banner that says so: "every document, event stream and schema in
+    /// What a page served to anyone exposes, in the module's sentence of the banner and the startup guard: "every document, event stream and schema in
     /// this process".
     /// </summary>
     public required string ExposedContent { get; init; }
@@ -66,26 +59,12 @@ internal sealed class StudioDescriptor : DiagnosticsDescriptor
     /// </summary>
     public required Func<StudioScope, string?, object> CreateResource { get; init; }
 
-    /// <summary>The startup guard's name for the endpoints this studio maps: <c>Marten Studio</c>.</summary>
-    public required string Surface { get; init; }
-
-    /// <summary>
-    /// The startup guard's lead sentence: what an unauthorized mapping would serve, and that the studio refuses to start.
-    /// </summary>
-    public required string Exposure { get; init; }
-
-    /// <summary>The startup guard's list of the three ways to say which authorization was meant, one per line.</summary>
-    public required string Remedies { get; init; }
-
     /// <summary>
     /// The keyboard shortcuts only this studio's pages answer to (1.2), listed on the shortcut sheet after
     /// <see cref="StudioShortcuts.Shared" />: MartenStudio's document list and document editor. Empty for a studio with none, so a
     /// Postgres Studio host is never told about a key that does nothing on its pages.
     /// </summary>
     public IReadOnlyList<StudioShortcutGroup> ExtraShortcuts { get; init; } = [];
-
-    /// <summary>The words the shell speaks in, taken from this descriptor: what <see cref="StudioModuleComposition.Compose" /> composes the shell's descriptor from.</summary>
-    public StudioShellIdentity ShellIdentity => new(ProductName, ExposedContent, Surface, Exposure, Remedies);
 }
 
 /// <summary>The conditions a sidebar entry may carry (<see cref="StudioNavItem.IsShown" />), shared by both studios' descriptors.</summary>

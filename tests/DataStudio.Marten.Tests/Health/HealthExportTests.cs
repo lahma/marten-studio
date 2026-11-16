@@ -40,7 +40,7 @@ public class HealthExportTests
     public void AddMartenStudio_alone_registers_no_health_check_and_no_registration()
     {
         ServiceCollection services = new();
-        services.AddMartenStudio();
+        services.AddDataStudio().AddMarten();
 
         services.Should().NotContain(static x => x.ServiceType == typeof(HealthCheckService), "AddMartenStudio() does not call AddHealthChecks()");
         services.Should().NotContain(static x => x.ServiceType == typeof(HealthExportRunner));
@@ -253,7 +253,7 @@ public class HealthExportTests
     [Fact]
     public async Task A_run_that_fails_in_the_studio_is_Degraded_names_only_the_exception_type_and_warns_once()
     {
-        await using HealthExportHarness harness = HealthExportHarness.Create(studio: static options => options.Path = "no-leading-slash");
+        await using HealthExportHarness harness = HealthExportHarness.Create(studio: static options => options.MaxPageSize = 0);
 
         HealthReportEntry entry = await harness.ProbeAsync();
 

@@ -22,6 +22,7 @@
 @inject ToastService Toasts
 @inject NavigationManager Navigation
 @inject IOptions<MartenStudioOptions> Options
+@inject IStudioSettings StudioSettings
 @inject IJSRuntime JsRuntime
 
 @*
@@ -430,7 +431,7 @@
     /// It arrives from the query string, so it arrives from whoever wrote the link. See
     /// <see cref="SafeReturnLink" /> for what is accepted and why the rule is an allow-list.
     /// </remarks>
-    private string? SafeFrom => SafeReturnLink.Sanitize(From, Options.Value);
+    private string? SafeFrom => SafeReturnLink.Sanitize(From, StudioSettings);
 
     private string BackHref =>
         SafeFrom ?? DocumentLinks.ToCollection(Options.Value, State.ActiveScope, Alias);

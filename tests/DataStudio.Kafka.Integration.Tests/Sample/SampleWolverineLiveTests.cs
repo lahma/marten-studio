@@ -15,7 +15,6 @@ using DataStudio.Kafka.Services;
 
 using Marten;
 
-using DataStudio.Marten;
 using DataStudio.Sample.Marten.Domain;
 
 using Microsoft.AspNetCore.Components.Authorization;
@@ -290,9 +289,8 @@ public class SampleWolverineLiveTests(SampleHostFixture fixture) : IClassFixture
                 options.Schema.For<CheckoutOrder>().MultiTenanted();
             }).UseLightweightSessions();
 
-            services.AddMartenStudio(options =>
+            services.AddDataStudio(static shell => shell.AuthorizationPolicy = SamplePolicies.Studio).AddMarten(options =>
             {
-                options.AuthorizationPolicy = SamplePolicies.Studio;
                 options.WriteAuthorizationPolicy = SamplePolicies.StudioWrite;
 
                 foreach (string tenantId in SampleStore.TenantIds)
@@ -303,7 +301,7 @@ public class SampleWolverineLiveTests(SampleHostFixture fixture) : IClassFixture
 
             // Configured and never started: KStudio reads the options, and the host's own Wolverine is the one that runs.
             services.AddWolverine(options => SampleWolverine.Configure(options, bootstrap));
-            services.AddKafkaStudio(options =>
+            services.AddDataStudio().AddKafka(options =>
             {
                 SampleKafkaRegistration.Configure(options, bootstrap);
                 SampleKafkaRegistration.ConfigureWolverine(options);

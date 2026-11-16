@@ -67,7 +67,7 @@ public class TwinDatabaseResolutionLiveTests(PostgresFixture postgres)
         services.AddAuthorization();
         services.AddSingleton<AuthenticationStateProvider, StubAuthenticationStateProvider>();
         services.AddMarten(Configure);
-        services.AddMartenStudio(static options => options.AuthorizationPolicy = null);
+        services.AddDataStudio().AddMarten();
 
         await using ServiceProvider provider = services.BuildServiceProvider();
         await using AsyncServiceScope circuit = provider.CreateAsyncScope();

@@ -242,7 +242,7 @@ internal sealed class DaemonHealthHost : IAsyncDisposable
 
         builder.Services.AddAuthorization();
         builder.Services.AddSingleton<AuthenticationStateProvider, Anonymous>();
-        builder.Services.AddMartenStudio(options =>
+        builder.Services.AddDataStudio().AddMarten(options =>
         {
             options.Capabilities = MartenStudioCapabilities.All();
 

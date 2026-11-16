@@ -19,7 +19,6 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 
 using DataStudio.Postgres;
-using DataStudio.Postgres.Services.Postgres;
 using DataStudio.Postgres.Tests.Components;
 using DataStudio.Postgres.Tests.Support;
 
@@ -174,7 +173,7 @@ internal sealed class KafkaStudioHarness : IDisposable
             services.AddSingleton<IStudioModule, KafkaStudioModule>();
             services.RemoveAll<StudioShellDescriptor>();
             services.AddSingleton(static provider =>
-                StudioModuleComposition.Compose(PostgresStudioDescriptor.Instance.ShellIdentity, provider.GetServices<IStudioModule>()));
+                StudioModuleComposition.Compose(provider.GetServices<IStudioModule>()));
 
             services.AddSingleton<IKafkaClusterEntrySource>(Entries);
             services.AddSingleton<KafkaCapabilityGuard>();

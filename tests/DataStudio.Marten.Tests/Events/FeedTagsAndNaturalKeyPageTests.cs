@@ -173,7 +173,7 @@ public class FeedTagsAndNaturalKeyPageTests
             data.HighestSequences.Enqueue(10);
         });
 
-        context.Options.RefreshInterval = TimeSpan.FromMilliseconds(20);
+        context.ShellOptions.RefreshInterval = TimeSpan.FromMilliseconds(20);
 
         IRenderedComponent<Feed> page = Render(context, "marten/events/feed?follow=1");
 

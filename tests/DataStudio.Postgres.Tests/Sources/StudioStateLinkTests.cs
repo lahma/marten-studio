@@ -89,7 +89,7 @@ public class StudioStateLinkTests
             }
         });
         services.AddSingleton(_ => NpgsqlDataSource.Create("Host=postgres-studio-link-tests.invalid;Database=none;Username=none;Password=none"));
-        services.AddPostgresStudio(options =>
+        services.AddDataStudio().AddPostgres(options =>
         {
             options.AddDatabaseSource("tenants", static _ => new ListedDatabases());
             options.SourceAuthorizationPolicy = sourcePolicy is null ? null : SourcePolicy;

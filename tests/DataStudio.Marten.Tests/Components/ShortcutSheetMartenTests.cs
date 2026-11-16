@@ -17,11 +17,11 @@ namespace DataStudio.Marten.Tests.Components;
 /// </summary>
 public class ShortcutSheetMartenTests
 {
-    /// <summary>The shell's descriptor as <c>AddMartenStudio()</c> leaves it: the database as the one module.</summary>
+    /// <summary>The shell's descriptor as <c>AddMarten()</c> leaves it: the database as the one module.</summary>
     private static StudioShellDescriptor ShellOf(StudioDescriptor descriptor)
     {
         MartenStudioSettings settings = MartenStudioSettings.Of(new MartenStudioOptions());
-        return StudioModuleComposition.Compose(descriptor.ShellIdentity, [new DatabaseStudioModule(descriptor, settings, new StudioCapabilityGuard(settings))]);
+        return StudioModuleComposition.Compose([new DatabaseStudioModule(descriptor, settings, new StudioCapabilityGuard(settings))]);
     }
 
     [Fact]

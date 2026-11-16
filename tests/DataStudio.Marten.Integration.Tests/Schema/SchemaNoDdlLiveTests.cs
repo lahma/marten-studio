@@ -197,7 +197,7 @@ public class SchemaNoDdlLiveTests(PostgresFixture fixture)
             options.Schema.For<NumberedThing>();
         });
 
-        services.AddMartenStudio(options => options.AuthorizationPolicy = null);
+        services.AddDataStudio().AddMarten();
 
         return new Host(services.BuildServiceProvider(), fixture.ConnectionString, schema);
     }

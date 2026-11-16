@@ -1,7 +1,7 @@
 # Marten Studio sample host
 
 A small ASP.NET Core host that configures Marten with the demo domain in
-`samples/MartenStudio.SampleDomain`, adds Marten Studio, and mounts it at `/marten`.
+`samples/MartenStudio.SampleDomain`, adds Marten Studio, and mounts it at `/studio`.
 
 ```powershell
 dotnet run --project samples/MartenStudio.Sample --urls http://localhost:5210
@@ -15,8 +15,8 @@ Sign in at `/login` as `admin`, `ops` or `viewer` — the password is the user n
 | Switch | What it does |
 |---|---|
 | `--anonymous` | Maps the studio with `AllowAnonymous()` and draws a red banner. Never do this anywhere real. |
-| `--readonly` | Sets `MartenStudioOptions.ReadOnly`, which turns every mutating capability off. |
-| `--path /ops/marten` | Mounts the studio somewhere other than `/marten`, which exercises the sub-path re-rooting. |
+| `--readonly` | Sets `DataStudioOptions.ReadOnly`, which turns every mutating capability off. |
+| `--path /ops/marten` | Mounts the studio somewhere other than `/studio`, which exercises the sub-path re-rooting. |
 | `--allow-data-generation` | Maps the demo-data panel and the "make it unhealthy" switches outside `Development`. See below. It also lets startup run `drop schema … cascade` on `studio_sample` and `studio_sample_events` when another build seeded them or their rows carry no seed marker, and the cascade drops whatever in other schemas depends on them too. |
 
 ## The studio's own role

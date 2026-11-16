@@ -90,7 +90,7 @@ public class TableRowAuditMultiDatabaseLiveTests(TableRowAuditMultiDatabaseLiveT
             services.AddSingleton<AuthenticationStateProvider, TableRowDemoFixture.SignedIn>();
             services.AddSingleton<IDocumentStore>(Store);
 
-            services.AddMartenStudio(options =>
+            services.AddDataStudio().AddMarten(options =>
             {
                 options.Capabilities.BrowseDatabase = true;
                 options.BrowsableSchemas.Add("legacy");

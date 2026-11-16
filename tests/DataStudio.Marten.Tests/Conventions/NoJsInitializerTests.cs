@@ -9,7 +9,7 @@ namespace DataStudio.Marten.Tests.Conventions;
 /// nothing declares it, the filename alone is the declaration - and Blazor loads the initializers of
 /// every referenced RCL into <em>every</em> Blazor app in the process. So a host that runs a Blazor
 /// Server app of its own fetched the studio's initializer from the site root on every page it served,
-/// including pages that never mention the studio; where <see cref="MartenStudioOptions.AuthorizationPolicy" />
+/// including pages that never mention the studio; where <see cref="DataStudioOptions.AuthorizationPolicy" />
 /// is set that path is authorized too, so the fetch redirected to the login page, came back as
 /// <c>text/html</c>, and the browser logged a MIME-type error on every page load - the host's own
 /// unauthenticated login page included.

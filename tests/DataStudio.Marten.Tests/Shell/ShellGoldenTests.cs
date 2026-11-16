@@ -26,10 +26,10 @@ public class ShellGoldenTests
         WebApplicationBuilder builder = WebApplication.CreateBuilder();
         builder.WebHost.UseTestServer();
         builder.Services.AddMarten(static options => options.Connection(ConnectionString));
-        builder.Services.AddMartenStudio(configure);
+        builder.Services.AddDataStudio().AddMarten(configure);
 
         WebApplication app = builder.Build();
-        app.MapMartenStudio().AllowAnonymous();
+        app.MapDataStudio().AllowAnonymous();
         return app;
     }
 

@@ -248,7 +248,7 @@ public class AuroraServiceTests
             ServiceCollection services = new();
             services.AddLogging(static builder => builder.SetMinimumLevel(LogLevel.Trace));
             services.AddSingleton(NpgsqlDataSource.Create(Refused));
-            services.AddPostgresStudio(options =>
+            services.AddDataStudio().AddPostgres(options =>
             {
                 if (policies)
                 {

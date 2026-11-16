@@ -129,7 +129,7 @@ internal sealed class EventHealthHost : IAsyncDisposable
             store?.Invoke(options);
         });
 
-        collection.AddMartenStudio(options => studio?.Invoke(options));
+        collection.AddDataStudio().AddMarten(options => studio?.Invoke(options));
         services?.Invoke(collection);
 
         EventHealthHost host = new(collection.BuildServiceProvider(), logs, schema);

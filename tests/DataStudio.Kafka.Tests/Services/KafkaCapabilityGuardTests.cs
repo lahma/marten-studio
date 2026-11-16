@@ -105,7 +105,7 @@ public class KafkaCapabilityGuardTests
     public void ReadPayloads_without_SearchRecords_is_refused_at_validation()
     {
         ServiceCollection services = new();
-        services.AddKafkaStudio(static o => o.Capabilities.ReadPayloads = true);
+        services.AddDataStudio().AddKafka(static o => o.Capabilities.ReadPayloads = true);
         using ServiceProvider provider = services.BuildServiceProvider();
 
         Action read = () => _ = provider.GetRequiredService<IOptions<KafkaStudioOptions>>().Value;
@@ -114,7 +114,7 @@ public class KafkaCapabilityGuardTests
             "*KafkaStudioOptions.Capabilities.ReadPayloads needs KafkaStudioOptions.Capabilities.SearchRecords: a value is read only as part of a record a search or a permalink opened*");
 
         ServiceCollection fine = new();
-        fine.AddKafkaStudio(static o => o.Capabilities = KafkaStudioCapabilities.All());
+        fine.AddDataStudio().AddKafka(static o => o.Capabilities = KafkaStudioCapabilities.All());
         using ServiceProvider ok = fine.BuildServiceProvider();
         Action readOk = () => _ = ok.GetRequiredService<IOptions<KafkaStudioOptions>>().Value;
         readOk.Should().NotThrow();
@@ -124,7 +124,7 @@ public class KafkaCapabilityGuardTests
     public void The_options_validation_refuses_a_null_capabilities_object()
     {
         ServiceCollection services = new();
-        services.AddKafkaStudio(static o => o.Capabilities = null!);
+        services.AddDataStudio().AddKafka(static o => o.Capabilities = null!);
         using ServiceProvider provider = services.BuildServiceProvider();
 
         Action read = () => _ = provider.GetRequiredService<IOptions<KafkaStudioOptions>>().Value;

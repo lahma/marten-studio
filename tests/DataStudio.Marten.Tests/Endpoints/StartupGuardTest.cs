@@ -10,7 +10,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace DataStudio.Marten.Tests.Endpoints;
 
 /// <summary>
-/// The startup guard: an application whose Marten Studio mapping answers nothing about authorization
+/// The startup guard: an application whose Data Studio mapping answers nothing about authorization
 /// refuses to start, and each of four ways of answering satisfies it.
 /// </summary>
 /// <remarks>
@@ -24,12 +24,12 @@ public class StartupGuardTest
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
     private static WebApplication CreateApp(
-        Action<MartenStudioOptions>? configureStudio = null,
+        Action<DataStudioOptions>? configureShell = null,
         Action<WebApplicationBuilder>? configureBuilder = null)
     {
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseTestServer();
-        builder.Services.AddMartenStudio(configureStudio);
+        builder.Services.AddDataStudio(configureShell).AddMarten();
         configureBuilder?.Invoke(builder);
         return builder.Build();
     }
@@ -53,17 +53,17 @@ public class StartupGuardTest
     public async Task A_mapping_that_answers_nothing_refuses_to_start()
     {
         await using var app = CreateApp();
-        app.MapMartenStudio();
+        app.MapDataStudio();
 
         var failure = await StartAndStopAsync(app);
 
         failure.Should().BeOfType<InvalidOperationException>();
-        failure!.Message.Should().Contain("Marten Studio is mapped with no authorization");
-        failure.Message.Should().Contain("app.MapMartenStudio().RequireAuthorization()");
+        failure!.Message.Should().Contain("Data Studio is mapped with no authorization");
+        failure.Message.Should().Contain("app.MapDataStudio().RequireAuthorization()");
         failure.Message.Should().Contain("options.AuthorizationPolicy");
-        failure.Message.Should().Contain("app.MapMartenStudio().AllowAnonymous()");
+        failure.Message.Should().Contain("app.MapDataStudio().AllowAnonymous()");
         failure.Message.Should().Contain("FallbackPolicy");
-        failure.Message.Should().Contain("/marten", "the message names the routes nothing authorizes");
+        failure.Message.Should().Contain("/studio", "the message names the routes nothing authorizes");
     }
 
     /// <summary>
@@ -84,7 +84,7 @@ public class StartupGuardTest
 
         await using var app = CreateApp(configureBuilder: builder => builder.Services.AddSingleton(descriptor));
 
-        Action map = () => app.MapMartenStudio().AllowAnonymous();
+        Action map = () => app.MapDataStudio().AllowAnonymous();
 
         map.Should().Throw<InvalidOperationException>().WithMessage("*both claim the route*");
     }
@@ -105,9 +105,6 @@ public class StartupGuardTest
         SourceLabel = source.SourceLabel,
         ExposedContent = source.ExposedContent,
         CreateResource = source.CreateResource,
-        Surface = source.Surface,
-        Exposure = source.Exposure,
-        Remedies = source.Remedies,
     };
 
     [Fact]
@@ -117,7 +114,7 @@ public class StartupGuardTest
             builder.Services.AddAuthorization(static options =>
                 options.AddPolicy("studio-policy", static policy => policy.RequireAssertion(static _ => true))));
 
-        app.MapMartenStudio().RequireAuthorization("studio-policy");
+        app.MapDataStudio().RequireAuthorization("studio-policy");
 
         (await StartAndStopAsync(app)).Should().BeNull();
     }
@@ -126,7 +123,7 @@ public class StartupGuardTest
     public async Task AllowAnonymous_at_the_map_site_satisfies_the_guard()
     {
         await using var app = CreateApp();
-        app.MapMartenStudio().AllowAnonymous();
+        app.MapDataStudio().AllowAnonymous();
 
         (await StartAndStopAsync(app)).Should().BeNull();
     }
@@ -139,7 +136,7 @@ public class StartupGuardTest
             static builder => builder.Services.AddAuthorization(static options =>
                 options.AddPolicy("studio-policy", static policy => policy.RequireAssertion(static _ => true))));
 
-        app.MapMartenStudio();
+        app.MapDataStudio();
 
         (await StartAndStopAsync(app)).Should().BeNull();
     }
@@ -151,7 +148,7 @@ public class StartupGuardTest
             builder.Services.AddAuthorization(static options =>
                 options.FallbackPolicy = new AuthorizationPolicyBuilder().RequireAssertion(static _ => true).Build()));
 
-        app.MapMartenStudio();
+        app.MapDataStudio();
 
         (await StartAndStopAsync(app)).Should().BeNull();
     }
@@ -170,7 +167,7 @@ public class StartupGuardTest
                 options.AddPolicy("studio-policy", static policy => policy.RequireAssertion(static _ => true))));
 
         var group = app.MapGroup("/admin");
-        group.MapMartenStudio();
+        group.MapDataStudio();
         group.RequireAuthorization("studio-policy");
 
         (await StartAndStopAsync(app)).Should().BeNull();
@@ -182,12 +179,12 @@ public class StartupGuardTest
         await using var app = CreateApp();
 
         var group = app.MapGroup("/admin");
-        group.MapMartenStudio();
+        group.MapDataStudio();
 
         var failure = await StartAndStopAsync(app);
 
         failure.Should().BeOfType<InvalidOperationException>();
-        failure!.Message.Should().Contain("Marten Studio is mapped with no authorization");
+        failure!.Message.Should().Contain("Data Studio is mapped with no authorization");
     }
 
     /// <summary>
@@ -203,13 +200,13 @@ public class StartupGuardTest
 
         app.UseRouting();
 #pragma warning disable ASP0014 // Suggest using top level route registrations - the shape under test is exactly this one.
-        app.UseEndpoints(endpoints => endpoints.MapMartenStudio());
+        app.UseEndpoints(endpoints => endpoints.MapDataStudio());
 #pragma warning restore ASP0014
 
         var failure = await StartAndStopAsync(app);
 
         failure.Should().BeOfType<InvalidOperationException>();
-        failure!.Message.Should().Contain("Marten Studio is mapped with no authorization");
+        failure!.Message.Should().Contain("Data Studio is mapped with no authorization");
     }
 
     [Fact]
@@ -221,7 +218,7 @@ public class StartupGuardTest
 
         app.UseRouting();
 #pragma warning disable ASP0014
-        app.UseEndpoints(static endpoints => endpoints.MapMartenStudio().RequireAuthorization("studio-policy"));
+        app.UseEndpoints(static endpoints => endpoints.MapDataStudio().RequireAuthorization("studio-policy"));
 #pragma warning restore ASP0014
 
         (await StartAndStopAsync(app)).Should().BeNull();

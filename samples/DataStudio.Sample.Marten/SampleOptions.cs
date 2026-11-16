@@ -1,4 +1,3 @@
-using DataStudio.Marten;
 
 namespace DataStudio.Sample.Marten;
 
@@ -49,11 +48,11 @@ namespace DataStudio.Sample.Marten;
 /// unauthenticated studio looks like. Never do this anywhere real.
 /// </param>
 /// <param name="ReadOnly">
-/// <c>--readonly</c>: set <see cref="MartenStudioOptions.ReadOnly" />, which turns every mutating
+/// <c>--readonly</c>: set <see cref="DataStudioOptions.ReadOnly" />, which turns every mutating
 /// capability off however they were configured.
 /// </param>
 /// <param name="Path">
-/// <c>--path /ops/marten</c>: mount the studio somewhere other than <c>/marten</c>, which is what
+/// <c>--path /ops/marten</c>: mount the studio somewhere other than <c>/studio</c>, which is what
 /// exercises the sub-path re-rooting.
 /// </param>
 /// <param name="AllowDataGeneration">

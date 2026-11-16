@@ -14,7 +14,6 @@ using DataStudio.Kafka.Integration.Tests.Support;
 
 using Marten;
 
-using DataStudio.Marten;
 
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -25,7 +24,6 @@ using Microsoft.Extensions.Logging;
 
 using Npgsql;
 
-using DataStudio.Postgres;
 
 namespace DataStudio.Kafka.Integration.Tests.Shell;
 
@@ -98,9 +96,9 @@ public abstract class KafkaFirstNavigationLiveTests(KafkaFixture kafka)
             static (builder, postgres) =>
             {
                 builder.Services.AddSingleton(NpgsqlDataSource.Create(postgres.ConnectionString));
-                builder.Services.AddPostgresStudio();
+                builder.Services.AddDataStudio().AddPostgres();
             },
-            static app => app.MapPostgresStudio().AllowAnonymous());
+            static app => app.MapDataStudio().AllowAnonymous());
 
     /// <summary>
     /// The same walk on a Marten Studio host (D-SHELL 12.1): a Marten store over the same database, with Marten's own default of
@@ -118,9 +116,9 @@ public abstract class KafkaFirstNavigationLiveTests(KafkaFixture kafka)
                     options.Connection(postgres.ConnectionString);
                     options.DatabaseSchemaName = "kshell";
                 });
-                builder.Services.AddMartenStudio();
+                builder.Services.AddDataStudio().AddMarten();
             },
-            static app => app.MapMartenStudio().AllowAnonymous());
+            static app => app.MapDataStudio().AllowAnonymous());
 
     private async Task WalkAsync(string mount, Action<WebApplicationBuilder, PostgresContainer> addHostStudio, Func<WebApplication, object> mapStudio)
     {
@@ -156,7 +154,7 @@ public abstract class KafkaFirstNavigationLiveTests(KafkaFixture kafka)
         addHostStudio(builder, postgres);
         builder.Services.AddSingleton<IKafkaWireFactory>(provider =>
             counting = new CountingWireFactory(ActivatorUtilities.CreateInstance<ConfluentWireFactory>(provider)));
-        builder.Services.AddKafkaStudio(options =>
+        builder.Services.AddDataStudio().AddKafka(options =>
         {
             options.AddCluster("live", kafka.Client("admin"), static cluster => cluster.DisplayName("Live"));
             options.AddCluster("dark", new ClientConfig { BootstrapServers = "127.0.0.1:1" }, static cluster => cluster.DisplayName("Dark"));

@@ -11,7 +11,6 @@ using Microsoft.Extensions.Logging;
 
 using Npgsql;
 
-using DataStudio.Postgres;
 
 namespace DataStudio.Kafka.Integration.Tests.Support;
 
@@ -83,11 +82,11 @@ internal sealed class LiveSearchHost : IAsyncDisposable
         services.AddLogging(builder => builder.SetMinimumLevel(LogLevel.Trace).AddProvider(logs));
         services.AddHttpContextAccessor();
         services.AddSingleton(NpgsqlDataSource.Create("Host=127.0.0.1;Port=1;Database=none;Username=none;Password=none"));
-        services.AddPostgresStudio();
+        services.AddDataStudio().AddPostgres();
         services.AddAuthorization(options => options.AddPolicy(
             "kafka-topics",
             policy => policy.RequireAssertion(context => context.Resource is KafkaTopicResource resource && (resource.Topic is null || !refused.Contains(resource.Topic)))));
-        services.AddKafkaStudio(options =>
+        services.AddDataStudio().AddKafka(options =>
         {
             options.AddCluster("live", fixture.Client(user), cluster =>
             {

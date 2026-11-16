@@ -151,7 +151,7 @@ public class IndexAdvisorMartenLiveTests(MartenAdvisorServer server) : IClassFix
             options.AutoCreateSchemaObjects = AutoCreate.All;
             options.Schema.For<WhatIfPaint>().Duplicate(x => x.Color);
         });
-        services.AddMartenStudio(options =>
+        services.AddDataStudio().AddMarten(options =>
         {
             options.Capabilities = MartenStudioCapabilities.All();
             options.QueryTimeout = TimeSpan.FromSeconds(30);

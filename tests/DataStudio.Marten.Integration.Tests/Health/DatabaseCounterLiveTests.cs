@@ -1,5 +1,4 @@
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Options;
 
 using Npgsql;
 using DataStudio.Postgres.Services.Health;
@@ -55,7 +54,7 @@ public class DatabaseCounterLiveTests(PostgresFixture postgres)
             TimeSpan.FromSeconds(30),
             "pg_stat_database to count the deadlock, the rollbacks and the temp file");
 
-        clock.Advance(host.Provider.GetRequiredService<IOptions<MartenStudioOptions>>().Value.EffectiveHealthInterval + TimeSpan.FromSeconds(1));
+        clock.Advance(host.Provider.GetRequiredService<DataStudio.Postgres.Services.Settings.IStudioSettings>().EffectiveHealthInterval + TimeSpan.FromSeconds(1));
 
         HealthReport second = await host.ReportAsync();
 
@@ -77,7 +76,7 @@ public class DatabaseCounterLiveTests(PostgresFixture postgres)
         await using ConnectionsLiveHost host = await ConnectionsLiveHost.CreateAsync(database, clock: clock);
 
         await host.ReportAsync();
-        clock.Advance(host.Provider.GetRequiredService<IOptions<MartenStudioOptions>>().Value.EffectiveHealthInterval + TimeSpan.FromSeconds(1));
+        clock.Advance(host.Provider.GetRequiredService<DataStudio.Postgres.Services.Settings.IStudioSettings>().EffectiveHealthInterval + TimeSpan.FromSeconds(1));
         HealthReport second = await host.ReportAsync();
 
         second.Findings.Should().NotContain(static x => x.Code == "C08", "every read the studio made rolled back, and they are its own");

@@ -87,8 +87,8 @@ internal static class MartenDatabaseBridges
         /// A document page's return link, into the documents area. Caller: <c>DocumentDetail.razor</c>.
         /// </summary>
         /// <param name="from">The <c>?from=</c> value.</param>
-        /// <param name="options">MartenStudio's options.</param>
-        public static string? Sanitize(string? from, MartenStudioOptions options) =>
-            SafeReturnLink.Sanitize(from, MartenStudioSettings.Of(options), DocumentLinks.Root);
+        /// <param name="settings">The module's settings, whose shell's mount path a return link may carry.</param>
+        public static string? Sanitize(string? from, DataStudio.Postgres.Services.Settings.IStudioSettings settings) =>
+            SafeReturnLink.Sanitize(from, settings, DocumentLinks.Root);
     }
 }

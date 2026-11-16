@@ -482,7 +482,7 @@ public class TenantOverviewServiceTests
             var services = new ServiceCollection();
             services.AddLogging(static builder => builder.SetMinimumLevel(LogLevel.Warning));
             services.AddMarten(configure);
-            services.AddMartenStudio(options =>
+            services.AddDataStudio().AddMarten(options =>
             {
                 options.QueryTimeout = TimeSpan.FromSeconds(2);
                 options.DiscoverTenantIds = discover;

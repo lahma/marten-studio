@@ -1,4 +1,3 @@
-using DataStudio.Internal;
 using DataStudio.Services.Settings;
 using DataStudio.Services;
 using DataStudio.Postgres.Internal.Sql;
@@ -23,14 +22,14 @@ using Microsoft.Extensions.Hosting;
 namespace DataStudio.Postgres.Services.Settings;
 
 /// <summary>
-/// Registers everything the shared studio renders with - the shell's services, the scope, authorization, capability
-/// and audit services, the database browser, Sessions, the health advisor, the SQL console and Relationships - for
-/// whichever studio's <c>Add*Studio()</c> calls it.
+/// Registers everything the database pages render with - the scope, authorization, capability and audit services, the database
+/// browser, Sessions, the health advisor, the SQL console and Relationships - for whichever database module's <c>Add…()</c> calls it. The
+/// shell's own services (the settings, the Blazor registration, the guard, the preferences, the Activity ring) are <c>AddDataStudio()</c>'s.
 /// </summary>
 /// <remarks>
 /// <para>
-/// A studio supplies what makes it itself: its <see cref="StudioRegistrationMarker" />, its <see cref="StudioDescriptor" />,
-/// its <see cref="IStudioSettings" />, and - registered by its own <c>Add*Studio()</c> - its implementations of the seams.
+/// A module supplies what makes it itself: its <see cref="StudioRegistrationMarker" />, its <see cref="StudioDescriptor" />,
+/// its <see cref="IStudioSettings" />, and - registered by its own <c>Add…()</c> - its implementations of the seams.
 /// Four are required, because shared services and components take them as dependencies: <see cref="IStudioSourceProvider" />,
 /// <see cref="IStudioLinks" />, <see cref="ISessionLockLabeler" /> and <see cref="IDatabaseDeclarationsSource" />. The
 /// rest are optional, and a studio that registers none gets what the seam's own documentation says of its absence: the
@@ -42,18 +41,17 @@ namespace DataStudio.Postgres.Services.Settings;
 /// <para>
 /// <b>Nothing here changes how the host behaves.</b> No global JSON or SignalR option is touched, no middleware ordering
 /// is required, and every service is registered with <c>TryAdd</c> so an application that registered its own first is
-/// the one that answers. No hosted service is added but the two that already exist: the startup authorization guard and
-/// the database browser's configuration notice (event 9230).
+/// the one that answers. The one hosted service is the database browser's configuration notice (event 9230).
 /// </para>
 /// </remarks>
 internal static class StudioCoreRegistration
 {
-    /// <summary>Registers the shared studio for the studio <paramref name="marker" /> names.</summary>
+    /// <summary>Registers the database pages' services for the module <paramref name="marker" /> names.</summary>
     /// <param name="services">The application's service collection.</param>
-    /// <param name="marker">The studio being registered; a different studio already registered is refused.</param>
-    /// <param name="descriptor">The studio's descriptor.</param>
-    /// <param name="settings">How the studio's settings are built from the container.</param>
-    /// <exception cref="InvalidOperationException">Another studio is already registered in this container.</exception>
+    /// <param name="marker">The module being registered; a different database module already registered is refused.</param>
+    /// <param name="descriptor">The module's descriptor.</param>
+    /// <param name="settings">How the module's settings are built from the container.</param>
+    /// <exception cref="InvalidOperationException">Another database module is already registered in this container.</exception>
     public static void Add(
         IServiceCollection services,
         StudioRegistrationMarker marker,
@@ -64,13 +62,13 @@ internal static class StudioCoreRegistration
         ArgumentNullException.ThrowIfNull(descriptor);
         ArgumentNullException.ThrowIfNull(settings);
 
-        // The engine's own marker first: a studio added beside AddPostgresDiagnostics() is refused before any marker or service of
-        // the studio is registered.
+        // The engine's own marker first: a module added beside AddPostgresDiagnostics() is refused before any marker or service of
+        // the module is registered.
         DiagnosticsRegistrationMarker.Claim(services, marker.RegisteredBy, byStudio: true);
         StudioRegistrationMarker.Claim(services, marker);
 
-        // The diagnostics engine, which a studio registers as part of itself: refused beside AddPostgresDiagnostics(), in
-        // either order. The one settings object the studio's registration builds answers the engine's interface too.
+        // The diagnostics engine, which a database module registers as part of itself: refused beside AddPostgresDiagnostics(), in
+        // either order. The one settings object the module's registration builds answers the engine's interface too.
         DiagnosticsCoreRegistration.Add(
             services,
             descriptor,
@@ -81,32 +79,12 @@ internal static class StudioCoreRegistration
         // The database's own descriptor, as itself: the static instance, never composed.
         services.TryAddSingleton(descriptor);
 
-        // The shell's descriptor: the database module composed with the modules registered beside it, when first resolved (D34): after every
-        // Add*(), so registration is order-independent.
-        services.TryAddSingleton(provider => StudioModuleComposition.Compose(descriptor.ShellIdentity, provider.GetServices<IStudioModule>()));
         services.TryAddSingleton(settings);
 
         // The database as a module of the shell: the root, always there (D34).
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IStudioModule, DatabaseStudioModule>());
 
-        // The shell's view of the same object (D30: one object, two interfaces).
-        services.TryAddSingleton<IShellSettings>(static provider => provider.GetRequiredService<IStudioSettings>());
-
-        // Refuses to start an application whose mapped studio nothing authorizes. Registered here rather
-        // than at the map site, because a hosted service added to a built application is too late.
-        services.TryAddSingleton<StudioMappedEndpoints>();
-        services.TryAddEnumerable(
-            ServiceDescriptor.Singleton<IHostedService, StudioEndpointAuthorizationGuard>());
-
-        // Not a bare AddRazorComponents().AddInteractiveServerComponents(): called after a host's own AddServerSideBlazor()
-        // that would put the framework's hub-options setup in the container twice, the second after the host's
-        // Configure<HubOptions<ComponentHub>>, and reset the host's circuit options to the defaults (issue #38).
-        ServerSideBlazorRegistration.Add(services);
-
-        // Deliberately no AddSignalR().AddJsonProtocol(...) and no JsonStringEnumConverter: those options
-        // belong to the whole application's SignalR and its own hubs must keep their own format
-        // (there is no studio hub in v1 - plan D10).
-        services.AddHttpContextAccessor();
+        // The shell's IShellSettings is the shell's own object, never this module's: the module's settings answer the shell's members from it.
 
         services.TryAddSingleton<StudioCapabilityGuard>();
         services.TryAddSingleton<StudioActionLogService>();
@@ -116,9 +94,7 @@ internal static class StudioCoreRegistration
         // a per-circuit cache would ask the catalog once per visitor per page.
         services.TryAddSingleton<ColumnCatalog>();
 
-        // Scoped, because all of these are about one circuit: what it is pointed at, who is driving it, and
-        // what it has been told.
-        services.TryAddScoped<StudioPreferences>();
+        // Scoped, because all of these are about one circuit: what it is pointed at and who is driving it.
         services.TryAddScoped<StudioState>();
 
         // What the database's scope gate answered for this circuit: written by the module's circuit host, read by its frame.
@@ -126,23 +102,17 @@ internal static class StudioCoreRegistration
         services.TryAddScoped<IStudioScopeCatalog, StudioScopeCatalog>();
         services.TryAddScoped<StudioAuthorization>();
         services.TryAddScoped<StudioSourceResolver>();
-        services.TryAddScoped<StudioActivity>();
         services.TryAddScoped<StudioActionLog>();
 
         // The database's half of what a visitor may read of the ring: its entries are judged here, as every module's are by its own gate.
         services.TryAddEnumerable(ServiceDescriptor.Scoped<IStudioAuditScopeGate, DatabaseAuditGate>());
-        services.TryAddScoped<ToastService>();
 
-        // The words the shell's live-update loop logs in are the studio's: this studio's own log methods, chosen by its product.
-        // The shell's loop names no throttle: the database side closes over the container's, so event 9220 takes its level where it is logged.
-        services.TryAddSingleton(static provider => DatabaseLiveLogs.For(
+        // The words the shell's live-update loop logs in are this module's: its own log methods, chosen by its product, in place of the
+        // shell's default - Replace, so that the answer does not depend on which of the two registered first. The shell's loop names no throttle:
+        // the database side closes over the container's, so event 9220 takes its level where it is logged.
+        services.Replace(ServiceDescriptor.Singleton(static provider => DatabaseLiveLogs.For(
             provider.GetRequiredService<IStudioSettings>().Text.Product,
-            provider.GetService<StudioLogThrottle>()));
-
-        // A factory rather than the loop itself: StudioLiveUpdates is IAsyncDisposable, and a transient
-        // registration would leave the circuit's container tracking one instance per page visit for the
-        // life of the circuit. The page owns the loop it creates.
-        services.TryAddScoped<StudioLiveUpdatesFactory>();
+            provider.GetService<StudioLogThrottle>())));
 
         // The sidebar's badges. Scoped like the pages they point at, and reading through the same
         // services, so a badge is subject to the same source, database and tenant policies as the screen.

@@ -172,7 +172,7 @@ public class StorageServiceTests
                 options.DatabaseSchemaName = "storage_unit";
             });
 
-            services.AddMartenStudio(static options =>
+            services.AddDataStudio().AddMarten(static options =>
             {
                 options.StoreAuthorizationPolicy = "store-policy";
                 options.WriteAuthorizationPolicy = "write-policy";

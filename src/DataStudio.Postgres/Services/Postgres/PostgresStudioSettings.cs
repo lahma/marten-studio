@@ -1,15 +1,17 @@
 using Microsoft.Extensions.Options;
 
 using DataStudio.Postgres.Services.Settings;
+using DataStudio.Services.Settings;
 
 namespace DataStudio.Postgres.Services.Postgres;
 
 /// <summary>
-/// PostgresStudio's <see cref="IStudioSettings" />: a live adapter over <see cref="PostgresStudioOptions" />.
+/// The Postgres module's <see cref="IStudioSettings" />: a live adapter over <see cref="PostgresStudioOptions" /> and the shell's settings.
 /// </summary>
 /// <remarks>
-/// Every member reads <see cref="IOptions{TOptions}.Value" /> again, so <c>MapPostgresStudio(pattern)</c>'s write of
-/// <see cref="PostgresStudioOptions.Path" /> onto the resolved instance after startup is seen by every shared component.
+/// Every member reads its options again, so <c>MapDataStudio(pattern)</c>'s write of <c>DataStudioOptions.Path</c> onto the resolved instance after
+/// startup is seen by every shared component. What belongs to the shell - the mount, the title, the entry policy, the poll interval - is answered
+/// from the shell's settings; <see cref="ReadOnly" /> is either switch's (the shell's turns every module's capabilities off, this module's only its own).
 /// </remarks>
 internal sealed class PostgresStudioSettings : IStudioSettings
 {
@@ -23,19 +25,33 @@ internal sealed class PostgresStudioSettings : IStudioSettings
     ];
 
     private readonly IOptions<PostgresStudioOptions> options;
+    private readonly IShellSettings shell;
 
+    /// <summary>The settings over <paramref name="options" /> and a default shell, for a caller that builds the services by hand and has no shell of its own.</summary>
     public PostgresStudioSettings(IOptions<PostgresStudioOptions> options)
+        : this(options, DefaultShell())
     {
-        ArgumentNullException.ThrowIfNull(options);
-        this.options = options;
     }
 
-    /// <summary>The adapter over <paramref name="options" />, for a caller that builds the studio's services by hand.</summary>
-    public static PostgresStudioSettings Of(PostgresStudioOptions options)
+    public PostgresStudioSettings(IOptions<PostgresStudioOptions> options, IShellSettings shell)
     {
         ArgumentNullException.ThrowIfNull(options);
-        return new PostgresStudioSettings(Options.Create(options));
+        ArgumentNullException.ThrowIfNull(shell);
+        this.options = options;
+        this.shell = shell;
     }
+
+    /// <summary>The adapter over <paramref name="options" /> and the shell's <paramref name="shell" /> settings, for a caller that builds the services by hand.</summary>
+    public static PostgresStudioSettings Of(PostgresStudioOptions options, IShellSettings shell)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return new PostgresStudioSettings(Options.Create(options), shell);
+    }
+
+    /// <summary>The adapter over <paramref name="options" /> and a default shell, for a caller that builds the services by hand.</summary>
+    public static PostgresStudioSettings Of(PostgresStudioOptions options) => Of(options, DefaultShell());
+
+    private static ShellSettings DefaultShell() => new(Options.Create(new DataStudioOptions()));
 
     private PostgresStudioOptions Value => options.Value;
 
@@ -52,22 +68,22 @@ internal sealed class PostgresStudioSettings : IStudioSettings
     public StudioText Text => PostgresStudioText.Instance;
 
     /// <inheritdoc />
-    public string Title => Value.Title;
+    public string Title => shell.Title;
 
     /// <inheritdoc />
-    public string TrimmedPath => Value.TrimmedPath;
+    public string TrimmedPath => shell.TrimmedPath;
 
     /// <inheritdoc />
-    public string EscapedPath => Value.EscapedPath;
+    public string EscapedPath => shell.EscapedPath;
 
     /// <inheritdoc />
-    public bool HasCustomPath => Value.HasCustomPath;
+    public bool HasCustomPath => shell.HasCustomPath;
 
     /// <inheritdoc />
-    public string? ApplicationPath => Value.ApplicationPath;
+    public string? ApplicationPath => shell.ApplicationPath;
 
     /// <inheritdoc />
-    public string? AuthorizationPolicy => Value.AuthorizationPolicy;
+    public string? AuthorizationPolicy => shell.AuthorizationPolicy;
 
     /// <inheritdoc />
     public string? ScopePolicy => Value.SourceAuthorizationPolicy;
@@ -76,10 +92,11 @@ internal sealed class PostgresStudioSettings : IStudioSettings
     public string? WritePolicy => Value.WriteAuthorizationPolicy;
 
     /// <inheritdoc />
-    public bool ReadOnly => Value.ReadOnly;
+    public bool ReadOnly => shell.ReadOnly || Value.ReadOnly;
 
     /// <inheritdoc />
-    public string ReadOnlyOptionName => ((IDiagnosticsSettings) this).OptionName("ReadOnly");
+    /// <remarks>The switch that is on: the shell's when it is, else this module's - which is also the one a host reads to learn which switch exists.</remarks>
+    public string ReadOnlyOptionName => shell.ReadOnly ? shell.ReadOnlyOptionName : ((IDiagnosticsSettings) this).OptionName("ReadOnly");
 
     /// <inheritdoc />
     /// <remarks>The four reads authorized like writes; PostgresStudio has no mutating capability.</remarks>
@@ -113,10 +130,11 @@ internal sealed class PostgresStudioSettings : IStudioSettings
     public string? StudioApplicationName => Value.StudioApplicationName;
 
     /// <inheritdoc />
-    public TimeSpan RefreshInterval => Value.RefreshInterval;
+    public TimeSpan RefreshInterval => shell.RefreshInterval;
 
     /// <inheritdoc />
-    public TimeSpan EffectiveHealthInterval => Value.EffectiveHealthInterval;
+    /// <remarks><c>HealthInterval</c>, or the shell's <c>RefreshInterval</c> when that is longer: the advisor never runs faster than a page polls.</remarks>
+    public TimeSpan EffectiveHealthInterval => Value.HealthInterval >= shell.RefreshInterval ? Value.HealthInterval : shell.RefreshInterval;
 
     /// <inheritdoc />
     public long ExactCountThreshold => Value.ExactCountThreshold;

@@ -70,7 +70,7 @@ public class TagIndexDriftLiveTests(PostgresFixture postgres)
             options.Events.RegisterTagType<DriftAccount>("drift_account");
             options.Events.TagWith<DriftTagged>(static e => new DriftAccount(e.Account));
         });
-        services.AddMartenStudio(static options => options.AuthorizationPolicy = null);
+        services.AddDataStudio().AddMarten();
 
         await using ServiceProvider provider = services.BuildServiceProvider();
 

@@ -451,7 +451,7 @@ public class SqlConsoleReachTests
                 options.Schema.For<ReachTicket>().MultiTenanted();
             });
 
-            services.AddMartenStudio(options =>
+            services.AddDataStudio().AddMarten(options =>
             {
                 options.Capabilities = MartenStudioCapabilities.All();
                 options.StoreAuthorizationPolicy = "studio-store";

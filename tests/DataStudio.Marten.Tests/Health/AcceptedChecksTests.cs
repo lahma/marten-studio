@@ -39,7 +39,7 @@ public class AcceptedChecksTests
     private static MartenStudioOptions Resolve(Action<MartenStudioOptions> configure)
     {
         ServiceCollection services = new();
-        services.AddMartenStudio(configure);
+        services.AddDataStudio().AddMarten(configure);
         using ServiceProvider provider = services.BuildServiceProvider();
         return provider.GetRequiredService<IOptions<MartenStudioOptions>>().Value;
     }
@@ -106,7 +106,7 @@ public class AcceptedChecksTests
         CapturingLoggerProvider captured = new();
         ServiceCollection services = new();
         services.AddSingleton(captured.CreateFactory());
-        services.AddMartenStudio(static x =>
+        services.AddDataStudio().AddMarten(static x =>
         {
             x.AcceptedChecks["K10"] = "an old reason";
             x.AcceptedChecks["k10"] = "the same code again";
@@ -131,7 +131,7 @@ public class AcceptedChecksTests
         CapturingLoggerProvider captured = new();
         ServiceCollection services = new();
         services.AddSingleton(captured.CreateFactory());
-        services.AddMartenStudio(static x => x.AcceptedChecks["K05"] = "managed roles");
+        services.AddDataStudio().AddMarten(static x => x.AcceptedChecks["K05"] = "managed roles");
         using ServiceProvider provider = services.BuildServiceProvider();
         _ = provider.GetRequiredService<IOptions<MartenStudioOptions>>().Value;
 

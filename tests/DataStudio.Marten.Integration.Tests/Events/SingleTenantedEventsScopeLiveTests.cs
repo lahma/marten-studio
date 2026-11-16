@@ -91,7 +91,7 @@ public sealed class SingleTenantedEventsFixture(PostgresFixture postgres) : IAsy
         services.AddAuthorization();
         services.AddSingleton<AuthenticationStateProvider, StubAuthenticationStateProvider>();
         services.AddSingleton<IDocumentStore>(Store);
-        services.AddMartenStudio(static options =>
+        services.AddDataStudio().AddMarten(static options =>
         {
             options.Capabilities = MartenStudioCapabilities.All();
             options.DiscoverTenantIds = false;
@@ -114,7 +114,7 @@ public sealed class SingleTenantedEventsFixture(PostgresFixture postgres) : IAsy
         narrow.AddSingleton<IDocumentStore>(Store);
         narrow.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationService>(
             new DataStudio.Marten.Integration.Tests.Database.ResourcePolicy(static x => x.Capability is null || x.TenantId is not null));
-        narrow.AddMartenStudio(static options =>
+        narrow.AddDataStudio().AddMarten(static options =>
         {
             options.Capabilities = MartenStudioCapabilities.All();
             options.StoreAuthorizationPolicy = "sec1-store";

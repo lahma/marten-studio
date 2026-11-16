@@ -244,7 +244,7 @@ public class ConnectionCompareServiceTests
                 options.DatabaseSchemaName = "connection_compare_unit";
             });
 
-            services.AddMartenStudio(options =>
+            services.AddDataStudio().AddMarten(options =>
             {
                 options.Capabilities = MartenStudioCapabilities.All();
 

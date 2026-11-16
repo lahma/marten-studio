@@ -11,7 +11,7 @@ namespace DataStudio.Postgres.Tests.Endpoints;
 /// </summary>
 public class HostHubOptionsTests
 {
-    private static void AddStudio(IServiceCollection services) => services.AddPostgresStudio();
+    private static void AddStudio(IServiceCollection services) => services.AddDataStudio().AddPostgres();
 
     [Fact]
     public void The_hosts_hub_options_survive_a_studio_registered_after_its_Blazor() =>

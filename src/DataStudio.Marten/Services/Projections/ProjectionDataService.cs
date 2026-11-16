@@ -20,6 +20,7 @@ using DataStudio.Postgres.Internal.Sql;
 using DataStudio.Postgres.Services;
 using DataStudio.Postgres.Services.Health;
 using DataStudio.Postgres.Services.Live;
+using DataStudio.Postgres.Services.Settings;
 
 namespace DataStudio.Marten.Services.Projections;
 
@@ -89,6 +90,7 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
     private readonly DaemonControlState controlState;
     private readonly ColumnCatalog catalog;
     private readonly IOptions<MartenStudioOptions> options;
+    private readonly IStudioSettings settings;
     private readonly StudioLogThrottle throttle;
     private readonly ILogger<ProjectionDataService> logger;
     private readonly DatabaseReachAuthorization reach;
@@ -108,6 +110,7 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
         DaemonControlState controlState,
         ColumnCatalog catalog,
         IOptions<MartenStudioOptions> options,
+        IStudioSettings settings,
         StudioLogThrottle throttle,
         ILogger<ProjectionDataService> logger,
         DatabaseAccess databaseAccess,
@@ -128,6 +131,7 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
         this.controlState = controlState;
         this.catalog = catalog;
         this.options = options;
+        this.settings = settings;
         this.throttle = throttle;
         this.logger = logger;
         reach = new DatabaseReachAuthorization(authorization, logger);
@@ -923,7 +927,7 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
                 readAt,
                 mark,
                 keptRows.Where(x => charted.Contains(x.Name)).Select(static x => (x.Name, x.Sequence)),
-                lagHistory.SpacingFor(options.Value.RefreshInterval));
+                lagHistory.SpacingFor(settings.RefreshInterval));
         }
 
         return new StoredProjections(
@@ -946,7 +950,7 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
 
         string storeKey = resolved.Registration.Key;
         string databaseId = resolved.Database.Id.Identity;
-        TimeSpan spacing = lagHistory.SpacingFor(options.Value.RefreshInterval);
+        TimeSpan spacing = lagHistory.SpacingFor(settings.RefreshInterval);
         IReadOnlyList<StudioOperation> running = operations.RunningFor(storeKey, databaseId);
 
         foreach (ShardProgress shard in progress)
@@ -989,8 +993,8 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
     private ProjectionThresholds ThresholdsOf(IDocumentStore store) =>
         new(
             Read(() => store.Options.Events.Daemon.SlowPollingTime, TimeSpan.FromSeconds(1)),
-            options.Value.EffectiveHealthInterval,
-            lagHistory.SpacingFor(options.Value.RefreshInterval));
+            settings.EffectiveHealthInterval,
+            lagHistory.SpacingFor(settings.RefreshInterval));
 
     /// <summary>The event store's schema, which is where all three of these objects live.</summary>
     private static string EventSchemaOf(ResolvedScope resolved) => resolved.Store.Options.Events.DatabaseSchemaName;

@@ -230,7 +230,7 @@ public class TenantScopedCorrectionLiveTests(PostgresFixture postgres) : IAsyncL
         // Registered after AddAuthorization so that this is the one resolved.
         services.AddSingleton<IAuthorizationService>(policy);
 
-        services.AddMartenStudio(options =>
+        services.AddDataStudio().AddMarten(options =>
         {
             options.Capabilities = MartenStudioCapabilities.All();
             options.StoreAuthorizationPolicy = "studio-store";

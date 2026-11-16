@@ -54,9 +54,9 @@ public class EventLinksTests
     }
 
     [Fact]
-    public void A_custom_path_makes_links_relative_to_the_studio_root()
+    public void A_link_is_relative_to_the_studio_root_whatever_the_mount_path_is()
     {
-        var options = new MartenStudioOptions { Path = "/ops/marten" };
+        var options = new MartenStudioOptions();
 
         EventLinks.To(options, EventLinks.FeedRoute, scope: null).Should().Be("events/feed");
     }

@@ -318,7 +318,7 @@ public partial class MediumDataSetLiveTests
             options.Events.DatabaseSchemaName = schema + "_events";
         });
 
-        services.AddMartenStudio(static options => options.ReadOnly = false);
+        services.AddDataStudio().AddMarten(static options => options.ReadOnly = false);
         services.AddSingleton<IHealthStatementObserver>(probe);
 
         return services.BuildServiceProvider();

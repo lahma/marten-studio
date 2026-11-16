@@ -441,7 +441,7 @@ public partial class TenantScopedReachTests
                 }
             });
 
-            services.AddMartenStudio(options =>
+            services.AddDataStudio().AddMarten(options =>
             {
                 options.Capabilities = MartenStudioCapabilities.All();
                 options.StoreAuthorizationPolicy = StorePolicy;

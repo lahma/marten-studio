@@ -67,7 +67,7 @@ public class ExactCountConnectionLiveTests(PostgresFixture postgres)
 
         services.AddAuthorization();
         services.AddSingleton<AuthenticationStateProvider, AnonymousVisitor>();
-        services.AddMartenStudio(static options => options.DiscoverTenantIds = false);
+        services.AddDataStudio().AddMarten(static options => options.DiscoverTenantIds = false);
 
         await using ServiceProvider provider = services.BuildServiceProvider();
 

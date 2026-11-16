@@ -30,7 +30,7 @@ public class NavMenuScopeRaceTests
         await using StudioComponentContext context = new();
 
         // No poll inside the test: the live loop waits a whole interval before its first tick.
-        context.Options.RefreshInterval = TimeSpan.FromMinutes(5);
+        context.ShellOptions.RefreshInterval = TimeSpan.FromMinutes(5);
         context.Catalog.WithStore("default", "Default", DatabaseCardinality.StaticMultiple, "db-a", "db-b");
         await context.State.EnsureInitializedAsync(Token);
 

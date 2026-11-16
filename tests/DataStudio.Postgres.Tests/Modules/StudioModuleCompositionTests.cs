@@ -28,7 +28,7 @@ public class StudioModuleCompositionTests
     /// <summary>The database module as <c>AddPostgresStudio()</c> registers it, for a composition that is about the modules beside it.</summary>
     private static DatabaseStudioModule Database() => new(Host, Settings, new StudioCapabilityGuard(Settings));
 
-    private static StudioShellDescriptor Compose(params IStudioModule[] others) => StudioModuleComposition.Compose(Host.ShellIdentity, [Database(), .. others]);
+    private static StudioShellDescriptor Compose(params IStudioModule[] others) => StudioModuleComposition.Compose([Database(), .. others]);
 
     private sealed class FakeModule(string key, string root, params string[] sections) : IStudioModule
     {
@@ -55,7 +55,7 @@ public class StudioModuleCompositionTests
 
         public string HomeRoute => key;
 
-        public string? ExposedSentence => "Fake sentence.";
+        public string ExposedSentence => "Fake sentence.";
 
         public IReadOnlyList<StudioModuleCapabilityGroup> CapabilityGroups => [];
 
@@ -88,7 +88,7 @@ public class StudioModuleCompositionTests
 
         public string HomeRoute => "other";
 
-        public string? ExposedSentence => string.Empty;
+        public string ExposedSentence => string.Empty;
 
         public IReadOnlyList<StudioModuleCapabilityGroup> CapabilityGroups => [];
 
@@ -150,7 +150,7 @@ public class StudioModuleCompositionTests
     public void No_module_registered_resolves_the_database_as_the_one_root_module()
     {
         ServiceCollection services = new();
-        services.AddPostgresStudio();
+        services.AddDataStudio().AddPostgres();
         using ServiceProvider provider = services.BuildServiceProvider();
 
         provider.GetRequiredService<StudioDescriptor>().Should().BeSameAs(Host, "the database's descriptor is registered as itself, never composed");
@@ -164,15 +164,16 @@ public class StudioModuleCompositionTests
     {
         StudioShellDescriptor shell = Compose();
 
-        // The words are the database descriptor's.
-        shell.ProductName.Should().Be(Host.ProductName);
-        shell.ExposedContent.Should().Be(Host.ExposedContent);
-        shell.Surface.Should().Be(Host.Surface);
-        shell.Exposure.Should().Be(Host.Exposure);
-        shell.Remedies.Should().Be(Host.Remedies);
+        // The words are the shell's own (v2 step 4): its name, and the guard's lead built from what the module says its pages expose.
+        StudioShellIdentity.ProductName.Should().Be("Data Studio");
+        StudioShellIdentity.Surface.Should().Be("Data Studio");
+        shell.Exposure.Should().Be(
+            "Data Studio is mapped with no authorization. " + Database().ExposedSentence
+            + " Data Studio refuses to start rather than serve that by accident. Say which you meant:");
+        StudioShellIdentity.Remedies.Should().Contain("app.MapDataStudio().RequireAuthorization()").And.Contain("services.AddDataStudio(options => options.AuthorizationPolicy").And.Contain("app.MapDataStudio().AllowAnonymous()");
 
-        // The lists are the database's own, in order. The navigation is built once per registration, so the two builds are compared by what they say.
-        shell.PageAssemblies.Should().Equal(Host.PageAssemblies);
+        // The lists are the database's own, in order, then the shell's own Activity page. The navigation is built once per registration, so the two builds are compared by what they say.
+        shell.PageAssemblies.Should().Equal([.. Host.PageAssemblies, StudioShellDescriptor.ShellPages]);
         shell.ExtraShortcuts.Should().Equal(Host.ExtraShortcuts);
         shell.Navigation.Select(Shape).Should().BeEquivalentTo(Host.Navigation(Settings).Select(Shape), static options => options.WithStrictOrdering());
 
@@ -203,7 +204,7 @@ public class StudioModuleCompositionTests
         composed.Navigation.Where(static x => x.ModuleKey != "postgres").Select(static x => x.ModuleKey).Should().Equal("a", "b");
         composed.Navigation.Where(static x => x.ModuleKey == "postgres").Should().HaveCount(hostTitles.Length, "the root's own sections carry the root's key (6.1)");
         composed.Modules.Select(static x => x.Key).Should().Equal("postgres", "a", "b");
-        composed.PageAssemblies.Should().HaveCount(Host.PageAssemblies.Count + 2);
+        composed.PageAssemblies.Should().HaveCount(Host.PageAssemblies.Count + 3, "the two modules' and the shell's own");
         composed.ExtraShortcuts.Select(static x => x.Title).Should().Equal([.. Host.ExtraShortcuts.Select(static x => x.Title), "a keys", "b keys"]);
     }
 
@@ -221,7 +222,7 @@ public class StudioModuleCompositionTests
     public void Two_registrations_of_one_module_type_compose_once()
     {
         ServiceCollection services = new();
-        services.AddPostgresStudio();
+        services.AddDataStudio().AddPostgres();
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IStudioModule, OtherFakeModule>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IStudioModule, OtherFakeModule>());
         using ServiceProvider provider = services.BuildServiceProvider();

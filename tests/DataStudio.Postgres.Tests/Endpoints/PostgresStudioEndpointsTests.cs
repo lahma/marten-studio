@@ -22,7 +22,7 @@ namespace DataStudio.Postgres.Tests.Endpoints;
 
 /// <summary>
 /// An API-only host with only Npgsql - one <see cref="NpgsqlDataSource" />, no <c>.razor</c> of its own, no
-/// <c>UseAntiforgery()</c> - serves Postgres Studio at <c>/postgres</c>: the page, its stylesheet, the framework script
+/// <c>UseAntiforgery()</c> - serves Postgres Studio at <c>/studio</c>: the page, its stylesheet, the framework script
 /// and the Blazor circuit's negotiate, all with 200; and its mapping serves PostgresStudio's pages and nothing else.
 /// </summary>
 /// <remarks>
@@ -36,13 +36,14 @@ public class PostgresStudioEndpointsTests
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
     private static WebApplication CreateApp(
+        Action<DataStudioOptions>? configureShell = null,
         Action<PostgresStudioOptions>? configureStudio = null,
         Action<WebApplicationBuilder>? configureBuilder = null)
     {
         WebApplicationBuilder builder = WebApplication.CreateBuilder();
         builder.WebHost.UseTestServer();
         builder.Services.AddSingleton(NpgsqlDataSource.Create(ConnectionString));
-        builder.Services.AddPostgresStudio(configureStudio);
+        builder.Services.AddDataStudio(configureShell).AddPostgres(configureStudio);
         configureBuilder?.Invoke(builder);
         return builder.Build();
     }
@@ -64,17 +65,17 @@ public class PostgresStudioEndpointsTests
     public async Task An_api_only_host_with_one_data_source_serves_the_page_its_assets_and_the_circuit()
     {
         await using WebApplication app = CreateApp(configureBuilder: WithWebRoot);
-        app.MapPostgresStudio().AllowAnonymous();
+        app.MapDataStudio().AllowAnonymous();
         await app.StartAsync(Token);
         try
         {
             using HttpClient client = app.GetTestClient();
 
-            using HttpResponseMessage page = await client.GetAsync(new Uri("/postgres", UriKind.Relative), Token);
+            using HttpResponseMessage page = await client.GetAsync(new Uri("/studio", UriKind.Relative), Token);
             page.StatusCode.Should().Be(HttpStatusCode.OK);
 
             string body = await page.Content.ReadAsStringAsync(Token);
-            body.Should().Contain("<base href=\"/postgres/\"");
+            body.Should().Contain("<base href=\"/studio/\"");
             body.Should().Contain("<title>Postgres Studio</title>");
             body.Should().Contain("<link rel=\"stylesheet\" href=\"_content/DataStudio/css/studio.css\"");
             body.Should().Contain("<script src=\"_framework/blazor.web.js\">");
@@ -82,23 +83,23 @@ public class PostgresStudioEndpointsTests
             body.Should().Contain("<h1 class=\"ms-page-title\">Overview</h1>", "the root page renders PostgresStudio's overview");
             body.Should().NotContain("__RequestVerificationToken");
 
-            using HttpResponseMessage css = await client.GetAsync(new Uri("/postgres/_content/DataStudio/css/studio.css", UriKind.Relative), Token);
+            using HttpResponseMessage css = await client.GetAsync(new Uri("/studio/_content/DataStudio/css/studio.css", UriKind.Relative), Token);
             css.StatusCode.Should().Be(HttpStatusCode.OK);
             css.Content.Headers.ContentType!.MediaType.Should().Be("text/css");
 
             // The icon the document names, relative to its studio-rooted <base href>: under the mount path's mirror, so a host
             // that serves no /favicon.ico is asked for nothing.
-            using HttpResponseMessage icon = await client.GetAsync(new Uri("/postgres/_content/DataStudio/favicon.svg", UriKind.Relative), Token);
+            using HttpResponseMessage icon = await client.GetAsync(new Uri("/studio/_content/DataStudio/favicon.svg", UriKind.Relative), Token);
             icon.StatusCode.Should().Be(HttpStatusCode.OK);
             icon.Content.Headers.ContentType!.MediaType.Should().Be("image/svg+xml");
             (await icon.Content.ReadAsByteArrayAsync(Token)).Should().NotBeEmpty();
 
-            using HttpResponseMessage script = await client.GetAsync(new Uri("/postgres/_framework/blazor.web.js", UriKind.Relative), Token);
+            using HttpResponseMessage script = await client.GetAsync(new Uri("/studio/_framework/blazor.web.js", UriKind.Relative), Token);
             script.StatusCode.Should().Be(HttpStatusCode.OK);
             script.Content.Headers.ContentType!.MediaType.Should().Be("text/javascript");
 
             using HttpResponseMessage negotiate = await client.PostAsync(
-                new Uri("/postgres/_blazor/negotiate?negotiateVersion=1", UriKind.Relative), content: null, Token);
+                new Uri("/studio/_blazor/negotiate?negotiateVersion=1", UriKind.Relative), content: null, Token);
             negotiate.StatusCode.Should().Be(HttpStatusCode.OK);
             (await negotiate.Content.ReadAsStringAsync(Token)).Should().Contain("availableTransports");
         }
@@ -124,22 +125,22 @@ public class PostgresStudioEndpointsTests
         // As MapStaticAssets registers them: a literal route per file, with or without the leading slash, for GET and HEAD.
         app.MapMethods("/_framework/" + Initializer, ["GET", "HEAD"], static () => Results.Text("export function beforeWebStart() { }", "text/javascript")).AllowAnonymous();
         app.MapGet("_framework/dotnet-browser-tools/BrowserTools.js", static () => Results.Text("// tools", "text/javascript")).AllowAnonymous();
-        app.MapPostgresStudio().AllowAnonymous();
+        app.MapDataStudio().AllowAnonymous();
         await app.StartAsync(Token);
         try
         {
             using HttpClient client = app.GetTestClient();
 
-            using HttpResponseMessage initializer = await client.GetAsync(new Uri("/postgres/_framework/" + Initializer, UriKind.Relative), Token);
+            using HttpResponseMessage initializer = await client.GetAsync(new Uri("/studio/_framework/" + Initializer, UriKind.Relative), Token);
             initializer.StatusCode.Should().Be(HttpStatusCode.OK);
             (await initializer.Content.ReadAsStringAsync(Token)).Should().Contain("beforeWebStart");
 
-            using HttpResponseMessage nested = await client.GetAsync(new Uri("/postgres/_framework/dotnet-browser-tools/BrowserTools.js", UriKind.Relative), Token);
+            using HttpResponseMessage nested = await client.GetAsync(new Uri("/studio/_framework/dotnet-browser-tools/BrowserTools.js", UriKind.Relative), Token);
             nested.StatusCode.Should().Be(HttpStatusCode.OK);
             (await nested.Content.ReadAsStringAsync(Token)).Should().Be("// tools");
 
             using HttpResponseMessage head = await client.SendAsync(
-                new HttpRequestMessage(HttpMethod.Head, new Uri("/postgres/_framework/" + Initializer, UriKind.Relative)), Token);
+                new HttpRequestMessage(HttpMethod.Head, new Uri("/studio/_framework/" + Initializer, UriKind.Relative)), Token);
             head.StatusCode.Should().Be(HttpStatusCode.OK);
         }
         finally
@@ -158,7 +159,7 @@ public class PostgresStudioEndpointsTests
                 ["_framework/" + Initializer] = "export function beforeWebStart() { }"u8.ToArray(),
                 ["_framework/nested/other.js"] = "// other"u8.ToArray(),
             }));
-        app.MapPostgresStudio("/ops/db").AllowAnonymous();
+        app.MapDataStudio("/ops/db").AllowAnonymous();
         await app.StartAsync(Token);
         try
         {
@@ -186,16 +187,16 @@ public class PostgresStudioEndpointsTests
     /// guard. The recording provider proves the guard, not the router, refused them.
     /// </summary>
     [Theory]
-    [InlineData("/postgres/_framework/nothing-serves-this.js")]
-    [InlineData("/postgres/_framework/../../appsettings.json")]
-    [InlineData("/postgres/_framework/nested/../../appsettings.json")]
-    [InlineData("/postgres/_framework/..\\..\\appsettings.json")]
-    [InlineData("/postgres/_framework/nested/..\\..\\appsettings.json")]
-    [InlineData("/postgres/_framework/a\0b.js")]
-    [InlineData("/postgres/_framework/a\\b.js")]
-    [InlineData("/postgres/_framework//appsettings.json")]
-    [InlineData("/postgres/_framework/%2e%2e/appsettings.json")]
-    [InlineData("/postgres/_framework/nested")]
+    [InlineData("/studio/_framework/nothing-serves-this.js")]
+    [InlineData("/studio/_framework/../../appsettings.json")]
+    [InlineData("/studio/_framework/nested/../../appsettings.json")]
+    [InlineData("/studio/_framework/..\\..\\appsettings.json")]
+    [InlineData("/studio/_framework/nested/..\\..\\appsettings.json")]
+    [InlineData("/studio/_framework/a\0b.js")]
+    [InlineData("/studio/_framework/a\\b.js")]
+    [InlineData("/studio/_framework//appsettings.json")]
+    [InlineData("/studio/_framework/%2e%2e/appsettings.json")]
+    [InlineData("/studio/_framework/nested")]
     public async Task A_framework_file_the_host_does_not_serve_and_any_path_that_climbs_is_404_never_500(string path)
     {
         RecordingFileProvider webRoot = new(new TestFileProvider(new Dictionary<string, byte[]>
@@ -210,7 +211,7 @@ public class PostgresStudioEndpointsTests
             matched = (context.GetEndpoint() as RouteEndpoint)?.RoutePattern.RawText;
             await next(context);
         });
-        app.MapPostgresStudio().AllowAnonymous();
+        app.MapDataStudio().AllowAnonymous();
         await app.StartAsync(Token);
         try
         {
@@ -222,7 +223,7 @@ public class PostgresStudioEndpointsTests
                 },
                 Token);
 
-            matched.Should().Be("/postgres/_framework/{**file}", "the row must reach the forward's guard, not be routed elsewhere");
+            matched.Should().Be("/studio/_framework/{**file}", "the row must reach the forward's guard, not be routed elsewhere");
             response.Response.StatusCode.Should().Be(StatusCodes.Status404NotFound);
             using StreamReader reader = new(response.Response.Body);
             (await reader.ReadToEndAsync(Token)).Should().NotContain("secret");
@@ -248,13 +249,13 @@ public class PostgresStudioEndpointsTests
             ["_framework/nested/other.js"] = "// other"u8.ToArray(),
         }));
         await using WebApplication app = CreateApp(configureBuilder: builder => builder.Environment.WebRootFileProvider = webRoot);
-        app.MapPostgresStudio().AllowAnonymous();
+        app.MapDataStudio().AllowAnonymous();
         await app.StartAsync(Token);
         try
         {
             using HttpClient client = app.GetTestClient();
 
-            using HttpResponseMessage response = await client.GetAsync(new Uri("/postgres/_framework/nested/other.js", UriKind.Relative), Token);
+            using HttpResponseMessage response = await client.GetAsync(new Uri("/studio/_framework/nested/other.js", UriKind.Relative), Token);
 
             response.StatusCode.Should().Be(HttpStatusCode.OK);
             webRoot.Asked.Should().Contain("_framework/nested/other.js");
@@ -281,24 +282,24 @@ public class PostgresStudioEndpointsTests
             matched = (context.GetEndpoint() as RouteEndpoint)?.RoutePattern.RawText;
             await next(context);
         });
-        app.MapPostgresStudio().AllowAnonymous();
+        app.MapDataStudio().AllowAnonymous();
 
-        List<RouteEndpoint> framework = [.. RouteEndpoints(app).Where(static x => x.RoutePattern.RawText!.StartsWith("/postgres/_framework/", StringComparison.Ordinal))];
+        List<RouteEndpoint> framework = [.. RouteEndpoints(app).Where(static x => x.RoutePattern.RawText!.StartsWith("/studio/_framework/", StringComparison.Ordinal))];
         framework.Select(static x => x.RoutePattern.RawText).Should().BeEquivalentTo(
-            ["/postgres/_framework/blazor.web.js", "/postgres/_framework/opaque-redirect", "/postgres/_framework/{**file}"]);
+            ["/studio/_framework/blazor.web.js", "/studio/_framework/opaque-redirect", "/studio/_framework/{**file}"]);
 
         await app.StartAsync(Token);
         try
         {
             using HttpClient client = app.GetTestClient();
 
-            using HttpResponseMessage script = await client.GetAsync(new Uri("/postgres/_framework/blazor.web.js", UriKind.Relative), Token);
+            using HttpResponseMessage script = await client.GetAsync(new Uri("/studio/_framework/blazor.web.js", UriKind.Relative), Token);
             script.StatusCode.Should().Be(HttpStatusCode.OK);
             (await script.Content.ReadAsStringAsync(Token)).Should().Be("// blazor.web.js", "the host's web root wins (D22)");
-            matched.Should().Be("/postgres/_framework/blazor.web.js");
+            matched.Should().Be("/studio/_framework/blazor.web.js");
 
-            using HttpResponseMessage redirect = await client.GetAsync(new Uri("/postgres/_framework/opaque-redirect?url=x", UriKind.Relative), Token);
-            matched.Should().Be("/postgres/_framework/opaque-redirect", "the framework's own endpoint is matched, not the file forward");
+            using HttpResponseMessage redirect = await client.GetAsync(new Uri("/studio/_framework/opaque-redirect?url=x", UriKind.Relative), Token);
+            matched.Should().Be("/studio/_framework/opaque-redirect", "the framework's own endpoint is matched, not the file forward");
             redirect.StatusCode.Should().NotBe(HttpStatusCode.InternalServerError);
             redirect.StatusCode.Should().NotBe(HttpStatusCode.NotFound);
         }
@@ -320,16 +321,16 @@ public class PostgresStudioEndpointsTests
     public async Task A_root_mount_maps_no_framework_file_forward_and_leaves_the_hosts_own_files_alone()
     {
         await using WebApplication app = CreateApp(
-            configureStudio: static options =>
+            configureShell: static options =>
             {
                 options.Path = "/";
-                typeof(PostgresStudioOptions)
+                typeof(DataStudioOptions)
                     .GetField("pathCache", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
-                    .SetValue(options, new DataStudio.Postgres.Services.Settings.StudioPath("/", string.Empty, string.Empty, HasCustom: true));
+                    .SetValue(options, new DataStudio.Services.Settings.StudioPath("/", string.Empty, string.Empty, HasCustom: true));
             },
             configureBuilder: WithWebRoot);
         app.MapGet("/_framework/host-own.js", static () => Results.Text("// the host's", "text/javascript")).AllowAnonymous();
-        app.MapPostgresStudio().AllowAnonymous();
+        app.MapDataStudio().AllowAnonymous();
 
         List<string?> patterns = [.. RouteEndpoints(app).Select(static x => x.RoutePattern.RawText)];
         patterns.Should().NotContain(static x => x != null && x.EndsWith("/_framework/{**file}", StringComparison.Ordinal),
@@ -364,19 +365,19 @@ public class PostgresStudioEndpointsTests
     public async Task Without_a_policy_the_framework_file_forward_says_nothing_and_the_builder_governs_it()
     {
         await using WebApplication silent = CreateApp();
-        silent.MapPostgresStudio();
-        RouteEndpoint untouched = RouteEndpoints(silent).Single(static x => x.RoutePattern.RawText == "/postgres/_framework/{**file}");
+        silent.MapDataStudio();
+        RouteEndpoint untouched = RouteEndpoints(silent).Single(static x => x.RoutePattern.RawText == "/studio/_framework/{**file}");
         untouched.Metadata.GetMetadata<IAllowAnonymous>().Should().BeNull("the host's files may not be opted out by the studio");
         untouched.Metadata.GetOrderedMetadata<IAuthorizeData>().Should().BeEmpty();
 
         await using WebApplication required = CreateApp();
-        required.MapPostgresStudio().RequireAuthorization("x");
-        RouteEndpoint governed = RouteEndpoints(required).Single(static x => x.RoutePattern.RawText == "/postgres/_framework/{**file}");
+        required.MapDataStudio().RequireAuthorization("x");
+        RouteEndpoint governed = RouteEndpoints(required).Single(static x => x.RoutePattern.RawText == "/studio/_framework/{**file}");
         governed.Metadata.GetOrderedMetadata<IAuthorizeData>().Should().Contain(static x => x.Policy == "x");
 
         await using WebApplication anonymous = CreateApp();
-        anonymous.MapPostgresStudio().AllowAnonymous();
-        RouteEndpoint open = RouteEndpoints(anonymous).Single(static x => x.RoutePattern.RawText == "/postgres/_framework/{**file}");
+        anonymous.MapDataStudio().AllowAnonymous();
+        RouteEndpoint open = RouteEndpoints(anonymous).Single(static x => x.RoutePattern.RawText == "/studio/_framework/{**file}");
         open.Metadata.GetMetadata<IAllowAnonymous>().Should().NotBeNull("the caller said so about the mapping");
     }
 
@@ -385,10 +386,10 @@ public class PostgresStudioEndpointsTests
     {
         await using WebApplication governed = CreateApp(
             static options => options.AuthorizationPolicy = "ops",
-            static builder => builder.Services.AddAuthorization(static options => options.AddPolicy("ops", static policy => policy.RequireAssertion(static _ => true))));
-        governed.MapPostgresStudio();
+            configureBuilder: static builder => builder.Services.AddAuthorization(static options => options.AddPolicy("ops", static policy => policy.RequireAssertion(static _ => true))));
+        governed.MapDataStudio();
 
-        RouteEndpoint withPolicy = RouteEndpoints(governed).Single(static x => x.RoutePattern.RawText == "/postgres/_framework/{**file}");
+        RouteEndpoint withPolicy = RouteEndpoints(governed).Single(static x => x.RoutePattern.RawText == "/studio/_framework/{**file}");
 
         withPolicy.Metadata.GetOrderedMetadata<IAuthorizeData>().Should().Contain(static x => x.Policy == "ops");
         withPolicy.Metadata.GetMetadata<IAllowAnonymous>().Should().BeNull();
@@ -431,7 +432,7 @@ public class PostgresStudioEndpointsTests
         app.MapGet("_framework/App.Client.wasm", static () => Results.Text("host-owned wasm", "application/wasm"));
         app.MapGet("/_framework/" + Initializer, static () => Results.Text("export function beforeWebStart() { }", "text/javascript"));
         app.MapGet("/_framework/admin-only.js", static () => Results.Text("host-owned admin", "text/javascript")).RequireAuthorization("nobody");
-        app.MapPostgresStudio().RequireAuthorization();
+        app.MapDataStudio().RequireAuthorization();
         await app.StartAsync(Token);
         try
         {
@@ -440,16 +441,16 @@ public class PostgresStudioEndpointsTests
             using HttpResponseMessage root = await client.GetAsync(new Uri("/_framework/App.Client.wasm", UriKind.Relative), Token);
             root.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
 
-            using HttpResponseMessage anonymous = await client.GetAsync(new Uri("/postgres/_framework/App.Client.wasm", UriKind.Relative), Token);
+            using HttpResponseMessage anonymous = await client.GetAsync(new Uri("/studio/_framework/App.Client.wasm", UriKind.Relative), Token);
             anonymous.StatusCode.Should().NotBe(HttpStatusCode.OK);
             (await anonymous.Content.ReadAsStringAsync(Token)).Should().NotContain("host-owned");
 
-            using HttpRequestMessage initializerRequest = AsOperator("/postgres/_framework/" + Initializer);
+            using HttpRequestMessage initializerRequest = AsOperator("/studio/_framework/" + Initializer);
             using HttpResponseMessage initializer = await client.SendAsync(initializerRequest, Token);
             initializer.StatusCode.Should().Be(HttpStatusCode.OK, "a visitor the studio admits gets the file a file with no metadata gives them");
             (await initializer.Content.ReadAsStringAsync(Token)).Should().Contain("beforeWebStart");
 
-            using HttpRequestMessage wasmRequest = AsOperator("/postgres/_framework/App.Client.wasm");
+            using HttpRequestMessage wasmRequest = AsOperator("/studio/_framework/App.Client.wasm");
             using HttpResponseMessage wasm = await client.SendAsync(wasmRequest, Token);
             wasm.StatusCode.Should().Be(HttpStatusCode.OK);
 
@@ -457,7 +458,7 @@ public class PostgresStudioEndpointsTests
             using HttpResponseMessage adminAtRoot = await client.SendAsync(atRoot, Token);
             adminAtRoot.StatusCode.Should().Be(HttpStatusCode.Forbidden, "the host itself refuses this visitor");
 
-            using HttpRequestMessage underMount = AsOperator("/postgres/_framework/admin-only.js");
+            using HttpRequestMessage underMount = AsOperator("/studio/_framework/admin-only.js");
             using HttpResponseMessage adminUnderMount = await client.SendAsync(underMount, Token);
             adminUnderMount.StatusCode.Should().Be(HttpStatusCode.NotFound, "the studio never serves what the host would refuse");
             (await adminUnderMount.Content.ReadAsStringAsync(Token)).Should().NotContain("host-owned");
@@ -513,7 +514,7 @@ public class PostgresStudioEndpointsTests
         app.UseAuthentication();
         app.UseAuthorization();
         app.MapGet(RootPathRequirement.RootPath, static () => Results.Text("host-owned rooted", "text/javascript")).RequireAuthorization(RootPathRequirement.Policy);
-        app.MapPostgresStudio().RequireAuthorization();
+        app.MapDataStudio().RequireAuthorization();
         await app.StartAsync(Token);
         try
         {
@@ -523,20 +524,20 @@ public class PostgresStudioEndpointsTests
             using HttpResponseMessage root = await client.SendAsync(rootRequest, Token);
             root.StatusCode.Should().Be(HttpStatusCode.OK, "the handler admits the root request");
 
-            using HttpRequestMessage mirrorRequest = AsOperator("/postgres" + RootPathRequirement.RootPath);
+            using HttpRequestMessage mirrorRequest = AsOperator("/studio" + RootPathRequirement.RootPath);
             using HttpResponseMessage mirror = await client.SendAsync(mirrorRequest, Token);
             mirror.StatusCode.Should().Be(HttpStatusCode.OK, "the evaluation sees the root path and the HttpContext, as the middleware would");
             (await mirror.Content.ReadAsStringAsync(Token)).Should().Contain("host-owned rooted");
 
             // The control: the very same policy refuses a request that carries the mirror's path.
             DefaultHttpContext asMirror = new();
-            asMirror.Request.Path = "/postgres" + RootPathRequirement.RootPath;
+            asMirror.Request.Path = "/studio" + RootPathRequirement.RootPath;
             ClaimsPrincipal user = new(new ClaimsIdentity("test"));
             IAuthorizationService authorization = app.Services.GetRequiredService<IAuthorizationService>();
             (await authorization.AuthorizeAsync(user, asMirror, RootPathRequirement.Policy)).Succeeded.Should().BeFalse();
 
             // Whatever the evaluation did to the request, it put the mirror's path and endpoint back.
-            using HttpRequestMessage again = AsOperator("/postgres/_framework/nothing-here.js");
+            using HttpRequestMessage again = AsOperator("/studio/_framework/nothing-here.js");
             using HttpResponseMessage missing = await client.SendAsync(again, Token);
             missing.StatusCode.Should().Be(HttpStatusCode.NotFound);
         }
@@ -554,7 +555,7 @@ public class PostgresStudioEndpointsTests
         app.UseAuthentication();
         app.UseAuthorization();
         app.MapGet("/_framework/requirement-data.js", static () => Results.Text("host-owned data", "text/javascript")).WithMetadata(new FailingRequirementData());
-        app.MapPostgresStudio().RequireAuthorization();
+        app.MapDataStudio().RequireAuthorization();
         await app.StartAsync(Token);
         try
         {
@@ -564,7 +565,7 @@ public class PostgresStudioEndpointsTests
             using HttpResponseMessage root = await client.SendAsync(rootRequest, Token);
             root.StatusCode.Should().Be(HttpStatusCode.Forbidden, "the host's own middleware refuses an authenticated visitor");
 
-            using HttpRequestMessage mirrorRequest = AsOperator("/postgres/_framework/requirement-data.js");
+            using HttpRequestMessage mirrorRequest = AsOperator("/studio/_framework/requirement-data.js");
             using HttpResponseMessage mirror = await client.SendAsync(mirrorRequest, Token);
             mirror.StatusCode.Should().Be(HttpStatusCode.NotFound, "the studio never serves what the host would refuse");
             (await mirror.Content.ReadAsStringAsync(Token)).Should().NotContain("host-owned");
@@ -586,17 +587,17 @@ public class PostgresStudioEndpointsTests
             }));
         app.UseAuthentication();
         app.UseAuthorization();
-        app.MapPostgresStudio().AllowAnonymous();
+        app.MapDataStudio().AllowAnonymous();
         await app.StartAsync(Token);
         try
         {
             using HttpClient client = app.GetTestClient();
 
-            using HttpResponseMessage anonymous = await client.GetAsync(new Uri("/postgres/_framework/host-owned.js", UriKind.Relative), Token);
+            using HttpResponseMessage anonymous = await client.GetAsync(new Uri("/studio/_framework/host-owned.js", UriKind.Relative), Token);
             anonymous.StatusCode.Should().Be(HttpStatusCode.NotFound);
             (await anonymous.Content.ReadAsStringAsync(Token)).Should().NotContain("host-owned");
 
-            using HttpRequestMessage request = AsOperator("/postgres/_framework/host-owned.js");
+            using HttpRequestMessage request = AsOperator("/studio/_framework/host-owned.js");
             using HttpResponseMessage authenticated = await client.SendAsync(request, Token);
             authenticated.StatusCode.Should().Be(HttpStatusCode.OK);
         }
@@ -617,13 +618,13 @@ public class PostgresStudioEndpointsTests
             ran++;
             return Results.Text("posted", "text/javascript");
         }).AllowAnonymous();
-        app.MapPostgresStudio().AllowAnonymous();
+        app.MapDataStudio().AllowAnonymous();
         await app.StartAsync(Token);
         try
         {
             using HttpClient client = app.GetTestClient();
 
-            using HttpResponseMessage response = await client.GetAsync(new Uri("/postgres/_framework/x.js", UriKind.Relative), Token);
+            using HttpResponseMessage response = await client.GetAsync(new Uri("/studio/_framework/x.js", UriKind.Relative), Token);
 
             response.StatusCode.Should().Be(HttpStatusCode.NotFound);
             ran.Should().Be(0);
@@ -669,7 +670,7 @@ public class PostgresStudioEndpointsTests
     public async Task Every_page_of_the_shared_studio_is_mapped_under_postgres_and_no_Marten_page_is()
     {
         await using WebApplication app = CreateApp();
-        app.MapPostgresStudio().AllowAnonymous();
+        app.MapDataStudio().AllowAnonymous();
 
         string[] pages =
         [
@@ -680,10 +681,10 @@ public class PostgresStudioEndpointsTests
                 .Order(StringComparer.Ordinal),
         ];
 
-        pages.Should().Contain(["/postgres", "/postgres/query", "/postgres/database", "/postgres/database/object",
-            "/postgres/database/row", "/postgres/database/sessions", "/postgres/relationships", "/postgres/health",
-            "/postgres/activity"]);
-        pages.Should().OnlyContain(static x => x == "/postgres" || x.StartsWith("/postgres/", StringComparison.Ordinal));
+        pages.Should().Contain(["/studio", "/studio/query", "/studio/database", "/studio/database/object",
+            "/studio/database/row", "/studio/database/sessions", "/studio/relationships", "/studio/health",
+            "/studio/activity"]);
+        pages.Should().OnlyContain(static x => x == "/studio" || x.StartsWith("/studio/", StringComparison.Ordinal));
         pages.Should().NotContain(static x => x.Contains("documents", StringComparison.Ordinal)
             || x.Contains("events", StringComparison.Ordinal)
             || x.Contains("projections", StringComparison.Ordinal)
@@ -695,7 +696,7 @@ public class PostgresStudioEndpointsTests
     public async Task A_pattern_at_the_map_site_moves_the_studio()
     {
         await using WebApplication app = CreateApp();
-        app.MapPostgresStudio("/ops/db").AllowAnonymous();
+        app.MapDataStudio("/ops/db").AllowAnonymous();
         await app.StartAsync(Token);
         try
         {
@@ -705,7 +706,7 @@ public class PostgresStudioEndpointsTests
             page.StatusCode.Should().Be(HttpStatusCode.OK);
             (await page.Content.ReadAsStringAsync(Token)).Should().Contain("<base href=\"/ops/db/\"");
 
-            using HttpResponseMessage old = await client.GetAsync(new Uri("/postgres", UriKind.Relative), Token);
+            using HttpResponseMessage old = await client.GetAsync(new Uri("/studio", UriKind.Relative), Token);
             old.StatusCode.Should().Be(HttpStatusCode.NotFound);
         }
         finally
@@ -723,7 +724,7 @@ public class PostgresStudioEndpointsTests
     {
         await using WebApplication app = CreateApp();
 
-        Action map = () => app.MapPostgresStudio(pattern);
+        Action map = () => app.MapDataStudio(pattern);
 
         map.Should().Throw<ArgumentException>();
     }
@@ -733,8 +734,8 @@ public class PostgresStudioEndpointsTests
     {
         await using WebApplication app = CreateApp(
             static options => options.AuthorizationPolicy = "ops",
-            static builder => builder.Services.AddAuthorization(static options => options.AddPolicy("ops", static policy => policy.RequireAssertion(static _ => true))));
-        app.MapPostgresStudio();
+            configureBuilder: static builder => builder.Services.AddAuthorization(static options => options.AddPolicy("ops", static policy => policy.RequireAssertion(static _ => true))));
+        app.MapDataStudio();
 
         List<RouteEndpoint> studio = [.. RouteEndpoints(app).Where(static x => x.Metadata.GetMetadata<StudioEndpointMarker>() is not null)];
 
@@ -764,7 +765,7 @@ public class PostgresStudioEndpointsTests
             Interlocked.Increment(ref resolved);
             return NpgsqlDataSource.Create(ConnectionString);
         });
-        builder.Services.AddPostgresStudio(options =>
+        builder.Services.AddDataStudio().AddPostgres(options =>
         {
             Interlocked.Increment(ref configured);
             options.BrowsableSchemas.Add("*");

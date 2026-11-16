@@ -17,7 +17,6 @@ using Microsoft.Extensions.Logging;
 
 using Npgsql;
 
-using DataStudio.Postgres;
 
 namespace DataStudio.Kafka.Integration.Tests.Sample;
 
@@ -192,10 +191,10 @@ public class SampleHostLiveTests(SampleHostFixture fixture) : IClassFixture<Samp
             services.AddLogging(static builder => builder.SetMinimumLevel(LogLevel.Warning));
             services.AddHttpContextAccessor();
             services.AddSingleton(NpgsqlDataSource.Create("Host=127.0.0.1;Port=1;Database=none;Username=none;Password=none"));
-            services.AddPostgresStudio();
+            services.AddDataStudio().AddPostgres();
             services.AddAuthorization(SamplePolicies.Configure);
             SampleKafkaPolicies.AddHandlers(services);
-            services.AddKafkaStudio(options => SampleKafkaRegistration.Configure(options, bootstrap));
+            services.AddDataStudio().AddKafka(options => SampleKafkaRegistration.Configure(options, bootstrap));
 
             // After the studio's own: the circuit's visitor, signed in as the sample's user.
             ClaimsPrincipal principal = DevUsers.Authenticate(user, user)!;

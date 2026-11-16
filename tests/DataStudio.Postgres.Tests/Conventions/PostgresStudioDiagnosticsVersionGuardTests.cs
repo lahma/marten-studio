@@ -8,10 +8,10 @@ using DataStudio.Postgres.Internal;
 namespace DataStudio.Postgres.Tests.Conventions;
 
 /// <summary>
-/// <c>AddPostgresStudio</c> refuses to start beside a newer DataStudio.Postgres.Diagnostics than its own, or another build of
+/// <c>AddPostgres</c> refuses to start beside a newer DataStudio.Postgres.Diagnostics than its own, or another build of
 /// its version, and says why - which is what a central <c>PackageVersion</c> at another version produces under transitive
 /// pinning (PS-0, 2026-10-20, for the same pin one package up). A missing or older engine never reaches it: the runtime
-/// loads the engine to compile <c>AddPostgresStudio</c> itself and fails in the loader, naming it.
+/// loads the engine to compile <c>AddPostgres</c> itself and fails in the loader, naming it.
 /// </summary>
 /// <remarks>
 /// In this test host the engine is always present and always the same build, so the two failures are driven through the
@@ -52,7 +52,7 @@ public class PostgresStudioDiagnosticsVersionGuardTests
             .Should().Be(PostgresStudioDiagnosticsVersionGuard.InformationalVersion(Studio), "and the shell too: one build stamps all three");
 
         FluentActions.Invoking(() => PostgresStudioDiagnosticsVersionGuard.Ensure()).Should().NotThrow();
-        FluentActions.Invoking(() => new ServiceCollection().AddPostgresStudio()).Should().NotThrow();
+        FluentActions.Invoking(() => new ServiceCollection().AddDataStudio().AddPostgres()).Should().NotThrow();
     }
 
     [Fact]
@@ -67,12 +67,12 @@ public class PostgresStudioDiagnosticsVersionGuardTests
 
         refusal.InnerException.Should().BeSameAs(missing);
         refusal.Message.Should()
-            .Contain($"PostgresStudio {required} needs DataStudio.Postgres.Diagnostics {required} exactly")
+            .Contain($"DataStudio.Postgres {required} needs DataStudio.Postgres.Diagnostics {required} exactly")
             .And.Contain("deployed without DataStudio.Postgres.Diagnostics")
             .And.Contain("central PackageVersion for DataStudio.Postgres.Diagnostics")
             .And.Contain("CentralPackageTransitivePinningEnabled")
             .And.Contain($"pin DataStudio.Postgres.Diagnostics to {required}")
-            .And.Contain("let PostgresStudio bring it");
+            .And.Contain("let DataStudio.Postgres bring it");
     }
 
     [Fact]
@@ -87,12 +87,12 @@ public class PostgresStudioDiagnosticsVersionGuardTests
 
         refusal.InnerException.Should().BeSameAs(missing);
         refusal.Message.Should()
-            .Contain($"PostgresStudio {required} needs DataStudio {required} exactly")
+            .Contain($"DataStudio.Postgres {required} needs DataStudio {required} exactly")
             .And.Contain("deployed without DataStudio.")
             .And.Contain("central PackageVersion for DataStudio at another version")
             .And.Contain("CentralPackageTransitivePinningEnabled")
             .And.Contain($"pin DataStudio to {required}")
-            .And.Contain("let PostgresStudio bring it");
+            .And.Contain("let DataStudio.Postgres bring it");
     }
 
     [Fact]
@@ -101,7 +101,7 @@ public class PostgresStudioDiagnosticsVersionGuardTests
         FluentActions.Invoking(() => PostgresStudioDiagnosticsVersionGuard.Ensure(WithVersion("0.11.0"), () => WithVersion("0.11.0"), () => WithVersion("0.11.1")))
             .Should().Throw<InvalidOperationException>()
             .Which.Message.Should()
-            .Contain("PostgresStudio 0.11.0 needs DataStudio 0.11.0 exactly, and found DataStudio 0.11.1.")
+            .Contain("DataStudio.Postgres 0.11.0 needs DataStudio 0.11.0 exactly, and found DataStudio 0.11.1.")
             .And.Contain("central PackageVersion or a PackageReference for DataStudio must say 0.11.0");
     }
 
@@ -119,7 +119,7 @@ public class PostgresStudioDiagnosticsVersionGuardTests
         FluentActions.Invoking(() => PostgresStudioDiagnosticsVersionGuard.Ensure(WithVersion("0.11.0"), () => WithVersion("0.11.1")))
             .Should().Throw<InvalidOperationException>()
             .Which.Message.Should()
-            .Contain("PostgresStudio 0.11.0 needs DataStudio.Postgres.Diagnostics 0.11.0 exactly, and found DataStudio.Postgres.Diagnostics 0.11.1.")
+            .Contain("DataStudio.Postgres 0.11.0 needs DataStudio.Postgres.Diagnostics 0.11.0 exactly, and found DataStudio.Postgres.Diagnostics 0.11.1.")
             .And.Contain("upgraded together")
             .And.Contain("central PackageVersion or a PackageReference for DataStudio.Postgres.Diagnostics must say 0.11.0");
     }
@@ -127,7 +127,7 @@ public class PostgresStudioDiagnosticsVersionGuardTests
     /// <summary>
     /// The commit after the <c>+</c> is compared when, and only when, both assemblies are Release builds - as every pack
     /// is - and both carry one: the same version packed from two commits is refused. A Debug build compares the release
-    /// versions only, because an IDE's incremental build after a commit recompiles PostgresStudio with the new commit and
+    /// versions only, because an IDE's incremental build after a commit recompiles DataStudio.Postgres with the new commit and
     /// leaves an unchanged engine on the old one; so does a mixed pair, a missing configuration, and a side with no commit.
     /// </summary>
     [Theory]
@@ -189,7 +189,7 @@ public class PostgresStudioDiagnosticsVersionGuardTests
                 WithVersion("0.11.0+5f1c2a9d", "Release"), () => WithVersion("0.11.0+0b7e3c41", "Release")))
             .Should().Throw<InvalidOperationException>()
             .Which.Message.Should()
-            .Contain("PostgresStudio 0.11.0+5f1c2a9d needs DataStudio.Postgres.Diagnostics 0.11.0+5f1c2a9d exactly, and found DataStudio.Postgres.Diagnostics 0.11.0+0b7e3c41.")
+            .Contain("DataStudio.Postgres 0.11.0+5f1c2a9d needs DataStudio.Postgres.Diagnostics 0.11.0+5f1c2a9d exactly, and found DataStudio.Postgres.Diagnostics 0.11.0+0b7e3c41.")
             .And.Contain("must say 0.11.0,");
     }
 
@@ -215,16 +215,16 @@ public class PostgresStudioDiagnosticsVersionGuardTests
     }
 
     /// <summary>
-    /// The public <c>AddPostgresStudio</c> and the guard name no DataStudio.Postgres.Diagnostics type or member - in a call, a
+    /// The public <c>AddPostgres</c> and the guard name no DataStudio.Postgres.Diagnostics type or member - in a call, a
     /// field, a token or a local - so the JIT can compile them, and the guard can explain, when a newer engine whose members
     /// moved is loaded.
     /// </summary>
     [Fact]
-    public void Neither_AddPostgresStudio_nor_the_guard_names_an_engine_member()
+    public void Neither_AddPostgres_nor_the_guard_names_an_engine_member()
     {
         MethodBase[] methods =
         [
-            AddPostgresStudio,
+            AddPostgres,
             .. GuardMethods(),
         ];
 
@@ -238,16 +238,16 @@ public class PostgresStudioDiagnosticsVersionGuardTests
     [Fact]
     public void The_scan_finds_engine_members_where_they_are_meant_to_be()
     {
-        MethodInfo services = typeof(PostgresStudioServiceCollectionExtensions).GetMethod("AddPostgresStudioServices", Declared)!;
+        MethodInfo services = typeof(PostgresDataStudioBuilderExtensions).GetMethod("AddPostgresServices", Declared)!;
 
         services.Should().NotBeNull();
-        EngineMembersIn(services).Should().NotBeEmpty("AddPostgresStudioServices registers the engine's seams");
+        EngineMembersIn(services).Should().NotBeEmpty("AddPostgresServices registers the engine's seams");
     }
 
     [Fact]
     public void What_names_the_engine_is_never_inlined_into_what_runs_before_the_guard()
     {
-        MethodInfo services = typeof(PostgresStudioServiceCollectionExtensions).GetMethod("AddPostgresStudioServices", Declared)!;
+        MethodInfo services = typeof(PostgresDataStudioBuilderExtensions).GetMethod("AddPostgresServices", Declared)!;
         MethodInfo ensure = typeof(PostgresStudioDiagnosticsVersionGuard).GetMethod(nameof(PostgresStudioDiagnosticsVersionGuard.Ensure), Type.EmptyTypes)!;
         MethodInfo load = typeof(PostgresStudioDiagnosticsVersionGuard).GetMethod("LoadDiagnostics", Declared)!;
         MethodInfo loadShell = typeof(PostgresStudioDiagnosticsVersionGuard).GetMethod("LoadShell", Declared)!;
@@ -260,10 +260,10 @@ public class PostgresStudioDiagnosticsVersionGuardTests
         }
     }
 
-    private static MethodInfo AddPostgresStudio =>
-        typeof(PostgresStudioServiceCollectionExtensions).GetMethod(
-            nameof(PostgresStudioServiceCollectionExtensions.AddPostgresStudio),
-            [typeof(IServiceCollection), typeof(Action<PostgresStudioOptions>)])!;
+    private static MethodInfo AddPostgres =>
+        typeof(PostgresDataStudioBuilderExtensions).GetMethod(
+            nameof(PostgresDataStudioBuilderExtensions.AddPostgres),
+            [typeof(DataStudioBuilder), typeof(Action<PostgresStudioOptions>)])!;
 
     /// <summary>
     /// A throwaway in-memory assembly carrying <paramref name="informationalVersion" />, so every pair of versions the
@@ -374,8 +374,13 @@ public class PostgresStudioDiagnosticsVersionGuardTests
         }
     }
 
-    /// <summary>A type of the engine or of the shell: the two assemblies the guard checks, which neither it nor <c>AddPostgresStudio</c> may name.</summary>
+    /// <summary>
+    /// A type of the engine or of the shell: the two assemblies the guard checks, which neither it nor <c>AddPostgres</c> may name - except the
+    /// shell's <c>DataStudioBuilder</c>, which is <c>AddPostgres</c>'s own first parameter: the loader resolves it before the body runs whatever the body
+    /// names (as it does the engine-derived options type), so the guard cannot cover it, and the body only hands it on.
+    /// </summary>
     private static bool IsEngine(Type type) =>
         !type.IsGenericParameter
+        && type != typeof(DataStudioBuilder)
         && type.Assembly.GetName().Name is PostgresStudioDiagnosticsVersionGuard.DiagnosticsAssemblyName or PostgresStudioDiagnosticsVersionGuard.ShellAssemblyName;
 }

@@ -8,6 +8,7 @@
 @using DataStudio.Marten.Services.Projections
 @using Microsoft.Extensions.DependencyInjection
 @using Microsoft.Extensions.Options
+@using DataStudio.Postgres.Services.Settings
 @using DataStudio.Postgres.Components.Shared
 @using DataStudio.Postgres.Services
 @using DataStudio.Postgres.Services.Health
@@ -21,6 +22,7 @@
 @inject StudioLiveUpdatesFactory LiveFactory
 @inject ToastService Toasts
 @inject IOptions<MartenStudioOptions> Options
+@inject IStudioSettings StudioSettings
 @inject IHealthService Health
 @inject IServiceProvider Services
 @inject DataStudio.Marten.Services.Events.IEventDataService EventData
@@ -1005,7 +1007,7 @@
 
         if (live is not null && !disposed)
         {
-            await live.StartAsync(Options.Value.RefreshInterval, TickAsync, pageCancellation.Token);
+            await live.StartAsync(StudioSettings.RefreshInterval, TickAsync, pageCancellation.Token);
         }
     }
 
@@ -2119,7 +2121,7 @@
 
     private string FreshnessTitle => view is null
         ? string.Empty
-        : $"Read {Preferences.FormatInSelectedTimeZone(view.ReadAt)}; refreshed every {Options.Value.RefreshInterval.TotalSeconds:0.#} s and paused while this tab is hidden.";
+        : $"Read {Preferences.FormatInSelectedTimeZone(view.ReadAt)}; refreshed every {StudioSettings.RefreshInterval.TotalSeconds:0.#} s and paused while this tab is hidden.";
 
     /// <summary>When the studio paused this store's coordinator, in the visitor's selected time zone.</summary>
     private string PausedAtText => view?.Daemon.PausedByStudio is { } pause

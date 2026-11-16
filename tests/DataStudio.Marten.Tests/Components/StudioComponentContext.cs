@@ -64,6 +64,7 @@ internal class StudioComponentContext : BunitContext
     public StudioComponentContext(Action<IServiceCollection>? configure = null)
     {
         Options = new MartenStudioOptions();
+        ShellOptions = new DataStudioOptions();
         Catalog = new FakeStudioScopeCatalog();
         StoreInfo = new FakeStoreInfoService();
         EventData = new FakeEventDataService();
@@ -86,9 +87,10 @@ internal class StudioComponentContext : BunitContext
         // What the shared shell reads in place of the options: the live settings adapter over the same options
         // instance - so WithPolicy, WithReadOnly and every test that sets an option after construction are seen - the
         // descriptor, and the links into MartenStudio's own screens.
+        Services.AddSingleton<IOptions<DataStudioOptions>>(Microsoft.Extensions.Options.Options.Create(ShellOptions));
+        Services.AddSingleton<IShellSettings, ShellSettings>();
         Services.AddSingleton<IStudioSettings>(static provider =>
-            new MartenStudioSettings(provider.GetRequiredService<IOptions<MartenStudioOptions>>()));
-        Services.AddSingleton<IShellSettings>(static provider => provider.GetRequiredService<IStudioSettings>());
+            new MartenStudioSettings(provider.GetRequiredService<IOptions<MartenStudioOptions>>(), provider.GetRequiredService<IShellSettings>()));
         Services.AddSingleton(MartenStudioDescriptor.Instance);
         Services.AddSingleton<IStudioLinks, MartenStudioLinks>();
         Services.AddSingleton<IHttpContextAccessor>(new HttpContextAccessor());
@@ -155,12 +157,12 @@ internal class StudioComponentContext : BunitContext
 
         Services.AddSingleton<StudioCapabilityGuard>();
 
-        // The shell as AddMartenStudio() leaves a circuit: the database as the root module, the shell's descriptor composed from the modules
+        // The shell as AddMarten() leaves a circuit: the database as the root module, the shell's descriptor composed from the modules
         // registered, and what the module's scope gate answered. The context's one root is the one circuit, so all three are singletons here.
         Services.AddSingleton<IStudioModule>(static provider => new DatabaseStudioModule(
             provider.GetRequiredService<StudioDescriptor>(), provider.GetRequiredService<IStudioSettings>(), provider.GetRequiredService<StudioCapabilityGuard>()));
         Services.AddSingleton(static provider =>
-            StudioModuleComposition.Compose(provider.GetRequiredService<StudioDescriptor>().ShellIdentity, provider.GetServices<IStudioModule>()));
+            StudioModuleComposition.Compose(provider.GetServices<IStudioModule>()));
         Services.AddSingleton<DatabaseScopeAccess>();
         Services.AddSingleton<IStudioModuleRail, DatabaseModuleRail>();
         Services.AddSingleton<ToastService>();
@@ -186,6 +188,9 @@ internal class StudioComponentContext : BunitContext
 
     /// <summary>The options an application would have configured.</summary>
     public MartenStudioOptions Options { get; }
+
+    /// <summary>The shell's options: the mount, the title, the entry policy, the application path and the poll interval are its, not the module's.</summary>
+    public DataStudioOptions ShellOptions { get; }
 
     /// <summary>What the header is offered.</summary>
     public FakeStudioScopeCatalog Catalog { get; }

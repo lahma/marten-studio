@@ -283,7 +283,7 @@ public class DeadLetterLiveTests(PoisonStoreFixture fixture) : IClassFixture<Poi
         services.AddSingleton<Microsoft.AspNetCore.Components.Authorization.AuthenticationStateProvider, StubAuthenticationStateProvider>();
         services.AddSingleton(store);
 
-        services.AddMartenStudio(options =>
+        services.AddDataStudio().AddMarten(options =>
         {
             options.Capabilities = MartenStudioCapabilities.All();
             options.DiscoverTenantIds = false;

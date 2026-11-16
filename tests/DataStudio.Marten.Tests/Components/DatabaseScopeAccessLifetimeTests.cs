@@ -33,7 +33,7 @@ public class DatabaseScopeAccessLifetimeTests
             services.AddSingleton<IScrollToLocationHash, QuietScrollToLocationHash>();
         });
 
-        context.Options.RefreshInterval = TimeSpan.FromMinutes(5);
+        context.ShellOptions.RefreshInterval = TimeSpan.FromMinutes(5);
         context.StoreInfo.WithStore("default", "Default", databaseIdentity: "db-a").WithStore("other", "Other", databaseIdentity: "db-x");
         context.Catalog
             .WithStore("default", "Default", databaseIdentities: "db-a")
@@ -98,7 +98,7 @@ public class DatabaseScopeAccessLifetimeTests
             services.AddSingleton<IScrollToLocationHash, QuietScrollToLocationHash>();
         });
 
-        context.Options.RefreshInterval = TimeSpan.FromMinutes(5);
+        context.ShellOptions.RefreshInterval = TimeSpan.FromMinutes(5);
         context.StoreInfo.WithStore("default", "Default", databaseIdentity: "db-a");
         context.Catalog.WithStore("default", "Default", databaseIdentities: "db-a");
         context.WithPolicy("default");

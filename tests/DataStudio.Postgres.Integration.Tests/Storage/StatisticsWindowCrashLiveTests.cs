@@ -187,7 +187,7 @@ public class StatisticsWindowCrashLiveTests
         collection.AddAuthorization();
         collection.AddSingleton<AuthenticationStateProvider, Anonymous>();
         collection.AddSingleton(NpgsqlDataSource.Create(own.ConnectionString));
-        collection.AddPostgresStudio(studio => studio.Capabilities = PostgresStudioCapabilities.All());
+        collection.AddDataStudio().AddPostgres(studio => studio.Capabilities = PostgresStudioCapabilities.All());
 
         return collection.BuildServiceProvider();
     }

@@ -423,9 +423,8 @@ public class ReadPathNoDdlLiveTests(PostgresFixture fixture)
                 options.Schema.For<Ledger>();
             });
 
-            services.AddMartenStudio(static options =>
+            services.AddDataStudio().AddMarten(static options =>
             {
-                options.AuthorizationPolicy = null;
                 options.DiscoverTenantIds = false;
             });
 

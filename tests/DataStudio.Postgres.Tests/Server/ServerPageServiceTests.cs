@@ -29,7 +29,7 @@ public class ServerPageServiceTests
         ServiceCollection services = new();
         services.AddLogging();
         services.AddSingleton(NpgsqlDataSource.Create(ConnectionString));
-        services.AddPostgresStudio(static options => options.SourceAuthorizationPolicy = "src");
+        services.AddDataStudio().AddPostgres(static options => options.SourceAuthorizationPolicy = "src");
         services.AddSingleton<IAuthorizationService>(policy);
         services.AddScoped<AuthenticationStateProvider, TestAuthenticationStateProvider>();
         return services.BuildServiceProvider();

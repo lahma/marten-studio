@@ -543,7 +543,7 @@ public class RelationshipsDemoLiveTests(RelationshipsDemoFixture fixture) : ICla
             options.AutoCreateSchemaObjects = AutoCreate.None;
         });
 
-        services.AddMartenStudio(options =>
+        services.AddDataStudio().AddMarten(options =>
         {
             options.ReadOnly = false;
             options.Capabilities = MartenStudioCapabilities.All();

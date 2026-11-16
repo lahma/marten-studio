@@ -1,4 +1,5 @@
 using DataStudio.Postgres.Services.Settings;
+using DataStudio.Services.Settings;
 
 using Microsoft.Extensions.Options;
 using DataStudio.Postgres.Services;
@@ -6,32 +7,46 @@ using DataStudio.Postgres.Services;
 namespace DataStudio.Marten.Services;
 
 /// <summary>
-/// MartenStudio's <see cref="IStudioSettings" />: a live adapter over <see cref="MartenStudioOptions" />.
+/// The Marten module's <see cref="IStudioSettings" />: a live adapter over <see cref="MartenStudioOptions" /> and the shell's settings.
 /// </summary>
 /// <remarks>
-/// Every member reads <see cref="IOptions{TOptions}.Value" /> again, so <c>MapMartenStudio(pattern)</c>'s write of
-/// <see cref="MartenStudioOptions.Path" /> onto the resolved instance after startup is seen by every shared component,
-/// exactly as it was when they read the options themselves.
+/// Every member reads its options again, so <c>MapDataStudio(pattern)</c>'s write of <c>DataStudioOptions.Path</c> onto the resolved instance after
+/// startup is seen by every shared component. What belongs to the shell - the mount, the title, the entry policy, the poll interval - is answered
+/// from the shell's settings; <see cref="ReadOnly" /> is either switch's (the shell's turns every module's capabilities off, this module's only its own).
 /// </remarks>
 internal sealed class MartenStudioSettings : IStudioSettings
 {
     private readonly IOptions<MartenStudioOptions> options;
+    private readonly IShellSettings shell;
 
+    /// <summary>The settings over <paramref name="options" /> and a default shell, for a caller that builds the services by hand and has no shell of its own.</summary>
     public MartenStudioSettings(IOptions<MartenStudioOptions> options)
+        : this(options, DefaultShell())
+    {
+    }
+
+    public MartenStudioSettings(IOptions<MartenStudioOptions> options, IShellSettings shell)
     {
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(shell);
         this.options = options;
+        this.shell = shell;
     }
 
-    /// <summary>The adapter over <paramref name="options" />, for a caller that builds the studio's services by hand.</summary>
-    public static MartenStudioSettings Of(MartenStudioOptions options)
+    /// <summary>The adapter over <paramref name="options" /> and the shell's <paramref name="shell" /> settings, for a caller that builds the services by hand.</summary>
+    public static MartenStudioSettings Of(MartenStudioOptions options, IShellSettings shell)
     {
         ArgumentNullException.ThrowIfNull(options);
-        return new MartenStudioSettings(Options.Create(options));
+        return new MartenStudioSettings(Options.Create(options), shell);
     }
 
-    /// <summary>The adapter over <paramref name="options" />.</summary>
-    public static MartenStudioSettings Of(IOptions<MartenStudioOptions> options) => new(options);
+    /// <summary>The adapter over <paramref name="options" /> and a default shell, for a caller that builds the services by hand.</summary>
+    public static MartenStudioSettings Of(MartenStudioOptions options) => Of(options, DefaultShell());
+
+    /// <summary>The adapter over <paramref name="options" /> and a default shell.</summary>
+    public static MartenStudioSettings Of(IOptions<MartenStudioOptions> options) => new(options, DefaultShell());
+
+    private static ShellSettings DefaultShell() => new(Options.Create(new DataStudioOptions()));
 
     private MartenStudioOptions Value => options.Value;
 
@@ -51,22 +66,22 @@ internal sealed class MartenStudioSettings : IStudioSettings
     public StudioText Text => StudioText.Marten;
 
     /// <inheritdoc />
-    public string Title => Value.Title;
+    public string Title => shell.Title;
 
     /// <inheritdoc />
-    public string TrimmedPath => Value.TrimmedPath;
+    public string TrimmedPath => shell.TrimmedPath;
 
     /// <inheritdoc />
-    public string EscapedPath => Value.EscapedPath;
+    public string EscapedPath => shell.EscapedPath;
 
     /// <inheritdoc />
-    public bool HasCustomPath => Value.HasCustomPath;
+    public bool HasCustomPath => shell.HasCustomPath;
 
     /// <inheritdoc />
-    public string? ApplicationPath => Value.ApplicationPath;
+    public string? ApplicationPath => shell.ApplicationPath;
 
     /// <inheritdoc />
-    public string? AuthorizationPolicy => Value.AuthorizationPolicy;
+    public string? AuthorizationPolicy => shell.AuthorizationPolicy;
 
     /// <inheritdoc />
     public string? ScopePolicy => Value.StoreAuthorizationPolicy;
@@ -75,10 +90,11 @@ internal sealed class MartenStudioSettings : IStudioSettings
     public string? WritePolicy => Value.WriteAuthorizationPolicy;
 
     /// <inheritdoc />
-    public bool ReadOnly => Value.ReadOnly;
+    public bool ReadOnly => shell.ReadOnly || Value.ReadOnly;
 
     /// <inheritdoc />
-    public string ReadOnlyOptionName => ((IDiagnosticsSettings) this).OptionName("ReadOnly");
+    /// <remarks>The switch that is on: the shell's when it is, else this module's - which is also the one a host reads to learn which switch exists.</remarks>
+    public string ReadOnlyOptionName => shell.ReadOnly ? shell.ReadOnlyOptionName : ((IDiagnosticsSettings) this).OptionName("ReadOnly");
 
     /// <inheritdoc />
     /// <remarks>Every member: MartenStudio offers all fourteen.</remarks>
@@ -112,10 +128,11 @@ internal sealed class MartenStudioSettings : IStudioSettings
     public string? StudioApplicationName => Value.StudioApplicationName;
 
     /// <inheritdoc />
-    public TimeSpan RefreshInterval => Value.RefreshInterval;
+    public TimeSpan RefreshInterval => shell.RefreshInterval;
 
     /// <inheritdoc />
-    public TimeSpan EffectiveHealthInterval => Value.EffectiveHealthInterval;
+    /// <remarks><c>HealthInterval</c>, or the shell's <c>RefreshInterval</c> when that is longer: the advisor never runs faster than a page polls.</remarks>
+    public TimeSpan EffectiveHealthInterval => Value.HealthInterval >= shell.RefreshInterval ? Value.HealthInterval : shell.RefreshInterval;
 
     /// <inheritdoc />
     public long ExactCountThreshold => Value.ExactCountThreshold;

@@ -22,41 +22,12 @@ using System.Collections.Frozen;
 namespace DataStudio.Marten;
 
 /// <summary>
-/// Options for Marten Studio, configured through <c>AddMartenStudio(Action&lt;MartenStudioOptions&gt;)</c>.
-/// Validation runs at startup.
+/// Options for the Marten module of Data Studio, configured through <c>AddMarten(Action&lt;MartenStudioOptions&gt;)</c>.
+/// Validation runs at startup. Where the studio is mounted, what it is called, who gets in and how often a live page polls are the shell's
+/// (<c>DataStudioOptions</c>); <see cref="ReadOnly" /> here turns only this module's capabilities off.
 /// </summary>
 public sealed class MartenStudioOptions
 {
-    internal const string DefaultPath = "/marten";
-
-    /// <summary>
-    /// The path the studio is mounted at. Must start with <c>/</c> and be a plain routable path (no route
-    /// parameters, query or fragment). <c>MapMartenStudio(pattern)</c> overrides it.
-    /// </summary>
-    public string Path { get; set; } = DefaultPath;
-
-    /// <summary>
-    /// The title shown in the browser tab and the header.
-    /// </summary>
-    public string Title { get; set; } = "Marten Studio";
-
-    /// <summary>
-    /// Where the header's "Back to application" link goes, or <see langword="null" /> (the default) for no link. Either a
-    /// host-relative path that starts with a single <c>/</c> (<c>/</c>, <c>/app</c>) or an absolute <c>http</c> or
-    /// <c>https</c> URL without user information. It is used exactly as written and is never re-rooted under the studio's mount
-    /// path, so <c>/</c> is the host's own front page, not the studio's. A host that runs behind <c>UsePathBase</c> includes its
-    /// base (<c>/myapp/</c>): the option is not rewritten for it. Validated at startup.
-    /// </summary>
-    public string? ApplicationPath { get; set; }
-
-    /// <summary>
-    /// When set, the policy applied to every studio endpoint: pages, the Blazor circuit and the static
-    /// assets. When <see langword="null"/> the studio adds no policy of its own and refuses to start
-    /// unless the mapping calls <c>RequireAuthorization()</c> or <c>AllowAnonymous()</c>, or the host has
-    /// an <c>AuthorizationOptions.FallbackPolicy</c>.
-    /// </summary>
-    public string? AuthorizationPolicy { get; set; }
-
     /// <summary>
     /// When set, evaluated against a <see cref="MartenStoreResource"/> (with a <see langword="null"/>
     /// capability) before a store, database or tenant is listed, framed or read.
@@ -71,8 +42,9 @@ public sealed class MartenStudioOptions
     public string? WriteAuthorizationPolicy { get; set; }
 
     /// <summary>
-    /// Master switch: when <see langword="true"/> every capability is off regardless of
-    /// <see cref="Capabilities"/>, mutating controls are not rendered and the services refuse mutations.
+    /// This module's master switch: when <see langword="true"/> every capability of the module is off regardless of
+    /// <see cref="Capabilities"/>, mutating controls are not rendered and the services refuse mutations. The shell's
+    /// <c>DataStudioOptions.ReadOnly</c> turns off every module's.
     /// </summary>
     public bool ReadOnly { get; set; }
 
@@ -164,14 +136,8 @@ public sealed class MartenStudioOptions
     public long ExactCountThreshold { get; set; } = 100_000;
 
     /// <summary>
-    /// How often live pages poll for changes. Between one second and five minutes. Polling pauses while
-    /// the tab is hidden.
-    /// </summary>
-    public TimeSpan RefreshInterval { get; set; } = TimeSpan.FromSeconds(5);
-
-    /// <summary>
     /// How often the health advisor re-checks a database while somebody has its Health page or the
-    /// Overview open. Between fifteen seconds and one hour; a <see cref="RefreshInterval"/> longer than it
+    /// Overview open. Between fifteen seconds and one hour; the shell's <c>RefreshInterval</c> when longer
     /// wins, so the advisor never checks more often than the pages poll.
     /// </summary>
     /// <remarks>
@@ -187,13 +153,6 @@ public sealed class MartenStudioOptions
     /// </para>
     /// </remarks>
     public TimeSpan HealthInterval { get; set; } = TimeSpan.FromSeconds(60);
-
-    /// <summary>
-    /// The cadence the advisor really runs at: <see cref="HealthInterval"/>, or <see cref="RefreshInterval"/>
-    /// when that is longer. A clamp rather than a startup error, so a host that already polls slowly is not
-    /// refused a start by an option it never set.
-    /// </summary>
-    internal TimeSpan EffectiveHealthInterval => HealthInterval >= RefreshInterval ? HealthInterval : RefreshInterval;
 
     private readonly Dictionary<string, string> acceptedChecks = new(StringComparer.OrdinalIgnoreCase);
 
@@ -368,49 +327,4 @@ public sealed class MartenStudioOptions
     /// descriptors and, failing that, a bounded query.
     /// </summary>
     public bool DiscoverTenantIds { get; set; } = true;
-
-    /// <summary>
-    /// <see cref="Path"/> normalized to a rooted path without a trailing slash, falling back to
-    /// <see cref="DefaultPath"/> when unset or empty.
-    /// </summary>
-    internal string TrimmedPath => PathCache.Trimmed;
-
-    /// <summary>
-    /// Whether <see cref="Path"/> differs from the compile-time default "/marten".
-    /// </summary>
-    /// <remarks>
-    /// A fact, and nothing behaves differently on it. Every mount is studio-rooted now — the studio
-    /// always re-roots its own <c>/_blazor</c>, its framework script and its asset mirror under
-    /// <see cref="Path"/> and always renders a studio-rooted <c>&lt;base href&gt;</c> — because a
-    /// default mount that left a second <c>/_blazor</c> at the application root was an
-    /// <c>AmbiguousMatchException</c> in any host with a Blazor app of its own, and because two shapes
-    /// meant the shape nobody runs locally was the one that broke in production.
-    /// </remarks>
-    internal bool HasCustomPath => PathCache.HasCustom;
-
-    /// <summary>
-    /// <see cref="TrimmedPath"/> in its percent-encoded form, as browsers emit it in
-    /// request URIs and the &lt;base href&gt;. Server-side route patterns keep the raw
-    /// form (route matching compares decoded values); client-side URI comparisons need this one.
-    /// </summary>
-    internal string EscapedPath => PathCache.Escaped;
-
-    private DataStudio.Postgres.Services.Settings.StudioPath? pathCache;
-
-    /// <summary>
-    /// Values derived from <see cref="Path"/>, computed once and reused — they are read
-    /// on Blazor render hot paths (links, route matching) while the option itself only changes
-    /// during startup configuration. Held behind a single reference so a concurrent reader always
-    /// observes a fully-populated instance (reference reads/writes are atomic) even if the option
-    /// is mutated mid-render.
-    /// </summary>
-    private DataStudio.Postgres.Services.Settings.StudioPath PathCache
-    {
-        get
-        {
-            DataStudio.Postgres.Services.Settings.StudioPath cache = DataStudio.Postgres.Services.Settings.StudioPath.Of(Path, DefaultPath, pathCache);
-            pathCache = cache;
-            return cache;
-        }
-    }
 }

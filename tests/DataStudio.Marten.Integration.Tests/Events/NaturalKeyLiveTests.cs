@@ -177,7 +177,7 @@ public sealed class NaturalKeyFixture(PostgresFixture postgres) : IAsyncLifetime
         services.AddAuthorization();
         services.AddSingleton<AuthenticationStateProvider, StubAuthenticationStateProvider>();
         services.AddSingleton(store);
-        services.AddMartenStudio(options =>
+        services.AddDataStudio().AddMarten(options =>
         {
             options.IsDocumentTypeVisible = isVisible;
             options.DiscoverTenantIds = false;

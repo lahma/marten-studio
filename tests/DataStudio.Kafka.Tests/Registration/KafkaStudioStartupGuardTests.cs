@@ -16,8 +16,8 @@ public class KafkaStudioStartupGuardTests
     {
         ServiceCollection services = new();
         services.AddLogging();
-        services.AddPostgresStudio(studio);
-        services.AddKafkaStudio(kafka);
+        services.AddDataStudio().AddPostgres(studio);
+        services.AddDataStudio().AddKafka(kafka);
         ServiceProvider provider = services.BuildServiceProvider();
 
         return provider.GetServices<IHostedService>().OfType<KafkaStudioStartupGuard>().Single().StartAsync(Ct);

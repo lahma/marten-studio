@@ -217,7 +217,7 @@ internal sealed class LinqQueryHarness : IAsyncDisposable
             options.Schema.For<LinqLiveHidden>();
         });
 
-        services.AddMartenStudio(options =>
+        services.AddDataStudio().AddMarten(options =>
         {
             options.Capabilities.RunLinqQueries = true;
             options.QueryTimeout = TimeSpan.FromSeconds(30);

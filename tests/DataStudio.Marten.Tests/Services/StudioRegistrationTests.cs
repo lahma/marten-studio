@@ -304,7 +304,7 @@ public class StudioRegistrationTests
     public void AddMartenStudio_registers_the_same_services_with_the_same_lifetimes_and_order_as_before_the_move()
     {
         ServiceCollection services = new();
-        services.AddMartenStudio();
+        services.AddDataStudio().AddMarten();
 
         string[] actual = Describe(services.Select(Read));
         string[] expected = Describe(Expected);
@@ -347,7 +347,7 @@ public class StudioRegistrationTests
         services.AddLogging();
         services.AddAuthorizationCore();
         services.AddMarten(static options => options.Connection("Host=marten-studio-registration.invalid;Database=none;Username=none;Password=none"));
-        services.AddMartenStudio();
+        services.AddDataStudio().AddMarten();
 
         services.Where(static x => x.ImplementationFactory is not null && !x.IsKeyedService && IsStudio(x.ServiceType))
             .Select(static x => x.ServiceType)

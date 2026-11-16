@@ -196,7 +196,7 @@ public class FeedTests
 
         // A short interval so the test is about the behaviour rather than about waiting. Options
         // validation (one second minimum) runs in AddMartenStudio, which a component test does not use.
-        context.Options.RefreshInterval = TimeSpan.FromMilliseconds(20);
+        context.ShellOptions.RefreshInterval = TimeSpan.FromMilliseconds(20);
 
         context.EventData.Feed = new EventPage([FakeEventDataService.Event(10)], 10, false);
         context.EventData.HighestSequences.Enqueue(10);
@@ -273,7 +273,7 @@ public class FeedTests
     {
         using StudioComponentContext context = await NewContextAsync();
 
-        context.Options.RefreshInterval = TimeSpan.FromMilliseconds(20);
+        context.ShellOptions.RefreshInterval = TimeSpan.FromMilliseconds(20);
 
         context.EventData.Feed = new EventPage([FakeEventDataService.Event(10)], 10, false);
         context.EventData.HighestSequences.Enqueue(10);

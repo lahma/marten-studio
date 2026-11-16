@@ -375,10 +375,8 @@ public class TenantPartitionedEventsLiveTests(PostgresFixture postgres) : IAsync
             options.Projections.Add(new DailySalesProjection(), ProjectionLifecycle.Async);
         });
 
-        services.AddMartenStudio(options =>
+        services.AddDataStudio().AddMarten(options =>
         {
-            options.AuthorizationPolicy = null;
-
             // Stated rather than discovered: the scope resolver refuses a tenant the store cannot
             // vouch for, and what these tests are about is the read, not the selector.
             options.DiscoverTenantIds = false;

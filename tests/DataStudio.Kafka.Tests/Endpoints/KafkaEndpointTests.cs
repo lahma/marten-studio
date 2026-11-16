@@ -32,6 +32,7 @@ public class KafkaEndpointTests
     private static WebApplication CreateApp(
         bool kafka = true,
         bool dataSource = true,
+        Action<DataStudioOptions>? configureShell = null,
         Action<PostgresStudioOptions>? configureStudio = null,
         Action<KafkaStudioOptions>? configureKafka = null,
         Action<WebApplicationBuilder>? configureBuilder = null)
@@ -49,11 +50,11 @@ public class KafkaEndpointTests
             builder.Services.AddSingleton(NpgsqlDataSource.Create(ConnectionString));
         }
 
-        builder.Services.AddPostgresStudio(configureStudio);
+        builder.Services.AddDataStudio(configureShell).AddPostgres(configureStudio);
 
         if (kafka)
         {
-            builder.Services.AddKafkaStudio(options =>
+            builder.Services.AddDataStudio().AddKafka(options =>
             {
                 options.AddCluster("primary", new ClientConfig { BootstrapServers = "127.0.0.1:1" }, static cluster => cluster.DisplayName("Primary"));
                 configureKafka?.Invoke(options);
@@ -73,18 +74,18 @@ public class KafkaEndpointTests
         endpoint.Metadata.GetMetadata<Microsoft.AspNetCore.Components.Endpoints.ComponentTypeMetadata>()?.Type.Assembly == typeof(KafkaStudioOptions).Assembly;
 
     [Theory]
-    [InlineData("/postgres", "/postgres/kafka")]
+    [InlineData("/studio", "/studio/kafka")]
     [InlineData("/ops", "/ops/kafka")]
     public async Task Kafka_pages_are_served_below_the_mount(string mount, string expected)
     {
         await using WebApplication app = CreateApp();
-        if (mount == "/postgres")
+        if (mount == "/studio")
         {
-            app.MapPostgresStudio().AllowAnonymous();
+            app.MapDataStudio().AllowAnonymous();
         }
         else
         {
-            app.MapPostgresStudio(mount).AllowAnonymous();
+            app.MapDataStudio(mount).AllowAnonymous();
         }
 
         RouteEndpoints(app).Where(IsKafkaPage).Select(static x => x.RoutePattern.RawText).Should().BeEquivalentTo([expected, expected + "/record", expected + "/related", expected + "/search", expected + "/settings", expected + "/tail", expected + "/topic"], "the home, the record page, related records, search, the settings, the live tail and the topic overview");
@@ -116,14 +117,14 @@ public class KafkaEndpointTests
     [Fact]
     public async Task A_kafka_page_is_served_at_a_root_mount()
     {
-        await using WebApplication app = CreateApp(configureStudio: static options =>
+        await using WebApplication app = CreateApp(configureShell: static options =>
         {
             options.Path = "/";
-            typeof(PostgresStudioOptions)
+            typeof(DataStudioOptions)
                 .GetField("pathCache", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
-                .SetValue(options, new DataStudio.Postgres.Services.Settings.StudioPath("/", string.Empty, string.Empty, HasCustom: true));
+                .SetValue(options, new DataStudio.Services.Settings.StudioPath("/", string.Empty, string.Empty, HasCustom: true));
         });
-        app.MapPostgresStudio().AllowAnonymous();
+        app.MapDataStudio().AllowAnonymous();
 
         RouteEndpoints(app).Where(IsKafkaPage).Select(static x => x.RoutePattern.RawText).Should().BeEquivalentTo(["/kafka", "/kafka/record", "/kafka/related", "/kafka/search", "/kafka/settings", "/kafka/tail", "/kafka/topic"], "the pages, at the root of the host");
 
@@ -146,7 +147,7 @@ public class KafkaEndpointTests
     public async Task A_host_without_AddKafkaStudio_serves_no_kafka_route()
     {
         await using WebApplication app = CreateApp(kafka: false);
-        app.MapPostgresStudio().AllowAnonymous();
+        app.MapDataStudio().AllowAnonymous();
 
         RouteEndpoints(app).Where(IsKafkaPage).Should().BeEmpty();
 
@@ -154,7 +155,7 @@ public class KafkaEndpointTests
         try
         {
             using HttpClient client = app.GetTestClient();
-            using HttpResponseMessage page = await client.GetAsync(new Uri("/postgres/kafka", UriKind.Relative), Token);
+            using HttpResponseMessage page = await client.GetAsync(new Uri("/studio/kafka", UriKind.Relative), Token);
 
             page.StatusCode.Should().Be(HttpStatusCode.NotFound);
         }
@@ -168,12 +169,12 @@ public class KafkaEndpointTests
     public async Task A_host_with_no_data_source_at_all_renders_the_kafka_page_and_the_rail()
     {
         await using WebApplication app = CreateApp(dataSource: false);
-        app.MapPostgresStudio().AllowAnonymous();
+        app.MapDataStudio().AllowAnonymous();
         await app.StartAsync(Token);
         try
         {
             using HttpClient client = app.GetTestClient();
-            using HttpResponseMessage page = await client.GetAsync(new Uri("/postgres/kafka", UriKind.Relative), Token);
+            using HttpResponseMessage page = await client.GetAsync(new Uri("/studio/kafka", UriKind.Relative), Token);
 
             page.StatusCode.Should().Be(HttpStatusCode.OK);
             (await page.Content.ReadAsStringAsync(Token)).Should().Contain("ms-k-trademark").And.Contain("href=\"kafka\"");
@@ -188,10 +189,10 @@ public class KafkaEndpointTests
     public async Task Kafka_page_endpoints_carry_the_studio_policy_and_the_page_marker()
     {
         await using WebApplication app = CreateApp(
-            configureStudio: static options => options.AuthorizationPolicy = "ops",
+            configureShell: static options => options.AuthorizationPolicy = "ops",
             configureBuilder: static builder => builder.Services.AddAuthorization(static options =>
                 options.AddPolicy("ops", static policy => policy.RequireAssertion(static _ => true))));
-        app.MapPostgresStudio();
+        app.MapDataStudio();
 
         RouteEndpoint[] pages = [.. RouteEndpoints(app).Where(IsKafkaPage)];
 
@@ -204,7 +205,7 @@ public class KafkaEndpointTests
     public async Task An_unauthorized_mapping_with_kafka_is_still_refused_at_startup()
     {
         await using WebApplication app = CreateApp();
-        app.MapPostgresStudio();
+        app.MapDataStudio();
 
         Func<Task> start = () => app.StartAsync(Token);
 
@@ -223,12 +224,12 @@ public class KafkaEndpointTests
         });
         app.UseAuthentication();
         app.UseAuthorization();
-        app.MapPostgresStudio().RequireAuthorization();
+        app.MapDataStudio().RequireAuthorization();
         await app.StartAsync(Token);
         try
         {
             using HttpClient client = app.GetTestClient();
-            using HttpResponseMessage anonymous = await client.GetAsync(new Uri("/postgres/kafka", UriKind.Relative), Token);
+            using HttpResponseMessage anonymous = await client.GetAsync(new Uri("/studio/kafka", UriKind.Relative), Token);
 
             anonymous.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         }

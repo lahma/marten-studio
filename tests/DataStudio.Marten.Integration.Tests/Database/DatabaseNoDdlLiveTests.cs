@@ -120,7 +120,7 @@ public class DatabaseNoDdlLiveTests(PostgresFixture fixture)
             options.Schema.For<NumberedThing>();
         });
 
-        services.AddMartenStudio(static options =>
+        services.AddDataStudio().AddMarten(static options =>
         {
             options.Capabilities.BrowseDatabase = true;
             options.BrowsableSchemas.Add("*");

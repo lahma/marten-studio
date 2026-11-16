@@ -168,7 +168,7 @@ public class PerTenantSequenceWritesTests
                     options.Events.AppendMode = JasperFx.Events.EventAppendMode.QuickWithServerTimestamps;
                 }
             });
-            services.AddMartenStudio(static options =>
+            services.AddDataStudio().AddMarten(static options =>
             {
                 options.Capabilities = MartenStudioCapabilities.All();
                 options.DiscoverTenantIds = false;

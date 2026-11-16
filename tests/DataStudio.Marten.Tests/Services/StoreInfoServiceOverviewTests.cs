@@ -356,7 +356,7 @@ public class StoreInfoServiceOverviewTests
                 observed.OnBuildDatabases = builds.Increment;
                 options.Tenancy = (ITenancy) (object) observed;
             });
-            services.AddMartenStudio(static options =>
+            services.AddDataStudio().AddMarten(static options =>
             {
                 options.StoreAuthorizationPolicy = StorePolicy;
                 options.QueryTimeout = TimeSpan.FromSeconds(5);

@@ -4,7 +4,6 @@ using DataStudio.Sample.Marten.Domain.Documents;
 using DataStudio.Postgres.Services.Database;
 
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Options;
 
 using Npgsql;
 using DataStudio.Postgres.Services.Health;
@@ -50,7 +49,7 @@ public class ConnectionPoolLiveTests(PostgresFixture postgres)
             warning.Severity.Should().Be(HealthSeverity.Warning, "one check that finds the pool full is a moment");
             warning.Evidence.Should().Contain(new HealthEvidence("In use", "4 of 4 (100%)"));
 
-            clock.Advance(host.Provider.GetRequiredService<IOptions<MartenStudioOptions>>().Value.EffectiveHealthInterval + TimeSpan.FromSeconds(1));
+            clock.Advance(host.Provider.GetRequiredService<DataStudio.Postgres.Services.Settings.IStudioSettings>().EffectiveHealthInterval + TimeSpan.FromSeconds(1));
 
             HealthReport second = await host.ReportAsync();
 

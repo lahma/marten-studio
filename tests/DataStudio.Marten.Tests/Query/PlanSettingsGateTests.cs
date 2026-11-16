@@ -191,7 +191,7 @@ public class PlanSettingsGateTests
             var services = new ServiceCollection();
             services.AddLogging();
             services.AddMarten(options => options.Connection(ConnectionString));
-            services.AddMartenStudio(options =>
+            services.AddDataStudio().AddMarten(options =>
             {
                 options.Capabilities = MartenStudioCapabilities.All();
                 options.StoreAuthorizationPolicy = "studio-store";

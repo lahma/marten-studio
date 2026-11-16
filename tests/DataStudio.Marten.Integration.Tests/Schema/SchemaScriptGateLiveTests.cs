@@ -381,10 +381,8 @@ public class SchemaScriptGateLiveTests(PostgresFixture fixture)
             options.Schema.For<GateSecret>();
         });
 
-        services.AddMartenStudio(options =>
+        services.AddDataStudio().AddMarten(options =>
         {
-            options.AuthorizationPolicy = null;
-
             foreach (string tenant in Tenants)
             {
                 options.KnownTenantIds.Add(tenant);

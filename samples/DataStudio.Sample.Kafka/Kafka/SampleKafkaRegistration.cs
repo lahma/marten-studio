@@ -6,7 +6,7 @@ using DataStudio.Sample.Kafka.Wolverine;
 namespace DataStudio.Sample.Kafka.Kafka;
 
 /// <summary>
-/// What the sample tells KStudio about its cluster: the body of its <c>AddKafkaStudio(…)</c> call, in a method of its own so that the live
+/// What the sample tells KStudio about its cluster: the body of its <c>AddKafka(…)</c> call, in a method of its own so that the live
 /// tests configure the engine exactly as the host does.
 /// </summary>
 internal static class SampleKafkaRegistration

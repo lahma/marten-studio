@@ -52,7 +52,7 @@ public sealed class NpgsqlPoolLiveTests(PostgresFixture postgres)
         services.AddAuthorization();
         services.AddSingleton<AuthenticationStateProvider>(visitor);
         services.AddSingleton(source);
-        services.AddPostgresStudio();
+        services.AddDataStudio().AddPostgres();
 
         await using ServiceProvider provider = services.BuildServiceProvider();
         SessionPoolObserver observer = provider.GetRequiredService<SessionPoolObserver>();

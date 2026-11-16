@@ -26,7 +26,7 @@ public class ProjectionThresholdOptionTests
     private static MartenStudioOptions Resolve(Action<MartenStudioOptions> configure)
     {
         ServiceCollection services = new();
-        services.AddMartenStudio(configure);
+        services.AddDataStudio().AddMarten(configure);
         using ServiceProvider provider = services.BuildServiceProvider();
         return provider.GetRequiredService<IOptions<MartenStudioOptions>>().Value;
     }

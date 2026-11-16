@@ -35,7 +35,7 @@ public sealed class PostgresStudioWiringTests : IAsyncDisposable
         collection.AddSingleton<Microsoft.AspNetCore.Hosting.IWebHostEnvironment, WebHost>();
         collection.AddSingleton<Microsoft.Extensions.Configuration.IConfiguration>(new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build());
         collection.AddSingleton(NpgsqlDataSource.Create("Host=localhost;Database=app;Username=app"));
-        collection.AddPostgresStudio();
+        collection.AddDataStudio().AddPostgres();
         collection.AddHealthChecks().AddPostgresStudio();
         services = collection.BuildServiceProvider();
     }

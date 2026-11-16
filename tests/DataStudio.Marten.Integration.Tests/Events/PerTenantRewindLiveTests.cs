@@ -106,7 +106,7 @@ public class PerTenantRewindLiveTests(PostgresFixture postgres) : IAsyncLifetime
         builder.Services.AddAuthorization();
         builder.Services.AddSingleton<AuthenticationStateProvider, StubAuthenticationStateProvider>();
         builder.Services.AddSingleton<IAuthorizationService>(policy);
-        builder.Services.AddMartenStudio(options =>
+        builder.Services.AddDataStudio().AddMarten(options =>
         {
             options.Capabilities = MartenStudioCapabilities.All();
             options.StoreAuthorizationPolicy = "studio-store";

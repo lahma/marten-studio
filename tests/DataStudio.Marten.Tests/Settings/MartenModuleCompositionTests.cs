@@ -41,7 +41,7 @@ public class MartenModuleCompositionTests
 
         public string HomeRoute => "fake";
 
-        public string? ExposedSentence => string.Empty;
+        public string ExposedSentence => string.Empty;
 
         public IReadOnlyList<StudioModuleCapabilityGroup> CapabilityGroups => [];
 
@@ -84,7 +84,7 @@ public class MartenModuleCompositionTests
     [Fact]
     public void The_composed_route_table_matches_every_page_of_both_assemblies_as_the_databases_own_does()
     {
-        StudioShellDescriptor shell = StudioModuleComposition.Compose(Host.ShellIdentity, [Database()]);
+        StudioShellDescriptor shell = StudioModuleComposition.Compose([Database()]);
         StudioRouteTable own = new(Host.PageAssemblies);
         string[] paths = EveryPagePath(Host);
 
@@ -102,19 +102,19 @@ public class MartenModuleCompositionTests
     public void No_other_module_registered_resolves_the_database_as_the_one_root_module()
     {
         ServiceCollection services = new();
-        services.AddMartenStudio();
+        services.AddDataStudio().AddMarten();
         using ServiceProvider provider = services.BuildServiceProvider();
 
         provider.GetRequiredService<StudioDescriptor>().Should().BeSameAs(Host);
         StudioShellDescriptor shell = provider.GetRequiredService<StudioShellDescriptor>();
         shell.Modules.Should().ContainSingle().Which.Should().BeOfType<DatabaseStudioModule>().Which.IsRoot.Should().BeTrue();
-        shell.PageAssemblies.Should().Equal(Host.PageAssemblies, "Marten Studio's root owns both its own assembly and PostgresStudio's");
+        shell.PageAssemblies.Should().Equal([.. Host.PageAssemblies, StudioShellDescriptor.ShellPages], "the Marten module's root owns both its own assembly and DataStudio.Postgres's, and the shell adds its own");
     }
 
     [Fact]
     public void A_module_section_goes_before_the_roots_last_and_nothing_of_the_roots_moves()
     {
-        StudioShellDescriptor composed = StudioModuleComposition.Compose(Host.ShellIdentity, [Database(), new FakeModule()]);
+        StudioShellDescriptor composed = StudioModuleComposition.Compose([Database(), new FakeModule()]);
 
         string[] hostTitles = [.. Host.Navigation(Settings).Select(static x => x.Title)];
         composed.Navigation.Select(static x => x.Title).Should().Equal([.. hostTitles[..^1], "Fake section", hostTitles[^1]]);
@@ -122,9 +122,8 @@ public class MartenModuleCompositionTests
 
         // Shell A2b, 6.1: the root's sections carry the root's key (before, none).
         composed.Navigation.Where(static x => x.ModuleKey == Host.Key).Should().HaveCount(hostTitles.Length);
-        composed.ProductName.Should().Be(Host.ProductName);
         composed.ExtraShortcuts.Should().HaveSameCount(Host.ExtraShortcuts, "Marten Studio's document shortcuts are carried");
-        composed.PageAssemblies.Should().HaveCount(Host.PageAssemblies.Count + 1);
+        composed.PageAssemblies.Should().HaveCount(Host.PageAssemblies.Count + 2, "the fake module's and the shell's own");
     }
 
     [Fact]
@@ -134,7 +133,7 @@ public class MartenModuleCompositionTests
         FakeModule module = new();
         StudioNavSection[] colliding = [new StudioNavSection(label.ToUpperInvariant(), [])];
 
-        Action compose = () => StudioModuleComposition.Compose(Host.ShellIdentity, [Database(), new Colliding(module, colliding)]);
+        Action compose = () => StudioModuleComposition.Compose([Database(), new Colliding(module, colliding)]);
 
         compose.Should().Throw<InvalidOperationException>().WithMessage("*unique, ignoring case*");
     }
@@ -161,7 +160,7 @@ public class MartenModuleCompositionTests
 
         public string HomeRoute => inner.HomeRoute;
 
-        public string? ExposedSentence => inner.ExposedSentence;
+        public string ExposedSentence => inner.ExposedSentence;
 
         public IReadOnlyList<StudioModuleCapabilityGroup> CapabilityGroups => inner.CapabilityGroups;
 

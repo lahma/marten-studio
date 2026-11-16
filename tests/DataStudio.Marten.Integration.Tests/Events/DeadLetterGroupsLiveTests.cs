@@ -299,7 +299,7 @@ public sealed class DeadLetterGroupsFixture(PostgresFixture postgres) : IAsyncLi
         services.AddSingleton<IDocumentStore>(Store);
         services.AddSingleton<IAuthorizationService>(Policy);
         services.AddSingleton(new DeadLetterGroupCache(groupClock, TimeSpan.FromSeconds(5)) { LettersGrouped = lettersGrouped });
-        services.AddMartenStudio(options =>
+        services.AddDataStudio().AddMarten(options =>
         {
             options.Capabilities = capabilities;
             options.StoreAuthorizationPolicy = "studio-store";

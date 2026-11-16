@@ -175,7 +175,7 @@ internal sealed class ProjectionsFixture : IAsyncDisposable
         builder.Services.AddAuthorization();
         builder.Services.AddSingleton<AuthenticationStateProvider, AnonymousAuthenticationStateProvider>();
 
-        builder.Services.AddMartenStudio(options => options.Capabilities = capabilities ?? MartenStudioCapabilities.All());
+        builder.Services.AddDataStudio().AddMarten(options => options.Capabilities = capabilities ?? MartenStudioCapabilities.All());
 
         configureServices?.Invoke(builder.Services);
 

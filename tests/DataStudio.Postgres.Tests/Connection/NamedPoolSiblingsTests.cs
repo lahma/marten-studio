@@ -446,7 +446,7 @@ public sealed class NamedPoolSiblingsTests
         collection.AddLogging();
         collection.AddSingleton(new SessionPoolObserver(meterName));
         collection.AddSingleton(unnamed);
-        collection.AddPostgresStudio(o => o.AddDataSource("listed", _ => listed));
+        collection.AddDataStudio().AddPostgres(o => o.AddDataSource("listed", _ => listed));
 
         await using ServiceProvider root = collection.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true, ValidateOnBuild = false });
 

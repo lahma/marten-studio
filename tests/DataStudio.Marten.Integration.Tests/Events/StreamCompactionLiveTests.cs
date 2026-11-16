@@ -203,7 +203,7 @@ public sealed class StreamCompactionFixture(PostgresFixture postgres) : IAsyncLi
         services.AddSingleton<AuthenticationStateProvider, StubAuthenticationStateProvider>();
         services.AddSingleton(store);
 
-        services.AddMartenStudio(options =>
+        services.AddDataStudio().AddMarten(options =>
         {
             options.Capabilities = capabilities ? MartenStudioCapabilities.All() : new MartenStudioCapabilities();
             options.IsDocumentTypeVisible = isVisible;

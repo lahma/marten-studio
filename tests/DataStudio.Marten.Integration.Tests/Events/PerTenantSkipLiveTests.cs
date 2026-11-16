@@ -91,7 +91,7 @@ public sealed class PerTenantSkipFixture(PostgresFixture postgres) : IAsyncLifet
 
         // Both policies set and asked of a fake that allows everything until a reach test narrows it, and resets it.
         services.AddSingleton<IAuthorizationService>(Policy);
-        services.AddMartenStudio(static options =>
+        services.AddDataStudio().AddMarten(static options =>
         {
             options.Capabilities = MartenStudioCapabilities.All();
             options.StoreAuthorizationPolicy = "studio-store";

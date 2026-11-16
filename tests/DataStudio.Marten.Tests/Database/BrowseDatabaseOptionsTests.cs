@@ -25,7 +25,7 @@ public class BrowseDatabaseOptionsTests
     private static MartenStudioOptions Resolve(Action<MartenStudioOptions> configure)
     {
         var services = new ServiceCollection();
-        services.AddMartenStudio(configure);
+        services.AddDataStudio().AddMarten(configure);
         using ServiceProvider provider = services.BuildServiceProvider();
         return provider.GetRequiredService<IOptions<MartenStudioOptions>>().Value;
     }
@@ -193,7 +193,7 @@ public class BrowseDatabaseOptionsTests
     {
         var services = new ServiceCollection();
         services.AddLogging();
-        services.AddMartenStudio(static options => options.BrowsableSchemas.Add("bad\"one"));
+        services.AddDataStudio().AddMarten(static options => options.BrowsableSchemas.Add("bad\"one"));
         services.AddSingleton<EndpointDataSource>(MappedStudio());
 
         await using ServiceProvider provider = services.BuildServiceProvider();
@@ -226,7 +226,7 @@ public class BrowseDatabaseOptionsTests
         builder.WebHost.UseTestServer();
         builder.Logging.ClearProviders();
         builder.Logging.AddProvider(logs);
-        builder.Services.AddMartenStudio(options =>
+        builder.Services.AddDataStudio().AddMarten(options =>
         {
             Interlocked.Increment(ref configured);
             options.BrowsableSchemas.Add("*");
@@ -252,7 +252,7 @@ public class BrowseDatabaseOptionsTests
     {
         WebApplicationBuilder builder = WebApplication.CreateBuilder();
         builder.WebHost.UseTestServer();
-        builder.Services.AddMartenStudio(static _ => throw new InvalidOperationException("the host's own mistake"));
+        builder.Services.AddDataStudio().AddMarten(static _ => throw new InvalidOperationException("the host's own mistake"));
 
         await using (WebApplication app = builder.Build())
         {
@@ -267,7 +267,7 @@ public class BrowseDatabaseOptionsTests
 
         var services = new ServiceCollection();
         services.AddLogging();
-        services.AddMartenStudio(static _ => throw new InvalidOperationException("the host's own mistake"));
+        services.AddDataStudio().AddMarten(static _ => throw new InvalidOperationException("the host's own mistake"));
         services.AddSingleton<EndpointDataSource>(MappedStudio());
 
         await using ServiceProvider provider = services.BuildServiceProvider();
@@ -294,10 +294,10 @@ public class BrowseDatabaseOptionsTests
         builder.WebHost.UseTestServer();
         builder.Logging.ClearProviders();
         builder.Logging.AddProvider(logs);
-        builder.Services.AddMartenStudio(static options => options.BrowsableSchemas.Add("*"));
+        builder.Services.AddDataStudio().AddMarten(static options => options.BrowsableSchemas.Add("*"));
 
         await using WebApplication app = builder.Build();
-        app.MapMartenStudio().AllowAnonymous();
+        app.MapDataStudio().AllowAnonymous();
 
         await app.StartAsync(Token);
         await app.StopAsync(Token);

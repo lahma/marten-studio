@@ -91,7 +91,7 @@ public class SessionHolderNamesTests
             services.AddLogging();
             services.AddSingleton(NpgsqlDataSource.Create(ConnectionString("app")));
             services.AddSingleton<IPostgresDatabaseSource>(Tenants);
-            services.AddPostgresStudio(options =>
+            services.AddDataStudio().AddPostgres(options =>
             {
                 if (policies)
                 {

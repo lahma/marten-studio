@@ -1,3 +1,4 @@
+using DataStudio.Marten.Services;
 using Bunit;
 
 using DataStudio.Marten.Components.Pages.Documents;
@@ -86,23 +87,23 @@ public class DocumentPageHardeningTests
     [InlineData("//evil.example/steal")]
     [InlineData("/\\evil.example/steal")]
     [InlineData("\\\\evil.example\\steal")]
-    [InlineData("/marten/documents/customer")]
+    [InlineData("/studio/documents/customer")]
     [InlineData("data:text/html,<script>alert(1)</script>")]
     [InlineData("documents\\..\\..\\evil")]
     [InlineData("query?mode=sql")]
     public void A_return_link_the_studio_did_not_write_is_not_rendered(string from)
     {
-        SafeReturnLink.Sanitize(from, new MartenStudioOptions()).Should().BeNull();
+        SafeReturnLink.Sanitize(from, MartenStudioSettings.Of(new MartenStudioOptions())).Should().BeNull();
     }
 
     [Theory]
     [InlineData("documents/customer")]
     [InlineData("documents/customer?q=is:deleted&sort=id&dir=desc")]
     [InlineData("documents")]
-    [InlineData("marten/documents/customer?page=2")]
+    [InlineData("studio/documents/customer?page=2")]
     public void A_return_link_into_the_documents_area_is_kept_exactly_as_it_was(string from)
     {
-        SafeReturnLink.Sanitize(from, new MartenStudioOptions()).Should().Be(from);
+        SafeReturnLink.Sanitize(from, MartenStudioSettings.Of(new MartenStudioOptions())).Should().Be(from);
     }
 
     [Fact]

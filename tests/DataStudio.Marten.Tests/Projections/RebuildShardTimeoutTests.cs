@@ -66,7 +66,7 @@ public class RebuildShardTimeoutTests
     public void A_per_shard_timeout_under_a_minute_is_refused_at_startup()
     {
         var services = new ServiceCollection();
-        services.AddMartenStudio(static options => options.RebuildShardTimeout = TimeSpan.FromSeconds(30));
+        services.AddDataStudio().AddMarten(static options => options.RebuildShardTimeout = TimeSpan.FromSeconds(30));
 
         using ServiceProvider provider = services.BuildServiceProvider();
 

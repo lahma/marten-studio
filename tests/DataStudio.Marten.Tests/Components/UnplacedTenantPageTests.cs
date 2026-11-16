@@ -137,7 +137,7 @@ public class UnplacedTenantPageTests
             services.AddSingleton(new DocumentBrowserState());
         });
 
-        context.Options.RefreshInterval = TimeSpan.FromMinutes(5);
+        context.ShellOptions.RefreshInterval = TimeSpan.FromMinutes(5);
         context.StoreInfo.WithStore("default", "Default", databaseIdentity: "db-a");
         context.Catalog.WithStore("default", "Default", DatabaseCardinality.StaticMultiple, "db-a", "db-b");
 

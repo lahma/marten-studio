@@ -110,10 +110,8 @@ internal sealed class EmptySchemaStudio : IAsyncDisposable
             configure?.Invoke(options);
         });
 
-        services.AddMartenStudio(options =>
+        services.AddDataStudio().AddMarten(options =>
         {
-            options.AuthorizationPolicy = null;
-
             // The tenant probe is a read of its own and is not what these tests are measuring.
             options.DiscoverTenantIds = false;
         });

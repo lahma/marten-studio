@@ -222,7 +222,7 @@ public class DiagnosticsLiveTests(PostgresVersionMatrix matrix, PostgresFixture 
         builder.Services.AddAuthorization();
         builder.Services.AddSingleton<AuthenticationStateProvider, NobodyAuthenticationStateProvider>();
         builder.Services.AddSingleton(_ => NpgsqlDataSource.Create(owned[0]));
-        builder.Services.AddPostgresStudio();
+        builder.Services.AddDataStudio().AddPostgres();
 
         await using WebApplication app = builder.Build();
         app.MapGet("/", () => "the host's own page");

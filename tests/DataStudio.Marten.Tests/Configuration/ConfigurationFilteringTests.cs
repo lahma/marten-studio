@@ -142,7 +142,7 @@ public class ConfigurationFilteringTests
                 tenancy.AddMultipleTenantDatabase(SecondaryConnectionString, "secondary").ForTenants("globex");
             }));
 
-            services.AddMartenStudio(options => options.StoreAuthorizationPolicy = storePolicy);
+            services.AddDataStudio().AddMarten(options => options.StoreAuthorizationPolicy = storePolicy);
 
             // After AddMartenStudio, so these win over what the framework registrations contributed. The
             // Postgres version is the Overview's to fetch, and nothing here is listening for it.

@@ -1109,7 +1109,7 @@ internal sealed class RealDefinitionService : IAsyncDisposable
             builder.AddProvider(logs);
         });
         services.AddMarten(static options => options.Connection(DummyConnectionString));
-        services.AddMartenStudio();
+        services.AddDataStudio().AddMarten();
         services.AddSingleton<IAuthorizationService>(new TestStoreAuthorizationService());
         services.AddScoped<AuthenticationStateProvider>(_ => users);
 

@@ -55,7 +55,7 @@ public class ProjectionFloorsDriftLiveTests(PostgresFixture postgres)
             options.AutoCreateSchemaObjects = JasperFx.AutoCreate.CreateOrUpdate;
             options.Events.AddEventType<FloorDriftHappened>();
         });
-        services.AddMartenStudio(static options => options.AuthorizationPolicy = null);
+        services.AddDataStudio().AddMarten();
 
         await using ServiceProvider provider = services.BuildServiceProvider();
 

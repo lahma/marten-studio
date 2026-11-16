@@ -13,9 +13,8 @@ public class MartenStudioValidationMessagesTests
     public void Every_failure_reads_and_is_ordered_exactly_as_before_the_chain_was_shared()
     {
         ServiceCollection services = new();
-        services.AddMartenStudio(static options =>
+        services.AddDataStudio().AddMarten(static options =>
         {
-            options.Path = "x?y";
             options.DefaultPageSize = 0;
             options.MaxPageSize = 6000;
             options.QueryTimeout = TimeSpan.Zero;
@@ -23,7 +22,6 @@ public class MartenStudioValidationMessagesTests
             options.MaxSqlConsoleRows = 0;
             options.SqlConsoleRole = "bad role";
             options.ExactCountThreshold = -1;
-            options.RefreshInterval = TimeSpan.Zero;
             options.HealthInterval = TimeSpan.Zero;
             options.RebuildShardTimeout = TimeSpan.Zero;
             options.Capabilities = null!;
@@ -35,8 +33,6 @@ public class MartenStudioValidationMessagesTests
         Action resolve = () => _ = provider.GetRequiredService<IOptions<MartenStudioOptions>>().Value;
 
         resolve.Should().Throw<OptionsValidationException>().Which.Failures.Should().Equal(
-            "MartenStudioOptions.Path must start with '/'",
-            "MartenStudioOptions.Path must be a simple URL path: it cannot contain '{', '}', '?', '#', '.' or '..' segments, or empty segments ('//')",
             "MartenStudioOptions.DefaultPageSize must be between 1 and MaxPageSize",
             "MartenStudioOptions.MaxPageSize must be between 1 and 5000: a larger page is a sequential scan rendered into a browser",
             "MartenStudioOptions.QueryTimeout must be between one second and ten minutes",
@@ -44,7 +40,6 @@ public class MartenStudioValidationMessagesTests
             "MartenStudioOptions.MaxSqlConsoleRows must be between 1 and 10000",
             "MartenStudioOptions.SqlConsoleRole must be a plain Postgres identifier: it is written into SET LOCAL ROLE, where it cannot be a parameter",
             "MartenStudioOptions.ExactCountThreshold cannot be negative",
-            "MartenStudioOptions.RefreshInterval must be between one second and five minutes",
             "MartenStudioOptions.HealthInterval must be between fifteen seconds and one hour: several health checks scan the server's lock table and process array, and a page polls them no faster than this",
             "MartenStudioOptions.RebuildShardTimeout must be at least one minute: it is the per-shard replay budget, and a rebuild that exceeds it stops with the projection's tables already emptied",
             "MartenStudioOptions.Capabilities cannot be null: use new MartenStudioCapabilities() for none, or MartenStudioCapabilities.All()",

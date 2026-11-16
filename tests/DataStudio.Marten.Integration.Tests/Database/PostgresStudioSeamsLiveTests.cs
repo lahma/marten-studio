@@ -138,7 +138,7 @@ public class PostgresStudioSeamsLiveTests(PostgresFixture postgres)
         services.AddAuthorization();
         services.AddSingleton<AuthenticationStateProvider, Anonymous>();
         services.AddSingleton(NpgsqlDataSource.Create(connectionString));
-        services.AddPostgresStudio(options =>
+        services.AddDataStudio().AddPostgres(options =>
         {
             options.BrowsableSchemas.Clear();
 

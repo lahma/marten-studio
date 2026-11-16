@@ -36,7 +36,7 @@ public class CapabilityBannerModuleGroupsTests
 
         public string HomeRoute => key;
 
-        public string? ExposedSentence => null;
+        public string ExposedSentence => "Fake.";
 
         public IReadOnlyList<StudioModuleCapabilityGroup> CapabilityGroups =>
         [

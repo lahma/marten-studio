@@ -338,7 +338,7 @@ public sealed class StepperStoreFixture(PostgresFixture postgres) : IAsyncLifeti
         services.AddAuthorization();
         services.AddSingleton<AuthenticationStateProvider, StubAuthenticationStateProvider>();
         services.AddSingleton<IDocumentStore>(store!);
-        services.AddMartenStudio(options =>
+        services.AddDataStudio().AddMarten(options =>
         {
             options.DiscoverTenantIds = false;
             configure(options);

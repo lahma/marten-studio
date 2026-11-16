@@ -8,17 +8,15 @@ using Microsoft.Extensions.Options;
 namespace DataStudio.Kafka.Internal;
 
 /// <summary>
-/// Refuses to start a host that cannot serve KStudio safely (D34, D35): one that registered no studio, and one that enabled a Kafka capability
+/// Refuses to start a host that cannot serve the Kafka module safely (D34, D35): one that enabled a Kafka capability
 /// that no policy answers.
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Registered at <c>AddKafkaStudio()</c> time, checked at host start.</b> A refusal at registration would break order independence with the
-/// studio's own <c>Add*Studio()</c>; there is no <c>MapKafkaStudio()</c> to refuse at, and the host studio's map call must not name KStudio. The
-/// studio's own endpoint guard is the same mechanism (<c>StudioEndpointAuthorizationGuard</c>).
-/// </para>
-/// <para>
-/// <b>No studio.</b> <c>AddPostgresDiagnostics()</c> alone registers no studio either, so it is refused the same way.
+/// <b>Registered at <c>AddKafka()</c> time, checked at host start.</b> A refusal at registration would break order independence with the
+/// host's own registrations; there is no map call of the module's own to refuse at, and the shell's map call must not name Kafka. The
+/// shell's own endpoint guard is the same mechanism (<c>StudioEndpointAuthorizationGuard</c>). The module is added to the shell's builder, so
+/// it cannot be registered without a shell.
 /// </para>
 /// <para>
 /// <b>A capability with no policy.</b> Kafka records are personal data across every topic the principal can read, and the cluster policy is the
@@ -33,11 +31,6 @@ internal sealed class KafkaStudioStartupGuard(IServiceProvider provider) : IHost
     /// <inheritdoc />
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        if (provider.GetService<StudioRegistrationMarker>() is null)
-        {
-            throw new InvalidOperationException(KafkaStudioText.NoStudio);
-        }
-
         KafkaStudioOptions options = provider.GetRequiredService<IOptions<KafkaStudioOptions>>().Value;
         IShellSettings settings = provider.GetRequiredService<IShellSettings>();
         IReadOnlyList<KafkaCapability> configured = KafkaCapabilityGuard.ConfiguredIn(options.Capabilities);

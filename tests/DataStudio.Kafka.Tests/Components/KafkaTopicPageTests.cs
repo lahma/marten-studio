@@ -58,7 +58,7 @@ public class KafkaTopicPageTests
             studio: o => o.ClusterAuthorizationPolicy = "kafka-topics",
             services: services => services.AddLogging(builder => builder.SetMinimumLevel(LogLevel.Trace).AddProvider(logs)));
         rig.Studio.Authorization.AllowKafka(static resource => resource.Topic != "secret");
-        rig.Studio.Context.Options.RefreshInterval = TimeSpan.FromMilliseconds(50);
+        rig.Studio.Context.ShellOptions.RefreshInterval = TimeSpan.FromMilliseconds(50);
         rig.Topic("orders", 1, 1);
 
         // The home polls, and asks the policy about "orders" at every tick: that is the clock. "secret" is not in the cluster, so the home never asks about it.

@@ -250,9 +250,8 @@ public class DocumentsNoDdlLiveTests(PostgresFixture fixture)
             options.Schema.For<NumberedThing>();
         });
 
-        services.AddMartenStudio(options =>
+        services.AddDataStudio().AddMarten(options =>
         {
-            options.AuthorizationPolicy = null;
             studio?.Invoke(options);
         });
 

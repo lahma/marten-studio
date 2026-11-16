@@ -37,11 +37,13 @@ public class HealthAlertsTests
             Scope = scope,
         };
 
-    private static HealthAlerts Alerts(ToastService toasts, Action<MartenStudioOptions>? configure = null)
+    private static HealthAlerts Alerts(ToastService toasts, Action<MartenStudioOptions>? configure = null, Action<DataStudioOptions>? configureShell = null)
     {
         MartenStudioOptions options = new();
         configure?.Invoke(options);
-        return new HealthAlerts(toasts, MartenStudioSettings.Of(options));
+        DataStudioOptions shell = new();
+        configureShell?.Invoke(shell);
+        return new HealthAlerts(toasts, MartenStudioSettings.Of(options, new DataStudio.Services.Settings.ShellSettings(Microsoft.Extensions.Options.Options.Create(shell))));
     }
 
     /// <summary>
@@ -188,11 +190,10 @@ public class HealthAlertsTests
     [InlineData(60, 5 * 60, 15 * 60)]
     public void The_cool_down_is_a_quarter_of_an_hour_or_three_intervals_whichever_is_longer(int healthSeconds, int refreshSeconds, int expectedSeconds)
     {
-        HealthAlerts alerts = Alerts(new ToastService(), x =>
-        {
-            x.HealthInterval = TimeSpan.FromSeconds(healthSeconds);
-            x.RefreshInterval = TimeSpan.FromSeconds(refreshSeconds);
-        });
+        HealthAlerts alerts = Alerts(
+            new ToastService(),
+            x => x.HealthInterval = TimeSpan.FromSeconds(healthSeconds),
+            x => x.RefreshInterval = TimeSpan.FromSeconds(refreshSeconds));
 
         alerts.CoolDown.Should().Be(TimeSpan.FromSeconds(expectedSeconds));
         alerts.CoolDown.Should().BeGreaterThan(2 * TimeSpan.FromSeconds(Math.Max(healthSeconds, refreshSeconds)),

@@ -255,7 +255,7 @@ public class HealthSeamTests
     {
         ServiceCollection services = new();
         services.AddSingleton(Floor);
-        services.AddMartenStudio();
+        services.AddDataStudio().AddMarten();
 
         using ServiceProvider provider = services.BuildServiceProvider();
 

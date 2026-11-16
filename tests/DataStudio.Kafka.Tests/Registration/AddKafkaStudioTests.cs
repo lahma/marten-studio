@@ -36,8 +36,8 @@ public class AddKafkaStudioTests
         {
             services.AddHttpContextAccessor();
             services.AddSingleton(Npgsql.NpgsqlDataSource.Create("Host=127.0.0.1;Port=1;Database=none;Username=none;Password=none"));
-            services.AddPostgresStudio();
-            services.AddKafkaStudio(static options => options.AddCluster("primary", new Confluent.Kafka.ClientConfig { BootstrapServers = "127.0.0.1:1" }));
+            services.AddDataStudio().AddPostgres();
+            services.AddDataStudio().AddKafka(static options => options.AddCluster("primary", new Confluent.Kafka.ClientConfig { BootstrapServers = "127.0.0.1:1" }));
         });
         using IServiceScope scope = provider.CreateScope();
 
@@ -59,7 +59,7 @@ public class AddKafkaStudioTests
     [Fact]
     public async Task Kafka_without_a_studio_refuses_to_start()
     {
-        using ServiceProvider provider = Build(static services => services.AddKafkaStudio());
+        using ServiceProvider provider = Build(static services => services.AddDataStudio().AddKafka());
 
         Func<Task> start = () => Start(provider);
 
@@ -75,7 +75,7 @@ public class AddKafkaStudioTests
         using ServiceProvider provider = Build(static services =>
         {
             services.AddPostgresDiagnostics();
-            services.AddKafkaStudio();
+            services.AddDataStudio().AddKafka();
         });
 
         Func<Task> start = () => Start(provider);
@@ -88,8 +88,8 @@ public class AddKafkaStudioTests
     {
         using ServiceProvider provider = Build(static services =>
         {
-            services.AddPostgresStudio();
-            services.AddKafkaStudio();
+            services.AddDataStudio().AddPostgres();
+            services.AddDataStudio().AddKafka();
         });
 
         await Start(provider);
@@ -100,13 +100,13 @@ public class AddKafkaStudioTests
     {
         using ServiceProvider before = Build(static services =>
         {
-            services.AddKafkaStudio();
-            services.AddPostgresStudio();
+            services.AddDataStudio().AddKafka();
+            services.AddDataStudio().AddPostgres();
         });
         using ServiceProvider after = Build(static services =>
         {
-            services.AddPostgresStudio();
-            services.AddKafkaStudio();
+            services.AddDataStudio().AddPostgres();
+            services.AddDataStudio().AddKafka();
         });
 
         StudioShellDescriptor first = before.GetRequiredService<StudioShellDescriptor>();
@@ -123,9 +123,9 @@ public class AddKafkaStudioTests
     public void AddKafkaStudio_twice_registers_one_module()
     {
         ServiceCollection services = new();
-        services.AddPostgresStudio();
-        services.AddKafkaStudio();
-        services.AddKafkaStudio();
+        services.AddDataStudio().AddPostgres();
+        services.AddDataStudio().AddKafka();
+        services.AddDataStudio().AddKafka();
 
         services.Count(static x => x.ServiceType == typeof(IStudioModule) && x.ImplementationType == typeof(DataStudio.Kafka.Services.KafkaStudioModule)).Should().Be(1);
         services.Count(static x => x.ServiceType == typeof(IHostedService) && x.ImplementationType == typeof(KafkaStudioStartupGuard)).Should().Be(1);
@@ -134,7 +134,7 @@ public class AddKafkaStudioTests
     [Fact]
     public void A_host_without_kafka_resolves_the_very_descriptor_it_did_before()
     {
-        using ServiceProvider provider = Build(static services => services.AddPostgresStudio());
+        using ServiceProvider provider = Build(static services => services.AddDataStudio().AddPostgres());
 
         provider.GetRequiredService<StudioDescriptor>().Should().BeSameAs(DataStudio.Postgres.Services.Postgres.PostgresStudioDescriptor.Instance);
         provider.GetRequiredService<StudioShellDescriptor>().Modules.Should().ContainSingle().Which.IsRoot.Should().BeTrue("the database is the one module");
@@ -145,8 +145,8 @@ public class AddKafkaStudioTests
     {
         using ServiceProvider provider = Build(static services =>
         {
-            services.AddPostgresStudio();
-            services.AddKafkaStudio(static o => o.Capabilities.SearchRecords = true);
+            services.AddDataStudio().AddPostgres();
+            services.AddDataStudio().AddKafka(static o => o.Capabilities.SearchRecords = true);
         });
 
         IStudioModule module = provider.GetRequiredService<StudioShellDescriptor>().Modules.Single(static x => x.Key == "kafka");
@@ -171,9 +171,9 @@ public class AddKafkaStudioTests
     {
         using ServiceProvider provider = Build(static services =>
         {
-            services.AddPostgresStudio();
-            services.AddKafkaStudio();
-            services.AddKafkaStudio();
+            services.AddDataStudio().AddPostgres();
+            services.AddDataStudio().AddKafka();
+            services.AddDataStudio().AddKafka();
         });
 
         IStudioRecordSearchLinks links = provider.GetRequiredService<IStudioRecordSearchLinks>();
@@ -185,7 +185,7 @@ public class AddKafkaStudioTests
     [Fact]
     public void A_host_without_kafka_has_no_find_in_kafka_seam()
     {
-        using ServiceProvider provider = Build(static services => services.AddPostgresStudio());
+        using ServiceProvider provider = Build(static services => services.AddDataStudio().AddPostgres());
 
         provider.GetService<IStudioRecordSearchLinks>().Should().BeNull();
     }
@@ -195,8 +195,8 @@ public class AddKafkaStudioTests
     {
         using ServiceProvider provider = Build(static services =>
         {
-            services.AddPostgresStudio();
-            services.AddKafkaStudio(static o => o.ExternalLink("Traces", "https://tempo.example.com/trace/{traceId}").ExternalLink("Logs", "https://logs.example.com/?c={correlationId}"));
+            services.AddDataStudio().AddPostgres();
+            services.AddDataStudio().AddKafka(static o => o.ExternalLink("Traces", "https://tempo.example.com/trace/{traceId}").ExternalLink("Logs", "https://logs.example.com/?c={correlationId}"));
         });
 
         await Start(provider);
@@ -210,8 +210,8 @@ public class AddKafkaStudioTests
     {
         using ServiceProvider provider = Build(services =>
         {
-            services.AddPostgresStudio();
-            services.AddKafkaStudio(o => o.ExternalLink("Traces", template));
+            services.AddDataStudio().AddPostgres();
+            services.AddDataStudio().AddKafka(o => o.ExternalLink("Traces", template));
         });
 
         Func<Task> start = () => Start(provider);

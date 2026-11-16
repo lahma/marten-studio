@@ -175,9 +175,6 @@ public class DatabaseSeamTests
             SourceLabel = "Source",
             ExposedContent = marten.ExposedContent,
             CreateResource = marten.CreateResource,
-            Surface = marten.Surface,
-            Exposure = marten.Exposure,
-            Remedies = marten.Remedies,
         };
     }
 

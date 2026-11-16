@@ -4,6 +4,7 @@
 @using DataStudio.Marten.Services.Events
 @using DataStudio.Marten.Services.Health
 @using Microsoft.Extensions.Options
+@using DataStudio.Postgres.Services.Settings
 @using DataStudio.Postgres.Components.Shared
 @using DataStudio.Postgres.Services
 @using DataStudio.Postgres.Services.Health
@@ -15,6 +16,7 @@
 @inject StudioPreferences Preferences
 @inject StudioLiveUpdatesFactory LiveFactory
 @inject IOptions<MartenStudioOptions> Options
+@inject IStudioSettings StudioSettings
 
 @*
     1.2 SCOPE-1: every Marten store the visitor may see, what each says about itself, and each of its databases with a health
@@ -251,7 +253,7 @@
             live = LiveFactory.Create();
 
             // No Failed handler: a chip that could not be read is "not checked recently", and the tick catches its own failures.
-            await live.StartAsync(Options.Value.RefreshInterval, TickAsync, pageCancellation.Token);
+            await live.StartAsync(StudioSettings.RefreshInterval, TickAsync, pageCancellation.Token);
         }
         catch (OperationCanceledException)
         {

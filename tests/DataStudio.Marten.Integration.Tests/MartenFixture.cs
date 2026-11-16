@@ -108,7 +108,7 @@ public sealed class MartenFixture : IAsyncDisposable
             configureStore?.Invoke(options);
         });
 
-        services.AddMartenStudio(options =>
+        services.AddDataStudio().AddMarten(options =>
         {
             options.ReadOnly = false;
             configureStudio?.Invoke(options);

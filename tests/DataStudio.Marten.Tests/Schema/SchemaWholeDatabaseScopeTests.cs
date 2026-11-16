@@ -139,7 +139,7 @@ public class SchemaWholeDatabaseScopeTests
                 options.Policies.AllDocumentsAreMultiTenanted();
                 options.Events.TenancyStyle = TenancyStyle.Conjoined;
             });
-            services.AddMartenStudio(options =>
+            services.AddDataStudio().AddMarten(options =>
             {
                 options.Capabilities = MartenStudioCapabilities.All();
                 options.StoreAuthorizationPolicy = StorePolicy;

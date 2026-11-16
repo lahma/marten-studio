@@ -210,7 +210,7 @@ public class OrphanedProgressionLiveTests(PostgresFixture postgres) : IAsyncLife
         services.AddAuthorization();
         services.AddSingleton<AuthenticationStateProvider, AnonymousAuthenticationStateProvider>();
         services.AddMarten(options => Configure(options, projectionName, version, gate));
-        services.AddMartenStudio(static options => options.AuthorizationPolicy = null);
+        services.AddDataStudio().AddMarten();
 
         return new Studio(services.BuildServiceProvider());
     }

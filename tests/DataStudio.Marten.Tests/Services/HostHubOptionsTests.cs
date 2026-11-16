@@ -11,7 +11,7 @@ namespace DataStudio.Marten.Tests.Services;
 /// </summary>
 public class HostHubOptionsTests
 {
-    private static void AddStudio(IServiceCollection services) => services.AddMartenStudio();
+    private static void AddStudio(IServiceCollection services) => services.AddDataStudio().AddMarten();
 
     [Fact]
     public void The_hosts_hub_options_survive_a_studio_registered_after_its_Blazor() =>

@@ -165,9 +165,8 @@ public class OrphanedProgressionRemovalPartitionedLiveTests(PostgresFixture post
             options.Projections.Add(new DailySalesProjection(), ProjectionLifecycle.Async);
         });
 
-        services.AddMartenStudio(options =>
+        services.AddDataStudio().AddMarten(options =>
         {
-            options.AuthorizationPolicy = null;
             options.Capabilities.CorrectProgression = true;
             options.DiscoverTenantIds = false;
             options.KnownTenantIds.Add(Acme);

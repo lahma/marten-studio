@@ -1,12 +1,38 @@
 namespace DataStudio.Services.Settings;
 
 /// <summary>
-/// The words the shell speaks in, given by the studio that registered it (<see cref="StudioModuleComposition.Compose" />): in phase B,
-/// from the shell's own options; until then, from the database descriptor, which builds it.
+/// The words the shell speaks in, which are the shell's own: its name, the lead of its anonymous banner, and the startup guard's name for what
+/// it maps, its lead sentence (built from what every registered module says it exposes) and its three remedies.
 /// </summary>
-/// <param name="ProductName">The product's name in a sentence: the sidebar's accessible name and the rail's credit.</param>
-/// <param name="ExposedContent">What a page served to anyone exposes, in the anonymous banner's clause, or <see langword="null" /> for none.</param>
-/// <param name="Surface">The startup guard's name for the endpoints this studio maps.</param>
-/// <param name="Exposure">The startup guard's lead sentence: what an unauthorized mapping would serve, and that the studio refuses to start.</param>
-/// <param name="Remedies">The startup guard's list of the three ways to say which authorization was meant, one per line.</param>
-internal sealed record StudioShellIdentity(string ProductName, string? ExposedContent, string Surface, string Exposure, string Remedies);
+internal static class StudioShellIdentity
+{
+    /// <summary>The product's name in a sentence: the sidebar's accessible name and the rail's credit.</summary>
+    public const string ProductName = "Data Studio";
+
+    /// <summary>The startup guard's name for the endpoints the shell maps.</summary>
+    public const string Surface = "Data Studio";
+
+    /// <summary>The anonymous banner's lead, in <c>&lt;strong&gt;</c>; each module's sentence follows it in a <c>&lt;span&gt;</c> of its own.</summary>
+    public const string BannerLead = "This studio is served to anyone (AllowAnonymous)";
+
+    /// <summary>The startup guard's list of the three ways to say which authorization was meant, one per line.</summary>
+    public const string Remedies = """
+          - app.MapDataStudio().RequireAuthorization() authorizes its pages and its Blazor circuit;
+          - services.AddDataStudio(options => options.AuthorizationPolicy = "...") authorizes those and the static assets with them;
+          - app.MapDataStudio().AllowAnonymous() serves it to anyone, deliberately.
+        """;
+
+    /// <summary>
+    /// The startup guard's lead sentence: that the shell is mapped with no authorization, what every registered module's pages would serve
+    /// (each module's own sentence, in module order), and that the shell refuses to start.
+    /// </summary>
+    /// <param name="exposedSentences">Every registered module's <see cref="IStudioModule.ExposedSentence" />.</param>
+    public static string Exposure(IEnumerable<string> exposedSentences)
+    {
+        ArgumentNullException.ThrowIfNull(exposedSentences);
+
+        return Surface + " is mapped with no authorization. "
+            + string.Join(' ', exposedSentences)
+            + " " + Surface + " refuses to start rather than serve that by accident. Say which you meant:";
+    }
+}

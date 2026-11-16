@@ -46,7 +46,7 @@ public class FeedPerTenantSequencesTests
             options.Events.AppendMode = JasperFx.Events.EventAppendMode.QuickWithServerTimestamps;
             options.Events.AddEventType<DeadLetterVisibilityTests.NothingHappened>();
         });
-        services.AddMartenStudio(static options =>
+        services.AddDataStudio().AddMarten(static options =>
         {
             options.DiscoverTenantIds = false;
             options.KnownTenantIds.Add("acme");

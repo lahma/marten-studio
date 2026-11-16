@@ -18,7 +18,6 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
-using DataStudio.Postgres;
 
 using Wolverine;
 using Wolverine.Kafka;
@@ -93,8 +92,8 @@ public sealed class WolverineDiscoveryLiveTests(Kafka39Fixture parent, Kafka4Fix
             options.Discovery.DisableConventionalDiscovery();
             options.CodeGeneration.TypeLoadMode = TypeLoadMode.Static;
         });
-        builder.Services.AddPostgresStudio();
-        builder.Services.AddKafkaStudio(kafka => kafka.UseWolverineKafka(wolverine => wolverine.CloudEventsSerializer<LiveStructuredSerializer>()));
+        builder.Services.AddDataStudio().AddPostgres();
+        builder.Services.AddDataStudio().AddKafka(kafka => kafka.UseWolverineKafka(wolverine => wolverine.CloudEventsSerializer<LiveStructuredSerializer>()));
 
         await using WebApplication app = builder.Build();
         await app.StartAsync(Token);

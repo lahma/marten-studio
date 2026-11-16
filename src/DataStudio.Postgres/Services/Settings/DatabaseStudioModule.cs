@@ -5,7 +5,7 @@ using DataStudio.Postgres.Components.Layout;
 namespace DataStudio.Postgres.Services.Settings;
 
 /// <summary>
-/// The database as a module of the shell (D34): Postgres Studio's pages or Marten Studio's, built from the studio's own
+/// The database as a module of the shell (D34): the Postgres module's pages or the Marten module's, built from the module's own
 /// <see cref="StudioDescriptor" />, <see cref="IStudioSettings" /> and <see cref="StudioCapabilityGuard" />, and registered by
 /// <see cref="StudioCoreRegistration" />. It is the root: its pages sit directly under the mount, and it always exists.
 /// </summary>
@@ -67,7 +67,7 @@ internal sealed class DatabaseStudioModule : IStudioModule
     public string HomeRoute => string.Empty;
 
     /// <inheritdoc />
-    public string? ExposedSentence => null;
+    public string ExposedSentence => "Its pages carry no authorization, so " + descriptor.ExposedContent + " is readable by anyone who can reach this URL.";
 
     /// <inheritdoc />
     public IReadOnlyList<StudioModuleCapabilityGroup> CapabilityGroups

@@ -97,7 +97,7 @@ internal sealed class StudioHost : IAsyncDisposable
         collection.AddSingleton<IAuthorizationHandler, PredicateHandler>();
         services(collection);
 
-        collection.AddPostgresStudio(options =>
+        collection.AddDataStudio().AddPostgres(options =>
         {
             if (sourcePolicy is not null)
             {

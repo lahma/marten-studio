@@ -49,16 +49,17 @@ internal interface IStudioModule
     Type? ScopeGate { get; }
 
     /// <summary>
-    /// The module's front page below the mount: <c>""</c> for the root, the module's own segment for any other. Nothing reads it in phase A; it is on the seam
-    /// now so that the package split adds no member.
+    /// The module's front page below the mount: <c>""</c> for the root, the module's own segment for any other. A shell with no root module
+    /// sends its own front address to the first module's.
     /// </summary>
     string HomeRoute { get; }
 
     /// <summary>
-    /// One sentence the anonymous banner adds after the shell's own, or <see langword="null" /> for none: the root's is the shell's
-    /// <see cref="StudioShellDescriptor.ExposedContent" />.
+    /// What a page of the module exposes to anyone who can reach it, as one sentence: the anonymous banner draws one <c>&lt;span&gt;</c> of it per
+    /// module, and the startup guard's lead sentence joins them. It says what the module's pages show and to whom, so a host reads what
+    /// <c>AllowAnonymous()</c> would give away.
     /// </summary>
-    string? ExposedSentence { get; }
+    string ExposedSentence { get; }
 
     /// <summary>The module's capabilities as the chip lists them, one heading each, read live on every render; empty for a module with none.</summary>
     IReadOnlyList<StudioModuleCapabilityGroup> CapabilityGroups { get; }
@@ -89,23 +90,21 @@ internal sealed record StudioModuleCapabilityGroup(string Heading, IReadOnlyList
 
 /// <summary>
 /// Composes the registered modules into the shell's descriptor (D34): the root first, then the others in key order. A module's page
-/// assemblies, rail sections and shortcuts follow the root's, and the shell's identity is the one the registering studio gives (<see cref="StudioShellIdentity" />).
+/// assemblies, rail sections and shortcuts follow the root's; the shell's words are its own (<see cref="StudioShellIdentity" />).
 /// </summary>
 internal static class StudioModuleComposition
 {
-    /// <summary>The compile-time roots of the host studios' own pages, which no module that is not the root may claim.</summary>
+    /// <summary>The compile-time roots of the database module's own pages, which no module that is not the root may claim.</summary>
     private static readonly string[] HostRoots = ["/postgres", "/marten"];
 
-    /// <summary>Composes the shell's descriptor from <paramref name="identity" />'s words and <paramref name="modules" />.</summary>
-    /// <param name="identity">The studio's identity: the shell's name, its anonymous banner's clause and its startup guard's words.</param>
+    /// <summary>Composes the shell's descriptor from <paramref name="modules" />.</summary>
     /// <param name="modules">The registered modules, in any order.</param>
     /// <exception cref="InvalidOperationException">
     /// Two modules share a key, two are the root, a module that is not the root has pages that do not keep their root, a root is another
-    /// assembly's or a host studio's, or a section title or item label of a module collides with another one on the composed rail.
+    /// assembly's or a database module's, or a section title or item label of a module collides with another one on the composed rail.
     /// </exception>
-    public static StudioShellDescriptor Compose(StudioShellIdentity identity, IEnumerable<IStudioModule> modules)
+    public static StudioShellDescriptor Compose(IEnumerable<IStudioModule> modules)
     {
-        ArgumentNullException.ThrowIfNull(identity);
         ArgumentNullException.ThrowIfNull(modules);
 
         IStudioModule[] ordered =
@@ -116,15 +115,7 @@ internal static class StudioModuleComposition
 
         Validate(ordered);
 
-        return new StudioShellDescriptor
-        {
-            ProductName = identity.ProductName,
-            ExposedContent = identity.ExposedContent,
-            Surface = identity.Surface,
-            Exposure = identity.Exposure,
-            Remedies = identity.Remedies,
-            Modules = ordered,
-        };
+        return new StudioShellDescriptor { Modules = ordered };
     }
 
     private static void Validate(IStudioModule[] modules)
@@ -178,6 +169,14 @@ internal static class StudioModuleComposition
         // Every title and label on the composed rail is a sibling @key in one list (NavMenu), so a module's may collide with
         // nothing: not the root's, not another module's, and not another of its own. The root's own are not judged here.
         HashSet<string> names = new(StringComparer.OrdinalIgnoreCase);
+
+        // The shell's own section, when no module holds the Activity entry, is on the rail too: no module may take its title or its label.
+        if (!StudioShellDescriptor.ModulesHoldActivity(modules))
+        {
+            names.Add(StudioShellDescriptor.ShellRail.Title);
+            names.UnionWith(StudioShellDescriptor.ShellRail.Items.Select(static x => x.Label));
+        }
+
         foreach (StudioNavSection section in root?.Navigation ?? [])
         {
             names.Add(section.Title);

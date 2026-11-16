@@ -325,7 +325,7 @@ public class HealthMutesTests
 
         ServiceCollection studio = new();
         studio.AddLogging();
-        studio.AddMartenStudio();
+        studio.AddDataStudio().AddMarten();
 
         static string[] DataProtection(IServiceCollection services) =>
         [

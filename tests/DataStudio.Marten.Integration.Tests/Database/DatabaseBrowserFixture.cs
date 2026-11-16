@@ -191,7 +191,7 @@ public abstract class DatabaseBrowserFixture(PostgresFixture postgres) : IAsyncL
             options.Events.AddEventType<BrowserEvent>();
         });
 
-        services.AddMartenStudio(options =>
+        services.AddDataStudio().AddMarten(options =>
         {
             // BrowserLateSecret is hidden too, and never registered with Schema.For: Marten learns it only
             // when a session first touches it (the F7 case).

@@ -1,7 +1,6 @@
 using DataStudio.Components.Pages;
 using DataStudio.Components;
 using DataStudio.Services.Settings;
-using DataStudio.Marten.Components;
 using DataStudio.Marten.Components.Pages;
 using DataStudio.Postgres.Services.Settings;
 using DataStudio.Marten.Tests.Support;
@@ -26,13 +25,15 @@ public class StudioRouteTableTests
 {
     private static DataStudio.Marten.Services.MartenStudioSettings Options(string? path = null)
     {
-        MartenStudioOptions options = new();
+        DataStudioOptions shell = new();
         if (path is not null)
         {
-            options.Path = path;
+            shell.Path = path;
         }
 
-        return MartenSpine.Settings(options);
+        return DataStudio.Marten.Services.MartenStudioSettings.Of(
+            new MartenStudioOptions(),
+            new DataStudio.Services.Settings.ShellSettings(Microsoft.Extensions.Options.Options.Create(shell)));
     }
 
     private static StudioRouteTable Routes => MartenSpine.Routes;
@@ -42,18 +43,18 @@ public class StudioRouteTableTests
     // -------------------------------------------------------------------------------------------
 
     /// <summary>
-    /// MartenStudio's pages are rooted at <c>/marten</c> and the shared studio's at <c>/postgres</c>, each re-rooted at the
-    /// mount path from its own root (design §2.5) - two assemblies since the move.
+    /// The Marten module's pages are rooted at <c>/marten</c> and the shared database pages at <c>/postgres</c>, each re-rooted at the
+    /// mount path from its own root (design §2.5); the shell's own page (Activity) is the shell's to add, not the module's.
     /// </summary>
     [Fact]
     public void The_descriptor_names_both_studio_assemblies_and_the_shells_each_at_its_own_root()
     {
         MartenSpine.Descriptor.PageAssemblies.Should().Equal(
-            new StudioPageAssembly(typeof(MartenStudioApp).Assembly, "/marten"),
-            new StudioPageAssembly(typeof(StudioHome).Assembly, "/postgres"),
-            new StudioPageAssembly(typeof(Activity).Assembly, "/postgres"));
+            new StudioPageAssembly(typeof(DataStudio.Marten.Components.Pages.Overview).Assembly, "/marten"),
+            new StudioPageAssembly(typeof(StudioHome).Assembly, "/postgres"));
 
-        typeof(StudioHome).Assembly.Should().NotBeSameAs(typeof(MartenStudioApp).Assembly, "the shared pages are an assembly of their own");
+        typeof(StudioHome).Assembly.Should().NotBeSameAs(typeof(DataStudio.Marten.Components.Pages.Overview).Assembly, "the shared pages are an assembly of their own");
+        StudioShellDescriptor.ShellPages.Should().Be(new StudioPageAssembly(typeof(Activity).Assembly, "/postgres"), "the shell's page is the shell's");
     }
 
     [Fact]

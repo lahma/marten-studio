@@ -33,7 +33,7 @@ public class NavMenuLinkScopeTests
     public async Task While_a_scope_change_reads_the_catalog_the_rail_links_carry_the_scope_being_applied()
     {
         await using StudioComponentContext context = new();
-        context.Options.RefreshInterval = TimeSpan.FromMinutes(5);
+        context.ShellOptions.RefreshInterval = TimeSpan.FromMinutes(5);
         context.Catalog
             .WithStore("default", "Default", databaseIdentities: "db-a")
             .WithStore("other", "Other", databaseIdentities: "db-x");
@@ -66,7 +66,7 @@ public class NavMenuLinkScopeTests
     public async Task A_slow_first_scope_handler_does_not_leave_the_rail_links_on_the_old_scope()
     {
         await using StudioComponentContext context = new();
-        context.Options.RefreshInterval = TimeSpan.FromMinutes(5);
+        context.ShellOptions.RefreshInterval = TimeSpan.FromMinutes(5);
         context.Catalog
             .WithStore("default", "Default", databaseIdentities: "db-a")
             .WithStore("other", "Other", databaseIdentities: "db-x");
@@ -102,7 +102,7 @@ public class NavMenuLinkScopeTests
     public async Task A_scope_change_that_failed_leaves_the_links_on_the_active_scope()
     {
         await using StudioComponentContext context = new();
-        context.Options.RefreshInterval = TimeSpan.FromMinutes(5);
+        context.ShellOptions.RefreshInterval = TimeSpan.FromMinutes(5);
         context.Catalog
             .WithStore("default", "Default", databaseIdentities: "db-a")
             .WithStore("other", "Other", databaseIdentities: "db-x");
@@ -127,7 +127,7 @@ public class NavMenuLinkScopeTests
     public async Task Setting_the_scope_the_studio_is_already_on_redraws_no_links()
     {
         await using StudioComponentContext context = new();
-        context.Options.RefreshInterval = TimeSpan.FromMinutes(5);
+        context.ShellOptions.RefreshInterval = TimeSpan.FromMinutes(5);
         context.Catalog.WithStore("default", "Default", databaseIdentities: "db-a");
         await context.State.EnsureInitializedAsync(Token);
 
@@ -159,7 +159,7 @@ public class NavMenuLinkScopeTests
             services.AddSingleton<IScrollToLocationHash, QuietScrollToLocationHash>();
         });
 
-        context.Options.RefreshInterval = TimeSpan.FromMinutes(5);
+        context.ShellOptions.RefreshInterval = TimeSpan.FromMinutes(5);
         context.StoreInfo.WithStore("default", "Default", databaseIdentity: "db-a").WithStore("other", "Other", databaseIdentity: "db-x");
         context.Catalog
             .WithStore("default", "Default", databaseIdentities: "db-a")

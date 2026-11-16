@@ -31,7 +31,7 @@ using DataStudio.Postgres.Tests.Support;
 namespace DataStudio.Postgres.Tests.Components;
 
 /// <summary>
-/// A bUnit context wired as <c>AddPostgresStudio()</c> wires a circuit: PostgresStudio's settings, descriptor, links and
+/// A bUnit context wired as <c>AddPostgres()</c> wires a circuit: PostgresStudio's settings, descriptor, links and
 /// source provider - the real ones, over one <see cref="NpgsqlDataSource" /> registered as the application's unkeyed
 /// singleton, which nothing here ever opens - and fakes for every data service a page reads through.
 /// </summary>
@@ -47,6 +47,7 @@ internal sealed class PostgresStudioComponentContext : BunitContext
     public PostgresStudioComponentContext(Action<IServiceCollection>? configure = null)
     {
         Options = new PostgresStudioOptions();
+        ShellOptions = new DataStudioOptions();
         DataSource = NpgsqlDataSource.Create(ConnectionString);
         DatabaseObjects = new FakeDatabaseObjectService();
         TableRows = new FakeTableRowService();
@@ -64,9 +65,10 @@ internal sealed class PostgresStudioComponentContext : BunitContext
         Services.AddSingleton(DataSource);
         Services.AddSingleton<IOptions<PostgresStudioOptions>>(Microsoft.Extensions.Options.Options.Create(Options));
         Services.AddSingleton<IOptions<PostgresDiagnosticsOptions>>(Microsoft.Extensions.Options.Options.Create<PostgresDiagnosticsOptions>(Options));
+        Services.AddSingleton<IOptions<DataStudioOptions>>(Microsoft.Extensions.Options.Options.Create(ShellOptions));
+        Services.AddSingleton<IShellSettings, ShellSettings>();
         Services.AddSingleton<IStudioSettings>(static provider =>
-            new PostgresStudioSettings(provider.GetRequiredService<IOptions<PostgresStudioOptions>>()));
-        Services.AddSingleton<IShellSettings>(static provider => provider.GetRequiredService<IStudioSettings>());
+            new PostgresStudioSettings(provider.GetRequiredService<IOptions<PostgresStudioOptions>>(), provider.GetRequiredService<IShellSettings>()));
         Services.AddSingleton(PostgresStudioDescriptor.Instance);
         Services.AddSingleton<IStudioLinks, PostgresStudioLinks>();
         Services.AddSingleton<IHttpContextAccessor>(new HttpContextAccessor());
@@ -126,12 +128,12 @@ internal sealed class PostgresStudioComponentContext : BunitContext
 
         Services.AddSingleton<StudioCapabilityGuard>();
 
-        // The shell as AddPostgresStudio() leaves a circuit: the database as the root module, the shell's descriptor composed from the modules
+        // The shell as AddPostgres() leaves a circuit: the database as the root module, the shell's descriptor composed from the modules
         // registered, and what the module's scope gate answered. The context's one root is the one circuit, so all three are singletons here.
         Services.AddSingleton<IStudioModule>(static provider => new DatabaseStudioModule(
             provider.GetRequiredService<StudioDescriptor>(), provider.GetRequiredService<IStudioSettings>(), provider.GetRequiredService<StudioCapabilityGuard>()));
         Services.AddSingleton(static provider =>
-            StudioModuleComposition.Compose(provider.GetRequiredService<StudioDescriptor>().ShellIdentity, provider.GetServices<IStudioModule>()));
+            StudioModuleComposition.Compose(provider.GetServices<IStudioModule>()));
         Services.AddSingleton<DatabaseScopeAccess>();
         Services.AddSingleton<IStudioModuleRail, DatabaseModuleRail>();
         Services.AddSingleton<ToastService>();
@@ -151,6 +153,9 @@ internal sealed class PostgresStudioComponentContext : BunitContext
     }
 
     public PostgresStudioOptions Options { get; }
+
+    /// <summary>The shell's options: the mount, the title, the entry policy, the application path and the poll interval are its, not the module's.</summary>
+    public DataStudioOptions ShellOptions { get; }
 
     public NpgsqlDataSource DataSource { get; }
 

@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 
 using DataStudio.Services.Settings;
+using DataStudio.Marten;
 using DataStudio.Marten.Internal;
 using DataStudio.Marten.Internal.Sql;
 using DataStudio.Marten.Services;
@@ -29,71 +30,80 @@ using Microsoft.Extensions.Options;
 using DataStudio.Postgres.Services.Health;
 using DataStudio.Postgres.Services.Health.Checks;
 
-namespace DataStudio.Marten;
+namespace DataStudio;
 
 /// <summary>
-/// Registers Marten Studio's services.
+/// Adds the Marten module to Data Studio.
 /// </summary>
-public static partial class MartenStudioServiceCollectionExtensions
+public static class MartenDataStudioBuilderExtensions
 {
     /// <summary>
-    /// Registers everything Marten Studio renders with: its Blazor components, the store registry that
-    /// discovers this application's Marten stores, the scope, authorization, capability and audit
-    /// services, and the startup guard that refuses an unauthorized mapping.
+    /// Adds the Marten module to the studio: its Blazor components, the store registry that discovers this application's Marten
+    /// stores, the scope, authorization, capability and audit services, and the database pages over the stores' databases.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// No option points the studio at a store. It renders the stores <em>this application</em> registered
+    /// No option points the module at a store. It renders the stores <em>this application</em> registered
     /// - the default <c>IDocumentStore</c> and every ancillary store added with
     /// <c>AddMartenStore&lt;T&gt;()</c> - which is why there is no connection string anywhere in the
-    /// public API. Call this before or after <c>AddMarten()</c>; the scan that finds the stores runs
-    /// lazily on first use, when the container is complete.
+    /// public API. Call this before or after the host's own Marten registration (<c>services.AddMarten(...)</c>); the scan that finds
+    /// the stores runs lazily on first use, when the container is complete.
     /// </para>
     /// <para>
     /// Nothing here changes how the host behaves. No global JSON or SignalR option is touched, no
     /// middleware ordering is required, and every service is registered with <c>TryAdd</c> so an
     /// application that registered its own first is the one that answers. Call
-    /// <c>MapMartenStudio()</c> on the built application to map the endpoints.
+    /// <c>MapDataStudio()</c> on the built application to map the endpoints.
+    /// </para>
+    /// <para>
+    /// <b>One database module per application.</b> Calling this in an application that already called <c>AddPostgres()</c> throws: the two
+    /// share their services, and this module already browses its stores' databases. Calling it twice is safe.
     /// </para>
     /// </remarks>
-    /// <param name="services">The service collection.</param>
-    /// <param name="configure">Configures the studio, including the path it is served under.</param>
-    /// <returns>The same collection, so calls can be chained.</returns>
-    /// <exception cref="ArgumentNullException"><paramref name="services" /> is null.</exception>
+    /// <param name="builder">The builder <c>AddDataStudio()</c> returned.</param>
+    /// <param name="configure">Configures the module.</param>
+    /// <returns>The same builder, so calls can be chained.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="builder" /> is null.</exception>
     /// <exception cref="InvalidOperationException">
-    /// The application was deployed without the PostgresStudio package this one was released with, or with
-    /// another version of it.
+    /// The Postgres module is already added to this builder's services, or the application was deployed without the DataStudio.Postgres package
+    /// this one was released with, or with another version of it.
     /// </exception>
-    public static IServiceCollection AddMartenStudio(
-        this IServiceCollection services,
+    public static DataStudioBuilder AddMarten(
+        this DataStudioBuilder builder,
         Action<MartenStudioOptions>? configure = null)
     {
-        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(builder);
 
-        // Before anything that names a PostgresStudio type: this body names none, so the JIT can compile it and the
-        // guard can say what is wrong even when NuGet left PostgresStudio out of the deployment, where the first
-        // PostgresStudio type would otherwise be a FileNotFoundException with no word about why. Everything else is in
-        // AddMartenStudioServices, which is NoInlining so that it is compiled only once the guard has passed.
+        // Before anything that names a DataStudio.Postgres type: this body names none, so the JIT can compile it and the
+        // guard can say what is wrong even when NuGet left DataStudio.Postgres out of the deployment, where the first
+        // DataStudio.Postgres type would otherwise be a FileNotFoundException with no word about why. Everything else is in
+        // AddMartenServices, which is NoInlining so that it is compiled only once the guard has passed.
         // PostgresStudioVersionGuardTests scans this method's IL to keep it that way.
         PostgresStudioVersionGuard.Ensure();
 
-        return AddMartenStudioServices(services, configure);
+        AddMartenServices(builder, configure);
+
+        return builder;
     }
 
-    /// <summary>The body of <see cref="AddMartenStudio" />, once the shared studio is known to be the right one.</summary>
+    /// <summary>The body of <see cref="AddMarten" />, once the shared database module is known to be the right one.</summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static IServiceCollection AddMartenStudioServices(
-        IServiceCollection services,
+    private static void AddMartenServices(
+        DataStudioBuilder builder,
         Action<MartenStudioOptions>? configure)
     {
-        // First, so that a second studio in this container is refused before anything of this one is registered.
-        // Everything the shared studio needs - the shell, the scope and audit services, the database browser,
-        // Sessions, the health advisor - is registered there; what follows is Marten Studio's own.
+        IServiceCollection services = builder.Services;
+
+        // First, so that a second database module in this container is refused before anything of this one is registered.
+        // Everything the database pages need - the scope and audit services, the database browser, Sessions, the health
+        // advisor - is registered there; what follows is the Marten module's own.
         StudioCoreRegistration.Add(
             services,
             MartenStudioDescriptor.Marker,
             MartenStudioDescriptor.Instance,
-            static provider => new MartenStudioSettings(provider.GetRequiredService<IOptions<MartenStudioOptions>>()));
+            static provider => new MartenStudioSettings(
+                provider.GetRequiredService<IOptions<MartenStudioOptions>>(),
+                provider.GetRequiredService<IShellSettings>()));
 
         // The options both studios share are validated by one chain (StudioOptionsValidation), in MartenStudio's names and
         // with its sentences unchanged; MartenStudio's own validations sit between its parts, where they always were, so the
@@ -119,8 +129,8 @@ public static partial class MartenStudioServiceCollectionExtensions
             optionsBuilder.Configure(configure);
         }
 
-        // The registry captures this collection and scans it lazily, on first use: AddMartenStudio() is
-        // routinely called before AddMarten(), and a scan now would find no stores at all.
+        // The registry captures this collection and scans it lazily, on first use: AddMarten() is
+        // routinely called before the host's own Marten registration, and a scan now would find no stores at all.
         services.TryAddSingleton(new MartenStoreRegistry(services));
 
         // The shared seams, answered in Marten's terms. The source provider is scoped like the tenant
@@ -168,7 +178,7 @@ public static partial class MartenStudioServiceCollectionExtensions
         services.TryAddEnumerable(ServiceDescriptor.Scoped<IFindContributor, EventSequenceFindContributor>());
 
         // 1.1-NP4: "How Marten uses this connection" on Database > Connection. The data-source registry captures this collection and
-        // scans it lazily, like the store registry: AddMartenStudio() is routinely called before AddNpgsqlDataSource().
+        // scans it lazily, like the store registry: AddMarten() is routinely called before AddNpgsqlDataSource().
         services.TryAddSingleton(new MartenDataSourceRegistry(services));
         services.TryAddSingleton<MartenRowSizeCache>();
         services.TryAddEnumerable(ServiceDescriptor.Scoped<IConnectionInsightContributor, MartenConnectionInsightContributor>());
@@ -181,7 +191,7 @@ public static partial class MartenStudioServiceCollectionExtensions
         services.TryAddScoped<StudioScopeResolver>();
         services.TryAddScoped<TenantDiscovery>();
         services.TryAddScoped<IStoreInfoService, StoreInfoService>();
-        services.TryAddScoped<Services.Tenants.ITenantOverviewService, Services.Tenants.TenantOverviewService>();
+        services.TryAddScoped<DataStudio.Marten.Services.Tenants.ITenantOverviewService, DataStudio.Marten.Services.Tenants.TenantOverviewService>();
         services.TryAddScoped<IDocumentDataService, DocumentDataService>();
         services.TryAddScoped<DocumentBrowserState>();
         services.TryAddScoped<IDocumentWriteService, DocumentWriteService>();
@@ -222,14 +232,11 @@ public static partial class MartenStudioServiceCollectionExtensions
         services.TryAddScoped<IProjectionDataService, ProjectionDataService>();
 
         // W5-API: the diagnostics API for the host's own code (D31) is the engine's, registered by StudioCoreRegistration above,
-        // over this studio's stores, checks and descriptor.
-
-        return services;
+        // over this module's stores, checks and descriptor.
     }
 
-    /// <summary>The options MartenStudio shares with every studio, as the shared validation reads them.</summary>
+    /// <summary>The options the Postgres and Marten modules share, as the shared validation reads them.</summary>
     private static StudioOptionsShape Shape(MartenStudioOptions options) => new(
-        options.Path,
         options.DefaultPageSize,
         options.MaxPageSize,
         options.QueryTimeout,
@@ -237,11 +244,9 @@ public static partial class MartenStudioServiceCollectionExtensions
         options.MaxSqlConsoleRows,
         options.SqlConsoleRole,
         options.ExactCountThreshold,
-        options.RefreshInterval,
         options.HealthInterval,
         options.Capabilities is not null,
         options.BrowsableSchemas,
         options.MaxStudioConnections,
-        options.StudioApplicationName,
-        options.ApplicationPath);
+        options.StudioApplicationName);
 }

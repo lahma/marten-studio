@@ -407,7 +407,7 @@ public class LinqEventQueryServiceTests
                 options.Schema.For<LinqSecret>();
                 marten?.Invoke(options);
             });
-            services.AddMartenStudio(options =>
+            services.AddDataStudio().AddMarten(options =>
             {
                 options.StoreAuthorizationPolicy = StorePolicy;
                 options.WriteAuthorizationPolicy = WritePolicy;
