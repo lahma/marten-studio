@@ -170,7 +170,7 @@ internal static class StudioEndpointMapper
         // framework script and its asset mirror all live under the path, and the shell renders a
         // studio-rooted <base href> so the browser asks for them there. It is also what a reverse proxy
         // that forwards only the studio prefix needs.
-        components.Add(endpointBuilder => ReRootUnderStudioPath(endpointBuilder, studioPath, descriptor.PageAssemblies));
+        components.Add(endpointBuilder => ReRootUnderStudioPath(endpointBuilder, studioPath, descriptor));
 
         // The studio has no form, so it needs no antiforgery token - and requiring one would be a
         // middleware-ordering requirement on the host, which is the one thing registering the studio must
@@ -268,8 +268,10 @@ internal static class StudioEndpointMapper
     /// document-relative, so the studio-rooted <c>&lt;base href&gt;</c> points at the moved copy. Anything
     /// else is left alone.
     /// </remarks>
-    private static void ReRootUnderStudioPath(EndpointBuilder endpointBuilder, string studioPath, IReadOnlyList<StudioPageAssembly> pageAssemblies)
+    private static void ReRootUnderStudioPath(EndpointBuilder endpointBuilder, string studioPath, StudioShellDescriptor descriptor)
     {
+        IReadOnlyList<StudioPageAssembly> pageAssemblies = descriptor.PageAssemblies;
+
         if (endpointBuilder is not RouteEndpointBuilder routeEndpointBuilder)
         {
             return;
@@ -303,6 +305,53 @@ internal static class StudioEndpointMapper
         string address = rawText.Length == 1 ? string.Empty : rawText;
         string pattern = studioPath + address;
         routeEndpointBuilder.RoutePattern = RoutePatternFactory.Parse(pattern.Length == 0 ? "/" : pattern);
+
+        if (HomeRedirectOf(componentType, rawText, assembly, descriptor) is { } home)
+        {
+            RedirectRequestsTo(routeEndpointBuilder, studioPath, home);
+        }
+    }
+
+    /// <summary>
+    /// The home, below the mount, that the page at <paramref name="template" /> sends a visitor to instead of drawing anything, or
+    /// <see langword="null" /> when it draws: the shell's front page when one module is composed (there is nothing to choose), and a module's own
+    /// root address when the module's home is another address (the Postgres module's <c>/postgres</c> in a Marten host, whose home is Marten's).
+    /// </summary>
+    private static string? HomeRedirectOf(Type componentType, string template, StudioPageAssembly assembly, StudioShellDescriptor descriptor)
+    {
+        if (descriptor.ModuleOf(componentType) is { } module)
+        {
+            return string.Equals(template, assembly.CompileTimeRoot.TrimEnd('/'), StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(module.HomeRoute, assembly.Segment, StringComparison.OrdinalIgnoreCase)
+                ? module.HomeRoute
+                : null;
+        }
+
+        return template == "/" && descriptor.Modules.Count == 1 ? descriptor.Modules[0].HomeRoute : null;
+    }
+
+    /// <summary>
+    /// Answers a GET or HEAD request for the endpoint with a redirect to <c>{PathBase}{mount}/{home}</c> and the request's own query string, as a
+    /// path and nothing else. The framework's own redirect from a prerender (<c>NavigationManager.NavigateTo</c>) is an absolute URL built from
+    /// the request's scheme and host, which is wrong for a host behind a proxy whose forwarded headers the application does not apply: the visitor
+    /// would be sent to <c>http://internal-host/…</c>. The endpoint's metadata, and so its policy and the startup guard's page marker, is untouched,
+    /// and any other method still reaches the page.
+    /// </summary>
+    private static void RedirectRequestsTo(RouteEndpointBuilder endpointBuilder, string studioPath, string home)
+    {
+        RequestDelegate? page = endpointBuilder.RequestDelegate;
+        PathString target = new(studioPath + "/" + home);
+
+        endpointBuilder.RequestDelegate = context =>
+        {
+            if (!HttpMethods.IsGet(context.Request.Method) && !HttpMethods.IsHead(context.Request.Method))
+            {
+                return page is null ? Task.CompletedTask : page(context);
+            }
+
+            context.Response.Redirect(context.Request.PathBase.Add(target).ToUriComponent() + context.Request.QueryString.ToUriComponent());
+            return Task.CompletedTask;
+        };
     }
 
     /// <summary>The page assembly of <paramref name="componentType" />, or <see langword="null" /> when it is not a page assembly.</summary>

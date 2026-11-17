@@ -7,9 +7,10 @@
     The Postgres module's home, at {mount}/postgres: the Postgres overview.
 
     A Marten host serves the same Postgres pages over its stores' databases, but its home is the Marten module's (its page at {mount}/marten), and
-    this address must not be a second copy of it: the visitor is sent there, with the query string they came with. That runs on the prerender, where
-    the framework turns it into the response's own redirect, and on the circuit, where it is a navigation. The module that owns this page decides: a
-    page never names the Marten module's address, so it is the module's HomeRoute that is followed.
+    this address must not be a second copy of it: the visitor is sent there, with the query string they came with. A request for the address is
+    answered by its endpoint (StudioEndpointMapper) with a redirect that is a path, never an absolute URL built from the request's scheme and host;
+    this page's own redirect is the circuit's, a client-side navigation. The module that owns this page decides: a page never names the Marten
+    module's address, so it is the module's HomeRoute that is followed.
 *@
 
 @if (homeElsewhere is null)
@@ -31,8 +32,7 @@
 
         homeElsewhere = module.HomeRoute;
 
-        // This page's own address, as the request spelled it (the prerender's base URI is the application's, the circuit's is the mount's, so a
-        // relative reference would be one or the other), with its last segment replaced by the module's home.
+        // This page's own address, as the browser spelled it, with its last segment replaced by the module's home.
         Uri current = new(Navigation.Uri);
         string path = current.AbsolutePath.TrimEnd('/');
         Navigation.NavigateTo(string.Concat(path.AsSpan(0, path.Length - PostgresRoutes.Root.Length), homeElsewhere, current.Query), replace: true);

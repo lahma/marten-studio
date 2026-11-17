@@ -27,7 +27,12 @@ public class ShellFrontEndpointTests
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
-    private static WebApplication CreateApp(bool postgres, bool kafka = true, Action<DataStudioOptions>? configureShell = null, Action<WebApplicationBuilder>? configureBuilder = null)
+    private static WebApplication CreateApp(
+        bool postgres,
+        bool kafka = true,
+        Action<DataStudioOptions>? configureShell = null,
+        Action<WebApplicationBuilder>? configureBuilder = null,
+        string? pathBase = null)
     {
         WebApplicationBuilder builder = WebApplication.CreateBuilder();
         builder.WebHost.UseTestServer();
@@ -51,29 +56,48 @@ public class ShellFrontEndpointTests
         }
 
         configureBuilder?.Invoke(builder);
-        return builder.Build();
+        WebApplication app = builder.Build();
+
+        if (pathBase is not null)
+        {
+            // The path base is stripped before routing, as a host that mounts the application under a prefix does; so routing is explicit.
+            app.UsePathBase(pathBase);
+            app.UseRouting();
+        }
+
+        return app;
     }
 
     private static List<RouteEndpoint> RouteEndpoints(WebApplication app) =>
         [.. ((IEndpointRouteBuilder) app).DataSources.SelectMany(static source => source.Endpoints).OfType<RouteEndpoint>()];
 
-    [Fact]
-    public async Task With_one_module_the_front_address_sends_the_visitor_to_its_home_keeping_the_query()
+    /// <summary>
+    /// The one-module redirect is a path, whole: the path base, the mount, the module's home and the request's own query string - never an absolute URL
+    /// built from the request's scheme and host, which a host behind a proxy whose forwarded headers the application does not apply would get wrong.
+    /// </summary>
+    [Theory]
+    [InlineData("/studio", null, "/studio", "/studio/kafka")]
+    [InlineData("/studio", null, "/studio?cluster=primary", "/studio/kafka?cluster=primary")]
+    [InlineData("/studio", null, "/studio?cluster=primary&topic=a%2Fb", "/studio/kafka?cluster=primary&topic=a%2Fb")]
+    [InlineData("/ops/data", null, "/ops/data", "/ops/data/kafka")]
+    [InlineData("/ops/data", null, "/ops/data?cluster=primary", "/ops/data/kafka?cluster=primary")]
+    [InlineData("/studio", "/app", "/app/studio", "/app/studio/kafka")]
+    [InlineData("/studio", "/app", "/app/studio?cluster=primary", "/app/studio/kafka?cluster=primary")]
+    [InlineData("/ops/data", "/app", "/app/ops/data?cluster=primary", "/app/ops/data/kafka?cluster=primary")]
+    public async Task With_one_module_the_front_address_sends_the_visitor_to_its_home_as_a_path_keeping_the_query(string mount, string? pathBase, string request, string location)
     {
-        await using WebApplication app = CreateApp(postgres: false);
+        await using WebApplication app = CreateApp(postgres: false, configureShell: options => options.Path = mount, pathBase: pathBase);
         app.MapDataStudio().AllowAnonymous();
         await app.StartAsync(Token);
         try
         {
             using HttpClient client = app.GetTestClient();
 
-            using HttpResponseMessage plain = await client.GetAsync(new Uri("/studio", UriKind.Relative), Token);
-            using HttpResponseMessage withQuery = await client.GetAsync(new Uri("/studio?cluster=primary", UriKind.Relative), Token);
+            using HttpResponseMessage response = await client.GetAsync(new Uri(request, UriKind.Relative), Token);
 
-            plain.StatusCode.Should().Be(HttpStatusCode.Found, "a redirect that can change, never a permanent one");
-            plain.Headers.Location!.ToString().Should().EndWith("/studio/kafka");
-            withQuery.StatusCode.Should().Be(HttpStatusCode.Found);
-            withQuery.Headers.Location!.ToString().Should().EndWith("/studio/kafka?cluster=primary");
+            response.StatusCode.Should().Be(HttpStatusCode.Found, "a redirect that can change, never a permanent one");
+            response.Headers.Location!.OriginalString.Should().Be(location);
+            response.Headers.Location.IsAbsoluteUri.Should().BeFalse("a path holds no scheme and no host: the proxy in front decides those");
         }
         finally
         {
@@ -82,19 +106,24 @@ public class ShellFrontEndpointTests
     }
 
     [Fact]
-    public async Task The_front_address_follows_the_mount_and_the_path_base()
+    public async Task The_redirect_names_no_scheme_and_no_host_whatever_the_request_arrived_as()
     {
-        await using WebApplication app = CreateApp(postgres: false, configureShell: static options => options.Path = "/ops/data");
+        await using WebApplication app = CreateApp(postgres: false);
         app.MapDataStudio().AllowAnonymous();
         await app.StartAsync(Token);
         try
         {
             using HttpClient client = app.GetTestClient();
+            using HttpRequestMessage request = new(HttpMethod.Get, new Uri("/studio?cluster=primary", UriKind.Relative));
+            request.Headers.Host = "internal-host.example:8443";
+            request.Headers.TryAddWithoutValidation("X-Forwarded-Host", "public.example");
+            request.Headers.TryAddWithoutValidation("X-Forwarded-Proto", "https");
 
-            using HttpResponseMessage response = await client.GetAsync(new Uri("/ops/data?cluster=primary", UriKind.Relative), Token);
+            using HttpResponseMessage response = await client.SendAsync(request, Token);
 
             response.StatusCode.Should().Be(HttpStatusCode.Found);
-            response.Headers.Location!.ToString().Should().EndWith("/ops/data/kafka?cluster=primary");
+            response.Headers.Location!.OriginalString.Should().Be("/studio/kafka?cluster=primary");
+            response.Headers.Location.OriginalString.Should().NotContain("example").And.NotContain("://");
         }
         finally
         {
@@ -146,10 +175,13 @@ public class ShellFrontEndpointTests
         front.Metadata.GetMetadata<StudioEndpointMarker>().Should().NotBeNull().And.Match<StudioEndpointMarker>(static x => x.IsPage, "the guard counts it as a page");
     }
 
-    [Fact]
-    public async Task An_anonymous_visitor_is_refused_the_front_page_whichever_modules_there_are()
+    /// <summary>One module composed is the case that redirects: the authorization middleware answers before the endpoint's delegate runs, so no redirect names a module for a visitor the policy refuses.</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task An_anonymous_visitor_is_refused_the_front_page_whichever_modules_there_are(bool postgres)
     {
-        await using WebApplication app = CreateApp(postgres: true, configureBuilder: static builder =>
+        await using WebApplication app = CreateApp(postgres: postgres, configureBuilder: static builder =>
         {
             builder.Services
                 .AddAuthentication(TestAuthenticationHandler.SchemeName)
@@ -167,6 +199,7 @@ public class ShellFrontEndpointTests
             using HttpResponseMessage response = await client.GetAsync(new Uri("/studio", UriKind.Relative), Token);
 
             response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+            response.Headers.Location.Should().BeNull("a refused visitor is told nothing about where the module's home is");
         }
         finally
         {
@@ -177,12 +210,15 @@ public class ShellFrontEndpointTests
     [Fact]
     public async Task An_unauthorized_mapping_is_refused_at_startup_with_the_front_page_among_the_pages()
     {
-        await using WebApplication app = CreateApp(postgres: true);
+        await using WebApplication app = CreateApp(postgres: true, kafka: false, configureShell: static options => options.Path = "/only-front");
         app.MapDataStudio();
 
+        // With the front page and the pages of one module there is no way to tell them apart by a path that is under the mount: the front page's is the
+        // mount itself, so the sentence lists it as such. The marker test above is the one that holds that the guard counts it.
         Func<Task> start = () => app.StartAsync(Token);
 
-        (await start.Should().ThrowAsync<InvalidOperationException>()).Which.Message.Should().StartWith("Data Studio is mapped with no authorization.").And.Contain("/studio");
+        (await start.Should().ThrowAsync<InvalidOperationException>()).Which.Message.Should().StartWith("Data Studio is mapped with no authorization.")
+            .And.Contain("Unauthorized: /only-front,");
     }
 
     [Theory]
