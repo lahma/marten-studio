@@ -81,7 +81,7 @@ shell's and the Kafka module's own:
      free of engine types so that a newer engine whose members moved still reaches the guard, as `DataStudio.Marten.Tests`' `PostgresVersionGuardTests` does for
      the Postgres module, the engine and the shell one package up; `KafkaCoreVersionGuardTests` and `KafkaWolverineVersionGuardTests` for the Kafka three);
      `HealthCodesTests` (hard rule 7's codes table); `PublicApiShapeTests` and `DiagnosticsApiIsNotServedTests` (D31); `NpgsqlVersionTests`,
-     `MartenVersionTests` and `PostgresSolutionFilterTests` (*Build*); `PackReadinessTests` (the Kafka three's preview label); `VersionFallbackTests`;
+     `MartenVersionTests` and `PostgresSolutionFilterTests` (*Build*); `PackReadinessTests` (one version for all seven, no label); `VersionFallbackTests`;
      `WorkflowGenerationTests`; and `ReleasePushOrderTests` (*Release engineering*).
    - **Others**: `ReadmeSnippetTests` holds both READMEs to their samples: `README.md` to `samples/DataStudio.Sample.Marten/Program.cs` and
      `src/DataStudio.Postgres/README.md` to `samples/DataStudio.Sample.Postgres/Program.cs`. `NoUnboundedGateAwaitTests` holds every awaited gate to a bound. A

@@ -32,8 +32,8 @@ using static Fallout.Common.Tools.DotNet.DotNetTasks;
 /// <c>Build.cs</c> is deliberately empty and the release carries only the changelog notes. There is no
 /// feed for untagged builds: every tagged version is published from <c>publish.yml</c> by trusted publishing, which
 /// is why <c>Publish</c> is a single-source target gated on <see cref="Build.IsTaggedBuild"/> rather than
-/// a two-way switch between a release feed and a development one. (the Kafka module's packages are a preview by version,
-/// <c>&lt;version&gt;-&lt;label&gt;</c>, and go out on the same feed with the same tag.)
+/// a two-way switch between a release feed and a development one. A prerelease of the family (a hyphen in the CHANGELOG's version, such as
+/// <c>2.0.0-beta.1</c>) is all seven packages at that version, pushed to the same feed by the same tag.
 /// </remarks>
 partial class Build
 {
@@ -77,22 +77,6 @@ partial class Build
     AbsolutePath KafkaWolverineProject => SourceDirectory / "DataStudio.Kafka.Wolverine" / "DataStudio.Kafka.Wolverine.csproj";
 
     /// <summary>
-    /// <c>KafkaPrereleaseLabel</c> from <c>Directory.Build.props</c> (K8), the one place the preview label lives: empty
-    /// when the Kafka module has graduated. The three Kafka projects pack at <see cref="KafkaVersion"/>; nothing else reads it.
-    /// </summary>
-    string KafkaPrereleaseLabel => XDocument.Load(RootDirectory / "Directory.Build.props").Descendants()
-        .Where(x => x.Name.LocalName == "KafkaPrereleaseLabel")
-        .Select(x => x.Value.Trim())
-        .SingleOrDefault() ?? string.Empty;
-
-    /// <summary>
-    /// The version the three Kafka packages carry: the CHANGELOG's <see cref="Version"/>, plus <c>-&lt;label&gt;</c> while the
-    /// label is set. The same string the projects compute for their <c>PackageVersion</c>, and the one the exact pins
-    /// between them carry (<c>[1.3.0-preview.1]</c>).
-    /// </summary>
-    string KafkaVersion => KafkaPrereleaseLabel.Length == 0 ? Version : $"{Version}-{KafkaPrereleaseLabel}";
-
-    /// <summary>
     /// The seven packages a release consists of, in the order they are packed and pushed, each below the one that
     /// depends on exactly it: DataStudio.Postgres.Diagnostics, then DataStudio (the shell), then DataStudio.Postgres (which needs both), then
     /// DataStudio.Marten, then DataStudio.Kafka.Core, then DataStudio.Kafka (which needs DataStudio and DataStudio.Kafka.Core), then
@@ -101,7 +85,7 @@ partial class Build
     /// the seven appear together: nuget.org validates and indexes each package on its own, so for a few minutes DataStudio.Postgres
     /// can be listed while its DataStudio.Postgres.Diagnostics or DataStudio is not yet restorable (and DataStudio.Marten while its
     /// DataStudio.Postgres is not, and DataStudio.Kafka while its DataStudio.Kafka.Core is not), and a host restoring in that window gets NU1102
-    /// until it is. The three Kafka packages carry the preview label (<see cref="KafkaVersion"/>).
+    /// until it is.
     /// </summary>
     AbsolutePath[] ReleasePackages =>
     [
@@ -109,9 +93,9 @@ partial class Build
         PackagesDirectory / $"{ShellPackageId}.{Version}.nupkg",
         PackagesDirectory / $"{PostgresPackageId}.{Version}.nupkg",
         PackagesDirectory / $"{MartenPackageId}.{Version}.nupkg",
-        PackagesDirectory / $"{KafkaCorePackageId}.{KafkaVersion}.nupkg",
-        PackagesDirectory / $"{KafkaPackageId}.{KafkaVersion}.nupkg",
-        PackagesDirectory / $"{KafkaWolverinePackageId}.{KafkaVersion}.nupkg",
+        PackagesDirectory / $"{KafkaCorePackageId}.{Version}.nupkg",
+        PackagesDirectory / $"{KafkaPackageId}.{Version}.nupkg",
+        PackagesDirectory / $"{KafkaWolverinePackageId}.{Version}.nupkg",
     ];
 
     Target Pack => _ => _
@@ -164,9 +148,9 @@ partial class Build
             foreach (var package in new[]
                      {
                          PackagesDirectory / $"{ShellPackageId}.{Version}.nupkg",
-                         PackagesDirectory / $"{KafkaCorePackageId}.{KafkaVersion}.nupkg",
-                         PackagesDirectory / $"{KafkaPackageId}.{KafkaVersion}.nupkg",
-                         PackagesDirectory / $"{KafkaWolverinePackageId}.{KafkaVersion}.nupkg",
+                         PackagesDirectory / $"{KafkaCorePackageId}.{Version}.nupkg",
+                         PackagesDirectory / $"{KafkaPackageId}.{Version}.nupkg",
+                         PackagesDirectory / $"{KafkaWolverinePackageId}.{Version}.nupkg",
                      })
             {
                 AssertNuspecDependsOnNoneOf(package, PostgresPackageId, DiagnosticsPackageId, MartenPackageId, "Npgsql", "Marten", "JasperFx", "Weasel");
@@ -233,7 +217,7 @@ partial class Build
             // DataStudio.Kafka.Core depends on Confluent.Kafka at its floor and on the three Microsoft.Extensions.* abstractions it
             // registers into, logs through and binds options with, at their central floors (DataStudioKafkaCorePinsExtensions): no
             // ASP.NET Core and no part of the Marten family.
-            AssertNuspecDependencies(PackagesDirectory / $"{KafkaCorePackageId}.{KafkaVersion}.nupkg",
+            AssertNuspecDependencies(PackagesDirectory / $"{KafkaCorePackageId}.{Version}.nupkg",
                 new Dictionary<string, string>
                 {
                     ["Confluent.Kafka"] = ConfluentFloor,
@@ -242,17 +226,17 @@ partial class Build
                     ["Microsoft.Extensions.Options"] = CentralPackageVersion("Microsoft.Extensions.Options"),
                 });
 
-            // DataStudio.Kafka depends on exactly its own DataStudio (the family version) and exactly its own DataStudio.Kafka.Core (the
-            // preview version): DataStudioKafkaPinsFamilyExactly in DataStudio.Kafka.csproj, which takes each range from the referenced
+            // DataStudio.Kafka depends on exactly its own DataStudio and exactly its own DataStudio.Kafka.Core
+            // (both the family version): DataStudioKafkaPinsFamilyExactly in DataStudio.Kafka.csproj, which takes each range from the referenced
             // project's PackageVersion. It depends on no database module and no Npgsql. Two more lines are CPM's transitive pinning, as
             // The Marten module's assets line is (measured by K8): the assets pack that carries blazor.web.js (D22), which reaches it through the shell, and
             // Confluent.Kafka at its floor, which reaches it through DataStudio.Kafka.Core. The Kafka module references neither, and its built
             // assembly references no Confluent assembly (KafkaFenceTests); the lines only keep a host from lowering them.
-            AssertNuspecDependencies(PackagesDirectory / $"{KafkaPackageId}.{KafkaVersion}.nupkg",
+            AssertNuspecDependencies(PackagesDirectory / $"{KafkaPackageId}.{Version}.nupkg",
                 new Dictionary<string, string>
                 {
                     [ShellPackageId] = $"[{Version}]",
-                    [KafkaCorePackageId] = $"[{KafkaVersion}]",
+                    [KafkaCorePackageId] = $"[{Version}]",
                     ["Confluent.Kafka"] = ConfluentFloor,
                     ["Microsoft.AspNetCore.App.Internal.Assets"] = assetsPack,
                 });
@@ -263,10 +247,10 @@ partial class Build
             // Confluent.Kafka floor and the three abstractions, as DataStudio.Kafka.Core's own, and Microsoft.Extensions.Hosting, which
             // WolverineFx brings and the same conditional group (Directory.Packages.props) has a row for. All are floors a host
             // can raise and none is a reference of this project.
-            AssertNuspecDependencies(PackagesDirectory / $"{KafkaWolverinePackageId}.{KafkaVersion}.nupkg",
+            AssertNuspecDependencies(PackagesDirectory / $"{KafkaWolverinePackageId}.{Version}.nupkg",
                 new Dictionary<string, string>
                 {
-                    [KafkaCorePackageId] = $"[{KafkaVersion}]",
+                    [KafkaCorePackageId] = $"[{Version}]",
                     ["WolverineFx.Kafka"] = CentralPackageVersion("WolverineFx.Kafka"),
                     ["Confluent.Kafka"] = ConfluentFloor,
                     ["Microsoft.Extensions.DependencyInjection.Abstractions"] = CentralPackageVersion("Microsoft.Extensions.DependencyInjection.Abstractions"),
@@ -277,7 +261,6 @@ partial class Build
 
             ReportSummary(_ => _
                 .AddPair("Version", Version)
-                .AddPair("Kafka version", KafkaVersion)
                 .AddPair("Marten floor", MartenFloor)
                 .AddPair("Npgsql floor", NpgsqlFloor)
                 .AddPair("Confluent.Kafka floor", ConfluentFloor)
@@ -332,8 +315,7 @@ partial class Build
         });
 
     /// <summary>
-    /// <c>artifacts/packages</c> holds exactly the seven release packages - the first four at the CHANGELOG version, the
-    /// three Kafka packages at that version with the preview label - no eighth package, no stale version left behind,
+    /// <c>artifacts/packages</c> holds exactly the seven release packages - all at the CHANGELOG version - no eighth package, no stale version left behind,
     /// none of the seven missing.
     /// </summary>
     void AssertTheReleasePackagesAndNothingElse()
@@ -344,7 +326,7 @@ partial class Build
         Assert.True(found.SequenceEqual(expected),
             $"'{PackagesDirectory}' must hold exactly {string.Join(", ", expected)}; it holds " +
             $"[{string.Join(", ", found)}]. Run Pack, which packs all seven at the CHANGELOG version {Version} " +
-            $"(the Kafka packages as {KafkaVersion}).");
+            $"(the Kafka packages as {Version}).");
     }
 
     /// <summary>

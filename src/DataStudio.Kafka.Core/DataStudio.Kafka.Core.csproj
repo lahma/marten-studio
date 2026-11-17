@@ -6,9 +6,7 @@
     <PackageId>DataStudio.Kafka.Core</PackageId>
     <Title>Data Studio Kafka engine</Title>
     <IsPackable>true</IsPackable>
-    <!-- Empty, as the whole family's is for 2.0 (Directory.Build.props): this id has no release on nuget.org to be compared with, and restore refuses a baseline it cannot find (NU1101). Set to 2.0.0-preview.1 one release after this one, with the family's. -->
     <EnablePackageValidation>true</EnablePackageValidation>
-    <PackageValidationBaselineVersion></PackageValidationBaselineVersion>
     <PackageTags>kafka;blazor;studio;admin</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <Product>Data Studio</Product>
@@ -21,25 +19,6 @@
     <IsTrimmable>false</IsTrimmable>
     <IsAotCompatible>false</IsAotCompatible>
   </PropertyGroup>
-
-  <!-- K8: the preview label (Directory.Build.props, KafkaPrereleaseLabel). Only the three Kafka projects read it. The package and the
-       informational version are `<version>-<label>`; AssemblyVersion and FileVersion stay numeric. `Version` is the CHANGELOG's, passed by Pack
-       as a global property, so it is read here and never set. An empty label packs at the family version (the graduation path). The
-       label is also stamped into the assembly, so the version guards can tell the preview suffix from the family's own version. -->
-  <PropertyGroup>
-    <KafkaBaseVersion>$(Version)</KafkaBaseVersion>
-    <KafkaBaseVersion Condition="'$(KafkaBaseVersion)' == ''">$(VersionPrefix)</KafkaBaseVersion>
-  </PropertyGroup>
-  <PropertyGroup Condition="'$(KafkaPrereleaseLabel)' != ''">
-    <PackageVersion>$(KafkaBaseVersion)-$(KafkaPrereleaseLabel)</PackageVersion>
-    <InformationalVersion>$(KafkaBaseVersion)-$(KafkaPrereleaseLabel)</InformationalVersion>
-  </PropertyGroup>
-  <ItemGroup Condition="'$(KafkaPrereleaseLabel)' != ''">
-    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
-      <_Parameter1>KafkaPrereleaseLabel</_Parameter1>
-      <_Parameter2>$(KafkaPrereleaseLabel)</_Parameter2>
-    </AssemblyAttribute>
-  </ItemGroup>
 
   <!-- No FrameworkReference: the engine has no ASP.NET Core (KafkaCoreFenceTests). -->
 

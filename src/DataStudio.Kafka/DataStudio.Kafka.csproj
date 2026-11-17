@@ -1,17 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk.Razor">
 
   <!-- The Kafka module's Razor Class Library (AGENTS.md D34, D35): AddDataStudio().AddKafka() adds a Kafka section to the studio the host
-       registered. It has no Marten, no Npgsql and no database module (hard rule 16: it joins the studio through the shell, DataStudio), no static web assets (its CSS is a section of the shell's one stylesheet)
-       and it ships as a preview (K8; the label is Directory.Build.props' KafkaPrereleaseLabel). -->
+       registered. It has no Marten, no Npgsql and no database module (hard rule 16: it joins the studio through the shell, DataStudio), no static web assets (its CSS is a section of the shell's one stylesheet) -->
   <PropertyGroup>
     <AssemblyName>DataStudio.Kafka</AssemblyName>
     <RootNamespace>DataStudio.Kafka</RootNamespace>
     <PackageId>DataStudio.Kafka</PackageId>
     <Title>Data Studio for Apache Kafka</Title>
     <IsPackable>true</IsPackable>
-    <!-- Empty, as the whole family's is for 2.0 (Directory.Build.props): this id has no release on nuget.org to be compared with, and restore refuses a baseline it cannot find (NU1101). Set to 2.0.0-preview.1 one release after this one, with the family's. -->
     <EnablePackageValidation>true</EnablePackageValidation>
-    <PackageValidationBaselineVersion></PackageValidationBaselineVersion>
     <PackageTags>kafka;blazor;studio;admin</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <Product>Data Studio</Product>
@@ -35,25 +32,6 @@
     <ProjectReference Include="../DataStudio.Kafka.Core/DataStudio.Kafka.Core.csproj" />
   </ItemGroup>
 
-  <!-- K8: the preview label (Directory.Build.props, KafkaPrereleaseLabel). Only the three Kafka projects read it. The package and the
-       informational version are `<version>-<label>`; AssemblyVersion and FileVersion stay numeric. `Version` is the CHANGELOG's, passed by Pack
-       as a global property, so it is read here and never set. An empty label packs at the family version (the graduation path). The
-       label is also stamped into the assembly, so the version guards can tell the preview suffix from the family's own version. -->
-  <PropertyGroup>
-    <KafkaBaseVersion>$(Version)</KafkaBaseVersion>
-    <KafkaBaseVersion Condition="'$(KafkaBaseVersion)' == ''">$(VersionPrefix)</KafkaBaseVersion>
-  </PropertyGroup>
-  <PropertyGroup Condition="'$(KafkaPrereleaseLabel)' != ''">
-    <PackageVersion>$(KafkaBaseVersion)-$(KafkaPrereleaseLabel)</PackageVersion>
-    <InformationalVersion>$(KafkaBaseVersion)-$(KafkaPrereleaseLabel)</InformationalVersion>
-  </PropertyGroup>
-  <ItemGroup Condition="'$(KafkaPrereleaseLabel)' != ''">
-    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
-      <_Parameter1>KafkaPrereleaseLabel</_Parameter1>
-      <_Parameter2>$(KafkaPrereleaseLabel)</_Parameter2>
-    </AssemblyAttribute>
-  </ItemGroup>
-
   <ItemGroup>
     <None Include="../DataStudio.Kafka/README.md" Pack="true" PackagePath="/" />
     <None Include="../../icon.png" Pack="true" PackagePath="/" Visible="false" />
@@ -69,7 +47,7 @@
   </ItemGroup>
 
   <!-- Exactly its own build of what sits below it, as the Marten module's DataStudioMartenPinsPostgresExactly does: `DataStudio [x.y.z]` and `DataStudio.Kafka.Core [x.y.z]`
-       in the nuspec, not NuGet's default `>=`. DataStudio.Kafka.Core's range carries the preview label: the version NuGet reads is that project's PackageVersion. -->
+       in the nuspec, not NuGet's default `>=`. The version NuGet reads is that project's PackageVersion, the CHANGELOG's. -->
   <Target Name="DataStudioKafkaPinsFamilyExactly" AfterTargets="_GetProjectReferenceVersions">
     <ItemGroup>
       <_ProjectReferencesWithVersions Condition="'%(Filename)' == 'DataStudio' or '%(Filename)' == 'DataStudio.Kafka.Core'">

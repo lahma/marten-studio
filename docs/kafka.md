@@ -1,11 +1,10 @@
-# The Kafka module for Apache Kafka® (preview)
+# The Kafka module for Apache Kafka®
 
 The Kafka module (the `DataStudio.Kafka` package) is the Kafka section of Data Studio, beside the Marten or Postgres pages
 or alone. It shows the clusters and topics your application's own Kafka credentials can describe, and, behind a capability
 that is off by default, searches their records. It runs inside your application, with your configuration and your
-policies, and it never writes to Kafka. It is a preview: its API and screens may change in a minor release, and its three
-packages (`DataStudio.Kafka`, `DataStudio.Kafka.Core` and `DataStudio.Kafka.Wolverine`) are versioned `<version>-preview.1`
-and installed with `--prerelease`.
+policies, and it never writes to Kafka. Its three packages (`DataStudio.Kafka`, `DataStudio.Kafka.Core` and
+`DataStudio.Kafka.Wolverine`) are versioned with the rest of Data Studio.
 
 Apache Kafka is a trademark of the Apache Software Foundation. Data Studio is not affiliated with or endorsed by the Apache
 Software Foundation.
@@ -13,7 +12,7 @@ Software Foundation.
 ## Registration
 
 ```shell
-dotnet add package DataStudio.Kafka --prerelease
+dotnet add package DataStudio.Kafka --prerelease   # beta: remove at 2.0.0
 ```
 
 ```csharp
@@ -319,7 +318,7 @@ The cluster selector and the Settings page show each cluster's profile and the l
 `DataStudio.Kafka.Wolverine` lists the Kafka clusters and topics of the application's Wolverine configuration:
 
 ```shell
-dotnet add package DataStudio.Kafka.Wolverine --prerelease
+dotnet add package DataStudio.Kafka.Wolverine --prerelease   # beta: remove at 2.0.0
 ```
 
 ```csharp

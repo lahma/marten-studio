@@ -4,7 +4,7 @@ This is the full text of D3, D21, the *Package budget changes* and *Held deliber
 
 ## D3
 
-**D3 — Few dependencies a package, and no upper bound on any.** Seven packages, one version each (the Kafka three a preview of it):
+**D3 — Few dependencies a package, and no upper bound on any.** Seven packages, one version:
 
 | Package | Takes |
 |---|---|
@@ -152,10 +152,9 @@ refuses anything but the floor (this is the guard that keeps a latest-leg pack f
 one workflow runs all three latest legs; `build.yml` and `publish.yml` set none of them. Without Fallout: `dotnet test
 tests/DataStudio.Kafka.Tests -p:DataStudioConfluentVersion=2.16.0`.
 
-**Seven packages, four at one version and three as a preview.** `Pack` packs `src/DataStudio.Postgres.Diagnostics`, then
+**Seven packages, one version.** `Pack` packs `src/DataStudio.Postgres.Diagnostics`, then
 `src/DataStudio` (the shell), then `src/DataStudio.Postgres`, then `src/DataStudio.Marten`, then `src/DataStudio.Kafka.Core`, then
-`src/DataStudio.Kafka`, then `src/DataStudio.Kafka.Wolverine`, one after the other, all at the CHANGELOG version (the last three with the
-preview label, below) and all at the floors - it refuses a `--marten-version`, `--npgsql-version` or `--confluent-version` that is not the floor, and each
+`src/DataStudio.Kafka`, then `src/DataStudio.Kafka.Wolverine`, one after the other, all at the CHANGELOG version and all at the floors - it refuses a `--marten-version`, `--npgsql-version` or `--confluent-version` that is not the floor, and each
 csproj refuses a bare `dotnet pack` off its floor, by property and by `project.assets.json` (the engine and the Postgres module for
 Npgsql, the Marten module for Marten, and `DataStudio.Kafka.Core` for Confluent.Kafka) - and then asserts all seven nuspecs, each
 dependency at exactly the range NuGet wrote:
@@ -167,8 +166,8 @@ dependency at exactly the range NuGet wrote:
 | `DataStudio` | nothing of the family | `Microsoft.AspNetCore.App.Internal.Assets`, its one declared dependency; no driver, no Marten, no Kafka client |
 | `DataStudio.Postgres.Diagnostics` | nothing of the family | `Npgsql <floor>` and the four `Microsoft.Extensions.*` abstractions at their central rows; no ASP.NET Core package and no part of the Marten family |
 | `DataStudio.Kafka.Core` | nothing of the family | `Confluent.Kafka <floor>` and the three abstractions; no ASP.NET Core |
-| `DataStudio.Kafka` | `DataStudio [<version>]`, `DataStudio.Kafka.Core [<version>-<label>]` | `Confluent.Kafka` (through the engine) and the assets pack (through the shell); neither is a reference of the module |
-| `DataStudio.Kafka.Wolverine` | `DataStudio.Kafka.Core [<version>-<label>]` | `WolverineFx.Kafka <floor>`, and the rest of CPM's transitive pinning: the Confluent.Kafka floor, the three abstractions and `Microsoft.Extensions.Hosting` |
+| `DataStudio.Kafka` | `DataStudio [<version>]`, `DataStudio.Kafka.Core [<version>]` | `Confluent.Kafka` (through the engine) and the assets pack (through the shell); neither is a reference of the module |
+| `DataStudio.Kafka.Wolverine` | `DataStudio.Kafka.Core [<version>]` | `WolverineFx.Kafka <floor>`, and the rest of CPM's transitive pinning: the Confluent.Kafka floor, the three abstractions and `Microsoft.Extensions.Hosting` |
 
 A last assertion, with a sentence a maintainer reads when the Kafka module grows a database dependency: the shell's nuspec and the three Kafka
 nuspecs name no `DataStudio.Postgres`, `DataStudio.Postgres.Diagnostics`, `DataStudio.Marten`, `Npgsql`, `Marten`, `JasperFx` or `Weasel`, so a host with
@@ -189,27 +188,20 @@ engine or shell fails in the loader when it is first called, with a `FileNotFoun
 (measured 2026-11-01). `AddKafka` first runs `KafkaCoreVersionGuard` (shell and engine), and `UseWolverineKafka` runs
 `KafkaWolverineVersionGuard` (the engine). `AddPostgresDiagnostics` needs no guard: nothing is below it.
 
-**The Kafka preview label (K8).** The Kafka module ships as a preview beside the family release, and the version is still one number
-from one file: CHANGELOG.md. The label lives in one place, `Directory.Build.props`' `KafkaPrereleaseLabel`
-(`preview.1`), and only `DataStudio.Kafka.Core`, `DataStudio.Kafka` and `DataStudio.Kafka.Wolverine` read it: each sets `PackageVersion` and
-`InformationalVersion` to `$(Version)-$(KafkaPrereleaseLabel)` while the label is not empty, and leaves them alone when it is
-(`Version` is a global property that `Pack` passes, so the projects read it and never set it; `AssemblyVersion` and
-`FileVersion` stay numeric). At 2.0.0 the seven packages are `DataStudio.Postgres.Diagnostics`, `DataStudio`, `DataStudio.Postgres` and
-`DataStudio.Marten` at `2.0.0`, and `DataStudio.Kafka.Core`, `DataStudio.Kafka` and `DataStudio.Kafka.Wolverine` at `2.0.0-preview.1`.
-`PackReadinessTests` holds that no other project reads the label or sets a `PackageVersion`. The exact pins carry it: `DataStudio.Kafka`
-depends on `DataStudio [<version>]` and `DataStudio.Kafka.Core [<version>-<label>]`, and `DataStudio.Kafka.Wolverine` on `DataStudio.Kafka.Core
-[<version>-<label>]`. The version guards follow: `KafkaWolverineVersionGuard` compares the adapter with
-`DataStudio.Kafka.Core` as it stands (both carry the label), and `KafkaCoreVersionGuard` compares `DataStudio.Kafka.Core` with the Kafka module's own
-informational version and the shell with the *family version*, the module's with the
-`KafkaPrereleaseLabel` assembly metadata (stamped by the three projects) taken off. A different label, or a family assembly
-of another version, is still refused. Package validation runs on the three with no baseline: each carries an empty
-`PackageValidationBaselineVersion` element of its own (below). **To graduate** the Kafka module, empty the
-label in `Directory.Build.props` in the release's pull request: the three then pack at the family version (`PackageVersion` is
-the `Version` `Pack` passes), no `AssemblyMetadata` is stamped, `Pack` names the seven files with no label, and the guards compare
-all the assemblies as one version again. `PackReadinessTests` and `KafkaCoreVersionGuardTests` hold both states (the element must
-exist; its value may be empty). The rest of graduation is words, in the same pull request: the "preview" wording in `README.md`
-(the package table and the Kafka paragraph), `src/DataStudio.Kafka/README.md` and the changelog, and the `--prerelease` of the install
-lines. In the release after it, once a release of the Kafka module is on nuget.org, set the baseline of the three to it (below).
+**One version, a prerelease of it included.** The version is one number from one file, CHANGELOG.md, and all seven packages take it as it
+stands: no project sets a `PackageVersion` or an `InformationalVersion` of its own (`Version` is a global property that `Pack` passes, so
+the projects read it and never set it; `AssemblyVersion` and `FileVersion` stay numeric), and `PackReadinessTests` holds that none does and that
+no label exists. A prerelease of the family is the same: the CHANGELOG's header carries the suffix (`# 2.0.0-beta.1`), `ReleaseNotesParser` and
+`SemVersion` accept it, and `Pack` names the seven files `<id>.2.0.0-beta.1.nupkg` and writes `[2.0.0-beta.1]` into every exact pin.
+`Directory.Build.props`' `VersionPrefix` stays the numeric `2.0.0` (the fallback of a plain `dotnet build`; `VersionFallbackTests` compares it with the
+CHANGELOG's top version without the suffix), so the suffix lives only in the CHANGELOG. `ICreateGitHubRelease.Prerelease` is true for any
+version with a hyphen, so the GitHub Release of a beta is marked a prerelease, and the release body is the section's bullets as for any release.
+The version guards compare informational versions up to the `+`, so the suffix is part of what must match:
+`KafkaWolverineVersionGuard` compares the adapter with `DataStudio.Kafka.Core`, and `KafkaCoreVersionGuard` compares the shell and
+`DataStudio.Kafka.Core` with the Kafka module's own. Package validation runs on all seven with no baseline (below). The documentation of a
+beta says so in a few marked places (`<!-- beta: remove at 2.0.0 -->`: the README's note and install lines, the package READMEs' and the Kafka and
+database pages' install lines, `docs/upgrading.md`'s and `docs/stability.md`'s notes), which the release of `2.0.0` finds with one search and
+removes together with the `--prerelease` of the install lines.
 
 `build/_build.csproj` restores with no warnings. Fallout 10.4.0 brought `System.Security.Cryptography.Xml` and `.Pkcs` 10.0.10
 (NU1902/NU1903: GHSA-2fmv-rv2c-59x7, GHSA-846f-f764-76mx, GHSA-7hqp-7c5m-4vq6, GHSA-c399-9853-6jmj, GHSA-r955-8q5j-3h83);
@@ -246,9 +238,7 @@ then tag that commit.
 packages are compared with at `Pack`: `Pack` restores that version of each package from nuget.org and fails on a breaking change to the
 public surface (a removed or changed member, an interface member without a default body). **For 2.0 there is no baseline**: the seven ids
 are new, no release of them exists to compare with, and restore refuses a baseline it cannot find (NU1101), so
-`Directory.Build.props`' element is empty, and so is the Kafka three's own, each in its project, because they will take the preview version
-they shipped at. In the pull request of the release after 2.0, set it to `2.0.0` (the Kafka three, to the version they shipped at, in
-their own projects), and from then on move it, in the pull request that lands a release's CHANGELOG section, to the release before it, so the next release is compared with the last one shipped. A
+`Directory.Build.props`' element is empty, for all seven. In the pull request of the release after 2.0, set it to `2.0.0`, and from then on move it, in the pull request that lands a release's CHANGELOG section, to the release before it, so the next release is compared with the last one shipped. A
 deliberate break is a major version, and its `CompatibilitySuppressions.xml` is a reviewed file like a Verify baseline. A change to a Razor
 component's members is not a break: components are public only because Razor makes them so, and no baseline lists them
 (D20, `docs/stability.md`). Package validation still reports one, so suppress it in the project's
@@ -282,8 +272,8 @@ GitHub Actions, that `NUGET_USER` is set, and that `GITHUB_REF_NAME` matches the
 then does it mint the key, immediately before pushing — the key lives 15–60 minutes and one OIDC token
 mints exactly one key. Before it mints the key, it asserts that `artifacts/packages` holds exactly
 `DataStudio.Postgres.Diagnostics.<version>.nupkg`, `DataStudio.<version>.nupkg`, `DataStudio.Postgres.<version>.nupkg`,
-`DataStudio.Marten.<version>.nupkg`, `DataStudio.Kafka.Core.<version>-<label>.nupkg`, `DataStudio.Kafka.<version>-<label>.nupkg` and
-`DataStudio.Kafka.Wolverine.<version>-<label>.nupkg`, and it
+`DataStudio.Marten.<version>.nupkg`, `DataStudio.Kafka.Core.<version>.nupkg`, `DataStudio.Kafka.<version>.nupkg` and
+`DataStudio.Kafka.Wolverine.<version>.nupkg`, and it
 pushes them with that one key one at a time in that order (the engine first, `DataStudio.Kafka.Wolverine` last), the first failure ending
 the run, so a push that fails never lets a package that depends on exactly it reach nuget.org. `--skip-duplicate` keeps a re-run after a
 partial failure safe. nuget.org still validates and indexes each package on its own, so for a few minutes after a release

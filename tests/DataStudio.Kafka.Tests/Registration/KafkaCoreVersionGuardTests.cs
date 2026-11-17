@@ -1,10 +1,7 @@
 using System.Reflection;
 using System.Reflection.Emit;
-using System.Xml.Linq;
 
 using DataStudio.Kafka.Internal;
-
-using DataStudio.Marten.Tests.Conventions;
 
 using Microsoft.Extensions.DependencyInjection;
 
@@ -37,28 +34,12 @@ public class KafkaCoreVersionGuardTests
     public void Beside_the_builds_it_was_packed_with_the_guard_passes()
     {
         string required = KafkaCoreVersionGuard.ReleaseVersion(Module);
-        string? label = KafkaCoreVersionGuard.PrereleaseLabel(Module);
-        string? family = KafkaCoreVersionGuard.FamilyVersion(KafkaCoreVersionGuard.InformationalVersion(Module), label);
 
         required.Should().NotBe("?");
 
-        // The label is Directory.Build.props': stamped into the assembly while it is set, and nothing is stamped once it is emptied (graduation).
-        string configured = XDocument.Load(RepositoryRoot.Combine("Directory.Build.props")).Descendants()
-            .Single(static x => x.Name.LocalName == "KafkaPrereleaseLabel").Value.Trim();
-
-        if (configured.Length > 0)
-        {
-            label.Should().Be(configured, "the three Kafka projects are stamped with Directory.Build.props' KafkaPrereleaseLabel");
-            KafkaCoreVersionGuard.InformationalVersion(Module).Should().Contain("-" + label, "the Kafka module packs as a preview");
-        }
-        else
-        {
-            label.Should().BeNull("an empty label stamps no metadata");
-            family.Should().Be(KafkaCoreVersionGuard.InformationalVersion(Module), "the family version is the Kafka module's own");
-        }
-
-        KafkaCoreVersionGuard.InformationalVersion(Shell).Should().Be(family, "the family beside the Kafka module is at the version without its preview label");
-        KafkaCoreVersionGuard.InformationalVersion(Kafka).Should().Be(KafkaCoreVersionGuard.InformationalVersion(Module), "DataStudio.Kafka.Core is the Kafka module's own, label and all");
+        // One version for the family: the shell and the engine carry exactly the Kafka module's own informational version.
+        KafkaCoreVersionGuard.InformationalVersion(Shell).Should().Be(KafkaCoreVersionGuard.InformationalVersion(Module), "the shell beside the Kafka module is the family's version");
+        KafkaCoreVersionGuard.InformationalVersion(Kafka).Should().Be(KafkaCoreVersionGuard.InformationalVersion(Module), "DataStudio.Kafka.Core is the Kafka module's own build");
 
         FluentActions.Invoking(KafkaCoreVersionGuard.Ensure).Should().NotThrow();
         FluentActions.Invoking(() => new ServiceCollection().AddDataStudio().AddKafka()).Should().NotThrow();
@@ -71,9 +52,7 @@ public class KafkaCoreVersionGuardTests
     {
         FileNotFoundException notFound = new("Could not load file or assembly '" + missing + "'.", missing);
         string self = KafkaCoreVersionGuard.ReleaseVersion(Module);
-        string required = missing == "DataStudio.Kafka.Core"
-            ? self
-            : KafkaCoreVersionGuard.ReleaseVersion(KafkaCoreVersionGuard.FamilyVersion(KafkaCoreVersionGuard.InformationalVersion(Module), KafkaCoreVersionGuard.PrereleaseLabel(Module)));
+        string required = self;
 
         InvalidOperationException refusal = FluentActions
             .Invoking(() => KafkaCoreVersionGuard.Ensure(
@@ -130,110 +109,45 @@ public class KafkaCoreVersionGuardTests
     [InlineData("0.5.0+5f1c2a9d", "Release", "0.5.0+0b7e3c41", "Debug", true)]
     [InlineData("0.5.0+5f1c2a9d", null, "0.5.0+0b7e3c41", null, true)]
     public void The_commit_is_compared_only_between_two_release_builds_that_both_carry_one(
-        string kStudio, string? kStudioConfiguration, string other, string? otherConfiguration, bool passes)
+        string kafka, string? kafkaConfiguration, string other, string? otherConfiguration, bool passes)
     {
-        AssemblyBuilder module = WithVersion(kStudio, kStudioConfiguration);
+        AssemblyBuilder module = WithVersion(kafka, kafkaConfiguration);
         AssemblyBuilder loaded = WithVersion(other, otherConfiguration);
         bool bothRelease = KafkaCoreVersionGuard.IsReleaseBuild(module) && KafkaCoreVersionGuard.IsReleaseBuild(loaded);
 
-        KafkaCoreVersionGuard.SameBuild(kStudio, other, bothRelease).Should().Be(passes);
+        KafkaCoreVersionGuard.SameBuild(kafka, other, bothRelease).Should().Be(passes);
     }
 
-    /// <summary>A correct preview install: The Kafka module and DataStudio.Kafka.Core carry the label, the shell does not.</summary>
+    /// <summary>A prerelease of the family (2.0.0-beta.1) is one version for all seven packages: the three carry the same suffix as the four.</summary>
     [Theory]
-    [InlineData("1.3.0-preview.1", "1.3.0", "1.3.0-preview.1")]
-    [InlineData("1.3.0-preview.1+5f1c2a9d", "1.3.0+5f1c2a9d", "1.3.0-preview.1+5f1c2a9d")]
-    [InlineData("1.3.0-rc.1-preview.1+5f1c2a9d", "1.3.0-rc.1+5f1c2a9d", "1.3.0-rc.1-preview.1+5f1c2a9d")]
-    public void A_correct_preview_install_passes(string kStudio, string family, string core)
+    [InlineData("2.0.0-beta.1")]
+    [InlineData("2.0.0-beta.1+5f1c2a9d")]
+    [InlineData("2.0.0")]
+    public void A_prerelease_family_at_one_version_passes(string version)
     {
-        AssemblyBuilder module = WithVersion(kStudio, "Release", label: "preview.1");
+        AssemblyBuilder module = WithVersion(version, "Release");
 
-        FluentActions.Invoking(() => KafkaCoreVersionGuard.Ensure(
-                module,
-                () => WithVersion(family, "Release"),
-                () => WithVersion(core, "Release", label: "preview.1")))
+        FluentActions.Invoking(() => KafkaCoreVersionGuard.Ensure(module, () => WithVersion(version, "Release"), () => WithVersion(version, "Release")))
             .Should().NotThrow();
     }
 
     [Theory]
-    [InlineData("DataStudio")]
-    public void A_family_assembly_of_another_version_is_refused_beside_a_preview(string other)
+    [InlineData("DataStudio", "2.0.0-beta.2")]
+    [InlineData("DataStudio", "2.0.0")]
+    [InlineData("DataStudio.Kafka.Core", "2.0.0-beta.2")]
+    [InlineData("DataStudio.Kafka.Core", "2.0.1-beta.1")]
+    public void A_prerelease_family_with_another_suffix_or_version_is_refused(string other, string found)
     {
-        AssemblyBuilder module = WithVersion("1.3.0-preview.1", "Release", label: "preview.1");
+        AssemblyBuilder module = WithVersion("2.0.0-beta.1", "Release");
 
         FluentActions.Invoking(() => KafkaCoreVersionGuard.Ensure(
                 module,
-                () => WithVersion("1.3.1"),
-                () => module))
+                () => other == "DataStudio" ? WithVersion(found) : module,
+                () => other == "DataStudio.Kafka.Core" ? WithVersion(found) : module))
             .Should().Throw<InvalidOperationException>()
             .Which.Message.Should()
-            .Contain($"DataStudio.Kafka 1.3.0-preview.1 needs {other} 1.3.0 exactly, and found {other} 1.3.1.")
-            .And.Contain($"for {other} must say 1.3.0");
-    }
-
-    /// <summary>A family assembly carrying the preview label is not the family's build: a preview DataStudio never ships, so it is a skew.</summary>
-    [Fact]
-    public void A_family_assembly_carrying_the_preview_label_is_refused()
-    {
-        AssemblyBuilder module = WithVersion("1.3.0-preview.1", "Release", label: "preview.1");
-
-        FluentActions.Invoking(() => KafkaCoreVersionGuard.Ensure(module, () => WithVersion("1.3.0-preview.1"), () => module))
-            .Should().Throw<InvalidOperationException>()
-            .Which.Message.Should().Contain("needs DataStudio 1.3.0 exactly, and found DataStudio 1.3.0-preview.1.");
-    }
-
-    [Theory]
-    [InlineData("1.3.0")]
-    [InlineData("1.3.0-preview.2")]
-    [InlineData("1.3.1-preview.1")]
-    public void A_Kafka_Core_that_is_not_the_previews_own_build_is_refused(string core)
-    {
-        AssemblyBuilder module = WithVersion("1.3.0-preview.1", "Release", label: "preview.1");
-
-        FluentActions.Invoking(() => KafkaCoreVersionGuard.Ensure(module, () => WithVersion("1.3.0"), () => WithVersion(core)))
-            .Should().Throw<InvalidOperationException>()
-            .Which.Message.Should().Contain($"DataStudio.Kafka 1.3.0-preview.1 needs DataStudio.Kafka.Core 1.3.0-preview.1 exactly, and found DataStudio.Kafka.Core {core}.");
-    }
-
-    /// <summary>After graduation (the label emptied) nothing is stamped and nothing is taken off: all three are one version again.</summary>
-    /// <summary>A label that is present but empty (the build never stamps one, but a hand-made assembly can) takes nothing off.</summary>
-    [Fact]
-    public void An_empty_label_takes_nothing_off_and_all_three_are_one_version()
-    {
-        AssemblyBuilder module = WithVersion("1.3.0+5f1c2a9d", "Release", label: "");
-
-        KafkaCoreVersionGuard.PrereleaseLabel(module).Should().BeEmpty();
-        FluentActions.Invoking(() => KafkaCoreVersionGuard.Ensure(
-                module,
-                () => WithVersion("1.3.0+5f1c2a9d"),
-                () => WithVersion("1.3.0+5f1c2a9d")))
-            .Should().NotThrow();
-        FluentActions.Invoking(() => KafkaCoreVersionGuard.Ensure(module, () => WithVersion("1.3.0-preview.1+5f1c2a9d"), () => module))
-            .Should().Throw<InvalidOperationException>("with no label to take off, a family assembly carrying one is another version");
-    }
-
-    [Fact]
-    public void Without_a_label_all_three_are_one_version()
-    {
-        AssemblyBuilder module = WithVersion("1.3.0");
-
-        FluentActions.Invoking(() => KafkaCoreVersionGuard.Ensure(module, () => WithVersion("1.3.0"), () => WithVersion("1.3.0")))
-            .Should().NotThrow();
-        FluentActions.Invoking(() => KafkaCoreVersionGuard.Ensure(module, () => WithVersion("1.3.0-preview.1"), () => WithVersion("1.3.0")))
-            .Should().Throw<InvalidOperationException>("no label was stamped, so nothing is taken off a family version");
-    }
-
-    [Theory]
-    [InlineData("1.3.0-preview.1", "preview.1", "1.3.0")]
-    [InlineData("1.3.0-preview.1+5f1c2a9d", "preview.1", "1.3.0+5f1c2a9d")]
-    [InlineData("1.3.0-preview.1", "preview.2", "1.3.0-preview.1")]
-    [InlineData("1.3.0", "preview.1", "1.3.0")]
-    [InlineData("1.3.0-preview.1", null, "1.3.0-preview.1")]
-    [InlineData("1.3.0-preview.1", "", "1.3.0-preview.1")]
-    [InlineData(null, "preview.1", null)]
-    public void The_family_version_is_the_informational_version_without_the_label(string? informational, string? label, string? expected)
-    {
-        KafkaCoreVersionGuard.FamilyVersion(informational, label).Should().Be(expected);
+            .Contain($"DataStudio.Kafka 2.0.0-beta.1 needs {other} 2.0.0-beta.1 exactly, and found {other} {found}.")
+            .And.Contain($"for {other} must say 2.0.0-beta.1");
     }
 
     [Fact]
@@ -303,19 +217,12 @@ public class KafkaCoreVersionGuardTests
             nameof(KafkaDataStudioBuilderExtensions.AddKafka),
             [typeof(DataStudioBuilder), typeof(Action<KafkaOptions>)])!;
 
-    private static AssemblyBuilder WithVersion(string informationalVersion, string? configuration = "Release", string? label = null)
+    private static AssemblyBuilder WithVersion(string informationalVersion, string? configuration = "Release")
     {
         List<CustomAttributeBuilder> attributes =
         [
             new(typeof(AssemblyInformationalVersionAttribute).GetConstructor([typeof(string)])!, [informationalVersion]),
         ];
-
-        if (label is not null)
-        {
-            attributes.Add(new(
-                typeof(AssemblyMetadataAttribute).GetConstructor([typeof(string), typeof(string)])!,
-                [KafkaCoreVersionGuard.PrereleaseLabelMetadataKey, label]));
-        }
 
         if (configuration is not null)
         {

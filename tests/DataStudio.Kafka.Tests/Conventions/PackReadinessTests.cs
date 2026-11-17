@@ -5,9 +5,9 @@ using DataStudio.Marten.Tests.Conventions;
 namespace DataStudio.Kafka.Tests.Conventions;
 
 /// <summary>
-/// What K8 ships (design D-CORR 10.1 and 10.2): the three Kafka projects carry their package metadata and the exact pins, are
-/// packable, take their version from the one preview label in Directory.Build.props (no other project does), and the build packs
-/// and pushes them after the family's three. Read as text, so a package cannot drift unseen.
+/// What the Kafka module ships (design D-CORR 10.1 and 10.2): the three Kafka projects carry their package metadata and the exact pins,
+/// are packable, take the family's one version like every other project (no project sets a version or a label of its own), and the build
+/// packs and pushes them after the family's four. Read as text, so a package cannot drift unseen.
 /// </summary>
 public class PackReadinessTests
 {
@@ -31,7 +31,7 @@ public class PackReadinessTests
 
     [Theory]
     [MemberData(nameof(Projects))]
-    public void Each_project_has_its_package_metadata_is_packable_and_has_an_empty_validation_baseline(string project, string tags, string pinTarget)
+    public void Each_project_has_its_package_metadata_is_packable_and_inherits_the_validation_baseline(string project, string tags, string pinTarget)
     {
         var root = Load(project);
 
@@ -40,11 +40,10 @@ public class PackReadinessTests
         Property(root, "Description").Should().EndWith(AsfLine);
         Property(root, "PackageTags").Should().Be(tags);
         Property(root, "PackageReadmeFile").Should().Be("README.md");
-        Property(root, "IsPackable").Should().Be("true", "K8: The Kafka module ships, as a preview");
+        Property(root, "IsPackable").Should().Be("true", "the Kafka module ships with the family");
         Property(root, "EnablePackageValidation").Should().Be("true");
         root.Descendants().Where(static x => x.Name.LocalName == "PackageValidationBaselineVersion")
-            .Should().ContainSingle("the element must be there, or Directory.Build.props' baseline (the family's last release) would apply to an id nuget.org does not have")
-            .Which.Value.Should().BeEmpty("these ids have no release to be compared with yet");
+            .Should().BeEmpty("the baseline is Directory.Build.props' alone, the same for all seven packages");
 
         root.Descendants().Where(static x => x.Name.LocalName == "None"
                 && ((string?) x.Attribute("Include"))?.Replace('\\', '/') == "../DataStudio.Kafka/README.md")
@@ -97,61 +96,28 @@ public class PackReadinessTests
         publish.Should().MatchRegex(@"MartenProject,\s*KafkaCoreProject, KafkaProject, KafkaWolverineProject");
     }
 
-    /// <summary>The label lives in Directory.Build.props and nowhere else; the three projects derive their version from it.</summary>
+    /// <summary>All seven packages have one version, the CHANGELOG's: no project sets a version, a package version or a label of its own.</summary>
     [Fact]
-    public void The_preview_label_is_one_property_the_three_projects_derive_their_version_from()
+    public void No_project_sets_its_own_version_and_no_label_exists()
     {
-        XElement props = XDocument.Load(RepositoryRoot.Combine("Directory.Build.props")).Root!;
-        List<XElement> labels = [.. props.Descendants().Where(static x => x.Name.LocalName == "KafkaPrereleaseLabel")];
-
-        // The element must exist; its value may be empty - that is graduation. A label, when there is one, is a SemVer prerelease label.
-        labels.Should().ContainSingle("the label has exactly one home");
-
-        if (labels[0].Value.Trim().Length > 0)
-        {
-            labels[0].Value.Trim().Should().MatchRegex(@"^[0-9A-Za-z]+(\.[0-9A-Za-z]+)*$", "a SemVer prerelease label");
-        }
-
-        foreach (string project in Names)
-        {
-            string text = File.ReadAllText(RepositoryRoot.Combine("src", project, project + ".csproj"));
-
-            text.Should().Contain("<PackageVersion>$(KafkaBaseVersion)-$(KafkaPrereleaseLabel)</PackageVersion>", $"{project} packs at <version>-<label>")
-                .And.Contain("<InformationalVersion>$(KafkaBaseVersion)-$(KafkaPrereleaseLabel)</InformationalVersion>")
-                .And.Contain("<PropertyGroup Condition=\"'$(KafkaPrereleaseLabel)' != ''\">", "an empty label sets neither PackageVersion nor InformationalVersion")
-                .And.Contain("<ItemGroup Condition=\"'$(KafkaPrereleaseLabel)' != ''\">", "an empty label stamps no AssemblyMetadata")
-                .And.Contain("<KafkaBaseVersion>$(Version)</KafkaBaseVersion>", "the CHANGELOG's version, read and never set")
-                .And.NotContain("<Version>", "Version is a global property that Pack passes");
-            text.Should().NotContain("<AssemblyVersion>").And.NotContain("<FileVersion>", "both stay numeric");
-        }
-    }
-
-    [Fact]
-    public void No_other_project_reads_the_label_or_sets_its_own_package_version()
-    {
-        string[] kafka = [.. Names];
         string[] root = [RepositoryRoot.Combine("src"), RepositoryRoot.Combine("samples"), RepositoryRoot.Combine("tests"), RepositoryRoot.Combine("build")];
 
         foreach (string file in root.Where(Directory.Exists).SelectMany(static x => Directory.EnumerateFiles(x, "*.csproj", SearchOption.AllDirectories))
                      .Where(static x => !x.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar, StringComparison.Ordinal)))
         {
             string name = Path.GetFileNameWithoutExtension(file);
-
-            if (kafka.Contains(name))
-            {
-                continue;
-            }
-
             string text = File.ReadAllText(file);
 
-            text.Should().NotContain("KafkaPrereleaseLabel", $"{name}: only the three Kafka projects read the preview label");
-            text.Should().NotContain("<PackageVersion>", $"{name}: the CHANGELOG is the one version authority for every other project");
+            text.Should().NotContain("PrereleaseLabel", $"{name}: the seven packages have one version, with no label of their own");
+            text.Should().NotContain("<PackageVersion>", $"{name}: the CHANGELOG is the one version authority for every project");
+            text.Should().NotContain("<InformationalVersion>", $"{name}: the SDK derives it from the CHANGELOG's version");
         }
+
+        File.ReadAllText(RepositoryRoot.Combine("Directory.Build.props")).Should().NotContain("PrereleaseLabel");
 
         foreach (string file in Directory.EnumerateFiles(RepositoryRoot.Combine("build"), "*.cs"))
         {
-            // The build reads the label to name the packages; it never sets it.
-            File.ReadAllText(file).Should().NotContain("SetProperty(\"KafkaPrereleaseLabel", $"{file}: the label is Directory.Build.props's alone");
+            File.ReadAllText(file).Should().NotContain("PrereleaseLabel", $"{file}: the build packs all seven packages at the CHANGELOG's version");
         }
     }
 }

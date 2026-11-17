@@ -742,7 +742,7 @@ properties took the names of Data Studio 2.0: `PostgresStudio.Diagnostics` is `D
 `MartenStudio` is `DataStudio.Marten`, `KStudio.Core`, `KStudio` and `KStudio.Wolverine` are `DataStudio.Kafka.Core`, `DataStudio.Kafka` and
 `DataStudio.Kafka.Wolverine`, and the shell is the new `DataStudio`; `MartenStudioMartenFloor`, `PostgresStudioNpgsqlFloor`, `KStudioConfluentFloor` and
 `KStudioPrereleaseLabel` (and their `Latest` and `Version` partners), `PostgresStudioPinsNpgsql`, `PostgresStudioDiagnosticsPinsExtensions` and
-`KStudioCorePinsExtensions` are `DataStudioMartenFloor`, `DataStudioNpgsqlFloor`, `DataStudioConfluentFloor`, `KafkaPrereleaseLabel`,
+`KStudioCorePinsExtensions` are `DataStudioMartenFloor`, `DataStudioNpgsqlFloor`, `DataStudioConfluentFloor`, `KafkaPrereleaseLabel` (dropped the same day: *decision-notes.md*, "The Kafka packages' preview label"),
 `DataStudioPostgresPinsNpgsql`, `DataStudioDiagnosticsPinsExtensions` and `DataStudioKafkaCorePinsExtensions`. Why: the Kafka module references the shell and not the Postgres module, so a host with only
 Kafka needs the script and must not need Npgsql to get it; the shell is the one project whose pages use it. Measured: the nuspecs of `DataStudio`,
 `DataStudio.Postgres`, `DataStudio.Marten` and `DataStudio.Kafka` each list the pack at its central row (`Pack` asserts every line), and the nuspecs of the shell and of

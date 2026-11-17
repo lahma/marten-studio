@@ -227,12 +227,12 @@ public class SampleSeedTests
             SampleKafkaJudge.Judge(["orders.v1", "payments.v1", marker]).Verdict.Should().Be(SampleKafkaVerdict.Refuse, marker + " is an earlier sample's marker");
         }
 
-        SampleKafkaJudgement earlier = SampleKafkaJudge.Judge(["orders.v1", "payments.v1", "data-studio-sample.seed-v2"]);
+        SampleKafkaJudgement earlier = SampleKafkaJudge.Judge(["orders.v1", "payments.v1", KafkaSeedPlan.EarlierMarkerTopics[1]]);
 
         earlier.Verdict.Should().Be(SampleKafkaVerdict.Refuse);
         earlier.Message.Should().Be(
             "Data Studio Kafka sample: this Kafka holds an earlier sample's topics. Delete the container (or unset DATASTUDIO_KAFKA_SAMPLE_REUSE) so that the sample can seed it again.");
-        SampleKafkaJudge.Judge(["orders.v1", "data-studio-sample.seed-v1", KafkaSeedPlan.MarkerTopic]).Verdict.Should().Be(SampleKafkaVerdict.AlreadySeeded, "a cluster with the new marker is the sample's own");
+        SampleKafkaJudge.Judge(["orders.v1", KafkaSeedPlan.EarlierMarkerTopics[0], KafkaSeedPlan.MarkerTopic]).Verdict.Should().Be(SampleKafkaVerdict.AlreadySeeded, "a cluster with the new marker is the sample's own");
     }
 
     [Fact]

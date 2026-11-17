@@ -1,7 +1,7 @@
 # DataStudio.Postgres.Diagnostics
 
 ```shell
-dotnet add package DataStudio.Postgres.Diagnostics
+dotnet add package DataStudio.Postgres.Diagnostics --prerelease   # beta: remove at 2.0.0
 ```
 
 The diagnostics engine of [Data Studio](https://github.com/lahma/marten-studio#readme), as a package of its own with **no

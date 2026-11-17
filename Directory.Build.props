@@ -34,15 +34,6 @@
     <VersionPrefix>2.0.0</VersionPrefix>
   </PropertyGroup>
 
-  <!-- K8: the Kafka module ships as a preview beside the family release. The three Kafka projects (DataStudio.Kafka.Core, DataStudio.Kafka, DataStudio.Kafka.Wolverine) pack
-       at `<version>-<label>`, the version being CHANGELOG.md's (above); no other project reads the label. To graduate the Kafka module, empty it:
-       they then pack at the family version and stamp no label. The rest of graduation is words (the READMEs' "preview" and the
-       prerelease flag of the install lines) and, a release later, the three projects' empty PackageValidationBaselineVersion element
-       (build-and-release.md, "the Kafka module's preview label"). -->
-  <PropertyGroup>
-    <KafkaPrereleaseLabel>preview.1</KafkaPrereleaseLabel>
-  </PropertyGroup>
-
   <PropertyGroup>
     <Authors>Marko Lahma</Authors>
     <Company>Marko Lahma</Company>
@@ -60,8 +51,7 @@
     <!-- Package validation compares each shipped package with a release on nuget.org (EnablePackageValidation is on in each shipped project)
          once there is one. For 2.0 there is none: the seven ids (DataStudio, DataStudio.Postgres, DataStudio.Postgres.Diagnostics, DataStudio.Marten,
          DataStudio.Kafka, DataStudio.Kafka.Core, DataStudio.Kafka.Wolverine) are new, no release of them exists to be compared with, and restore refuses
-         a baseline it cannot find (NU1101), so the element is empty. One release later, in that release's own pull request, set it to 2.0.0 (the Kafka
-         three, which carry a preview label, to the version they shipped at, in their own projects: each has its own empty element until then). -->
+         a baseline it cannot find (NU1101), so the element is empty. One release later, in that release's own pull request, set it to 2.0.0. -->
     <PackageValidationBaselineVersion></PackageValidationBaselineVersion>
   </PropertyGroup>
 

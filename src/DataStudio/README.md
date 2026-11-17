@@ -1,7 +1,7 @@
 # DataStudio
 
 ```shell
-dotnet add package DataStudio
+dotnet add package DataStudio --prerelease   # beta: remove at 2.0.0
 ```
 
 The shell of [Data Studio](https://github.com/lahma/marten-studio#readme): an embeddable Blazor Server admin UI that a
@@ -13,7 +13,7 @@ Every module package brings it at exactly its own version, so most hosts never r
 |---|---|---|
 | Postgres | `DataStudio.Postgres` | the PostgreSQL databases an application registers as `NpgsqlDataSource` |
 | Marten | `DataStudio.Marten` | an application's own Marten store (it brings the Postgres pages over the store's databases) |
-| Kafka | `DataStudio.Kafka` | the Kafka clusters an application already has credentials for (a preview) |
+| Kafka | `DataStudio.Kafka` | the Kafka clusters an application already has credentials for |
 
 Install the modules you want; each module pins exactly the shell it was built with.
 

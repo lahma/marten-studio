@@ -573,3 +573,14 @@ and the composition each carried a special case for it. With no 1.x address to k
 has a segment of its own (`postgres`, `marten`, `kafka`), the shell owns the mount (a front page of one tile per module, or a redirect when there is one) and `activity`, and the layout has one
 path: the module of the page on screen. A pasted 1.x address is a 404 and not a wrong page, and issue #78 is closed by the new addresses. Module order stopped being the composition's choice for the same reason: it
 is the order the host wrote its `Add…()` calls.
+
+## The Kafka packages' preview label (2026-11-17)
+
+Until 2.0 the three Kafka packages (`DataStudio.Kafka.Core`, `DataStudio.Kafka` and `DataStudio.Kafka.Wolverine`) were packed as a preview of the family's
+version, `<version>-preview.1` (K8), through one property, `Directory.Build.props`' `KafkaPrereleaseLabel`, which only the three read. The owner dropped the
+label at 2.0 (2026-11-17: "drop preview label from kafka and use the same versioning policy as others"): the Kafka module is part of Data Studio 2.0 at the
+family's version, and all seven packages have one version, the CHANGELOG's, always. What existed only for the label went with it: the property, the three
+projects' own `PackageVersion`, `InformationalVersion` and assembly metadata, their own empty package-validation baseline, `KStudioVersion` in the
+build (one `Version` for the seven), the version guard's family-version special case and the tests that computed a Kafka version. 2.0 itself ships first
+as `2.0.0-beta.1`, for the owner to try in real projects, and `2.0.0` follows after feedback: that is a prerelease of the one version, which the CHANGELOG
+header carries and all seven packages take.

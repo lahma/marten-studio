@@ -15,7 +15,7 @@ build/                                   The Fallout orchestrator. `build/` is a
   Build.cs                               CHANGELOG-driven version, Clean, test projects, release notes
   Build.CI.GitHubActions.cs              The four [GitHubActions] attributes every workflow comes from
   Build.Browsers.cs                      The Playwright install target, and Test's dependency on it (D19)
-  Build.Publish.cs                       Pack (the seven packages, three of them a preview) + the in-build nuget.org OIDC token exchange (D15)
+  Build.Publish.cs                       Pack (the seven packages, one version) + the in-build nuget.org OIDC token exchange (D15)
   Build.Marten.cs                        --marten-version: the floor, the latest-tested Marten or an exact one (D3)
   Build.Npgsql.cs                        --npgsql-version and NpgsqlPass, the Postgres module's latest-Npgsql pass (D30)
   Build.Confluent.cs                     --confluent-version: the Kafka module's floor, latest-tested Confluent.Kafka or an exact one (D36)
@@ -380,9 +380,9 @@ tests/DataStudio.Postgres.Tests/Connection/  The catalogue against the loaded Np
                                          each way, the pooler signs and the sentinel test - no database
 src/DataStudio.Kafka.Core/                        The Kafka engine (D36): catalog, window resolution, scan engine, predicates,
                                          decoders, governor and redaction, over Confluent.Kafka behind the internal wire
-                                         seam. No ASP.NET Core, no shell, no Npgsql (KafkaCoreFenceTests); packed as a preview (K8)
+                                         seam. No ASP.NET Core, no shell, no Npgsql (KafkaCoreFenceTests)
 src/DataStudio.Kafka/                             The Kafka module's Razor Class Library (D34, D35): AddKafka(), its options, capabilities
-                                         and resource; no Marten (hard rule 16), no static web assets; packed as a preview (K8)
+                                         and resource; no Marten (hard rule 16), no static web assets
 src/DataStudio.Kafka/Components/                  The module's components, under _Imports.razor
 src/DataStudio.Kafka/Components/Layout/           The cluster selector the shell draws in its header on Kafka pages
 src/DataStudio.Kafka/Components/Pages/            The Kafka routed pages; each @page must be rooted at /kafka
@@ -464,7 +464,7 @@ tests/DataStudio.Kafka.Integration.Tests/Sample/  The sample host, started once,
 tests/DataStudio.Kafka.Integration.Tests/Shell/   Live Kafka and Postgres: first navigation creates no topic, commits no offset, writes no row, makes no broker call while prerendering
 src/DataStudio.Kafka.Wolverine/                   DataStudio.Kafka.Wolverine (D43): UseWolverineKafka() and its options. It lists a Wolverine application's Kafka
                                          clusters and topics by reading its built configuration and nothing else. References DataStudio.Kafka.Core and
-                                         WolverineFx.Kafka only (KafkaWolverineFenceTests); packed as a preview (K8)
+                                         WolverineFx.Kafka only (KafkaWolverineFenceTests)
 src/DataStudio.Kafka.Wolverine/Internal/          The cluster source DataStudio.Kafka.Core runs, the topic reader, the tenant probe (the only reflection) and the version guard
 tests/DataStudio.Kafka.Wolverine.Tests/           The adapter's fast suite (D16): no Docker and no Wolverine host. Its output folder holds no studio
 tests/DataStudio.Kafka.Wolverine.Tests/Conventions/ The IL scan of what the adapter may call, the fences and the version guard

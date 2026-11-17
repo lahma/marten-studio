@@ -34,13 +34,6 @@ namespace DataStudio.Kafka.Internal;
 /// Otherwise - a Debug build, where an IDE's incremental build after a commit legitimately leaves the assemblies on different commits - only the
 /// part before the <c>+</c> is compared.
 /// </para>
-/// <para>
-/// <b>The preview label (K8).</b> DataStudio.Kafka, DataStudio.Kafka.Core and DataStudio.Kafka.Wolverine pack at <c>&lt;version&gt;-&lt;label&gt;</c> (<c>1.3.0-preview.1</c>), the
-/// family beside them at <c>&lt;version&gt;</c>. So DataStudio.Kafka.Core is compared with DataStudio.Kafka's own informational version, label and all, and
-/// DataStudio with the <em>family version</em>: DataStudio.Kafka's with the label taken off, the label being the
-/// <c>KafkaPrereleaseLabel</c> assembly metadata the three projects stamp. Without that metadata (a build that emptied the label) nothing is
-/// taken off. A different label, or a family assembly of another version, still fails.
-/// </para>
 /// </remarks>
 internal static class KafkaCoreVersionGuard
 {
@@ -49,9 +42,6 @@ internal static class KafkaCoreVersionGuard
 
     /// <summary>The Kafka module's engine assembly name, checked the same way.</summary>
     internal const string EngineAssemblyName = "DataStudio.Kafka.Core";
-
-    /// <summary>The key of the assembly metadata that names the Kafka module's preview label (Directory.Build.props' <c>KafkaPrereleaseLabel</c>).</summary>
-    internal const string PrereleaseLabelMetadataKey = "KafkaPrereleaseLabel";
 
     /// <summary>
     /// Throws unless the DataStudio and DataStudio.Kafka.Core this process loads are the builds this DataStudio.Kafka was packed
@@ -65,30 +55,28 @@ internal static class KafkaCoreVersionGuard
     /// <summary>
     /// The whole check, with the loaders supplied - the seam the tests use: the shell first, then DataStudio.Kafka.Core.
     /// </summary>
-    /// <param name="kStudio">DataStudio.Kafka's own assembly, whose version is the one required.</param>
+    /// <param name="kafka">DataStudio.Kafka's own assembly, whose version is the one required.</param>
     /// <param name="loadShell">Loads the shell's assembly; may throw <see cref="FileNotFoundException" />.</param>
     /// <param name="loadEngine">Loads DataStudio.Kafka.Core; may throw <see cref="FileNotFoundException" />.</param>
     /// <exception cref="InvalidOperationException">Any is missing, or is another version.</exception>
     internal static void Ensure(
-        Assembly kStudio,
+        Assembly kafka,
         Func<Assembly> loadShell,
         Func<Assembly> loadEngine)
     {
-        EnsureAssembly(ShellAssemblyName, "DataStudio.Kafka", kStudio, loadShell, family: true);
-        EnsureAssembly(EngineAssemblyName, "DataStudio.Kafka", kStudio, loadEngine, family: false);
+        EnsureAssembly(ShellAssemblyName, "DataStudio.Kafka", kafka, loadShell);
+        EnsureAssembly(EngineAssemblyName, "DataStudio.Kafka", kafka, loadEngine);
     }
 
     /// <summary>One required assembly: loaded, and the same build as DataStudio.Kafka's own.</summary>
     /// <param name="name">The required package.</param>
     /// <param name="bringer">The package whose reference brings it, which a host that removes its pin lets do so.</param>
-    /// <param name="kStudio">DataStudio.Kafka's own assembly, whose version is the one required.</param>
+    /// <param name="kafka">DataStudio.Kafka's own assembly, whose version is the one required.</param>
     /// <param name="load">Loads the required assembly; may throw <see cref="FileNotFoundException" />.</param>
-    /// <param name="family">Whether the required assembly is the family's, at the version without the Kafka module's preview label.</param>
-    private static void EnsureAssembly(string name, string bringer, Assembly kStudio, Func<Assembly> load, bool family)
+    private static void EnsureAssembly(string name, string bringer, Assembly kafka, Func<Assembly> load)
     {
-        string? self = InformationalVersion(kStudio);
-        string? kStudioVersion = family ? FamilyVersion(self, PrereleaseLabel(kStudio)) : self;
-        string required = ReleaseVersion(kStudioVersion);
+        string? self = InformationalVersion(kafka);
+        string required = ReleaseVersion(self);
         Assembly loaded;
 
         try
@@ -107,16 +95,16 @@ internal static class KafkaCoreVersionGuard
         }
 
         string? loadedVersion = InformationalVersion(loaded);
-        bool bothRelease = IsReleaseBuild(kStudio) && IsReleaseBuild(loaded);
+        bool bothRelease = IsReleaseBuild(kafka) && IsReleaseBuild(loaded);
 
-        if (SameBuild(kStudioVersion, loadedVersion, bothRelease))
+        if (SameBuild(self, loadedVersion, bothRelease))
         {
             return;
         }
 
         // The commits were compared: name them, since the release version may well be the same on both sides.
-        bool commits = bothRelease && HasBuildMetadata(kStudioVersion) && HasBuildMetadata(loadedVersion);
-        string shownRequired = commits ? kStudioVersion! : required;
+        bool commits = bothRelease && HasBuildMetadata(self) && HasBuildMetadata(loadedVersion);
+        string shownRequired = commits ? self! : required;
         string shownSelf = commits ? self! : ReleaseVersion(self);
         string shownFound = commits ? loadedVersion! : ReleaseVersion(loadedVersion);
 
@@ -131,13 +119,13 @@ internal static class KafkaCoreVersionGuard
     /// Whether two informational versions name the same build. When both assemblies are Release builds and both carry build metadata - the
     /// <c>+&lt;commit&gt;</c> SourceLink appends - the whole strings must match; otherwise the release versions (the part before the <c>+</c>) must.
     /// </summary>
-    /// <param name="kStudio">DataStudio.Kafka's informational version.</param>
+    /// <param name="kafka">DataStudio.Kafka's informational version.</param>
     /// <param name="other">The other assembly's informational version.</param>
     /// <param name="bothRelease">Whether both assemblies say <c>[AssemblyConfiguration("Release")]</c>, as every pack does.</param>
-    internal static bool SameBuild(string? kStudio, string? other, bool bothRelease) =>
-        bothRelease && HasBuildMetadata(kStudio) && HasBuildMetadata(other)
-            ? string.Equals(kStudio, other, StringComparison.Ordinal)
-            : string.Equals(ReleaseVersion(kStudio), ReleaseVersion(other), StringComparison.Ordinal);
+    internal static bool SameBuild(string? kafka, string? other, bool bothRelease) =>
+        bothRelease && HasBuildMetadata(kafka) && HasBuildMetadata(other)
+            ? string.Equals(kafka, other, StringComparison.Ordinal)
+            : string.Equals(ReleaseVersion(kafka), ReleaseVersion(other), StringComparison.Ordinal);
 
     /// <summary>Whether an assembly was built in the Release configuration, as every pack of the packages is.</summary>
     /// <param name="assembly">The assembly.</param>
@@ -146,35 +134,6 @@ internal static class KafkaCoreVersionGuard
             assembly.GetCustomAttribute<AssemblyConfigurationAttribute>()?.Configuration,
             "Release",
             StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>
-    /// An informational version without DataStudio.Kafka's preview label: <c>1.3.0-preview.1+5f1c2a9d</c> is <c>1.3.0+5f1c2a9d</c> for the label
-    /// <c>preview.1</c>, which is the version the family packages beside DataStudio.Kafka carry. Unchanged when there is no label, or when the version
-    /// does not end its release part with exactly <c>-&lt;label&gt;</c> (so another label is left to fail the comparison).
-    /// </summary>
-    /// <param name="informationalVersion">DataStudio.Kafka's informational version as the assembly carries it.</param>
-    /// <param name="label">The preview label, or <see langword="null" /> or empty for none.</param>
-    internal static string? FamilyVersion(string? informationalVersion, string? label)
-    {
-        if (string.IsNullOrEmpty(informationalVersion) || string.IsNullOrEmpty(label))
-        {
-            return informationalVersion;
-        }
-
-        int plus = informationalVersion.IndexOf('+', StringComparison.Ordinal);
-        string release = plus < 0 ? informationalVersion : informationalVersion[..plus];
-        string suffix = "-" + label;
-
-        return release.EndsWith(suffix, StringComparison.Ordinal)
-            ? release[..^suffix.Length] + (plus < 0 ? string.Empty : informationalVersion[plus..])
-            : informationalVersion;
-    }
-
-    /// <summary>The preview label an assembly was stamped with (<see cref="PrereleaseLabelMetadataKey" />), or <see langword="null" /> for none.</summary>
-    /// <param name="assembly">The assembly.</param>
-    internal static string? PrereleaseLabel(Assembly assembly) =>
-        assembly.GetCustomAttributes<AssemblyMetadataAttribute>()
-            .FirstOrDefault(static x => x.Key == PrereleaseLabelMetadataKey)?.Value;
 
     /// <summary>An assembly's informational version up to the <c>+</c>, or its assembly version without one.</summary>
     /// <param name="assembly">The assembly.</param>

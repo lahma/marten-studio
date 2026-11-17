@@ -1,5 +1,9 @@
 # Data Studio
 
+<!-- beta: remove at 2.0.0 -->
+> **Data Studio 2.0 is in beta** (`2.0.0-beta.1`), published for trial: names, addresses and options may still move before
+> 2.0.0, and every package is installed with `--prerelease`. What is promised meanwhile is in [docs/stability.md](docs/stability.md).
+
 An embeddable Blazor Server admin UI for the data stores your ASP.NET Core application already uses, shipped as
 MIT-licensed Razor Class Libraries. It is one product with three modules. You add `AddDataStudio()` to your container,
 one call for each module you want, and `MapDataStudio()` to your endpoint pipeline, and Data Studio runs inside your own
@@ -15,7 +19,7 @@ application against *that application's own* configuration, never against a conn
   locks, the foreign keys as a diagram, a health advisor that says what is wrong and how sure it is, the statements
   that take the database's time, autovacuum, storage, replication, the server's settings and a guarded SQL console. The
   Marten module is built on it, and shows these pages over the databases of the application's stores.
-- **Kafka** (a preview), for the clusters, topics, partitions and consumer groups the application's own Kafka
+- **Kafka**, for the clusters, topics, partitions and consumer groups the application's own Kafka
   credentials can describe, and, behind capabilities that are off by default, a search for the records you need.
 
 It is **not** a standalone application, **not** a fleet monitor and **not** a connection-string tool. There is no
@@ -31,7 +35,7 @@ Registering it must never change how your application behaves. No global styles,
 onto your host, no middleware ordering requirement, no altered authentication, no second projection daemon. A host that
 adds the packages and never maps them is byte-for-byte the application it was.
 
-For an application that uses Marten, start with `dotnet add package DataStudio.Marten` (this README is that package's own);
+For an application that uses Marten, start with `dotnet add package DataStudio.Marten --prerelease` <!-- beta: remove at 2.0.0 --> (this README is that package's own);
 the install lines for every other kind of host are under [Install](#install).
 
 ### The first five minutes, in Development
@@ -56,8 +60,7 @@ Every address in this document is under the studio's mount, `/studio` unless you
 
 ## Packages and modules
 
-Data Studio is seven packages, released together: four at one version, and the three Kafka packages, a preview, beside
-them at `<version>-preview.1`.
+Data Studio is seven packages, released together at one version.
 
 | Package | What it is | Register | Pages |
 |---|---|---|---|
@@ -65,9 +68,9 @@ them at `<version>-preview.1`.
 | `DataStudio.Marten` | The Marten module, for an application with a Marten `IDocumentStore`; brings the Postgres module | `.AddMarten()` | `/studio/marten/…`, and the Postgres pages over the stores' databases |
 | `DataStudio.Postgres` | The Postgres module, for any application that registers an `NpgsqlDataSource` and has no Marten | `.AddPostgres()` | `/studio/postgres/…` |
 | `DataStudio.Postgres.Diagnostics` | The findings in your own code, with no UI and no ASP.NET Core: a worker, a job host, a shared library | `services.AddPostgresDiagnostics()` | none |
-| `DataStudio.Kafka` (preview) | The Kafka module, over the application's own Kafka credentials; needs no database module | `.AddKafka()` | `/studio/kafka/…` |
-| `DataStudio.Kafka.Core` (preview) | The Kafka engine, with no ASP.NET Core; brought by `DataStudio.Kafka` | none: take `DataStudio.Kafka` | none |
-| `DataStudio.Kafka.Wolverine` (preview) | Lists a Wolverine application's Kafka clusters and topics in the Kafka module | `kafka.UseWolverineKafka()` | none |
+| `DataStudio.Kafka` | The Kafka module, over the application's own Kafka credentials; needs no database module | `.AddKafka()` | `/studio/kafka/…` |
+| `DataStudio.Kafka.Core` | The Kafka engine, with no ASP.NET Core; brought by `DataStudio.Kafka` | none: take `DataStudio.Kafka` | none |
+| `DataStudio.Kafka.Wolverine` | Lists a Wolverine application's Kafka clusters and topics in the Kafka module | `kafka.UseWolverineKafka()` | none |
 
 **Which to choose.** If the application uses Marten, take `DataStudio.Marten`: it brings `DataStudio.Postgres` with it, at
 exactly its own version, and shows everything the Postgres module shows for the store's databases - the database
@@ -89,8 +92,7 @@ rail), so a Marten host does not call `.AddPostgres()`, and the two together are
 module's database browser shows what else lives in the store's own databases - a job store, a legacy schema - but a
 separate plain database of a Marten application is not listed.
 
-**The Kafka module for Apache Kafka®** (a preview: its API and screens may change in a minor release; its packages are
-versioned `<version>-preview.1`) adds a Kafka section to the studio: the clusters, topics, partitions and consumer groups
+**The Kafka module for Apache Kafka®** adds a Kafka section to the studio: the clusters, topics, partitions and consumer groups
 your application's own Kafka credentials can describe, and, behind capabilities that are off by default, a search for the
 records you need. Call `.AddKafka()` on the same builder; there is no separate map call, and the Kafka pages are served
 under the studio's own path, at `/studio/kafka`. It never creates a topic, never commits an offset, and asks your own
@@ -156,17 +158,17 @@ Take the packages for the kind of host you have. Target framework: `net10.0`.
 
 | Your application | Install |
 |---|---|
-| Uses Marten | `dotnet add package DataStudio.Marten` |
-| Uses Npgsql with no Marten | `dotnet add package DataStudio.Postgres` |
-| Uses only Kafka | `dotnet add package DataStudio.Kafka --prerelease` |
-| Uses Marten and Kafka | `dotnet add package DataStudio.Marten`, then `dotnet add package DataStudio.Kafka --prerelease` |
-| Wants only the findings in its own code, with no UI | `dotnet add package DataStudio.Postgres.Diagnostics` |
+| Uses Marten | `dotnet add package DataStudio.Marten --prerelease` <!-- beta: remove at 2.0.0 --> |
+| Uses Npgsql with no Marten | `dotnet add package DataStudio.Postgres --prerelease` <!-- beta: remove at 2.0.0 --> |
+| Uses only Kafka | `dotnet add package DataStudio.Kafka --prerelease` <!-- beta: remove at 2.0.0 --> |
+| Uses Marten and Kafka | `dotnet add package DataStudio.Marten --prerelease`, then `dotnet add package DataStudio.Kafka --prerelease` <!-- beta: remove at 2.0.0 --> |
+| Wants only the findings in its own code, with no UI | `dotnet add package DataStudio.Postgres.Diagnostics --prerelease` <!-- beta: remove at 2.0.0 --> |
 
-For a Wolverine application's Kafka clusters and topics, add `dotnet add package DataStudio.Kafka.Wolverine --prerelease`
+For a Wolverine application's Kafka clusters and topics, add `dotnet add package DataStudio.Kafka.Wolverine --prerelease` <!-- beta: remove at 2.0.0 -->
 beside `DataStudio.Kafka`; `DataStudio.Kafka.Core`, the engine, comes with `DataStudio.Kafka`.
 
 ```shell
-dotnet add package DataStudio.Marten
+dotnet add package DataStudio.Marten --prerelease   # beta: remove at 2.0.0
 ```
 
 One package reference per module. `DataStudio.Marten` brings `Marten` (floor `9.57.0`: the floors follow the latest
@@ -931,7 +933,7 @@ in LINQ mode's and the Documents list's index advice - **What if?** plans the st
 imagined by [hypopg](https://github.com/HypoPG/hypopg), and draws the plan now and the plan with the index side by side.
 It creates nothing, and needs hypopg installed in the database, which is your decision; the studio never installs it.
 
-### The Kafka module (preview)
+### The Kafka module
 
 The Kafka module's pages are under `/studio/kafka/…`: the clusters and topics the application's own Kafka credentials can
 describe, and, behind capabilities that are off by default, search, compare, related records, export and a live tail. It

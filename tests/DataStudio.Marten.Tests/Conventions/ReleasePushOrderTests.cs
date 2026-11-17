@@ -45,14 +45,10 @@ public class ReleasePushOrderTests
         items[5].Should().Contain("KafkaPackageId", "the Kafka module depends on exactly DataStudio and DataStudio.Kafka.Core, both pushed before it");
         items[6].Should().Contain("KafkaWolverinePackageId");
 
-        foreach (string kafka in items[4..])
+        foreach (string package in items)
         {
-            kafka.Should().Contain("KafkaVersion", "the three Kafka packages carry the preview label, the family's four do not");
-        }
-
-        foreach (string family in items[..4])
-        {
-            family.Should().NotContain("KafkaVersion");
+            package.Should().Contain("{Version}", "all seven packages carry the CHANGELOG's one version");
+            package.Should().NotContain("KafkaVersion", "there is no version of the Kafka three of their own");
         }
     }
 

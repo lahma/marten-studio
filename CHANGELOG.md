@@ -1,9 +1,11 @@
-# 2.0.0
+# 2.0.0-beta.1
 
-2.0.0 makes the three studios one product, Data Studio, with three modules: Marten, Postgres and Kafka. A host
+2.0.0-beta.1 is a beta of 2.0, published for trial: names, addresses and options may still move before 2.0.0.
+2.0 makes the three studios one product, Data Studio, with three modules: Marten, Postgres and Kafka. A host
 registers one shell, `AddDataStudio()`, adds the modules it wants, and maps one `MapDataStudio()`. There are seven
-packages: `DataStudio`, `DataStudio.Postgres.Diagnostics`, `DataStudio.Postgres` and `DataStudio.Marten` at 2.0.0, and
-`DataStudio.Kafka.Core`, `DataStudio.Kafka` and `DataStudio.Kafka.Wolverine` at 2.0.0-preview.1. This release breaks 1.x on
+packages, all at one version: `DataStudio`, `DataStudio.Postgres.Diagnostics`, `DataStudio.Postgres`, `DataStudio.Marten`,
+`DataStudio.Kafka.Core`, `DataStudio.Kafka` and `DataStudio.Kafka.Wolverine`. The Kafka module is no longer a preview and
+its packages no longer carry a label of their own. This release breaks 1.x on
 purpose: names, calls, options and addresses changed so that they read right from the start, and nothing keeps a 1.x
 spelling alive. [docs/upgrading.md](docs/upgrading.md) lists every break with what to write instead. What a host relies
 on for safety did not change, with one exception it must act on: capabilities are still off until the host turns them on

@@ -1,6 +1,6 @@
 # Kafka
 
-Data Studio's Kafka module (`DataStudio.Kafka`, with its engine `DataStudio.Kafka.Core` and `DataStudio.Kafka.Wolverine`, all three a preview) is for
+Data Studio's Kafka module (`DataStudio.Kafka`, with its engine `DataStudio.Kafka.Core` and `DataStudio.Kafka.Wolverine`) is for
 Apache Kafka®. Apache Kafka is a trademark of the Apache Software Foundation. Data Studio is not affiliated with or endorsed by the Apache Software
 Foundation. AGENTS.md states each rule; this document holds its full text and wins where they differ. D34 and D35 are the module's half, D36 to
 D41 the engine's, D45 to D48 M5's.
@@ -105,7 +105,7 @@ definition's raw dictionaries. "No match" is always drawn beside its count and e
 resolution, the scan engine, the search predicates, the decoders, the governor and redaction. It has no ASP.NET Core
 (no `FrameworkReference`), references no shell, no module, no Npgsql, no Marten family and no Wolverine (`KafkaCoreFenceTests`,
 which also holds the reverse: the shell, `DataStudio.Postgres`, `DataStudio.Postgres.Diagnostics` and `DataStudio.Marten` reference no Confluent,
-librdkafka, Wolverine or `DataStudio.Kafka*` package or project), and is packed as a preview, `<version>-<label>` (K8). Its public types are in namespace `DataStudio.Kafka`, shared with the module above it: `KafkaEngineOptions` (the base of
+librdkafka, Wolverine or `DataStudio.Kafka*` package or project), and is packed at the family's version, like the other four packages. Its public types are in namespace `DataStudio.Kafka`, shared with the module above it: `KafkaEngineOptions` (the base of
 the module's `KafkaOptions`), `KafkaClusterBuilder`, `KafkaTopicBuilder`, `KafkaKeyFormat`, `KafkaScanLimits`, and the decoder
 extension point (`IKafkaRecordDecoder`, `KafkaDecodeContext`, `KafkaDecodeResult`, `KafkaHeader`, `KafkaDecoders`). Later
 milestones add `KafkaRedactionBuilder` (M2, M3), `KafkaPartitioner` (M3) and the correlation and index seams (M4, M5),

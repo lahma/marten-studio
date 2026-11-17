@@ -1,8 +1,8 @@
 # Data Studio for Apache Kafka®
 
 ```shell
-dotnet add package DataStudio.Kafka --prerelease
-dotnet add package DataStudio.Kafka.Wolverine --prerelease   # for a Wolverine application's clusters and topics
+dotnet add package DataStudio.Kafka --prerelease   # beta: remove at 2.0.0
+dotnet add package DataStudio.Kafka.Wolverine --prerelease   # for a Wolverine application's clusters and topics; beta: remove --prerelease at 2.0.0
 ```
 
 The Kafka module of [Data Studio](https://github.com/lahma/marten-studio#readme): a Kafka section inside your own ASP.NET
@@ -19,8 +19,6 @@ group joined.
 
 Every capability is off by default (`SearchRecords`, `ReadPayloads`, `ExportRecords`, `LiveTail`), and each is asked of
 your policies per topic. See the documentation for authorization, redaction and limits.
-
-This is a preview: its API and screens may change in a minor release.
 
 Apache Kafka is a trademark of the Apache Software Foundation. Data Studio is not affiliated with or endorsed by the Apache
 Software Foundation.

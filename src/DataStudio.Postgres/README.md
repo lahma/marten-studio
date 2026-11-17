@@ -1,7 +1,7 @@
 # DataStudio.Postgres
 
 ```shell
-dotnet add package DataStudio.Postgres
+dotnet add package DataStudio.Postgres --prerelease   # beta: remove at 2.0.0
 ```
 
 The Postgres module of [Data Studio](https://github.com/lahma/marten-studio#readme): an embeddable Blazor Server admin UI
@@ -39,7 +39,7 @@ package. Target framework: `net10.0`. PostgreSQL 15 to 19 are tested, and 14 sti
 **Which package.** Want the UI: this one. Want only the findings in your own code - a worker that mails a daily summary, a
 shared library, a job host with nothing to mount - take `DataStudio.Postgres.Diagnostics` alone: it has no ASP.NET Core in
 it ([`docs/diagnostics.md`](https://github.com/lahma/marten-studio/blob/main/docs/diagnostics.md#without-the-ui)). A
-Kafka section for the same studio is `DataStudio.Kafka` (a preview). The packages are released together at one version,
+Kafka section for the same studio is `DataStudio.Kafka`. The packages are released together at one version,
 and each depends on exactly its own version of the ones below it (`[x.y.z]` in the nuspec), so a central `PackageVersion`
 for any of them must equal this package's, or be removed: `AddPostgres()` checks the packages beneath it at startup and
 throws an `InvalidOperationException` that says which version to pin; a missing or older one fails when it is first

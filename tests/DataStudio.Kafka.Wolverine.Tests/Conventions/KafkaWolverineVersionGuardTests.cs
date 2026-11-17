@@ -64,11 +64,11 @@ public class KafkaWolverineVersionGuardTests
             .And.Contain("upgraded together");
     }
 
-    /// <summary>The adapter and DataStudio.Kafka.Core carry the same preview label (K8), so a correct preview install compares equal as it stands.</summary>
+    /// <summary>The adapter and DataStudio.Kafka.Core are one version, a prerelease of the family included, so a correct install compares equal as it stands.</summary>
     [Theory]
-    [InlineData("1.3.0-preview.1", "1.3.0-preview.1")]
-    [InlineData("1.3.0-preview.1+5f1c2a9d", "1.3.0-preview.1+5f1c2a9d")]
-    public void A_correct_preview_install_passes(string adapterVersion, string coreVersion)
+    [InlineData("2.0.0-beta.1", "2.0.0-beta.1")]
+    [InlineData("2.0.0-beta.1+5f1c2a9d", "2.0.0-beta.1+5f1c2a9d")]
+    public void A_correct_prerelease_install_passes(string adapterVersion, string coreVersion)
     {
         AssemblyBuilder adapter = WithVersion(adapterVersion);
 
@@ -76,16 +76,16 @@ public class KafkaWolverineVersionGuardTests
     }
 
     [Theory]
-    [InlineData("1.3.0")]
-    [InlineData("1.3.0-preview.2")]
-    [InlineData("1.3.1-preview.1")]
-    public void A_Kafka_Core_that_is_not_the_previews_own_build_is_refused(string core)
+    [InlineData("2.0.0")]
+    [InlineData("2.0.0-beta.2")]
+    [InlineData("2.0.1-beta.1")]
+    public void A_Kafka_Core_that_is_not_the_adapters_own_build_is_refused(string core)
     {
-        AssemblyBuilder adapter = WithVersion("1.3.0-preview.1");
+        AssemblyBuilder adapter = WithVersion("2.0.0-beta.1");
 
         FluentActions.Invoking(() => KafkaWolverineVersionGuard.Ensure(adapter, () => WithVersion(core)))
             .Should().Throw<InvalidOperationException>()
-            .Which.Message.Should().Contain($"DataStudio.Kafka.Wolverine 1.3.0-preview.1 needs DataStudio.Kafka.Core 1.3.0-preview.1 exactly, and found DataStudio.Kafka.Core {core}.");
+            .Which.Message.Should().Contain($"DataStudio.Kafka.Wolverine 2.0.0-beta.1 needs DataStudio.Kafka.Core 2.0.0-beta.1 exactly, and found DataStudio.Kafka.Core {core}.");
     }
 
     [Fact]

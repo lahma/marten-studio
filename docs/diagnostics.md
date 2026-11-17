@@ -257,7 +257,7 @@ Take it when the host has no UI to mount and only wants the findings:
 - an application that wants the **health check** (`AddHealthChecks().AddPostgresDiagnostics()`) and no pages.
 
 ```shell
-dotnet add package DataStudio.Postgres.Diagnostics
+dotnet add package DataStudio.Postgres.Diagnostics --prerelease   # beta: remove at 2.0.0
 ```
 
 ```csharp

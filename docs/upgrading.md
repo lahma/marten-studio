@@ -2,6 +2,11 @@
 
 ## 1.x → 2.0: one product, Data Studio
 
+<!-- beta: remove at 2.0.0 -->
+**2.0 is in beta** (`2.0.0-beta.1`), published for trial: names, addresses and options may still move before `2.0.0`
+([stability.md](stability.md)). Every package is a prerelease, so install with `--prerelease`, and pin the beta version
+exactly.
+
 2.0 turns Marten Studio, Postgres Studio and KStudio into one product, Data Studio, with three modules: Marten, Postgres
 and Kafka. Packages, registration, options, types, addresses, log categories and the studio's wording all changed, on
 purpose and without a bridge: no 1.x name, call or address is kept as an alias, and no redirect leads from an old address
@@ -16,8 +21,8 @@ step-by-step path through 1.3.x: go to 2.0.0 in one move.
 1. **Replace the packages** (the table under "Packages"). Remove `MartenStudio`, `PostgresStudio`,
    `PostgresStudio.Diagnostics`, `KStudio`, `KStudio.Core` and `KStudio.Wolverine` and add the 2.0 ids. If your repository
    keeps a central `PackageVersion` for any of them, rename it and keep every `DataStudio*` package at one version: each
-   depends on exactly its own version of the ones below it and checks that at startup. The Kafka three are previews
-   (`2.0.0-preview.1`), so installing them needs `--prerelease`.
+   depends on exactly its own version of the ones below it and checks that at startup. While 2.0 is in beta that version
+   is `2.0.0-beta.1` and installing needs `--prerelease`.
 2. **Replace the registration.** One call registers the shell, and one call per module adds a module to it:
 
    ```csharp
@@ -67,9 +72,9 @@ step-by-step path through 1.3.x: go to 2.0.0 in one move.
 | `PostgresStudio` | `DataStudio.Postgres` | The Postgres module: the database pages, the SQL console and the health pages |
 | `PostgresStudio.Diagnostics` | `DataStudio.Postgres.Diagnostics` | The diagnostics engine, with no UI and no ASP.NET Core; usable alone |
 | `MartenStudio` | `DataStudio.Marten` | The Marten module; it brings the Postgres module over the stores' databases |
-| `KStudio` | `DataStudio.Kafka` | The Kafka module (preview, `2.0.0-preview.1`) |
-| `KStudio.Core` | `DataStudio.Kafka.Core` | The Kafka engine (preview) |
-| `KStudio.Wolverine` | `DataStudio.Kafka.Wolverine` | Wolverine cluster discovery for the Kafka module (preview) |
+| `KStudio` | `DataStudio.Kafka` | The Kafka module |
+| `KStudio.Core` | `DataStudio.Kafka.Core` | The Kafka engine |
+| `KStudio.Wolverine` | `DataStudio.Kafka.Wolverine` | Wolverine cluster discovery for the Kafka module |
 
 The 1.x ids get no release after 1.3.1. Once 2.0.0 is published, each is marked deprecated on nuget.org, with its 2.0 id as
 the alternative. References:
