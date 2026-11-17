@@ -75,7 +75,7 @@ internal enum DaemonDistribution
 /// </para>
 /// <para>
 /// <b>A studio pause keeps it.</b> <c>PauseAsync</c> stops the loop and the agents and releases no lock - only
-/// <c>StopAsync</c> does - so while Marten Studio's pause is in effect the answer is still what this node led when it
+/// <c>StopAsync</c> does - so while Data Studio's pause is in effect the answer is still what this node led when it
 /// paused, which is what decides whether an agent started here would run beside another node's.
 /// </para>
 /// <para>
@@ -204,7 +204,7 @@ internal static class DaemonTopologyWording
         if (daemon.IsExternallyManaged)
         {
             return "An external system - Wolverine's managed distribution, typically - decides which node runs each agent, and "
-                + "Marten Studio does not ask it, so it cannot say which run on this node. Their progress below is read from the "
+                + "Data Studio does not ask it, so it cannot say which run on this node. Their progress below is read from the "
                 + "database either way.";
         }
 
@@ -226,7 +226,7 @@ internal static class DaemonTopologyWording
                 "MartenDaemonModeIsSolo(): a coordinator with no leadership loop. An agent runs once something starts it, "
                 + "nothing restarts one that stops, and Start and Stop act at once. It runs " + running + " now.",
             _ =>
-                "A projection coordinator that is not Marten's own runs this daemon, and Marten Studio cannot tell how it "
+                "A projection coordinator that is not Marten's own runs this daemon, and Data Studio cannot tell how it "
                 + "distributes agents between nodes. This node's daemon runs " + running + " now.",
         };
     }
@@ -283,9 +283,9 @@ internal static class DaemonTopologyWording
         + "rewind here would restart its agents on this node, beside that node's. Rewind it from the node that runs it - its "
         + "projections screen says it leads the shards.";
 
-    /// <summary>What a rewind does while Marten Studio's pause is in effect, said in its confirm dialog.</summary>
+    /// <summary>What a rewind does while Data Studio's pause is in effect, said in its confirm dialog.</summary>
     public const string RewindWhilePaused =
-        " Marten Studio's pause of this store's daemon is in effect, and a rewind restarts this projection's agents on this "
+        " Data Studio's pause of this store's daemon is in effect, and a rewind restarts this projection's agents on this "
         + "node now: they run while the rest stay paused.";
 
     private static string HotCold(DaemonStatus daemon, string running)
@@ -294,7 +294,7 @@ internal static class DaemonTopologyWording
         int led = daemon.Leadership.Count(static x => x.Value);
 
         string held = shards == 0
-            ? "Marten Studio cannot tell which of this database's shards it leads."
+            ? "Data Studio cannot tell which of this database's shards it leads."
             : led == 0
                 ? "This node holds the lock for none of this database's " + Count(shards, "shard") + ": another node runs them, or none has started yet."
                 : "This node holds the lock for " + led.ToString(CultureInfo.InvariantCulture) + " of this database's "

@@ -26,10 +26,11 @@ else
            answer per call and per scope, and a number that tried to sum them would be a guess. *@
         <p class="ms-popover-lead">What this studio allows. Your account's policies decide what you may do.</p>
         @* Every module's capabilities (D34): one list per group, in module order, with the same rows. *@
-        @foreach ((string groupKey, StudioModuleCapabilityGroup group) in ModuleGroups)
+        @foreach ((string groupKey, IStudioModule module, StudioModuleCapabilityGroup group, bool first) in ModuleGroups)
         {
-            <p class="ms-popover-title" @key="groupKey">@group.Heading</p>
-            <ul class="ms-capability-list" aria-label="@group.Heading">
+            string heading = module.ProductName + ": " + group.Name;
+            <p class="ms-popover-title" @key="groupKey">@heading</p>
+            <ul class="ms-capability-list" aria-label="@heading">
                 @foreach (StudioModuleCapability capability in group.Capabilities)
                 {
                     <li class="ms-capability @(capability.Configured ? "ms-capability-on" : "ms-capability-off")" @key="capability.Name">
@@ -39,6 +40,13 @@ else
                     </li>
                 }
             </ul>
+            @if (first && module.ReadOnlyOption is { } ownSwitch)
+            {
+                @* The module's own switch is on: every row above is off for that reason, and the line names the switch. *@
+                <p class="ms-popover-footnote">
+                    <code>@ownSwitch</code> is true, so every capability of this module is off.
+                </p>
+            }
         }
         @Footnote
     </div>
@@ -48,11 +56,11 @@ else
     /// <summary>
     /// The groups of every module, in module order, each with its key: the module's key and the group's index in the
     /// module's own list. Never the heading - the composition proves a module's key unique and says nothing of the words of its groups, so
-    /// two modules whose groups share a heading would throw a duplicate-key error and break the header.
+    /// two modules whose groups share a name would throw a duplicate-key error and break the header. <c>First</c> marks a module's first group.
     /// </summary>
-    private IEnumerable<(string Key, StudioModuleCapabilityGroup Group)> ModuleGroups =>
+    private IEnumerable<(string Key, IStudioModule Module, StudioModuleCapabilityGroup Group, bool First)> ModuleGroups =>
         Descriptor.Modules.SelectMany(static module =>
-            module.CapabilityGroups.Select((group, index) => (module.Key + "/" + index.ToString(System.Globalization.CultureInfo.InvariantCulture), group)));
+            module.CapabilityGroups.Select((group, index) => (module.Key + "/" + index.ToString(System.Globalization.CultureInfo.InvariantCulture), module, group, index == 0)));
 
     /// <summary>Every group of every module, in module order.</summary>
     private IReadOnlyList<StudioModuleCapabilityGroup> Groups => [.. Descriptor.Modules.SelectMany(static x => x.CapabilityGroups)];

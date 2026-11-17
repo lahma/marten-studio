@@ -339,7 +339,7 @@ internal sealed class ReplicationFactsReader : IReplicationFactsReader
         {
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                logger.LogDebug(exception, "{Product} did not read the replication {Section} of {DatabaseId}: {Reason}", settings.Text.ProductName, section, context.DatabaseId, expected);
+                logger.LogDebug(exception, "Data Studio did not read the replication {Section} of {DatabaseId}: {Reason}", section, context.DatabaseId, expected);
             }
 
             return expected;

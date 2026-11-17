@@ -238,29 +238,39 @@ public partial class PostgresStudioWordsTests
     }
 
     /// <summary>
-    /// The theory's other anti-vacuity half: the very same cases, evaluated in Marten Studio's words, do say "store", "Marten"
-    /// and the rest across many checks - so the cases reach the sentences each studio words its own way, and a pass above is
-    /// Postgres Studio's words rather than facts that never get that far.
+    /// The theory's other anti-vacuity half: the very same cases, evaluated in the Postgres module's words, render sentences that come from
+    /// <see cref="StudioText" /> - so the cases reach the sentences each module words its own way, and a pass above is the Postgres
+    /// module's words rather than facts that never get that far.
     /// </summary>
     [Fact]
-    public void The_same_cases_in_Marten_Studios_words_do_speak_of_a_store()
+    public void The_cases_reach_the_sentences_the_module_words_its_own_way()
     {
+        string[] sentences =
+        [
+            .. StringMembers()
+                .Select(static x => (string?) typeof(DataStudio.Postgres.Services.Settings.StudioText).GetProperty(x)!.GetValue(PostgresStudioText.Instance))
+                .Where(static x => x is { Length: >= 20 })
+                .Select(static x => x!.Trim()),
+        ];
+
         HashSet<string> codes = new(StringComparer.Ordinal);
 
         foreach (CheckWordCase checkCase in CheckWordCases.All.Where(static x => !x.AboutMartensTables))
         {
-            HealthCheckInfo info = HealthCheckRegistry.Describe(checkCase.Check, text: DataStudio.Postgres.Services.Settings.StudioText.Marten);
+            HealthCheckInfo info = HealthCheckRegistry.Describe(checkCase.Check, text: PostgresStudioText.Instance);
             HealthVerdict verdict = ((IHealthCheck) Activator.CreateInstance(checkCase.Check)!)
-                .Evaluate(checkCase.Facts, checkCase.Evaluation with { Text = DataStudio.Postgres.Services.Settings.StudioText.Marten });
+                .Evaluate(checkCase.Facts, checkCase.Evaluation with { Text = PostgresStudioText.Instance });
 
-            if (Leaks(Rendered(info, verdict), aboutMartensTables: false).Count > 0)
+            string rendered = string.Join('\n', Rendered(info, verdict).Select(static x => x.Text));
+
+            if (sentences.Any(rendered.Contains))
             {
                 codes.Add(checkCase.Code);
             }
         }
 
-        codes.Should().Contain(["C01", "C03", "C04", "C05", "C07", "C08", "K07", "R01", "S02", "S03", "S05", "T02", "T03", "T07", "T14", "T15", "T23"],
-            "each of these words a sentence its own way in each studio, and the cases make it appear");
+        codes.Should().Contain(["C01", "C03", "C04", "C05", "C07", "C08", "R01", "S02", "S03", "S05", "T02", "T03", "T07", "T14", "T23"],
+            "each of these words a sentence its own way in each module, and the cases make it appear");
     }
 
     /// <summary>Everything a check renders in a studio: its own title, its status note, and every part of every finding.</summary>

@@ -471,12 +471,12 @@
     };
 
     /// <summary>
-    /// Whether the owner filter is drawn: always in MartenStudio, and in a studio over plain data sources only when the
+    /// Whether the owner filter is drawn: always where the configuration declares tables, and over plain data sources only when the
     /// list holds something the mt_ rule calls Marten's - or a link asked for one side - since otherwise every object is
     /// "Other" and the filter has nothing to tell apart.
     /// </summary>
     private bool ShowsOwnerFilter =>
-        Settings.Text.Product == StudioProduct.MartenStudio || Owner != DatabaseOwnerFilter.All || list is { Counts.Marten: > 0 };
+        Settings.Text.ConfigurationDeclaresTables || Owner != DatabaseOwnerFilter.All || list is { Counts.Marten: > 0 };
 
     private string OwnerCount(DatabaseOwnerFilter owner)
     {

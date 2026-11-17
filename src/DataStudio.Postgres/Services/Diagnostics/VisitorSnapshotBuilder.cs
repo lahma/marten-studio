@@ -184,7 +184,7 @@ internal sealed class VisitorSnapshotBuilder
             details,
             replicationView,
             registry,
-            DiagnosticsJson.ProducerFor(settings.Text.Product),
+            DiagnosticsJson.Producer,
             now,
             connectionView,
             applications);

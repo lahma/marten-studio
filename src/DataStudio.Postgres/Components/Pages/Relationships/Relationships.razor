@@ -31,8 +31,8 @@
     on the graph: without one - always, in a studio over plain data sources - Documents draws nothing and
     Tables is Both, so there is no switch and the picture is Both whatever the URL says.
 
-    Every sentence about document types is the studio's own (StudioText, or Product for the prose drawn
-    as markup), so a studio over plain data sources speaks of tables alone.
+    Every sentence about document types is the module's own (StudioText, or the fact that its configuration declares tables for
+    the prose drawn as markup), so a module over plain data sources speaks of tables alone.
 *@
 
 <PageTitle>Relationships</PageTitle>
@@ -42,7 +42,7 @@
         <h1 class="ms-page-title">Relationships</h1>
     </div>
 
-    @if (Settings.Text.Product != StudioProduct.MartenStudio)
+    @if (!Settings.Text.ConfigurationDeclaresTables)
     {
         @* A studio over plain data sources declares no key of its own: what is drawn is what Postgres has. *@
         <p class="ms-schema-note">
@@ -141,7 +141,7 @@
     }
     else if (graph.IsEmpty)
     {
-        @if (Settings.Text.Product != StudioProduct.MartenStudio)
+        @if (!Settings.Text.ConfigurationDeclaresTables)
         {
             @* No configuration declares a key here: the only keys there are, are the ones in the tables' DDL. *@
             <div class="ms-empty">

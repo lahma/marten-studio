@@ -73,18 +73,6 @@ internal sealed class SessionActivityService : ISessionActivityService
     /// <summary>What the audit ring says was read.</summary>
     internal const string DetailsTarget = "sessions, locks and prepared transactions";
 
-    /// <summary><see cref="StudioDenialText.SessionsCapabilityDenial" />, where the sentence is kept.</summary>
-    internal const string CapabilityDenial = StudioDenialText.SessionsCapabilityDenial;
-
-    /// <summary><see cref="StudioDenialText.SessionsReadOnlyDenial" />, where the sentence is kept.</summary>
-    internal const string ReadOnlyDenial = StudioDenialText.SessionsReadOnlyDenial;
-
-    /// <summary><see cref="StudioDenialText.SessionsStorePolicyDenial" />, where the sentence is kept.</summary>
-    internal const string StorePolicyDenial = StudioDenialText.SessionsStorePolicyDenial;
-
-    /// <summary><see cref="StudioDenialText.SessionsWritePolicyDenial" />, where the sentence is kept.</summary>
-    internal const string WritePolicyDenial = StudioDenialText.SessionsWritePolicyDenial;
-
     // The audit ledger is keyed by store, database and what was read; these name "what" for the ledger, which
     // was written for relations and is reused here as it is.
     private const string LedgerSchema = "(activity)";
@@ -427,7 +415,7 @@ internal sealed class SessionActivityService : ISessionActivityService
             audit.RecordCapabilityDenied(denied, DetailsAction, DetailsTarget);
 
             return denied.Reason == CapabilityDenialReason.ReadOnly
-                ? SessionActivityDetails.Refused(DatabaseRefusal.ReadOnly, settings.Text.SessionsReadOnlyDenial)
+                ? SessionActivityDetails.Refused(DatabaseRefusal.ReadOnly, settings.Text.SessionsReadOnlyDenial(settings.ReadOnlyOptionName))
                 : SessionActivityDetails.Refused(DatabaseRefusal.CapabilityOff, settings.Text.SessionsCapabilityDenial);
         }
 
@@ -559,7 +547,7 @@ internal sealed class SessionActivityService : ISessionActivityService
         {
             // Nobody is asked about a capability the process does not have.
             return capabilities.ReadOnly
-                ? new SessionDetailsAccess(false, true, null, DatabaseRefusal.ReadOnly, settings.Text.SessionsReadOnlyDenial)
+                ? new SessionDetailsAccess(false, true, null, DatabaseRefusal.ReadOnly, settings.Text.SessionsReadOnlyDenial(settings.ReadOnlyOptionName))
                 : new SessionDetailsAccess(false, false, null, DatabaseRefusal.CapabilityOff, settings.Text.SessionsCapabilityDenial);
         }
 

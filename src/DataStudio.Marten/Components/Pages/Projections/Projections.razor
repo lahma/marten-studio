@@ -81,7 +81,7 @@
                 <p class="ms-empty-description">
                     There is no <code>mt_events</code>, <code>mt_streams</code> or
                     <code>mt_event_progression</code> here. Marten creates them the first time this store
-                    appends an event or runs its daemon; Marten Studio never creates them from a page.
+                    appends an event or runs its daemon; Data Studio never creates them from a page.
                 </p>
             </div>
         }
@@ -384,7 +384,7 @@
             <div class="ms-empty">
                 <p class="ms-empty-title">No projections registered</p>
                 <p class="ms-empty-description">
-                    This store's <code>StoreOptions</code> registers no projection. Marten Studio shows what
+                    This store's <code>StoreOptions</code> registers no projection. Data Studio shows what
                     the host configured - add one with <code>opts.Projections.Add(...)</code> or
                     <code>opts.Projections.Snapshot&lt;T&gt;(...)</code> and it appears here.
                 </p>
@@ -1317,7 +1317,7 @@
     }
 
     /// <summary>
-    /// Whether this projection is being rebuilt: by Marten Studio, anywhere in this process - or, where the daemon here
+    /// Whether this projection is being rebuilt: by Data Studio, anywhere in this process - or, where the daemon here
     /// can say so, by anything. A daemon that says nothing proves nothing, so "no" is "not known to be".
     /// </summary>
     private bool IsRebuilding(string projectionName) =>
@@ -1330,8 +1330,8 @@
 
     /// <summary>Who is rebuilding it, for the row's badge and the buttons' hover text.</summary>
     private string? RebuildingBy(string projectionName) =>
-        IsRebuildingByStudio(projectionName) ? "by Marten Studio"
-        : view?.Daemon.IsRebuildingHere(projectionName) == true ? "on this daemon, by something other than Marten Studio"
+        IsRebuildingByStudio(projectionName) ? "by Data Studio"
+        : view?.Daemon.IsRebuildingHere(projectionName) == true ? "on this daemon, by something other than Data Studio"
         : null;
 
     /// <summary>

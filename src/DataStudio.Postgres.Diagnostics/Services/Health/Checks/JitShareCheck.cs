@@ -44,11 +44,6 @@ internal sealed class JitShareCheck : HealthCheck<JitFacts>
     /// <summary>The series of a statement's JIT time, in milliseconds.</summary>
     internal const string JitSeries = "statements.jit-ms:";
 
-    /// <summary>The remedy's line in MartenStudio (<see cref="Settings.StudioText.JitRemedyCode" /> is each studio's).</summary>
-    internal const string RemedyCode =
-        "opts.ConfigureNpgsqlDataSourceBuilder(b =>\n"
-        + "    b.ConnectionStringBuilder.Options = ((b.ConnectionStringBuilder.Options ?? string.Empty) + \" -c jit=off\").Trim());";
-
     /// <inheritdoc />
     public override async Task<JitFacts> GatherAsync(HealthCheckContext context, CancellationToken cancellationToken)
     {

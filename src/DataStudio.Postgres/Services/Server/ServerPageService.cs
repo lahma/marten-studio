@@ -403,7 +403,7 @@ internal sealed class ServerPageService : IServerPageService
 
     private static string StorePolicyDenial(StudioText text)
     {
-        string policy = text.Product == StudioProduct.PostgresStudio ? text.OptionName("SourceAuthorizationPolicy") : text.OptionName("StoreAuthorizationPolicy");
+        string policy = text.ScopePolicyOption;
 
         return "Your account may not see this database's server. The policy (" + policy + ") refused this " + text.SourceNoun
             + " and database as a whole, with no tenant selected: the server's settings belong to no tenant.";
@@ -426,7 +426,7 @@ internal sealed class ServerPageService : IServerPageService
         {
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                logger.LogDebug(exception, "{Product} did not read the server facts of {DatabaseId}", settings.Text.ProductName, databaseId);
+                logger.LogDebug(exception, "Data Studio did not read the server facts of {DatabaseId}", databaseId);
             }
         }
         else

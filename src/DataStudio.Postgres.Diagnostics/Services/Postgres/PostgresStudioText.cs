@@ -3,7 +3,7 @@ using DataStudio.Postgres.Services.Settings;
 namespace DataStudio.Postgres.Services.Postgres;
 
 /// <summary>
-/// Postgres Studio's words for every sentence the shared studio says in a studio's own (<see cref="StudioText" />): its
+/// The Postgres module's words for every sentence the shared studio says in a module's own (<see cref="StudioText" />): its
 /// options type, its policies, a data source rather than a store, and remedies that are SQL or a server setting rather
 /// than a <c>StoreOptions</c> line.
 /// </summary>
@@ -14,12 +14,12 @@ namespace DataStudio.Postgres.Services.Postgres;
 /// admits, and every row needs <c>BrowseDatabase</c>, and every definition <c>ViewDefinitions</c> or <c>BrowseDatabase</c>,
 /// each with the write policy (D27, design PS10). Nothing in
 /// it is anybody's store, except what the <c>mt_</c> rule calls Marten's - whose rows are never read here, in either
-/// studio, and which <see cref="StudioText.MartenStoreNotice" /> points at Marten Studio for.
+/// module, and which <see cref="StudioText.MartenStoreNotice" /> points at the Marten pages for.
 /// </para>
 /// <para>
 /// <b>Never a Marten word but the two that name Marten on purpose.</b> <c>PostgresStudioWordsTests</c> holds every
 /// sentence here to that: none says <c>MartenOptions</c>, <c>StoreOptions</c>, "store" or a session API; only
-/// the <c>mt_</c> notices name Marten and Marten Studio, and only the one about a Marten table's partitions
+/// the <c>mt_</c> notices name Marten and its pages, and only the one about a Marten table's partitions
 /// (<see cref="StudioText.MartenTablePartitionParameters" />) names the store whose <c>StoreOptions</c> declare it.
 /// </para>
 /// </remarks>
@@ -31,99 +31,56 @@ internal static class PostgresStudioText
     /// <summary>The options type a host with no studio configures: the engine's own.</summary>
     public const string DiagnosticsOptionsTypeName = "PostgresDiagnosticsOptions";
 
-    /// <summary>Postgres Studio's words.</summary>
+    /// <summary>The Postgres module's words.</summary>
     public static StudioText Instance { get; } = Build(OptionsTypeName);
 
     /// <summary>
     /// The same words for a host that registered <c>AddPostgresDiagnostics()</c> and no studio, which has no
-    /// <c>PostgresOptions</c>: every sentence that names an option names it on <c>PostgresDiagnosticsOptions</c>. Every
-    /// other word is <see cref="Instance" />'s, and a studio's host never meets this instance.
+    /// <c>PostgresOptions</c>: every sentence composed over the options type names its option on <c>PostgresDiagnosticsOptions</c>.
+    /// Every other word is <see cref="Instance" />'s, and a studio's host never meets this instance.
     /// </summary>
     public static StudioText DiagnosticsInstance { get; } = Build(DiagnosticsOptionsTypeName);
 
     private static StudioText Build(string optionsTypeName) => new()
     {
-        Product = StudioProduct.PostgresStudio,
-        ProductName = "Postgres Studio",
         OptionsTypeName = optionsTypeName,
-        RegistrationMethod = "AddPostgres",
-        AlternativeRegistrationMethod = "AddPostgresDiagnostics",
         SourceNoun = "data source",
-        ScopeDeniedEntry = "Not authorized for this data source or database.",
         SourcePossessive = "the data source's",
+        ScopePolicyName = "SourceAuthorizationPolicy",
+        ScopePolicyNoun = "source",
+        TenantlessScopeClause = string.Empty,
+        OptionsRegistration = "services.AddDataStudio().AddPostgres(options => ...)",
+        HealthCheckRegistration =
+            "services.AddPostgresDiagnostics() or services.AddDataStudio().AddPostgres() as well as AddHealthChecks().AddPostgresDiagnostics()",
+        ScopeDeniedEntry = "Not authorized for this data source or database.",
         FindHint = "An exact table or view name, or a statement's queryid",
         FindNamesScopeLikeThePickers = true,
+        NamedSchemasAreOwn = true,
+        ConfigurationDeclaresTables = false,
 
-        BrowseReadOnlyDenial =
-            "PostgresOptions.ReadOnly is true, which turns PostgresOptions.Capabilities.BrowseDatabase off with every "
-            + "other capability.",
         BrowseCapabilityDenial =
             "The rows of every object here, and everything in the schemas PostgresOptions.BrowsableSchemas admits only "
             + "through \"*\", need PostgresOptions.Capabilities.BrowseDatabase.",
-        DefinitionReadOnlyDenial =
-            "PostgresOptions.ReadOnly is true, which turns PostgresOptions.Capabilities.ViewDefinitions and "
-            + "PostgresOptions.Capabilities.BrowseDatabase off with every other capability.",
         DefinitionCapabilityDenial =
             "The definitions of the objects here need PostgresOptions.Capabilities.ViewDefinitions, for the schemas "
             + "PostgresOptions.BrowsableSchemas names exactly, or PostgresOptions.Capabilities.BrowseDatabase.",
-        DefinitionWritePolicyDenialHead =
-            "Your account may not read definitions here. The write policy (PostgresOptions.WriteAuthorizationPolicy, "
-            + "or SourceAuthorizationPolicy when no write policy is set) refused ",
-        DefinitionWritePolicyDenialTail = " for this data source and database.",
-        BrowseWritePolicyDenial =
-            "Your account may not browse the database here. The write policy (PostgresOptions.WriteAuthorizationPolicy, "
-            + "or SourceAuthorizationPolicy when no write policy is set) refused BrowseDatabase for this data source and database.",
-        BrowseStorePolicyDenial =
-            "Your account may not browse the database here. The source policy (PostgresOptions.SourceAuthorizationPolicy) "
-            + "refused this data source and database.",
         BrowseEmptyListDenial =
             "PostgresOptions.BrowsableSchemas is empty, so no schema is browsable. List the schema names, or \"*\".",
         MartenDependencyDenial =
             "This view reads one of Marten's own tables - a document or event table, or Marten's bookkeeping - whose rows are "
-            + "never read here: browse them with Marten Studio, where the store's tenancy and visibility rules apply.",
-        NoSelectPrivilege = "The data source's Postgres role has no SELECT privilege on it.",
+            + "never read here: browse them on the Marten pages, where the store's tenancy and visibility rules apply.",
         OwnSchemaFlag = null,
         OwnSchemaFlagTitle = null,
         MartenInternalTitle =
             "Named like Marten's own (mt_): a Marten store's document, event or bookkeeping object. Its rows are never read "
-            + "here; browse them with Marten Studio.",
+            + "here; browse them on the Marten pages.",
         MartenStoreNotice =
-            "This database holds a Marten store; browse its documents with Marten Studio, where its tenancy and visibility "
+            "This database holds a Marten store; browse its documents on the Marten pages, where its tenancy and visibility "
             + "rules apply.",
         OwnerFilterMartenTitle =
-            "Only what is named like Marten's own (mt_): a Marten store's objects, whose rows are read in Marten Studio",
+            "Only what is named like Marten's own (mt_): a Marten store's objects, whose rows are read on the Marten pages",
         OwnerFilterOtherTitle = "Everything not named like Marten's own: this application's objects, and other libraries'",
 
-        SessionsCapabilityDenial =
-            "Process ids, roles, client addresses, application names, connection times and statements need "
-            + "PostgresOptions.Capabilities.ViewDatabaseActivity.",
-        SessionsReadOnlyDenial =
-            "PostgresOptions.ReadOnly is true, which turns PostgresOptions.Capabilities.ViewDatabaseActivity off "
-            + "with every other capability.",
-        SessionsStorePolicyDenial =
-            "Your account may not see this database's sessions. The source policy "
-            + "(PostgresOptions.SourceAuthorizationPolicy) refused this data source and database.",
-        SessionsWritePolicyDenial =
-            "Your account may not see who is using this database. The write policy (PostgresOptions.WriteAuthorizationPolicy, "
-            + "or SourceAuthorizationPolicy when no write policy is set) refused ViewDatabaseActivity for this data source and "
-            + "database.",
-
-        StorageStorePolicyDenial =
-            "Your account may not see this database's storage. The source policy "
-            + "(PostgresOptions.SourceAuthorizationPolicy) refused this data source and database.",
-
-        StatementsCapabilityDenial =
-            "The statements this database runs, their counters and their text, need PostgresOptions.Capabilities.ViewDatabaseActivity.",
-        StatementsReadOnlyDenial =
-            "PostgresOptions.ReadOnly is true, which turns PostgresOptions.Capabilities.ViewDatabaseActivity off "
-            + "with every other capability.",
-        StatementsStorePolicyDenial =
-            "Your account may not see this database's statements. The source policy "
-            + "(PostgresOptions.SourceAuthorizationPolicy) refused this data source and database.",
-        StatementsWritePolicyDenial =
-            "Your account may not see the statements this database runs. The write policy "
-            + "(PostgresOptions.WriteAuthorizationPolicy, or SourceAuthorizationPolicy when no write policy is set) refused "
-            + "ViewDatabaseActivity for this data source and database.",
         StudioCostCovers =
             "health checks, the SQL console, the database browser, Sessions, Maintenance, Storage, Replication, Server and the "
             + "relationship reads",
@@ -147,9 +104,6 @@ internal static class PostgresStudioText
         RelationshipNeighbourhoodUnmatched = "an end in a table this studio does not draw, so there is nothing to draw them between.",
         RelationshipTablesUnavailable = "No table is drawn:",
 
-        StatementsOnSessionsPage =
-            "The statements themselves are on Database › Sessions, behind PostgresOptions.Capabilities.ViewDatabaseActivity, "
-            + "masked for the schemas you may not see.",
         ServerSettingComment = "A server setting",
         DeadlockCause =
             "They come from two transactions taking the same rows in different orders: two code paths updating the same rows "
@@ -175,7 +129,6 @@ internal static class PostgresStudioText
             """,
         JudgedTables = "Tables in the browsable schemas",
         JudgedTable = "table in the browsable schemas",
-        NotJudged = "not among the tables the studio judges",
         JudgedTablesRead = "the tables in the browsable schemas",
         NoJudgedTable = "No table exists in the browsable schemas yet.",
         UnjudgedOldest =
@@ -183,13 +136,14 @@ internal static class PostgresStudioText
             + "does not admit, or beyond the largest tables a sweep reads - and wraparound protection counts every table in the "
             + "database, so it holds the whole database back as surely as one of these would.",
         MartenTablePartitionParameters =
-            "each partition's pg_class.reloptions says which; Marten Studio's Schema screen, over the store whose StoreOptions "
+            "each partition's pg_class.reloptions says which; the Marten pages' Schema screen, over the store whose StoreOptions "
             + "declare this table, shows which parameters the partitions differ on",
-        LeaderTimeoutClause = string.Empty,
+        MigrationBehindVacuum = "a migration queued behind it (an ALTER TABLE, from whatever tool runs the host's migrations)",
+        ConnectionSource = "the data source",
         ReadOnlyWrites = "write the application makes",
         ReadOnlyNeverAsks = "and most data access never asks",
 
-        // The two checks whose titles name a store: S02, whose docs heading says what it guards in Marten Studio's words, and
+        // The two checks whose titles name a store: S02, whose docs heading says what it guards in the Marten module's words, and
         // S10. The docs heading stays the attribute's, so the "Docs" link still finds its anchor.
         CheckTitles = new Dictionary<string, string>(StringComparer.Ordinal)
         {
@@ -220,7 +174,6 @@ internal static class PostgresStudioText
             """,
         IdleTransactionIdCost = ", which holds vacuum back as well, snapshot or not",
         SkippedCommit = "its commit",
-        IdleTimeoutLeaderClause = string.Empty,
         StrongerLockExamples = "a migration's ALTER TABLE, a TRUNCATE",
         LongStatementRemedyCode =
             """
@@ -234,12 +187,10 @@ internal static class PostgresStudioText
             + "application's own migrations.",
         PreparedTransactionHolds = "for good and blocks whatever needs its locks",
         RetriedFailures = "serialization failures, optimistic-concurrency conflicts, unique violations",
-        ScopePolicyNoun = "source",
         ChangeDataCaptureConsumer = "a change data capture connector",
         EveryWriteExamples = "every insert, update and delete",
         EverySourceDatabase = "every database on this server",
         UnclearedDeadRows = "every row updated or deleted leaves a dead row version that is never cleared",
-        LostCommitsMeaning = string.Empty,
         ZeroedPageRows = "including rows that other rows, or other systems, still point at",
         SettingsReadOn =
             "on a connection from the data source - so a value set for its role, its database or in its connection string is "
@@ -267,7 +218,6 @@ internal static class PostgresStudioText
         AppendOnlyExamples = "an event log, an audit or history table",
         HorizonDeadRowsLabel = "Dead rows in the tables the studio judges",
         LogicalSlotConsumers = "Debezium, a CDC pipeline, a subscription",
-        ConfiguredKeyColumnClause = string.Empty,
         JudgedStatementNoun = "statement",
         ShortStatementsJit =
             "An application's statements are mostly short, and a large table's cost estimates are what push them over the line.",
@@ -284,8 +234,6 @@ internal static class PostgresStudioText
             // On the NpgsqlDataSourceBuilder the data source is built with:
             {statements}
             """,
-        PoolIdleTimeoutLeaderClause = string.Empty,
-        LogParametersLoggerClause = string.Empty,
         SharedDataSourceRemedyCode =
             """
             // One NpgsqlDataSource for the process: register it once ...

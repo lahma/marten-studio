@@ -57,7 +57,7 @@
         @* The coordinator has no public paused flag, so this line is the studio reporting what the
            studio did - never an inference from "no agents have been running for a while". *@
         <p class="ms-daemon-explanation ms-daemon-paused-by">
-            <strong>Paused by Marten Studio</strong>
+            <strong>Paused by Data Studio</strong>
             <span class="ms-muted">(@PausedByUser, @PausedAtText)</span>
         </p>
 
@@ -69,7 +69,7 @@
             <p class="ms-daemon-explanation ms-daemon-pause-lifted" role="status">
                 <strong>but this daemon reports that it is running.</strong>
                 <span class="ms-muted">
-                    Something outside Marten Studio resumed it. Pause it again before starting or
+                    Something outside Data Studio resumed it. Pause it again before starting or
                     stopping one agent.
                 </span>
             </p>
@@ -139,7 +139,7 @@
     public string? Topology { get; set; }
 
     /// <summary>
-    /// Whether Marten Studio itself paused this store's projection coordinator.
+    /// Whether Data Studio itself paused this store's projection coordinator.
     /// </summary>
     /// <remarks>
     /// Only ever what this process recorded doing. There is no public "is paused" on
@@ -186,7 +186,7 @@
         (false, _, _, _) when IsExternallyManaged => "External: run by another system",
         (false, _, _, _) => "Not hosted in this process",
         (true, true, true, _) => "Hosted and running - the studio's pause is no longer in effect",
-        (true, true, false, _) => "Hosted, paused by Marten Studio",
+        (true, true, false, _) => "Hosted, paused by Data Studio",
         (true, false, false, _) => "Hosted, stopped",
         (true, false, true, true) => "Hosted, running, paused shards",
         _ => "Hosted and running"

@@ -46,7 +46,7 @@ public class ServerPageTests
             ServerRead<ServerConnectionPosture>.Of(Posture("app", reading: "probe")),
             [new HealthStatement("select 1 from pg_catalog.pg_settings", [])]);
 
-        return ServerPageService.Build(facts, Services.Settings.StudioText.Marten, consoleRoleSet: true);
+        return ServerPageService.Build(facts, DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance, consoleRoleSet: true);
     }
 
     private static async Task<(PostgresStudioComponentContext Context, FakeServerPage Data)> ContextAsync(ServerPageView view)

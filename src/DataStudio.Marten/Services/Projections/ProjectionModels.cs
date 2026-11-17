@@ -433,7 +433,7 @@ internal static class DaemonControlMessages
     public static string PauseNoLongerInEffect(TimeSpan leadershipPollingTime, TimeSpan agentPauseTime) =>
         string.Create(
             CultureInfo.InvariantCulture,
-            $"Marten Studio's pause is still on the record, but this daemon reports that it is running - something outside the studio resumed it. Its leadership loop restarts agents as often as every {Sooner(leadershipPollingTime, agentPauseTime).TotalSeconds:0.#} s, so pause it again before starting or stopping one.");
+            $"Data Studio's pause is still on the record, but this daemon reports that it is running - something outside the studio resumed it. Its leadership loop restarts agents as often as every {Sooner(leadershipPollingTime, agentPauseTime).TotalSeconds:0.#} s, so pause it again before starting or stopping one.");
 
     private static TimeSpan Sooner(TimeSpan left, TimeSpan right) => left <= right ? left : right;
 }
@@ -449,7 +449,7 @@ internal static class DaemonControlMessages
 /// <param name="HighWaterLastPolledAt">When the high-water agent last polled, when the daemon says.</param>
 /// <param name="Explanation">Plain words for whoever is reading the card, especially when it is not hosted here.</param>
 /// <param name="PausedByStudio">
-/// The pause this process issued through Marten Studio, or <see langword="null" /> when it has issued
+/// The pause this process issued through Data Studio, or <see langword="null" /> when it has issued
 /// none. The coordinator has no public paused flag at all, so this is the only honest answer available:
 /// it says what the studio did, and never guesses at what somebody else did.
 /// </param>
@@ -564,7 +564,7 @@ internal sealed record DaemonStatus(
     /// </summary>
     public bool IsExternallyManaged => Hosting == DaemonHostingState.ExternallyManaged;
 
-    /// <summary>Whether Marten Studio is the reason this store's agents are not running.</summary>
+    /// <summary>Whether Data Studio is the reason this store's agents are not running.</summary>
     public bool IsPausedByStudio => PausedByStudio is not null;
 
     /// <summary>How often the coordinator restarts agents it finds missing.</summary>
@@ -825,7 +825,7 @@ internal static class OrphanWording
     public const string HandOver =
         "These rows are in mt_event_progression, and nothing this store registers advances them: each was written by a "
         + "projection that has since been renamed, removed or given a new version, or by a subscription that was removed. "
-        + "Whether to remove one is the host's decision: Marten Studio removes one only where the host enabled "
+        + "Whether to remove one is the host's decision: Data Studio removes one only where the host enabled "
         + "Capabilities.CorrectProgression and the write policy allows this visitor to change this database as a whole, after a "
         + "confirmation. Marten's own "
         + "IEventDatabase.DeleteProjectionProgressByShardNameAsync removes a row by its exact name, registered or not - "
@@ -1308,7 +1308,7 @@ internal static class RebuildWording
             + "present ignores a stored floor and replays from the first event.",
         _ =>
             "Marten replays from a start floor when one is stored for the projection - none is - or when its code subscribes "
-            + "from a sequence or a time (SubscribeFromSequence, SubscribeFromTime), which Marten Studio cannot see. Then "
+            + "from a sequence or a time (SubscribeFromSequence, SubscribeFromTime), which Data Studio cannot see. Then "
             + "fewer events are replayed, and a document that only events at or below the floor built is deleted and not rebuilt.",
     };
 

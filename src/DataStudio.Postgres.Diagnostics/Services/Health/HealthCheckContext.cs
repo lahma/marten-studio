@@ -184,7 +184,7 @@ internal sealed record HealthEvaluation(DateTimeOffset Now, IStudioRuntime Studi
     /// <param name="history">The history, or none.</param>
     /// <param name="text">The studio's words, or <see langword="null" /> for MartenStudio's.</param>
     public static HealthEvaluation At(DateTimeOffset now, IStudioRuntime? runtime = null, HealthHistoryView? history = null, StudioText? text = null) =>
-        new(now, runtime ?? NoStudioRuntime.Instance, history ?? HealthHistoryView.Empty) { Text = text ?? StudioText.Marten };
+        new(now, runtime ?? NoStudioRuntime.Instance, history ?? HealthHistoryView.Empty) { Text = text ?? StudioText.Of(null) };
 }
 
 /// <summary>

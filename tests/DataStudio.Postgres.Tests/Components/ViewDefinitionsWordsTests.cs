@@ -81,7 +81,7 @@ public class ViewDefinitionsWordsTests
         off.State.Denial.Should().Be(Words.BrowseCapabilityDenial).And.NotContain("definitions",
             "the rows' sentence is about rows: a definition has a sentence of its own");
 
-        Gate(browse: true, authorized: true, DefinitionsPass, readOnly: true).State.DefinitionDenial.Should().Be(Words.DefinitionReadOnlyDenial)
+        Gate(browse: true, authorized: true, DefinitionsPass, readOnly: true).State.DefinitionDenial.Should().Be(Words.DefinitionReadOnlyDenial("PostgresOptions.ReadOnly"))
             .And.Contain("PostgresOptions.Capabilities.ViewDefinitions and PostgresOptions.Capabilities.BrowseDatabase off");
 
         Gate(browse: true, authorized: false, new DatabasePolicyAnswer(true, false, DatabaseRefusal.WritePolicy)).State.DefinitionDenial
@@ -94,7 +94,7 @@ public class ViewDefinitionsWordsTests
 
         foreach (string sentence in new[]
                  {
-                     Words.DefinitionReadOnlyDenial, Words.DefinitionCapabilityDenial, Words.DefinitionWritePolicyDenialFor("ViewDefinitions"),
+                     Words.DefinitionReadOnlyDenial("PostgresOptions.ReadOnly"), Words.DefinitionCapabilityDenial, Words.DefinitionWritePolicyDenialFor("ViewDefinitions"),
                      DatabaseGate.DefinitionSchemaDenial("archive", Entries, Words),
                  })
         {

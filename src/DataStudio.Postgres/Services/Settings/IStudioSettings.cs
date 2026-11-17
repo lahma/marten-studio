@@ -28,12 +28,6 @@ namespace DataStudio.Postgres.Services.Settings;
 /// </remarks>
 internal interface IStudioSettings : IShellSettings, IDiagnosticsSettings
 {
-    /// <summary>
-    /// The product's name in a sentence: <c>Marten Studio</c>. Declared by both bases (<see cref="IShellSettings" /> and
-    /// <see cref="IDiagnosticsSettings" />) and redeclared here so that <c>settings.ProductName</c> is unambiguous.
-    /// </summary>
-    new string ProductName { get; }
-
     /// <summary>The public capabilities type's name: <c>MartenCapabilities</c>, whose <c>All()</c> a remedy names.</summary>
     string CapabilitiesTypeName { get; }
 

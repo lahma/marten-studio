@@ -1,132 +1,141 @@
-using DataStudio.Postgres.Services.Database;
-using DataStudio.Postgres.Services.Health.Checks;
+using DataStudio.Postgres.Services.Postgres;
 
 namespace DataStudio.Postgres.Services.Settings;
 
-/// <summary>Which studio is speaking - for the shared log events, whose templates are each studio's own.</summary>
-internal enum StudioProduct
-{
-    /// <summary>Marten Studio: every template, sentence and remedy exactly as 0.4 wrote it.</summary>
-    MartenStudio,
-
-    /// <summary>Postgres Studio: the same events, ids and properties, in its own words.</summary>
-    PostgresStudio,
-}
-
 /// <summary>
-/// Every sentence the shared studio says differently in each studio: the refusals that name an option or a policy, the
-/// prose that names a store's configuration, the remedies that are code, and the wording of the judged-table checks.
+/// Every sentence the shared studio says in a module's own words: the refusals that name an option or a policy, the prose that names
+/// a store's configuration, the remedies that are code, and the wording of the judged-table checks.
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>One per studio, read through <see cref="IDiagnosticsSettings.Text" />.</b> Shared code never spells a studio's product,
-/// options type or configuration itself: it reads the sentence here. MartenStudio's instance is <see cref="Marten" />,
-/// built from the very constants the shared code said before it was shared (<c>StudioDenialText.BrowseCapabilityDenial</c> and the
-/// rest), so a MartenStudio host reads every sentence byte for byte as it did; <c>StudioTextPinTests</c> holds each one
-/// to its literal. Postgres Studio's is <c>PostgresStudioText.Instance</c>.
+/// <b>One per module, read through <see cref="IDiagnosticsSettings.Text" />.</b> Shared code never spells a module's options type,
+/// policy or configuration itself: it reads the sentence here. The Postgres module's instance is <c>PostgresStudioText.Instance</c> and
+/// the Marten module's is built in <c>DataStudio.Marten</c>; <see cref="Of" /> falls back to the Postgres words.
 /// </para>
 /// <para>
-/// <b>What is not here.</b> A sentence that differs between the studios only by the options type it names is composed
-/// with <see cref="OptionName" /> (or <see cref="IDiagnosticsSettings.OptionName" />) where it is written. A sentence that can
-/// only ever be said in MartenStudio - one about a hidden document type, or another registered store - stays where it is:
-/// a plain data source has neither.
+/// <b>It holds only what differs.</b> A sentence that is the same in both modules but for the nouns below
+/// (<see cref="OptionsTypeName" />, <see cref="SourceNoun" />, <see cref="SourcePossessive" />, <see cref="ScopePolicyName" />,
+/// <see cref="TenantlessScopeClause" />) is a computed member written once. A sentence that truly differs - a remedy that is a
+/// <c>StoreOptions</c> line in one module and SQL in the other - is a <see langword="required" /> member each module says in its own
+/// words. The actor of a sentence is Data Studio, never a module.
 /// </para>
 /// </remarks>
 internal sealed class StudioText
 {
-    /// <summary>Which studio this is, for the shared log events and the prose a component draws as markup.</summary>
-    public required StudioProduct Product { get; init; }
-
-    /// <summary>The product's name in a sentence: <c>Marten Studio</c>.</summary>
-    public required string ProductName { get; init; }
+    // ---------------------------------------------------------------------------------------------------------------
+    // The nouns every computed sentence is written over.
 
     /// <summary>The public options type's name: <c>MartenOptions</c>.</summary>
     public required string OptionsTypeName { get; init; }
 
-    /// <summary>
-    /// The module's call on the shell's builder, as a host writes it after <c>services.AddDataStudio()</c>: <c>AddMarten</c>. The health check's
-    /// own registration is this name and <c>Diagnostics</c>: <c>AddMartenDiagnostics</c>.
-    /// </summary>
-    public required string RegistrationMethod { get; init; }
-
-    /// <summary>
-    /// The other registration that also registers what the health check runs, or <see langword="null" /> for none:
-    /// <c>AddPostgresDiagnostics</c>, the engine alone, which Postgres Studio's health check works with and Marten Studio's,
-    /// which reads a store, does not.
-    /// </summary>
-    public string? AlternativeRegistrationMethod { get; init; }
-
     /// <summary>A source in a sentence: <c>Marten store</c>.</summary>
     public required string SourceNoun { get; init; }
-
-    /// <summary><paramref name="member" /> as a host's registration spells it: <c>MartenOptions.SqlConsoleRole</c>.</summary>
-    /// <param name="member">The member path below the options type.</param>
-    public string OptionName(string member) => OptionsTypeName + "." + member;
-
-    /// <summary>
-    /// The words of the studio <paramref name="settings" /> belong to - for a service whose settings are an optional
-    /// constructor argument only so that a test can build it by hand, the way its <c>StudioLogThrottle</c> is:
-    /// MartenStudio's, as every such test is, when there are none. The container always supplies them.
-    /// </summary>
-    /// <param name="settings">The studio's settings, or <see langword="null" /> for a hand-built owner.</param>
-    public static StudioText Of(IDiagnosticsSettings? settings) => settings?.Text ?? Marten;
-
-    /// <summary>What the Activity ring says of a scope a policy refused.</summary>
-    public required string ScopeDeniedEntry { get; init; }
 
     /// <summary>
     /// The source, possessive, before "own role", "own schemas" or "most expensive statements": <c>the store's</c>.
     /// </summary>
     public required string SourcePossessive { get; init; }
 
+    /// <summary>The policy asked, with the scope as the resource, before anything of a source is listed: <c>StoreAuthorizationPolicy</c>.</summary>
+    public required string ScopePolicyName { get; init; }
+
+    /// <summary>K07: the policy that decides which source a visitor reaches, before " or write policy": <c>store</c>.</summary>
+    public required string ScopePolicyNoun { get; init; }
+
     /// <summary>
-    /// What the header's Find box offers to find, for a screen reader (1.2-FINAL-FIX): Marten Studio's has documents, streams, natural
-    /// keys and sequences, which a plain data source has none of. Not <see langword="required" />, so a hand-built text keeps Marten's.
+    /// What a refusal of a source says when the module has tenants, after "this store and database": <c> as a whole, with no tenant
+    /// selected</c> - or empty for a module with none.
     /// </summary>
-    public string FindHint { get; init; } =
-        "A document or stream id, a natural key, #sequence, an exact table or view name or a queryid";
+    public required string TenantlessScopeClause { get; init; }
+
+    /// <summary>
+    /// The registration a host writes to configure the module, in a remedy's comment: <c>services.AddDataStudio().AddMarten(options =&gt; ...)</c>.
+    /// </summary>
+    public required string OptionsRegistration { get; init; }
+
+    /// <summary>
+    /// What a host that added the health check without the module calls, whole, after "Data Studio's services are not registered: call ".
+    /// </summary>
+    public required string HealthCheckRegistration { get; init; }
+
+    /// <summary><paramref name="member" /> as a host's registration spells it: <c>MartenOptions.SqlConsoleRole</c>.</summary>
+    /// <param name="member">The member path below the options type.</param>
+    public string OptionName(string member) => OptionsTypeName + "." + member;
+
+    /// <summary>The option that switches <paramref name="capability" /> on: <c>MartenOptions.Capabilities.BrowseDatabase</c>.</summary>
+    /// <param name="capability">The capability's name.</param>
+    public string CapabilityOption(string capability) => OptionName("Capabilities." + capability);
+
+    /// <summary>The scope policy as a host spells it: <c>MartenOptions.StoreAuthorizationPolicy</c>.</summary>
+    public string ScopePolicyOption => OptionName(ScopePolicyName);
+
+    /// <summary>
+    /// The words of the module <paramref name="settings" /> belong to - for a service whose settings are an optional constructor
+    /// argument only so that a test can build it by hand, the way its <c>StudioLogThrottle</c> is: the Postgres module's, as every
+    /// such test is, when there are none. The container always supplies them.
+    /// </summary>
+    /// <param name="settings">The module's settings, or <see langword="null" /> for a hand-built owner.</param>
+    public static StudioText Of(IDiagnosticsSettings? settings) => settings?.Text ?? PostgresStudioText.Instance;
+
+    /// <summary>What the Activity ring says of a scope a policy refused.</summary>
+    public required string ScopeDeniedEntry { get; init; }
+
+    /// <summary>What the header's Find box offers to find, for a screen reader.</summary>
+    public required string FindHint { get; init; }
 
     /// <summary>
     /// Whether Find's empty result names the scope as the header's pickers do, with their labels ("Source Default › Database admin")
-    /// rather than bare ("Default › primary"). Postgres Studio's does (1.2-FINAL-FIX); Marten Studio's wording stays as it was.
+    /// rather than bare ("Default › primary").
     /// </summary>
     public bool FindNamesScopeLikeThePickers { get; init; }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // What the module's own schemas and tables are: two facts, each named for what a page decides with it.
+
+    /// <summary>
+    /// Whether the schemas <c>BrowsableSchemas</c> names exactly are the source's own - their structure shown to anyone the source
+    /// policy admits, and never withheld - as a plain data source's are. <see langword="false" /> where the module's configuration
+    /// declares which schemas are its own (a Marten store's), and <c>ViewDefinitions</c> is the second way to see the ones named.
+    /// </summary>
+    public required bool NamedSchemasAreOwn { get; init; }
+
+    /// <summary>
+    /// Whether the module's configuration declares tables, keys and sequences of its own (a Marten store's document types), so that
+    /// the owner filter always has two sides, the relationships page speaks of declared keys, and the store's own sequences are
+    /// structure only. <see langword="false" /> for a source that is whatever its database holds.
+    /// </summary>
+    public required bool ConfigurationDeclaresTables { get; init; }
 
     // ---------------------------------------------------------------------------------------------------------------
     // The database browser.
 
     /// <summary>What <c>ReadOnly</c> says about the database browser.</summary>
-    public required string BrowseReadOnlyDenial { get; init; }
+    /// <param name="readOnlyOption">The switch that is on, as a host spells it.</param>
+    public string BrowseReadOnlyDenial(string readOnlyOption) =>
+        ReadOnlyTurnsOff(readOnlyOption, CapabilityOption("BrowseDatabase"));
 
     /// <summary>What a <c>BrowseDatabase</c> that is off says.</summary>
     public required string BrowseCapabilityDenial { get; init; }
 
     /// <summary>What the write policy's refusal of <c>BrowseDatabase</c> says.</summary>
-    public required string BrowseWritePolicyDenial { get; init; }
+    public string BrowseWritePolicyDenial =>
+        "Your account may not browse the database here. " + WritePolicyRefused("BrowseDatabase") + Scope(null);
 
     /// <summary>What the scope policy's refusal of the database as a whole says.</summary>
-    public required string BrowseStorePolicyDenial { get; init; }
+    public string BrowseStorePolicyDenial => "Your account may not browse the database here. " + ScopePolicyRefused(null);
 
     /// <summary>What an empty <c>BrowsableSchemas</c> says.</summary>
     public required string BrowseEmptyListDenial { get; init; }
 
     /// <summary>
-    /// What <c>ReadOnly</c> says about a definition: it turns both ways in - <c>ViewDefinitions</c> and
-    /// <c>BrowseDatabase</c> - off.
+    /// What <c>ReadOnly</c> says about a definition: it turns both ways in - <c>ViewDefinitions</c> and <c>BrowseDatabase</c> - off.
     /// </summary>
-    public required string DefinitionReadOnlyDenial { get; init; }
+    /// <param name="readOnlyOption">The switch that is on, as a host spells it.</param>
+    public string DefinitionReadOnlyDenial(string readOnlyOption) =>
+        ReadOnlyTurnsOff(readOnlyOption, CapabilityOption("ViewDefinitions") + " and " + CapabilityOption("BrowseDatabase"));
 
     /// <summary>What it says of a definition when both <c>ViewDefinitions</c> and <c>BrowseDatabase</c> are off.</summary>
     public required string DefinitionCapabilityDenial { get; init; }
-
-    /// <summary>
-    /// What the write policy's refusal of a definition says, before the names of the capabilities it refused
-    /// (<see cref="DefinitionWritePolicyDenialFor" />).
-    /// </summary>
-    public required string DefinitionWritePolicyDenialHead { get; init; }
-
-    /// <summary>What closes the sentence <see cref="DefinitionWritePolicyDenialHead" /> opens.</summary>
-    public required string DefinitionWritePolicyDenialTail { get; init; }
 
     /// <summary>
     /// What the write policy's refusal of a definition says: <paramref name="capabilities" /> is the capability, or both,
@@ -134,13 +143,14 @@ internal sealed class StudioText
     /// </summary>
     /// <param name="capabilities">The names, as <c>ViewDefinitions</c>, <c>BrowseDatabase</c> or <c>ViewDefinitions and BrowseDatabase</c>.</param>
     public string DefinitionWritePolicyDenialFor(string capabilities) =>
-        DefinitionWritePolicyDenialHead + capabilities + DefinitionWritePolicyDenialTail;
+        "Your account may not read definitions here. " + WritePolicyRefused(capabilities) + Scope(null);
 
     /// <summary>What a view reading one of Marten's own tables says about its rows.</summary>
     public required string MartenDependencyDenial { get; init; }
 
     /// <summary>What a relation the connection's own role may not read says, when no <c>SqlConsoleRole</c> is set.</summary>
-    public required string NoSelectPrivilege { get; init; }
+    public string NoSelectPrivilege =>
+        char.ToUpperInvariant(SourcePossessive[0]) + SourcePossessive[1..] + " Postgres role has no SELECT privilege on it.";
 
     /// <summary>The rail's flag on a source's own schema - <c>M</c> - or <see langword="null" /> to draw none.</summary>
     public required string? OwnSchemaFlag { get; init; }
@@ -153,7 +163,7 @@ internal sealed class StudioText
 
     /// <summary>
     /// The database page's notice when the database holds objects named like Marten's, or <see langword="null" /> for a
-    /// studio that is the place to browse them.
+    /// module that is the place to browse them.
     /// </summary>
     public required string? MartenStoreNotice { get; init; }
 
@@ -167,40 +177,52 @@ internal sealed class StudioText
     // Database › Sessions.
 
     /// <summary>What a <c>ViewDatabaseActivity</c> that is off says.</summary>
-    public required string SessionsCapabilityDenial { get; init; }
+    public string SessionsCapabilityDenial =>
+        "Process ids, roles, client addresses, application names, connection times and statements need "
+        + CapabilityOption("ViewDatabaseActivity") + ".";
 
     /// <summary>What <c>ReadOnly</c> says about session details.</summary>
-    public required string SessionsReadOnlyDenial { get; init; }
+    /// <param name="readOnlyOption">The switch that is on, as a host spells it.</param>
+    public string SessionsReadOnlyDenial(string readOnlyOption) =>
+        ReadOnlyTurnsOff(readOnlyOption, CapabilityOption("ViewDatabaseActivity"));
 
     /// <summary>What the scope policy's refusal of the database's sessions says.</summary>
-    public required string SessionsStorePolicyDenial { get; init; }
+    public string SessionsStorePolicyDenial =>
+        "Your account may not see this database's sessions. " + ScopePolicyRefused("a session belongs to no tenant");
 
     /// <summary>What the write policy's refusal of <c>ViewDatabaseActivity</c> says.</summary>
-    public required string SessionsWritePolicyDenial { get; init; }
+    public string SessionsWritePolicyDenial =>
+        "Your account may not see who is using this database. " + WritePolicyRefused("ViewDatabaseActivity") + Scope(null);
 
     // ---------------------------------------------------------------------------------------------------------------
-    // Storage (W5-CAP).
+    // Storage.
 
     /// <summary>What the scope policy's refusal of the database's storage says: its sizes and growth belong to no tenant.</summary>
-    public required string StorageStorePolicyDenial { get; init; }
+    public string StorageStorePolicyDenial =>
+        "Your account may not see this database's storage. " + ScopePolicyRefused("a table's size belongs to no tenant");
 
     // ---------------------------------------------------------------------------------------------------------------
-    // Statements (W5-Q1).
+    // Statements.
 
     /// <summary>What a <c>ViewDatabaseActivity</c> that is off says about the Statements page.</summary>
-    public required string StatementsCapabilityDenial { get; init; }
+    public string StatementsCapabilityDenial =>
+        "The statements this database runs, their counters and their text, need " + CapabilityOption("ViewDatabaseActivity") + ".";
 
     /// <summary>What <c>ReadOnly</c> says about the Statements page.</summary>
-    public required string StatementsReadOnlyDenial { get; init; }
+    /// <param name="readOnlyOption">The switch that is on, as a host spells it.</param>
+    public string StatementsReadOnlyDenial(string readOnlyOption) =>
+        ReadOnlyTurnsOff(readOnlyOption, CapabilityOption("ViewDatabaseActivity"));
 
     /// <summary>What the scope policy's refusal of the database's statements says.</summary>
-    public required string StatementsStorePolicyDenial { get; init; }
+    public string StatementsStorePolicyDenial =>
+        "Your account may not see this database's statements. " + ScopePolicyRefused("a statement belongs to no tenant");
 
     /// <summary>What the write policy's refusal of <c>ViewDatabaseActivity</c> says about the Statements page.</summary>
-    public required string StatementsWritePolicyDenial { get; init; }
+    public string StatementsWritePolicyDenial =>
+        "Your account may not see the statements this database runs. " + WritePolicyRefused("ViewDatabaseActivity") + Scope(null);
 
     /// <summary>
-    /// What the studio's cost meter counts and what it does not, inside the parentheses of the "studio cost" line - one meter
+    /// What the cost meter counts and what it does not, inside the parentheses of the "studio cost" line - one meter
     /// for the Health page and the Statements page.
     /// </summary>
     public required string StudioCostCovers { get; init; }
@@ -232,10 +254,10 @@ internal sealed class StudioText
     /// <summary>The Relationships screen's note above the foreign keys it cannot draw.</summary>
     public required string RelationshipUnmatchedNote { get; init; }
 
-    /// <summary>1.0-HARD: why a foreign key that points at a table the studio does not draw is not drawn.</summary>
+    /// <summary>Why a foreign key that points at a table the studio does not draw is not drawn.</summary>
     public required string RelationshipUnplacedTarget { get; init; }
 
-    /// <summary>1.0-HARD: why a foreign key on a table the studio does not draw is not drawn.</summary>
+    /// <summary>Why a foreign key on a table the studio does not draw is not drawn.</summary>
     public required string RelationshipUnplacedSource { get; init; }
 
     /// <summary>
@@ -251,7 +273,9 @@ internal sealed class StudioText
     // Health.
 
     /// <summary>The sentence pointing at Database › Sessions for the statements a finding counts.</summary>
-    public required string StatementsOnSessionsPage { get; init; }
+    public string StatementsOnSessionsPage =>
+        "The statements themselves are on Database › Sessions, behind " + CapabilityOption("ViewDatabaseActivity") + ", "
+        + "masked for the schemas you may not see.";
 
     /// <summary>The comment above a server setting in a remedy: <c>A server setting, not a StoreOptions one</c>.</summary>
     public required string ServerSettingComment { get; init; }
@@ -271,16 +295,16 @@ internal sealed class StudioText
     /// <summary>C04: the code that ends what a session began.</summary>
     public required string EndWhatYouBeginCode { get; init; }
 
-    /// <summary>T12, T13: the judged tables, plural and capitalised for an evidence label: <c>Marten tables</c>.</summary>
+    /// <summary>T12, T13: the judged tables, plural and capitalised for an evidence label.</summary>
     public required string JudgedTables { get; init; }
 
-    /// <summary>T12, T13: one judged table, after "The oldest": <c>Marten table</c>.</summary>
+    /// <summary>T12, T13: one judged table, after "The oldest".</summary>
     public required string JudgedTable { get; init; }
 
-    /// <summary>T12, T13: what a table not judged is: <c>not the store's</c>.</summary>
-    public required string NotJudged { get; init; }
+    /// <summary>T12, T13: what a table not judged is.</summary>
+    public string NotJudged { get; } = "not among the tables the studio judges";
 
-    /// <summary>T12, T13: where the ages are read from: <c>the store's own tables</c>.</summary>
+    /// <summary>T12, T13: where the ages are read from.</summary>
     public required string JudgedTablesRead { get; init; }
 
     /// <summary>T12: the quiet note when no judged table exists.</summary>
@@ -291,16 +315,21 @@ internal sealed class StudioText
 
     /// <summary>
     /// T07, T08: where a person sees which storage parameters the partitions of a Marten table differ on, said inside the
-    /// parentheses after "autovacuum may be switched off for some of them": MartenStudio's own Schema screen, or - for a
-    /// studio with no store's configuration to show - Marten Studio's, over the store that manages the table.
+    /// parentheses after "autovacuum may be switched off for some of them".
     /// </summary>
     public required string MartenTablePartitionParameters { get; init; }
 
     /// <summary>
     /// T14: what a timeout the DBA sets as a backstop must also respect, starting with " - " to follow "is the DBA's
-    /// backstop" - MartenStudio's HotCold leader's idle stretch (K08) - or empty for a studio with no daemon.
+    /// backstop" - the HotCold leader's idle stretch (K08) - or empty for a module with no daemon.
     /// </summary>
-    public required string LeaderTimeoutClause { get; init; }
+    public string LeaderTimeoutClause { get; init; } = string.Empty;
+
+    /// <summary>What a migration queued behind a VACUUM at the head of a lock chain is, in a sentence's parentheses.</summary>
+    public required string MigrationBehindVacuum { get; init; }
+
+    /// <summary>S04: the connection the posture checks name, <c>the store's data source</c>.</summary>
+    public required string ConnectionSource { get; init; }
 
     /// <summary>S10: the writes a read-only transaction refuses, after "every": <c>SaveChanges, append and projection write</c>.</summary>
     public required string ReadOnlyWrites { get; init; }
@@ -309,18 +338,16 @@ internal sealed class StudioText
     public required string ReadOnlyNeverAsks { get; init; }
 
     // ---------------------------------------------------------------------------------------------------------------
-    // Health: the words a shared check says of the application and its tables (wave 6). Each is MartenStudio's literal as
-    // the check said it, and Postgres Studio's in its own words - a plain data source has no store, no documents, no
-    // events and no daemon, and PostgresStudioWordsTests evaluates every shared check to hold it to that.
+    // Health: the words a shared check says of the application and its tables. Each module says them in its own words - a plain data
+    // source has no store, no documents, no events and no daemon, and PostgresStudioWordsTests evaluates every shared check to hold it to that.
 
     /// <summary>
-    /// The title a check's status row and its findings carry in this studio, by code, where it is not the check's own
-    /// (<c>HealthCheckAttribute.Title</c>, which stays the docs heading): empty for MartenStudio, whose titles are the
-    /// attributes'.
+    /// The title a check's status row and its findings carry in this module, by code, where it is not the check's own
+    /// (<c>HealthCheckAttribute.Title</c>, which stays the docs heading): empty for a module whose titles are the attributes'.
     /// </summary>
     public IReadOnlyDictionary<string, string> CheckTitles { get; init; } = new Dictionary<string, string>(StringComparer.Ordinal);
 
-    /// <summary>The title of the check <paramref name="code" /> in this studio: <see cref="CheckTitles" />' entry, or <paramref name="title" />.</summary>
+    /// <summary>The title of the check <paramref name="code" /> in this module: <see cref="CheckTitles" />' entry, or <paramref name="title" />.</summary>
     /// <param name="code">The check's code.</param>
     /// <param name="title">Its attribute's title.</param>
     public string CheckTitle(string code, string title) => CheckTitles.TryGetValue(code, out string? own) ? own : title;
@@ -360,9 +387,9 @@ internal sealed class StudioText
 
     /// <summary>
     /// C04's remedy: what a server-wide idle timeout also ends, starting with a space after "is the DBA's backstop." - or empty
-    /// for a studio with no daemon.
+    /// for a module with no daemon.
     /// </summary>
-    public required string IdleTimeoutLeaderClause { get; init; }
+    public string IdleTimeoutLeaderClause { get; init; } = string.Empty;
 
     /// <summary>C05: what queues behind a long statement's locks, after "anything that needs a stronger lock on the same tables - ".</summary>
     public required string StrongerLockExamples { get; init; }
@@ -382,9 +409,6 @@ internal sealed class StudioText
     /// <summary>C08: the failures an application retries, between dashes after "most often failures the application retries".</summary>
     public required string RetriedFailures { get; init; }
 
-    /// <summary>K07: the policy that decides which source a visitor reaches, before " or write policy": <c>store</c>.</summary>
-    public required string ScopePolicyNoun { get; init; }
-
     /// <summary>R01: what reads a slot, in a list after "whatever consumed it - ".</summary>
     public required string ChangeDataCaptureConsumer { get; init; }
 
@@ -398,7 +422,7 @@ internal sealed class StudioText
     public required string UnclearedDeadRows { get; init; }
 
     /// <summary>S02: what a lost commit means here, starting with a space - or empty.</summary>
-    public required string LostCommitsMeaning { get; init; }
+    public string LostCommitsMeaning { get; init; } = string.Empty;
 
     /// <summary>S02: which rows a zeroed page takes with it, after "the rows on it are gone for good - ".</summary>
     public required string ZeroedPageRows { get; init; }
@@ -450,8 +474,8 @@ internal sealed class StudioText
     public required string PartitionedIndexRepair { get; init; }
 
     /// <summary>
-    /// T03: who rebuilds an invalid index no other branch of the check words - a declared one in MartenStudio, a primary key
-    /// in a studio over plain data sources - starting with a space.
+    /// T03: who rebuilds an invalid index no other branch of the check words - a declared one in the Marten module, a primary key
+    /// in the Postgres module - starting with a space.
     /// </summary>
     public required string DeclaredIndexRebuild { get; init; }
 
@@ -467,7 +491,7 @@ internal sealed class StudioText
     /// <summary>
     /// T15's caveat: a key column a table's own configuration adds, which need not lead - starting with ", and" - or empty.
     /// </summary>
-    public required string ConfiguredKeyColumnClause { get; init; }
+    public string ConfiguredKeyColumnClause { get; init; } = string.Empty;
 
     /// <summary>T23: a judged statement, in a title: <c>store statement</c>.</summary>
     public required string JudgedStatementNoun { get; init; }
@@ -482,30 +506,27 @@ internal sealed class StudioText
     public required string JitRemedyExplanation { get; init; }
 
     /// <summary>
-    /// The connection checks' remedies (C16, C17, S11, S12, S13): how a studio's host changes a data source's
+    /// The connection checks' remedies (C16, C17, S11, S12, S13): how a host changes a data source's
     /// <c>NpgsqlConnectionStringBuilder</c> in code, as a template whose <c>{statements}</c> line is replaced by the statements
-    /// (<c>b.ConnectionStringBuilder.KeepAlive = 30;</c>, one per line). MartenStudio's wraps them in
-    /// <c>opts.ConfigureNpgsqlDataSourceBuilder</c>, which every data source Marten builds from a connection string passes through
-    /// (<see cref="JitShareCheck.RemedyCode" />); Postgres Studio names the <c>NpgsqlDataSourceBuilder</c> itself.
+    /// (<c>b.ConnectionStringBuilder.KeepAlive = 30;</c>, one per line).
     /// </summary>
     public required string DataSourceBuilderRemedy { get; init; }
 
     /// <summary>
     /// C16: what else the same idle timeout does to the studio's own process, starting with a space after the finding's last
-    /// sentence - MartenStudio's HotCold leader's idle stretch (K08) - or empty for a studio with no daemon.
+    /// sentence - the HotCold leader's idle stretch (K08) - or empty for a module with no daemon.
     /// </summary>
-    public required string PoolIdleTimeoutLeaderClause { get; init; }
+    public string PoolIdleTimeoutLeaderClause { get; init; } = string.Empty;
 
     /// <summary>
-    /// S13's <c>Log Parameters</c> finding: what decides whether the keyword logs anything in this studio's hosts, starting with a
-    /// space after the finding's last sentence - MartenStudio's: Marten 9 sets <c>DisableNpgsqlLogging</c> on by default, so Npgsql
-    /// has no logger unless the host switched that off - or empty for a studio that knows nothing of how its host builds the logger.
+    /// S13's <c>Log Parameters</c> finding: what decides whether the keyword logs anything in this module's hosts, starting with a
+    /// space after the finding's last sentence - or empty for a module that knows nothing of how its host builds the logger.
     /// </summary>
-    public required string LogParametersLoggerClause { get; init; }
+    public string LogParametersLoggerClause { get; init; } = string.Empty;
 
     /// <summary>
     /// C18's remedy: the lines that give a process one <c>NpgsqlDataSource</c>, registered once and used wherever a connection is
-    /// wanted - MartenStudio's hand it to Marten with <c>UseNpgsqlDataSource()</c>.
+    /// wanted.
     /// </summary>
     public required string SharedDataSourceRemedyCode { get; init; }
 
@@ -524,267 +545,33 @@ internal sealed class StudioText
     /// <summary>What a page with nothing selected asks the visitor to pick in the header, after "Pick ": <c>a store and database</c>.</summary>
     public required string PickInTheHeader { get; init; }
 
-    /// <summary>
-    /// Plan insight P04's remedy (X1b): where the index a selective sequential scan wants belongs - a store's options for a
-    /// Marten table, whose hand-made indexes the next <c>CreateOrUpdate</c> drops, and the host's own migrations otherwise.
-    /// </summary>
+    /// <summary>Plan insight P04's remedy: where the index a selective sequential scan wants belongs.</summary>
     public required string PlanIndexRemedy { get; init; }
 
-    /// <summary>Plan insight P07's remedy (X1b): what serves a pattern with a leading wildcard, and where it is declared.</summary>
+    /// <summary>Plan insight P07's remedy: what serves a pattern with a leading wildcard, and where it is declared.</summary>
     public required string PlanPatternRemedy { get; init; }
 
-    /// <summary>
-    /// MartenStudio's wording, exactly as the shared code wrote it before it was shared. Every member is either one of
-    /// the constants it used, or that literal moved here - but the six judged-table members of T12 and T13
-    /// (<see cref="JudgedTables" /> to <see cref="UnjudgedOldest" />), reworded in 0.5 when MartenStudio's table checks
-    /// began to judge every table of the store's schemas and the ones the database browser admits, not only the tables
-    /// the store declares (issue #8, G1).
-    /// </summary>
-    public static StudioText Marten { get; } = new()
+    // ---------------------------------------------------------------------------------------------------------------
+    // The one shape the computed sentences share.
+
+    private static string ReadOnlyTurnsOff(string readOnlyOption, string what)
     {
-        Product = StudioProduct.MartenStudio,
-        ProductName = "Marten Studio",
-        OptionsTypeName = "MartenOptions",
-        RegistrationMethod = "AddMarten",
-        SourceNoun = "Marten store",
-        ScopeDeniedEntry = "Not authorized for this store, database or tenant.",
-        SourcePossessive = "the store's",
+        ArgumentException.ThrowIfNullOrEmpty(readOnlyOption);
+        return readOnlyOption + " is true, which turns " + what + " off with every other capability.";
+    }
 
-        BrowseReadOnlyDenial = StudioDenialText.BrowseReadOnlyDenial,
-        BrowseCapabilityDenial = StudioDenialText.BrowseCapabilityDenial,
-        BrowseWritePolicyDenial = StudioDenialText.BrowseWritePolicyDenial,
-        BrowseStorePolicyDenial = StudioDenialText.BrowseStorePolicyDenial,
-        BrowseEmptyListDenial = StudioDenialText.BrowseEmptyListDenial,
-        DefinitionReadOnlyDenial = StudioDenialText.DefinitionReadOnlyDenial,
-        DefinitionCapabilityDenial = StudioDenialText.DefinitionCapabilityDenial,
-        DefinitionWritePolicyDenialHead = StudioDenialText.DefinitionWritePolicyDenialHead,
-        DefinitionWritePolicyDenialTail = StudioDenialText.DefinitionWritePolicyDenialTail,
-        MartenDependencyDenial = StudioDenialText.MartenDependencyDenial,
-        NoSelectPrivilege = "The store's Postgres role has no SELECT privilege on it.",
-        OwnSchemaFlag = "M",
-        OwnSchemaFlagTitle = "Declared by this Marten store. Its structure is shown whether or not Capabilities.BrowseDatabase is on.",
-        MartenInternalTitle = "Marten's own bookkeeping. It is described on the Schema screen and never browsed raw.",
-        MartenStoreNotice = null,
-        OwnerFilterMartenTitle = "Only what Marten owns: document tables, the event store, projections and its own bookkeeping",
-        OwnerFilterOtherTitle = "Only what Marten does not own: this application's own objects, and other libraries'",
+    /// <summary>"The write policy (…, or … when no write policy is set) refused <paramref name="what" /> for this store and database", without the closing.</summary>
+    private string WritePolicyRefused(string what) =>
+        "The write policy (" + OptionName("WriteAuthorizationPolicy") + ", or " + ScopePolicyName + " when no write policy is set) refused "
+        + what + " for this " + SourceNoun + " and database";
 
-        SessionsCapabilityDenial = StudioDenialText.SessionsCapabilityDenial,
-        SessionsReadOnlyDenial = StudioDenialText.SessionsReadOnlyDenial,
-        SessionsStorePolicyDenial = StudioDenialText.SessionsStorePolicyDenial,
-        SessionsWritePolicyDenial = StudioDenialText.SessionsWritePolicyDenial,
+    /// <summary>"The store policy (…) refused this store and database…", ending with a full stop.</summary>
+    private string ScopePolicyRefused(string? because) =>
+        "The " + ScopePolicyNoun + " policy (" + ScopePolicyOption + ") refused this " + SourceNoun + " and database" + Scope(because);
 
-        StorageStorePolicyDenial =
-            "Your account may not see this database's storage. The store policy (MartenOptions.StoreAuthorizationPolicy) "
-            + "refused this store and database as a whole, with no tenant selected: a table's size belongs to no tenant.",
-
-        StatementsCapabilityDenial =
-            "The statements this database runs, their counters and their text, need MartenOptions.Capabilities.ViewDatabaseActivity.",
-        StatementsReadOnlyDenial =
-            "MartenOptions.ReadOnly is true, which turns MartenOptions.Capabilities.ViewDatabaseActivity off with every "
-            + "other capability.",
-        StatementsStorePolicyDenial =
-            "Your account may not see this database's statements. The store policy (MartenOptions.StoreAuthorizationPolicy) "
-            + "refused this store and database as a whole, with no tenant selected: a statement belongs to no tenant.",
-        StatementsWritePolicyDenial =
-            "Your account may not see the statements this database runs. The write policy (MartenOptions.WriteAuthorizationPolicy, "
-            + "or StoreAuthorizationPolicy when no write policy is set) refused ViewDatabaseActivity for this store and database as "
-            + "a whole, with no tenant selected.",
-        StudioCostCovers =
-            "health checks, the SQL console, the database browser, the Query page, and the schema, relationship, document, event and "
-            + "projection reads; a Marten session the studio opens to write or to steer the daemon is not counted",
-        StatementsStudioRoles =
-            "It is the role of the health checks (all but these reads of pg_stat_statements), the SQL console, the Query page, "
-            + "the database browser, Sessions, the Maintenance, Storage, Replication and Server pages, the Schema page's catalog "
-            + "reads, the Relationships graph and the Projections page's high-water explanation, and this page lists none of "
-            + "their statements. The document, event and projection reads, tenant discovery, the Relationships page's document "
-            + "counts, these reads of pg_stat_statements and Marten's own sessions - the studio's writes, and the Schema page's "
-            + "Check, Preview and DDL - run as the store's own role, and are among the statements above when they rank among "
-            + "the ones kept.",
-
-        ExamplesIntro = "Built from this store's own aliases and tables. Click one to load it.",
-        ExamplesEmpty = "This store has no document type to build an example from.",
-        RelationshipTableKey = "A key on a table Marten does not map - enforced by Postgres.",
-        RelationshipTableCaption =
-            "Every foreign key between the document types and tables on the diagram, with the end that points, the end pointed "
-            + "at, the columns, whether the database has the constraint, and what a delete does.",
-        RelationshipIsolatedLabel = "Document types and tables with no foreign key",
-        RelationshipUnmatchedNote =
-            "These foreign keys have an end that is not a document type of this store, so there is nothing to draw them between.",
-        RelationshipUnplacedTarget = "It points at a table no document type of this store maps.",
-        RelationshipUnplacedSource = "It is on a table no document type of this store maps.",
-        RelationshipNeighbourhoodUnmatched =
-            "an end that is not a document type of this store or a table the studio can place, so there is nothing to draw them "
-            + "between.",
-        RelationshipTablesUnavailable = "Only document types are drawn:",
-
-        StatementsOnSessionsPage = SessionEvidence.StatementsOnSessionsPage,
-        ServerSettingComment = "A server setting, not a StoreOptions one",
-        DeadlockCause =
-            "In a Marten store they come from two transactions taking the same rows in different orders: "
-            + "documents saved in a different order by two code paths, a projection and a request writing the same documents, "
-            + "an inline projection updating rows another session holds.",
-        TempSpillCause =
-            "In a Marten store it is usually an ORDER BY on a document field no index covers, or a large "
-            + "aggregation",
-        LongStatementCause =
-            "In a Marten store it is most often a query over a large document table "
-            + "with no index for its filter, a projection rebuild's batch, or a report somebody started by hand.",
-        ShortTransactionCode =
-            """
-            // Keep transactions short, and end what you begin:
-            await using var session = store.LightweightSession();
-            // ... work ...
-            await session.SaveChangesAsync(cancellationToken);
-            """,
-        EndWhatYouBeginCode =
-            """
-            // Dispose every session on every path, and end what it began:
-            await using var session = store.LightweightSession();
-            // ... work ...
-            await session.SaveChangesAsync(cancellationToken);
-            """,
-        JudgedTables = "Tables the studio judges",
-        JudgedTable = "table the studio judges",
-        NotJudged = "not among the tables the studio judges",
-        JudgedTablesRead = "the tables the studio judges",
-        NoJudgedTable = "No table the studio judges exists yet.",
-        UnjudgedOldest =
-            " The oldest table in this database is not one the studio judges - in a schema neither the store nor "
-            + "MartenOptions.BrowsableSchemas admits, another registered store's, a document type the studio hides, or "
-            + "beyond the largest tables a sweep reads - and wraparound protection counts every table in the database, so it "
-            + "holds the whole database back as surely as one of these would.",
-        MartenTablePartitionParameters = "the Schema screen's Tables tab shows which parameters the partitions differ on",
-        LeaderTimeoutClause =
-            " - but where a Marten HotCold daemon leads from a transaction, the first must be longer than its leader's idle stretch "
-            + "and the second unset for the store's role, or they end that leadership too (K08)",
-        ReadOnlyWrites = "SaveChanges, append and projection write",
-        ReadOnlyNeverAsks = "and Marten, like most data access, never asks",
-
-        AmbiguousPoolNotChecked =
-            "More than one Npgsql pool in this process uses this database's connection string - the host's own "
-            + "AddNpgsqlDataSource beside Marten's, or NpgsqlConnections opened with Marten's connection string - and Npgsql "
-            + "reports each under that same name. Their numbers differ, so which pool is Marten's cannot be told, and the "
-            + "pool is not judged; naming the host's data source (NpgsqlDataSourceBuilder.Name), or giving its connections an "
-            + "Application Name of their own, tells them apart.",
-        PoolBorrowers = "Every Marten session, query and daemon batch in this process",
-        PoolRemedyCode =
-            """
-            // The ceiling is the connection string's "Maximum Pool Size" (Npgsql's default is 100).
-            // For every data source Marten builds from a connection string:
-            opts.ConfigureNpgsqlDataSourceBuilder(b => b.ConnectionStringBuilder.MaxPoolSize = 200);
-            """,
-        PoolRemedyExplanation =
-            "Raise it only when the server has the headroom (C03, and C02 for a store with a database per tenant), and after "
-            + "ruling out sessions that hold their connection too long: dispose every IDocumentSession (await using), and keep "
-            + "transactions short. A data source the host builds itself (UseNpgsqlDataSource) is configured where it is built.",
-        NextConnectionExamples = "a pool that wants to grow, a deployment's new instance, the async daemon's next connection",
-        EveryDatabasesConnections = "this store's and everybody else's",
-        FewerConnectionsRemedyCode =
-            """
-            // Fewer connections per process - every data source Marten builds from a connection string:
-            opts.ConfigureNpgsqlDataSourceBuilder(b => b.ConnectionStringBuilder.MaxPoolSize = 50);
-            """,
-        IdleTransactionIdCost = " that Marten's high-water detection can wait behind, so async projections stop moving (D01)",
-        SkippedCommit = "SaveChangesAsync",
-        IdleTimeoutLeaderClause =
-            " With the HotCold leadership lock transaction-scoped (Events.UseAdvisoryLockTransaction, the default at Marten 9.39 "
-            + "and 9.40) it can also end the daemon's leadership session: one shorter than the minute or so the leader sits idle "
-            + "in its transaction - after taking the lead at 9.39, between DistributedLock's keepalives at 9.50.2 - or any "
-            + "timeout with Events.UseMonitoredAdvisoryLock off.",
-        StrongerLockExamples = "a schema apply, a rebuild's truncate",
-        LongStatementRemedyCode =
-            """
-            // A ceiling for Marten's own statements, in seconds (Npgsql's default is 30):
-            opts.CommandTimeout = 60;
-
-            // ...and an index for the filter a slow document query uses:
-            opts.Schema.For<Order>().Index(x => x.CustomerId);
-            """,
-        LongStatementRemedyExplanation =
-            "CommandTimeout bounds what Marten sends; it does not reach another application's statements. The Query page's index "
-            + "advisor says which index a document query needs.",
-        PreparedTransactionHolds =
-            "for good, blocks whatever needs its locks, and, having a transaction id, can hold Marten's high-water mark still so "
-            + "that async projections stop",
-        RetriedFailures = "optimistic concurrency on documents, an expected version on an event stream, unique violations",
-        ScopePolicyNoun = "store",
-        ChangeDataCaptureConsumer = "a change data capture connector reading Marten's events",
-        EveryWriteExamples = "every Marten append, every document upsert",
-        EverySourceDatabase = "every store database on this server",
-        UnclearedDeadRows = "every document Marten upserts leaves a dead row version that is never cleared",
-        LostCommitsMeaning = " For an event store that is events an async projection or a subscriber may already have acted on.",
-        ZeroedPageRows = "including a document or an event the store still points at",
-        SettingsReadOn =
-            "on a connection from the store's own data source - so a value set for its role, its database or in its connection "
-            + "string is the one the store's sessions run with",
-        PageRowsExamples = "documents, events, index entries",
-        ConnectionCarries = "every document and event it reads or writes",
-        GenericPlanPlaceholders =
-            " - the JSON member names Marten writes into its SQL included - are placeholders; a filter on data ->> $n can never "
-            + "use an expression index in that plan, so a sequential scan filtering on one does not show that the table lacks an "
-            + "index.",
-        OwnRoleOnTables = "the store's own role on its tables",
-        OneOfTheTables = "one of its tables",
-        SlowStatementCause =
-            "A statement this slow is most often a query over a large document table with no index for its filter, or one that "
-            + "reads far more rows than it returns.",
-        UnboundedRead = "a ToListAsync() with no Take() or paging",
-        PlanReadsNoneOfTheTables = "The plan reads none of the store's tables directly",
-        UnnamedPlanScans = " of a partition, or of a table this store does not declare or the studio does not show, not named here",
-        PartitionedIndexRepair = InvalidIndexCheck.PartitionedInWords,
-        DeclaredIndexRebuild = " Marten's configuration declares it, so a re-apply drops it and builds it again.",
-        AppendOnlyExamples = "an event log such as mt_events, a history table",
-        HorizonDeadRowsLabel = "Dead rows in the store's tables",
-        LogicalSlotConsumers = "Debezium, a CDC pipeline on mt_events, a subscription",
-        ConfiguredKeyColumnClause =
-            ", and a column the table's own configuration adds to every key (a conjoined Marten table's tenant_id) need not lead",
-        JudgedStatementNoun = "store statement",
-        ShortStatementsJit =
-            "Marten's statements are short, and a large table's cost estimates are what push them over the line.",
-        JitRemedyCode = JitShareCheck.RemedyCode,
-        JitRemedyExplanation =
-            "Turns JIT off for the store's own connections only - every data source Marten builds, tenant databases included - and "
-            + "leaves the server's setting alone for everybody else. A data source the host builds itself (UseNpgsqlDataSource) "
-            + "takes the same Options on its own NpgsqlDataSourceBuilder. To keep JIT for the occasional long query, a DBA can "
-            + "raise jit_above_cost for the store's role instead.",
-        DataSourceBuilderRemedy =
-            """
-            // For every data source Marten builds from a connection string:
-            opts.ConfigureNpgsqlDataSourceBuilder(b =>
-            {
-                {statements}
-            });
-            """,
-        LogParametersLoggerClause =
-            " Marten 9 gives the data sources it builds no logger factory while StoreOptions.DisableNpgsqlLogging is on, which is its "
-            + "default, so there the keyword logs nothing unless the host turned that off or built its own data source with a logger factory.",
-        PoolIdleTimeoutLeaderClause =
-            " K08 judges the same idle_session_timeout against the HotCold daemon's leadership connection, which this finding does not cover.",
-        SharedDataSourceRemedyCode =
-            """
-            // One NpgsqlDataSource for the process: register it once ...
-            services.AddNpgsqlDataSource(connectionString);
-
-            // ... and hand it to Marten instead of a connection string of its own:
-            services.AddMarten(opts => { /* ... */ })
-                .UseNpgsqlDataSource();
-            """,
-        SharedDataSourceRemedyExplanation =
-            "Every part of the process that opens connections - Marten, Wolverine, a repository of the host's own - then shares "
-            + "one pool and one Maximum Pool Size, so the server sees one ceiling for the process instead of one per data source. "
-            + "A pool per tenant database is not a duplicate and is not counted.",
-        DatabaseGateReason = "needs the store policy to allow this database as a whole, with no tenant selected in the policy's resource",
-        ExportSourceNoun = "store",
-        PickInTheHeader = "a store and database",
-        PlanIndexRemedy =
-            "An index whose leading column the filter compares lets Postgres read only the rows it keeps. For a document table, "
-            + "declare it in the store's options - a computed index, or a duplicated field - because an index made by hand on a "
-            + "Marten table is dropped by the next CreateOrUpdate; the Query page's index advisor writes the line for a where "
-            + "clause. For any other table, add it in your own migrations, built CONCURRENTLY on a table in use.",
-        PlanPatternRemedy =
-            "A btree index can serve a pattern only by the fixed text it starts with, so one that starts with % or _ tests every "
-            + "row. A trigram index (the pg_trgm extension's GIN index, gin_trgm_ops) serves it - for a document table declared "
-            + "in the store's options, because an index made by hand on a Marten table is dropped by the next CreateOrUpdate - "
-            + "and so does searching for a prefix instead, or full-text search.",
-    };
+    /// <summary>What closes a refusal of a source: " for this …" is the caller's; this is the tenant clause and the full stop.</summary>
+    private string Scope(string? because) =>
+        TenantlessScopeClause.Length == 0
+            ? "."
+            : TenantlessScopeClause + (because is null ? string.Empty : ": " + because) + ".";
 }

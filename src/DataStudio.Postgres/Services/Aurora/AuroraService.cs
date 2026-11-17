@@ -202,7 +202,7 @@ internal sealed class AuroraService : IAuroraService
         {
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                logger.LogDebug(exception, "{Product} did not read the Aurora facts of {DatabaseId}", settings.Text.ProductName, whole.DatabaseId);
+                logger.LogDebug(exception, "Data Studio did not read the Aurora facts of {DatabaseId}", whole.DatabaseId);
             }
 
             PostgresException? postgres = exception as PostgresException ?? exception.InnerException as PostgresException;
@@ -241,7 +241,7 @@ internal sealed class AuroraService : IAuroraService
 
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                logger.LogDebug(exception, "{Product} did not read the Aurora session waits of {DatabaseId}", settings.Text.ProductName, whole.DatabaseId);
+                logger.LogDebug(exception, "Data Studio did not read the Aurora session waits of {DatabaseId}", whole.DatabaseId);
             }
 
             sessions = new ServerRead<AuroraSessionWaits>(null, postgres?.SqlState == PostgresErrorCodes.InsufficientPrivilege
@@ -379,7 +379,7 @@ internal sealed class AuroraService : IAuroraService
     private string StorePolicyDenial()
     {
         StudioText text = settings.Text;
-        string policy = text.Product == StudioProduct.PostgresStudio ? text.OptionName("SourceAuthorizationPolicy") : text.OptionName("StoreAuthorizationPolicy");
+        string policy = text.ScopePolicyOption;
 
         return "Your account may not see this database's server. The policy (" + policy + ") refused this " + text.SourceNoun
             + " and database as a whole, with no tenant selected: the server belongs to no tenant.";

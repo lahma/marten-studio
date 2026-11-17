@@ -216,7 +216,7 @@ internal sealed class AuroraFactsReader : IAuroraFactsReader
         {
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                logger.LogDebug(exception, "{Product} did not read Aurora's {Section} of {DatabaseId}: {Reason}", settings.Text.ProductName, section, context.DatabaseId, expected);
+                logger.LogDebug(exception, "Data Studio did not read Aurora's {Section} of {DatabaseId}: {Reason}", section, context.DatabaseId, expected);
             }
 
             return expected;

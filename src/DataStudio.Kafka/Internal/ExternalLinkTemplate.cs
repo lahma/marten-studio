@@ -168,7 +168,7 @@ internal static partial class ExternalLinkTemplate
         {
             if (!Placeholders.Contains(named, StringComparer.Ordinal))
             {
-                return "the template names a placeholder KStudio does not know (the placeholders are {traceId}, {correlationId}, {from}, {to}, {fromMs} and {toMs}).";
+                return "the template names a placeholder Data Studio does not know (the placeholders are {traceId}, {correlationId}, {from}, {to}, {fromMs} and {toMs}).";
             }
         }
 

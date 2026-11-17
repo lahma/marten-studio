@@ -154,7 +154,7 @@ internal sealed class HealthExportRunner
     {
         ArgumentNullException.ThrowIfNull(services);
 
-        this.registeredText = registeredText ?? StudioText.Marten;
+        this.registeredText = registeredText ?? StudioText.Of(null);
         this.services = services;
         this.timeProvider = timeProvider ?? TimeProvider.System;
         this.limits = limits ?? HealthExportLimits.Default;

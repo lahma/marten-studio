@@ -22,11 +22,10 @@ internal sealed record StudioShortcut(IReadOnlyList<string> Chords, string Does)
 internal sealed record StudioShortcutGroup(string Title, IReadOnlyList<StudioShortcut> Shortcuts);
 
 /// <summary>
-/// Every keyboard shortcut the shared studio has (1.2-A11Y), written from the handlers, not from memory: the JSON viewer's
-/// <c>OnTreeKeyDownAsync</c>, the search bar's, the menu pattern of <c>MenuButton</c> and <c>JsonCopyMenu</c>, <c>RowGrid</c>'s
-/// <c>OnRowKeyAsync</c>, <c>PlanIcicle</c>'s <c>KeyAsync</c>, the SQL editor's chords in studio.js and the dialogs' (ModalDialog).
-/// A studio adds its own through <c>StudioDescriptor.ExtraShortcuts</c>, so a Postgres Studio host is never told about a
-/// key only Marten Studio's pages answer to.
+/// Every keyboard shortcut of the components that live in the shell (1.2-A11Y), written from the handlers, not from memory: the JSON viewer's
+/// <c>OnTreeKeyDownAsync</c>, the search bar's, the menu pattern of <c>MenuButton</c> and <c>JsonCopyMenu</c> and the dialogs' (ModalDialog).
+/// A module lists the shortcuts of its own components through <c>IStudioModule.Shortcuts</c> - the Postgres module's SQL editor, row grids and
+/// plan view, the Marten module's document lists - so a host never reads a key none of its pages answers to.
 /// </summary>
 /// <remarks>
 /// A shortcut handler and its line here change together: <c>ShortcutSheetMatchesHandlersTests</c> reads the handlers' source for the keys they
@@ -48,7 +47,7 @@ internal static class StudioShortcuts
             new StudioShortcut("Esc", "Close this list, or cancel the open dialog"),
         ]);
 
-    /// <summary>The shortcuts every studio has, in the order the sheet lists them after <see cref="Anywhere" />.</summary>
+    /// <summary>The shortcuts of the shell's own components, in the order the sheet lists them.</summary>
     public static IReadOnlyList<StudioShortcutGroup> Shared { get; } =
     [
         Anywhere,
@@ -64,13 +63,6 @@ internal static class StudioShortcuts
                 new StudioShortcut(["↑", "↓"], "Previous or next item"),
                 new StudioShortcut(["Home", "End"], "First or last item"),
                 new StudioShortcut("Esc", "Close the menu"),
-            ]),
-        new(
-            "SQL editor",
-            [
-                new StudioShortcut("Ctrl+Enter", "Run the statement (Cmd+Enter on a Mac)"),
-                new StudioShortcut("Esc", "Cancel the statement that is running"),
-                new StudioShortcut("Ctrl+S", "Save the statement as a saved query (Cmd+S on a Mac)"),
             ]),
         new(
             "JSON viewer (a row has focus)",
@@ -90,20 +82,6 @@ internal static class StudioShortcuts
             [
                 new StudioShortcut(["Enter", "Shift+Enter"], "Next or previous match"),
                 new StudioShortcut("Esc", "Clear the search"),
-            ]),
-        new(
-            "Table rows (a row has focus)",
-            [
-                new StudioShortcut("Space", "Open or close the row in place"),
-                new StudioShortcut("Enter", "Open the row's detail page, for a row that has one"),
-            ]),
-        new(
-            "Plan icicle (a frame has focus)",
-            [
-                new StudioShortcut("↑", "The frame's parent"),
-                new StudioShortcut("↓", "Its first child"),
-                new StudioShortcut(["←", "→"], "Previous or next sibling"),
-                new StudioShortcut(["Enter", "Space"], "Select the frame"),
             ]),
     ];
 }

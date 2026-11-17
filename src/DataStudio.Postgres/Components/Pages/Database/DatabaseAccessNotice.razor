@@ -42,7 +42,7 @@
             }
             else
             {
-            <p class="ms-db-access-title">@(Settings.Text.Product == StudioProduct.MartenStudio ? Headline(access.Refusal) : SourceHeadline(access.Refusal))</p>
+            <p class="ms-db-access-title">@(Settings.Text.NamedSchemasAreOwn ? SourceHeadline(access.Refusal) : Headline(access.Refusal))</p>
             <p class="ms-muted">@denial</p>
             @if ((access.Refusal is DatabaseRefusal.CapabilityOff or DatabaseRefusal.ReadOnly) && access.DefinitionDenial is { Length: > 0 } definitions && definitions != denial)
             {
@@ -50,7 +50,7 @@
                    what a definition needs is either of two capabilities. *@
                 <p class="ms-muted">@definitions</p>
             }
-            @if (Settings.Text.Product != StudioProduct.MartenStudio)
+            @if (Settings.Text.NamedSchemasAreOwn)
             {
                 @* A studio over plain data sources: its own schemas are the ones BrowsableSchemas names exactly, and
                    nothing in them is any store's. *@

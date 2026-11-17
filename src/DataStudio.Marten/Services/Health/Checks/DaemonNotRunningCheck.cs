@@ -188,7 +188,7 @@ internal sealed class DaemonNotRunningCheck : HealthCheck<DaemonNotRunningFacts>
 
         if (facts.InProcess.PausedByStudio is not null)
         {
-            return HealthVerdict.Quiet("Marten Studio paused this store's projection coordinator; the projections screen says who and when.");
+            return HealthVerdict.Quiet("Data Studio paused this store's projection coordinator; the projections screen says who and when.");
         }
 
         TimeSpan window = DaemonThresholds.DaemonQuiet(configuration.SlowPollingTime);

@@ -367,7 +367,7 @@ internal sealed class MartenDatabaseDeclarationsSource : IDatabaseDeclarationsSo
                 // The rows are refused by the capability anyway, and nobody is asked about a capability the
                 // process does not have.
                 others[store.StoreKey] = new DatabaseStoreAccess(
-                    true, DatabaseRowAccess.Refused(DatabaseRefusal.CapabilityOff, DatabaseGate.CapabilityDenial));
+                    true, DatabaseRowAccess.Refused(DatabaseRefusal.CapabilityOff, MartenStudioText.Instance.BrowseCapabilityDenial));
                 continue;
             }
 

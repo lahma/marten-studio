@@ -17,19 +17,14 @@ namespace DataStudio.Postgres.Services.Settings;
 /// </remarks>
 internal interface IDiagnosticsSettings
 {
-    /// <summary>The product's name in a sentence: <c>Marten Studio</c>.</summary>
-    string ProductName { get; }
-
     /// <summary>The public options type's name, as a host's registration spells it: <c>MartenOptions</c>.</summary>
     string OptionsTypeName { get; }
 
     /// <summary>
-    /// Every sentence the shared studio says in this studio's own words (<see cref="StudioText" />): MartenStudio's is
-    /// <see cref="StudioText.Marten" />, which is 0.4's wording to the byte. This member has no default implementation, so
-    /// a studio's settings must say. A few shared services take the settings optionally, only so that a test can build
-    /// them by hand, and fall back to MartenStudio's words when given none (<see cref="StudioText.Of" />); every studio's
-    /// registration supplies its settings, which <c>PostgresStudioWiringTests</c> holds a real <c>AddPostgres()</c>
-    /// host to.
+    /// Every sentence the shared studio says in this module's own words (<see cref="StudioText" />). This member has no default
+    /// implementation, so a module's settings must say. A few shared services take the settings optionally, only so that a test
+    /// can build them by hand, and fall back to the Postgres module's words when given none (<see cref="StudioText.Of" />); every
+    /// module's registration supplies its settings.
     /// </summary>
     StudioText Text { get; }
 
@@ -52,9 +47,9 @@ internal interface IDiagnosticsSettings
     string? StudioApplicationName => null;
 
     /// <summary>
-    /// Issue #44: the name the derived session name ends with - the product's, or the engine's on a host with no studio.
+    /// Issue #44: the name the derived session name ends with: <c>Data Studio</c>, or the engine's own on a host with no studio.
     /// </summary>
-    string SessionProduct => OptionsTypeName == "PostgresDiagnosticsOptions" ? "Postgres Studio Diagnostics" : Text.ProductName;
+    string SessionProduct => "Data Studio";
 
     /// <summary>The schemas the database browser may show beyond a source's own: exact names, or <c>"*"</c> (D27).</summary>
     IReadOnlyList<string> BrowsableSchemas { get; }

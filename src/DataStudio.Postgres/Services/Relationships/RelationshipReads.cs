@@ -67,9 +67,6 @@ internal sealed class RelationshipReads
     /// <summary>The command timeout a catalog estimate runs under: the studio's query timeout, at least a second.</summary>
     internal int CommandTimeoutSeconds => Math.Max(1, (int) settings.QueryTimeout.TotalSeconds);
 
-    /// <summary>The studio whose words the relationship reads' log lines are in.</summary>
-    internal StudioProduct Product => settings.Text.Product;
-
     /// <summary>1.0-HARD: the studio's own words, for the sentences the graph builder writes.</summary>
     internal StudioText Text => settings.Text;
 
@@ -182,10 +179,10 @@ internal sealed class RelationshipReads
 
         bool browse = capabilities.IsEnabled(StudioCapability.BrowseDatabase);
 
-        // Postgres Studio's exactly-named schemas are structure, shown under the source policy alone.
+        // A source's exactly-named schemas are structure, shown under the source policy alone.
         IReadOnlyList<string> entries = browse
             ? browsable
-            : Product == StudioProduct.PostgresStudio
+            : settings.Text.NamedSchemasAreOwn
                 ? [.. browsable.Where(static x => x != BrowsableSchemaMatcher.Everything)]
                 : [];
 

@@ -138,7 +138,7 @@ internal static partial class KafkaEngineOptionsValidation
             ValidateRules(problems, name, rules);
         }
 
-        CorrelationValidation.Validate(problems, "KStudio: topic '" + Display(name) + "'", topic.Correlations);
+        CorrelationValidation.Validate(problems, "Data Studio: topic '" + Display(name) + "'", topic.Correlations);
     }
 
     /// <summary>
@@ -148,7 +148,7 @@ internal static partial class KafkaEngineOptionsValidation
     /// </summary>
     private static void ValidateRules(List<string> problems, string topic, KafkaRedactionRules rules)
     {
-        string label = "KStudio: topic '" + Display(topic) + "'";
+        string label = "Data Studio: topic '" + Display(topic) + "'";
         HashSet<string> seenHeaders = new(StringComparer.OrdinalIgnoreCase);
         HashSet<string> seenAttributes = new(StringComparer.OrdinalIgnoreCase);
         HashSet<string> seenPaths = new(StringComparer.OrdinalIgnoreCase);

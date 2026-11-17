@@ -6,7 +6,6 @@ using Marten.Storage;
 using DataStudio.Marten.Tests.Sql;
 
 using Npgsql;
-using DataStudio.Postgres.Services.Health.Checks;
 
 namespace DataStudio.Marten.Tests.Marten;
 
@@ -34,7 +33,7 @@ public class StatementChecksApiSurfaceTests
     [Fact]
     public void The_remedy_is_the_line_compiled_here()
     {
-        JitShareCheck.RemedyCode.Should().Be(
+        DataStudio.Marten.Services.MartenStudioText.Instance.JitRemedyCode.Should().Be(
             "opts.ConfigureNpgsqlDataSourceBuilder(b =>\n"
             + "    b.ConnectionStringBuilder.Options = ((b.ConnectionStringBuilder.Options ?? string.Empty) + \" -c jit=off\").Trim());",
             "the text the page offers is the C# below, which compiles against the Marten and Npgsql this build uses");

@@ -299,12 +299,4 @@ internal static class SessionEvidence
         "Open Database › Sessions › Holders",
         SessionLinks.Route,
         [new KeyValuePair<string, string?>(SessionLinks.ViewParameter, SessionLinks.HoldersView)]);
-
-    /// <summary>
-    /// The sentence that points at the page with the statement text: findings never carry it, because what a
-    /// visitor may read of another application's statement depends on which schemas they may see.
-    /// </summary>
-    public const string StatementsOnSessionsPage =
-        "The statements themselves are on Database › Sessions, behind MartenOptions.Capabilities.ViewDatabaseActivity, "
-        + "masked for the schemas you may not see.";
 }

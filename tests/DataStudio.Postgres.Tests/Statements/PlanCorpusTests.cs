@@ -2,7 +2,6 @@ using System.Text.Json;
 
 using DataStudio.Postgres.Services.Postgres;
 using DataStudio.Postgres.Services.Query;
-using DataStudio.Postgres.Services.Settings;
 
 namespace DataStudio.Postgres.Tests.Statements;
 
@@ -42,7 +41,7 @@ public class PlanCorpusTests
     [MemberData(nameof(EveryInsightOnEveryFixture))]
     public void An_insight_fires_on_the_corpus_plan_with_its_shape_and_stays_quiet_on_every_other(string code, string name)
     {
-        List<PlanInsightFinding> findings = [.. PlanInsights.Evaluate(PlanFixtures.Plan(name), StudioText.Marten).Where(x => x.Insight.Code == code)];
+        List<PlanInsightFinding> findings = [.. PlanInsights.Evaluate(PlanFixtures.Plan(name), DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance).Where(x => x.Insight.Code == code)];
 
         if (Fires[code].Contains(name))
         {
@@ -74,7 +73,7 @@ public class PlanCorpusTests
         QueryPlan plan = QueryPlanReader.Read(plain).Plan!;
 
         plan.Analyzed.Should().BeFalse();
-        PlanInsights.Evaluate(plan, StudioText.Marten).Where(x => x.Insight.Code == code).Should().BeEmpty("a plain plan prints none of what {0} reads", code);
+        PlanInsights.Evaluate(plan, DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance).Where(x => x.Insight.Code == code).Should().BeEmpty("a plain plan prints none of what {0} reads", code);
         PlanInsights.NotJudged(plan).Select(static x => x.Code).Should().Contain(code);
     }
 
@@ -102,13 +101,13 @@ public class PlanCorpusTests
             + "the cache was too small for the parameters it was asked about, so it saved little.");
 
         static string Message(string code, string name) =>
-            PlanInsights.Evaluate(PlanFixtures.Plan(name), StudioText.Marten).Single(x => x.Insight.Code == code).Message;
+            PlanInsights.Evaluate(PlanFixtures.Plan(name), DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance).Single(x => x.Insight.Code == code).Message;
     }
 
     [Fact]
     public void P11_says_how_much_work_mem_the_hash_would_have_needed()
     {
-        PlanInsightFinding finding = PlanInsights.Evaluate(PlanFixtures.Plan("p11-fires"), StudioText.Marten).Single(static x => x.Insight.Code == "P11");
+        PlanInsightFinding finding = PlanInsights.Evaluate(PlanFixtures.Plan("p11-fires"), DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance).Single(static x => x.Insight.Code == "P11");
 
         // 4,096 kB at its peak, in 8 batches: 32,768 kB, which is 32 MB.
         finding.Remedy.Should().Contain("about 32 MB").And.Contain("SET work_mem = '32MB'").And.Contain("hash_mem_multiplier");
@@ -117,12 +116,12 @@ public class PlanCorpusTests
     [Fact]
     public void P09_links_to_Maintenance_and_the_others_link_nowhere()
     {
-        PlanInsights.Evaluate(PlanFixtures.Plan("p09-fires"), StudioText.Marten).Single(static x => x.Insight.Code == "P09")
+        PlanInsights.Evaluate(PlanFixtures.Plan("p09-fires"), DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance).Single(static x => x.Insight.Code == "P09")
             .RelatedPage.Should().Be(PlanInsightPage.Maintenance);
 
         foreach (string name in new[] { "p10-fires", "p11-fires", "p12-fires", "p13-fires", "p14-fires" })
         {
-            PlanInsights.Evaluate(PlanFixtures.Plan(name), StudioText.Marten).Should().OnlyContain(static x => x.RelatedPage == PlanInsightPage.None);
+            PlanInsights.Evaluate(PlanFixtures.Plan(name), DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance).Should().OnlyContain(static x => x.RelatedPage == PlanInsightPage.None);
         }
     }
 
@@ -131,8 +130,8 @@ public class PlanCorpusTests
     {
         QueryPlan plan = PlanFixtures.Plan("p10-fires");
 
-        PlanInsights.Evaluate(plan, StudioText.Marten).Single(static x => x.Insight.Code == "P10").Remedy.Should()
-            .Contain(StudioText.Marten.PlanIndexRemedy).And.Contain("CreateOrUpdate");
+        PlanInsights.Evaluate(plan, DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance).Single(static x => x.Insight.Code == "P10").Remedy.Should()
+            .Contain(DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance.PlanIndexRemedy).And.Contain("CreateOrUpdate");
         PlanInsights.Evaluate(plan, PostgresStudioText.Instance).Single(static x => x.Insight.Code == "P10").Remedy.Should()
             .Contain(PostgresStudioText.Instance.PlanIndexRemedy).And.NotContain("Marten");
     }

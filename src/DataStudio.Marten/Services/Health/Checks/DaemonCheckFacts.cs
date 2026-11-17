@@ -729,7 +729,7 @@ internal sealed record DaemonAgentFact(
 /// </param>
 /// <param name="PausedByStudio">The coordinator pause this studio recorded for the store, if any.</param>
 /// <param name="StartRefusals">The start refusals the studio recorded for this database, by shard.</param>
-/// <param name="StudioRebuilds">The projections Marten Studio is rebuilding in this database right now.</param>
+/// <param name="StudioRebuilds">The projections Data Studio is rebuilding in this database right now.</param>
 /// <param name="LiveExceptions">
 /// What the in-process shard tracker last published as a shard's exception, by shard - present only while some page
 /// watches the tracker; used for JasperFx's transient/permanent classification where the feature exists.

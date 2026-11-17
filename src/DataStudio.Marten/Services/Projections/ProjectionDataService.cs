@@ -798,7 +798,7 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
         if (handedBack.Count > 0 && paused)
         {
             sentences.Add(
-                "Marten Studio's pause is in effect, so nothing was started; cleared the Stopped agent the rebuild left for "
+                "Data Studio's pause is in effect, so nothing was started; cleared the Stopped agent the rebuild left for "
                 + ShardList(handedBack) + ", which resuming the daemon starts.");
         }
         else if (handedBack.Count > 0)
@@ -941,8 +941,8 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
 
     /// <summary>
     /// Each registered shard's history from the screen's own samples (<see cref="ProjectionLagHistory" />), judged with what
-    /// is known here of the daemon: whether its projection is being rebuilt (and since when, if Marten Studio started it),
-    /// Marten Studio's own pause, and its agent's status here. Memory only - never a read.
+    /// is known here of the daemon: whether its projection is being rebuilt (and since when, if Data Studio started it),
+    /// Data Studio's own pause, and its agent's status here. Memory only - never a read.
     /// </summary>
     private Dictionary<string, ShardLagHistory> LagHistoriesOf(ResolvedScope resolved, DaemonStatus daemon, IReadOnlyList<ShardProgress> progress)
     {
@@ -1988,7 +1988,7 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
     /// failed action with this message rather than as a 9203 scope denial.
     /// </remarks>
     internal static KeyNotFoundException UnprovisionedTenant(string storeKey, string tenantId) =>
-        new($"No database of Marten store '{storeKey}' holds tenant '{StudioLogValue.Cap(tenantId)}' yet. Marten Studio does not " +
+        new($"No database of Marten store '{storeKey}' holds tenant '{StudioLogValue.Cap(tenantId)}' yet. Data Studio does not " +
             "ask the tenancy to find it, because on a sharded or single-server tenancy finding a tenant " +
             "provisions one.");
 

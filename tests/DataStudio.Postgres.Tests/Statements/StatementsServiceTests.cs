@@ -229,7 +229,7 @@ public class StatementsServiceTests
             new StatementReadOutcome(StatementReadState.NothingRecorded, Pg17, null), null, HealthHistoryView.Empty, null, StatementsTestFacts.Tables, null);
 
         StatementsService.Status(nothing, PostgresStudioText.Instance).Should().Contain("of the data source's own role");
-        StatementsService.Status(nothing, StudioText.Marten).Should().Contain("of the store's own role");
+        StatementsService.Status(nothing, DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance).Should().Contain("of the store's own role");
         StatementsService.Status(Facts(Read(null)), PostgresStudioText.Instance).Should().BeNull("it read");
     }
 
@@ -315,7 +315,7 @@ public class StatementsServiceTests
         }
 
         // MartenStudio's reads of Marten's own tables run as the store's role whatever SqlConsoleRole is, and it says so.
-        StudioText.Marten.StatementsStudioRoles.Should()
+        DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance.StatementsStudioRoles.Should()
             .Contain("The document, event and projection reads, tenant discovery")
             .And.Contain("Marten's own sessions")
             .And.Contain("run as the store's own role");

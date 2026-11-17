@@ -9,7 +9,7 @@ namespace DataStudio.Postgres.Services.Health.Checks;
 /// <param name="SqlConsoleRole">Whether <c>SqlConsoleRole</c> is set - never the name, which is the database-wide gate's (D29).</param>
 /// <param name="BrowsesEverySchema">Whether <c>BrowsableSchemas</c> contains <c>"*"</c>.</param>
 /// <param name="OptionsTypeName">The options type's name, as a host's registration spells it.</param>
-/// <param name="RegistrationMethod">The module's call on the shell's builder: <c>AddMarten</c>, <c>AddPostgres</c>.</param>
+/// <param name="OptionsRegistration">The registration a host writes to configure the module, whole: <c>services.AddDataStudio().AddMarten(options =&gt; ...)</c>.</param>
 /// <param name="CapabilitiesTypeName">The capabilities type's name.</param>
 /// <param name="ReadOnlyOptionName">The switch that is on when <paramref name="ReadOnly" /> is, as a host spells it: the shell's or the module's.</param>
 internal sealed record StudioLintFacts(
@@ -18,7 +18,7 @@ internal sealed record StudioLintFacts(
     bool SqlConsoleRole,
     bool BrowsesEverySchema,
     string OptionsTypeName,
-    string RegistrationMethod,
+    string OptionsRegistration,
     string CapabilitiesTypeName,
     string ReadOnlyOptionName)
 {
@@ -55,7 +55,7 @@ internal sealed record StudioLintFacts(
             !string.IsNullOrWhiteSpace(settings.SqlConsoleRole),
             BrowsableSchemaMatcher.IncludesEverything(settings.BrowsableSchemas),
             settings.OptionsTypeName,
-            settings.Text.RegistrationMethod,
+            settings.Text.OptionsRegistration,
             settings.CapabilitiesTypeName,
             settings.ReadOnlyOptionName);
     }
@@ -65,7 +65,7 @@ internal sealed record StudioLintFacts(
     /// role itself is a DBA's to create and grant, and the line says nothing of how - a remedy is never DDL or a grant.
     /// </summary>
     public HealthRemedy SqlConsoleRoleRemedy() => new(
-        "// In " + RegistrationMethod + "(options => ...): the role the SQL console and the database browser read as\n"
+        "// In " + OptionsRegistration + ": the role the SQL console and the database browser read as\n"
         + "options.SqlConsoleRole = \"studio_reader\";",
         "A role the data source's login is a member of, granted SELECT on what the console and the browser should read and "
         + "nothing more; each of their statements switches to it with SET LOCAL ROLE (" + OptionName("SqlConsoleRole") + "). Creating "

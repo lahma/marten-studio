@@ -2090,7 +2090,7 @@ internal sealed partial class EventDataService : IEventDataService
         {
             throw new InvalidOperationException(
                 "The async daemon this process hosts does not rewind one tenant's agents (IProjectionDaemon.RewindSubscriptionAsync "
-                + "with a tenant), so Marten Studio does not rewind subscriptions on this store.");
+                + "with a tenant), so Data Studio does not rewind subscriptions on this store.");
         }
 
         // The user first, so that nothing awaits between the agent check and the call: the check is a snapshot of the

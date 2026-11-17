@@ -78,7 +78,6 @@ internal sealed partial class HealthCheckRegistry
         : this(
             DiscoverAll((descriptor ?? throw new ArgumentNullException(nameof(descriptor))).HealthCheckAssemblies),
             runtime ?? NoStudioRuntime.Instance,
-            descriptor.ProductName,
             settings?.Text)
     {
     }
@@ -86,7 +85,6 @@ internal sealed partial class HealthCheckRegistry
     private HealthCheckRegistry(
         IReadOnlyList<(Type Type, IReadOnlySet<StudioSourceKind>? SourceKinds)> checks,
         IStudioRuntime runtime,
-        string productName = "Marten Studio",
         StudioText? text = null)
     {
         IReadOnlyList<string> problems = Problems([.. checks.Select(static x => x.Type)], runtime);
@@ -94,7 +92,7 @@ internal sealed partial class HealthCheckRegistry
         if (problems.Count > 0)
         {
             throw new InvalidOperationException(
-                productName + "'s health checks are not well-formed: " + string.Join(" | ", problems));
+                "Data Studio's health checks are not well-formed: " + string.Join(" | ", problems));
         }
 
         All =

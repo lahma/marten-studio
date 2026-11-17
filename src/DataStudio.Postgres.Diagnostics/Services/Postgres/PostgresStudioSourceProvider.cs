@@ -479,13 +479,13 @@ internal static class PostgresTenancy
         {
             throw new KeyNotFoundException(
                 "'" + StudioLogValue.Cap(tenant) + "' is not a tenant of data source '" + sourceKey
-                + "': Postgres Studio's sources have no tenants.");
+                + "': the Postgres module's sources have no tenants.");
         }
 
         if (string.IsNullOrEmpty(scope.DatabaseId))
         {
             throw new KeyNotFoundException(
-                "The scope names no database of data source '" + sourceKey + "': Postgres Studio resolves a database only by its name.");
+                "The scope names no database of data source '" + sourceKey + "': the Postgres module resolves a database only by its name.");
         }
     }
 }

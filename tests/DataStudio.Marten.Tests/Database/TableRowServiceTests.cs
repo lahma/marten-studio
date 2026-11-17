@@ -4,7 +4,6 @@ using DataStudio.Postgres.Services.Database;
 using Npgsql;
 using DataStudio.Postgres.Internal.Sql;
 using DataStudio.Postgres.Services.Query;
-using DataStudio.Postgres.Services.Settings;
 
 namespace DataStudio.Marten.Tests.Database;
 
@@ -354,19 +353,19 @@ public class TableRowServiceTests
         RowFilterVerdict redSort = new() { SortLevel = IndexVerdictLevel.Red };
         RowFilterVerdict green = new();
 
-        string? withheld = TableRowService.ShouldWithhold(TableRowTestData.Relation(estimatedRows: 2_000_000), redFilter, 100_000, StudioText.Marten);
+        string? withheld = TableRowService.ShouldWithhold(TableRowTestData.Relation(estimatedRows: 2_000_000), redFilter, 100_000, DataStudio.Marten.Services.MartenStudioText.Instance);
 
         withheld.Should().Contain("MartenOptions.ExactCountThreshold").And.Contain("2,000,000").And.Contain("Run anyway");
-        TableRowService.ShouldWithhold(TableRowTestData.Relation(estimatedRows: 2_000_000), redSort, 100_000, StudioText.Marten).Should().Contain("the sort");
-        TableRowService.ShouldWithhold(TableRowTestData.Relation(estimatedRows: 2_000_000), green, 100_000, StudioText.Marten).Should().BeNull();
-        TableRowService.ShouldWithhold(TableRowTestData.Relation(estimatedRows: 99_999), redFilter, 100_000, StudioText.Marten).Should().BeNull();
+        TableRowService.ShouldWithhold(TableRowTestData.Relation(estimatedRows: 2_000_000), redSort, 100_000, DataStudio.Marten.Services.MartenStudioText.Instance).Should().Contain("the sort");
+        TableRowService.ShouldWithhold(TableRowTestData.Relation(estimatedRows: 2_000_000), green, 100_000, DataStudio.Marten.Services.MartenStudioText.Instance).Should().BeNull();
+        TableRowService.ShouldWithhold(TableRowTestData.Relation(estimatedRows: 99_999), redFilter, 100_000, DataStudio.Marten.Services.MartenStudioText.Instance).Should().BeNull();
 
         TableRowService.ShouldWithhold(
-                TableRowTestData.Relation(estimatedRows: null, sizeBytes: (CountEstimator.MaxSpeculativePages + 1) * 8192L), redFilter, 100_000, StudioText.Marten)
+                TableRowTestData.Relation(estimatedRows: null, sizeBytes: (CountEstimator.MaxSpeculativePages + 1) * 8192L), redFilter, 100_000, DataStudio.Marten.Services.MartenStudioText.Instance)
             .Should().Contain("never analysed");
-        TableRowService.ShouldWithhold(TableRowTestData.Relation(estimatedRows: null, sizeBytes: 8192), redFilter, 100_000, StudioText.Marten)
+        TableRowService.ShouldWithhold(TableRowTestData.Relation(estimatedRows: null, sizeBytes: 8192), redFilter, 100_000, DataStudio.Marten.Services.MartenStudioText.Instance)
             .Should().BeNull();
-        TableRowService.ShouldWithhold(TableRowTestData.Relation("v", estimatedRows: null, sizeBytes: 0), redFilter, 100_000, StudioText.Marten)
+        TableRowService.ShouldWithhold(TableRowTestData.Relation("v", estimatedRows: null, sizeBytes: 0), redFilter, 100_000, DataStudio.Marten.Services.MartenStudioText.Instance)
             .Should().BeNull("a view has no estimate, and each of its pages is bounded by the timeout");
     }
 
@@ -467,18 +466,18 @@ public class TableRowServiceTests
             TableRowTestData.Relation(estimatedRows: 5_000_000, schema: "legacy", name: "events"),
             TableRowTestData.Index("events_other", "created_on"));
 
-        string? reason = TableRowService.UnindexedInboundCount(large, ["order_id"], 100_000, StudioText.Marten);
+        string? reason = TableRowService.UnindexedInboundCount(large, ["order_id"], 100_000, DataStudio.Marten.Services.MartenStudioText.Instance);
 
         reason.Should().Contain("legacy.events").And.Contain("5,000,000").And.Contain("ExactCountThreshold").And.Contain("order_id");
 
         TableRowService.UnindexedInboundCount(
                 TableRowTestData.Detail(TableRowTestData.Relation(estimatedRows: 5_000_000), TableRowTestData.Index("by_order", "order_id", "line")),
-                ["order_id"], 100_000, StudioText.Marten)
+                ["order_id"], 100_000, DataStudio.Marten.Services.MartenStudioText.Instance)
             .Should().BeNull("an index leading with the key finds the pointing rows");
 
         TableRowService.UnindexedInboundCount(
                 TableRowTestData.Detail(TableRowTestData.Relation(estimatedRows: 5_000_000), TableRowTestData.Index("by_line", "line", "order_id")),
-                ["order_id"], 100_000, StudioText.Marten)
+                ["order_id"], 100_000, DataStudio.Marten.Services.MartenStudioText.Instance)
             .Should().NotBeNull("an index the key is only inside does not lead with it");
 
         TableRowService.UnindexedInboundCount(
@@ -486,15 +485,15 @@ public class TableRowServiceTests
                     TableRowTestData.Relation(estimatedRows: 5_000_000),
                     new CatalogIndex("partial", "create index partial", false, false, true, true, false, ["order_id"]),
                     new CatalogIndex("broken", "create index broken", false, false, false, false, false, ["order_id"])),
-                ["order_id"], 100_000, StudioText.Marten)
+                ["order_id"], 100_000, DataStudio.Marten.Services.MartenStudioText.Instance)
             .Should().NotBeNull("a partial index serves some rows and an invalid one none");
 
-        TableRowService.UnindexedInboundCount(TableRowTestData.Detail(TableRowTestData.Relation(estimatedRows: 99_999)), ["order_id"], 100_000, StudioText.Marten)
+        TableRowService.UnindexedInboundCount(TableRowTestData.Detail(TableRowTestData.Relation(estimatedRows: 99_999)), ["order_id"], 100_000, DataStudio.Marten.Services.MartenStudioText.Instance)
             .Should().BeNull("a small table is counted, index or not");
 
         TableRowService.UnindexedInboundCount(
                 TableRowTestData.Detail(TableRowTestData.Relation(estimatedRows: null, sizeBytes: (CountEstimator.MaxSpeculativePages + 1) * 8192L)),
-                ["order_id"], 100_000, StudioText.Marten)
+                ["order_id"], 100_000, DataStudio.Marten.Services.MartenStudioText.Instance)
             .Should().Contain("never analysed");
     }
 

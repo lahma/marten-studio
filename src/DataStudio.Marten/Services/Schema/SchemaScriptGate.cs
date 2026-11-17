@@ -72,12 +72,13 @@ internal static class SchemaScriptGate
     /// <param name="script">The output withheld.</param>
     /// <param name="refusal">Which part of the gate said no.</param>
     /// <param name="fallback">The gate's own sentence, for a refusal that is none of the usual four.</param>
-    public static string HiddenTypesDenial(SchemaScript script, DatabaseRefusal refusal, string? fallback) =>
+    /// <param name="readOnlyOption">The switch that is on, as a host spells it; <see langword="null" /> is the Marten module's own.</param>
+    public static string HiddenTypesDenial(SchemaScript script, DatabaseRefusal refusal, string? fallback, string? readOnlyOption = null) =>
         Noun(script) + " would print the tables of document types the host hides from the studio " +
         "(MartenOptions.IsDocumentTypeVisible), so it is shown only past the database browser's gate. " +
         refusal switch
         {
-            DatabaseRefusal.ReadOnly => DatabaseGate.ReadOnlyDenial,
+            DatabaseRefusal.ReadOnly => MartenStudioText.Instance.BrowseReadOnlyDenial(readOnlyOption ?? MartenStudioText.Instance.OptionName("ReadOnly")),
             DatabaseRefusal.CapabilityOff => "It needs MartenOptions.Capabilities.BrowseDatabase.",
             DatabaseRefusal.StorePolicy =>
                 "The store policy (MartenOptions.StoreAuthorizationPolicy) refused your account this store " +

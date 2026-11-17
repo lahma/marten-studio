@@ -308,7 +308,7 @@
             @if (rewindScopeError is { Length: > 0 } scopeError)
             {
                 <p class="ms-alert ms-alert-warning" role="alert">
-                    Marten Studio could not describe what this rewind would touch: @scopeError. The rewind
+                    Data Studio could not describe what this rewind would touch: @scopeError. The rewind
                     itself is still available, and the service refuses it if the daemon is not here.
                 </p>
             }
@@ -586,7 +586,7 @@
 
         if (projections is null)
         {
-            return "Marten Studio has not read the projections for this database yet";
+            return "Data Studio has not read the projections for this database yet";
         }
 
         if (!projections.Daemon.IsHostedHere)
@@ -611,7 +611,7 @@
 
         if (projection.IsSubscription)
         {
-            return $"'{projectionName}' is a subscription registered with Events.Subscribe(...), which Marten Studio does "
+            return $"'{projectionName}' is a subscription registered with Events.Subscribe(...), which Data Studio does "
                 + "not rewind: the store's projection list does not name it, and the rewind is checked against that list.";
         }
 
@@ -636,7 +636,7 @@
     }
 
     /// <summary>
-    /// M7: what the confirm dialog adds while Marten Studio's pause is in effect - the rewind restarts the projection's agents
+    /// M7: what the confirm dialog adds while Data Studio's pause is in effect - the rewind restarts the projection's agents
     /// on this node at once, pause or not (JasperFx's <c>RewindSubscriptionAsync</c> starts them itself).
     /// </summary>
     private string PausedNote => projections is { Daemon.IsPausedByStudio: true } ? DaemonTopologyWording.RewindWhilePaused : string.Empty;

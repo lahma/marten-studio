@@ -98,7 +98,7 @@ internal sealed class DatabaseGate
     /// </param>
     /// <param name="text">
     /// The studio's own words for each refusal (<see cref="IDiagnosticsSettings.Text" />). <c>DatabaseAccess</c>, the gate's one
-    /// builder, always hands the settings' over; <see langword="null" /> is MartenStudio's, for a test that builds a gate
+    /// builder, always hands the settings' over; <see langword="null" /> is the Postgres module's, for a test that builds a gate
     /// by hand.
     /// </param>
     /// <param name="definitions">
@@ -106,6 +106,10 @@ internal sealed class DatabaseGate
     /// policies' yes (<see cref="DatabaseAccess.EvaluateDefinitionPoliciesAsync" />). <see langword="null" /> is
     /// "not asked", which is the gate every screen but the object browser reads: there, <c>BrowseDatabase</c> alone opens a
     /// definition, as it always did.
+    /// </param>
+    /// <param name="readOnlyOption">
+    /// The switch that is on when <paramref name="readOnly" /> is, as a host spells it, for the refusal's sentence; <see langword="null" />
+    /// is the module's own (<c>OptionName("ReadOnly")</c>), for a test that builds a gate by hand.
     /// </param>
     public DatabaseGate(
         IReadOnlyList<string> storeSchemas,
@@ -120,14 +124,16 @@ internal sealed class DatabaseGate
         string? storeKey = null,
         IReadOnlyDictionary<string, DatabaseStoreAccess>? otherStores = null,
         StudioText? text = null,
-        DatabasePolicyAnswer? definitions = null)
+        DatabasePolicyAnswer? definitions = null,
+        string? readOnlyOption = null)
     {
         ArgumentNullException.ThrowIfNull(storeSchemas);
         ArgumentNullException.ThrowIfNull(liveSchemas);
         ArgumentNullException.ThrowIfNull(configuredEntries);
         ArgumentNullException.ThrowIfNull(classifier);
 
-        text ??= StudioText.Marten;
+        text ??= StudioText.Of(null);
+        readOnlyOption ??= text.OptionName("ReadOnly");
 
         Classifier = classifier;
         this.text = text;
@@ -138,7 +144,7 @@ internal sealed class DatabaseGate
         this.storeSchemas = new HashSet<string>(storeSchemas, StringComparer.Ordinal);
 
         (closedBy, closedDenial) = readOnly
-            ? (DatabaseRefusal.ReadOnly, text.BrowseReadOnlyDenial)
+            ? (DatabaseRefusal.ReadOnly, text.BrowseReadOnlyDenial(readOnlyOption))
             : !capabilityEnabled
                 ? (DatabaseRefusal.CapabilityOff, text.BrowseCapabilityDenial)
                 : authorized != true
@@ -159,7 +165,7 @@ internal sealed class DatabaseGate
 
         (definitionsClosedBy, definitionsClosedDenial) = browseOpen || definitionsPass
             ? (DatabaseRefusal.None, null)
-            : DefinitionsClosure(text, readOnly, capabilityEnabled, authorized, policyRefusal, definitions);
+            : DefinitionsClosure(text, readOnlyOption, readOnly, capabilityEnabled, authorized, policyRefusal, definitions);
 
         definitionSchemas = browseOpen
             ? browsable
@@ -237,6 +243,7 @@ internal sealed class DatabaseGate
     /// </remarks>
     private static (DatabaseRefusal Refusal, string Denial) DefinitionsClosure(
         StudioText text,
+        string readOnlyOption,
         bool readOnly,
         bool browseEnabled,
         bool? browseAuthorized,
@@ -245,7 +252,7 @@ internal sealed class DatabaseGate
     {
         if (readOnly)
         {
-            return (DatabaseRefusal.ReadOnly, text.DefinitionReadOnlyDenial);
+            return (DatabaseRefusal.ReadOnly, text.DefinitionReadOnlyDenial(readOnlyOption));
         }
 
         bool definitionsEnabled = definitions is { CapabilityEnabled: true };
@@ -274,30 +281,6 @@ internal sealed class DatabaseGate
             : viewDefinitions
                 ? nameof(StudioCapability.ViewDefinitions)
                 : nameof(StudioCapability.BrowseDatabase);
-
-    /// <summary><see cref="StudioDenialText.BrowseReadOnlyDenial" />, where the sentence is kept.</summary>
-    public const string ReadOnlyDenial = StudioDenialText.BrowseReadOnlyDenial;
-
-    /// <summary><see cref="StudioDenialText.BrowseCapabilityDenial" />, where the sentence is kept.</summary>
-    public const string CapabilityDenial = StudioDenialText.BrowseCapabilityDenial;
-
-    /// <summary><see cref="StudioDenialText.BrowseWritePolicyDenial" />, where the sentence is kept.</summary>
-    public const string WritePolicyDenial = StudioDenialText.BrowseWritePolicyDenial;
-
-    /// <summary><see cref="StudioDenialText.BrowseStorePolicyDenial" />, where the sentence is kept.</summary>
-    public const string StorePolicyDenial = StudioDenialText.BrowseStorePolicyDenial;
-
-    /// <summary><see cref="StudioDenialText.DefinitionReadOnlyDenial" />, where the sentence is kept.</summary>
-    public const string DefinitionReadOnlyDenial = StudioDenialText.DefinitionReadOnlyDenial;
-
-    /// <summary><see cref="StudioDenialText.DefinitionCapabilityDenial" />, where the sentence is kept.</summary>
-    public const string DefinitionCapabilityDenial = StudioDenialText.DefinitionCapabilityDenial;
-
-    /// <summary><see cref="StudioDenialText.DefinitionWritePolicyDenialHead" />, where the sentence is kept.</summary>
-    public const string DefinitionWritePolicyDenialHead = StudioDenialText.DefinitionWritePolicyDenialHead;
-
-    /// <summary><see cref="StudioDenialText.DefinitionWritePolicyDenialTail" />, where the sentence is kept.</summary>
-    public const string DefinitionWritePolicyDenialTail = StudioDenialText.DefinitionWritePolicyDenialTail;
 
     /// <summary>What a view that reaches into a withheld schema says.</summary>
     public const string WithheldDependencyDenial = "It reads from a schema you cannot see.";
@@ -331,9 +314,6 @@ internal sealed class DatabaseGate
         "This view reads a table some of whose rows are stored in a partition or child table in a schema you " +
         "cannot see, so its rows are not shown.";
 
-    /// <summary><see cref="StudioDenialText.MartenDependencyDenial" />, where the sentence is kept.</summary>
-    public const string MartenDependencyDenial = StudioDenialText.MartenDependencyDenial;
-
     /// <summary>
     /// What a view that calls a function the studio cannot see into says about its rows, while some schema
     /// the reading role may read is withheld from this visitor.
@@ -360,9 +340,6 @@ internal sealed class DatabaseGate
         "It belongs to another Marten store, and the write policy (MartenOptions.WriteAuthorizationPolicy, " +
         "or StoreAuthorizationPolicy when no write policy is set) refused BrowseDatabase for that store, with " +
         "no tenant selected.";
-
-    /// <summary><see cref="StudioDenialText.BrowseEmptyListDenial" />, where the sentence is kept.</summary>
-    public const string EmptyListDenial = StudioDenialText.BrowseEmptyListDenial;
 
     /// <summary>Whose each object is.</summary>
     public DatabaseObjectClassifier Classifier { get; }

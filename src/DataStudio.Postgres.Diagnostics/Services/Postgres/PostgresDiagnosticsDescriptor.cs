@@ -19,7 +19,7 @@ internal static class PostgresDiagnosticsDescriptor
     public static DiagnosticsDescriptor Instance { get; } = new()
     {
         Key = Key,
-        ProductName = "Postgres Studio",
+        ProductName = "Postgres",
 
         // The shared checks, which read nothing but Postgres, run against every kind of source.
         HealthCheckAssemblies = [new StudioHealthCheckAssembly(typeof(PostgresDiagnosticsDescriptor).Assembly)],

@@ -374,9 +374,9 @@ internal sealed record ProjectionThresholds(TimeSpan SlowPollingTime, TimeSpan H
 
 /// <summary>What a shard's history is judged with, besides its samples.</summary>
 /// <param name="Spacing">How far apart the samples are kept (<see cref="ProjectionLagHistory.SpacingFor" />).</param>
-/// <param name="Rebuilding">Whether its projection is known to be being rebuilt: by Marten Studio, or by the daemon here.</param>
-/// <param name="RebuildStartedAt">When Marten Studio started that rebuild, when it did - no sample before it is the rebuild's.</param>
-/// <param name="PausedByStudio">Whether Marten Studio's coordinator pause is recorded for the store.</param>
+/// <param name="Rebuilding">Whether its projection is known to be being rebuilt: by Data Studio, or by the daemon here.</param>
+/// <param name="RebuildStartedAt">When Data Studio started that rebuild, when it did - no sample before it is the rebuild's.</param>
+/// <param name="PausedByStudio">Whether Data Studio's coordinator pause is recorded for the store.</param>
 /// <param name="AgentStatusHere">The status of the shard's agent in the daemon hosted here, when one runs it.</param>
 /// <param name="WarningThreshold">The row's own <c>warning_behind_threshold</c>, when the host wrote one.</param>
 /// <param name="CriticalThreshold">The row's own <c>critical_behind_threshold</c>, likewise.</param>
@@ -420,7 +420,7 @@ internal sealed record ShardLagHistory(string ShardName, IReadOnlyList<LagPoint>
     public RebuildEta? Rebuild { get; init; }
 
     /// <summary>
-    /// Why the arrow is not drawn although the samples would draw one: a lag that grows by design (Marten Studio's pause)
+    /// Why the arrow is not drawn although the samples would draw one: a lag that grows by design (Data Studio's pause)
     /// or because the agent here is not running (D05's). A stall and a rebuild are not reasons - they are what the chart
     /// and the estimate are for.
     /// </summary>
@@ -481,7 +481,7 @@ internal sealed record ShardLagHistory(string ShardName, IReadOnlyList<LagPoint>
 
         string? withheld =
             context.Rebuilding ? null
-            : context.PausedByStudio ? "not judged: Marten Studio paused the projection coordinator, and every lag grows until it is resumed"
+            : context.PausedByStudio ? "not judged: Data Studio paused the projection coordinator, and every lag grows until it is resumed"
             : context.AgentStatusHere is { Length: > 0 } status && !string.Equals(status, "Running", StringComparison.OrdinalIgnoreCase)
                 ? "not judged: its agent here is " + status + " (D05)"
             : null;

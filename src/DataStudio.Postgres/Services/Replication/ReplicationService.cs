@@ -641,7 +641,7 @@ internal sealed class ReplicationService : IReplicationService
     private string StorePolicyDenial()
     {
         StudioText text = settings.Text;
-        string policy = text.Product == StudioProduct.PostgresStudio ? text.OptionName("SourceAuthorizationPolicy") : text.OptionName("StoreAuthorizationPolicy");
+        string policy = text.ScopePolicyOption;
 
         return "Your account may not see this database's replication. The policy (" + policy + ") refused this "
             + text.SourceNoun + " and database as a whole, with no tenant selected: the server's WAL and its standbys belong to no tenant.";
@@ -676,7 +676,7 @@ internal sealed class ReplicationService : IReplicationService
         {
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                logger.LogDebug(exception, "{Product} did not read the replication facts of {DatabaseId}", settings.Text.ProductName, databaseId);
+                logger.LogDebug(exception, "Data Studio did not read the replication facts of {DatabaseId}", databaseId);
             }
         }
         else

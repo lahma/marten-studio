@@ -33,7 +33,7 @@ internal sealed record ConfigurationValue(string Name, string Value, string Memb
 /// <remarks>
 /// Five fields, chosen rather than mapped: <c>DatabaseDescriptor</c> also carries a <c>Properties</c>
 /// list, a <c>SubjectUri</c> and a <c>DatabaseUri()</c>, any of which a provider is free to build out of
-/// the connection string. Marten Studio never renders a connection string (plan §3.2), so the safe
+/// the connection string. Data Studio never renders a connection string (plan §3.2), so the safe
 /// fields are named here one at a time and the rest are not carried at all - a DTO that held them would
 /// be one refactor away from printing them.
 /// </remarks>

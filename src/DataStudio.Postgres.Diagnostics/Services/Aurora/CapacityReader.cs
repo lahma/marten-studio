@@ -168,7 +168,7 @@ internal sealed class CapacityReader
         {
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                logger.LogDebug("{Product}'s capacity source took longer than {Timeout} for {DatabaseId}", settings.Text.ProductName, Timeout, database.Database);
+                logger.LogDebug("Data Studio's capacity source took longer than {Timeout} for {DatabaseId}", Timeout, database.Database);
             }
 
             return new CapacityReading(null, askedAt, "the capacity source took longer than " + Seconds(Timeout), true);

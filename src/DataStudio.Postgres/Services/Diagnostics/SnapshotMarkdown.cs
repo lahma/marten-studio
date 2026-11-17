@@ -63,17 +63,7 @@ internal static class SnapshotMarkdown
         return md.ToString().TrimEnd('\n') + "\n";
     }
 
-    private static string Product(string producer)
-    {
-        string name = producer.Split(' ', 2)[0];
-
-        return name switch
-        {
-            "MartenStudio" => "Marten Studio",
-            "PostgresStudio" => "Postgres Studio",
-            _ => name,
-        };
-    }
+    private static string Product(string producer) => producer.LastIndexOf(' ') is > 0 and var space ? producer[..space] : producer;
 
     private static void Summary(StringBuilder md, PostgresDiagnosticsSnapshot snapshot)
     {

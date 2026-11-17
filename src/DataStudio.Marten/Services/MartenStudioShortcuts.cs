@@ -3,7 +3,7 @@ using DataStudio.Services;
 namespace DataStudio.Marten.Services;
 
 /// <summary>
-/// The keyboard shortcuts only Marten Studio's pages answer to, for the shortcut sheet (<c>?</c>, 1.2-A11Y). Written from the
+/// The keyboard shortcuts only the Marten pages answer to, for the shortcut sheet (<c>?</c>, 1.2-A11Y). Written from the
 /// handlers: <c>DocumentTable.OnRowKeyAsync</c>, the JSON editor's chords in studio.js (<c>martenStudio.json.enhanceTextarea</c>) and the LINQ
 /// panel's (its predicate box is the SQL editor's <c>enhanceEditor</c>; its Order by box is <c>enhanceRunField</c>).
 /// </summary>

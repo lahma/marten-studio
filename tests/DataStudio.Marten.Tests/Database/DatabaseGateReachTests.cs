@@ -176,7 +176,7 @@ public class DatabaseGateReachTests
             DatabaseObjectDetail detail = DatabaseObjectAssembler.Detail(gate, View("docs", [read]));
 
             detail.Relation!.Rows.Refusal.Should().Be(DatabaseRefusal.MartenOwned, read.Name);
-            detail.Relation.Rows.Reason.Should().Be(DatabaseGate.MartenDependencyDenial);
+            detail.Relation.Rows.Reason.Should().Be(DataStudio.Marten.Services.MartenStudioText.Instance.MartenDependencyDenial);
             detail.Relation.DefinitionAvailable.Should().BeTrue(read.Name);
         }
 

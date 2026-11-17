@@ -16,7 +16,7 @@ internal sealed record MartenDaemonNeeds(bool Hosted, string? Explanation, int R
 }
 
 /// <summary>
-/// "How Marten uses this connection": the rows, the card and the sentences Marten Studio adds to the Connection page - pure over
+/// "How Marten uses this connection": the rows, the card and the sentences Data Studio adds to the Connection page - pure over
 /// what <see cref="MartenConnectionInsightContributor" /> gathered, so every sentence is testable without a store.
 /// </summary>
 /// <remarks>

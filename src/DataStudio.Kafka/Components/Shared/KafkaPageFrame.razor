@@ -5,7 +5,7 @@
 
 @* Every Kafka page renders its body inside this frame (D34, D35). It draws a spinner until the cluster policy has answered for the cluster
    in scope (Topic = null), then the body or a notice: a refused cluster's body never runs its OnInitializedAsync, as the host's ScopeAccess
-   rule has it. The frame is a convenience - every KStudio service asks the policy itself (hard rule 5).
+   rule has it. The frame is a convenience - every Data Studio service asks the policy itself (hard rule 5).
 
    Nothing below the frame starts while the page is prerendered (D-SHELL 5.5). The body is created only after the first render has been delivered
    to a live circuit (OnAfterRenderAsync is the signal the shell already uses for "this render is interactive": it needs no renderer information a
@@ -54,7 +54,7 @@
     }
 
     /// <summary>The name the frame cascades its <see cref="Task" /> under: <c>[CascadingParameter(Name = KafkaPageFrame.ReadyName)] public Task? Ready</c>.</summary>
-    public const string ReadyName = "KStudio.PageReady";
+    public const string ReadyName = "Kafka.PageReady";
 
     private readonly TaskCompletionSource ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
 

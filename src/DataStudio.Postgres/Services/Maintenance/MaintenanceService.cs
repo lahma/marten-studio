@@ -169,9 +169,7 @@ internal sealed class MaintenanceService : IMaintenanceService
     /// <summary>What a store-policy refusal of the page says, naming the option the studio's registration spells.</summary>
     internal string StorePolicyDenial =>
         "Your account may not see this database's maintenance. The "
-        + (settings.Text.Product == StudioProduct.PostgresStudio
-            ? "source policy (" + settings.Text.OptionName("SourceAuthorizationPolicy") + ")"
-            : "store policy (" + settings.Text.OptionName("StoreAuthorizationPolicy") + ")")
+        + settings.Text.ScopePolicyNoun + " policy (" + settings.Text.ScopePolicyOption + ")"
         + " refused this " + settings.Text.SourceNoun + " and database as a whole, with no tenant selected: maintenance belongs to no tenant.";
 
     /// <inheritdoc />
@@ -360,7 +358,7 @@ internal sealed class MaintenanceService : IMaintenanceService
             {
                 if (logger.IsEnabled(LogLevel.Debug))
                 {
-                    logger.LogDebug(exception, "{Product} could not read the database browser's gate for the Maintenance page", settings.Text.ProductName);
+                    logger.LogDebug(exception, "Data Studio could not read the database browser's gate for the Maintenance page");
                 }
 
                 return null;

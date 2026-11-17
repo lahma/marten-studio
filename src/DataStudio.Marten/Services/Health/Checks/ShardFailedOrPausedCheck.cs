@@ -508,7 +508,7 @@ internal sealed class ShardFailedOrPausedCheck : HealthCheck<ShardFailedOrPaused
         if (inProcess.StartRefusals.GetValueOrDefault(problem.Shard) is { } refusal)
         {
             evidence.Add(new HealthEvidence(
-                "Last start from Marten Studio",
+                "Last start from Data Studio",
                 "refused " + EvidenceTime.Utc(refusal.RefusedAt)
                 + (refusal.Reason is { Length: > 0 } classified ? ": " + classified : string.Empty)
                 + (refusal.IsTransient switch

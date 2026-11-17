@@ -10,9 +10,9 @@ using DataStudio.Postgres.Services.Sources;
 namespace DataStudio.Postgres.Tests.Conventions;
 
 /// <summary>
-/// PostgresStudio says its own words (PS-3b): every sentence it reads from <see cref="StudioText" /> and every log template
-/// it writes is free of MartenStudio's option names, configuration and session APIs - except the few that name Marten
-/// on purpose, to say that a Marten store's objects are browsed elsewhere. The <c>.Checks</c> part holds every shared
+/// The Postgres module says its own words (PS-3b): every sentence it reads from <see cref="StudioText" /> is free of the Marten module's
+/// option names, configuration and session APIs - except the few that name Marten on purpose, to say that a Marten store's objects are
+/// browsed on the Marten pages. The <c>.Checks</c> part holds every shared
 /// health check to the same, by evaluating it (wave 6).
 /// </summary>
 public partial class PostgresStudioWordsTests
@@ -81,9 +81,9 @@ public partial class PostgresStudioWordsTests
     }
 
     /// <summary>
-    /// A Marten table whose partitions disagree on <c>autovacuum_enabled</c> (T07, T08) is pointed at Marten Studio's Schema
-    /// screen and its store's <c>StoreOptions</c> - Postgres Studio has no Schema screen of its own to send anybody to - and
-    /// a relational table, as in MartenStudio, at the catalog.
+    /// A Marten table whose partitions disagree on <c>autovacuum_enabled</c> (T07, T08) is pointed at the Marten pages' Schema
+    /// screen and its store's <c>StoreOptions</c> - the Postgres module has no Schema screen of its own to send anybody to - and
+    /// a relational table at the catalog.
     /// </summary>
     [Theory]
     [InlineData("DocumentTable", "mt_doc_order")]
@@ -96,20 +96,17 @@ public partial class PostgresStudioWordsTests
 
         string said = Autovacuum.State(Partitioned(kind, name), "autovacuum_vacuum_scale_factor", "0.02", PostgresStudioText.Instance);
 
-        said.Should().Contain("may be switched off for some of them (each partition's pg_class.reloptions says which; Marten Studio's "
+        said.Should().Contain("may be switched off for some of them (each partition's pg_class.reloptions says which; the Marten pages' "
             + "Schema screen, over the store whose StoreOptions declare this table, shows which parameters the partitions differ on).");
-        said.Should().NotContain("(the Schema screen's", "there is no Schema screen in Postgres Studio");
+        said.Should().NotContain("(the Schema screen's", "there is no Schema screen in the Postgres module");
     }
 
     [Fact]
-    public void A_relational_tables_differing_partitions_point_at_the_catalog_in_either_studio()
+    public void A_relational_tables_differing_partitions_point_at_the_catalog()
     {
-        foreach (StudioText text in new[] { PostgresStudioText.Instance, StudioText.Marten })
-        {
-            Autovacuum.State(Partitioned(StudioTableKind.Relational, "orders"), "autovacuum_vacuum_scale_factor", "0.02", text)
-                .Should().Be(" Its partitions do not all have the same autovacuum_enabled setting, so autovacuum may be switched off "
-                    + "for some of them (each partition's pg_class.reloptions says which).");
-        }
+        Autovacuum.State(Partitioned(StudioTableKind.Relational, "orders"), "autovacuum_vacuum_scale_factor", "0.02", PostgresStudioText.Instance)
+            .Should().Be(" Its partitions do not all have the same autovacuum_enabled setting, so autovacuum may be switched off "
+                + "for some of them (each partition's pg_class.reloptions says which).");
     }
 
     private static TableFacts Partitioned(StudioTableKind kind, string name) =>
@@ -119,11 +116,16 @@ public partial class PostgresStudioWordsTests
         });
 
     [Fact]
-    public void The_scan_sees_MartenStudios_words_in_MartenStudios_text()
+    public void The_scan_sees_the_Marten_modules_words_in_a_planted_sentence()
     {
-        StringMembers().Select(static x => (string?) typeof(StudioText).GetProperty(x)!.GetValue(StudioText.Marten))
-            .Count(static text => text is not null && MartenStudioNames.Concat(StoreWords).Any(text.Contains))
-            .Should().BeGreaterThan(10, "otherwise the theory above proves nothing");
+        string[] planted =
+        [
+            "MartenOptions.Capabilities.BrowseDatabase", "opts.Schema.For<Order>().Index(x => x.Status);", "the store's own role",
+            "a Marten store", "this store", "a document type", "one tenant",
+        ];
+
+        planted.Count(static text => MartenStudioNames.Concat(StoreWords).Any(text.Contains)).Should().Be(planted.Length,
+            "the words the theory above forbids are the words the Marten module's sentences use, so it can fail");
     }
 
     [Fact]
@@ -132,9 +134,7 @@ public partial class PostgresStudioWordsTests
         PostgresStudioSettings settings = PostgresStudioSettings.Of(new PostgresOptions());
 
         settings.Text.Should().BeSameAs(PostgresStudioText.Instance);
-        settings.Text.Product.Should().Be(StudioProduct.PostgresStudio);
         settings.Text.OptionsTypeName.Should().Be(settings.OptionsTypeName);
-        settings.Text.ProductName.Should().Be(settings.ProductName);
         settings.Text.OwnSchemaFlag.Should().BeNull("an own schema is just a browsable one; there is no store to flag it as");
     }
 }

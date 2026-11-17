@@ -1,4 +1,5 @@
 using DataStudio.Postgres.Services.Database;
+using DataStudio.Postgres.Services.Postgres;
 using DataStudio.Postgres.Services.Settings;
 
 namespace DataStudio.Marten.Tests.Support;
@@ -26,6 +27,12 @@ namespace DataStudio.Marten.Tests.Support;
 /// </remarks>
 internal static class FakeDatabaseObjects
 {
+    /// <summary>
+    /// The words the fake refuses in: the Postgres module's, unless the test project that links this file says otherwise (the Marten suite sets
+    /// its own from a module initializer).
+    /// </summary>
+    public static StudioText Words { get; set; } = PostgresStudioText.Instance;
+
     /// <summary>The demo store's document schema.</summary>
     public const string StoreSchema = "studio_sample";
 
@@ -68,11 +75,11 @@ internal static class FakeDatabaseObjects
             Denial: refusal switch
             {
                 DatabaseRefusal.None => null,
-                DatabaseRefusal.ReadOnly => DatabaseGate.ReadOnlyDenial,
-                DatabaseRefusal.CapabilityOff => DatabaseGate.CapabilityDenial,
-                DatabaseRefusal.WritePolicy => DatabaseGate.WritePolicyDenial,
-                DatabaseRefusal.StorePolicy => DatabaseGate.StorePolicyDenial,
-                DatabaseRefusal.SchemaNotBrowsable => DatabaseGate.EmptyListDenial,
+                DatabaseRefusal.ReadOnly => Words.BrowseReadOnlyDenial(Words.OptionName("ReadOnly")),
+                DatabaseRefusal.CapabilityOff => Words.BrowseCapabilityDenial,
+                DatabaseRefusal.WritePolicy => Words.BrowseWritePolicyDenial,
+                DatabaseRefusal.StorePolicy => Words.BrowseStorePolicyDenial,
+                DatabaseRefusal.SchemaNotBrowsable => Words.BrowseEmptyListDenial,
                 _ => "The database browser is unavailable.",
             })
         {
@@ -83,11 +90,11 @@ internal static class FakeDatabaseObjects
             DefinitionDenial = refusal switch
             {
                 DatabaseRefusal.None => null,
-                DatabaseRefusal.ReadOnly => DatabaseGate.DefinitionReadOnlyDenial,
-                DatabaseRefusal.CapabilityOff => DatabaseGate.DefinitionCapabilityDenial,
-                DatabaseRefusal.WritePolicy => StudioText.Marten.DefinitionWritePolicyDenialFor("BrowseDatabase"),
-                DatabaseRefusal.StorePolicy => DatabaseGate.StorePolicyDenial,
-                DatabaseRefusal.SchemaNotBrowsable => DatabaseGate.EmptyListDenial,
+                DatabaseRefusal.ReadOnly => Words.DefinitionReadOnlyDenial(Words.OptionName("ReadOnly")),
+                DatabaseRefusal.CapabilityOff => Words.DefinitionCapabilityDenial,
+                DatabaseRefusal.WritePolicy => Words.DefinitionWritePolicyDenialFor("BrowseDatabase"),
+                DatabaseRefusal.StorePolicy => Words.BrowseStorePolicyDenial,
+                DatabaseRefusal.SchemaNotBrowsable => Words.BrowseEmptyListDenial,
                 _ => "The database browser is unavailable.",
             },
         };

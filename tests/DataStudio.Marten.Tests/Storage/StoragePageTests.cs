@@ -363,7 +363,7 @@ public class StoragePageTests
     {
         FakeStorageService storage = new()
         {
-            View = StorageView.Refused(DatabaseRefusal.StorePolicy, DataStudio.Postgres.Services.Settings.StudioText.Marten.StorageStorePolicyDenial),
+            View = StorageView.Refused(DatabaseRefusal.StorePolicy, DataStudio.Marten.Services.MartenStudioText.Instance.StorageStorePolicyDenial),
         };
         await using StudioComponentContext context = await ContextAsync(storage);
 

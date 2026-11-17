@@ -60,7 +60,7 @@ public class SessionsPageTests
     }
 
     private static readonly SessionDetailsAccess Closed =
-        new(false, false, null, DatabaseRefusal.CapabilityOff, SessionActivityService.CapabilityDenial);
+        new(false, false, null, DatabaseRefusal.CapabilityOff, DataStudio.Marten.Services.MartenStudioText.Instance.SessionsCapabilityDenial);
 
     private static readonly SessionDetailsAccess Open = new(true, false, true, DatabaseRefusal.None, null);
 
@@ -189,7 +189,7 @@ public class SessionsPageTests
     public async Task A_write_policy_refusal_says_which_policy_and_asks_for_nothing_more()
     {
         await using Fixture fixture = await ReadyAsync(
-            new SessionDetailsAccess(true, false, false, DatabaseRefusal.WritePolicy, SessionActivityService.WritePolicyDenial));
+            new SessionDetailsAccess(true, false, false, DatabaseRefusal.WritePolicy, DataStudio.Marten.Services.MartenStudioText.Instance.SessionsWritePolicyDenial));
         StudioComponentContext context = fixture.Context;
         FakeSessionActivityService sessions = fixture.Sessions;
 
@@ -317,7 +317,7 @@ public class SessionsPageTests
         await using Fixture fixture = await ReadyAsync(Closed);
         StudioComponentContext context = fixture.Context;
         FakeSessionActivityService sessions = fixture.Sessions;
-        sessions.Summary = SessionActivitySummary.Refused(DatabaseRefusal.StorePolicy, SessionActivityService.StorePolicyDenial);
+        sessions.Summary = SessionActivitySummary.Refused(DatabaseRefusal.StorePolicy, DataStudio.Marten.Services.MartenStudioText.Instance.SessionsStorePolicyDenial);
 
         var page = context.Render<Sessions>();
         page.WaitForAssertion(() => page.FindAll(".ms-sessions-refusal").Should().ContainSingle());

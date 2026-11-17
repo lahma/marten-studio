@@ -263,9 +263,7 @@ internal sealed record HealthExportSummary
     public static HealthExportSummary NotRegistered(DateTimeOffset measuredAt, StudioText text) => new()
     {
         MeasuredAt = measuredAt,
-        Problem = text.ProductName + "'s services are not registered: call services."
-            + (text.AlternativeRegistrationMethod is { } alternative ? alternative + "() or services." : string.Empty)
-            + "AddDataStudio()." + text.RegistrationMethod + "() as well as AddHealthChecks()." + text.RegistrationMethod + "Diagnostics()",
+        Problem = "Data Studio's services are not registered: call " + text.HealthCheckRegistration,
     };
 
     /// <summary>A host whose container holds no source the studio would list.</summary>
@@ -274,7 +272,7 @@ internal sealed record HealthExportSummary
     public static HealthExportSummary NoStores(DateTimeOffset measuredAt, StudioText text) => new()
     {
         MeasuredAt = measuredAt,
-        Problem = text.ProductName + " found no " + text.SourceNoun + " to check",
+        Problem = "Data Studio found no " + text.SourceNoun + " to check",
     };
 
     /// <summary>A run the application's stopping cut short: nothing it found is reported half-way.</summary>
@@ -283,7 +281,7 @@ internal sealed record HealthExportSummary
     public static HealthExportSummary Stopping(DateTimeOffset measuredAt, StudioText text) => new()
     {
         MeasuredAt = measuredAt,
-        Problem = "The application is stopping, so " + text.ProductName + " did not finish checking",
+        Problem = "The application is stopping, so Data Studio did not finish checking",
     };
 
     /// <summary>A run that failed in the studio itself. The exception's type is named; its words never are.</summary>
@@ -293,7 +291,7 @@ internal sealed record HealthExportSummary
     public static HealthExportSummary Broken(DateTimeOffset measuredAt, string exceptionType, StudioText text) => new()
     {
         MeasuredAt = measuredAt,
-        Problem = text.ProductName + " could not check: its health export failed with " + exceptionType + ", logged as event 9270",
+        Problem = "Data Studio could not check: its health export failed with " + exceptionType + ", logged as event 9270",
     };
 
     /// <summary>
@@ -307,7 +305,7 @@ internal sealed record HealthExportSummary
     /// </param>
     public string Describe(TimeSpan interval, StudioText? words = null)
     {
-        words ??= StudioText.Marten;
+        words ??= StudioText.Of(null);
         StringBuilder text = new();
 
         if (Problem is not null)

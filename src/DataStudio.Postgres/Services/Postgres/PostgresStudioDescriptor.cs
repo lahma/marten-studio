@@ -45,7 +45,7 @@ internal static class PostgresStudioDescriptor
     private static StudioDescriptor Create() => new()
     {
         Key = Key,
-        ProductName = "Postgres Studio",
+        ProductName = "Postgres",
         PageAssemblies =
         [
             new StudioPageAssembly(typeof(StudioHome).Assembly, PageRoot),

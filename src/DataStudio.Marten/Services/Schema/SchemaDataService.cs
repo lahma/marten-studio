@@ -441,7 +441,7 @@ internal sealed partial class SchemaDataService : ISchemaDataService
             .ConfigureAwait(false);
 
         string? withheld = SchemaTableAssembler.PartitionCountsWithheld(
-            capabilities.ReadOnly, answer.CapabilityEnabled, answer.Authorized, answer.Refusal);
+            capabilities.ReadOnly, answer.CapabilityEnabled, answer.Authorized, answer.Refusal, settings.ReadOnlyOptionName);
 
         Dictionary<string, string> typeNames = new(StringComparer.OrdinalIgnoreCase);
         Dictionary<string, IReadOnlyList<KeyValuePair<string, string>>?> declaredParameters = new(StringComparer.OrdinalIgnoreCase);
@@ -1137,7 +1137,7 @@ internal sealed partial class SchemaDataService : ISchemaDataService
 
         return grant.Allowed
             ? null
-            : new SchemaScriptRefusal(grant.Refusal, SchemaScriptGate.HiddenTypesDenial(script, grant.Refusal, grant.Reason));
+            : new SchemaScriptRefusal(grant.Refusal, SchemaScriptGate.HiddenTypesDenial(script, grant.Refusal, grant.Reason, settings.ReadOnlyOptionName));
     }
 
     /// <summary>

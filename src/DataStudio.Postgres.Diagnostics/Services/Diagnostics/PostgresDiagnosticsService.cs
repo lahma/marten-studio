@@ -179,7 +179,7 @@ internal sealed class PostgresDiagnosticsService : IPostgresDiagnostics
         PostgresDiagnosticsSnapshot empty = new()
         {
             SchemaVersion = DiagnosticsJson.SchemaVersion,
-            Producer = DiagnosticsJson.ProducerFor(settings.Text.Product),
+            Producer = DiagnosticsJson.Producer,
             GeneratedAt = timeProvider.GetUtcNow(),
             Database = asked,
         };

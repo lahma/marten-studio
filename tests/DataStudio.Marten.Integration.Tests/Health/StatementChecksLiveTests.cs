@@ -319,7 +319,7 @@ public class StatementChecksLiveTests(PostgresFixture postgres, StatementsServer
         finding.Severity.Should().Be(HealthSeverity.Warning);
         finding.Evidence.Where(static x => x.Label.StartsWith("Statement ", StringComparison.Ordinal) && !x.Label.EndsWith(" JIT", StringComparison.Ordinal))
             .Should().Contain(static x => x.Value.Contains("mt_doc_customer", StringComparison.Ordinal));
-        finding.Finding.Remedy!.Code.Should().Be(JitShareCheck.RemedyCode);
+        finding.Finding.Remedy!.Code.Should().Be(DataStudio.Marten.Services.MartenStudioText.Instance.JitRemedyCode);
     }
 
     // ------------------------------------------------------------------------------------------------

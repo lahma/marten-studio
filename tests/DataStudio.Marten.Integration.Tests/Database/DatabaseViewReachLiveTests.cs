@@ -195,7 +195,7 @@ public class DatabaseViewReachLiveTests(DatabaseViewReachLiveTests.Fixture fixtu
             x.RequireRowAccessAsync(BrowserHost.Scope, fixture.LegacySchema, "zz_docs", cancellationToken: Token));
 
         rows.Refusal.Should().Be(DatabaseRefusal.MartenOwned);
-        rows.Reason.Should().Be(DatabaseGate.MartenDependencyDenial);
+        rows.Reason.Should().Be(DataStudio.Marten.Services.MartenStudioText.Instance.MartenDependencyDenial);
 
         DatabaseObjectDefinition query = await host.ObjectsAsync(x => x.GetDefinitionAsync(
             BrowserHost.Scope, new DatabaseObjectRef(DatabaseObjectKind.View, fixture.LegacySchema, "zz_docs"), Token));

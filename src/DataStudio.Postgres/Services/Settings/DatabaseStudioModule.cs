@@ -1,6 +1,7 @@
 using DataStudio.Services.Settings;
 using DataStudio.Services;
 using DataStudio.Postgres.Components.Layout;
+using DataStudio.Postgres.Services.Postgres;
 
 namespace DataStudio.Postgres.Services.Settings;
 
@@ -19,6 +20,7 @@ internal sealed class DatabaseStudioModule : IStudioModule
     private readonly IStudioSettings settings;
     private readonly StudioCapabilityGuard guard;
     private readonly IReadOnlyList<StudioNavSection> navigation;
+    private readonly IReadOnlyList<StudioShortcutGroup> shortcuts;
 
     /// <summary>Creates the module for the studio registered in this container.</summary>
     /// <param name="descriptor">The studio's descriptor.</param>
@@ -34,6 +36,7 @@ internal sealed class DatabaseStudioModule : IStudioModule
         this.settings = settings;
         this.guard = guard;
         navigation = descriptor.Navigation(settings);
+        shortcuts = [.. PostgresStudioShortcuts.Groups, .. descriptor.ExtraShortcuts];
     }
 
     /// <inheritdoc />
@@ -74,13 +77,12 @@ internal sealed class DatabaseStudioModule : IStudioModule
     {
         get
         {
-            // Each heading names its module, as every other module's does, so that beside another module's groups none reads as nobody's.
-            List<StudioModuleCapabilityGroup> groups = [new(descriptor.ProductName + ": reads authorized like writes", Rows(guard.OfferedReads))];
+            List<StudioModuleCapabilityGroup> groups = [new("reads authorized like writes", Rows(guard.OfferedReads))];
 
             IReadOnlyList<StudioCapability> mutating = guard.OfferedMutating;
             if (mutating.Count > 0)
             {
-                groups.Add(new(descriptor.ProductName + ": mutating operations", Rows(mutating)));
+                groups.Add(new("mutating operations", Rows(mutating)));
             }
 
             return groups;
@@ -88,10 +90,18 @@ internal sealed class DatabaseStudioModule : IStudioModule
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// The module's own <c>ReadOnly</c>, while it is on. The chip draws groups only while the shell's switch is off, so a <c>ReadOnly</c> that
+    /// is on here is this module's.
+    /// </remarks>
+    public string? ReadOnlyOption => settings.ReadOnly ? settings.ReadOnlyOptionName : null;
+
+    /// <inheritdoc />
     public string? AllCapabilitiesOption => settings.AllCapabilities();
 
     /// <inheritdoc />
-    public IReadOnlyList<StudioShortcutGroup> Shortcuts => descriptor.ExtraShortcuts;
+    /// <remarks>The Postgres module's components' own, then the Marten module's document lists and editor, where the module is the Marten one.</remarks>
+    public IReadOnlyList<StudioShortcutGroup> Shortcuts => shortcuts;
 
     /// <inheritdoc />
     /// <remarks>Empty: the Activity page's footer keeps naming the studio's own range, 9200-9211, as literal text in phase A.</remarks>

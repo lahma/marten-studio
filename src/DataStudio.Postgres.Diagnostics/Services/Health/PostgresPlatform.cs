@@ -305,7 +305,7 @@ internal sealed record PostgresServerFacts(DateTimeOffset ReadAt, int VersionNum
         {
             if (logger?.IsEnabled(LogLevel.Debug) == true)
             {
-                logger.LogDebug(exception, "{Product} could not read the Aurora instance of {DatabaseId}", context.Settings.Text.ProductName, context.DatabaseId);
+                logger.LogDebug(exception, "Data Studio could not read the Aurora instance of {DatabaseId}", context.DatabaseId);
             }
 
             PostgresException? postgres = exception as PostgresException ?? exception.InnerException as PostgresException;

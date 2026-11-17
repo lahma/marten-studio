@@ -28,13 +28,13 @@ internal sealed class PostgresDiagnosticsSettings : IDiagnosticsSettings
     private PostgresDiagnosticsOptions Value => options.Value;
 
     /// <inheritdoc />
-    public string ProductName => "Postgres Studio";
-
-    /// <inheritdoc />
     public string OptionsTypeName => nameof(PostgresDiagnosticsOptions);
 
     /// <inheritdoc />
     public StudioText Text => PostgresStudioText.DiagnosticsInstance;
+
+    /// <inheritdoc />
+    public string SessionProduct => "Data Studio Diagnostics";
 
     /// <inheritdoc />
     public TimeSpan QueryTimeout => Value.QueryTimeout;

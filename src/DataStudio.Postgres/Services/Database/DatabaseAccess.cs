@@ -507,7 +507,8 @@ internal sealed class DatabaseAccess
                 resolved.Source.Key,
                 others,
                 settings.Text,
-                definitions),
+                definitions,
+                settings.ReadOnlyOptionName),
             DatabaseRefusal.None,
             null);
     }
@@ -540,7 +541,7 @@ internal sealed class DatabaseAccess
             return new DatabaseBrowseGrant(
                 null,
                 denied.Reason == CapabilityDenialReason.ReadOnly ? DatabaseRefusal.ReadOnly : DatabaseRefusal.CapabilityOff,
-                denied.Reason == CapabilityDenialReason.ReadOnly ? settings.Text.BrowseReadOnlyDenial : settings.Text.BrowseCapabilityDenial);
+                denied.Reason == CapabilityDenialReason.ReadOnly ? settings.Text.BrowseReadOnlyDenial(settings.ReadOnlyOptionName) : settings.Text.BrowseCapabilityDenial);
         }
 
         // 2. The two policies, of the database as a whole - nothing here is tenant-scoped - and asked one at a
@@ -649,7 +650,7 @@ internal sealed class DatabaseAccess
                 return new DatabaseBrowseGrant(
                     null,
                     readOnly ? DatabaseRefusal.ReadOnly : DatabaseRefusal.CapabilityOff,
-                    readOnly ? settings.Text.DefinitionReadOnlyDenial : settings.Text.DefinitionCapabilityDenial);
+                    readOnly ? settings.Text.DefinitionReadOnlyDenial(settings.ReadOnlyOptionName) : settings.Text.DefinitionCapabilityDenial);
             }
         }
 

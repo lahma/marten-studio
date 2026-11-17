@@ -39,7 +39,7 @@ internal sealed class PostgresStudioSettings : IStudioSettings
     private PostgresOptions Value => options.Value;
 
     /// <inheritdoc />
-    public string ProductName => "Postgres Studio";
+    public string ProductName => shell.ProductName;
 
     /// <inheritdoc />
     public string OptionsTypeName => nameof(PostgresOptions);
@@ -159,7 +159,7 @@ internal sealed class PostgresStudioSettings : IStudioSettings
             _ => throw new ArgumentOutOfRangeException(
                 nameof(capability),
                 capability,
-                "PostgresCapabilities has no property for this capability: Postgres Studio does not offer it."),
+                "PostgresCapabilities has no property for this capability: the Postgres module does not offer it."),
         };
     }
 }

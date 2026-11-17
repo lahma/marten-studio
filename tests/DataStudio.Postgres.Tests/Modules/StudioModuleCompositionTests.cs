@@ -227,8 +227,9 @@ public class StudioModuleCompositionTests
     {
         DatabaseStudioModule module = Database();
 
-        module.CapabilityGroups.Should().NotBeEmpty().And.OnlyContain(static x => x.Heading.StartsWith("Postgres Studio: ", StringComparison.Ordinal));
-        module.CapabilityGroups[0].Heading.Should().Be("Postgres Studio: reads authorized like writes");
+        module.ProductName.Should().Be("Postgres");
+        module.CapabilityGroups.Should().NotBeEmpty();
+        module.CapabilityGroups[0].Name.Should().Be("reads authorized like writes");
     }
 
     [Fact]

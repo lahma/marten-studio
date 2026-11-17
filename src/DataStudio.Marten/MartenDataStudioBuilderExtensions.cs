@@ -158,7 +158,7 @@ public static class MartenDataStudioBuilderExtensions
         services.TryAddScoped<IRelationshipNodeSource, MartenRelationshipNodeSource>();
         services.TryAddEnumerable(ServiceDescriptor.Scoped<INavIndicatorContributor, MartenNavIndicatorContributor>());
 
-        // 1.0-P3C: Marten Studio's plan insights (P26 to P28), judged against the document tables the store in scope declares.
+        // 1.0-P3C: Data Studio's plan insights (P26 to P28), judged against the document tables the store in scope declares.
         services.TryAddEnumerable(ServiceDescriptor.Scoped<IPlanInsightContributor, MartenPlanInsightContributor>());
 
         // 1.2-INDEX-A: the Statements page's index advisor, in Marten's terms - a document table's indexes are the StoreOptions lines

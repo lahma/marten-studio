@@ -190,7 +190,7 @@
         {
             @* The tiles above already say "unknown"; this says why, and offers the retry. Everything
                below is gated on the same answer, so a failure here is the one that has to be legible. *@
-            <ErrorAlert Message="@($"Marten Studio could not read this database's event tables: {countsError}")"
+            <ErrorAlert Message="@($"Data Studio could not read this database's event tables: {countsError}")"
                         OnRetry="RefreshAsync" />
         }
         else if (counts.Error is { } countsReadError)
@@ -341,7 +341,7 @@
                     else if (activity.Count == 0)
                     {
                         <p class="ms-muted">
-                            No one has changed anything through Marten Studio since this process started.
+                            No one has changed anything through Data Studio since this process started.
                         </p>
                     }
                     else
@@ -428,7 +428,7 @@
         <div class="ms-empty">
             <p class="ms-empty-title">No Marten store to show</p>
             <p class="ms-empty-description">
-                This application registered no Marten store that you are authorized to see. Marten Studio
+                This application registered no Marten store that you are authorized to see. Data Studio
                 renders the stores the host configured - add <code>AddMarten(...)</code> to the container,
                 or check the policy named by <code>MartenOptions.StoreAuthorizationPolicy</code>.
             </p>

@@ -4,8 +4,6 @@ using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 
-using DataStudio.Postgres.Services.Settings;
-
 namespace DataStudio.Postgres.Services.Diagnostics;
 
 /// <summary>
@@ -51,12 +49,11 @@ internal static class DiagnosticsJson
     };
 
     /// <summary>
-    /// What <see cref="PostgresDiagnosticsSnapshot.Producer" /> says: the package and its release, <c>PostgresStudio 0.5.0</c> -
-    /// both studios ship at one version, so PostgresStudio's assembly says it for either. The API's snapshot and the studio's
-    /// download say it the same way.
+    /// What <see cref="PostgresDiagnosticsSnapshot.Producer" /> says: the product and its release, <c>Data Studio 2.0.0</c> - every
+    /// module ships at one version, so the engine's assembly says it for all. The API's snapshot and the studio's download say it
+    /// the same way.
     /// </summary>
-    internal static string ProducerFor(StudioProduct product) =>
-        (product == StudioProduct.MartenStudio ? "MartenStudio " : "PostgresStudio ") + Release;
+    internal static string Producer => "Data Studio " + Release;
 
     private static readonly string Release = ReleaseOf(
         typeof(DiagnosticsJson).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion);

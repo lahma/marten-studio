@@ -29,7 +29,7 @@ internal class DiagnosticsDescriptor
     /// <summary>The studio's key: <c>marten</c>. Also what <c>StudioRegistrationMarker</c> holds.</summary>
     public required string Key { get; init; }
 
-    /// <summary>The product's name in a sentence: <c>Marten Studio</c>.</summary>
+    /// <summary>The module's name, as the chip, the rail's credit and the front page's tile say it: <c>Marten</c>.</summary>
     public required string ProductName { get; init; }
 
     /// <summary>

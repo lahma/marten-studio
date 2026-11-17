@@ -61,7 +61,7 @@ internal static class KafkaAccessText
     public static string Describe(WireError error) => error switch
     {
         WireError.NotAuthorized refusal => Needs(refusal),
-        WireError.AuthenticationFailed failure => "Not available: the cluster refused KStudio's credentials (" + failure.Code + ")",
+        WireError.AuthenticationFailed failure => "Not available: the cluster refused Data Studio's credentials (" + failure.Code + ")",
         WireError.Unsupported unsupported => "Not available: this broker does not support " + unsupported.Api,
         WireError.NotFound notFound => string.Create(
             CultureInfo.InvariantCulture,

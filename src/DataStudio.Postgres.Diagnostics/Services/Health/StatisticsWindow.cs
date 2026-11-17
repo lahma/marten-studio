@@ -640,8 +640,7 @@ internal sealed record StatisticsWindow
             string? sqlState = (exception as PostgresException ?? exception.InnerException as PostgresException)?.SqlState;
             logger.LogDebug(
                 exception,
-                "{Product} read no timeline and no system identifier for database {DatabaseId} ({SqlState}): the statistics window goes on without them",
-                context.Settings.Text.ProductName,
+                "Data Studio read no timeline and no system identifier for database {DatabaseId} ({SqlState}): the statistics window goes on without them",
                 context.DatabaseId,
                 sqlState ?? exception.GetType().Name);
         }

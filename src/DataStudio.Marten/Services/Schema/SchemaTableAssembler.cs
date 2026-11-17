@@ -1,6 +1,7 @@
 using DataStudio.Marten.Internal.Sql;
 using DataStudio.Postgres.Services.Database;
 using DataStudio.Postgres.Services.Schema;
+using DataStudio.Postgres.Services.Settings;
 
 namespace DataStudio.Marten.Services.Schema;
 
@@ -200,11 +201,13 @@ internal static class SchemaTableAssembler
     /// for the database as a whole, or the write policy with <c>BrowseDatabase</c> named - as
     /// <see cref="DatabaseAccess.EvaluatePoliciesAsync" /> reports it.
     /// </param>
+    /// <param name="readOnlyOption">The switch that is on when <paramref name="readOnly" /> is, as a host spells it; <see langword="null" /> is the Marten module's own.</param>
     public static string? PartitionCountsWithheld(
         bool readOnly,
         bool capabilityEnabled,
         bool? authorized,
-        DatabaseRefusal refusal = DatabaseRefusal.WritePolicy)
+        DatabaseRefusal refusal = DatabaseRefusal.WritePolicy,
+        string? readOnlyOption = null)
     {
         if (capabilityEnabled && authorized == true)
         {
@@ -216,12 +219,14 @@ internal static class SchemaTableAssembler
             "the database browser's gate, because a per-tenant partition count and a tenancy table's row count " +
             "are both the number of tenants. ";
 
+        StudioText words = MartenStudioText.Instance;
+
         return Why + (readOnly
-            ? DatabaseGate.ReadOnlyDenial
+            ? words.BrowseReadOnlyDenial(readOnlyOption ?? words.OptionName("ReadOnly"))
             : !capabilityEnabled
                 ? "It needs MartenOptions.Capabilities.BrowseDatabase."
                 : refusal == DatabaseRefusal.StorePolicy
-                    ? DatabaseGate.StorePolicyDenial
-                    : DatabaseGate.WritePolicyDenial);
+                    ? words.BrowseStorePolicyDenial
+                    : words.BrowseWritePolicyDenial);
     }
 }

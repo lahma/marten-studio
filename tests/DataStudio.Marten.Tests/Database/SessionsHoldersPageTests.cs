@@ -23,7 +23,7 @@ namespace DataStudio.Marten.Tests.Database;
 public class SessionsHoldersPageTests
 {
     private static readonly SessionDetailsAccess Closed =
-        new(false, false, null, DatabaseRefusal.CapabilityOff, SessionActivityService.CapabilityDenial);
+        new(false, false, null, DatabaseRefusal.CapabilityOff, DataStudio.Marten.Services.MartenStudioText.Instance.SessionsCapabilityDenial);
 
     private static readonly SessionDetailsAccess Open = new(true, false, true, DatabaseRefusal.None, null);
 

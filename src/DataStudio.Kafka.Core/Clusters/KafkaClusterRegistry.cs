@@ -58,7 +58,7 @@ internal sealed class KafkaClusterRegistry
 
         if (services is null && options.ClusterSources.Count > 0)
         {
-            throw new InvalidOperationException("KStudio's Kafka options name a cluster source, which needs the application's services to run.");
+            throw new InvalidOperationException("Data Studio's Kafka options name a cluster source, which needs the application's services to run.");
         }
 
         // The snapshot first, and the snapshot is what is validated: nothing written to the options after this line reaches the engine.
@@ -67,7 +67,7 @@ internal sealed class KafkaClusterRegistry
 
         if (problems.Count > 0)
         {
-            throw new InvalidOperationException("KStudio's Kafka options are not valid: " + string.Join(" ", problems));
+            throw new InvalidOperationException("Data Studio's Kafka options are not valid: " + string.Join(" ", problems));
         }
 
         this.options = options;

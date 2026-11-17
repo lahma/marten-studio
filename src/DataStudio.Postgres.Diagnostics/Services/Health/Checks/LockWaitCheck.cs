@@ -317,9 +317,7 @@ internal sealed class LockWaitCheck : HealthCheck<LockWaitFacts>
         ArgumentNullException.ThrowIfNull(head);
         ArgumentNullException.ThrowIfNull(text);
 
-        string migration = text.Product == StudioProduct.MartenStudio
-            ? "a migration queued behind it (ApplyAllDatabaseChangesOnStartup, db-apply)"
-            : "a migration queued behind it (an ALTER TABLE, from whatever tool runs the host's migrations)";
+        string migration = text.MigrationBehindVacuum;
 
         return "The head of the chain is " + head.VacuumLabel + ". "
             + (head.PreventsWraparound

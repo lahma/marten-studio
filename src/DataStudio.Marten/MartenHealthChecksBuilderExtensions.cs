@@ -11,7 +11,7 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 namespace DataStudio.Marten;
 
 /// <summary>
-/// Adds Marten Studio's health advisor to the host's own ASP.NET Core health checks.
+/// Adds Data Studio's health advisor to the host's own ASP.NET Core health checks.
 /// </summary>
 public static class MartenHealthChecksBuilderExtensions
 {

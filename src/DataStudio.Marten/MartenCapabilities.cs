@@ -1,7 +1,7 @@
 namespace DataStudio.Marten;
 
 /// <summary>
-/// The operations Marten Studio is allowed to perform beyond browsing the store: the mutating ones, and
+/// The operations Data Studio is allowed to perform beyond browsing the store: the mutating ones, and
 /// the reads that are authorized like writes - the three that reach past the store's own documents and
 /// events (<see cref="RunSql"/>, <see cref="BrowseDatabase"/> and <see cref="ViewDefinitions"/>), the one that
 /// names other sessions (<see cref="ViewDatabaseActivity"/>) and the one that evaluates a typed expression

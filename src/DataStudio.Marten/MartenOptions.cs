@@ -84,7 +84,7 @@ public sealed class MartenOptions
     /// The <c>application_name</c> the studio's sessions carry in <c>pg_stat_activity</c>, Database › Sessions and an external
     /// monitor, so that the studio's load is never mistaken for the application's (issue #44). <see langword="null" /> - the
     /// default - is the application's own name from its connection string with the studio's after it in parentheses
-    /// (<c>orders-api (Marten Studio)</c>), or the studio's alone; an empty string leaves the application's own name. It is set for
+    /// (<c>orders-api (Data Studio)</c>), or the studio's alone; an empty string leaves the application's own name. It is set for
     /// each of the studio's read-only transactions only (<c>set_config(…, true)</c>), so a pooled connection goes back to the
     /// application as it came. Printable ASCII, at most 63 characters: what PostgreSQL keeps as written.
     /// </summary>
@@ -172,7 +172,7 @@ public sealed class MartenOptions
     /// </para>
     /// <para>
     /// The check's row on the Health page shows the reason only beside a finding the visitor may see. The <em>Accepted
-    /// checks</em> list on the Server page (and on Marten Studio's Configuration page) is configuration, shown to anyone who
+    /// checks</em> list on the Server page (and on Data Studio's Configuration page) is configuration, shown to anyone who
     /// may open that page, so a reason should hold nothing you would not show them.
     /// </para>
     /// <para>

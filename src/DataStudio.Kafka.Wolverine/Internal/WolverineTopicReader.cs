@@ -95,7 +95,7 @@ internal static class WolverineTopicReader
         {
             if (!KafkaTopicName.IsValid(name))
             {
-                notes.Add(new KafkaSourceNote("a topic", "its name is one KStudio cannot address", "The topic '" + name + "' was not listed: its name is one KStudio cannot address."));
+                notes.Add(new KafkaSourceNote("a topic", "its name is one Data Studio cannot address", "The topic '" + name + "' was not listed: its name is one Data Studio cannot address."));
                 continue;
             }
 

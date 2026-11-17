@@ -82,7 +82,7 @@ internal sealed class KafkaStudioModule(IOptions<KafkaOptions> options) : IStudi
     public IReadOnlyList<StudioModuleCapabilityGroup> CapabilityGroups =>
     [
         new StudioModuleCapabilityGroup(
-            KafkaStudioText.CapabilitiesHeading,
+            KafkaStudioText.CapabilitiesGroup,
             [
                 .. KafkaCapabilityGuard.Offered.Select(capability => new StudioModuleCapability(
                     capability.ToString(),

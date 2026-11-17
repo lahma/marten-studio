@@ -198,7 +198,7 @@ internal sealed class ConnectionInsightService : IConnectionInsightService
         {
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                logger.LogDebug(exception, "{Product} could not read the connection facts of {DatabaseId}", settings.Text.ProductName, whole.DatabaseId);
+                logger.LogDebug(exception, "Data Studio could not read the connection facts of {DatabaseId}", whole.DatabaseId);
             }
 
             return ConnectionPageView.Refused(
@@ -264,7 +264,7 @@ internal sealed class ConnectionInsightService : IConnectionInsightService
             audit.RecordCapabilityDenied(denied, ApplicationsAction, ApplicationsTarget);
 
             return denied.Reason == CapabilityDenialReason.ReadOnly
-                ? ConnectionApplicationsView.Refused(DatabaseRefusal.ReadOnly, settings.Text.SessionsReadOnlyDenial)
+                ? ConnectionApplicationsView.Refused(DatabaseRefusal.ReadOnly, settings.Text.SessionsReadOnlyDenial(settings.ReadOnlyOptionName))
                 : ConnectionApplicationsView.Refused(DatabaseRefusal.CapabilityOff, settings.Text.SessionsCapabilityDenial);
         }
 
@@ -330,7 +330,7 @@ internal sealed class ConnectionInsightService : IConnectionInsightService
 
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                logger.LogDebug(exception, "{Product} could not read the application sessions of {DatabaseId}", settings.Text.ProductName, whole.DatabaseId);
+                logger.LogDebug(exception, "Data Studio could not read the application sessions of {DatabaseId}", whole.DatabaseId);
             }
 
             return ConnectionApplicationsView.Refused(
@@ -399,7 +399,7 @@ internal sealed class ConnectionInsightService : IConnectionInsightService
         {
             // Nobody is asked about a capability the process does not have.
             return capabilities.ReadOnly
-                ? new SessionDetailsAccess(false, true, null, DatabaseRefusal.ReadOnly, settings.Text.SessionsReadOnlyDenial)
+                ? new SessionDetailsAccess(false, true, null, DatabaseRefusal.ReadOnly, settings.Text.SessionsReadOnlyDenial(settings.ReadOnlyOptionName))
                 : new SessionDetailsAccess(false, false, null, DatabaseRefusal.CapabilityOff, settings.Text.SessionsCapabilityDenial);
         }
 
@@ -441,7 +441,7 @@ internal sealed class ConnectionInsightService : IConnectionInsightService
     internal static string StorePolicyDenial(IStudioSettings settings)
     {
         StudioText text = settings.Text;
-        string policy = text.Product == StudioProduct.PostgresStudio ? text.OptionName("SourceAuthorizationPolicy") : text.OptionName("StoreAuthorizationPolicy");
+        string policy = text.ScopePolicyOption;
 
         return "Your account may not see how this application connects. The policy (" + policy + ") refused this " + text.SourceNoun
             + " and database as a whole, with no tenant selected: a connection belongs to no tenant.";

@@ -34,7 +34,7 @@ internal sealed class MartenStudioSettings : IStudioSettings
     internal IReadOnlyDictionary<string, ProjectionLagThreshold> ProjectionThresholds => Value.ProjectionLagThresholdsByName;
 
     /// <inheritdoc />
-    public string ProductName => "Marten Studio";
+    public string ProductName => shell.ProductName;
 
     /// <inheritdoc />
     public string OptionsTypeName => nameof(MartenOptions);
@@ -43,7 +43,7 @@ internal sealed class MartenStudioSettings : IStudioSettings
     public string CapabilitiesTypeName => nameof(MartenCapabilities);
 
     /// <inheritdoc />
-    public StudioText Text => StudioText.Marten;
+    public StudioText Text => MartenStudioText.Instance;
 
     /// <inheritdoc />
     public string Title => shell.Title;

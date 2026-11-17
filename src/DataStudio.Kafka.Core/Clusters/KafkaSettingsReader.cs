@@ -115,8 +115,8 @@ internal sealed class KafkaSettingsReader(KafkaEngineSnapshot settings)
             KafkaSettingExposure.Shown => MaskUserInfo(value),
             KafkaSettingExposure.Secret => string.IsNullOrEmpty(value) ? "not set" : "set",
             KafkaSettingExposure.Path => value,
-            KafkaSettingExposure.Removed => "removed: KStudio's clients never use it",
-            _ => "value withheld: KStudio does not know this setting",
+            KafkaSettingExposure.Removed => "removed: Data Studio's clients never use it",
+            _ => "value withheld: Data Studio does not know this setting",
         };
 
         return new KafkaSettingRow(key, exposure, shown, role);

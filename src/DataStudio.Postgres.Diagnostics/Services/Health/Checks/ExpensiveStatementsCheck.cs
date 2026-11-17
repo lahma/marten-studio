@@ -583,7 +583,7 @@ internal static class StatementPlanAdvice
         IReadOnlySet<string> lockedTables,
         StudioText? text = null)
     {
-        text ??= StudioText.Marten;
+        text ??= StudioText.Of(null);
 
         ArgumentNullException.ThrowIfNull(scans);
         ArgumentNullException.ThrowIfNull(statement);

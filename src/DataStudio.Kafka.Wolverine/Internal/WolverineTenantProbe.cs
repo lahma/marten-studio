@@ -55,7 +55,7 @@ internal static class WolverineTenantProbe
     /// <summary>The most tenants one transport lists.</summary>
     internal const int MaxTenants = 200;
 
-    private const string ShapeReason = "this Wolverine version does not expose them as KStudio expects";
+    private const string ShapeReason = "this Wolverine version does not expose them as Data Studio expects";
 
     /// <summary>Reads the tenants of <paramref name="transport" />.</summary>
     /// <param name="transport">A Kafka transport of the application's Wolverine configuration.</param>
@@ -122,8 +122,8 @@ internal static class WolverineTenantProbe
                 {
                     notes.Add(new KafkaSourceNote(
                         "a tenant cluster",
-                        "its id is one KStudio cannot address",
-                        "A tenant's cluster was not listed: its id is one KStudio cannot address."));
+                        "its id is one Data Studio cannot address",
+                        "A tenant's cluster was not listed: its id is one Data Studio cannot address."));
                     continue;
                 }
 
@@ -137,7 +137,7 @@ internal static class WolverineTenantProbe
                     notes.Add(new KafkaSourceNote(
                         "a tenant cluster",
                         "Wolverine had not connected it",
-                        "Tenant " + id + "'s cluster is not listed: Wolverine had not connected it when KStudio read the configuration after the application started."));
+                        "Tenant " + id + "'s cluster is not listed: Wolverine had not connected it when Data Studio read the configuration after the application started."));
                     continue;
                 }
 

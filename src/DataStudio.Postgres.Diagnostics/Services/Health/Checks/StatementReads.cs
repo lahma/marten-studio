@@ -100,7 +100,7 @@ internal sealed record StatementReadOutcome(StatementReadState State, StatementE
     public Exception? Cause { get; init; }
 
     /// <summary>The sentence a check's row says for a state that is not <see cref="StatementReadState.Read" />: H7's, unchanged.</summary>
-    public string? Reason => ReasonIn(StudioText.Marten);
+    public string? Reason => ReasonIn(StudioText.Of(null));
 
     /// <summary><see cref="Reason" /> in the words of the studio <paramref name="text" /> is - whose role recorded nothing.</summary>
     /// <param name="text">The studio's words.</param>
@@ -803,7 +803,7 @@ internal static class StatementWindows
         ArgumentNullException.ThrowIfNull(read);
         ArgumentNullException.ThrowIfNull(window);
         ArgumentNullException.ThrowIfNull(history);
-        text ??= StudioText.Marten;
+        text ??= StudioText.Of(null);
 
         string when = window.Watched
             ? "Measured " + Describe(window, read.ReadAt) + ", between two statement checks."

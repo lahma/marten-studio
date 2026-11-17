@@ -67,16 +67,6 @@ internal sealed class InvalidIndexCheck : HealthCheck<InvalidIndexFacts>
     /// <summary>The variant of a finding about the invalid indexes on a table's partitions; its subject is the table.</summary>
     internal const string PartitionsVariant = "partitions";
 
-    /// <summary>
-    /// What a partitioned table's invalid index needs instead of a re-apply, in MartenStudio
-    /// (<see cref="Settings.StudioText.PartitionedIndexRepair" /> is each studio's).
-    /// </summary>
-    internal const string PartitionedInWords =
-        " On a partitioned table a re-apply cannot resume the build: Weasel reads only the partitioned table's own indexes, "
-        + "and rebuilding under the same child index name fails while the leftover index on the partition is still there. A "
-        + "DBA drops that leftover partition index first; the next apply then builds the index again. The partition is not "
-        + "named here, because Marten names a tenant's partition after the tenant.";
-
     /// <inheritdoc />
     public override async Task<InvalidIndexFacts> GatherAsync(HealthCheckContext context, CancellationToken cancellationToken)
     {

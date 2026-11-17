@@ -244,7 +244,7 @@ public class RowDetailPageTests
     public async Task A_shut_gate_is_named_on_the_neutral_panel()
     {
         await using var context = await RowUiData.ContextAsync();
-        context.TableRows.Detail = TableRowDetail.Refused(DatabaseRefusal.CapabilityOff, DatabaseGate.CapabilityDenial);
+        context.TableRows.Detail = TableRowDetail.Refused(DatabaseRefusal.CapabilityOff, DataStudio.Marten.Services.MartenStudioText.Instance.BrowseCapabilityDenial);
 
         var page = Render(context, TriggerRow);
 
@@ -262,7 +262,7 @@ public class RowDetailPageTests
     public async Task A_policy_refusal_of_a_row_link_says_the_stores_own_structure_is_still_shown()
     {
         await using var context = await RowUiData.ContextAsync();
-        context.TableRows.Detail = TableRowDetail.Refused(DatabaseRefusal.WritePolicy, DatabaseGate.WritePolicyDenial);
+        context.TableRows.Detail = TableRowDetail.Refused(DatabaseRefusal.WritePolicy, DataStudio.Marten.Services.MartenStudioText.Instance.BrowseWritePolicyDenial);
 
         var page = Render(context, TriggerRow);
 

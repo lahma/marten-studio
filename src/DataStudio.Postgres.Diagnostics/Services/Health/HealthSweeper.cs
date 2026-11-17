@@ -708,7 +708,7 @@ internal sealed class HealthSweeper
             {
                 if (logger.IsEnabled(LogLevel.Debug))
                 {
-                    logger.LogDebug(exception, "{Product} did not sample Aurora's {Section} of {DatabaseId}", settings.Text.ProductName, section, context.DatabaseId);
+                    logger.LogDebug(exception, "Data Studio did not sample Aurora's {Section} of {DatabaseId}", section, context.DatabaseId);
                 }
             }
             else

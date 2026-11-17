@@ -357,7 +357,7 @@ internal sealed partial class ProjectionDataService
     /// recorded for D05 with its reason.
     /// </para>
     /// <para>
-    /// <b>Rebuilds, asked twice.</b> A rebuild Marten Studio is running is known at every version, from the operation
+    /// <b>Rebuilds, asked twice.</b> A rebuild Data Studio is running is known at every version, from the operation
     /// tracker; one somebody else started is known only where the daemon says so (<c>IsRebuilding</c>, JasperFx 2.86,
     /// whose <see langword="false" /> proves nothing). At the floor, JasperFx 2.74 has no guard: a start during a rebuild
     /// the studio did not start goes through and runs a continuous agent beside the replay - recorded by the live tests
@@ -431,7 +431,7 @@ internal sealed partial class ProjectionDataService
                 && string.Equals(x.Target, target.Name, StringComparison.OrdinalIgnoreCase)) is { } rebuild)
         {
             return RefuseStart(storeKey, databaseId, target, RebuildingReason, true,
-                target.Identity + " was not started: Marten Studio is rebuilding " + target.Name + " (operation " + rebuild.Id
+                target.Identity + " was not started: Data Studio is rebuilding " + target.Name + " (operation " + rebuild.Id
                 + "), and a continuous agent started now would run beside the replay. Start it once the rebuild has finished.");
         }
 
@@ -506,7 +506,7 @@ internal sealed partial class ProjectionDataService
 
     /// <summary>
     /// Why a rebuild would not be started, when the daemon here says this projection is already being rebuilt and it is
-    /// not Marten Studio doing it - "already rebuilding" as a state, not a failure.
+    /// not Data Studio doing it - "already rebuilding" as a state, not a failure.
     /// </summary>
     /// <remarks>
     /// A rebuild the studio is running is answered by the operation tracker with its own handle, as it always was. One
@@ -525,7 +525,7 @@ internal sealed partial class ProjectionDataService
             return null;
         }
 
-        return source.Name + " is already being rebuilt on this daemon, by something other than Marten Studio. Nothing was "
+        return source.Name + " is already being rebuilt on this daemon, by something other than Data Studio. Nothing was "
             + "started; the projections screen shows it as rebuilding until the daemon says it has finished.";
     }
 

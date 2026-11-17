@@ -14,7 +14,7 @@ public class PlanFactsInsightsTests
     private static readonly DateTimeOffset Now = new(2026, 11, 1, 12, 0, 0, TimeSpan.Zero);
 
     private static IReadOnlyList<PlanInsightFinding> Evaluate(string fixture, PlanFacts? facts, StudioText? text = null) =>
-        PlanInsights.Evaluate(PlanFixtures.Plan(fixture), text ?? StudioText.Marten, facts);
+        PlanInsights.Evaluate(PlanFixtures.Plan(fixture), text ?? DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance, facts);
 
     private static IReadOnlyList<PlanInsightFinding> Of(string code, string fixture, PlanFacts? facts) =>
         [.. Evaluate(fixture, facts).Where(x => x.Insight.Code == code)];
@@ -108,7 +108,7 @@ public class PlanFactsInsightsTests
         QueryPlan plan = QueryPlanReader.Read(PlanFixtures.Get("p16-fires").Replace("addresses", table, StringComparison.Ordinal)).Plan!;
         PlanFacts facts = Facts(Relation("public", table) with { Columns = [Column("city", "text"), Column("postcode", "text")] });
 
-        PlanInsightFinding finding = PlanInsights.Evaluate(plan, StudioText.Marten, facts).Single(static x => x.Insight.Code == "P16");
+        PlanInsightFinding finding = PlanInsights.Evaluate(plan, DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance, facts).Single(static x => x.Insight.Code == "P16");
 
         finding.Remedy.Should().Contain("(CREATE STATISTICS) over city, postcode").And.NotContain("CREATE STATISTICS \"");
     }
@@ -158,7 +158,7 @@ public class PlanFactsInsightsTests
             .Replace("\"users\"", "\"events\"", StringComparison.Ordinal)).Plan!;
         PlanFacts facts = Facts(Relation("public", "events") with { Columns = [Column("created_at", "timestamp without time zone")], Indexes = [Index("events_created_idx", "created_at")] });
 
-        PlanInsightFinding finding = PlanInsights.Evaluate(plan, StudioText.Marten, facts).Single(static x => x.Insight.Code == "P17");
+        PlanInsightFinding finding = PlanInsights.Evaluate(plan, DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance, facts).Single(static x => x.Insight.Code == "P17");
 
         finding.Message.Should().Contain("a cast to date").And.Contain("public.events.created_at");
         finding.Remedy.Should().Contain("Cast the other side").And.Contain("timestamp without time zone");
@@ -202,7 +202,7 @@ public class PlanFactsInsightsTests
             StringComparison.Ordinal);
         QueryPlan plan = QueryPlanReader.Read(json).Plan!;
 
-        PlanInsightFinding finding = PlanInsights.Evaluate(plan, StudioText.Marten, PartitionFacts(8)).Single(static x => x.Insight.Code == "P18");
+        PlanInsightFinding finding = PlanInsights.Evaluate(plan, DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance, PartitionFacts(8)).Single(static x => x.Insight.Code == "P18");
 
         finding.Message.Should().Contain("filters on the partition key (created_at), but not in a form Postgres could prune by");
     }
@@ -224,7 +224,7 @@ public class PlanFactsInsightsTests
         Of("P19", "p19-quiet", null).Should().BeEmpty();
 
         string right = PlanFixtures.Get("p19-fires").Replace("\"Actual Rows\": 50.0", "\"Actual Rows\": 1000.0", StringComparison.Ordinal);
-        PlanInsights.Evaluate(QueryPlanReader.Read(right).Plan!, StudioText.Marten).Should().NotContain(static x => x.Insight.Code == "P19");
+        PlanInsights.Evaluate(QueryPlanReader.Read(right).Plan!, DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance).Should().NotContain(static x => x.Insight.Code == "P19");
     }
 
     [Fact]
@@ -242,7 +242,7 @@ public class PlanFactsInsightsTests
         Of("P20", "p20-quiet", null).Should().BeEmpty();
 
         QueryPlan plain = QueryPlanReader.Read(PlanFixtures.Get("p20-fires").Replace("\"Execution Time\": 1000.0", "\"Execution Time\": null", StringComparison.Ordinal)).Plan!;
-        PlanInsights.Evaluate(plain, StudioText.Marten).Should().NotContain(static x => x.Insight.Code == "P20");
+        PlanInsights.Evaluate(plain, DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance).Should().NotContain(static x => x.Insight.Code == "P20");
     }
 
     // ---- Without facts -------------------------------------------------------------------------------------------------------
@@ -256,7 +256,7 @@ public class PlanFactsInsightsTests
     {
         QueryPlan plan = PlanFixtures.Plan(fixture);
 
-        PlanInsights.Evaluate(plan, StudioText.Marten).Select(static x => x.Insight.Code).Should().NotContain(["P15", "P16", "P17", "P18"]);
+        PlanInsights.Evaluate(plan, DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance).Select(static x => x.Insight.Code).Should().NotContain(["P15", "P16", "P17", "P18"]);
         PlanInsights.NotJudgedWithoutFacts(plan, null).Select(static x => x.Code).Should().Equal("P15", "P16", "P17", "P18");
         PlanInsights.NotJudgedWithoutFacts(plan, Facts()).Should().BeEmpty("with facts, they are judged");
     }
@@ -310,7 +310,7 @@ public class PlanFactsInsightsTests
     {
         PlanFacts facts = Facts(Relation("public", "orders") with { ModifiedSinceAnalyze = 200_000 });
 
-        Evaluate("p15-fires", facts, StudioText.Marten).Single(static x => x.Insight.Code == "P15").Remedy
+        Evaluate("p15-fires", facts, DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance).Single(static x => x.Insight.Code == "P15").Remedy
             .Should().Be(Evaluate("p15-fires", facts, PostgresStudioText.Instance).Single(static x => x.Insight.Code == "P15").Remedy);
     }
 }

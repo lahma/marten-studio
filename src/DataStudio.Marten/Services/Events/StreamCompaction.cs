@@ -410,7 +410,7 @@ internal static class StreamCompactionRules
     public static string RewindTenantNotAddressable(string tenant) =>
         "Tenant " + tenant + "'s agents are named with its id, and with a ':' in it that name does not read back as this "
         + "tenant's: the daemon would stop the tenant's agents and Marten would then refuse the rewind, leaving them "
-        + "stopped. Marten Studio does not rewind subscriptions for this tenant.";
+        + "stopped. Data Studio does not rewind subscriptions for this tenant.";
 
     /// <summary>
     /// What a rewind Marten or JasperFx refused as an unknown subscription is reported as - in place of their own message,

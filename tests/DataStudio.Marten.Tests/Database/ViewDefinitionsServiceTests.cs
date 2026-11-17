@@ -9,7 +9,6 @@ using Microsoft.Extensions.DependencyInjection;
 
 using DataStudio.Postgres.Services;
 using DataStudio.Postgres.Services.Database;
-using DataStudio.Postgres.Services.Settings;
 
 namespace DataStudio.Marten.Tests.Database;
 
@@ -52,7 +51,7 @@ public class ViewDefinitionsServiceTests
         definition.Found.Should().BeFalse();
         definition.Sql.Should().BeNull();
         definition.Refusal.Should().Be(DatabaseRefusal.WritePolicy);
-        definition.Reason.Should().Be(StudioText.Marten.DefinitionWritePolicyDenialFor("ViewDefinitions"),
+        definition.Reason.Should().Be(DataStudio.Marten.Services.MartenStudioText.Instance.DefinitionWritePolicyDenialFor("ViewDefinitions"),
             "only the capability that is on was asked, and the sentence says so");
 
         StudioActionLogEntry entry = harness.Ring.GetLatest().Should().ContainSingle().Which;
@@ -84,7 +83,7 @@ public class ViewDefinitionsServiceTests
         DatabaseObjectDefinition definition = await harness.Objects.GetDefinitionAsync(TenantScope, Definition, Token);
 
         definition.Refusal.Should().Be(DatabaseRefusal.WritePolicy);
-        definition.Reason.Should().Be(StudioText.Marten.DefinitionWritePolicyDenialFor("ViewDefinitions and BrowseDatabase"));
+        definition.Reason.Should().Be(DataStudio.Marten.Services.MartenStudioText.Instance.DefinitionWritePolicyDenialFor("ViewDefinitions and BrowseDatabase"));
 
         StudioActionLogEntry entry = harness.Ring.GetLatest().Should().ContainSingle().Which;
         entry.Capability.Should().Be(nameof(StudioCapability.BrowseDatabase),
@@ -111,7 +110,7 @@ public class ViewDefinitionsServiceTests
         DatabaseObjectDefinition definition = await harness.Objects.GetDefinitionAsync(TenantScope, Definition, Token);
 
         definition.Refusal.Should().Be(DatabaseRefusal.StorePolicy);
-        definition.Reason.Should().Be(StudioText.Marten.BrowseStorePolicyDenial);
+        definition.Reason.Should().Be(DataStudio.Marten.Services.MartenStudioText.Instance.BrowseStorePolicyDenial);
         harness.Ring.GetLatest().Should().ContainSingle().Which.Capability.Should().Be(nameof(StudioCapability.ViewDefinitions));
         harness.Policies.Calls.Should().NotContain(static x => x.Resource.Capability == nameof(StudioCapability.ViewDefinitions),
             "the store policy answers for the database before any capability is asked about it");
@@ -125,7 +124,7 @@ public class ViewDefinitionsServiceTests
         DatabaseObjectDefinition definition = await harness.Objects.GetDefinitionAsync(TenantScope, Definition, Token);
 
         definition.Refusal.Should().Be(DatabaseRefusal.CapabilityOff);
-        definition.Reason.Should().Be(StudioText.Marten.DefinitionCapabilityDenial);
+        definition.Reason.Should().Be(DataStudio.Marten.Services.MartenStudioText.Instance.DefinitionCapabilityDenial);
 
         StudioActionLogEntry entry = harness.Ring.GetLatest().Should().ContainSingle().Which;
         entry.Capability.Should().Be(nameof(StudioCapability.BrowseDatabase));
@@ -147,7 +146,7 @@ public class ViewDefinitionsServiceTests
 
         DatabaseObjectDefinition definition = await harness.Objects.GetDefinitionAsync(TenantScope, Definition, Token);
         definition.Refusal.Should().Be(DatabaseRefusal.ReadOnly);
-        definition.Reason.Should().Be(StudioText.Marten.DefinitionReadOnlyDenial);
+        definition.Reason.Should().Be(DataStudio.Marten.Services.MartenStudioText.Instance.DefinitionReadOnlyDenial("MartenOptions.ReadOnly"));
 
         DatabaseSequenceValue value = await harness.Objects.GetSequenceValueAsync(TenantScope, "legacy", "orders_id_seq", Token);
         value.Refusal.Should().Be(DatabaseRefusal.ReadOnly);
@@ -168,7 +167,7 @@ public class ViewDefinitionsServiceTests
 
         value.Found.Should().BeFalse();
         value.Refusal.Should().Be(DatabaseRefusal.CapabilityOff, "a value is data: BrowseDatabase's alone");
-        value.Reason.Should().Be(StudioText.Marten.BrowseCapabilityDenial).And.Contain("MartenOptions.Capabilities.BrowseDatabase");
+        value.Reason.Should().Be(DataStudio.Marten.Services.MartenStudioText.Instance.BrowseCapabilityDenial).And.Contain("MartenOptions.Capabilities.BrowseDatabase");
 
         StudioActionLogEntry entry = harness.Ring.GetLatest().Should().ContainSingle().Which;
         entry.Action.Should().Be(DatabaseObjectService.SequenceValueAction);
@@ -191,7 +190,7 @@ public class ViewDefinitionsServiceTests
 
         rows.Allowed.Should().BeFalse();
         rows.Refusal.Should().Be(DatabaseRefusal.CapabilityOff);
-        rows.Reason.Should().Be(StudioText.Marten.BrowseCapabilityDenial, "rows are refused naming BrowseDatabase, in 0.4's sentence");
+        rows.Reason.Should().Be(DataStudio.Marten.Services.MartenStudioText.Instance.BrowseCapabilityDenial, "rows are refused naming BrowseDatabase, in 0.4's sentence");
 
         harness.Ring.GetLatest().Should().ContainSingle().Which.Capability.Should().Be(nameof(StudioCapability.BrowseDatabase));
         harness.Policies.Calls.Should().NotContain(static x => x.Resource.Capability == nameof(StudioCapability.ViewDefinitions),

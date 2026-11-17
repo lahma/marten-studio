@@ -580,7 +580,7 @@ internal sealed class StatementsService : IStatementsService
         if (!capabilities.IsEnabled(StudioCapability.ViewDatabaseActivity))
         {
             return (Refuse(asked, capabilities.ReadOnly ? DatabaseRefusal.ReadOnly : DatabaseRefusal.CapabilityOff,
-                capabilities.ReadOnly ? text.StatementsReadOnlyDenial : text.StatementsCapabilityDenial), null, asked);
+                capabilities.ReadOnly ? text.StatementsReadOnlyDenial(settings.ReadOnlyOptionName) : text.StatementsCapabilityDenial), null, asked);
         }
 
         // 2. The scope, resolved with no tenant: the store policy, which the resolver asks before it looks anything up.

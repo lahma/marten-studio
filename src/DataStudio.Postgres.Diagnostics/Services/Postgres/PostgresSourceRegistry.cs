@@ -531,7 +531,7 @@ internal sealed class PostgresSourceRegistry
             {
                 string registration = keyed ? " under the key '" + key + "'" : string.Empty;
                 throw new InvalidOperationException(
-                    type.Name + registration + " is registered as " + descriptor.Lifetime + ", and Postgres Studio keeps what a "
+                    type.Name + registration + " is registered as " + descriptor.Lifetime + ", and Data Studio keeps what a "
                     + "source's factory answers for the life of the process: register it as a singleton, or the studio would hold "
                     + "one scope's instance for every visitor.");
             }

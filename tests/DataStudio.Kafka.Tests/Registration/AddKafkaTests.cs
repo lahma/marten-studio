@@ -130,10 +130,10 @@ public class AddKafkaTests
         using ServiceProvider postgresFirst = Build(static services => services.AddDataStudio().AddPostgres().AddKafka());
 
         string[] Headings(ServiceProvider provider) =>
-            [.. provider.GetRequiredService<StudioShellDescriptor>().Modules.SelectMany(static x => x.CapabilityGroups).Select(static x => x.Heading)];
+            [.. provider.GetRequiredService<StudioShellDescriptor>().Modules.SelectMany(static x => x.CapabilityGroups.Select(group => x.ProductName + ": " + group.Name))];
 
-        Headings(kafkaFirst).First().Should().Be("KStudio for Apache Kafka® reads");
-        Headings(postgresFirst).First().Should().StartWith("Postgres Studio: ");
+        Headings(kafkaFirst).First().Should().Be("Kafka: reads");
+        Headings(postgresFirst).First().Should().StartWith("Postgres: ");
         Headings(postgresFirst).Last().Should().Be("KStudio for Apache Kafka® reads");
         kafkaFirst.GetRequiredService<StudioShellDescriptor>().Modules.Select(static x => x.ProductName).Should().Equal("KStudio for Apache Kafka®", "Postgres Studio");
         postgresFirst.GetRequiredService<StudioShellDescriptor>().Modules.Select(static x => x.ProductName).Should().Equal("Postgres Studio", "KStudio for Apache Kafka®");
@@ -174,8 +174,8 @@ public class AddKafkaTests
         module.PageAssemblies.Should().ContainSingle().Which.CompileTimeRoot.Should().Be("/kafka");
         module.HomeRoute.Should().Be("kafka");
         module.Summary.Should().Be("Topics, record search and live tail of the application's clusters.");
-        module.ProductName.Should().Be("KStudio for Apache Kafka®");
-        module.CapabilityGroups.Should().ContainSingle().Which.Heading.Should().Be("KStudio for Apache Kafka® reads");
+        module.ProductName.Should().Be("Kafka");
+        module.CapabilityGroups.Should().ContainSingle().Which.Name.Should().Be("reads");
         module.CapabilityGroups.Single().Capabilities.Should().Equal(
             new StudioModuleCapability("SearchRecords", "KafkaOptions.Capabilities.SearchRecords", Configured: true),
             new StudioModuleCapability("ReadPayloads", "KafkaOptions.Capabilities.ReadPayloads", Configured: false),

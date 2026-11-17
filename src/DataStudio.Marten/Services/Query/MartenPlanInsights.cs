@@ -7,7 +7,7 @@ using DataStudio.Postgres.Services.Query;
 namespace DataStudio.Marten.Services.Query;
 
 /// <summary>
-/// 1.0-P3C (issue #28 phase 3): Marten Studio's plan insights P26 to P28 - what a plan says about a document table that only a
+/// 1.0-P3C (issue #28 phase 3): Data Studio's plan insights P26 to P28 - what a plan says about a document table that only a
 /// studio that knows the store's configuration can say - pure evaluators over the plan, the facts beside it and the tables the
 /// store declares (<see cref="MartenPlanTable" />). They read no database and run no Marten LINQ terminal: what the store declares comes
 /// from <c>StoreOptions</c> alone (hard rule 14), and a remedy is a <c>StoreOptions</c> line, never DDL and never run.
@@ -39,7 +39,7 @@ internal static partial class MartenPlanInsights
     public static readonly PlanInsightInfo FilteredAfterIndex =
         new("P28", "Tenant or soft-delete predicate filtered after the index", HealthSeverity.Warning, true);
 
-    /// <summary>Every Marten Studio plan insight, by code.</summary>
+    /// <summary>Every Data Studio plan insight, by code.</summary>
     public static IReadOnlyList<PlanInsightInfo> All { get; } = [JsonFilterWithoutIndex, GinNotUsed, FilteredAfterIndex];
 
     /// <summary>The prefix of every Marten document table's name.</summary>

@@ -231,7 +231,7 @@ internal sealed class DangerousSettingsCheck : HealthCheck<DangerousSettingsFact
                     HealthSeverity.Info,
                     name + " = " + setting.Value + " on " + facts.Platform.Name + ", whose storage manages durability itself",
                     "On a server's own disk this would be Critical: " + why + " " + facts.Platform.Name + " replaces Postgres's storage with "
-                    + "its own, and the provider manages durability - " + evaluation.Text.ProductName + " cannot verify this setting's meaning on "
+                    + "its own, and the provider manages durability - Data Studio cannot verify this setting's meaning on "
                     + facts.Platform.Name + ", so it reports the value rather than judging it. The provider's documentation, or its support, "
                     + "is where to confirm it.",
                     bad == "off" ? "on" : "off",

@@ -59,8 +59,18 @@ internal interface IStudioModule
     /// </summary>
     string ExposedSentence { get; }
 
-    /// <summary>The module's capabilities as the chip lists them, one heading each, read live on every render; empty for a module with none.</summary>
+    /// <summary>
+    /// The module's capabilities as the chip lists them, one group each, read live on every render; empty for a module with none. The chip
+    /// draws each group under the heading <c>{ProductName}: {group name}</c>, the same shape for every module.
+    /// </summary>
     IReadOnlyList<StudioModuleCapabilityGroup> CapabilityGroups { get; }
+
+    /// <summary>
+    /// The module's own switch that turns all of its capabilities off, spelled as a host writes it (<c>MartenOptions.ReadOnly</c>), while that
+    /// switch is on; <see langword="null" /> while it is off and for a module with no switch of its own. The chip says it under the module's first
+    /// group. The shell's own switch is not here: it turns the chip itself into "Read-only".
+    /// </summary>
+    string? ReadOnlyOption => null;
 
     /// <summary>The one-line opt-in that turns all of the module's capabilities on (<c>MartenCapabilities.All()</c>), or <see langword="null" /> for a module with none.</summary>
     string? AllCapabilitiesOption { get; }
@@ -81,10 +91,10 @@ internal interface IStudioModule
 /// <param name="Configured">Whether the host switched it on, without the master switch.</param>
 internal sealed record StudioModuleCapability(string Name, string Option, bool Configured);
 
-/// <summary>A heading and the capabilities listed under it in the chip's popover.</summary>
-/// <param name="Heading">The group's heading, and its list's accessible name.</param>
+/// <summary>A named group of a module's capabilities, listed under the module's name in the chip's popover.</summary>
+/// <param name="Name">The group's name without the module's: <c>reads authorized like writes</c>.</param>
 /// <param name="Capabilities">The group's capabilities, in order.</param>
-internal sealed record StudioModuleCapabilityGroup(string Heading, IReadOnlyList<StudioModuleCapability> Capabilities);
+internal sealed record StudioModuleCapabilityGroup(string Name, IReadOnlyList<StudioModuleCapability> Capabilities);
 
 /// <summary>
 /// Composes the registered modules into the shell's descriptor (D34): every module in registration order, the order of the host's <c>Add…()</c>

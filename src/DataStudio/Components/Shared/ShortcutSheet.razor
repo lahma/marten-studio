@@ -7,8 +7,8 @@
     (not while a text field has focus, and not over another dialog), so it needs no circuit round trip and works the moment the page
     has loaded. It is not a form (D23), and Close is a plain button the script answers to (`data-ms-dialog-close`).
 
-    The list is data, not markup: StudioShortcuts holds the shared groups and the studio's descriptor adds its own (ExtraShortcuts),
-    so a Postgres Studio host never reads a key only a Marten page answers to. There are two global keys, `?` and Esc; the
+    The list is data, not markup: StudioShortcuts holds the groups of the shell's own components and every composed module adds its own
+    (IStudioModule.Shortcuts), so a host never reads a key none of its pages answers to. There are two global keys, `?` and Esc; the
     rest work where focus is on the control that handles them, which each group's title says.
 *@
 

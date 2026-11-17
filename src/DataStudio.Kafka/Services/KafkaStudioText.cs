@@ -16,20 +16,20 @@ internal static class KafkaStudioText
     /// <summary>The durable audit events KStudio logs, as the Activity page's footer names them (#77): 9600 to 9609 (9610 and 9611 are not audit events), see <c>KafkaStudioLog</c>.</summary>
     public const string AuditEventIds = "9600-9609";
 
-    /// <summary>The product on first prominent use: the rail's credit line, the capability heading, the README.</summary>
-    public const string ProductName = "KStudio for Apache Kafka®";
+    /// <summary>The module's name: the rail's credit line, the chip's headings and the front page's tile.</summary>
+    public const string ProductName = "Kafka";
 
-    /// <summary>The capability chip's group heading.</summary>
-    public const string CapabilitiesHeading = "KStudio for Apache Kafka® reads";
+    /// <summary>The capability chip's group name, under the module's: <c>Kafka: reads</c>.</summary>
+    public const string CapabilitiesGroup = "reads";
 
     /// <summary>The sentence the anonymous banner adds after the host studio's own.</summary>
     public const string ExposedSentence =
-        "KStudio's pages show the clusters, topics, partitions and consumer groups this application's Kafka credentials can describe, "
+        "Data Studio's pages show the clusters, topics, partitions and consumer groups this application's Kafka credentials can describe, "
         + "and whatever its capabilities read.";
 
     /// <summary>The disclaimer every Kafka page ends with.</summary>
     public const string Trademark =
-        "Apache Kafka is a trademark of the Apache Software Foundation. KStudio is not affiliated with or endorsed by the Apache Software Foundation.";
+        "Apache Kafka is a trademark of the Apache Software Foundation. Data Studio is not affiliated with or endorsed by the Apache Software Foundation.";
 
     /// <summary>The Activity entry of a refusal by a cluster or topic policy: it names neither, so a refusal says nothing it should not.</summary>
     public const string RefusedEntry = "Refused by the cluster or topic policy.";
@@ -92,14 +92,14 @@ internal static class KafkaStudioText
 
     /// <summary>The lead paragraph of the cluster settings page.</summary>
     public const string SettingsLead =
-        "The settings this application handed KStudio for this cluster, one by one. A secret shows only whether it is set; a path is shown and the "
-        + "file is never read; a setting KStudio does not know is listed with its value withheld.";
+        "The settings this application handed Data Studio for this cluster, one by one. A secret shows only whether it is set; a path is shown and the "
+        + "file is never read; a setting Data Studio does not know is listed with its value withheld.";
 
     /// <summary>The refusal of a host that enabled a capability no policy answers, at start.</summary>
     /// <param name="capabilities">The capabilities enabled, comma separated.</param>
     /// <param name="readOnlyOption">The host studio's master switch, spelled as its options spell it.</param>
     public static string CapabilityWithoutPolicy(string capabilities, string readOnlyOption) =>
-        $"KStudio has {capabilities} enabled and no policy decides who may use them: every visitor admitted to the studio could read the "
+        $"Data Studio has {capabilities} enabled and no policy decides who may use them: every visitor admitted to the studio could read the "
         + "records of every topic this application's credentials can read. Set KafkaOptions.CapabilityAuthorizationPolicy (asked for each "
         + "capability use, once per topic), or KafkaOptions.ClusterAuthorizationPolicy (asked for every read, once per topic), or turn the "
         + $"capabilities off; {readOnlyOption} = true turns them all off.";
@@ -515,7 +515,7 @@ internal static class KafkaStudioText
     public static string ProfileChipTitle(KafkaProfile profile) => profile switch
     {
         KafkaProfile.Development => "This cluster's profile is Development: it caps nothing; the limits are the ones the host set (Settings shows them).",
-        KafkaProfile.Test => "This cluster's profile is Test: it caps each scan at KStudio's default limits (Settings shows them).",
+        KafkaProfile.Test => "This cluster's profile is Test: it caps each scan at Data Studio's default limits (Settings shows them).",
         _ => "This cluster's profile is Production: it caps scans, the byte rate and the hourly allowance, and turns export and live tail off (Settings shows them).",
     };
 
@@ -568,7 +568,7 @@ internal static class KafkaStudioText
 
     /// <summary>The Keys panel when the anchor offers nothing to search for.</summary>
     public const string RelatedNoKeys =
-        "This record has no correlation value KStudio can use: its correlation fields are absent, redacted or cut.";
+        "This record has no correlation value Data Studio can use: its correlation fields are absent, redacted or cut.";
 
     /// <summary>The page for a link that names neither a record nor a value to look for.</summary>
     public const string RelatedLinkInvalid = "This link names no record or value to look for.";
@@ -652,7 +652,7 @@ internal static class KafkaStudioText
 
     /// <summary>The sentence under the discovered facts: what they are and are not.</summary>
     public const string DiscoveredLead =
-        "Read from the application's Wolverine configuration when KStudio first needed it. They describe how the application uses the topic, not what it holds.";
+        "Read from the application's Wolverine configuration when Data Studio first needed it. They describe how the application uses the topic, not what it holds.";
 
     /// <summary>The heading of the Settings page's section on what a cluster source listed and could not list.</summary>
     /// <param name="sources">The names of the sources, for example <c>Wolverine</c>.</param>
@@ -660,7 +660,7 @@ internal static class KafkaStudioText
 
     /// <summary>The sentence under the Settings page's discovery section.</summary>
     public const string DiscoveryLead =
-        "KStudio read the application's configuration once, and started, connected and wrote nothing. Discovery adds no redaction: declare rules for every topic that carries personal data.";
+        "Data Studio read the application's configuration once, and started, connected and wrote nothing. Discovery adds no redaction: declare rules for every topic that carries personal data.";
 
     /// <summary>What the Settings page says of a cluster a source listed.</summary>
     /// <param name="source">The source's name.</param>

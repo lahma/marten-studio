@@ -1,7 +1,6 @@
 using DataStudio.Postgres.Services.Health;
 using DataStudio.Postgres.Services.Health.Checks;
 using DataStudio.Postgres.Services.Postgres;
-using DataStudio.Postgres.Services.Settings;
 
 using static DataStudio.Postgres.Tests.Server.ServerTestFacts;
 
@@ -46,8 +45,8 @@ public class ServerWordsTests
     [Fact]
     public void T14s_timeout_backstop_names_K08_in_Marten_Studio_only()
     {
-        StudioText.Marten.LeaderTimeoutClause.Should().EndWith("(K08)");
-        ("is the DBA's backstop" + StudioText.Marten.LeaderTimeoutClause + ".").Should().Contain("HotCold");
+        DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance.LeaderTimeoutClause.Should().EndWith("(K08)");
+        ("is the DBA's backstop" + DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance.LeaderTimeoutClause + ".").Should().Contain("HotCold");
         ("is the DBA's backstop" + PostgresStudioText.Instance.LeaderTimeoutClause + ".").Should().Be("is the DBA's backstop.");
     }
 }

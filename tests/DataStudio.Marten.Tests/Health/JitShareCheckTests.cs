@@ -27,7 +27,7 @@ public class JitShareCheckTests
         statement.Value.Should().Be(HealthEvidence.StatementPending);
         finding.Evidence.Single(static x => x.Label == "Statement 1 JIT").Value.Should().StartWith("40% of its 1.5 s over 150 calls");
 
-        finding.Remedy!.Code.Should().Be(JitShareCheck.RemedyCode);
+        finding.Remedy!.Code.Should().Be(DataStudio.Marten.Services.MartenStudioText.Instance.JitRemedyCode);
         finding.Remedy.Code.Should().Contain("ConfigureNpgsqlDataSourceBuilder").And.Contain("ConnectionStringBuilder.Options").And.Contain("-c jit=off");
     }
 

@@ -18,14 +18,14 @@ internal sealed record StudioDaemonPause(
     string? TenantId);
 
 /// <summary>
-/// The pauses Marten Studio issued, remembered because the coordinator will not remember them for us.
+/// The pauses Data Studio issued, remembered because the coordinator will not remember them for us.
 /// </summary>
 /// <remarks>
 /// <para>
 /// <c>IProjectionCoordinator</c> has <c>PauseAsync()</c> and <c>ResumeAsync()</c> and no public "am I
 /// paused" of any kind (verified by decompiling JasperFx.Events 2.69.3's
 /// <c>ProjectionCoordinatorBase</c>: the paused state is the private <c>_cancellation</c>/<c>_runner</c>
-/// pair). So the studio records what <em>it</em> did and says only that: "Paused by Marten Studio
+/// pair). So the studio records what <em>it</em> did and says only that: "Paused by Data Studio
 /// (user, time)". It deliberately does not infer a pause from "this daemon has had no agents for a
 /// while" - a daemon with no agents is also what a store with no async projections looks like, what a
 /// HotCold node that lost the election looks like, and what a daemon that is still starting looks like.

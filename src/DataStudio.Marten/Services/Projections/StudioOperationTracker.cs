@@ -286,7 +286,7 @@ internal sealed class StudioOperationTracker : IDisposable
             if (running >= MaxRunning)
             {
                 throw new StudioOperationRefusedException(
-                    $"Marten Studio is already running {running} background operations, which is the most it will run at once. "
+                    $"Data Studio is already running {running} background operations, which is the most it will run at once. "
                     + "Wait for one of them to finish, or cancel it, and try again.");
             }
 

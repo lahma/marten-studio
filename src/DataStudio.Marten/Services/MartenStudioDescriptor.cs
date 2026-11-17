@@ -62,7 +62,7 @@ internal static class MartenStudioDescriptor
     private static StudioDescriptor Create() => new()
     {
         Key = Key,
-        ProductName = "Marten Studio",
+        ProductName = "Marten",
         PageAssemblies =
         [
             new StudioPageAssembly(typeof(Components.Pages.Overview).Assembly, PageRoot),

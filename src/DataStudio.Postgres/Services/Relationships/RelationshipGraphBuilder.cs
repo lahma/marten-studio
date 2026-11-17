@@ -105,7 +105,7 @@ internal static class RelationshipGraphBuilder
         ArgumentNullException.ThrowIfNull(declared);
         ArgumentNullException.ThrowIfNull(physicalKeys);
 
-        var builder = new Builder(nodes, database, text ?? StudioText.Marten);
+        var builder = new Builder(nodes, database, text ?? StudioText.Of(null));
 
         builder.RegisterTables(physicalKeys);
         builder.AddDeclared(declared);

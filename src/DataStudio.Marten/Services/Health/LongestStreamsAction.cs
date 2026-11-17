@@ -17,7 +17,6 @@ using Npgsql;
 using DataStudio.Postgres.Internal.Sql;
 using DataStudio.Postgres.Services;
 using DataStudio.Postgres.Services.Health;
-using DataStudio.Postgres.Services.Settings;
 using DataStudio.Postgres.Services.Sources;
 
 namespace DataStudio.Marten.Services.Health;
@@ -220,9 +219,9 @@ internal sealed class LongestStreamsAction(IOptions<MartenOptions> options, Colu
 
     private static HealthActionResult TimedOut(HealthActionContext context, bool canNarrow, DateTimeOffset now) =>
         HealthActionResult.TimedOut(
-            "It ran past its statement_timeout (" + StudioText.Marten.OptionName("QueryTimeout") + ", "
+            "It ran past its statement_timeout (" + MartenStudioText.Instance.OptionName("QueryTimeout") + ", "
             + EventHealth.Duration(context.Session.StatementTimeout) + "). "
-            + (canNarrow ? "Pick a tenant to narrow it, or raise " : "Raise ") + StudioText.Marten.OptionName("QueryTimeout") + ".",
+            + (canNarrow ? "Pick a tenant to narrow it, or raise " : "Raise ") + MartenStudioText.Instance.OptionName("QueryTimeout") + ".",
             now);
 
     /// <summary>Reads the statement's rows, at most <see cref="LongestStreamsQuery.MaxTake" />.</summary>

@@ -1,7 +1,6 @@
 using DataStudio.Postgres.Services.Database;
 using DataStudio.Postgres.Services.Health;
 using DataStudio.Postgres.Services.Health.Checks;
-using DataStudio.Postgres.Services.Settings;
 
 namespace DataStudio.Marten.Tests.Health;
 
@@ -48,7 +47,7 @@ public class LockWaitVacuumHeadTests
     [Fact]
     public void An_anti_wraparound_autovacuum_is_said_never_to_give_way_and_a_Marten_migration_is_named()
     {
-        string advice = LockWaitCheck.VacuumHeadAdvice(Head(true, true, true), StudioText.Marten);
+        string advice = LockWaitCheck.VacuumHeadAdvice(Head(true, true, true), DataStudio.Marten.Services.MartenStudioText.Instance);
 
         advice.Should().Contain("An anti-wraparound autovacuum does not give way to a lock request")
             .And.Contain("ApplyAllDatabaseChangesOnStartup, db-apply");

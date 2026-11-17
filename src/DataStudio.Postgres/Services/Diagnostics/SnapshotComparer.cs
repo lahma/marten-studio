@@ -160,7 +160,8 @@ internal static class SnapshotComparer
     private static string Name(PostgresDatabaseRef database) =>
         Cap(database.Source, MaxFileText) + " / " + (database.Database.Length == 0 ? "default" : Cap(database.Database, MaxFileText));
 
-    private static string ProductOf(string producer) => producer.Split(' ', 2)[0];
+    /// <summary>The product a producer string names: everything before its release, <c>Data Studio</c> of <c>Data Studio 2.0.0</c>.</summary>
+    private static string ProductOf(string producer) => producer.LastIndexOf(' ') is > 0 and var space ? producer[..space] : producer;
 
     /// <summary>One compare: the state the sections share, so each reads like the page it compares.</summary>
     private sealed class Run(PostgresDiagnosticsSnapshot earlier, VisitorView view, bool hides)

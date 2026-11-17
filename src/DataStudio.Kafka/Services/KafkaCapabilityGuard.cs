@@ -106,8 +106,8 @@ internal sealed class KafkaCapabilityDeniedException : InvalidOperationException
     /// <param name="readOnlyOption">The host studio's master switch, spelled as its options spell it.</param>
     public KafkaCapabilityDeniedException(KafkaCapability capability, CapabilityDenialReason reason, string readOnlyOption)
         : base(reason == CapabilityDenialReason.ReadOnly
-            ? $"KStudio refused '{capability}' because {readOnlyOption} is true, which turns every capability off."
-            : $"KStudio refused '{capability}' because {KafkaCapabilityGuard.OptionFor(capability)} is false.")
+            ? $"Data Studio refused '{capability}' because {readOnlyOption} is true, which turns every capability off."
+            : $"Data Studio refused '{capability}' because {KafkaCapabilityGuard.OptionFor(capability)} is false.")
     {
         Capability = capability;
         Reason = reason;

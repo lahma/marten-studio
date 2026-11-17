@@ -434,7 +434,7 @@ public class DatabaseGateRedactionTests
         DatabaseGate gate = new(StoreSchemas(), Live, ["*"], true, false, false, Classifier(), null, DatabaseRefusal.StorePolicy);
 
         gate.State.Refusal.Should().Be(DatabaseRefusal.StorePolicy);
-        gate.State.Denial.Should().Be(DatabaseGate.StorePolicyDenial);
+        gate.State.Denial.Should().Be(DataStudio.Marten.Services.MartenStudioText.Instance.BrowseStorePolicyDenial);
         gate.DataAccess("quartz").Refusal.Should().Be(DatabaseRefusal.StorePolicy);
     }
 

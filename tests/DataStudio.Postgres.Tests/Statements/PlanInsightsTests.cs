@@ -16,7 +16,7 @@ namespace DataStudio.Postgres.Tests.Statements;
 /// </summary>
 public class PlanInsightsTests
 {
-    private static readonly StudioText Marten = StudioText.Marten;
+    private static readonly StudioText Marten = DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance;
 
     /// <summary>
     /// Where each insight fires among the fixtures: the shapes the probe asked for, and P01 where the planner's estimate of

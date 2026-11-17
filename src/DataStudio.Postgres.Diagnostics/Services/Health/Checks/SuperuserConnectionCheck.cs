@@ -29,11 +29,11 @@ internal static class HostEnvironmentName
 /// <summary>How the posture checks name the connection they read on, in each studio's words.</summary>
 internal static class SourceWords
 {
-    /// <summary>"the store's data source" in MartenStudio, "the data source" in Postgres Studio, whose source is one.</summary>
+    /// <summary>The connection a posture finding names, in the module's words: <c>the store's data source</c>.</summary>
     public static string DataSource(Settings.StudioText text)
     {
         ArgumentNullException.ThrowIfNull(text);
-        return text.Product == Settings.StudioProduct.PostgresStudio ? "the data source" : text.SourcePossessive + " data source";
+        return text.ConnectionSource;
     }
 }
 

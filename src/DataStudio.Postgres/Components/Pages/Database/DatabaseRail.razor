@@ -464,7 +464,7 @@
     private string WithheldReason(DatabaseAccessState access) => access.Refusal switch
     {
         DatabaseRefusal.ReadOnly => "the studio is read-only",
-        DatabaseRefusal.CapabilityOff when Settings.Text.Product == StudioProduct.MartenStudio && !access.DefinitionsOpen =>
+        DatabaseRefusal.CapabilityOff when !Settings.Text.NamedSchemasAreOwn && !access.DefinitionsOpen =>
             "they need Capabilities.BrowseDatabase, or Capabilities.ViewDefinitions for the schemas BrowsableSchemas names",
         DatabaseRefusal.CapabilityOff => "they need Capabilities.BrowseDatabase",
         DatabaseRefusal.WritePolicy or DatabaseRefusal.StorePolicy => "your account may not browse them",
