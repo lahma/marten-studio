@@ -28,9 +28,9 @@ public class PlanPageTests
 
     private const string Join = "analyzed-join";
 
-    private static async Task<PostgresStudioComponentContext> ReadyAsync(bool runSql = true)
+    private static async Task<PostgresComponentContext> ReadyAsync(bool runSql = true)
     {
-        PostgresStudioComponentContext context = new();
+        PostgresComponentContext context = new();
 
         if (runSql)
         {
@@ -49,7 +49,7 @@ public class PlanPageTests
         ParameterTypes = types ?? [],
     };
 
-    private static async Task<IRenderedComponent<PlanPage>> RanAsync(PostgresStudioComponentContext context, string statement = "select o.id from orders o", PlanRunResult? result = null)
+    private static async Task<IRenderedComponent<PlanPage>> RanAsync(PostgresComponentContext context, string statement = "select o.id from orders o", PlanRunResult? result = null)
     {
         context.SqlConsole.NextPlan = result ?? Ran();
 
@@ -66,7 +66,7 @@ public class PlanPageTests
     [Fact]
     public async Task Without_RunSql_the_page_shows_the_consoles_disabled_state_naming_the_property_and_offers_only_the_paste_box()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync(runSql: false);
+        await using PostgresComponentContext context = await ReadyAsync(runSql: false);
 
         IRenderedComponent<PlanPage> page = context.Render<PlanPage>();
 
@@ -82,7 +82,7 @@ public class PlanPageTests
     [Fact]
     public async Task Without_RunSql_a_pasted_text_plan_is_drawn_and_nothing_is_run_or_audited()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync(runSql: false);
+        await using PostgresComponentContext context = await ReadyAsync(runSql: false);
         IRenderedComponent<PlanPage> page = context.Render<PlanPage>();
 
         string text = File.ReadAllText(DataStudio.Marten.Tests.Conventions.RepositoryRoot.Combine("tests", "DataStudio.Postgres.Tests", "Statements", "PlanCorpus", "text-hashjoin-analyze-pg17.txt"));
@@ -102,7 +102,7 @@ public class PlanPageTests
     [Fact]
     public async Task Under_ReadOnly_the_paste_box_is_still_offered()
     {
-        await using PostgresStudioComponentContext context = new();
+        await using PostgresComponentContext context = new();
         context.WithAllCapabilities();
         context.Options.ReadOnly = true;
         await context.ReadyAsync();
@@ -116,7 +116,7 @@ public class PlanPageTests
     [Fact]
     public async Task ReadOnly_says_so_in_the_disabled_state()
     {
-        await using PostgresStudioComponentContext context = new();
+        await using PostgresComponentContext context = new();
         context.WithAllCapabilities();
         context.Options.ReadOnly = true;
         await context.ReadyAsync();
@@ -130,7 +130,7 @@ public class PlanPageTests
     [Fact]
     public async Task A_write_policy_that_refuses_the_visitor_says_so_beside_the_editor_and_disables_it()
     {
-        await using PostgresStudioComponentContext context = new();
+        await using PostgresComponentContext context = new();
         context.WithAllCapabilities();
         context.Options.WriteAuthorizationPolicy = "write-policy";
         await context.ReadyAsync();
@@ -148,7 +148,7 @@ public class PlanPageTests
     [Fact]
     public async Task The_page_offers_the_editor_three_modes_seven_options_and_a_paste_box_and_runs_nothing_on_its_own()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
 
         IRenderedComponent<PlanPage> page = context.Render<PlanPage>();
 
@@ -165,7 +165,7 @@ public class PlanPageTests
     [Fact]
     public async Task The_options_that_count_what_a_statement_does_need_Explain_analyze_and_say_why()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
         IRenderedComponent<PlanPage> page = context.Render<PlanPage>();
 
         foreach (string option in new[] { "buffers", "timing", "wal", "serialize" })
@@ -193,7 +193,7 @@ public class PlanPageTests
     [Fact]
     public async Task A_generic_plan_needs_a_statement_with_placeholders()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
         IRenderedComponent<PlanPage> page = context.Render<PlanPage>();
 
         page.FindAll("input[name=ms-plan-mode]")[2].HasAttribute("disabled").Should().BeTrue();
@@ -207,7 +207,7 @@ public class PlanPageTests
     [Fact]
     public async Task A_statement_with_placeholders_gets_a_box_for_each_with_a_NULL_choice_and_the_values_go_to_the_console()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
         context.SqlConsole.NextPlan = Ran("p09-fires", types: ["integer", "text"]);
 
         IRenderedComponent<PlanPage> page = context.Render<PlanPage>();
@@ -240,7 +240,7 @@ public class PlanPageTests
     [Fact]
     public async Task The_generic_plan_sends_no_values()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
         context.SqlConsole.NextPlan = Ran("p09-fires");
 
         IRenderedComponent<PlanPage> page = context.Render<PlanPage>();
@@ -261,7 +261,7 @@ public class PlanPageTests
     [Fact]
     public async Task After_a_server_older_than_17_answers_MEMORY_and_SERIALIZE_are_disabled_with_the_release_and_the_options_it_left_out_are_named()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
         PlanRunResult result = Ran(major: 16) with { LeftOut = ["MEMORY (needs PostgreSQL 17)"] };
 
         IRenderedComponent<PlanPage> page = await RanAsync(context, result: result);
@@ -276,7 +276,7 @@ public class PlanPageTests
     [Fact]
     public async Task A_link_reopens_the_page_with_the_editor_the_mode_and_the_options_filled_and_does_not_run()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
         context.Navigate("studio/postgres/plan?sql=" + Uri.EscapeDataString("select 1 from t where a = $1") + "&mode=analyze&options=verbose,wal");
 
         IRenderedComponent<PlanPage> page = context.Render<PlanPage>();
@@ -296,7 +296,7 @@ public class PlanPageTests
     [Fact]
     public async Task A_run_writes_the_statement_the_mode_and_the_options_into_the_address_but_never_the_plan_or_a_value()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
         context.SqlConsole.NextPlan = Ran("p09-fires");
 
         IRenderedComponent<PlanPage> page = context.Render<PlanPage>();
@@ -316,7 +316,7 @@ public class PlanPageTests
     [Fact]
     public async Task VERBOSE_is_ticked_by_default_and_unticking_it_is_written_into_the_address_and_asked_for_in_the_run_and_the_facts_say_to_plan_again()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
         context.PlanFacts.Answer = _ => new PlanFacts(DateTimeOffset.UnixEpoch, [], []) { Unqualified = 1 };
 
         IRenderedComponent<PlanPage> page = context.Render<PlanPage>();
@@ -340,13 +340,13 @@ public class PlanPageTests
     [Fact]
     public async Task A_run_writes_the_scope_even_when_the_address_had_none()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
         context.CurrentUri.Should().NotContain("db=", "the premise: the address names no scope");
 
         await RanAsync(context);
 
         (string? source, string? database, _) = DataStudio.Postgres.Components.StudioScopeQuery.Read(
-            context.CurrentUri, DataStudio.Postgres.Services.Postgres.PostgresStudioDescriptor.Instance.SourceQueryParameter);
+            context.CurrentUri, DataStudio.Postgres.Services.Postgres.PostgresDescriptor.Instance.SourceQueryParameter);
         source.Should().Be(context.State.ActiveScope!.StoreKey);
         database.Should().Be(context.State.ActiveScope!.DatabaseId);
     }
@@ -354,7 +354,7 @@ public class PlanPageTests
     [Fact]
     public async Task The_default_mode_and_options_are_not_written_into_the_address()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
 
         IRenderedComponent<PlanPage> page = await RanAsync(context);
 
@@ -366,7 +366,7 @@ public class PlanPageTests
     [Fact]
     public async Task A_run_asks_the_console_for_the_plan_and_draws_the_summary_strip_the_tree_and_the_insights()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
 
         IRenderedComponent<PlanPage> page = await RanAsync(context);
 
@@ -396,7 +396,7 @@ public class PlanPageTests
     [Fact]
     public async Task A_plan_that_fires_P09_links_to_Maintenance_for_the_scope_on_screen()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
 
         IRenderedComponent<PlanPage> page = await RanAsync(context, result: Ran("p09-fires"));
 
@@ -408,7 +408,7 @@ public class PlanPageTests
     [Fact]
     public async Task A_guard_refusal_is_the_editors_error_with_a_caret_at_the_character()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
         context.SqlConsole.NextPlan = PlanRunResult.Refused(new SqlRejection("DisallowedStatement", "The console only runs select.", "delete", 0), 0);
 
         IRenderedComponent<PlanPage> page = context.Render<PlanPage>();
@@ -422,7 +422,7 @@ public class PlanPageTests
     [Fact]
     public async Task A_Postgres_error_points_into_the_typed_statement_not_the_statement_it_was_sent_in()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
 
         // "select nope from t": sent behind "explain (format json) " (22 characters), so Postgres counts from the 8th of 30.
         int sent = "explain (format json) ".Length + "select ".Length + 1;
@@ -443,7 +443,7 @@ public class PlanPageTests
     [Fact]
     public async Task The_first_keystroke_after_an_error_takes_it_and_its_caret_away()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
         int sent = "explain (format json) ".Length + "select ".Length + 1;
         context.SqlConsole.NextPlan = new PlanRunResult
         {
@@ -467,7 +467,7 @@ public class PlanPageTests
     [Fact]
     public async Task An_error_in_another_command_than_the_statement_points_at_no_character_of_it()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
         context.SqlConsole.NextPlan = new PlanRunResult { Error = new SqlError("22P02", "invalid input syntax for type integer: \"x\"", 14, null, null), ErrorOffset = -1 };
 
         IRenderedComponent<PlanPage> page = context.Render<PlanPage>();
@@ -482,7 +482,7 @@ public class PlanPageTests
     [Fact]
     public async Task A_plan_larger_than_the_studio_draws_says_so_and_draws_none()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
         context.SqlConsole.NextPlan = new PlanRunResult { PlanUnavailable = QueryPlanReader.TooLarge(9_000_000) };
 
         IRenderedComponent<PlanPage> page = context.Render<PlanPage>();
@@ -497,7 +497,7 @@ public class PlanPageTests
     [Fact]
     public async Task The_node_table_has_a_row_for_every_node_and_the_columns_the_plan_printed()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
         IRenderedComponent<PlanPage> page = await RanAsync(context);
 
         page.Find(".ms-plan-view-table").Click();
@@ -523,7 +523,7 @@ public class PlanPageTests
     [Fact]
     public async Task A_click_on_a_header_sorts_the_table_and_a_second_click_reverses_it_with_aria_sort_saying_so()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
         IRenderedComponent<PlanPage> page = await RanAsync(context);
         page.Find(".ms-plan-view-table").Click();
 
@@ -557,7 +557,7 @@ public class PlanPageTests
     [Fact]
     public async Task One_selected_node_is_shared_by_the_table_and_the_tree_in_both_directions()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
         IRenderedComponent<PlanPage> page = await RanAsync(context);
 
         // Nothing is selected, and no detail is drawn.
@@ -597,7 +597,7 @@ public class PlanPageTests
     [Fact]
     public async Task The_selected_nodes_every_key_is_listed_by_group_with_what_it_means()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
         IRenderedComponent<PlanPage> page = await RanAsync(context);
 
         page.FindAll(".ms-plan-node")[0].Click();
@@ -615,7 +615,7 @@ public class PlanPageTests
     [Fact]
     public async Task The_heat_select_colours_each_nodes_bar_and_prints_its_value_as_text()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
         IRenderedComponent<PlanPage> page = await RanAsync(context);
 
         page.FindAll(".ms-plan-heat-line, .ms-plan-heat-legend").Should().BeEmpty("no heat until one is asked for");
@@ -647,7 +647,7 @@ public class PlanPageTests
     [Fact]
     public async Task The_critical_path_toggle_marks_the_chain_in_the_tree_and_the_table()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
         IRenderedComponent<PlanPage> page = await RanAsync(context);
 
         page.FindAll(".ms-plan-critical, .ms-plan-critical-flag").Should().BeEmpty();
@@ -669,7 +669,7 @@ public class PlanPageTests
     [Fact]
     public async Task A_new_plan_forgets_the_selection_of_the_last_but_keeps_the_view_the_visitor_chose()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
         IRenderedComponent<PlanPage> page = await RanAsync(context);
         page.Find(".ms-plan-view-table").Click();
         page.FindAll(".ms-plan-row")[1].QuerySelector(".ms-plan-pick")!.Click();
@@ -684,7 +684,7 @@ public class PlanPageTests
 
     // ---- Paste a plan --------------------------------------------------------------------------------------------------
 
-    private static async Task PasteAsync(PostgresStudioComponentContext context, IRenderedComponent<PlanPage> page, string text)
+    private static async Task PasteAsync(PostgresComponentContext context, IRenderedComponent<PlanPage> page, string text)
     {
         JSRuntimeInvocationHandler<int> sending = context.JSInterop.Setup<int>("martenStudio.query.sendInChunks", static _ => true);
 
@@ -706,7 +706,7 @@ public class PlanPageTests
     [Fact]
     public async Task A_pasted_plan_is_drawn_with_a_tree_a_table_and_a_summary_and_nothing_goes_to_the_database()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
         IRenderedComponent<PlanPage> page = context.Render<PlanPage>();
 
         string plan = PlanFixtures.Get(Join);
@@ -729,7 +729,7 @@ public class PlanPageTests
     [Fact]
     public async Task Text_that_is_not_a_plan_says_so_under_the_paste_box_and_draws_nothing()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
         IRenderedComponent<PlanPage> page = context.Render<PlanPage>();
 
         await PasteAsync(context, page, "[\"not a plan\"]");
@@ -741,7 +741,7 @@ public class PlanPageTests
     [Fact]
     public async Task Pasting_nothing_says_there_is_nothing_to_draw()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
         IRenderedComponent<PlanPage> page = context.Render<PlanPage>();
 
         context.JSInterop.Setup<int>("martenStudio.query.sendInChunks", static _ => true).SetResult(0);
@@ -753,7 +753,7 @@ public class PlanPageTests
     [Fact]
     public async Task Text_longer_than_the_reader_reads_is_refused_by_the_browsers_helper_and_the_page_says_so()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
         IRenderedComponent<PlanPage> page = context.Render<PlanPage>();
 
         context.JSInterop.Setup<int>("martenStudio.query.sendInChunks", static _ => true).SetResult(PlanPaste.PastedTooLarge);
@@ -765,7 +765,7 @@ public class PlanPageTests
     [Fact]
     public async Task The_paste_box_is_not_bound_so_a_plan_never_travels_in_one_message()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
         IRenderedComponent<PlanPage> page = context.Render<PlanPage>();
 
         IElement textArea = page.Find("#ms-plan-paste");
@@ -780,7 +780,7 @@ public class PlanPageTests
     [Fact]
     public async Task Copy_as_Markdown_puts_the_summary_and_the_node_table_on_the_clipboard()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
         IRenderedComponent<PlanPage> page = await RanAsync(context);
         context.JSInterop.Setup<bool>("martenStudio.clipboard.copyText", static _ => true).SetResult(true);
 
@@ -797,7 +797,7 @@ public class PlanPageTests
     [Fact]
     public async Task Copy_JSON_and_Download_plan_json_hand_the_plan_to_the_browser_whole()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
         IRenderedComponent<PlanPage> page = await RanAsync(context);
         context.JSInterop.Setup<bool>("martenStudio.clipboard.copyText", static _ => true).SetResult(true);
         context.JSInterop.Setup<bool>("martenStudio.download.text", static _ => true).SetResult(true);
@@ -817,7 +817,7 @@ public class PlanPageTests
     [Fact]
     public async Task Download_for_speedscope_saves_plan_speedscope_json_in_speedscopes_format_named_for_the_statement()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
         IRenderedComponent<PlanPage> page = await RanAsync(context, "select o.id\nfrom orders o");
         context.JSInterop.Setup<bool>("martenStudio.download.text", static _ => true).SetResult(true);
 
@@ -846,7 +846,7 @@ public class PlanPageTests
     [Fact]
     public async Task A_pasted_plan_is_exported_for_speedscope_as_a_pasted_plan()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
         IRenderedComponent<PlanPage> page = context.Render<PlanPage>();
         context.JSInterop.Setup<bool>("martenStudio.download.text", static _ => true).SetResult(true);
 
@@ -865,7 +865,7 @@ public class PlanPageTests
     [Fact]
     public async Task The_console_view_has_none_of_the_analyzers_controls_and_nodes_that_do_not_react_to_a_click()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
 
         IRenderedComponent<PlanView> view = context.Render<PlanView>(parameters => parameters.Add(x => x.Json, PlanFixtures.Get(Join)));
 
@@ -878,7 +878,7 @@ public class PlanPageTests
     [Fact]
     public async Task The_consoles_SQL_panel_offers_Open_in_Plan_with_the_statement_in_the_address()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
 
         IRenderedComponent<SqlConsolePanel> panel = context.Render<SqlConsolePanel>();
         panel.FindAll(".ms-query-open-plan-link").Should().BeEmpty("there is no statement to carry yet");

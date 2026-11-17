@@ -499,7 +499,7 @@ public class RelationshipsLiveTests(RelationshipsLiveTests.Fixture fixture)
         RelationshipDataService service = RelationshipServiceBuilder.Build(
             scope.ServiceProvider,
             new StudioSnapshotCache(TimeProvider.System, TimeSpan.FromMinutes(5)),
-            MartenStudioSettings.Of(new MartenOptions { QueryTimeout = TimeSpan.FromSeconds(1) }),
+            MartenSettings.Of(new MartenOptions { QueryTimeout = TimeSpan.FromSeconds(1) }),
             loggers.CreateLogger<RelationshipDataService>());
 
         await using NpgsqlConnection holder = await Postgres.OpenAsync(token);

@@ -82,7 +82,7 @@ public class EngineOptionsSnapshotTests
             registry.Get("main"),
             registry.Settings,
             new WireReaderOptions(Guid.Parse("11111111-2222-3333-4444-555555555555"), WireIsolation.ReadCommitted, new KafkaScanLimits()),
-            new ConfluentClientEvents(new KStudioLoggers(new CapturingLoggerProvider().CreateFactory()), new KafkaLogOnce(TimeProvider.System), TimeProvider.System));
+            new ConfluentClientEvents(new KafkaEngineLoggers(new CapturingLoggerProvider().CreateFactory()), new KafkaLogOnce(TimeProvider.System), TimeProvider.System));
 
         reader.GroupId.Should().Be("kstudio-11111111222233334444555555555555");
     }

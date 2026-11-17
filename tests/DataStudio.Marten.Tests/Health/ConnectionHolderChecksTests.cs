@@ -326,7 +326,7 @@ public class ConnectionHolderChecksTests
     public void Neither_check_says_a_store_in_Postgres_Studios_words()
     {
         ConnectionHolderFacts facts = Facts(Limits(90), Group("orders", "billing-api", idle: 12), Group("orders", string.Empty, idle: 4));
-        HealthEvaluation evaluation = HealthEvaluation.At(Now, text: PostgresStudioText.Instance);
+        HealthEvaluation evaluation = HealthEvaluation.At(Now, text: PostgresText.Instance);
 
         List<HealthFinding> findings =
         [

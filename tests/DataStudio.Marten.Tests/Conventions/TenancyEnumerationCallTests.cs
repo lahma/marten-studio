@@ -79,7 +79,7 @@ public class TenancyEnumerationCallTests
     [
         // PS-1a: the resolver's and the scope catalog's three enumerations are one call now, the Marten source's
         // DatabasesAsync, which the shared resolver and catalog ask exactly where they used to ask the store.
-        new("src/DataStudio.Marten/Services/MartenStudioSourceProvider.cs", "AllDatabases", 1,
+        new("src/DataStudio.Marten/Services/MartenSourceProvider.cs", "AllDatabases", 1,
             "the implementation of IStudioSource.DatabasesAsync for a Marten store, and nothing else: every caller of "
             + "the seam is counted at its own call below"),
         new("src/DataStudio.Postgres/Services/Sources/StudioSourceResolver.cs", "DatabasesAsync", 1,

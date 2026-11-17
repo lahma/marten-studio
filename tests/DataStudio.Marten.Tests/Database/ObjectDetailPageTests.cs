@@ -125,7 +125,7 @@ public class ObjectDetailPageTests
         {
             Relation = detail.Relation! with
             {
-                Rows = DatabaseRowAccess.Refused(DatabaseRefusal.CapabilityOff, DataStudio.Marten.Services.MartenStudioText.Instance.BrowseCapabilityDenial),
+                Rows = DatabaseRowAccess.Refused(DatabaseRefusal.CapabilityOff, DataStudio.Marten.Services.MartenText.Instance.BrowseCapabilityDenial),
             },
         };
 
@@ -287,9 +287,9 @@ public class ObjectDetailPageTests
 
         (DatabaseAccessState access, DatabaseRowAccess rows, string expected) = why == nameof(DatabaseRefusal.CapabilityOff)
             ? (FakeDatabaseObjects.Access(DatabaseRefusal.CapabilityOff),
-                DatabaseRowAccess.Refused(DatabaseRefusal.CapabilityOff, DataStudio.Marten.Services.MartenStudioText.Instance.BrowseCapabilityDenial),
+                DatabaseRowAccess.Refused(DatabaseRefusal.CapabilityOff, DataStudio.Marten.Services.MartenText.Instance.BrowseCapabilityDenial),
                 // The query is a definition, so what the tab says is the definitions' sentence, which names both ways in.
-                DataStudio.Marten.Services.MartenStudioText.Instance.DefinitionCapabilityDenial)
+                DataStudio.Marten.Services.MartenText.Instance.DefinitionCapabilityDenial)
             : (FakeDatabaseObjects.Access(),
                 DatabaseRowAccess.Refused(DatabaseRefusal.HiddenDependency, DatabaseGate.HiddenDependencyDenial),
                 DatabaseGate.HiddenDependencyDenial);
@@ -320,7 +320,7 @@ public class ObjectDetailPageTests
                 Relation = detail.Relation! with
                 {
                     Schema = FakeDatabaseObjects.StoreSchema,
-                    Rows = DatabaseRowAccess.Refused(DatabaseRefusal.CapabilityOff, DataStudio.Marten.Services.MartenStudioText.Instance.BrowseCapabilityDenial),
+                    Rows = DatabaseRowAccess.Refused(DatabaseRefusal.CapabilityOff, DataStudio.Marten.Services.MartenText.Instance.BrowseCapabilityDenial),
                     DefinitionAvailable = false,
                 },
                 Access = FakeDatabaseObjects.Access(DatabaseRefusal.CapabilityOff),
@@ -332,7 +332,7 @@ public class ObjectDetailPageTests
 
         var page = DatabasePageData.RenderObject(context, FakeDatabaseObjects.StoreSchema, "order_totals", "definition");
 
-        page.Find(".ms-db-definition-tab .ms-db-refusal").TextContent.Trim().Should().Be(DataStudio.Marten.Services.MartenStudioText.Instance.DefinitionCapabilityDenial);
+        page.Find(".ms-db-definition-tab .ms-db-refusal").TextContent.Trim().Should().Be(DataStudio.Marten.Services.MartenText.Instance.DefinitionCapabilityDenial);
         real.DefinitionsAsked.Should().Be(0);
         real.Logs.Entries.Should().NotContain(static x => x.Level >= LogLevel.Warning);
         real.Ring.GetLatest().Should().BeEmpty();
@@ -366,7 +366,7 @@ public class ObjectDetailPageTests
         await page.Find(".ms-db-triggers .ms-db-expander").ClickAsync(new MouseEventArgs());
 
         page.Find(".ms-db-triggers .ms-db-definition-row .ms-db-refusal").TextContent.Trim().Should().Be(
-            DataStudio.Marten.Services.MartenStudioText.Instance.DefinitionWritePolicyDenialFor("BrowseDatabase"),
+            DataStudio.Marten.Services.MartenText.Instance.DefinitionWritePolicyDenialFor("BrowseDatabase"),
             "the grid is handed the detail's own gate, which names the policy that said no, and the one capability it asked about");
         context.DatabaseObjects.DefinitionsAsked.Should().BeEmpty();
     }
@@ -516,7 +516,7 @@ public class ObjectDetailPageTests
     public void A_link_outside_the_gate_gets_the_same_neutral_panel_and_leaks_nothing()
     {
         using var context = DatabasePageData.Context();
-        string sentence = DatabaseGate.SchemaDenial("secret", ["quartz", "legacy"], DataStudio.Marten.Services.MartenStudioText.Instance);
+        string sentence = DatabaseGate.SchemaDenial("secret", ["quartz", "legacy"], DataStudio.Marten.Services.MartenText.Instance);
         context.DatabaseObjects.Detail = DatabaseObjectDetail.Unavailable(DatabaseRefusal.SchemaNotBrowsable, sentence);
 
         var page = DatabasePageData.RenderObject(context, "secret", "payroll");
@@ -548,7 +548,7 @@ public class ObjectDetailPageTests
         context.DatabaseObjects.Detail = why switch
         {
             "policy" => DatabaseObjectDetail.Unavailable(DatabaseRefusal.WritePolicy, "Your account may not browse the database here."),
-            "withheld schema" => DatabaseObjectDetail.Unavailable(DatabaseRefusal.SchemaNotBrowsable, DatabaseGate.SchemaDenial("secret", ["quartz", "legacy"], DataStudio.Marten.Services.MartenStudioText.Instance)),
+            "withheld schema" => DatabaseObjectDetail.Unavailable(DatabaseRefusal.SchemaNotBrowsable, DatabaseGate.SchemaDenial("secret", ["quartz", "legacy"], DataStudio.Marten.Services.MartenText.Instance)),
             _ => null,
         };
 
@@ -613,7 +613,7 @@ public class ObjectDetailPageTests
     {
         using var context = DatabasePageData.Context();
         context.DatabaseObjects.Detail = DatabaseObjectDetail.Unavailable(
-            DatabaseRefusal.SchemaNotBrowsable, DatabaseGate.SchemaDenial("secret", ["quartz", "legacy"], DataStudio.Marten.Services.MartenStudioText.Instance));
+            DatabaseRefusal.SchemaNotBrowsable, DatabaseGate.SchemaDenial("secret", ["quartz", "legacy"], DataStudio.Marten.Services.MartenText.Instance));
 
         var page = DatabasePageData.RenderObject(context, "secret", "payroll");
 

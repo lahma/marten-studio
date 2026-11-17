@@ -22,10 +22,10 @@ namespace DataStudio.Postgres.Tests.Replication;
 /// </summary>
 public class ReplicationPageTests
 {
-    private static async Task<(PostgresStudioComponentContext Context, FakeReplicationService Service)> ContextAsync(ReplicationView view, bool capabilities = true)
+    private static async Task<(PostgresComponentContext Context, FakeReplicationService Service)> ContextAsync(ReplicationView view, bool capabilities = true)
     {
         FakeReplicationService service = new(view);
-        PostgresStudioComponentContext context = new(services => services.AddSingleton<IReplicationService>(service));
+        PostgresComponentContext context = new(services => services.AddSingleton<IReplicationService>(service));
 
         if (capabilities)
         {
@@ -41,13 +41,13 @@ public class ReplicationPageTests
             names,
             names ? null : "Your account's write policy did not allow ViewDatabaseActivity for this database, so no standby or slot is named.",
             HealthHistoryView.Empty,
-            PostgresStudioText.Instance);
+            PostgresText.Instance);
 
     [Fact]
     public async Task The_sections_are_drawn_in_the_order_the_brief_gives_each_table_in_a_scroll_region()
     {
-        (PostgresStudioComponentContext context, FakeReplicationService service) = await ContextAsync(View(names: true, [ReplicationViewTests.Standby()]));
-        await using PostgresStudioComponentContext owned = context;
+        (PostgresComponentContext context, FakeReplicationService service) = await ContextAsync(View(names: true, [ReplicationViewTests.Standby()]));
+        await using PostgresComponentContext owned = context;
 
         var page = context.Render<ReplicationPage>();
         page.WaitForAssertion(() => page.FindAll(".ms-repl-section").Should().HaveCount(7));
@@ -78,9 +78,9 @@ public class ReplicationPageTests
             Wal = ReplicationRead<WalStatistics>.Of(new WalStatistics(1000, 250, 64e6, 0, 12_345, 678, 14.6, 4_049.8, ReplicationTestFacts.Now.AddDays(-3))),
         };
 
-        (PostgresStudioComponentContext context, _) = await ContextAsync(
-            ReplicationService.Build(facts, true, null, HealthHistoryView.Empty, PostgresStudioText.Instance));
-        await using PostgresStudioComponentContext owned = context;
+        (PostgresComponentContext context, _) = await ContextAsync(
+            ReplicationService.Build(facts, true, null, HealthHistoryView.Empty, PostgresText.Instance));
+        await using PostgresComponentContext owned = context;
 
         var page = context.Render<ReplicationPage>();
         page.WaitForAssertion(() => page.FindAll(".ms-repl-section").Should().HaveCount(7));
@@ -94,8 +94,8 @@ public class ReplicationPageTests
     public async Task Untimed_writes_and_syncs_are_counted_and_no_time_is_made_up()
     {
         // ReplicationViewTests.Facts(): 10 writes, 5 syncs, no timing and no reset time.
-        (PostgresStudioComponentContext context, _) = await ContextAsync(View(names: true));
-        await using PostgresStudioComponentContext owned = context;
+        (PostgresComponentContext context, _) = await ContextAsync(View(names: true));
+        await using PostgresComponentContext owned = context;
 
         var page = context.Render<ReplicationPage>();
         page.WaitForAssertion(() => page.FindAll(".ms-repl-section").Should().HaveCount(7));
@@ -111,9 +111,9 @@ public class ReplicationPageTests
             Wal = ReplicationRead<WalStatistics>.Of(new WalStatistics(1000, 250, 64e6, 0, null, null, null, null, null)),
         };
 
-        (PostgresStudioComponentContext context, _) = await ContextAsync(
-            ReplicationService.Build(facts, true, null, HealthHistoryView.Empty, PostgresStudioText.Instance));
-        await using PostgresStudioComponentContext owned = context;
+        (PostgresComponentContext context, _) = await ContextAsync(
+            ReplicationService.Build(facts, true, null, HealthHistoryView.Empty, PostgresText.Instance));
+        await using PostgresComponentContext owned = context;
 
         var page = context.Render<ReplicationPage>();
         page.WaitForAssertion(() => page.FindAll(".ms-repl-section").Should().HaveCount(7));
@@ -124,8 +124,8 @@ public class ReplicationPageTests
     [Fact]
     public async Task With_pg_read_all_stats_a_standbys_lag_is_drawn_and_its_name_through_the_activity_gate()
     {
-        (PostgresStudioComponentContext context, _) = await ContextAsync(View(names: true, [ReplicationViewTests.Standby()]));
-        await using PostgresStudioComponentContext owned = context;
+        (PostgresComponentContext context, _) = await ContextAsync(View(names: true, [ReplicationViewTests.Standby()]));
+        await using PostgresComponentContext owned = context;
 
         var page = context.Render<ReplicationPage>();
         page.WaitForAssertion(() => page.FindAll(".ms-repl-standbys tbody tr").Should().ContainSingle());
@@ -140,8 +140,8 @@ public class ReplicationPageTests
     {
         StandbyRow unreadable = new("walreceiver", null, "postgres", null, null, null, null, null, null, null);
 
-        (PostgresStudioComponentContext context, _) = await ContextAsync(View(names: true, [unreadable]));
-        await using PostgresStudioComponentContext owned = context;
+        (PostgresComponentContext context, _) = await ContextAsync(View(names: true, [unreadable]));
+        await using PostgresComponentContext owned = context;
 
         var page = context.Render<ReplicationPage>();
         page.WaitForAssertion(() => page.FindAll(".ms-repl-standbys tbody tr").Should().ContainSingle());
@@ -154,8 +154,8 @@ public class ReplicationPageTests
     [Fact]
     public async Task Without_the_activity_gate_no_standby_or_slot_is_named()
     {
-        (PostgresStudioComponentContext context, _) = await ContextAsync(View(names: false, [ReplicationViewTests.Standby()]));
-        await using PostgresStudioComponentContext owned = context;
+        (PostgresComponentContext context, _) = await ContextAsync(View(names: false, [ReplicationViewTests.Standby()]));
+        await using PostgresComponentContext owned = context;
 
         var page = context.Render<ReplicationPage>();
         page.WaitForAssertion(() => page.FindAll(".ms-repl-standbys tbody tr").Should().ContainSingle());
@@ -169,8 +169,8 @@ public class ReplicationPageTests
     [Fact]
     public async Task With_the_capability_off_the_page_names_the_option_that_would_show_names()
     {
-        (PostgresStudioComponentContext context, _) = await ContextAsync(View(names: false), capabilities: false);
-        await using PostgresStudioComponentContext owned = context;
+        (PostgresComponentContext context, _) = await ContextAsync(View(names: false), capabilities: false);
+        await using PostgresComponentContext owned = context;
 
         var page = context.Render<ReplicationPage>();
         page.WaitForAssertion(() => page.FindAll(".ms-repl-section").Should().HaveCount(7));
@@ -181,8 +181,8 @@ public class ReplicationPageTests
     [Fact]
     public async Task On_Aurora_five_sections_say_they_do_not_apply_and_the_slots_and_io_stay()
     {
-        (PostgresStudioComponentContext context, _) = await ContextAsync(View(names: true, platform: PostgresPlatformKind.AmazonAurora));
-        await using PostgresStudioComponentContext owned = context;
+        (PostgresComponentContext context, _) = await ContextAsync(View(names: true, platform: PostgresPlatformKind.AmazonAurora));
+        await using PostgresComponentContext owned = context;
 
         var page = context.Render<ReplicationPage>();
         page.WaitForAssertion(() => page.FindAll(".ms-repl-section").Should().HaveCount(7));
@@ -195,8 +195,8 @@ public class ReplicationPageTests
     [Fact]
     public async Task A_refusal_is_said_and_nothing_else_is_drawn()
     {
-        (PostgresStudioComponentContext context, _) = await ContextAsync(ReplicationView.Refused(ReplicationRefusal.StorePolicy, "Your account may not see this database's replication."));
-        await using PostgresStudioComponentContext owned = context;
+        (PostgresComponentContext context, _) = await ContextAsync(ReplicationView.Refused(ReplicationRefusal.StorePolicy, "Your account may not see this database's replication."));
+        await using PostgresComponentContext owned = context;
 
         var page = context.Render<ReplicationPage>();
         page.WaitForAssertion(() => page.FindAll(".ms-repl-refusal").Should().ContainSingle());
@@ -208,8 +208,8 @@ public class ReplicationPageTests
     [Fact]
     public async Task A_tablespace_is_measured_only_behind_its_button_and_a_denied_one_says_so()
     {
-        (PostgresStudioComponentContext context, FakeReplicationService service) = await ContextAsync(View(names: false));
-        await using PostgresStudioComponentContext owned = context;
+        (PostgresComponentContext context, FakeReplicationService service) = await ContextAsync(View(names: false));
+        await using PostgresComponentContext owned = context;
         service.Size = new TablespaceSize("pg_global", null, "Not readable by this role: pg_tablespace_size needs CREATE on the tablespace.");
 
         var page = context.Render<ReplicationPage>();

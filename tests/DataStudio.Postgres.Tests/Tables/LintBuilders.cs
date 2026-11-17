@@ -79,7 +79,7 @@ internal static class LintBuilders
 
     /// <summary>An evaluation in Postgres Studio's words, with its migration remedies, over <paramref name="window" />.</summary>
     public static HealthEvaluation Evaluation(StatisticsWindow? window = null, HealthHistoryView? history = null) =>
-        HealthEvaluation.At(Now, history: history, text: PostgresStudioText.Instance) with
+        HealthEvaluation.At(Now, history: history, text: PostgresText.Instance) with
         {
             TableRemedies = PostgresHealthTableRemedies.Instance,
             Statistics = window,

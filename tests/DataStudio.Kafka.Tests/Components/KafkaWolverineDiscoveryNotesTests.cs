@@ -205,8 +205,8 @@ public class KafkaWolverineDiscoveryNotesTests
 
         first.SameServersNames([first, second]).Should().Equal("Wolverine · besteffort");
         first.SameServersNames([first]).Should().BeEmpty();
-        KafkaStudioText.ClusterOptionText(first.Label, first.SameServersNames([first, second])).Should().Be("Wolverine (same servers as Wolverine · besteffort)");
-        KafkaStudioText.ClusterOptionText("Wolverine", []).Should().Be("Wolverine");
+        KafkaText.ClusterOptionText(first.Label, first.SameServersNames([first, second])).Should().Be("Wolverine (same servers as Wolverine · besteffort)");
+        KafkaText.ClusterOptionText("Wolverine", []).Should().Be("Wolverine");
         first.Equals(new KafkaClusterEntry("wolverine", null, "Wolverine", null) { SameServersAs = ["wolverine-besteffort", "wolverine-hidden"] }).Should().BeTrue("entries are rebuilt on every read");
     }
 

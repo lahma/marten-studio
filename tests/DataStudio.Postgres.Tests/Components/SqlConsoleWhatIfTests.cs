@@ -23,7 +23,7 @@ public class SqlConsoleWhatIfTests
     [Fact]
     public async Task An_explain_plan_offers_its_index_and_a_what_if_asks_for_the_statement_that_was_planned()
     {
-        await using PostgresStudioComponentContext context = new();
+        await using PostgresComponentContext context = new();
         context.WithAllCapabilities();
         await context.ReadyAsync();
         context.SqlConsole.Next = Plan("17-nestloop-plain");
@@ -46,7 +46,7 @@ public class SqlConsoleWhatIfTests
     [Fact]
     public async Task A_plan_typed_as_an_EXPLAIN_and_a_run_offer_no_what_if()
     {
-        await using PostgresStudioComponentContext context = new();
+        await using PostgresComponentContext context = new();
         context.WithAllCapabilities();
         await context.ReadyAsync();
         context.SqlConsole.Next = Plan("17-nestloop-plain");

@@ -55,7 +55,7 @@ internal static class PostgresSeamRegistration
 
         // The seams, answered for plain PostgreSQL. The source provider is scoped, as the seam asks: its refresh
         // generation is the circuit's.
-        services.TryAddScoped<IStudioSourceProvider, PostgresStudioSourceProvider>();
+        services.TryAddScoped<IStudioSourceProvider, PostgresSourceProvider>();
         services.TryAddSingleton<ISessionLockLabeler, PostgresSessionLockLabeler>();
         services.TryAddScoped<IDatabaseDeclarationsSource, PostgresDatabaseDeclarationsSource>();
         services.TryAddSingleton<IHealthTableSource, PostgresHealthTableSource>();

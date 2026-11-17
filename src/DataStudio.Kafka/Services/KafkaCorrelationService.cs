@@ -329,8 +329,8 @@ internal sealed class KafkaCorrelationService(
         KafkaTopicQuery[] queries = QueriesOf(prepared!);
         if (queries.Length == 0)
         {
-            await NotRunAsync(input, KafkaStudioText.RelatedNothingReason, NothingRecorded).ConfigureAwait(false);
-            return new KafkaRelatedPlanResult.Refused(KafkaStudioText.RelatedNothingToSearch);
+            await NotRunAsync(input, KafkaText.RelatedNothingReason, NothingRecorded).ConfigureAwait(false);
+            return new KafkaRelatedPlanResult.Refused(KafkaText.RelatedNothingToSearch);
         }
 
         try
@@ -342,8 +342,8 @@ internal sealed class KafkaCorrelationService(
             {
                 // The builder writes only texts that parse and compile: this is a guard, and it records nothing a visitor typed.
                 logger.LogWarning("Data Studio's related-records search was not valid for the engine ({Errors} errors)", plan.Errors.Count);
-                await NotRunAsync(input, KafkaStudioText.SearchFailed, NothingRecorded).ConfigureAwait(false);
-                return new KafkaRelatedPlanResult.Refused(KafkaStudioText.SearchFailed);
+                await NotRunAsync(input, KafkaText.SearchFailed, NothingRecorded).ConfigureAwait(false);
+                return new KafkaRelatedPlanResult.Refused(KafkaText.SearchFailed);
             }
 
             return new KafkaRelatedPlanResult.Planned(new KafkaRelatedPlanned(input, prepared.Lanes, plan));
@@ -351,8 +351,8 @@ internal sealed class KafkaCorrelationService(
         catch (Exception e) when (e is not OperationCanceledException)
         {
             logger.LogWarning(e, "Data Studio could not plan a related-records search");
-            await NotRunAsync(input, KafkaStudioText.SearchFailed, NothingRecorded).ConfigureAwait(false);
-            return new KafkaRelatedPlanResult.Refused(KafkaStudioText.SearchFailed);
+            await NotRunAsync(input, KafkaText.SearchFailed, NothingRecorded).ConfigureAwait(false);
+            return new KafkaRelatedPlanResult.Refused(KafkaText.SearchFailed);
         }
     }
 
@@ -377,8 +377,8 @@ internal sealed class KafkaCorrelationService(
         // A grant lower than the one the visitor was planned under refuses the start; a higher one starts the planned (lower) grant.
         if (!GrantHeld(planned, prepared!))
         {
-            await NotRunAsync(input, KafkaStudioText.GrantChanged, planned.Plan.AuditText).ConfigureAwait(false);
-            return new KafkaRelatedStartResult.Refused(KafkaStudioText.GrantChanged);
+            await NotRunAsync(input, KafkaText.GrantChanged, planned.Plan.AuditText).ConfigureAwait(false);
+            return new KafkaRelatedStartResult.Refused(KafkaText.GrantChanged);
         }
 
         KafkaScanPlan plan = planned.Plan;
@@ -391,7 +391,7 @@ internal sealed class KafkaCorrelationService(
 
             if (start.Handle is not { } handle)
             {
-                string text = KafkaStudioText.Refusal(start.Refusal ?? KafkaScanRefusal.ShuttingDown, start.SpentBudget);
+                string text = KafkaText.Refusal(start.Refusal ?? KafkaScanRefusal.ShuttingDown, start.SpentBudget);
                 await NotRunAsync(input, text, plan.AuditText).ConfigureAwait(false);
                 return new KafkaRelatedStartResult.Refused(text);
             }
@@ -401,8 +401,8 @@ internal sealed class KafkaCorrelationService(
         catch (Exception e) when (e is not OperationCanceledException)
         {
             logger.LogWarning(e, "Data Studio could not start a related-records search");
-            await NotRunAsync(input, KafkaStudioText.SearchFailed, plan.AuditText).ConfigureAwait(false);
-            return new KafkaRelatedStartResult.Refused(KafkaStudioText.SearchFailed);
+            await NotRunAsync(input, KafkaText.SearchFailed, plan.AuditText).ConfigureAwait(false);
+            return new KafkaRelatedStartResult.Refused(KafkaText.SearchFailed);
         }
     }
 
@@ -412,7 +412,7 @@ internal sealed class KafkaCorrelationService(
     {
         ArgumentNullException.ThrowIfNull(planned);
 
-        await NotRunAsync(planned.Input, KafkaStudioText.NotConfirmed, planned.Plan.AuditText).ConfigureAwait(false);
+        await NotRunAsync(planned.Input, KafkaText.NotConfirmed, planned.Plan.AuditText).ConfigureAwait(false);
     }
 
     private const string NothingRecorded = "(no search text was built)";
@@ -422,7 +422,7 @@ internal sealed class KafkaCorrelationService(
     {
         KafkaClusterEntry cluster = input.Cluster;
         IReadOnlyList<string> topics = input.Topics;
-        string target = KafkaStudioText.RelatedTarget(input.Subject, topics.Count, input.From, input.To);
+        string target = KafkaText.RelatedTarget(input.Subject, topics.Count, input.From, input.To);
 
         // 1. The capability.
         try
@@ -447,7 +447,7 @@ internal sealed class KafkaCorrelationService(
         if (!await authorization.IsAuthorizedAsync(cluster, null, null, cancellationToken).ConfigureAwait(false))
         {
             actionLog.RecordClusterDenied(cluster, null, topics, authorization.PolicyFor(null) ?? "(none)", Action, target, KafkaCapability.SearchRecords);
-            return (KafkaStudioText.SearchNamesRefusedTopic, null);
+            return (KafkaText.SearchNamesRefusedTopic, null);
         }
 
         foreach (KafkaTopicName name in names)
@@ -456,7 +456,7 @@ internal sealed class KafkaCorrelationService(
                 || !await authorization.IsAuthorizedAsync(cluster, name.Value, KafkaCapability.SearchRecords, cancellationToken).ConfigureAwait(false))
             {
                 actionLog.RecordClusterDenied(cluster, name.Value, topics, authorization.PolicyFor(KafkaCapability.SearchRecords) ?? "(none)", Action, target, KafkaCapability.SearchRecords);
-                return (KafkaStudioText.SearchNamesRefusedTopic, null);
+                return (KafkaText.SearchNamesRefusedTopic, null);
             }
         }
 
@@ -520,9 +520,9 @@ internal sealed class KafkaCorrelationService(
     {
         names = [];
 
-        if (input.Topics.Count is < 1 or > KafkaStudioText.MaxSearchTopics)
+        if (input.Topics.Count is < 1 or > KafkaText.MaxSearchTopics)
         {
-            return KafkaStudioText.SearchTopicCount;
+            return KafkaText.SearchTopicCount;
         }
 
         List<KafkaTopicName> parsed = [];
@@ -530,7 +530,7 @@ internal sealed class KafkaCorrelationService(
         {
             if (!KafkaTopicName.TryCreate(topic, out KafkaTopicName name))
             {
-                return KafkaStudioText.SearchTopicInvalid;
+                return KafkaText.SearchTopicInvalid;
             }
 
             if (!parsed.Contains(name))
@@ -546,12 +546,12 @@ internal sealed class KafkaCorrelationService(
 
         if (input.Keys.IsEmpty)
         {
-            return KafkaStudioText.RelatedNoKeys;
+            return KafkaText.RelatedNoKeys;
         }
 
         if (input.Keys.Values.Any(static x => x.Value.Length > MaxSeedValueLength))
         {
-            return KafkaStudioText.RelatedValueTooLong;
+            return KafkaText.RelatedValueTooLong;
         }
 
         names = [.. parsed];
@@ -574,7 +574,7 @@ internal sealed class KafkaCorrelationService(
     private async Task NotRunAsync(KafkaRelatedInput input, string reason, string predicate)
     {
         string user = await authorization.UserNameAsync().ConfigureAwait(false);
-        string target = KafkaStudioText.RelatedTarget(input.Subject, input.Topics.Count, input.From, input.To);
+        string target = KafkaText.RelatedTarget(input.Subject, input.Topics.Count, input.From, input.To);
 
         actionLog.Record(input.Cluster, input.Topics, Action, target, succeeded: false, reason, KafkaCapability.SearchRecords);
         logger.SearchNotRun(user, string.Join(", ", input.Topics), input.Cluster.Key, input.Cluster.TenantId, reason, predicate);
@@ -583,7 +583,7 @@ internal sealed class KafkaCorrelationService(
     /// <summary>Records a search that ran, once, when it ended: the ring entry and event 9600. Needs nothing from a scope that may be disposing.</summary>
     private void RecordScan(KafkaRelatedInput input, KafkaScanPlan plan, string user, KafkaScanResult? result)
     {
-        string target = KafkaStudioText.RelatedTarget(input.Subject, input.Topics.Count, input.From, input.To);
+        string target = KafkaText.RelatedTarget(input.Subject, input.Topics.Count, input.From, input.To);
 
         if (result is null)
         {

@@ -57,7 +57,7 @@ public class KafkaProfileAllowanceTests
         allowance.PerHour.Should().Be(512 * MiB);
         allowance.Left.Should().Be(512 * MiB);
         allowance.ClusterProfile.Should().Be(KafkaProfile.Production);
-        KafkaStudioText.ClusterAllowance(allowance.Left, allowance.PerHour, KafkaProfile.Production)
+        KafkaText.ClusterAllowance(allowance.Left, allowance.PerHour, KafkaProfile.Production)
             .Should().Be("512 MiB of this cluster's 512 MiB an hour left (Production profile)");
     }
 
@@ -222,17 +222,17 @@ public class KafkaProfileAllowanceTests
     [Fact]
     public void A_refusal_that_does_not_say_which_allowance_names_no_number()
     {
-        KafkaStudioText.Refusal(KafkaScanRefusal.OwnerBudgetSpent, new KafkaScanLimits())
+        KafkaText.Refusal(KafkaScanRefusal.OwnerBudgetSpent, new KafkaScanLimits())
             .Should().Be("You have read your hourly allowance. It frees up as the hour rolls on.");
     }
 
     [Fact]
     public void The_text_for_a_profile_refusal_is_neutral_and_names_no_builder()
     {
-        string text = KafkaStudioText.Refusal(KafkaScanRefusal.ProfileForbids, new KafkaScanLimits());
+        string text = KafkaText.Refusal(KafkaScanRefusal.ProfileForbids, new KafkaScanLimits());
 
         text.Should().Be("This cluster's profile does not allow this.").And.NotContain("KafkaClusterBuilder");
-        text.Should().NotBe(KafkaStudioText.SearchFailed, "the default arm is not what a profile refusal says");
+        text.Should().NotBe(KafkaText.SearchFailed, "the default arm is not what a profile refusal says");
     }
 
     [Fact]
@@ -240,7 +240,7 @@ public class KafkaProfileAllowanceTests
     {
         foreach (KafkaScanRefusal refusal in Enum.GetValues<KafkaScanRefusal>())
         {
-            KafkaStudioText.Refusal(refusal, new KafkaScanLimits()).Should().NotBe(KafkaStudioText.SearchFailed, refusal.ToString());
+            KafkaText.Refusal(refusal, new KafkaScanLimits()).Should().NotBe(KafkaText.SearchFailed, refusal.ToString());
         }
     }
 }

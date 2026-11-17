@@ -26,6 +26,6 @@ internal static class MartenServiceBridges
         /// <c>Projections.razor</c>, <c>ProjectionDataService.Health</c> and <c>LinqQueryService</c>.
         /// </summary>
         /// <param name="capability">The capability.</param>
-        public static string OptionName(StudioCapability capability) => MartenStudioSettings.CapabilityOption(capability);
+        public static string OptionName(StudioCapability capability) => MartenSettings.CapabilityOption(capability);
     }
 }

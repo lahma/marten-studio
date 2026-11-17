@@ -51,7 +51,7 @@ public class MartenRailRoutesTests
     public void The_marten_segment_is_spelled_once_and_the_pages_say_it_as_text()
     {
         MartenRoutes.Root.Should().Be("marten");
-        MartenStudioDescriptor.PageRoot.Should().Be("/" + MartenRoutes.Root);
-        MartenStudioDescriptor.Key.Should().Be(MartenRoutes.Root);
+        MartenDescriptor.PageRoot.Should().Be("/" + MartenRoutes.Root);
+        MartenDescriptor.Key.Should().Be(MartenRoutes.Root);
     }
 }

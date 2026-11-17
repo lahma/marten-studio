@@ -20,7 +20,7 @@ public sealed class StudioRoutesTests
     private const string Start = "http://localhost/studio/postgres/database/connection";
 
     private sealed record Rig(
-        PostgresStudioComponentContext Context,
+        PostgresComponentContext Context,
         RecordingNavigationManager Navigation,
         RecordingNavigationInterception Interception,
         RecordingScrollToLocationHash Scroll);
@@ -31,7 +31,7 @@ public sealed class StudioRoutesTests
         var interception = new RecordingNavigationInterception();
         var scroll = new RecordingScrollToLocationHash();
 
-        PostgresStudioComponentContext context = new(services =>
+        PostgresComponentContext context = new(services =>
         {
             services.AddSingleton<NavigationManager>(navigation);
             services.AddSingleton<INavigationInterception>(interception);
@@ -49,7 +49,7 @@ public sealed class StudioRoutesTests
     public async Task Interception_is_asked_exactly_once_after_the_first_render_and_not_again()
     {
         Rig rig = await NewRigAsync();
-        await using PostgresStudioComponentContext context = rig.Context;
+        await using PostgresComponentContext context = rig.Context;
 
         var routes = context.Render<StudioRoutes>();
 
@@ -67,7 +67,7 @@ public sealed class StudioRoutesTests
     public async Task An_intercepted_address_no_page_matches_is_force_loaded_once_and_the_page_on_screen_stays()
     {
         Rig rig = await NewRigAsync();
-        await using PostgresStudioComponentContext context = rig.Context;
+        await using PostgresComponentContext context = rig.Context;
         var routes = context.Render<StudioRoutes>();
         routes.Find("h1").TextContent.Should().Be("Connection", "the premise");
 
@@ -90,7 +90,7 @@ public sealed class StudioRoutesTests
     public async Task An_intercepted_address_no_page_matches_is_not_given_the_scope_by_the_shell()
     {
         Rig rig = await NewRigAsync();
-        await using PostgresStudioComponentContext context = rig.Context;
+        await using PostgresComponentContext context = rig.Context;
         var routes = context.Render<StudioRoutes>();
         routes.Find("h1").TextContent.Should().Be("Connection", "the premise");
         await SettleAsync(routes);
@@ -112,7 +112,7 @@ public sealed class StudioRoutesTests
     public async Task An_intercepted_non_page_address_naming_a_refused_scope_records_only_the_force_load()
     {
         Rig rig = await NewRigAsync();
-        await using PostgresStudioComponentContext context = rig.Context;
+        await using PostgresComponentContext context = rig.Context;
         var routes = context.Render<StudioRoutes>();
         routes.Find("h1").TextContent.Should().Be("Connection", "the premise");
         await SettleAsync(routes);
@@ -131,7 +131,7 @@ public sealed class StudioRoutesTests
     public async Task An_address_no_page_matches_that_the_browser_did_not_intercept_shows_not_found_and_loads_nothing()
     {
         Rig rig = await NewRigAsync();
-        await using PostgresStudioComponentContext context = rig.Context;
+        await using PostgresComponentContext context = rig.Context;
         var routes = context.Render<StudioRoutes>();
 
         rig.Navigation.Simulate("studio/no-such-page", intercepted: false);
@@ -144,7 +144,7 @@ public sealed class StudioRoutesTests
     public async Task An_intercepted_address_that_is_a_page_shows_that_page_and_loads_nothing()
     {
         Rig rig = await NewRigAsync();
-        await using PostgresStudioComponentContext context = rig.Context;
+        await using PostgresComponentContext context = rig.Context;
         var routes = context.Render<StudioRoutes>();
 
         rig.Navigation.Simulate("studio/postgres/health", intercepted: true);
@@ -158,7 +158,7 @@ public sealed class StudioRoutesTests
     public async Task A_document_that_starts_on_an_unmatched_address_shows_not_found_and_never_force_loads()
     {
         Rig rig = await NewRigAsync("http://localhost/studio/no-such-page");
-        await using PostgresStudioComponentContext context = rig.Context;
+        await using PostgresComponentContext context = rig.Context;
 
         var routes = context.Render<StudioRoutes>();
         await SettleAsync(routes);
@@ -173,7 +173,7 @@ public sealed class StudioRoutesTests
         foreach (Exception failure in new Exception[] { new JSDisconnectedException("the circuit closed"), new JSException("another renderer has it") })
         {
             Rig rig = await NewRigAsync();
-            await using PostgresStudioComponentContext context = rig.Context;
+            await using PostgresComponentContext context = rig.Context;
             rig.Interception.Failure = failure;
 
             var routes = context.Render<StudioRoutes>();
@@ -208,7 +208,7 @@ public sealed class StudioRoutesTests
     public async Task The_fragment_is_scrolled_to_when_the_path_or_the_fragment_changes_and_never_for_a_query_only_change()
     {
         Rig rig = await NewRigAsync("http://localhost/studio/postgres/health");
-        await using PostgresStudioComponentContext context = rig.Context;
+        await using PostgresComponentContext context = rig.Context;
         var routes = context.Render<StudioRoutes>();
         await SettleAsync(routes);
         rig.Scroll.Refreshed.Should().BeEmpty("the first render does nothing: the browser scrolled the document itself");
@@ -236,7 +236,7 @@ public sealed class StudioRoutesTests
     public async Task A_scroll_that_fails_because_the_circuit_closed_costs_nothing()
     {
         Rig rig = await NewRigAsync("http://localhost/studio/postgres/health");
-        await using PostgresStudioComponentContext context = rig.Context;
+        await using PostgresComponentContext context = rig.Context;
         rig.Scroll.Failure = new JSDisconnectedException("the circuit closed");
         var routes = context.Render<StudioRoutes>();
 

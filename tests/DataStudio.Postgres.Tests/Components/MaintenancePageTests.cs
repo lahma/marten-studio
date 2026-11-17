@@ -72,18 +72,18 @@ public class MaintenancePageTests
         Horizon = new MaintenanceHorizonView(null, "Nothing holds the vacuum horizon back."),
     };
 
-    private static async Task<(PostgresStudioComponentContext Context, FakeMaintenanceService Service)> ContextAsync(MaintenanceView view)
+    private static async Task<(PostgresComponentContext Context, FakeMaintenanceService Service)> ContextAsync(MaintenanceView view)
     {
         FakeMaintenanceService service = new(view);
-        PostgresStudioComponentContext context = await new PostgresStudioComponentContext(services => services.AddSingleton<IMaintenanceService>(service)).ReadyAsync();
+        PostgresComponentContext context = await new PostgresComponentContext(services => services.AddSingleton<IMaintenanceService>(service)).ReadyAsync();
         return (context, service);
     }
 
     [Fact]
     public async Task Each_table_is_drawn_against_its_own_triggers_with_its_badges_worst_first()
     {
-        (PostgresStudioComponentContext context, FakeMaintenanceService _) = await ContextAsync(View());
-        await using PostgresStudioComponentContext disposing = context;
+        (PostgresComponentContext context, FakeMaintenanceService _) = await ContextAsync(View());
+        await using PostgresComponentContext disposing = context;
 
         var page = context.Render<Maintenance>();
 
@@ -120,8 +120,8 @@ public class MaintenancePageTests
     [Fact]
     public async Task On_19_the_triggers_have_a_stats_since_column_and_Next_for_autovacuum_lists_the_scores_highest_first()
     {
-        (PostgresStudioComponentContext context, FakeMaintenanceService _) = await ContextAsync(NineteenView());
-        await using PostgresStudioComponentContext disposing = context;
+        (PostgresComponentContext context, FakeMaintenanceService _) = await ContextAsync(NineteenView());
+        await using PostgresComponentContext disposing = context;
 
         var page = context.Render<Maintenance>();
         page.WaitForAssertion(() => page.FindAll(".ms-maint-table tbody tr").Should().HaveCount(2));
@@ -145,8 +145,8 @@ public class MaintenancePageTests
     [Fact]
     public async Task Below_19_there_is_no_stats_since_column_and_no_Next_for_autovacuum_section()
     {
-        (PostgresStudioComponentContext context, FakeMaintenanceService _) = await ContextAsync(View());
-        await using PostgresStudioComponentContext disposing = context;
+        (PostgresComponentContext context, FakeMaintenanceService _) = await ContextAsync(View());
+        await using PostgresComponentContext disposing = context;
 
         var page = context.Render<Maintenance>();
         page.WaitForAssertion(() => page.FindAll(".ms-maint-table tbody tr").Should().HaveCount(2));
@@ -159,8 +159,8 @@ public class MaintenancePageTests
     [Fact]
     public async Task A_19_server_whose_scores_were_read_but_none_is_shown_to_the_visitor_says_so()
     {
-        (PostgresStudioComponentContext context, FakeMaintenanceService _) = await ContextAsync(NineteenView() with { Next = [] });
-        await using PostgresStudioComponentContext disposing = context;
+        (PostgresComponentContext context, FakeMaintenanceService _) = await ContextAsync(NineteenView() with { Next = [] });
+        await using PostgresComponentContext disposing = context;
 
         var page = context.Render<Maintenance>();
         page.WaitForAssertion(() => page.FindAll(".ms-maint-next").Should().ContainSingle());
@@ -172,8 +172,8 @@ public class MaintenancePageTests
     [Fact]
     public async Task What_is_running_the_workers_the_forecast_and_the_horizon_are_drawn_from_the_view()
     {
-        (PostgresStudioComponentContext context, FakeMaintenanceService _) = await ContextAsync(View());
-        await using PostgresStudioComponentContext disposing = context;
+        (PostgresComponentContext context, FakeMaintenanceService _) = await ContextAsync(View());
+        await using PostgresComponentContext disposing = context;
 
         var page = context.Render<Maintenance>();
 
@@ -189,8 +189,8 @@ public class MaintenancePageTests
     [Fact]
     public async Task Measure_asks_the_service_for_that_table_and_draws_what_it_found()
     {
-        (PostgresStudioComponentContext context, FakeMaintenanceService service) = await ContextAsync(View());
-        await using PostgresStudioComponentContext disposing = context;
+        (PostgresComponentContext context, FakeMaintenanceService service) = await ContextAsync(View());
+        await using PostgresComponentContext disposing = context;
 
         service.Measure = new BloatMeasureRow(8_192_000, 12.5, 9_000, 1_000, 9.5, 819_200, 10, [new BloatIndexRow("orders_pkey", "btree", 245_760, 45.2, 3, null, null)]);
 
@@ -207,9 +207,9 @@ public class MaintenancePageTests
     [Fact]
     public async Task A_refused_view_says_why_and_draws_nothing_else()
     {
-        (PostgresStudioComponentContext context, FakeMaintenanceService _) = await ContextAsync(
+        (PostgresComponentContext context, FakeMaintenanceService _) = await ContextAsync(
             MaintenanceView.Refused(MaintenanceRefusal.StorePolicy, "Your account may not see this database's maintenance."));
-        await using PostgresStudioComponentContext disposing = context;
+        await using PostgresComponentContext disposing = context;
 
         var page = context.Render<Maintenance>();
 

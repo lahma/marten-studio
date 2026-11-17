@@ -19,7 +19,7 @@ internal sealed class WindowResolver(
     KafkaWires wires,
     KafkaWireReads reads,
     KafkaEngineSnapshot options,
-    KStudioLoggers loggers,
+    KafkaEngineLoggers loggers,
     TimeProvider timeProvider)
 {
     /// <summary>Resolves a window.</summary>
@@ -207,7 +207,7 @@ internal sealed class WindowResolver(
             notes.Add(new WindowNote.RetentionGap(key.Topic, key.Partition, logStart, firstAt));
             string topicText = KafkaLogValue.Cap(key.Topic);
             string clusterText = KafkaLogValue.Cap(cluster);
-            KStudioLog.RetentionGap(loggers.Catalog, key.Partition, topicText, clusterText, logStart);
+            KafkaEngineLog.RetentionGap(loggers.Catalog, key.Partition, topicText, clusterText, logStart);
         }
 
         // With no margin the end is exact, and a record stamped earlier than one before the end but appended after it is missed: the case

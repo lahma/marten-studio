@@ -72,7 +72,7 @@ public static class PostgresDiagnosticsHealthChecksBuilderExtensions
         // studio still cost one run per interval between them. Built with Postgres Studio's words, which are the ones it
         // says "call services.AddPostgresDiagnostics() or services.AddDataStudio().AddPostgres()" in when neither was added.
         builder.Services.TryAddSingleton(static services =>
-            ActivatorUtilities.CreateInstance<HealthExportRunner>(services, PostgresStudioText.Instance));
+            ActivatorUtilities.CreateInstance<HealthExportRunner>(services, PostgresText.Instance));
 
         return builder.Add(new HealthCheckRegistration(
             name,

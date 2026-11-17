@@ -72,13 +72,13 @@ public class PostgresOptionsTests
         none.ViewDefinitions.Should().BeFalse("a definition is read only when a host says so, or when it enables BrowseDatabase, which implies it");
         none.ViewDatabaseActivity.Should().BeFalse();
 
-        foreach (StudioCapability capability in PostgresStudioSettings.Offered)
+        foreach (StudioCapability capability in PostgresSettings.Offered)
         {
-            PostgresStudioSettings.IsConfigured(none, capability).Should().BeFalse(capability.ToString());
+            PostgresSettings.IsConfigured(none, capability).Should().BeFalse(capability.ToString());
         }
 
-        PostgresStudioSettings.IsConfigured(new PostgresCapabilities { ViewDefinitions = true }, StudioCapability.ViewDefinitions).Should().BeTrue();
-        PostgresStudioSettings.IsConfigured(new PostgresCapabilities { ViewDefinitions = true }, StudioCapability.BrowseDatabase)
+        PostgresSettings.IsConfigured(new PostgresCapabilities { ViewDefinitions = true }, StudioCapability.ViewDefinitions).Should().BeTrue();
+        PostgresSettings.IsConfigured(new PostgresCapabilities { ViewDefinitions = true }, StudioCapability.BrowseDatabase)
             .Should().BeFalse("ViewDefinitions does not imply the rows: BrowseDatabase implies ViewDefinitions, never the other way");
     }
 
@@ -239,7 +239,7 @@ public class PostgresOptionsTests
     public void The_settings_speak_PostgresStudios_names_and_offer_four_capabilities()
     {
         PostgresOptions options = new() { SourceAuthorizationPolicy = "src", WriteAuthorizationPolicy = "write" };
-        IStudioSettings settings = PostgresStudioSettings.Of(options);
+        IStudioSettings settings = PostgresSettings.Of(options);
 
         settings.ProductName.Should().Be("Data Studio", "the module's settings answer the shell's name; its own is its descriptor's");
         settings.OptionName("ReadOnly").Should().Be("PostgresOptions.ReadOnly");
@@ -259,14 +259,14 @@ public class PostgresOptionsTests
     [Fact]
     public void The_source_label_is_Source_once_a_named_source_exists_and_the_descriptors_otherwise()
     {
-        IStudioSettings alone = PostgresStudioSettings.Of(new PostgresOptions());
-        alone.SourceLabelOf(PostgresStudioDescriptor.Instance).Should().Be("Database");
+        IStudioSettings alone = PostgresSettings.Of(new PostgresOptions());
+        alone.SourceLabelOf(PostgresDescriptor.Instance).Should().Be("Database");
 
-        IStudioSettings withDataSource = PostgresStudioSettings.Of(new PostgresOptions().AddDataSource("reporting", static _ => null!));
-        withDataSource.SourceLabelOf(PostgresStudioDescriptor.Instance).Should().Be("Source");
+        IStudioSettings withDataSource = PostgresSettings.Of(new PostgresOptions().AddDataSource("reporting", static _ => null!));
+        withDataSource.SourceLabelOf(PostgresDescriptor.Instance).Should().Be("Source");
 
-        IStudioSettings withHost = PostgresStudioSettings.Of(new PostgresOptions().AddDatabaseSource("tenants", static _ => null!));
-        withHost.SourceLabelOf(PostgresStudioDescriptor.Instance).Should().Be("Source");
+        IStudioSettings withHost = PostgresSettings.Of(new PostgresOptions().AddDatabaseSource("tenants", static _ => null!));
+        withHost.SourceLabelOf(PostgresDescriptor.Instance).Should().Be("Source");
     }
 
     [Theory]
@@ -274,7 +274,7 @@ public class PostgresOptionsTests
     public void Every_capability_PostgresStudio_does_not_offer_throws_rather_than_reads_false(string name)
     {
         StudioCapability capability = Enum.Parse<StudioCapability>(name);
-        PostgresStudioSettings settings = PostgresStudioSettings.Of(new PostgresOptions { Capabilities = PostgresCapabilities.All() });
+        PostgresSettings settings = PostgresSettings.Of(new PostgresOptions { Capabilities = PostgresCapabilities.All() });
 
         if (settings.Capabilities.Contains(capability))
         {
@@ -359,7 +359,7 @@ public class PostgresOptionsTests
 
         options.AcceptedChecks.Should().HaveCount(2);
         options.AcceptedCheckReasons["K05"].Should().HaveLength(500);
-        PostgresStudioSettings.Of(options).AcceptedChecks["s04"].Should().Be("the login is a superuser on purpose");
+        PostgresSettings.Of(options).AcceptedChecks["s04"].Should().Be("the login is a superuser on purpose");
     }
 
     /// <summary>
@@ -370,7 +370,7 @@ public class PostgresOptionsTests
     public void Changing_AcceptedChecks_after_startup_changes_nothing_and_cannot_break_an_enumeration()
     {
         PostgresOptions options = Resolve(static x => x.AcceptedChecks["K05"] = "managed roles");
-        PostgresStudioSettings settings = PostgresStudioSettings.Of(options);
+        PostgresSettings settings = PostgresSettings.Of(options);
 
         IReadOnlyDictionary<string, string> seen = settings.AcceptedChecks;
         using IEnumerator<KeyValuePair<string, string>> enumerating = seen.GetEnumerator();

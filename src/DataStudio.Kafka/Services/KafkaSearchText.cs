@@ -61,7 +61,7 @@ internal static class KafkaSearchText
                 CultureInfo.InvariantCulture,
                 $"Stopped after {KafkaDisplay.Count(result.Records, "record")}, this search's budget. Continue reads on from where it stopped."),
             KafkaScanStopReason.OwnerBudget =>
-                $"Stopped: you have read {KafkaStudioText.Allowance(result.SpentBudget)}. Continue reads on from where it stopped, once the allowance frees up.",
+                $"Stopped: you have read {KafkaText.Allowance(result.SpentBudget)}. Continue reads on from where it stopped, once the allowance frees up.",
             KafkaScanStopReason.Deadline =>
                 $"Stopped after {WindowNote.Span(limits.MaxScanDuration)}, the longest a search runs. Continue reads on from where it stopped.",
             KafkaScanStopReason.Cancelled => "Stopped by you. Continue reads on from where it stopped.",

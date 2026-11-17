@@ -201,7 +201,7 @@ public class PlanDiffTests
         {
             QueryPlan plan = PlanFixtures.Pair(name);
 
-            PlanInsights.Evaluate(plan, DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance).Should().NotContain(static x => x.Insight.Code == "P21");
+            PlanInsights.Evaluate(plan, DataStudio.Postgres.Services.Postgres.PostgresText.Instance).Should().NotContain(static x => x.Insight.Code == "P21");
             PlanInsights.NotJudged(plan).Should().NotContain(static x => x.Code == "P21");
             PlanInsights.NotJudgedWithoutFacts(plan, null).Should().NotContain(static x => x.Code == "P21");
         }

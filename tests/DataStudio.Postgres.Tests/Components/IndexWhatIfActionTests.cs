@@ -26,7 +26,7 @@ public sealed class IndexWhatIfActionTests : IAsyncDisposable
 
     private static CancellationToken Token => Xunit.TestContext.Current.CancellationToken;
 
-    private readonly PostgresStudioComponentContext context = new();
+    private readonly PostgresComponentContext context = new();
 
     public ValueTask DisposeAsync() => context.DisposeAsync();
 

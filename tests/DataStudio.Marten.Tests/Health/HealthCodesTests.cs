@@ -57,8 +57,8 @@ public class HealthCodesTests
     /// </summary>
     internal static IReadOnlyList<RegisteredCode> Registered()
     {
-        HealthCheckRegistry marten = new(MartenStudioDescriptor.Instance);
-        HealthCheckRegistry postgres = new(PostgresStudioDescriptor.Instance);
+        HealthCheckRegistry marten = new(MartenDescriptor.Instance);
+        HealthCheckRegistry postgres = new(PostgresDescriptor.Instance);
         HashSet<string> inMarten = [.. marten.All.Select(static x => x.Info.Code)];
         HashSet<string> inPostgres = [.. postgres.All.Select(static x => x.Info.Code)];
 
@@ -315,8 +315,8 @@ public class HealthCodesTests
 
         RetiredFor("Marten").Should().NotBeEmpty("K10 was retired in 1.1, or this compares nothing");
 
-        MartenStudioDescriptor.Instance.RetiredCheckCodes.Should().BeEquivalentTo(RetiredFor("Marten"), "Data Studio's descriptor");
-        PostgresStudioDescriptor.Instance.RetiredCheckCodes.Should().BeEquivalentTo(RetiredFor("Postgres"), "Postgres Studio's descriptor");
+        MartenDescriptor.Instance.RetiredCheckCodes.Should().BeEquivalentTo(RetiredFor("Marten"), "Data Studio's descriptor");
+        PostgresDescriptor.Instance.RetiredCheckCodes.Should().BeEquivalentTo(RetiredFor("Postgres"), "Postgres Studio's descriptor");
         PostgresDiagnosticsDescriptor.Instance.RetiredCheckCodes.Should().BeEquivalentTo(RetiredFor("Postgres"), "the diagnostics engine's descriptor");
     }
 

@@ -176,7 +176,7 @@ public class DatabaseGateReachTests
             DatabaseObjectDetail detail = DatabaseObjectAssembler.Detail(gate, View("docs", [read]));
 
             detail.Relation!.Rows.Refusal.Should().Be(DatabaseRefusal.MartenOwned, read.Name);
-            detail.Relation.Rows.Reason.Should().Be(DataStudio.Marten.Services.MartenStudioText.Instance.MartenDependencyDenial);
+            detail.Relation.Rows.Reason.Should().Be(DataStudio.Marten.Services.MartenText.Instance.MartenDependencyDenial);
             detail.Relation.DefinitionAvailable.Should().BeTrue(read.Name);
         }
 
@@ -309,7 +309,7 @@ public class DatabaseGateReachTests
         IReadOnlyDictionary<string, DatabaseStoreAccess>? otherStores = null,
         bool capability = true) =>
         new(StoreSchemas(), live ?? Live, ["quartz", "legacy", OtherSchema], capability, false, capability ? true : null,
-            classifier ?? Classifier(), DataStudio.Marten.Services.MartenStudioText.Instance, null, DatabaseRefusal.WritePolicy, "default", otherStores);
+            classifier ?? Classifier(), DataStudio.Marten.Services.MartenText.Instance, null, DatabaseRefusal.WritePolicy, "default", otherStores);
 
     private static Dictionary<string, DatabaseStoreAccess> OtherStore(DatabaseStoreAccess access) =>
         new(StringComparer.OrdinalIgnoreCase) { [OtherStoreKey] = access };

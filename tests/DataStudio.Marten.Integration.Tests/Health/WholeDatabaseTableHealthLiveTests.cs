@@ -557,7 +557,7 @@ public class WholeDatabaseTableHealthLiveTests(WholeDatabaseTablesFixture fixtur
     private static async Task<IStudioTableSet> SetAsync(HealthLiveHost host)
     {
         await using AsyncServiceScope scope = host.Services.CreateAsyncScope();
-        await using HealthConnection connection = new(MartenStudioDatabase.Of(host.Store.Storage.Database));
+        await using HealthConnection connection = new(MartenSourceDatabase.Of(host.Store.Storage.Database));
 
         HealthCheckContext context = new(
             new ResolvedScope(
@@ -580,7 +580,7 @@ public class WholeDatabaseTableHealthLiveTests(WholeDatabaseTablesFixture fixtur
     private static async Task<IReadOnlyList<string>> RedundantOnTableAsync(HealthLiveHost host, string schema, string table)
     {
         await using AsyncServiceScope scope = host.Services.CreateAsyncScope();
-        await using HealthConnection connection = new(MartenStudioDatabase.Of(host.Store.Storage.Database));
+        await using HealthConnection connection = new(MartenSourceDatabase.Of(host.Store.Storage.Database));
 
         HealthSqlRunner sql = new(connection, new ReadOnlySqlOptions(), null);
         IReadOnlyList<HealthIndexRow> rows = await sql.QueryAsync(

@@ -50,10 +50,10 @@ public class HealthSeamTests
                 new MartenStoreRegistration("default", "Default", typeof(IDocumentStore)),
                 store,
                 store.Storage.Database),
-            MartenStudioSettings.Of(new MartenOptions()),
+            MartenSettings.Of(new MartenOptions()),
             MartenStudioRuntime.Current,
             services,
-            new HealthSqlRunner(new HealthConnection(MartenStudioDatabase.Of(store.Storage.Database)), new ReadOnlySqlOptions(), null),
+            new HealthSqlRunner(new HealthConnection(MartenSourceDatabase.Of(store.Storage.Database)), new ReadOnlySqlOptions(), null),
             Now,
             new HealthSweepMemo(),
             CancellationToken.None));
@@ -236,10 +236,10 @@ public class HealthSeamTests
     [Fact]
     public void The_registry_a_studio_builds_holds_every_check_in_its_descriptors_assemblies()
     {
-        HealthCheckRegistry registry = new(MartenStudioDescriptor.Instance, MartenStudioRuntime.Current);
+        HealthCheckRegistry registry = new(MartenDescriptor.Instance, MartenStudioRuntime.Current);
 
         registry.All.Select(static x => x.Info.CheckType).Should().BeEquivalentTo(
-            MartenStudioDescriptor.Instance.HealthCheckAssemblies.Select(static x => x.Assembly).Distinct().SelectMany(HealthCheckRegistry.Discover));
+            MartenDescriptor.Instance.HealthCheckAssemblies.Select(static x => x.Assembly).Distinct().SelectMany(HealthCheckRegistry.Discover));
         registry.All.Should().HaveCount(87,
             "the studio ships 87 checks: 0.4's 49, W5's D09 and C11, W5-V1's T16 and T24, W5-R2's R02-R04, W5-S2's S04-S10 and K05-K08, "
             + "W5-B1's T15, T17, T19, T20, T25 and T26, 0.6's C12 (X3), T18 (X4) and D10 (M4), 0.8's C13 and C14 (#20), 0.10's K09 and K10 (V1), 1.0.1's C15 (#47), and 1.1's E09, C16-C18 and S11-S13 (NP2), less K10, retired in 1.1");

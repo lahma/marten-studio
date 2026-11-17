@@ -111,7 +111,7 @@ internal sealed class KafkaTailService(
 
             if (!plan.IsValid)
             {
-                await NotRunAsync(input, session, KafkaStudioText.PredicateDidNotRun(plan.Errors), KafkaStudioText.PredicateDidNotParse(input.PredicateText?.Length ?? 0)).ConfigureAwait(false);
+                await NotRunAsync(input, session, KafkaText.PredicateDidNotRun(plan.Errors), KafkaText.PredicateDidNotParse(input.PredicateText?.Length ?? 0)).ConfigureAwait(false);
             }
 
             return new KafkaTailPlanResult.Planned(new KafkaTailPlanned(input, plan, grant));
@@ -119,8 +119,8 @@ internal sealed class KafkaTailService(
         catch (Exception e) when (e is not OperationCanceledException)
         {
             logger.LogWarning(e, "Data Studio could not plan a live tail");
-            await NotRunAsync(input, session, KafkaStudioText.TailFailed, PredicateNotRecorded(input)).ConfigureAwait(false);
-            return new KafkaTailPlanResult.Refused(KafkaStudioText.TailFailed);
+            await NotRunAsync(input, session, KafkaText.TailFailed, PredicateNotRecorded(input)).ConfigureAwait(false);
+            return new KafkaTailPlanResult.Refused(KafkaText.TailFailed);
         }
     }
 
@@ -146,16 +146,16 @@ internal sealed class KafkaTailService(
         // lower than the tail's first segment had; a higher one starts with the planned (lower) grant.
         if (!grant.AtLeast(planned.Grant) || (session is not null && !planned.Grant.AtLeast(session.Grant)))
         {
-            await NotRunAsync(input, session, KafkaStudioText.TailGrantChanged, AuditTextOf(input, planned.Plan)).ConfigureAwait(false);
-            return new KafkaTailStartResult.Refused(KafkaStudioText.TailGrantChanged);
+            await NotRunAsync(input, session, KafkaText.TailGrantChanged, AuditTextOf(input, planned.Plan)).ConfigureAwait(false);
+            return new KafkaTailStartResult.Refused(KafkaText.TailGrantChanged);
         }
 
         KafkaScanPlan plan = planned.Plan;
 
         if (!plan.IsValid)
         {
-            await NotRunAsync(input, session, KafkaStudioText.PredicateDidNotRun(plan.Errors), KafkaStudioText.PredicateDidNotParse(input.PredicateText?.Length ?? 0)).ConfigureAwait(false);
-            return new KafkaTailStartResult.Refused(KafkaStudioText.PredicateInvalid);
+            await NotRunAsync(input, session, KafkaText.PredicateDidNotRun(plan.Errors), KafkaText.PredicateDidNotParse(input.PredicateText?.Length ?? 0)).ConfigureAwait(false);
+            return new KafkaTailStartResult.Refused(KafkaText.PredicateInvalid);
         }
 
         try
@@ -185,8 +185,8 @@ internal sealed class KafkaTailService(
         catch (Exception e) when (e is not OperationCanceledException)
         {
             logger.LogWarning(e, "Data Studio could not start a live tail");
-            await NotRunAsync(input, session, KafkaStudioText.TailFailed, plan.AuditText).ConfigureAwait(false);
-            return new KafkaTailStartResult.Refused(KafkaStudioText.TailFailed);
+            await NotRunAsync(input, session, KafkaText.TailFailed, plan.AuditText).ConfigureAwait(false);
+            return new KafkaTailStartResult.Refused(KafkaText.TailFailed);
         }
     }
 
@@ -225,7 +225,7 @@ internal sealed class KafkaTailService(
     {
         KafkaClusterEntry cluster = input.Cluster;
         IReadOnlyList<string> topics = input.Topics;
-        string target = KafkaStudioText.TailTarget(topics);
+        string target = KafkaText.TailTarget(topics);
 
         // 1. The capability, and the one it needs.
         try
@@ -234,7 +234,7 @@ internal sealed class KafkaTailService(
         }
         catch (KafkaCapabilityDeniedException denial)
         {
-            actionLog.RecordCapabilityDenied(cluster, topics, denial, KafkaStudioText.TailAction, target);
+            actionLog.RecordCapabilityDenied(cluster, topics, denial, KafkaText.TailAction, target);
             session?.CountRefusedResume(denial.VisitorText);
             return (denial.VisitorText, [], KafkaGrantDecision.EnvelopeOnly);
         }
@@ -242,7 +242,7 @@ internal sealed class KafkaTailService(
         // 2. The cluster's profile: Production never tails, even when the capability is granted.
         if (ForbiddenByProfile(cluster))
         {
-            string text = KafkaStudioText.ProfileForbids(KafkaStudioText.LiveTailAction, cluster);
+            string text = KafkaText.ProfileForbids(KafkaText.LiveTailAction, cluster);
             await NotRunAsync(input, session, text, PredicateNotRecorded(input)).ConfigureAwait(false);
             return (text, [], KafkaGrantDecision.EnvelopeOnly);
         }
@@ -258,9 +258,9 @@ internal sealed class KafkaTailService(
         // 4. The cluster policy, then the policies for every topic: any refusal refuses the whole tail and names nothing.
         if (!await authorization.IsAuthorizedAsync(cluster, null, null, cancellationToken).ConfigureAwait(false))
         {
-            actionLog.RecordClusterDenied(cluster, null, topics, authorization.PolicyFor(null) ?? "(none)", KafkaStudioText.TailAction, target, KafkaCapability.LiveTail);
-            session?.CountRefusedResume(KafkaStudioText.RequestRefused);
-            return (KafkaStudioText.RequestRefused, [], KafkaGrantDecision.EnvelopeOnly);
+            actionLog.RecordClusterDenied(cluster, null, topics, authorization.PolicyFor(null) ?? "(none)", KafkaText.TailAction, target, KafkaCapability.LiveTail);
+            session?.CountRefusedResume(KafkaText.RequestRefused);
+            return (KafkaText.RequestRefused, [], KafkaGrantDecision.EnvelopeOnly);
         }
 
         foreach (KafkaTopicName name in names)
@@ -269,9 +269,9 @@ internal sealed class KafkaTailService(
                 || !await authorization.IsAuthorizedAsync(cluster, name.Value, KafkaCapability.SearchRecords, cancellationToken).ConfigureAwait(false)
                 || !await authorization.IsAuthorizedAsync(cluster, name.Value, KafkaCapability.LiveTail, cancellationToken).ConfigureAwait(false))
             {
-                actionLog.RecordClusterDenied(cluster, name.Value, topics, authorization.PolicyFor(KafkaCapability.LiveTail) ?? "(none)", KafkaStudioText.TailAction, target, KafkaCapability.LiveTail);
-                session?.CountRefusedResume(KafkaStudioText.RequestRefused);
-                return (KafkaStudioText.RequestRefused, [], KafkaGrantDecision.EnvelopeOnly);
+                actionLog.RecordClusterDenied(cluster, name.Value, topics, authorization.PolicyFor(KafkaCapability.LiveTail) ?? "(none)", KafkaText.TailAction, target, KafkaCapability.LiveTail);
+                session?.CountRefusedResume(KafkaText.RequestRefused);
+                return (KafkaText.RequestRefused, [], KafkaGrantDecision.EnvelopeOnly);
             }
         }
 
@@ -281,14 +281,14 @@ internal sealed class KafkaTailService(
 
         if (grant.Denied is { } denied)
         {
-            actionLog.RecordCapabilityDenied(cluster, topics, denied, KafkaStudioText.TailAction, target);
+            actionLog.RecordCapabilityDenied(cluster, topics, denied, KafkaText.TailAction, target);
             session?.CountRefusedResume(denied.VisitorText);
             return (denied.VisitorText, [], grant);
         }
 
         if (grant.Refusal is not null)
         {
-            actionLog.RecordClusterDenied(cluster, grant.RefusedTopic, topics, authorization.PolicyFor(KafkaCapability.ReadPayloads) ?? "(none)", KafkaStudioText.TailAction, target, KafkaCapability.ReadPayloads);
+            actionLog.RecordClusterDenied(cluster, grant.RefusedTopic, topics, authorization.PolicyFor(KafkaCapability.ReadPayloads) ?? "(none)", KafkaText.TailAction, target, KafkaCapability.ReadPayloads);
             session?.CountRefusedResume(grant.Refusal);
             return (grant.Refusal, [], grant);
         }
@@ -300,9 +300,9 @@ internal sealed class KafkaTailService(
     {
         names = [];
 
-        if (input.Topics.Count is < 1 or > KafkaStudioText.MaxSearchTopics)
+        if (input.Topics.Count is < 1 or > KafkaText.MaxSearchTopics)
         {
-            return KafkaStudioText.SearchTopicCount;
+            return KafkaText.SearchTopicCount;
         }
 
         List<KafkaTopicName> parsed = [];
@@ -310,7 +310,7 @@ internal sealed class KafkaTailService(
         {
             if (!KafkaTopicName.TryCreate(topic, out KafkaTopicName name))
             {
-                return KafkaStudioText.SearchTopicInvalid;
+                return KafkaText.SearchTopicInvalid;
             }
 
             if (!parsed.Contains(name))
@@ -319,9 +319,9 @@ internal sealed class KafkaTailService(
             }
         }
 
-        if (input.PredicateText is { Length: > KafkaStudioText.MaxPredicateLength })
+        if (input.PredicateText is { Length: > KafkaText.MaxPredicateLength })
         {
-            return KafkaStudioText.PredicateTooLong;
+            return KafkaText.PredicateTooLong;
         }
 
         names = [.. parsed];
@@ -341,7 +341,7 @@ internal sealed class KafkaTailService(
         string.Create(CultureInfo.InvariantCulture, $"(the tail text is not recorded, {input.PredicateText?.Length ?? 0} characters)");
 
     private static string AuditTextOf(KafkaTailInput input, KafkaScanPlan plan) =>
-        plan.IsValid ? plan.AuditText : KafkaStudioText.PredicateDidNotParse(input.PredicateText?.Length ?? 0);
+        plan.IsValid ? plan.AuditText : KafkaText.PredicateDidNotParse(input.PredicateText?.Length ?? 0);
 
     /// <summary>
     /// Records a segment that did not run. For a tail's first segment that is the ring entry and event 9609; for a resume it is counted in the session's
@@ -357,8 +357,8 @@ internal sealed class KafkaTailService(
 
         string user = await authorization.UserNameAsync().ConfigureAwait(false);
 
-        actionLog.Record(input.Cluster, input.Topics, KafkaStudioText.TailAction, KafkaStudioText.TailTarget(input.Topics), succeeded: false, reason, KafkaCapability.LiveTail);
-        logger.ActionNotRun(user, KafkaStudioText.LiveTailAction.ToLowerInvariant(), string.Join(", ", input.Topics), input.Cluster.Cluster, input.Cluster.TenantId, reason, predicate);
+        actionLog.Record(input.Cluster, input.Topics, KafkaText.TailAction, KafkaText.TailTarget(input.Topics), succeeded: false, reason, KafkaCapability.LiveTail);
+        logger.ActionNotRun(user, KafkaText.LiveTailAction.ToLowerInvariant(), string.Join(", ", input.Topics), input.Cluster.Cluster, input.Cluster.TenantId, reason, predicate);
     }
 
     /// <summary>Records a session that ended, once: the ring entry and event 9608. Needs nothing from a scope that may be disposing.</summary>
@@ -370,8 +370,8 @@ internal sealed class KafkaTailService(
         actionLog.Record(
             input.Cluster,
             input.Topics,
-            KafkaStudioText.TailAction,
-            KafkaStudioText.TailTarget(input.Topics),
+            KafkaText.TailAction,
+            KafkaText.TailTarget(input.Topics),
             succeeded,
             session.AuditMessage(reason),
             KafkaCapability.LiveTail);

@@ -181,8 +181,8 @@ public class StorageSinceMarkTests
             ]);
 
         StorageService service = new(
-            PostgresStudioSettings.Of(Microsoft.Extensions.Options.Options.Create(new PostgresOptions())),
-            PostgresStudioDescriptor.Instance,
+            PostgresSettings.Of(Microsoft.Extensions.Options.Options.Create(new PostgresOptions())),
+            PostgresDescriptor.Instance,
             authorization: null!,
             resolver: null!,
             facts: null!,

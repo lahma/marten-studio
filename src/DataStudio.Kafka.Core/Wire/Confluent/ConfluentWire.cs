@@ -16,7 +16,7 @@ internal sealed class ConfluentWire(
     KafkaAdminPool<ConfluentOffsetsReader> offsetsPool,
     KafkaEngineSnapshot options,
     ConfluentClientEvents events,
-    KStudioLoggers loggers) : IKafkaWire
+    KafkaEngineLoggers loggers) : IKafkaWire
 {
     /// <inheritdoc />
     public string ClusterKey => cluster.Key;
@@ -395,7 +395,7 @@ internal sealed class ConfluentWire(
         {
             string callName = call.ToString();
             string kind = exception.GetType().Name;
-            KStudioLog.CatalogReadFailed(loggers.Catalog, callName, ClusterKey, kind);
+            KafkaEngineLog.CatalogReadFailed(loggers.Catalog, callName, ClusterKey, kind);
             return WireResult<T>.Fail(new WireError.Failed(kind, IsFatal: false));
         }
     }

@@ -56,7 +56,7 @@ internal sealed record ScanRunInputs(
     KafkaByteRateGovernor Governor,
     OwnerByteBudget OwnerBudget,
     TimeProvider Time,
-    KStudioLoggers Loggers,
+    KafkaEngineLoggers Loggers,
     KafkaLogOnce Once,
     IScanObserver? Observer,
     bool MatchEveryRecordInRange = false,
@@ -231,7 +231,7 @@ internal sealed class ScanRun : IDisposable
             stopReason = KafkaScanStopReason.Failed;
             string clusterText = KafkaLogValue.Cap(cluster)!;
             string kind = exception.GetType().Name;
-            KStudioLog.ScanFailed(inputs.Loggers.Scans, ScanId, clusterText, kind);
+            KafkaEngineLog.ScanFailed(inputs.Loggers.Scans, ScanId, clusterText, kind);
         }
         finally
         {
@@ -506,7 +506,7 @@ internal sealed class ScanRun : IDisposable
             string kind = rule.StartsWith('$') ? "JsonPath" : "Pattern";
             string failure = redacted.Failure.ToString();
             string exceptionKind = redacted.ExceptionKind ?? "none";
-            KStudioLog.PayloadRuleNotApplied(inputs.Loggers.Scans, kind, topicText, clusterText, failure, exceptionKind);
+            KafkaEngineLog.PayloadRuleNotApplied(inputs.Loggers.Scans, kind, topicText, clusterText, failure, exceptionKind);
         }
     }
 
@@ -519,7 +519,7 @@ internal sealed class ScanRun : IDisposable
         if (inputs.Once.ShouldLog($"decoder|{clusterText}|{topicText}|{decoder}"))
         {
             string kind = exception.GetType().Name;
-            KStudioLog.DecoderFailed(inputs.Loggers.Scans, decoder, topicText, clusterText, kind);
+            KafkaEngineLog.DecoderFailed(inputs.Loggers.Scans, decoder, topicText, clusterText, kind);
         }
     }
 
@@ -595,7 +595,7 @@ internal sealed class ScanRun : IDisposable
                 {
                     groupRefusalLogged = true;
                     string clusterText = KafkaLogValue.Cap(cluster)!;
-                    KStudioLog.GroupCoordinatorRefused(inputs.Loggers.Scans, ScanId, clusterText);
+                    KafkaEngineLog.GroupCoordinatorRefused(inputs.Loggers.Scans, ScanId, clusterText);
                 }
 
                 return false;
@@ -702,7 +702,7 @@ internal sealed class ScanRun : IDisposable
             }
 
             string topicText = KafkaLogValue.Cap(p.Range.Topic)!;
-            KStudioLog.OffsetsDeletedDuringScan(inputs.Loggers.Scans, ScanId, lost, topicText, p.Range.Partition);
+            KafkaEngineLog.OffsetsDeletedDuringScan(inputs.Loggers.Scans, ScanId, lost, topicText, p.Range.Partition);
         }
 
         if (resume >= p.Range.End)
@@ -771,7 +771,7 @@ internal sealed class ScanRun : IDisposable
     private void LogStalled(PartitionState p)
     {
         string topicText = KafkaLogValue.Cap(p.Range.Topic)!;
-        KStudioLog.PartitionStalled(inputs.Loggers.Scans, ScanId, topicText, p.Range.Partition, p.Next);
+        KafkaEngineLog.PartitionStalled(inputs.Loggers.Scans, ScanId, topicText, p.Range.Partition, p.Next);
     }
 
     private void ExtendStallClocks(TimeSpan waited)
@@ -847,7 +847,7 @@ internal sealed class ScanRun : IDisposable
 
         if (elapsed > SlowCloseMilliseconds)
         {
-            KStudioLog.ConsumerCloseSlow(inputs.Loggers.Scans, ScanId, elapsed);
+            KafkaEngineLog.ConsumerCloseSlow(inputs.Loggers.Scans, ScanId, elapsed);
         }
     }
 
@@ -914,7 +914,7 @@ internal sealed class ScanRun : IDisposable
 
         string clusterText = KafkaLogValue.Cap(cluster)!;
         string reasonText = reason.ToString();
-        KStudioLog.ScanStopped(
+        KafkaEngineLog.ScanStopped(
             inputs.Loggers.Scans, ScanId, clusterText, reasonText, result.Records, result.Bytes, result.Matches, result.Undecidable, (long) result.Elapsed.TotalMilliseconds);
 
         return result;

@@ -42,7 +42,7 @@ public class StatementPlanServiceTests
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
-    private static StatementsService Service(PostgresStudioComponentContext context, IStatementFacts facts)
+    private static StatementsService Service(PostgresComponentContext context, IStatementFacts facts)
     {
         IServiceProvider services = context.Services;
 
@@ -62,19 +62,19 @@ public class StatementPlanServiceTests
         Statement(1, "select * from public.orders where id = $1", 10, 100, [Orders]),
         Statement(3, "copy (select 'x') to stdout", 1, 100)));
 
-    private static IEnumerable<StudioActionLogEntry> Plans(PostgresStudioComponentContext context) =>
+    private static IEnumerable<StudioActionLogEntry> Plans(PostgresComponentContext context) =>
         context.Services.GetRequiredService<StudioActionLogService>().GetLatest().Where(static x => x.Action == StatementsService.PlanAction);
 
     [Fact]
     public async Task With_ViewDatabaseActivity_off_nothing_is_read_planned_or_audited()
     {
-        await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
+        await using PostgresComponentContext context = await new PostgresComponentContext().ReadyAsync();
         CountingFacts facts = new(Two());
 
         StatementPlanView view = await Service(context, facts).PlanAsync(Scope, 1, Token);
 
         view.Refusal.Should().Be(DatabaseRefusal.CapabilityOff);
-        view.Reason.Should().Be(PostgresStudioText.Instance.StatementsCapabilityDenial);
+        view.Reason.Should().Be(PostgresText.Instance.StatementsCapabilityDenial);
         view.QueryId.Should().Be(1);
         facts.Reads.Should().Be(0);
         Plans(context).Should().BeEmpty("a closed gate refuses nothing a person did, as the page's own does");
@@ -83,7 +83,7 @@ public class StatementPlanServiceTests
     [Fact]
     public async Task The_write_policys_refusal_is_the_pages_and_nothing_is_read()
     {
-        await using PostgresStudioComponentContext context = new();
+        await using PostgresComponentContext context = new();
         context.WithAllCapabilities();
         context.Options.WriteAuthorizationPolicy = "write";
         context.AuthorizationService.Allow(static resource => resource.Capability is null);
@@ -93,7 +93,7 @@ public class StatementPlanServiceTests
         StatementPlanView view = await Service(context, facts).PlanAsync(Scope with { TenantId = "acme" }, 1, Token);
 
         view.Refusal.Should().Be(DatabaseRefusal.WritePolicy);
-        view.Reason.Should().Be(PostgresStudioText.Instance.StatementsWritePolicyDenial);
+        view.Reason.Should().Be(PostgresText.Instance.StatementsWritePolicyDenial);
         facts.Reads.Should().Be(0);
         context.AuthorizationService.Calls.Should().Contain(static x => x.Resource.Capability == nameof(StudioCapability.ViewDatabaseActivity));
     }
@@ -101,7 +101,7 @@ public class StatementPlanServiceTests
     [Fact]
     public async Task A_queryid_the_sweep_did_not_read_has_no_plan_and_says_so()
     {
-        await using PostgresStudioComponentContext context = new();
+        await using PostgresComponentContext context = new();
         context.WithAllCapabilities();
         await context.ReadyAsync();
 
@@ -116,7 +116,7 @@ public class StatementPlanServiceTests
     [Fact]
     public async Task A_text_withheld_at_read_gets_no_plan()
     {
-        await using PostgresStudioComponentContext context = new();
+        await using PostgresComponentContext context = new();
         context.WithAllCapabilities();
         await context.ReadyAsync();
 
@@ -134,7 +134,7 @@ public class StatementPlanServiceTests
     {
         // No database browser gate behind the service: the visitor's withheld schemas cannot be read, so every text is withheld,
         // and with it every plan.
-        await using PostgresStudioComponentContext context = new();
+        await using PostgresComponentContext context = new();
         context.WithAllCapabilities();
         await context.ReadyAsync();
 
@@ -291,7 +291,7 @@ public class StatementPlanServiceTests
     [Fact]
     public async Task The_reader_refuses_a_text_that_names_a_withheld_schema_before_it_opens_a_connection()
     {
-        await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
+        await using PostgresComponentContext context = await new PostgresComponentContext().ReadyAsync();
         StatementPlanReader reader = new(context.Services.GetRequiredService<IStudioSettings>(), NullLogger<StatementPlanReader>.Instance);
         NoConnection database = new();
 

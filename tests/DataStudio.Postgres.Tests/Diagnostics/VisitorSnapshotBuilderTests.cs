@@ -30,7 +30,7 @@ public class VisitorSnapshotBuilderTests
     private const string StorePolicySentence = "The store policy does not allow you this database.";
     private const string SchemaSentence = "1 table is in a schema you may not browse, so its name is not shown.";
 
-    private static readonly HealthCheckRegistry Registry = new(PostgresStudioDescriptor.Instance);
+    private static readonly HealthCheckRegistry Registry = new(PostgresDescriptor.Instance);
 
     private static HealthReport Report()
     {

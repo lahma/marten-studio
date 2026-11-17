@@ -86,18 +86,18 @@ public class BrowseDatabaseOptionsTests
             System.Reflection.PropertyInfo property = typeof(MartenCapabilities).GetProperty(capability.ToString())
                 ?? throw new InvalidOperationException(capability + " has no MartenCapabilities property.");
 
-            MartenStudioSettings.IsConfigured(configured, capability).Should().BeFalse();
+            MartenSettings.IsConfigured(configured, capability).Should().BeFalse();
 
             property.SetValue(configured, true);
 
-            MartenStudioSettings.IsConfigured(configured, capability).Should().BeTrue(
+            MartenSettings.IsConfigured(configured, capability).Should().BeTrue(
                 capability + " must read " + property.Name);
 
             StudioCapabilityGuard.All.Where(x => x != capability)
-                .Should().OnlyContain(x => !MartenStudioSettings.IsConfigured(configured, x));
+                .Should().OnlyContain(x => !MartenSettings.IsConfigured(configured, x));
         }
 
-        Action unknown = () => MartenStudioSettings.IsConfigured(new MartenCapabilities(), (StudioCapability) 999);
+        Action unknown = () => MartenSettings.IsConfigured(new MartenCapabilities(), (StudioCapability) 999);
         unknown.Should().Throw<ArgumentOutOfRangeException>("a capability with no property must not quietly read as off");
     }
 
@@ -158,7 +158,7 @@ public class BrowseDatabaseOptionsTests
         var options = new MartenOptions();
         options.BrowsableSchemas.Add("*");
 
-        var notice = new DatabaseBrowserConfigurationNotice(MartenStudioSettings.Of(options), Logger(logs), containerEndpoints: MappedStudio());
+        var notice = new DatabaseBrowserConfigurationNotice(MartenSettings.Of(options), Logger(logs), containerEndpoints: MappedStudio());
 
         await notice.StartedAsync(Token);
         await notice.StartedAsync(Token);
@@ -178,7 +178,7 @@ public class BrowseDatabaseOptionsTests
         var options = new MartenOptions { SqlConsoleRole = role };
         options.BrowsableSchemas.Add(star ? "*" : "quartz");
 
-        await new DatabaseBrowserConfigurationNotice(MartenStudioSettings.Of(options), Logger(logs), containerEndpoints: MappedStudio())
+        await new DatabaseBrowserConfigurationNotice(MartenSettings.Of(options), Logger(logs), containerEndpoints: MappedStudio())
             .StartedAsync(Token);
 
         logs.Entries.Should().BeEmpty();

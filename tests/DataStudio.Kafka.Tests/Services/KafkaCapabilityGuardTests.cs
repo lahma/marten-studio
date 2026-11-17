@@ -38,10 +38,10 @@ public class KafkaCapabilityGuardTests
     [Fact]
     public void A_capability_is_effective_only_with_the_flag_set_and_ReadOnly_off()
     {
-        using KafkaStudioHarness off = new();
+        using KafkaHarness off = new();
         off.Context.Services.GetRequiredService<KafkaCapabilityGuard>().IsEnabled(KafkaCapability.SearchRecords).Should().BeFalse();
 
-        using KafkaStudioHarness on = new(static o => o.Capabilities = KafkaCapabilities.All());
+        using KafkaHarness on = new(static o => o.Capabilities = KafkaCapabilities.All());
         KafkaCapabilityGuard guard = on.Context.Services.GetRequiredService<KafkaCapabilityGuard>();
         guard.IsEnabled(KafkaCapability.SearchRecords).Should().BeTrue();
 
@@ -53,7 +53,7 @@ public class KafkaCapabilityGuardTests
     [Fact]
     public void ReadOnly_names_the_hosts_option()
     {
-        using KafkaStudioHarness harness = new(static o => o.Capabilities = KafkaCapabilities.All());
+        using KafkaHarness harness = new(static o => o.Capabilities = KafkaCapabilities.All());
         harness.Context.ShellOptions.ReadOnly = true;
         KafkaCapabilityGuard guard = harness.Context.Services.GetRequiredService<KafkaCapabilityGuard>();
 
@@ -66,7 +66,7 @@ public class KafkaCapabilityGuardTests
     [Fact]
     public void A_refusal_names_the_capability_option()
     {
-        using KafkaStudioHarness harness = new();
+        using KafkaHarness harness = new();
         KafkaCapabilityGuard guard = harness.Context.Services.GetRequiredService<KafkaCapabilityGuard>();
 
         Action require = () => guard.Require(KafkaCapability.SearchRecords);
@@ -80,7 +80,7 @@ public class KafkaCapabilityGuardTests
     [Fact]
     public void A_capability_that_is_on_requires_nothing()
     {
-        using KafkaStudioHarness harness = new(static o => o.Capabilities.SearchRecords = true);
+        using KafkaHarness harness = new(static o => o.Capabilities.SearchRecords = true);
 
         Action require = () => harness.Context.Services.GetRequiredService<KafkaCapabilityGuard>().Require(KafkaCapability.SearchRecords);
 

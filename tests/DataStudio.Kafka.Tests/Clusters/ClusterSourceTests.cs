@@ -352,7 +352,7 @@ public class ClusterSourceTests
         options.ClusterSources.Add(_ => new CountingSource(() => runs++));
         ServiceCollection services = new();
         services.AddLogging();
-        KStudioEngineRegistration.Add(services, _ => options, _ => new StubSettings());
+        KafkaEngineRegistration.Add(services, _ => options, _ => new StubSettings());
         using ServiceProvider provider = services.BuildServiceProvider();
 
         runs.Should().Be(0, "nothing is read until the registry is first needed");
@@ -372,7 +372,7 @@ public class ClusterSourceTests
         ServiceCollection services = new();
         services.AddSingleton<ILoggerFactory>(logs.CreateFactory());
         services.AddSingleton(TimeProvider.System);
-        services.AddSingleton<KStudioLoggers>();
+        services.AddSingleton<KafkaEngineLoggers>();
         services.AddSingleton(static provider => new KafkaLogOnce(provider.GetRequiredService<TimeProvider>()));
         using ServiceProvider provider = services.BuildServiceProvider();
 

@@ -304,7 +304,7 @@ internal sealed class StudioOperationTracker : IDisposable
 
         logger.ProjectionRebuildStarted(user, target, storeKey, databaseId);
         actionLog.Record(new StudioActionLogEntry(
-            startedAt, user, new DatabaseAuditScope(storeKey, databaseId, null).ToAuditScope(MartenStudioDescriptor.Key), kind + "Started", target, true,
+            startedAt, user, new DatabaseAuditScope(storeKey, databaseId, null).ToAuditScope(MartenDescriptor.Key), kind + "Started", target, true,
             "Started; it runs in the background and survives this page.", capability.ToString()));
 
         // Detached on purpose: nothing awaits this task, and its exceptions are observed in the
@@ -505,7 +505,7 @@ internal sealed class StudioOperationTracker : IDisposable
         actionLog.Record(new StudioActionLogEntry(
             finishedAt,
             completed.User,
-            new DatabaseAuditScope(completed.StoreKey, completed.DatabaseId, null).ToAuditScope(MartenStudioDescriptor.Key),
+            new DatabaseAuditScope(completed.StoreKey, completed.DatabaseId, null).ToAuditScope(MartenDescriptor.Key),
             completed.Kind + "Finished",
             completed.Target,
             state == StudioOperationState.Succeeded,

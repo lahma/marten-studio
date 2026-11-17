@@ -32,9 +32,9 @@ public class PlanViewContributorTests
         }
     }
 
-    private static async Task<(PostgresStudioComponentContext Context, IRenderedComponent<PlanView> View)> RenderAsync(IPlanInsightContributor? contributor, string fixture = "14-nestloop-plain")
+    private static async Task<(PostgresComponentContext Context, IRenderedComponent<PlanView> View)> RenderAsync(IPlanInsightContributor? contributor, string fixture = "14-nestloop-plain")
     {
-        PostgresStudioComponentContext context = await new PostgresStudioComponentContext(services =>
+        PostgresComponentContext context = await new PostgresComponentContext(services =>
         {
             if (contributor is not null)
             {
@@ -59,7 +59,7 @@ public class PlanViewContributorTests
             [new PlanInsightFinding(Mine, plan.Root.Id, plan.Root.Description, "It found something.", "Declare it.")],
             [Other]));
 
-        (PostgresStudioComponentContext context, IRenderedComponent<PlanView> view) = await RenderAsync(contributor);
+        (PostgresComponentContext context, IRenderedComponent<PlanView> view) = await RenderAsync(contributor);
         await using (context)
         {
             view.FindAll(".ms-plan-insight-code").Select(static x => x.TextContent).Should().Contain("P05").And.Contain("P90");
@@ -77,7 +77,7 @@ public class PlanViewContributorTests
     {
         Fake contributor = new(static _ => throw new InvalidOperationException("the store would not read"));
 
-        (PostgresStudioComponentContext context, IRenderedComponent<PlanView> view) = await RenderAsync(contributor);
+        (PostgresComponentContext context, IRenderedComponent<PlanView> view) = await RenderAsync(contributor);
         await using (context)
         {
             view.FindAll(".ms-plan-insight-code").Select(static x => x.TextContent).Should().Contain("P05");
@@ -89,7 +89,7 @@ public class PlanViewContributorTests
     [Fact]
     public async Task Without_a_contributor_the_view_is_what_it_was()
     {
-        (PostgresStudioComponentContext context, IRenderedComponent<PlanView> view) = await RenderAsync(null);
+        (PostgresComponentContext context, IRenderedComponent<PlanView> view) = await RenderAsync(null);
         await using (context)
         {
             view.FindAll(".ms-plan-not-judged-here").Should().BeEmpty();

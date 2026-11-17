@@ -34,7 +34,7 @@ internal static class MartenDatabaseBridges
         /// </summary>
         /// <param name="database">The Marten database.</param>
         public static DatabasePoolSettings? Of(IMartenDatabase database) =>
-            DatabasePoolSettings.Of(MartenStudioDatabase.Of(database));
+            DatabasePoolSettings.Of(MartenSourceDatabase.Of(database));
     }
 
     extension(DatabaseLinks)
@@ -54,7 +54,7 @@ internal static class MartenDatabaseBridges
             string name,
             DatabaseObjectTab? tab = null,
             IReadOnlyList<KeyValuePair<string, string?>>? extra = null) =>
-            DatabaseLinks.ToObject(MartenStudioDescriptor.Instance, scope, schema, name, tab, extra);
+            DatabaseLinks.ToObject(MartenDescriptor.Instance, scope, schema, name, tab, extra);
 
         /// <summary>
         /// A relation's Rows tab, with MartenStudio's descriptor. Caller: <c>ReferencedBy.razor</c>.
@@ -64,7 +64,7 @@ internal static class MartenDatabaseBridges
         /// <param name="name">The relation's name.</param>
         /// <param name="filter">A row filter, or <see langword="null" />.</param>
         public static string ToRows(StudioScope? scope, string schema, string name, string? filter = null) =>
-            DatabaseLinks.ToRows(MartenStudioDescriptor.Instance, scope, schema, name, filter);
+            DatabaseLinks.ToRows(MartenDescriptor.Instance, scope, schema, name, filter);
     }
 
     extension(SafeReturnLink)

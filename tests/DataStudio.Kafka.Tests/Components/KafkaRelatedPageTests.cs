@@ -170,7 +170,7 @@ public class KafkaRelatedPageTests
 
         IRenderedComponent<KafkaRelatedPage> page = await OpenAsync(rig, "&topic=orders.in&partition=0&offset=1" + Window);
 
-        page.Find(".ms-k-keys").TextContent.Should().Contain(KafkaStudioText.RelatedNoKeys);
+        page.Find(".ms-k-keys").TextContent.Should().Contain(KafkaText.RelatedNoKeys);
         page.FindAll(".ms-k-search-actions button").Should().BeEmpty();
         page.FindAll(".ms-k-lane").Should().BeEmpty();
     }
@@ -183,7 +183,7 @@ public class KafkaRelatedPageTests
 
         IRenderedComponent<KafkaRelatedPage> page = await OpenAsync(rig, "");
 
-        page.Find(".ms-empty").TextContent.Should().Contain(KafkaStudioText.RelatedLinkInvalid);
+        page.Find(".ms-empty").TextContent.Should().Contain(KafkaText.RelatedLinkInvalid);
         rig.BrokerCalls.Should().Be(0);
     }
 

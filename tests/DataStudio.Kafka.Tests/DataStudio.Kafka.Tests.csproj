@@ -53,7 +53,7 @@
        suites rather than copied (as DataStudio.Postgres.Tests links DataStudio.Marten.Tests'): each names only PostgresStudio's types, so a Kafka page is
        rendered in a real Postgres Studio shell with KStudio's own services added beside it. -->
   <ItemGroup>
-    <Compile Include="../DataStudio.Postgres.Tests/Components/PostgresStudioComponentContext.cs" Link="Support/Linked/PostgresStudioComponentContext.cs" />
+    <Compile Include="../DataStudio.Postgres.Tests/Components/PostgresComponentContext.cs" Link="Support/Linked/PostgresComponentContext.cs" />
     <Compile Include="../DataStudio.Postgres.Tests/Support/PostgresFakes.cs" Link="Support/Linked/PostgresFakes.cs" />
     <Compile Include="../DataStudio.Postgres.Tests/Support/NoHealthActionService.cs" Link="Support/Linked/NoHealthActionService.cs" />
     <Compile Include="../DataStudio.Postgres.Tests/Support/RecordingNavigationManager.cs" Link="Support/Linked/RecordingNavigationManager.cs" />

@@ -46,13 +46,13 @@ public class ServerPageTests
             ServerRead<ServerConnectionPosture>.Of(Posture("app", reading: "probe")),
             [new HealthStatement("select 1 from pg_catalog.pg_settings", [])]);
 
-        return ServerPageService.Build(facts, DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance, consoleRoleSet: true);
+        return ServerPageService.Build(facts, DataStudio.Postgres.Services.Postgres.PostgresText.Instance, consoleRoleSet: true);
     }
 
-    private static async Task<(PostgresStudioComponentContext Context, FakeServerPage Data)> ContextAsync(ServerPageView view)
+    private static async Task<(PostgresComponentContext Context, FakeServerPage Data)> ContextAsync(ServerPageView view)
     {
         FakeServerPage data = new() { View = view };
-        PostgresStudioComponentContext context = new(services => services.AddSingleton<IServerPageService>(data));
+        PostgresComponentContext context = new(services => services.AddSingleton<IServerPageService>(data));
         context.Health.WithFindings(
             FakeHealthService.Finding("S04", HealthSeverity.Info, "The application connects to Postgres as a superuser", HealthArea.Server),
             FakeHealthService.Finding("T01", HealthSeverity.Warning, "A table is read whole", HealthArea.Tables));
@@ -63,8 +63,8 @@ public class ServerPageTests
     [Fact]
     public async Task It_draws_the_server_the_settings_the_extensions_and_the_security_posture()
     {
-        (PostgresStudioComponentContext context, FakeServerPage data) = await ContextAsync(View());
-        await using PostgresStudioComponentContext owned = context;
+        (PostgresComponentContext context, FakeServerPage data) = await ContextAsync(View());
+        await using PostgresComponentContext owned = context;
 
         var page = context.Render<ServerPage>();
 
@@ -95,8 +95,8 @@ public class ServerPageTests
     [Fact]
     public async Task The_platform_slot_is_there_and_renders_nothing()
     {
-        (PostgresStudioComponentContext context, _) = await ContextAsync(View());
-        await using PostgresStudioComponentContext owned = context;
+        (PostgresComponentContext context, _) = await ContextAsync(View());
+        await using PostgresComponentContext owned = context;
 
         var page = context.Render<ServerPage>();
         page.WaitForAssertion(() => page.FindAll("section[aria-label='Security posture']").Should().ContainSingle());
@@ -107,8 +107,8 @@ public class ServerPageTests
     [Fact]
     public async Task A_hidden_setting_says_which_grant_shows_it()
     {
-        (PostgresStudioComponentContext context, _) = await ContextAsync(View());
-        await using PostgresStudioComponentContext owned = context;
+        (PostgresComponentContext context, _) = await ContextAsync(View());
+        await using PostgresComponentContext owned = context;
 
         var page = context.Render<ServerPage>();
         page.WaitForAssertion(() => page.FindAll(".ms-s2-setting-hidden").Should().NotBeEmpty());
@@ -121,8 +121,8 @@ public class ServerPageTests
     [Fact]
     public async Task Nothing_on_the_page_needs_ViewDatabaseActivity()
     {
-        (PostgresStudioComponentContext context, _) = await ContextAsync(View());
-        await using PostgresStudioComponentContext owned = context;
+        (PostgresComponentContext context, _) = await ContextAsync(View());
+        await using PostgresComponentContext owned = context;
 
         context.Options.Capabilities.ViewDatabaseActivity.Should().BeFalse("every capability is off by default (D4)");
 
@@ -138,8 +138,8 @@ public class ServerPageTests
     [Fact]
     public async Task A_refusal_is_its_sentence_and_nothing_else()
     {
-        (PostgresStudioComponentContext context, _) = await ContextAsync(ServerPageView.Refused(ServerRefusal.StorePolicy, "Your account may not see this database's server."));
-        await using PostgresStudioComponentContext owned = context;
+        (PostgresComponentContext context, _) = await ContextAsync(ServerPageView.Refused(ServerRefusal.StorePolicy, "Your account may not see this database's server."));
+        await using PostgresComponentContext owned = context;
 
         var page = context.Render<ServerPage>();
         page.WaitForAssertion(() => page.FindAll(".ms-s2-refusal").Should().ContainSingle());

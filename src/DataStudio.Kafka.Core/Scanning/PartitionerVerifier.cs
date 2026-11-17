@@ -137,7 +137,7 @@ internal sealed class PartitionerVerifier(
     KafkaWires wires,
     KafkaEngineSnapshot settings,
     OwnerByteBudget budget,
-    KStudioLoggers loggers,
+    KafkaEngineLoggers loggers,
     TimeProvider time)
 {
     /// <summary>The fewest offsets a window may have for pruning to be worth proving.</summary>
@@ -563,7 +563,7 @@ internal sealed class PartitionerVerifier(
     {
         string topic = KafkaLogValue.Cap(request.Topic)!;
         string cluster = KafkaLogValue.Cap(request.Cluster)!;
-        KStudioLog.PartitionerSampleFailed(loggers.Scans, topic, cluster, kind);
+        KafkaEngineLog.PartitionerSampleFailed(loggers.Scans, topic, cluster, kind);
     }
 
     private sealed class RangeSample(long end)

@@ -16,7 +16,7 @@ namespace DataStudio.Postgres.Tests.Statements;
 /// </summary>
 public class PlanInsightsTests
 {
-    private static readonly StudioText Marten = DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance;
+    private static readonly StudioText Marten = DataStudio.Postgres.Services.Postgres.PostgresText.Instance;
 
     /// <summary>
     /// Where each insight fires among the fixtures: the shapes the probe asked for, and P01 where the planner's estimate of
@@ -201,7 +201,7 @@ public class PlanInsightsTests
     {
         string json = Analyzed("""{"Node Type": "Seq Scan", "Filter": "(a = 1)", "Actual Rows": 1, "Rows Removed by Filter": 200000, "Actual Loops": 1}""");
 
-        Evaluate(json, PostgresStudioText.Instance).Single(static x => x.Insight.Code == "P04").Remedy.Should().Be(PostgresStudioText.Instance.PlanIndexRemedy)
+        Evaluate(json, PostgresText.Instance).Single(static x => x.Insight.Code == "P04").Remedy.Should().Be(PostgresText.Instance.PlanIndexRemedy)
             .And.NotContain("Marten");
     }
 
@@ -338,7 +338,7 @@ public class PlanInsightsTests
             """).Replace("\"Execution Time\": 1.0", "\"Execution Time\": 100.0", StringComparison.Ordinal)
             .Replace("\"Planning Time\": 0.1", "\"Planning Time\": 250.0, \"JIT\": {\"Functions\": 3, \"Timing\": {\"Total\": 60.0}}", StringComparison.Ordinal);
 
-        IReadOnlyList<PlanInsightFinding> findings = Evaluate(json, PostgresStudioText.Instance);
+        IReadOnlyList<PlanInsightFinding> findings = Evaluate(json, PostgresText.Instance);
         findings.Select(static x => x.Insight.Code).Distinct().Should().BeEquivalentTo(PlanInsights.All.Take(14).Select(static x => x.Code), "P15 to P20 are held to Postgres Studio's words in PlanFactsInsightsTests");
 
         foreach (PlanInsightFinding finding in findings)

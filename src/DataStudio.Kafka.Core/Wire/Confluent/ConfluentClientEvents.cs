@@ -14,7 +14,7 @@ namespace DataStudio.Kafka.Core.Wire.Confluent;
 /// host's stderr, a client error is classified and logged, and a recent authentication failure is remembered so that a call that then
 /// times out is reported as what it was.
 /// </summary>
-internal sealed class ConfluentClientEvents(KStudioLoggers loggers, KafkaLogOnce once, TimeProvider timeProvider)
+internal sealed class ConfluentClientEvents(KafkaEngineLoggers loggers, KafkaLogOnce once, TimeProvider timeProvider)
 {
     private static readonly TimeSpan AuthenticationMemory = TimeSpan.FromSeconds(30);
 
@@ -28,7 +28,7 @@ internal sealed class ConfluentClientEvents(KStudioLoggers loggers, KafkaLogOnce
     {
         string facility = KafkaLogValue.Cap(message.Facility);
         string text = KafkaLogValue.CapText(message.Message);
-        KStudioLog.ClientLog(loggers.Clients, cluster, client, facility, text);
+        KafkaEngineLog.ClientLog(loggers.Clients, cluster, client, facility, text);
     }
 
     /// <summary>Handles an error the client reports outside any call.</summary>
@@ -41,7 +41,7 @@ internal sealed class ConfluentClientEvents(KStudioLoggers loggers, KafkaLogOnce
 
         if (error.IsFatal)
         {
-            KStudioLog.ClientFatalError(loggers.Clients, client, cluster, code);
+            KafkaEngineLog.ClientFatalError(loggers.Clients, client, cluster, code);
             return;
         }
 
@@ -49,11 +49,11 @@ internal sealed class ConfluentClientEvents(KStudioLoggers loggers, KafkaLogOnce
         {
             authentication[cluster] = (timeProvider.GetUtcNow(), code);
             LogLevel level = KafkaLogOnce.WarningOrDebug(once, "auth|" + cluster);
-            KStudioLog.AuthenticationFailed(loggers.Clients, level, cluster, code);
+            KafkaEngineLog.AuthenticationFailed(loggers.Clients, level, cluster, code);
             return;
         }
 
-        KStudioLog.ClientError(loggers.Clients, client, cluster, code);
+        KafkaEngineLog.ClientError(loggers.Clients, client, cluster, code);
     }
 
     /// <summary>Records that a token refresh handler of the host threw; only the exception's type name is logged.</summary>
@@ -63,7 +63,7 @@ internal sealed class ConfluentClientEvents(KStudioLoggers loggers, KafkaLogOnce
     public void OnTokenRefreshFailed(string cluster, string client, Exception exception)
     {
         string kind = exception.GetType().Name;
-        KStudioLog.ClientError(loggers.Clients, client, cluster, kind);
+        KafkaEngineLog.ClientError(loggers.Clients, client, cluster, kind);
     }
 
     /// <summary>The authentication failure seen in the last 30 seconds, if any.</summary>
@@ -84,7 +84,7 @@ internal sealed class ConfluentClientEvents(KStudioLoggers loggers, KafkaLogOnce
         return setting =>
         {
             string name = KafkaLogValue.Cap(setting);
-            KStudioLog.HostSettingOverridden(logger, name, key, client);
+            KafkaEngineLog.HostSettingOverridden(logger, name, key, client);
         };
     }
 }

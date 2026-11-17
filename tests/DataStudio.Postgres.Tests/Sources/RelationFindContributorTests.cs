@@ -18,8 +18,8 @@ public class RelationFindContributorTests
 
     private static RelationFindContributor Contributor(FakeDatabaseObjectService objects) => new(
         objects,
-        PostgresStudioSettings.Of(Microsoft.Extensions.Options.Options.Create(new PostgresOptions())),
-        PostgresStudioDescriptor.Instance);
+        PostgresSettings.Of(Microsoft.Extensions.Options.Options.Create(new PostgresOptions())),
+        PostgresDescriptor.Instance);
 
     [Fact]
     public async Task An_exact_name_is_a_hit_that_opens_the_object_in_the_browser()
@@ -138,8 +138,8 @@ public class RelationFindContributorTests
 
     private static RelationFindContributor Crowded(CrowdedObjects objects) => new(
         objects,
-        PostgresStudioSettings.Of(Microsoft.Extensions.Options.Options.Create(new PostgresOptions())),
-        PostgresStudioDescriptor.Instance);
+        PostgresSettings.Of(Microsoft.Extensions.Options.Options.Create(new PostgresOptions())),
+        PostgresDescriptor.Instance);
 
     [Fact]
     public async Task An_exact_name_past_the_first_hundred_that_contain_it_is_still_found_with_one_ask_a_kind()

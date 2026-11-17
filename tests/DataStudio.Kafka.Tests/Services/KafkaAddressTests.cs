@@ -17,7 +17,7 @@ public class KafkaAddressTests
     [InlineData("wolverine")]
     public void A_cluster_entry_key_survives_the_round_trip_through_the_address(string key)
     {
-        using KafkaStudioHarness harness = new();
+        using KafkaHarness harness = new();
         IStudioSettings settings = harness.Context.Services.GetRequiredService<IStudioSettings>();
 
         string href = KafkaAddress.Href(KafkaAddress.SearchRoute, key, (KafkaAddress.TopicParameter, "orders.v1"));
@@ -36,7 +36,7 @@ public class KafkaAddressTests
     [Fact]
     public void The_slash_of_a_tenant_key_is_escaped_in_the_query_string()
     {
-        using KafkaStudioHarness harness = new();
+        using KafkaHarness harness = new();
         IStudioSettings settings = harness.Context.Services.GetRequiredService<IStudioSettings>();
 
         KafkaAddress.Href(KafkaAddress.SearchRoute, "wolverine/acme").Should().Contain("cluster=wolverine%2Facme");

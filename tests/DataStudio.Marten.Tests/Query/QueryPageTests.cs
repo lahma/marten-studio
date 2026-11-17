@@ -830,7 +830,7 @@ public class QueryPageTests
 
         files.Should().NotBeEmpty("scanning nothing would pass for the wrong reason");
 
-        // The engine, DataStudio.Postgres.Diagnostics, has no Razor component at all (the fence that says so is PostgresStudioFenceTests).
+        // The engine, DataStudio.Postgres.Diagnostics, has no Razor component at all (the fence that says so is PostgresFenceTests).
         foreach (string project in StudioProjects.Databases.Where(static x => x != StudioProjects.Diagnostics))
         {
             files.Should().Contain(

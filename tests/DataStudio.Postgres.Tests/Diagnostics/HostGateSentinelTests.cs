@@ -74,7 +74,7 @@ public class HostGateSentinelTests
                 null,
                 null);
 
-            statements = DiagnosticsSnapshotBuilder.Statements(facts, gate, DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance);
+            statements = DiagnosticsSnapshotBuilder.Statements(facts, gate, DataStudio.Postgres.Services.Postgres.PostgresText.Instance);
         }
         else
         {

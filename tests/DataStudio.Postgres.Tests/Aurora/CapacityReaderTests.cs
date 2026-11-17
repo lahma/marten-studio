@@ -94,7 +94,7 @@ public sealed class CapacityReaderTests : IDisposable
 
         return new CapacityReader(
             provider,
-            PostgresStudioSettings.Of(Options.Create(options)),
+            PostgresSettings.Of(Options.Create(options)),
             new StudioLogThrottle(clock),
             logs.CreateFactory().CreateLogger<CapacityReader>(),
             clock)

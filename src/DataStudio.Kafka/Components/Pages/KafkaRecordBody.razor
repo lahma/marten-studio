@@ -34,7 +34,7 @@
     {
         <div class="ms-empty" role="status">
             <p class="ms-empty-title">Not a record</p>
-            <p class="ms-empty-description">@KafkaStudioText.RecordLinkInvalid</p>
+            <p class="ms-empty-description">@KafkaText.RecordLinkInvalid</p>
         </div>
     }
     else if (error is not null)
@@ -70,7 +70,7 @@
                              Matches="@((IReadOnlyList<KafkaMatch>)[record])"
                              Source="@KafkaExportSource.Record"
                              Topics="@((IReadOnlyList<string>)[record.Topic])"
-                             AuditText="@KafkaStudioText.RecordExportAuditText"
+                             AuditText="@KafkaText.RecordExportAuditText"
                              SourceRecords="1"
                              SourceBytes="@record.ValueLength"
                              ValueExtension="@KafkaExportService.ValueExtensionOf(record)" />
@@ -98,7 +98,7 @@
                                 <td class="ms-table-cell"><a href="@RecordHref(rowOffset)">@KafkaDisplay.Number(rowOffset)</a></td>
                                 @if (match is null)
                                 {
-                                    <td class="ms-table-cell ms-muted" colspan="5">@KafkaStudioText.NoRecordAtThisOffset</td>
+                                    <td class="ms-table-cell ms-muted" colspan="5">@KafkaText.NoRecordAtThisOffset</td>
                                 }
                                 else
                                 {
@@ -151,7 +151,7 @@
     {
         <div class="ms-empty" role="status">
             <p class="ms-empty-title">Not found</p>
-            <p class="ms-empty-description">@KafkaStudioText.TopicNotAvailable(topic ?? string.Empty)</p>
+            <p class="ms-empty-description">@KafkaText.TopicNotAvailable(topic ?? string.Empty)</p>
         </div>
     }
 </div>
@@ -291,7 +291,7 @@
         catch (Exception e) when (!disposed)
         {
             Logger.LogWarning(e, "The Kafka record page failed to read the record");
-            error = KafkaStudioText.ReadFailed;
+            error = KafkaText.ReadFailed;
         }
 
         loading = false;
@@ -442,7 +442,7 @@
         catch (Exception e) when (!disposed)
         {
             Logger.LogWarning(e, "The Kafka record page failed to compare two records");
-            error = KafkaStudioText.ReadFailed;
+            error = KafkaText.ReadFailed;
         }
         finally
         {

@@ -22,9 +22,9 @@ public class StudioLayoutNavigationRaceTests
 
     private const string HostPath = "studio/postgres/database/connection";
 
-    private static KafkaStudioHarness Harness(string startAt)
+    private static KafkaHarness Harness(string startAt)
     {
-        KafkaStudioHarness harness = new(null, KafkaStudioHarness.Primary, KafkaStudioHarness.Secondary);
+        KafkaHarness harness = new(null, KafkaHarness.Primary, KafkaHarness.Secondary);
         harness.Context.Navigate(startAt);
         return harness;
     }
@@ -34,7 +34,7 @@ public class StudioLayoutNavigationRaceTests
     [Fact]
     public async Task Going_from_a_kafka_page_to_a_host_page_renders_no_host_body_while_the_scope_gate_is_pending()
     {
-        using KafkaStudioHarness harness = Harness(KafkaPage);
+        using KafkaHarness harness = Harness(KafkaPage);
         await harness.Context.ReadyAsync();
         harness.Context.Options.SourceAuthorizationPolicy = "host-source";
 
@@ -59,7 +59,7 @@ public class StudioLayoutNavigationRaceTests
     [Fact]
     public async Task Going_from_a_kafka_page_to_a_host_page_the_policy_refuses_never_renders_the_host_body()
     {
-        using KafkaStudioHarness harness = Harness(KafkaPage);
+        using KafkaHarness harness = Harness(KafkaPage);
         await harness.Context.ReadyAsync();
         harness.Context.Options.SourceAuthorizationPolicy = "host-source";
 
@@ -76,7 +76,7 @@ public class StudioLayoutNavigationRaceTests
     [Fact]
     public async Task A_rail_click_to_a_host_page_during_the_catalog_load_is_gated_too()
     {
-        using KafkaStudioHarness harness = Harness(KafkaPage);
+        using KafkaHarness harness = Harness(KafkaPage);
         harness.Context.Options.SourceAuthorizationPolicy = "host-source";
 
         // The catalog load asks the host's policy for every store, so it is pending for as long as the gate is held. The layout has not yet
@@ -99,12 +99,12 @@ public class StudioLayoutNavigationRaceTests
     [Fact]
     public async Task Arriving_on_a_kafka_page_from_a_host_page_opens_the_cluster_the_address_names()
     {
-        using KafkaStudioHarness harness = Harness(KafkaPage);
+        using KafkaHarness harness = Harness(KafkaPage);
         await harness.Context.ReadyAsync();
 
         IRenderedComponent<StudioRoutes> routes = harness.Context.Render<StudioRoutes>();
         routes.WaitForState(() => routes.FindComponent<StudioLayout>().Instance.PreferencesLoaded);
-        routes.WaitForAssertion(() => harness.State.ActiveCluster.Should().Be(KafkaStudioHarness.Primary));
+        routes.WaitForAssertion(() => harness.State.ActiveCluster.Should().Be(KafkaHarness.Primary));
         harness.Navigation.Simulate(HostPath, intercepted: true);
         routes.WaitForAssertion(() => routes.FindAll("#ms-cluster-select").Should().BeEmpty());
 
@@ -112,19 +112,19 @@ public class StudioLayoutNavigationRaceTests
         // this address to it.
         harness.Navigation.Simulate("studio/kafka?cluster=secondary", intercepted: true);
 
-        routes.WaitForAssertion(() => harness.State.ActiveCluster.Should().Be(KafkaStudioHarness.Secondary));
+        routes.WaitForAssertion(() => harness.State.ActiveCluster.Should().Be(KafkaHarness.Secondary));
         routes.WaitForAssertion(() => harness.Navigation.Uri.Should().EndWith("kafka?cluster=secondary"));
     }
 
     [Fact]
     public async Task Back_to_a_kafka_page_opens_the_cluster_its_address_names_and_not_the_one_the_state_last_held()
     {
-        using KafkaStudioHarness harness = Harness(KafkaPage + "?cluster=secondary");
+        using KafkaHarness harness = Harness(KafkaPage + "?cluster=secondary");
         await harness.Context.ReadyAsync();
 
         IRenderedComponent<StudioRoutes> routes = harness.Context.Render<StudioRoutes>();
         routes.WaitForState(() => routes.FindComponent<StudioLayout>().Instance.PreferencesLoaded);
-        routes.WaitForAssertion(() => harness.State.ActiveCluster.Should().Be(KafkaStudioHarness.Secondary));
+        routes.WaitForAssertion(() => harness.State.ActiveCluster.Should().Be(KafkaHarness.Secondary));
 
         // The visitor picks the first cluster, leaves for a host page, and Back returns to the entry that named the second.
         await routes.InvokeAsync(() => harness.State.SetClusterAsync("primary"));
@@ -132,7 +132,7 @@ public class StudioLayoutNavigationRaceTests
         routes.WaitForAssertion(() => routes.FindAll("#ms-cluster-select").Should().BeEmpty());
         harness.Navigation.Simulate("studio/kafka?cluster=secondary", intercepted: true);
 
-        routes.WaitForAssertion(() => harness.State.ActiveCluster.Should().Be(KafkaStudioHarness.Secondary));
+        routes.WaitForAssertion(() => harness.State.ActiveCluster.Should().Be(KafkaHarness.Secondary));
         routes.WaitForAssertion(() => harness.Navigation.Uri.Should().EndWith("kafka?cluster=secondary"));
     }
 }

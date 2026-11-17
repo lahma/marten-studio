@@ -443,7 +443,7 @@ public class DatabaseObjectsPageTests
         await expander.ClickAsync(new MouseEventArgs());
 
         page.Find(".ms-db-definition-row .ms-db-refusal").TextContent.Trim().Should().Be(
-            DataStudio.Marten.Services.MartenStudioText.Instance.DefinitionCapabilityDenial,
+            DataStudio.Marten.Services.MartenText.Instance.DefinitionCapabilityDenial,
             "a definition is refused in the sentence that names both ways in, not the rows' that names BrowseDatabase alone");
         page.FindAll(".ms-db-definition-row .ms-sql").Should().BeEmpty();
         Expander(page, "host_fn").GetAttribute("aria-expanded").Should().Be("true");
@@ -469,7 +469,7 @@ public class DatabaseObjectsPageTests
         await Expander(page, "host_fn").ClickAsync(new MouseEventArgs());
 
         page.Find(".ms-db-definition-row .ms-db-refusal").TextContent.Trim()
-            .Should().Be(DatabaseGate.SchemaDenial(FakeDatabaseObjects.StoreSchema, [FakeDatabaseObjects.Legacy, FakeDatabaseObjects.Quartz], DataStudio.Marten.Services.MartenStudioText.Instance));
+            .Should().Be(DatabaseGate.SchemaDenial(FakeDatabaseObjects.StoreSchema, [FakeDatabaseObjects.Legacy, FakeDatabaseObjects.Quartz], DataStudio.Marten.Services.MartenText.Instance));
         context.DatabaseObjects.DefinitionsAsked.Should().BeEmpty();
     }
 
@@ -561,14 +561,14 @@ public class DatabaseObjectsPageTests
         context.DatabaseObjects.Definition = DatabaseObjectDefinition.Unavailable(
             new DatabaseObjectRef(DatabaseObjectKind.Function, "legacy", "unsafe_definer", string.Empty),
             DatabaseRefusal.CapabilityOff,
-            DataStudio.Marten.Services.MartenStudioText.Instance.BrowseCapabilityDenial);
+            DataStudio.Marten.Services.MartenText.Instance.BrowseCapabilityDenial);
 
         var page = DatabasePageData.RenderBrowser(context, "kind=functions&schema=legacy");
 
         await Expander(page, "unsafe_definer").ClickAsync(new MouseEventArgs());
 
         page.WaitForAssertion(() => page.Find(".ms-db-definition-row .ms-db-refusal").TextContent.Trim()
-            .Should().Be(DataStudio.Marten.Services.MartenStudioText.Instance.BrowseCapabilityDenial));
+            .Should().Be(DataStudio.Marten.Services.MartenText.Instance.BrowseCapabilityDenial));
         page.FindAll(".ms-db-definition-row .ms-sql").Should().BeEmpty();
         context.DatabaseObjects.DefinitionsAsked.Should().ContainSingle("the list said this one was available");
     }
@@ -732,8 +732,8 @@ public class DatabaseObjectsPageTests
         var page = DatabasePageData.RenderBrowser(context);
 
         string notice = page.Find(".ms-db-access").TextContent;
-        notice.Should().Contain(DataStudio.Marten.Services.MartenStudioText.Instance.BrowseCapabilityDenial, "the rows' sentence, which 0.4 pinned, is still the first line");
-        notice.Should().Contain(DataStudio.Marten.Services.MartenStudioText.Instance.DefinitionCapabilityDenial, "and the definitions' own, which names both ways in, follows");
+        notice.Should().Contain(DataStudio.Marten.Services.MartenText.Instance.BrowseCapabilityDenial, "the rows' sentence, which 0.4 pinned, is still the first line");
+        notice.Should().Contain(DataStudio.Marten.Services.MartenText.Instance.DefinitionCapabilityDenial, "and the definitions' own, which names both ways in, follows");
         notice.Should().Contain("Capabilities.ViewDefinitions").And.Contain("Capabilities.BrowseDatabase");
 
         page.Find(".ms-db-rail-withheld").TextContent.Should().Contain("Capabilities.ViewDefinitions")
@@ -764,7 +764,7 @@ public class DatabaseObjectsPageTests
         notice.TextContent.Should().Contain("Rows, and everything in a schema")
             .And.Contain("MartenOptions.Capabilities.BrowseDatabase")
             .And.Contain("Capabilities.ViewDefinitions")
-            .And.NotContain(DataStudio.Marten.Services.MartenStudioText.Instance.BrowseCapabilityDenial, "that sentence says a definition needs BrowseDatabase, which is no longer true");
+            .And.NotContain(DataStudio.Marten.Services.MartenText.Instance.BrowseCapabilityDenial, "that sentence says a definition needs BrowseDatabase, which is no longer true");
 
         // A routine the list offers a body of is asked for, as the gate said it may be.
         context.DatabaseObjects.List = DatabasePageData.ListOf(
@@ -801,7 +801,7 @@ public class DatabaseObjectsPageTests
         await Expander(page, "recalculate").ClickAsync(new MouseEventArgs());
 
         page.Find(".ms-db-definition-row .ms-db-refusal").TextContent.Trim()
-            .Should().Be(DatabaseGate.DefinitionSchemaDenial(FakeDatabaseObjects.Legacy, [FakeDatabaseObjects.Quartz, "*"], DataStudio.Marten.Services.MartenStudioText.Instance))
+            .Should().Be(DatabaseGate.DefinitionSchemaDenial(FakeDatabaseObjects.Legacy, [FakeDatabaseObjects.Quartz, "*"], DataStudio.Marten.Services.MartenText.Instance))
             .And.Contain("only through \"*\"");
         context.DatabaseObjects.DefinitionsAsked.Should().BeEmpty();
     }
@@ -829,7 +829,7 @@ public class DatabaseObjectsPageTests
     public void A_schema_the_gate_refuses_is_a_neutral_message_with_a_way_back()
     {
         using var context = DatabasePageData.Context();
-        string sentence = DatabaseGate.SchemaDenial("secret", ["quartz"], DataStudio.Marten.Services.MartenStudioText.Instance);
+        string sentence = DatabaseGate.SchemaDenial("secret", ["quartz"], DataStudio.Marten.Services.MartenText.Instance);
         context.DatabaseObjects.List = DatabaseObjectList.Refused(
             new DatabaseObjectQuery(DatabaseObjectCategory.Tables, "secret"), DatabaseRefusal.SchemaNotBrowsable, sentence);
 

@@ -152,7 +152,7 @@ internal sealed class EventShapeCheckService : IEventShapeCheck
         {
             string schema = resolved.Store.Options.Events.DatabaseSchemaName;
 
-            await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
+            await using NpgsqlConnection connection = MartenSourceDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
             await connection.OpenStudioAsync(cancellationToken).ConfigureAwait(false);
 
             TableColumns events = await columnCatalog.GetAsync(connection, schema, EventTableInfo.EventsTable, cancellationToken).ConfigureAwait(false);
@@ -286,7 +286,7 @@ internal sealed class EventShapeCheckService : IEventShapeCheck
             // is listed and checked ("read as another type"); E05's wider "known" (upcasters included) would leave it out.
             Func<string, bool> isKnown = registered.Contains;
 
-            await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
+            await using NpgsqlConnection connection = MartenSourceDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
             await connection.OpenStudioAsync(cancellationToken).ConfigureAwait(false);
 
             await using NpgsqlCommand command = EventAliasStatistics.Command(events.DatabaseSchemaName, options.Value.QueryTimeout);
@@ -421,7 +421,7 @@ internal sealed class EventShapeCheckService : IEventShapeCheck
         IReadOnlyStoreOptions storeOptions = resolved.Store.Options;
         string schema = storeOptions.Events.DatabaseSchemaName;
 
-        await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
+        await using NpgsqlConnection connection = MartenSourceDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
         await connection.OpenStudioAsync(token).ConfigureAwait(false);
 
         TableColumns events = await columnCatalog.GetAsync(connection, schema, EventTableInfo.EventsTable, token).ConfigureAwait(false);

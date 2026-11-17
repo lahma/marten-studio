@@ -31,7 +31,7 @@ public class ConnectionHistoryReaderTests
             Reader = new ConnectionHistoryReader(
                 Store,
                 Options.Create(new PostgresConnectionHistoryOptions { Retention = Retention }),
-                PostgresStudioSettings.Of(new PostgresOptions()),
+                PostgresSettings.Of(new PostgresOptions()),
                 Clock);
         }
 

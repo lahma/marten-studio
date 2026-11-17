@@ -4,7 +4,7 @@ using DataStudio.Postgres.Services.Postgres;
 namespace DataStudio.Marten.Tests.Conventions;
 
 /// <summary>
-/// The mirror of <c>PostgresStudioWordsTests</c> for the product's name (v2 step 6): no sentence, title, credit, tile or heading says "Marten Studio",
+/// The mirror of <c>PostgresWordsTests</c> for the product's name (v2 step 6): no sentence, title, credit, tile or heading says "Marten Studio",
 /// "Postgres Studio" or "KStudio". The product is Data Studio, and a module is Marten, Postgres or Kafka. Held over every module's words (the Kafka
 /// module's in its own suite) and over every string literal and every Razor text in <c>src/</c>.
 /// </summary>
@@ -13,8 +13,8 @@ public class ProductNamesTests
     [Fact]
     public void No_sentence_of_the_Marten_or_the_Postgres_modules_words_says_a_removed_product_name()
     {
-        string marten = WordsSnapshot.OfStudioText(MartenStudioText.Instance, "MartenOptions.ReadOnly");
-        string postgres = WordsSnapshot.OfStudioText(PostgresStudioText.Instance, "PostgresOptions.ReadOnly");
+        string marten = WordsSnapshot.OfStudioText(MartenText.Instance, "MartenOptions.ReadOnly");
+        string postgres = WordsSnapshot.OfStudioText(PostgresText.Instance, "PostgresOptions.ReadOnly");
 
         ProductNameScan.Names.Matches(marten).Select(static x => x.Value).Should().BeEmpty("the Marten module's words");
         ProductNameScan.Names.Matches(postgres).Select(static x => x.Value).Should().BeEmpty("the Postgres module's words");
@@ -91,7 +91,7 @@ public class ProductNamesTests
     [InlineData("// Marten Studio in a comment\nint x;")]
     [InlineData("/// <summary>Postgres Studio</summary>\nclass C { }")]
     [InlineData("/* KStudio */ int x;")]
-    [InlineData("KStudioLog.Started(logger); using KStudio.Core;")]
+    [InlineData("KafkaEngineLog.Started(logger); using KStudio.Core;")]
     [InlineData("char c = '\"'; string s = \"fine\"; // Marten Studio")]
     public void The_scan_ignores_a_comment_and_an_identifier(string source)
     {

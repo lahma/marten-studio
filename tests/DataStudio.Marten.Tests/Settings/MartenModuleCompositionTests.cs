@@ -53,9 +53,9 @@ public class MartenModuleCompositionTests
         public string AuditEventIds => string.Empty;
     }
 
-    private static readonly StudioDescriptor Host = DataStudio.Marten.Services.MartenStudioDescriptor.Instance;
+    private static readonly StudioDescriptor Host = DataStudio.Marten.Services.MartenDescriptor.Instance;
 
-    private static readonly DataStudio.Marten.Services.MartenStudioSettings Settings = DataStudio.Marten.Services.MartenStudioSettings.Of(Options.Create(new MartenOptions()));
+    private static readonly DataStudio.Marten.Services.MartenSettings Settings = DataStudio.Marten.Services.MartenSettings.Of(Options.Create(new MartenOptions()));
 
     private static DatabaseStudioModule Database() => new(Host, Settings, new StudioCapabilityGuard(Settings));
 
@@ -126,7 +126,7 @@ public class MartenModuleCompositionTests
 
         // Every module's sections carry its key.
         composed.Navigation.Where(static x => x.ModuleKey == Host.Key).Should().HaveCount(hostTitles.Length);
-        composed.ExtraShortcuts.Should().HaveCount(PostgresStudioShortcuts.Groups.Count + Host.ExtraShortcuts.Count, "the Postgres module's own and the Marten pages' document shortcuts are carried");
+        composed.ExtraShortcuts.Should().HaveCount(PostgresShortcuts.Groups.Count + Host.ExtraShortcuts.Count, "the Postgres module's own and the Marten pages' document shortcuts are carried");
         composed.PageAssemblies.Should().HaveCount(Host.PageAssemblies.Count + 2, "the fake module's and the shell's own");
     }
 

@@ -119,6 +119,6 @@ public class PlanStatementLintTests
         QueryPlan plain = QueryPlanTextReader.Read("Seq Scan on public.orders  (cost=0.00..1.01 rows=1 width=4)").Plan!;
         PlanInsights.NotJudged(plain).Should().NotContain(static x => x.FromText);
         PlanInsights.NotJudgedWithoutFacts(plain, null).Should().NotContain(static x => x.FromText);
-        PlanInsights.Evaluate(plain, DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance).Should().NotContain(static x => x.Insight.FromText);
+        PlanInsights.Evaluate(plain, DataStudio.Postgres.Services.Postgres.PostgresText.Instance).Should().NotContain(static x => x.Insight.FromText);
     }
 }

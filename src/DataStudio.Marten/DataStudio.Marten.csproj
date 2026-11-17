@@ -142,7 +142,7 @@
 
     A host that ends up with another PostgresStudio anyway - a central PackageVersion under transitive
     pinning drops it from the graph with no NuGet diagnostic at all (PS-0) - is stopped at startup by
-    Internal/PostgresStudioVersionGuard.cs.
+    Internal/PostgresVersionGuard.cs.
   -->
   <Target Name="DataStudioMartenPinsPostgresExactly" AfterTargets="_GetProjectReferenceVersions">
     <ItemGroup>

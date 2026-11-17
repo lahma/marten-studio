@@ -15,9 +15,9 @@ namespace DataStudio.Postgres.Tests.Components;
 /// </summary>
 public class PlanViewTests
 {
-    private static async Task<PostgresStudioComponentContext> ContextAsync() => await new PostgresStudioComponentContext().ReadyAsync();
+    private static async Task<PostgresComponentContext> ContextAsync() => await new PostgresComponentContext().ReadyAsync();
 
-    private static IRenderedComponent<PlanView> Render(PostgresStudioComponentContext context, string json, string? caption = null) =>
+    private static IRenderedComponent<PlanView> Render(PostgresComponentContext context, string json, string? caption = null) =>
         context.Render<PlanView>(parameters => parameters.Add(x => x.Json, json).Add(x => x.Caption, caption).Add(x => x.Label, "Query plan"));
 
     /// <summary>Each node's head, its parts joined by a space: Blazor drops the whitespace between them, and the head's gap draws it.</summary>
@@ -32,7 +32,7 @@ public class PlanViewTests
     [Fact]
     public async Task PostgreSQL_14s_plain_plan_is_a_tree_of_estimates_and_cost_shares()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
 
         IRenderedComponent<PlanView> view = Render(context, ExplainFixtures.Get("14-nestloop-plain"));
 
@@ -68,7 +68,7 @@ public class PlanViewTests
     [Fact]
     public async Task PostgreSQL_18s_analyzed_plan_draws_rows_loops_time_shares_buffers_and_index_searches()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
 
         IRenderedComponent<PlanView> view = Render(context, ExplainFixtures.Get("18-nestloop-analyze"));
 
@@ -90,7 +90,7 @@ public class PlanViewTests
     [Fact]
     public async Task PostgreSQL_19s_analyzed_cte_draws_its_subplan_and_where_it_kept_its_rows()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
 
         IRenderedComponent<PlanView> view = Render(context, ExplainFixtures.Get("19rc1-cte-analyze"), "A caption of the caller's.");
 
@@ -103,7 +103,7 @@ public class PlanViewTests
     [Fact]
     public async Task A_spill_flags_its_node_and_says_so_under_the_tree()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
 
         IRenderedComponent<PlanView> view = Render(context, ExplainFixtures.Get("19rc1-sort-spill-analyze"));
 
@@ -118,7 +118,7 @@ public class PlanViewTests
     [Fact]
     public async Task A_node_a_planner_setting_disabled_and_one_that_never_ran_say_so()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
 
         IRenderedComponent<PlanView> view = Render(context, """
             [{"Plan": {"Node Type": "Append", "Actual Rows": 1, "Actual Loops": 1, "Plans": [
@@ -133,7 +133,7 @@ public class PlanViewTests
     [Fact]
     public async Task Text_that_is_not_a_plan_says_so_and_still_offers_what_it_was_given()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
 
         IRenderedComponent<PlanView> view = Render(context, "[\"not a plan\"]");
 
@@ -145,7 +145,7 @@ public class PlanViewTests
     [Fact]
     public async Task A_plan_handed_over_read_draws_the_tree_and_never_offers_raw_json()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
         QueryPlan plan = QueryPlanReader.Read(ExplainFixtures.Get("16-seqfilter-plain")).Plan!;
 
         IRenderedComponent<PlanView> view = context.Render<PlanView>(parameters => parameters.Add(x => x.Plan, plan).Add(x => x.Json, "[]"));
@@ -157,7 +157,7 @@ public class PlanViewTests
     [Fact]
     public async Task A_plan_larger_than_the_drawn_bound_draws_its_first_nodes_and_says_how_many()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
         string children = string.Join(",", Enumerable.Range(0, PlanView.MaxDrawnNodes + 50).Select(static _ => "{\"Node Type\": \"Seq Scan\", \"Total Cost\": 1}"));
 
         IRenderedComponent<PlanView> view = Render(context, "[{\"Plan\": {\"Node Type\": \"Append\", \"Total Cost\": 1, \"Plans\": [" + children + "]}}]");

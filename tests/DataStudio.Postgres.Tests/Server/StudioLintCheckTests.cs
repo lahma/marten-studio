@@ -206,7 +206,7 @@ public class StudioLintCheckTests
     [InlineData(true, true, "DataStudioOptions.ReadOnly")]
     public void The_facts_read_the_effective_switchs_name_off_the_registered_settings(bool shellReadOnly, bool moduleReadOnly, string expected)
     {
-        PostgresStudioSettings settings = PostgresStudioSettings.Of(
+        PostgresSettings settings = PostgresSettings.Of(
             new PostgresOptions { ReadOnly = moduleReadOnly },
             new DataStudio.Services.Settings.ShellSettings(Microsoft.Extensions.Options.Options.Create(new DataStudioOptions { ReadOnly = shellReadOnly })));
 

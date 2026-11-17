@@ -146,7 +146,7 @@ public class DatabaseAccessTests
         DatabaseBrowseGrant grant = await harness.Access.RequireBrowseAsync(TenantScope, "Test", "x.y", Token);
 
         grant.Refusal.Should().Be(DatabaseRefusal.StorePolicy);
-        grant.Reason.Should().Be(DataStudio.Marten.Services.MartenStudioText.Instance.BrowseStorePolicyDenial);
+        grant.Reason.Should().Be(DataStudio.Marten.Services.MartenText.Instance.BrowseStorePolicyDenial);
     }
 
     /// <summary>

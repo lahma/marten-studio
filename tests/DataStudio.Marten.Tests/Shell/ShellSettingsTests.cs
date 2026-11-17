@@ -36,7 +36,7 @@ public sealed class ShellSettingsTests
         using ServiceProvider provider = services.BuildServiceProvider();
 
         provider.GetRequiredService<IShellSettings>().Should().BeOfType<ShellSettings>();
-        provider.GetRequiredService<IStudioSettings>().Should().BeOfType<DataStudio.Marten.Services.MartenStudioSettings>();
+        provider.GetRequiredService<IStudioSettings>().Should().BeOfType<DataStudio.Marten.Services.MartenSettings>();
         provider.GetRequiredService<IStudioSettings>().Should().NotBeSameAs(provider.GetRequiredService<IShellSettings>());
     }
 

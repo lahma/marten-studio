@@ -21,7 +21,7 @@ namespace DataStudio.Kafka.Tests.Scanning;
 
 /// <summary>
 /// The scan engine over the in-memory fake broker, on a clock a test moves by hand. It builds the engine's real container
-/// (<c>KStudioEngineRegistration</c>), seeds records with explicit timestamps (every one in the past, as the broker requires) and runs
+/// (<c>KafkaEngineRegistration</c>), seeds records with explicit timestamps (every one in the past, as the broker requires) and runs
 /// scans to their end, so every test below drives the same code the live suite drives against Kafka.
 /// </summary>
 internal sealed class ScanFixture : IAsyncDisposable
@@ -84,7 +84,7 @@ internal sealed class ScanFixture : IAsyncDisposable
             services.AddSingleton(observer);
         }
 
-        KStudioEngineRegistration.Add(services, _ => options, _ => new TestEngineSettings(TimeSpan.Zero));
+        KafkaEngineRegistration.Add(services, _ => options, _ => new TestEngineSettings(TimeSpan.Zero));
         return new ScanFixture(clock, fake, wire, services.BuildServiceProvider(), logs);
     }
 

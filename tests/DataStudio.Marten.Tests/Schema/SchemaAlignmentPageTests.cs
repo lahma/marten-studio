@@ -383,7 +383,7 @@ public class SchemaAlignmentPageTests
         new("studio", name, string.Empty, DatabaseObjectKind.Function, false,
             new DatabaseObjectOwnership(DatabaseObjectOwner.Other),
             !refused,
-            refused ? DataStudio.Marten.Services.MartenStudioText.Instance.BrowseCapabilityDenial : null);
+            refused ? DataStudio.Marten.Services.MartenText.Instance.BrowseCapabilityDenial : null);
 
     private static StudioComponentContext NewContext(out FakeSchemaDataService schema)
     {

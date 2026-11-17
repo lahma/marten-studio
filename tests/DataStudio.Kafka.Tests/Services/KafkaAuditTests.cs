@@ -17,16 +17,16 @@ public class KafkaAuditTests
 {
     private static CancellationToken Ct => Xunit.TestContext.Current.CancellationToken;
 
-    private static ValueTask<List<StudioActionLogEntry>> Visible(KafkaStudioHarness harness) =>
+    private static ValueTask<List<StudioActionLogEntry>> Visible(KafkaHarness harness) =>
         harness.Context.ActivityRing.GetVisibleAsync(cancellationToken: Ct);
 
-    private static void Record(KafkaStudioHarness harness, string[] topics, KafkaCapability? capability = null, KafkaClusterEntry? cluster = null) =>
-        harness.ActionLog.Record(cluster ?? KafkaStudioHarness.Primary, topics, "SearchRecords", string.Join(", ", topics), succeeded: true, "done", capability);
+    private static void Record(KafkaHarness harness, string[] topics, KafkaCapability? capability = null, KafkaClusterEntry? cluster = null) =>
+        harness.ActionLog.Record(cluster ?? KafkaHarness.Primary, topics, "SearchRecords", string.Join(", ", topics), succeeded: true, "done", capability);
 
     [Fact]
     public async Task An_entry_is_written_under_the_module_scope_with_the_clusters_label()
     {
-        using KafkaStudioHarness harness = new();
+        using KafkaHarness harness = new();
 
         Record(harness, ["orders.v1"], cluster: new KafkaClusterEntry("primary", "tenant-a", "Primary", null));
 
@@ -43,7 +43,7 @@ public class KafkaAuditTests
     [Fact]
     public async Task A_module_entry_is_never_judged_by_the_hosts_store_policy()
     {
-        using KafkaStudioHarness harness = new();
+        using KafkaHarness harness = new();
         harness.Context.Options.SourceAuthorizationPolicy = "host-source";
         harness.Authorization.AllowHost(static _ => false);
 
@@ -56,7 +56,7 @@ public class KafkaAuditTests
     [Fact]
     public async Task An_entry_naming_a_refused_topic_is_hidden()
     {
-        using KafkaStudioHarness harness = new(static o => o.ClusterAuthorizationPolicy = "kafka-topics");
+        using KafkaHarness harness = new(static o => o.ClusterAuthorizationPolicy = "kafka-topics");
         harness.Authorization.AllowKafka(static r => r.Topic != "secrets.v1");
 
         Record(harness, ["orders.v1"]);
@@ -68,10 +68,10 @@ public class KafkaAuditTests
     [Fact]
     public async Task A_refused_cluster_hides_its_entries()
     {
-        using KafkaStudioHarness harness = new(static o => o.ClusterAuthorizationPolicy = "kafka-topics");
+        using KafkaHarness harness = new(static o => o.ClusterAuthorizationPolicy = "kafka-topics");
         harness.Authorization.AllowKafka(static r => r.Cluster != "secondary");
 
-        Record(harness, ["a"], cluster: KafkaStudioHarness.Secondary);
+        Record(harness, ["a"], cluster: KafkaHarness.Secondary);
 
         (await Visible(harness)).Should().BeEmpty();
     }
@@ -79,7 +79,7 @@ public class KafkaAuditTests
     [Fact]
     public async Task A_SearchRecords_entry_needs_the_capability_on_and_its_policy()
     {
-        using KafkaStudioHarness harness = new(static o => o.CapabilityAuthorizationPolicy = "kafka-search");
+        using KafkaHarness harness = new(static o => o.CapabilityAuthorizationPolicy = "kafka-search");
 
         Record(harness, ["orders.v1"], KafkaCapability.SearchRecords);
 
@@ -99,7 +99,7 @@ public class KafkaAuditTests
     [Fact]
     public async Task A_ReadPayloads_entry_needs_ReadPayloads_on_and_its_policy()
     {
-        using KafkaStudioHarness harness = new(static o => o.CapabilityAuthorizationPolicy = "kafka-search");
+        using KafkaHarness harness = new(static o => o.CapabilityAuthorizationPolicy = "kafka-search");
 
         Record(harness, ["orders.v1"], KafkaCapability.ReadPayloads);
 
@@ -127,7 +127,7 @@ public class KafkaAuditTests
     [Fact]
     public async Task Answers_are_kept_for_one_sweep_only()
     {
-        using KafkaStudioHarness harness = new(static o => o.ClusterAuthorizationPolicy = "kafka-topics");
+        using KafkaHarness harness = new(static o => o.ClusterAuthorizationPolicy = "kafka-topics");
 
         Record(harness, ["orders.v1"]);
         Record(harness, ["orders.v1"]);
@@ -143,7 +143,7 @@ public class KafkaAuditTests
     [Fact]
     public async Task An_entry_of_a_kind_no_gate_answers_for_is_hidden()
     {
-        using KafkaStudioHarness harness = new();
+        using KafkaHarness harness = new();
         harness.Context.ActivityRing.Record(
             new StudioAuditScope("removed-module", ["somewhere"], "somewhere", new object()), "Anything", "target", succeeded: true);
 
@@ -153,7 +153,7 @@ public class KafkaAuditTests
     [Fact]
     public async Task A_host_entry_is_judged_as_before()
     {
-        using KafkaStudioHarness harness = new();
+        using KafkaHarness harness = new();
         harness.Context.ActionLog.Record("OpenDocument", "orders/1", succeeded: true, "done");
 
         (await Visible(harness)).Should().ContainSingle().Which.DatabaseScope().Should().NotBeNull("the studio's own entry carries the database's scope, under the database module's key");
@@ -162,7 +162,7 @@ public class KafkaAuditTests
     [Fact]
     public async Task The_activity_footer_names_the_modules_events_beside_the_studios()
     {
-        using KafkaStudioHarness harness = new();
+        using KafkaHarness harness = new();
         await harness.Context.ReadyAsync();
 
         IRenderedComponent<Activity> page = harness.Context.Render<Activity>();
@@ -174,7 +174,7 @@ public class KafkaAuditTests
     [Fact]
     public async Task The_scope_column_shows_the_cluster_label()
     {
-        using KafkaStudioHarness harness = new();
+        using KafkaHarness harness = new();
         await harness.Context.ReadyAsync();
         Record(harness, ["orders.v1"], cluster: new KafkaClusterEntry("primary", "tenant-a", "Primary", null));
 
@@ -188,7 +188,7 @@ public class KafkaAuditTests
     public async Task A_tenant_entry_is_recorded_and_judged_by_its_cluster_and_tenant_not_its_entry_key()
     {
         // D43, decision 6: the audit scope carries the cluster's own key and the tenant, so the gate asks the question the entry's pages asked.
-        using KafkaStudioHarness harness = new(static o => o.ClusterAuthorizationPolicy = "kafka-topics");
+        using KafkaHarness harness = new(static o => o.ClusterAuthorizationPolicy = "kafka-topics");
         harness.Authorization.AllowKafka(static r => r is { Cluster: "wolverine", TenantId: "acme" });
         KafkaClusterEntry acme = new("wolverine/acme", "acme", "Wolverine", null);
         KafkaClusterEntry globex = new("wolverine/globex", "globex", "Wolverine", null);

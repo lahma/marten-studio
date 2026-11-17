@@ -27,7 +27,7 @@ public class ConfluentScanReaderTests
         options.AddCluster("main", new ClientConfig { BootstrapServers = "localhost:1" });
         KafkaClusterDefinition cluster = new KafkaClusterRegistry(options).Get("main");
         CapturingLoggerProvider logs = new();
-        ConfluentClientEvents events = new(new KStudioLoggers(logs.CreateFactory()), new KafkaLogOnce(TimeProvider.System), TimeProvider.System);
+        ConfluentClientEvents events = new(new KafkaEngineLoggers(logs.CreateFactory()), new KafkaLogOnce(TimeProvider.System), TimeProvider.System);
 
         return new ConfluentScanReader(cluster, KafkaEngineSnapshot.Take(options), new WireReaderOptions(Guid.NewGuid(), WireIsolation.ReadCommitted, new KafkaScanLimits()), events);
     }
@@ -140,7 +140,7 @@ public class ConfluentScanReaderTests
         options.AddCluster("main", new ClientConfig(new Dictionary<string, string> { ["bootstrap.servers"] = "localhost:1", ["not.a.real.key"] = "secret-sentinel" }));
         KafkaClusterDefinition cluster = new KafkaClusterRegistry(options).Get("main");
         CapturingLoggerProvider logs = new();
-        ConfluentClientEvents events = new(new KStudioLoggers(logs.CreateFactory()), new KafkaLogOnce(TimeProvider.System), TimeProvider.System);
+        ConfluentClientEvents events = new(new KafkaEngineLoggers(logs.CreateFactory()), new KafkaLogOnce(TimeProvider.System), TimeProvider.System);
 
         Func<ConfluentScanReader> build = () => new ConfluentScanReader(
             cluster,

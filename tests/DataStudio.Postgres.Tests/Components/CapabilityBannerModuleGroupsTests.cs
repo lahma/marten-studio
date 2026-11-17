@@ -54,7 +54,7 @@ public class CapabilityBannerModuleGroupsTests
     [Fact]
     public async Task Two_modules_whose_groups_share_a_heading_are_drawn_each_group_once()
     {
-        await using PostgresStudioComponentContext context = new(static services =>
+        await using PostgresComponentContext context = new(static services =>
         {
             services.AddSingleton<IStudioModule>(new FakeModule("a", "/a"));
             services.AddSingleton<IStudioModule>(new FakeModule("b", "/b"));

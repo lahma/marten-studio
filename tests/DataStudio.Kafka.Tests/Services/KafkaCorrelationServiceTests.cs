@@ -190,7 +190,7 @@ public class KafkaCorrelationServiceTests
         rig.Studio.Authorization.AllowKafka(static resource => resource.Topic != "orders");
         KafkaRelatedStartResult start = await related.StartAsync(planned, confirmed: true, Ct);
 
-        start.Should().BeOfType<KafkaRelatedStartResult.Refused>().Which.Text.Should().Be(KafkaStudioText.SearchNamesRefusedTopic);
+        start.Should().BeOfType<KafkaRelatedStartResult.Refused>().Which.Text.Should().Be(KafkaText.SearchNamesRefusedTopic);
         rig.Logs.Entries.Should().Contain(static x => x.EventId.Id == 9603);
     }
 
@@ -205,12 +205,12 @@ public class KafkaCorrelationServiceTests
 
         KafkaRelatedPlanResult plan = await rig.Correlation().PlanAsync(rig.RelatedInput(["orders", "secret.v1"], Keys("c-1")), Ct);
 
-        plan.Should().BeOfType<KafkaRelatedPlanResult.Refused>().Which.Text.Should().Be(KafkaStudioText.SearchNamesRefusedTopic).And.NotContain("secret");
+        plan.Should().BeOfType<KafkaRelatedPlanResult.Refused>().Which.Text.Should().Be(KafkaText.SearchNamesRefusedTopic).And.NotContain("secret");
         rig.BrokerCalls.Should().Be(callsBefore, "a refused request is not narrowed to the allowed topics and read: nothing is read at all");
 
         StudioActionLogEntry entry = rig.Ring.Should().ContainSingle().Which;
         entry.Succeeded.Should().BeFalse();
-        entry.Message.Should().Be(KafkaStudioText.RefusedEntry);
+        entry.Message.Should().Be(KafkaText.RefusedEntry);
         rig.Logs.Entries.Should().ContainSingle(static x => x.EventId.Id == 9603);
     }
 
@@ -222,9 +222,9 @@ public class KafkaCorrelationServiceTests
         KafkaCorrelationService related = rig.Correlation();
         string[] twentyOne = [.. Enumerable.Range(0, 21).Select(static i => "t" + i)];
 
-        (await related.PrepareAsync(rig.RelatedInput(twentyOne, Keys("c-1")), Ct)).Should().BeOfType<KafkaRelatedPrepareResult.Refused>().Which.Text.Should().Be(KafkaStudioText.SearchTopicCount);
-        (await related.PrepareAsync(rig.RelatedInput(["orders"], CorrelationKeySet.Empty), Ct)).Should().BeOfType<KafkaRelatedPrepareResult.Refused>().Which.Text.Should().Be(KafkaStudioText.RelatedNoKeys);
-        (await related.PrepareAsync(rig.RelatedInput(["orders"], Keys(new string('x', 1_001))), Ct)).Should().BeOfType<KafkaRelatedPrepareResult.Refused>().Which.Text.Should().Be(KafkaStudioText.RelatedValueTooLong);
+        (await related.PrepareAsync(rig.RelatedInput(twentyOne, Keys("c-1")), Ct)).Should().BeOfType<KafkaRelatedPrepareResult.Refused>().Which.Text.Should().Be(KafkaText.SearchTopicCount);
+        (await related.PrepareAsync(rig.RelatedInput(["orders"], CorrelationKeySet.Empty), Ct)).Should().BeOfType<KafkaRelatedPrepareResult.Refused>().Which.Text.Should().Be(KafkaText.RelatedNoKeys);
+        (await related.PrepareAsync(rig.RelatedInput(["orders"], Keys(new string('x', 1_001))), Ct)).Should().BeOfType<KafkaRelatedPrepareResult.Refused>().Which.Text.Should().Be(KafkaText.RelatedValueTooLong);
         (await related.PrepareAsync(rig.RelatedInput(["orders"], Keys("c-1")) with { From = KafkaSearchRig.T0.AddHours(2) }, Ct)).Should().BeOfType<KafkaRelatedPrepareResult.Refused>().Which.Text.Should().Be("The window must start before it ends.");
 
         rig.Studio.Authorization.Calls.Should().BeEmpty("a bound is checked before any policy is asked");
@@ -338,7 +338,7 @@ public class KafkaCorrelationServiceTests
 
         KafkaRelatedPlanResult plan = await rig.Correlation().PlanAsync(rig.RelatedInput(["bare"], Keys("c-1")), Ct);
 
-        plan.Should().BeOfType<KafkaRelatedPlanResult.Refused>().Which.Text.Should().Be(KafkaStudioText.RelatedNothingToSearch);
+        plan.Should().BeOfType<KafkaRelatedPlanResult.Refused>().Which.Text.Should().Be(KafkaText.RelatedNothingToSearch);
         rig.Ring.Should().ContainSingle(static x => !x.Succeeded);
         rig.Logs.Entries.Should().ContainSingle(static x => x.EventId.Id == 9601);
     }

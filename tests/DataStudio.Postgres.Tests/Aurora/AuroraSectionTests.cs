@@ -48,7 +48,7 @@ public class AuroraSectionTests
     [Fact]
     public async Task On_Aurora_it_draws_the_instance_the_capacity_the_instances_the_waits_and_the_commits()
     {
-        await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
+        await using PostgresComponentContext context = await new PostgresComponentContext().ReadyAsync();
 
         var section = context.Render<AuroraSection>(parameters => parameters.Add(static x => x.Model, View()));
 
@@ -68,7 +68,7 @@ public class AuroraSectionTests
     [Fact]
     public async Task Through_the_activity_gate_each_session_is_counts_and_shares()
     {
-        await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
+        await using PostgresComponentContext context = await new PostgresComponentContext().ReadyAsync();
 
         var section = context.Render<AuroraSection>(parameters => parameters.Add(static x => x.Model, View(sessions: true)));
 
@@ -80,7 +80,7 @@ public class AuroraSectionTests
     [Fact]
     public async Task Off_Aurora_it_draws_a_capacity_reading_if_there_is_one_and_nothing_otherwise()
     {
-        await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
+        await using PostgresComponentContext context = await new PostgresComponentContext().ReadyAsync();
 
         context.Render<AuroraSection>(parameters => parameters.Add(static x => x.Model, new AuroraView())).Markup.Trim().Should().BeEmpty();
 
@@ -96,7 +96,7 @@ public class AuroraSectionTests
     [Fact]
     public async Task A_refusal_is_drawn_in_the_section()
     {
-        await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
+        await using PostgresComponentContext context = await new PostgresComponentContext().ReadyAsync();
 
         var section = context.Render<AuroraSection>(parameters => parameters.Add(static x => x.Model, new AuroraView { Refused = "Your account may not see this database's server." }));
 
@@ -106,7 +106,7 @@ public class AuroraSectionTests
     [Fact]
     public async Task The_answer_line_names_the_instance_and_the_capacity_and_draws_nothing_without_them()
     {
-        await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
+        await using PostgresComponentContext context = await new PostgresComponentContext().ReadyAsync();
 
         var line = context.Render<ServerAnswer>(parameters => parameters.Add(static x => x.Model,
             new HealthServerLine("instance studio-test-instance-2 (a reader), Aurora 16.4.1", Now.AddDays(-1), "4.5 ACU (min 0.5, max 16), measured 2026-10-26 11:59:00 UTC", null)));
@@ -124,7 +124,7 @@ public class AuroraSectionTests
     [Fact]
     public async Task The_Health_page_says_which_instance_answered_and_once_that_another_one_did()
     {
-        await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
+        await using PostgresComponentContext context = await new PostgresComponentContext().ReadyAsync();
         context.Health.Report = context.Health.Report with
         {
             MeasuredAt = Now,
@@ -172,7 +172,7 @@ public class AuroraSectionTests
     [Fact]
     public async Task A_failed_read_is_drawn_by_its_type_or_SQLSTATE_and_never_its_message()
     {
-        await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
+        await using PostgresComponentContext context = await new PostgresComponentContext().ReadyAsync();
         context.Aurora.Answer = static _ => throw new InvalidOperationException("relation \"secret_schema.payroll\" does not exist");
 
         var slot = context.Render<ServerPlatformSlot>(parameters => parameters.Add(static x => x.Model, new StudioScope("default", "default", null)));
@@ -191,7 +191,7 @@ public class AuroraSectionTests
     [Fact]
     public async Task A_read_for_a_scope_the_page_has_left_is_dropped()
     {
-        await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
+        await using PostgresComponentContext context = await new PostgresComponentContext().ReadyAsync();
 
         TaskCompletionSource<AuroraView> first = new(TaskCreationOptions.RunContinuationsAsynchronously);
         context.Aurora.Answer = scope => scope.DatabaseId == "first" ? first.Task : Task.FromResult(new AuroraView { Refused = "the second database's answer" });

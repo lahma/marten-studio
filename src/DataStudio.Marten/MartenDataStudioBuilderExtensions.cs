@@ -78,8 +78,8 @@ public static class MartenDataStudioBuilderExtensions
         // guard can say what is wrong even when NuGet left DataStudio.Postgres out of the deployment, where the first
         // DataStudio.Postgres type would otherwise be a FileNotFoundException with no word about why. Everything else is in
         // AddMartenServices, which is NoInlining so that it is compiled only once the guard has passed.
-        // PostgresStudioVersionGuardTests scans this method's IL to keep it that way.
-        PostgresStudioVersionGuard.Ensure();
+        // PostgresVersionGuardTests scans this method's IL to keep it that way.
+        PostgresVersionGuard.Ensure();
 
         AddMartenServices(builder, configure);
 
@@ -99,9 +99,9 @@ public static class MartenDataStudioBuilderExtensions
         // advisor - is registered there; what follows is the Marten module's own.
         StudioCoreRegistration.Add(
             services,
-            MartenStudioDescriptor.Marker,
-            MartenStudioDescriptor.Instance,
-            static provider => new MartenStudioSettings(
+            MartenDescriptor.Marker,
+            MartenDescriptor.Instance,
+            static provider => new MartenSettings(
                 provider.GetRequiredService<IOptions<MartenOptions>>(),
                 provider.GetRequiredService<IShellSettings>()));
 
@@ -119,7 +119,7 @@ public static class MartenDataStudioBuilderExtensions
                 static options => options.KnownTenantIds.All(static tenantId => !string.IsNullOrWhiteSpace(tenantId)),
                 "MartenOptions.KnownTenantIds cannot contain an empty or whitespace tenant id")
             .ValidateSharedSchemas(nameof(MartenOptions), Shape)
-            .ValidateSharedAcceptedChecks(nameof(MartenOptions), MartenStudioDescriptor.Instance, static options => options.AcceptedCheckReasons);
+            .ValidateSharedAcceptedChecks(nameof(MartenOptions), MartenDescriptor.Instance, static options => options.AcceptedCheckReasons);
 
         // 1.2-PROJ: the per-projection lag thresholds (a type of its own: a failure names the projection).
         services.AddSingleton<IValidateOptions<MartenOptions>, ProjectionThresholdsValidator>();
@@ -135,11 +135,11 @@ public static class MartenDataStudioBuilderExtensions
 
         // The shared seams, answered in Marten's terms. The source provider is scoped like the tenant
         // discovery it holds: a circuit's discovered tenants and its refresh button are its own.
-        services.TryAddScoped<IStudioSourceProvider, MartenStudioSourceProvider>();
-        services.TryAddSingleton<IStudioLinks, MartenStudioLinks>();
+        services.TryAddScoped<IStudioSourceProvider, MartenSourceProvider>();
+        services.TryAddSingleton<IStudioLinks, MartenLinks>();
 
         // D-CORR 7: the links a module's page makes into Documents and Streams, by type and id, with a store and a tenant and no database.
-        services.TryAddSingleton<IStudioRouteLinks, MartenStudioRouteLinks>();
+        services.TryAddSingleton<IStudioRouteLinks, MartenRouteLinks>();
         services.TryAddSingleton<ISessionLockLabeler, MartenSessionLockLabeler>();
         services.TryAddScoped<IDatabaseDeclarationsSource, MartenDatabaseDeclarationsSource>();
         services.TryAddSingleton<IHealthTableSource, MartenHealthTableSource>();

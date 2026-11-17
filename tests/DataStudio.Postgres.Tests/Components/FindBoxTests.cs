@@ -21,9 +21,9 @@ public class FindBoxTests
 {
     private static readonly StudioScope Active = new("default", "default", null);
 
-    private static PostgresStudioComponentContext Context(params FakeFindContributor[] contributors)
+    private static PostgresComponentContext Context(params FakeFindContributor[] contributors)
     {
-        PostgresStudioComponentContext context = new(services =>
+        PostgresComponentContext context = new(services =>
         {
             foreach (FakeFindContributor contributor in contributors)
             {
@@ -35,7 +35,7 @@ public class FindBoxTests
         return context;
     }
 
-    private static async Task<IRenderedComponent<FindBox>> RenderReadyAsync(PostgresStudioComponentContext context)
+    private static async Task<IRenderedComponent<FindBox>> RenderReadyAsync(PostgresComponentContext context)
     {
         await context.ReadyAsync();
         return context.Render<FindBox>();
@@ -44,7 +44,7 @@ public class FindBoxTests
     [Fact]
     public async Task With_no_kind_registered_nothing_is_drawn_and_no_script_is_asked_for()
     {
-        using PostgresStudioComponentContext context = Context();
+        using PostgresComponentContext context = Context();
 
         IRenderedComponent<FindBox> box = await RenderReadyAsync(context);
 
@@ -55,7 +55,7 @@ public class FindBoxTests
     [Fact]
     public void With_no_scope_nothing_is_drawn_and_no_script_is_asked_for()
     {
-        using PostgresStudioComponentContext context = Context(new FakeFindContributor(10, "Any"));
+        using PostgresComponentContext context = Context(new FakeFindContributor(10, "Any"));
 
         IRenderedComponent<FindBox> box = context.Render<FindBox>();
 
@@ -66,7 +66,7 @@ public class FindBoxTests
     [Fact]
     public async Task The_box_is_a_search_with_a_name_a_hint_and_a_magnifier_for_narrow_screens()
     {
-        using PostgresStudioComponentContext context = Context(new FakeFindContributor(10, "Any"));
+        using PostgresComponentContext context = Context(new FakeFindContributor(10, "Any"));
 
         IRenderedComponent<FindBox> box = await RenderReadyAsync(context);
 
@@ -96,7 +96,7 @@ public class FindBoxTests
     [Fact]
     public async Task The_script_enhances_the_field_once_after_a_render_that_has_one()
     {
-        using PostgresStudioComponentContext context = Context(new FakeFindContributor(10, "Any"));
+        using PostgresComponentContext context = Context(new FakeFindContributor(10, "Any"));
 
         IRenderedComponent<FindBox> box = await RenderReadyAsync(context);
         await box.InvokeAsync(() => box.Instance.CloseAsync());
@@ -113,7 +113,7 @@ public class FindBoxTests
             FakeFindContributor.Hit(Active, "Document", "1", tenantChip: "tenant acme"),
             FakeFindContributor.Hit(Active, "Document", "2", mark: "deleted"));
         FakeFindContributor streams = new FakeFindContributor(20, "Streams").Returns("streams", null, FakeFindContributor.Hit(Active, "Stream", "1"));
-        using PostgresStudioComponentContext context = Context(documents, streams);
+        using PostgresComponentContext context = Context(documents, streams);
         string before = context.CurrentUri;
 
         IRenderedComponent<FindBox> box = await RenderReadyAsync(context);
@@ -133,7 +133,7 @@ public class FindBoxTests
     public async Task One_hit_in_the_scope_on_screen_is_opened_by_itself_and_the_value_stays()
     {
         FakeFindContributor documents = new FakeFindContributor(10, "Documents").Returns("documents", null, FakeFindContributor.Hit(Active, "Document", "42"));
-        using PostgresStudioComponentContext context = Context(documents);
+        using PostgresComponentContext context = Context(documents);
 
         IRenderedComponent<FindBox> box = await RenderReadyAsync(context);
         await box.InvokeAsync(() => box.Instance.FindAsync("42"));
@@ -151,7 +151,7 @@ public class FindBoxTests
     {
         StudioScope elsewhere = new(store, database, tenant);
         FakeFindContributor documents = new FakeFindContributor(10, "Documents").Returns("documents", null, FakeFindContributor.Hit(elsewhere, "Document", "42"));
-        using PostgresStudioComponentContext context = Context(documents);
+        using PostgresComponentContext context = Context(documents);
         string before = context.CurrentUri;
 
         IRenderedComponent<FindBox> box = await RenderReadyAsync(context);
@@ -169,7 +169,7 @@ public class FindBoxTests
         FakeFindContributor documents = new FakeFindContributor(10, "Documents").Returns(
             "47 document types",
             ["2 document types partitioned by tenant were not searched: select a tenant."]);
-        using PostgresStudioComponentContext context = Context(documents);
+        using PostgresComponentContext context = Context(documents);
 
         IRenderedComponent<FindBox> box = await RenderReadyAsync(context);
         await box.InvokeAsync(() => box.Instance.FindAsync("nope"));
@@ -186,7 +186,7 @@ public class FindBoxTests
     public async Task A_part_of_a_name_that_matched_nothing_offers_the_browsers_name_filter()
     {
         FakeFindContributor documents = new FakeFindContributor(10, "Tables").Returns("tables and views");
-        using PostgresStudioComponentContext context = Context(documents);
+        using PostgresComponentContext context = Context(documents);
 
         IRenderedComponent<FindBox> box = await RenderReadyAsync(context);
         await box.InvokeAsync(() => box.Instance.FindAsync("qrtz"));
@@ -204,7 +204,7 @@ public class FindBoxTests
     [InlineData("1234")]
     public async Task A_value_that_could_not_be_a_name_offers_no_name_filter(string typed)
     {
-        using PostgresStudioComponentContext context = Context(new FakeFindContributor(10, "Tables").Returns("tables and views"));
+        using PostgresComponentContext context = Context(new FakeFindContributor(10, "Tables").Returns("tables and views"));
 
         IRenderedComponent<FindBox> box = await RenderReadyAsync(context);
         await box.InvokeAsync(() => box.Instance.FindAsync(typed));
@@ -217,7 +217,7 @@ public class FindBoxTests
     public async Task A_name_that_was_found_offers_no_name_filter()
     {
         FakeFindContributor tables = new FakeFindContributor(10, "Tables").Returns("tables and views", null, FakeFindContributor.Hit(Active, "Table", "public.orders"), FakeFindContributor.Hit(Active, "Table", "other.orders"));
-        using PostgresStudioComponentContext context = Context(tables);
+        using PostgresComponentContext context = Context(tables);
 
         IRenderedComponent<FindBox> box = await RenderReadyAsync(context);
         await box.InvokeAsync(() => box.Instance.FindAsync("orders"));
@@ -229,7 +229,7 @@ public class FindBoxTests
     [Fact]
     public async Task The_empty_message_names_the_scope_with_the_headers_source_label()
     {
-        using PostgresStudioComponentContext context = Context(new FakeFindContributor(10, "Tables").Returns("tables and views"));
+        using PostgresComponentContext context = Context(new FakeFindContributor(10, "Tables").Returns("tables and views"));
 
         IRenderedComponent<FindBox> box = await RenderReadyAsync(context);
         await box.InvokeAsync(() => box.Instance.FindAsync("nope"));
@@ -242,7 +242,7 @@ public class FindBoxTests
     [Fact]
     public async Task A_source_with_no_tenants_never_says_all_tenants()
     {
-        using PostgresStudioComponentContext context = Context(new FakeFindContributor(10, "Tables").Returns("tables and views"));
+        using PostgresComponentContext context = Context(new FakeFindContributor(10, "Tables").Returns("tables and views"));
 
         IRenderedComponent<FindBox> box = await RenderReadyAsync(context);
         await box.InvokeAsync(() => box.Instance.FindAsync("nope"));
@@ -257,7 +257,7 @@ public class FindBoxTests
     public async Task A_value_that_is_too_long_is_refused_in_the_panel_and_nothing_is_asked()
     {
         FakeFindContributor documents = new(10, "Documents");
-        using PostgresStudioComponentContext context = Context(documents);
+        using PostgresComponentContext context = Context(documents);
 
         IRenderedComponent<FindBox> box = await RenderReadyAsync(context);
         await box.InvokeAsync(() => box.Instance.FindAsync(new string('x', 600)));
@@ -272,7 +272,7 @@ public class FindBoxTests
     {
         FakeFindContributor documents = new FakeFindContributor(10, "Documents").Returns(
             "documents", null, FakeFindContributor.Hit(Active, "Document", "1"), FakeFindContributor.Hit(Active, "Document", "2"));
-        using PostgresStudioComponentContext context = Context(documents);
+        using PostgresComponentContext context = Context(documents);
 
         IRenderedComponent<FindBox> box = await RenderReadyAsync(context);
         await box.InvokeAsync(() => box.Instance.FindAsync("x"));
@@ -287,7 +287,7 @@ public class FindBoxTests
     [Fact]
     public async Task Disposing_after_the_circuit_is_gone_swallows_the_lost_interop()
     {
-        using PostgresStudioComponentContext context = Context(new FakeFindContributor(10, "Any"));
+        using PostgresComponentContext context = Context(new FakeFindContributor(10, "Any"));
         context.JSInterop.SetupVoid("martenStudio.find.release", _ => true).SetException(new JSDisconnectedException("the circuit closed"));
 
         IRenderedComponent<FindBox> box = await RenderReadyAsync(context);
@@ -300,7 +300,7 @@ public class FindBoxTests
     [Fact]
     public async Task The_layout_draws_the_box_between_the_scope_and_the_actions()
     {
-        using PostgresStudioComponentContext context = Context(new FakeFindContributor(10, "Any"));
+        using PostgresComponentContext context = Context(new FakeFindContributor(10, "Any"));
         await context.ReadyAsync();
         context.Navigate("studio/postgres/health");
 

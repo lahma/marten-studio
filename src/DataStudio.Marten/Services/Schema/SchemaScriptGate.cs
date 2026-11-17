@@ -78,7 +78,7 @@ internal static class SchemaScriptGate
         "(MartenOptions.IsDocumentTypeVisible), so it is shown only past the database browser's gate. " +
         refusal switch
         {
-            DatabaseRefusal.ReadOnly => MartenStudioText.Instance.BrowseReadOnlyDenial(readOnlyOption ?? MartenStudioText.Instance.OptionName("ReadOnly")),
+            DatabaseRefusal.ReadOnly => MartenText.Instance.BrowseReadOnlyDenial(readOnlyOption ?? MartenText.Instance.OptionName("ReadOnly")),
             DatabaseRefusal.CapabilityOff => "It needs MartenOptions.Capabilities.BrowseDatabase.",
             DatabaseRefusal.StorePolicy =>
                 "The store policy (MartenOptions.StoreAuthorizationPolicy) refused your account this store " +

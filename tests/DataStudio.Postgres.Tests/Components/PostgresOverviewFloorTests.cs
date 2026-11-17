@@ -20,7 +20,7 @@ public class PostgresOverviewFloorTests
     {
         FakeServerReader reader = new() { Facts = new PostgresServerFacts(DateTimeOffset.UnixEpoch, versionNumber, version, PostgresPlatform.SelfHosted) };
 
-        await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext(
+        await using PostgresComponentContext context = await new PostgresComponentContext(
             services => services.AddSingleton<IPostgresServerReader>(reader)).ReadyAsync();
 
         var page = context.Render<StudioHome>();

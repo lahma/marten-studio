@@ -102,7 +102,7 @@ public class KafkaTailServiceTests
         KafkaTailPlanResult plan = await tail.PlanAsync(rig.TailInput(["orders"]), null, Ct);
 
         string text = plan.Should().BeOfType<KafkaTailPlanResult.Refused>().Subject.Text;
-        text.Should().Be(KafkaStudioText.ProfileForbids(KafkaStudioText.LiveTailAction, rig.Entry));
+        text.Should().Be(KafkaText.ProfileForbids(KafkaText.LiveTailAction, rig.Entry));
         text.Should().Be("This cluster's profile does not allow live tail.").And.NotContain("KafkaClusterBuilder");
         rig.BrokerCalls.Should().Be(callsBefore);
 
@@ -123,9 +123,9 @@ public class KafkaTailServiceTests
 
         KafkaTailPlanResult plan = await rig.Tail().PlanAsync(rig.TailInput(["orders", "secret.v1"]), null, Ct);
 
-        plan.Should().BeOfType<KafkaTailPlanResult.Refused>().Which.Text.Should().Be(KafkaStudioText.RequestRefused).And.NotContain("secret");
+        plan.Should().BeOfType<KafkaTailPlanResult.Refused>().Which.Text.Should().Be(KafkaText.RequestRefused).And.NotContain("secret");
         rig.BrokerCalls.Should().Be(callsBefore, "a refused request is not narrowed to the allowed topics and read");
-        rig.Ring.Should().ContainSingle().Which.Message.Should().Be(KafkaStudioText.RefusedEntry, "the entry says nothing about why");
+        rig.Ring.Should().ContainSingle().Which.Message.Should().Be(KafkaText.RefusedEntry, "the entry says nothing about why");
         rig.Logs.Entries.Should().ContainSingle(static x => x.EventId.Id == 9603);
     }
 
@@ -148,7 +148,7 @@ public class KafkaTailServiceTests
         rig.Studio.Authorization.AllowKafka(static resource => resource.Capability != "LiveTail");
         KafkaTailPlanResult refused = await rig.Tail().PlanAsync(rig.TailInput(["orders"]), null, Ct);
 
-        refused.Should().BeOfType<KafkaTailPlanResult.Refused>().Which.Text.Should().Be(KafkaStudioText.RequestRefused);
+        refused.Should().BeOfType<KafkaTailPlanResult.Refused>().Which.Text.Should().Be(KafkaText.RequestRefused);
     }
 
     [Fact]
@@ -171,10 +171,10 @@ public class KafkaTailServiceTests
         KafkaTailService tail = rig.Tail();
 
         KafkaTailPlanResult many = await tail.PlanAsync(rig.TailInput([.. Enumerable.Range(0, 21).Select(static i => "t" + i)]), null, Ct);
-        KafkaTailPlanResult tooLong = await tail.PlanAsync(rig.TailInput(["orders"], new string('x', KafkaStudioText.MaxPredicateLength + 1)), null, Ct);
+        KafkaTailPlanResult tooLong = await tail.PlanAsync(rig.TailInput(["orders"], new string('x', KafkaText.MaxPredicateLength + 1)), null, Ct);
 
-        many.Should().BeOfType<KafkaTailPlanResult.Refused>().Which.Text.Should().Be(KafkaStudioText.SearchTopicCount);
-        tooLong.Should().BeOfType<KafkaTailPlanResult.Refused>().Which.Text.Should().Be(KafkaStudioText.PredicateTooLong);
+        many.Should().BeOfType<KafkaTailPlanResult.Refused>().Which.Text.Should().Be(KafkaText.SearchTopicCount);
+        tooLong.Should().BeOfType<KafkaTailPlanResult.Refused>().Which.Text.Should().Be(KafkaText.PredicateTooLong);
         rig.BrokerCalls.Should().Be(callsBefore);
         rig.Logs.Entries.Count(static x => x.EventId.Id == 9609).Should().Be(2);
     }
@@ -282,7 +282,7 @@ public class KafkaTailServiceTests
         rig.Studio.Authorization.AllowKafka(static resource => resource.Topic != "orders");
         KafkaTailPlanResult byPolicy = await tail.PlanAsync(session.Input with { ResumeFrom = session.Cursor }, session, Ct);
 
-        byPolicy.Should().BeOfType<KafkaTailPlanResult.Refused>().Which.Text.Should().Be(KafkaStudioText.RequestRefused);
+        byPolicy.Should().BeOfType<KafkaTailPlanResult.Refused>().Which.Text.Should().Be(KafkaText.RequestRefused);
         session.RefusedResumes.Should().Be(2);
 
         session.End(KafkaScanStopReason.Cancelled);
@@ -395,7 +395,7 @@ public class KafkaTailServiceTests
         KafkaTailPlanResult.Planned plan = (KafkaTailPlanResult.Planned) await tail.PlanAsync(session.Input with { ResumeFrom = session.Cursor }, session, Ct);
         KafkaTailStartResult start = await tail.StartAsync(session, plan.Value, Ct);
 
-        start.Should().BeOfType<KafkaTailStartResult.Refused>().Which.Text.Should().Be(KafkaStudioText.TailGrantChanged);
+        start.Should().BeOfType<KafkaTailStartResult.Refused>().Which.Text.Should().Be(KafkaText.TailGrantChanged);
         session.RefusedResumes.Should().Be(1);
         await session.DisposeAsync();
     }
@@ -423,7 +423,7 @@ public class KafkaTailServiceTests
 
         KafkaTailStartResult start = await tail.StartAsync(session, planned, Ct);
 
-        start.Should().BeOfType<KafkaTailStartResult.Refused>().Which.Text.Should().Be(KafkaStudioText.TailGrantChanged);
+        start.Should().BeOfType<KafkaTailStartResult.Refused>().Which.Text.Should().Be(KafkaText.TailGrantChanged);
         session.RefusedResumes.Should().Be(1);
         await session.DisposeAsync();
     }

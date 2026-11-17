@@ -20,7 +20,7 @@ public class ShortcutSheetMartenTests
     /// <summary>The shell's descriptor as <c>AddMarten()</c> leaves it: the database as the one module.</summary>
     private static StudioShellDescriptor ShellOf(StudioDescriptor descriptor)
     {
-        MartenStudioSettings settings = MartenStudioSettings.Of(new MartenOptions());
+        MartenSettings settings = MartenSettings.Of(new MartenOptions());
         return StudioModuleComposition.Compose([new DatabaseStudioModule(descriptor, settings, new StudioCapabilityGuard(settings))]);
     }
 
@@ -28,7 +28,7 @@ public class ShortcutSheetMartenTests
     public void The_Marten_sheet_ends_with_the_document_groups_after_the_shared_ones()
     {
         using BunitContext context = new();
-        context.Services.AddSingleton(ShellOf(MartenStudioDescriptor.Instance));
+        context.Services.AddSingleton(ShellOf(MartenDescriptor.Instance));
 
         IRenderedComponent<ShortcutSheet> sheet = context.Render<ShortcutSheet>();
 
@@ -46,7 +46,7 @@ public class ShortcutSheetMartenTests
     public void The_Marten_sheet_lists_the_database_modules_three_groups_between_the_shells_and_its_own()
     {
         using BunitContext context = new();
-        context.Services.AddSingleton(ShellOf(MartenStudioDescriptor.Instance));
+        context.Services.AddSingleton(ShellOf(MartenDescriptor.Instance));
 
         string[] titles = [.. context.Render<ShortcutSheet>().FindAll(".ms-shortcuts-title").Select(static x => x.TextContent.Trim())];
 
@@ -68,7 +68,7 @@ public class ShortcutSheetMartenTests
     public void The_document_editors_keys_are_listed_as_the_script_answers_them()
     {
         using BunitContext context = new();
-        context.Services.AddSingleton(ShellOf(MartenStudioDescriptor.Instance));
+        context.Services.AddSingleton(ShellOf(MartenDescriptor.Instance));
 
         AngleSharp.Dom.IElement editor = context.Render<ShortcutSheet>().FindAll(".ms-shortcuts-group")
             .Single(static x => x.QuerySelector(".ms-shortcuts-title")!.TextContent.Trim() == "Document editor");

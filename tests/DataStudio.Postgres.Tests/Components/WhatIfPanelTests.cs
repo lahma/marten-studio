@@ -22,7 +22,7 @@ public class WhatIfPanelTests
         "[{\"Plan\": {\"Node Type\": \"Bitmap Heap Scan\", \"Relation Name\": \"u\", \"Alias\": \"u\", \"Total Cost\": 61.2, \"Plans\": [{\"Node Type\": "
         + "\"Bitmap Index Scan\", \"Parent Relationship\": \"Outer\", \"Index Name\": \"<13630>btree_u_v\", \"Total Cost\": 5}]}}]";
 
-    private static async Task<PostgresStudioComponentContext> ContextAsync() => await new PostgresStudioComponentContext().ReadyAsync();
+    private static async Task<PostgresComponentContext> ContextAsync() => await new PostgresComponentContext().ReadyAsync();
 
     private static QueryPlan PlanOf(string json) => QueryPlanReader.Read(json).Plan!;
 
@@ -34,13 +34,13 @@ public class WhatIfPanelTests
         Made = new HypotheticalIndexMade(13630, "<13630>btree_u_v"),
     });
 
-    private static IRenderedComponent<PlanView> Render(PostgresStudioComponentContext context, WhatIfSource? source, string json = Before) =>
+    private static IRenderedComponent<PlanView> Render(PostgresComponentContext context, WhatIfSource? source, string json = Before) =>
         context.Render<PlanView>(parameters => parameters.Add(x => x.Json, json).Add(x => x.WhatIf, source));
 
     [Fact]
     public async Task A_plan_that_suggests_an_index_offers_it_and_a_what_if_draws_both_plans_side_by_side()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
         List<HypotheticalIndex> asked = [];
         WhatIfSource source = new()
         {
@@ -82,7 +82,7 @@ public class WhatIfPanelTests
     public async Task hypopgs_absence_and_a_role_that_may_not_use_it_are_said_in_their_own_sentence(bool installed, string sentence)
     {
         HypotheticalIndexState state = installed ? HypotheticalIndexState.NoPrivilege : HypotheticalIndexState.NotInstalled;
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
         WhatIfSource source = new() { RunAsync = (index, _) => Task.FromResult(WhatIfResult.NotCompared(index, sentence, state)) };
 
         IRenderedComponent<PlanView> view = Render(context, source);
@@ -96,7 +96,7 @@ public class WhatIfPanelTests
     [Fact]
     public async Task The_not_installed_and_no_privilege_sentences_say_which_and_whose_decision_it_is()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
         WhatIfSource source = new()
         {
             RunAsync = (index, _) => Task.FromResult(WhatIfResult.NotCompared(index, HypotheticalIndexAvailability.NotInstalledSentence, HypotheticalIndexState.NotInstalled)),
@@ -112,7 +112,7 @@ public class WhatIfPanelTests
     [Fact]
     public async Task A_plan_that_suggests_nothing_and_a_plan_with_no_source_offer_no_what_if()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
         WhatIfSource source = new() { RunAsync = (index, _) => Task.FromResult(Compared(index)) };
 
         Render(context, source, ExplainFixtures.Get("17-seqfilter-plain")).FindAll(".ms-whatif").Should().BeEmpty("a leading-wildcard LIKE suggests no btree");
@@ -122,7 +122,7 @@ public class WhatIfPanelTests
     [Fact]
     public async Task Indexes_a_source_names_are_offered_in_place_of_the_plans_own_with_its_note()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
         HypotheticalIndex marten = new()
         {
             Key = "marten:Color",
@@ -145,7 +145,7 @@ public class WhatIfPanelTests
     [Fact]
     public async Task A_what_if_that_throws_is_said_on_the_panel()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
         WhatIfSource source = new() { RunAsync = static (_, _) => Task.FromException<WhatIfResult>(new InvalidOperationException("boom")) };
 
         IRenderedComponent<PlanView> view = Render(context, source);

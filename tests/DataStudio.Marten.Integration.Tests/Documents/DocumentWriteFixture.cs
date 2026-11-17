@@ -112,22 +112,22 @@ public abstract class DocumentWriteFixture(PostgresFixture postgres) : IAsyncLif
         var wrapped = Options.Create(StudioOptions);
         var stores = registry ?? throw new InvalidOperationException("The registry is only there when Docker is.");
 
-        var settings = MartenStudioSettings.Of(wrapped);
-        var authorization = new StudioAuthorization(settings, MartenStudioDescriptor.Instance, Authorization, Users);
+        var settings = MartenSettings.Of(wrapped);
+        var authorization = new StudioAuthorization(settings, MartenDescriptor.Instance, Authorization, Users);
         var tenants = new TenantDiscovery(wrapped, NullLogger<TenantDiscovery>.Instance);
 
         // The registry scans the collection the store was registered in and resolves from the provider
         // that built it, so it hands back the one store this fixture seeded rather than a second one. The
         // shared catalog and resolver read it through MartenStudio's source provider, as the container wires them.
-        var sources = new MartenStudioSourceProvider(
-            wrapped, stores, tenants, RequireProvider(), NullLogger<MartenStudioSourceProvider>.Instance);
+        var sources = new MartenSourceProvider(
+            wrapped, stores, tenants, RequireProvider(), NullLogger<MartenSourceProvider>.Instance);
         var resolver = new StudioScopeResolver(
-            new DataStudio.Postgres.Services.Sources.StudioSourceResolver(sources, authorization, MartenStudioDescriptor.Instance));
+            new DataStudio.Postgres.Services.Sources.StudioSourceResolver(sources, authorization, MartenDescriptor.Instance));
 
         var catalog = new StudioScopeCatalog(sources, authorization, NullLogger<StudioScopeCatalog>.Instance);
 
         var state = new StudioState(catalog, NullLogger<StudioState>.Instance, new StudioPreferences(new HttpContextAccessor()));
-        var audit = new StudioActionLog(new StudioActivity(Ring, Users, []), Logs.CreateLogger<StudioActionLog>(), Users, state, MartenStudioDescriptor.Instance, settings);
+        var audit = new StudioActionLog(new StudioActivity(Ring, Users, []), Logs.CreateLogger<StudioActionLog>(), Users, state, MartenDescriptor.Instance, settings);
 
         return new DocumentWriteService(
             new StudioCapabilityGuard(settings),

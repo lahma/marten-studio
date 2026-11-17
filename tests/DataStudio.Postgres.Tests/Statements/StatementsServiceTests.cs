@@ -44,7 +44,7 @@ public class StatementsServiceTests
         }
     }
 
-    private static StatementsService Service(PostgresStudioComponentContext context, IStatementFacts facts)
+    private static StatementsService Service(PostgresComponentContext context, IStatementFacts facts)
     {
         IServiceProvider services = context.Services;
 
@@ -66,13 +66,13 @@ public class StatementsServiceTests
     [Fact]
     public async Task With_ViewDatabaseActivity_off_the_page_says_so_and_reads_nothing()
     {
-        await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
+        await using PostgresComponentContext context = await new PostgresComponentContext().ReadyAsync();
         CountingFacts facts = new(Some());
 
         StatementsView view = await Service(context, facts).GetAsync(Scope, TestContext.Current.CancellationToken);
 
         view.Refusal.Should().Be(DatabaseRefusal.CapabilityOff);
-        view.Reason.Should().Be(PostgresStudioText.Instance.StatementsCapabilityDenial).And.Contain("PostgresOptions.Capabilities.ViewDatabaseActivity");
+        view.Reason.Should().Be(PostgresText.Instance.StatementsCapabilityDenial).And.Contain("PostgresOptions.Capabilities.ViewDatabaseActivity");
         facts.Reads.Should().Be(0, "a visitor short of the gate never causes a statement sweep");
         context.AuthorizationService.Calls.Should().BeEmpty("nobody is asked who is asking about a capability the process does not have");
     }
@@ -80,7 +80,7 @@ public class StatementsServiceTests
     [Fact]
     public async Task Under_ReadOnly_the_page_says_ReadOnly_turned_it_off()
     {
-        await using PostgresStudioComponentContext context = new();
+        await using PostgresComponentContext context = new();
         context.WithAllCapabilities();
         context.Options.ReadOnly = true;
         await context.ReadyAsync();
@@ -96,7 +96,7 @@ public class StatementsServiceTests
     [Fact]
     public async Task The_write_policy_is_asked_with_the_capability_named_and_no_tenant_and_its_refusal_reads_nothing()
     {
-        await using PostgresStudioComponentContext context = new();
+        await using PostgresComponentContext context = new();
         context.WithAllCapabilities();
         context.Options.SourceAuthorizationPolicy = "source";
         context.Options.WriteAuthorizationPolicy = "write";
@@ -107,7 +107,7 @@ public class StatementsServiceTests
         StatementsView view = await Service(context, facts).GetAsync(Scope with { TenantId = "acme" }, TestContext.Current.CancellationToken);
 
         view.Refusal.Should().Be(DatabaseRefusal.WritePolicy);
-        view.Reason.Should().Be(PostgresStudioText.Instance.StatementsWritePolicyDenial);
+        view.Reason.Should().Be(PostgresText.Instance.StatementsWritePolicyDenial);
         facts.Reads.Should().Be(0);
         context.AuthorizationService.Calls.Should().Contain(static x =>
             x.Policy == "write" && x.Resource.Capability == nameof(StudioCapability.ViewDatabaseActivity));
@@ -118,7 +118,7 @@ public class StatementsServiceTests
     [Fact]
     public async Task The_store_policy_refuses_the_database_as_a_whole_and_reads_nothing()
     {
-        await using PostgresStudioComponentContext context = new();
+        await using PostgresComponentContext context = new();
         context.WithAllCapabilities();
         context.Options.SourceAuthorizationPolicy = "source";
         context.AuthorizationService.Allow(static _ => false);
@@ -128,14 +128,14 @@ public class StatementsServiceTests
         StatementsView view = await Service(context, facts).GetAsync(Scope, TestContext.Current.CancellationToken);
 
         view.Refusal.Should().Be(DatabaseRefusal.StorePolicy);
-        view.Reason.Should().Be(PostgresStudioText.Instance.StatementsStorePolicyDenial);
+        view.Reason.Should().Be(PostgresText.Instance.StatementsStorePolicyDenial);
         facts.Reads.Should().Be(0);
     }
 
     [Fact]
     public async Task Through_the_gate_the_statements_are_read_once_and_the_first_read_is_audited_once_per_circuit()
     {
-        await using PostgresStudioComponentContext context = new();
+        await using PostgresComponentContext context = new();
         context.WithAllCapabilities();
         await context.ReadyAsync();
         CountingFacts facts = new(Some());
@@ -158,7 +158,7 @@ public class StatementsServiceTests
     [Fact]
     public void A_text_is_masked_for_its_visitor_and_withheld_when_their_mask_cannot_be_read()
     {
-        StatementsService service = new(PostgresStudioSettings.Of(Microsoft.Extensions.Options.Options.Create(new PostgresOptions())),
+        StatementsService service = new(PostgresSettings.Of(Microsoft.Extensions.Options.Options.Create(new PostgresOptions())),
             null!, null!, null!, null!, null!, new StudioLogThrottle(TimeProvider.System), NullLogger<StatementsService>.Instance);
 
         StatementFacts facts = Facts(Read(
@@ -183,7 +183,7 @@ public class StatementsServiceTests
                 readOnly: false,
                 authorized: true,
                 new DatabaseObjectClassifier([]),
-                PostgresStudioText.Instance),
+                PostgresText.Instance),
             DatabaseRefusal.None,
             null);
 
@@ -196,7 +196,7 @@ public class StatementsServiceTests
     [Fact]
     public void A_statement_with_no_group_says_whether_its_text_was_read()
     {
-        StatementsService service = new(PostgresStudioSettings.Of(Microsoft.Extensions.Options.Options.Create(new PostgresOptions())),
+        StatementsService service = new(PostgresSettings.Of(Microsoft.Extensions.Options.Options.Create(new PostgresOptions())),
             null!, null!, null!, null!, null!, new StudioLogThrottle(TimeProvider.System), NullLogger<StatementsService>.Instance);
 
         StatementsView view = service.Show(Facts(Read(null, Statement(1, "(select 1) union (select 2)", 1, 2), Statement(2, null, 1, 1))), gate: null);
@@ -216,7 +216,7 @@ public class StatementsServiceTests
             new StatementReadOutcome(StatementReadState.NotInstalled, new StatementExtension(170011, null, null), null) { Platform = new PostgresPlatform(kind, null) },
             null, HealthHistoryView.Empty, null, StatementsTestFacts.Tables, null);
 
-        string status = StatementsService.Status(facts, PostgresStudioText.Instance)!;
+        string status = StatementsService.Status(facts, PostgresText.Instance)!;
 
         status.Should().StartWith("pg_stat_statements is not installed in this database").And.Contain(where).And.Contain(who);
         status.Should().NotContain("GRANT", "a grant is named in words, never as a statement to paste");
@@ -229,8 +229,8 @@ public class StatementsServiceTests
             "default", "default", Now,
             new StatementReadOutcome(StatementReadState.NothingRecorded, Pg17, null), null, HealthHistoryView.Empty, null, StatementsTestFacts.Tables, null);
 
-        StatementsService.Status(nothing, PostgresStudioText.Instance).Should().Contain("of the data source's own role");
-        StatementsService.Status(Facts(Read(null)), PostgresStudioText.Instance).Should().BeNull("it read");
+        StatementsService.Status(nothing, PostgresText.Instance).Should().Contain("of the data source's own role");
+        StatementsService.Status(Facts(Read(null)), PostgresText.Instance).Should().BeNull("it read");
     }
 
     [Fact]
@@ -254,7 +254,7 @@ public class StatementsServiceTests
     [Fact]
     public async Task A_poll_shows_the_last_sweep_and_never_runs_one()
     {
-        await using PostgresStudioComponentContext context = new();
+        await using PostgresComponentContext context = new();
         context.WithAllCapabilities();
         await context.ReadyAsync();
 
@@ -279,7 +279,7 @@ public class StatementsServiceTests
     [Fact]
     public async Task A_poll_is_gated_as_the_load_is_and_looks_nothing_up_for_a_refused_visitor()
     {
-        await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
+        await using PostgresComponentContext context = await new PostgresComponentContext().ReadyAsync();
         CountingFacts facts = new(Some(), latest: Some());
 
         StatementsView view = await Service(context, facts).GetLatestAsync(Scope, TestContext.Current.CancellationToken);
@@ -297,12 +297,12 @@ public class StatementsServiceTests
     public void The_studio_line_says_which_of_the_studios_reads_this_page_can_list()
     {
         StatementsService Of(string? role) => new(
-            PostgresStudioSettings.Of(Microsoft.Extensions.Options.Options.Create(new PostgresOptions { SqlConsoleRole = role })),
+            PostgresSettings.Of(Microsoft.Extensions.Options.Options.Create(new PostgresOptions { SqlConsoleRole = role })),
             null!, null!, null!, null!, null!, new StudioLogThrottle(TimeProvider.System), NullLogger<StatementsService>.Instance);
 
         string narrowed = Of("studio_reader").StudioCostText();
-        narrowed.Should().Contain("SqlConsoleRole is studio_reader. " + PostgresStudioText.Instance.StatementsStudioRoles);
-        PostgresStudioText.Instance.StatementsStudioRoles.Should().Contain("but these reads of pg_stat_statements runs as it")
+        narrowed.Should().Contain("SqlConsoleRole is studio_reader. " + PostgresText.Instance.StatementsStudioRoles);
+        PostgresText.Instance.StatementsStudioRoles.Should().Contain("but these reads of pg_stat_statements runs as it")
             .And.Contain("when they rank among the ones kept");
 
         string none = Of(null).StudioCostText();
@@ -321,7 +321,7 @@ public class StatementsServiceTests
     {
         StatementRead read = Read(null, Statement(1, "select 1", 1, 1));
 
-        StatementsService.Caveat(Facts(read), PostgresStudioText.Instance).Should()
+        StatementsService.Caveat(Facts(read), PostgresText.Instance).Should()
             .Contain("Top-level statements only").And.Contain("with the most execution time per second since their counters began");
 
         StatementFacts old = StatementFacts.Build(
@@ -329,7 +329,7 @@ public class StatementsServiceTests
             HealthHistoryView.Empty, null, StatementsTestFacts.Tables, PostgresStatementClassifier.Instance);
 
         old.FoldsNested.Should().BeTrue();
-        StatementsService.Caveat(old, PostgresStudioText.Instance).Should()
+        StatementsService.Caveat(old, PostgresText.Instance).Should()
             .Contain("pg_stat_statements 1.8 has no toplevel column, so a statement a function runs is summed into its own row")
             .And.NotContain("Top-level statements only");
     }

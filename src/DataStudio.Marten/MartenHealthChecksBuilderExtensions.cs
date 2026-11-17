@@ -92,9 +92,9 @@ public static class MartenHealthChecksBuilderExtensions
 
         // The same guard, for the same reason, as services.AddDataStudio().AddMarten(): a host may register its health checks
         // first, and this body names no PostgresStudio type so the guard can explain a missing or mismatched
-        // PostgresStudio before the JIT meets one. The rest is in a NoInlining method; PostgresStudioVersionGuardTests
+        // PostgresStudio before the JIT meets one. The rest is in a NoInlining method; PostgresVersionGuardTests
         // scans this method's IL.
-        PostgresStudioVersionGuard.Ensure();
+        PostgresVersionGuard.Ensure();
 
         return AddMartenDiagnosticsHealthCheck(builder, name, failureStatus, tags, timeout);
     }
@@ -112,7 +112,7 @@ public static class MartenHealthChecksBuilderExtensions
         // the same studio still cost one run per interval between them.
         // Built with the Marten module's words, which are the ones it says "call services.AddDataStudio().AddMarten()" in when it was not added.
         builder.Services.TryAddSingleton(static services =>
-            ActivatorUtilities.CreateInstance<HealthExportRunner>(services, MartenStudioText.Instance));
+            ActivatorUtilities.CreateInstance<HealthExportRunner>(services, MartenText.Instance));
 
         return builder.Add(new HealthCheckRegistration(
             name,

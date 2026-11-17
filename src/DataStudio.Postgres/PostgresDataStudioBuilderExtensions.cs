@@ -59,8 +59,8 @@ public static class PostgresDataStudioBuilderExtensions
         // engine whose members moved, or another build of the same version, gets the guard's message rather than a
         // MissingMethodException. (The parameter types above derive from an engine type and name the shell's builder, so a missing or older
         // engine or shell fails in the loader before this line, with a FileNotFoundException that names it; see the guard's remarks.)
-        // PostgresStudioDiagnosticsVersionGuardTests scans this method's IL to keep it that way.
-        PostgresStudioDiagnosticsVersionGuard.Ensure();
+        // PostgresDiagnosticsVersionGuardTests scans this method's IL to keep it that way.
+        PostgresDiagnosticsVersionGuard.Ensure();
 
         AddPostgresServices(builder, configure);
 
@@ -78,9 +78,9 @@ public static class PostgresDataStudioBuilderExtensions
         // First, so that a second database module in this container is refused before anything of this one is registered.
         StudioCoreRegistration.Add(
             services,
-            PostgresStudioDescriptor.Marker,
-            PostgresStudioDescriptor.Instance,
-            static provider => new PostgresStudioSettings(
+            PostgresDescriptor.Marker,
+            PostgresDescriptor.Instance,
+            static provider => new PostgresSettings(
                 provider.GetRequiredService<IOptions<PostgresOptions>>(),
                 provider.GetRequiredService<IShellSettings>()));
 
@@ -91,7 +91,7 @@ public static class PostgresDataStudioBuilderExtensions
             .ValidateSharedBounds(nameof(PostgresOptions), nameof(PostgresOptions.MaxInlineValueBytes), Shape)
             .ValidateSharedCapabilities(nameof(PostgresOptions), nameof(PostgresCapabilities), Shape)
             .ValidateSharedSchemas(nameof(PostgresOptions), Shape)
-            .ValidateSharedAcceptedChecks(nameof(PostgresOptions), PostgresStudioDescriptor.Instance, static options => options.AcceptedCheckReasons)
+            .ValidateSharedAcceptedChecks(nameof(PostgresOptions), PostgresDescriptor.Instance, static options => options.AcceptedCheckReasons)
             .ValidateSourceNames(nameof(PostgresOptions), SourceNames);
 
         if (configure is not null)
@@ -108,7 +108,7 @@ public static class PostgresDataStudioBuilderExtensions
         PostgresSeamRegistration.Add<PostgresOptions>(services);
 
         // The shared seams only a UI has, answered for plain PostgreSQL.
-        services.TryAddSingleton<IStudioLinks, PostgresStudioLinks>();
+        services.TryAddSingleton<IStudioLinks, PostgresLinks>();
 
         // The Overview's server read: scoped, because what it remembers is the circuit's.
         services.TryAddScoped<IPostgresServerReader, PostgresServerReader>();

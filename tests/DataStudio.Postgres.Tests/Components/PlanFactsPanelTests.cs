@@ -26,7 +26,7 @@ public class PlanFactsPanelTests
 
     private static readonly DateTimeOffset Now = new(2026, 11, 1, 12, 0, 0, TimeSpan.Zero);
 
-    private static async Task<PostgresStudioComponentContext> ContextAsync() => await new PostgresStudioComponentContext().WithAllCapabilities().ReadyAsync();
+    private static async Task<PostgresComponentContext> ContextAsync() => await new PostgresComponentContext().WithAllCapabilities().ReadyAsync();
 
     private static PlanRelationFacts Orders() => new("public", "orders", PlanRelationState.Read)
     {
@@ -47,13 +47,13 @@ public class PlanFactsPanelTests
 
     private static string Normal(string text) => string.Join(' ', text.Split((char[]) [' ', '\n', '\r', '\t'], StringSplitOptions.RemoveEmptyEntries));
 
-    private static IRenderedComponent<PlanFactsPanel> Panel(PostgresStudioComponentContext context, PlanFacts? facts) =>
+    private static IRenderedComponent<PlanFactsPanel> Panel(PostgresComponentContext context, PlanFacts? facts) =>
         context.Render<PlanFactsPanel>(parameters => parameters.Add(x => x.Facts, facts));
 
     [Fact]
     public async Task A_relation_shows_its_estimate_its_analyze_state_its_indexes_its_extended_statistics_and_its_columns()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
 
         IRenderedComponent<PlanFactsPanel> panel = Panel(context, Facts(Orders()));
 
@@ -72,7 +72,7 @@ public class PlanFactsPanelTests
     [Fact]
     public async Task Values_need_BrowseDatabase_and_are_not_shown_without_it_and_a_refusal_says_why()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
 
         IRenderedComponent<PlanFactsPanel> without = Panel(context, Facts(Orders()));
         without.Find(".ms-plan-dbfact-values-note").TextContent.Should().Contain("need BrowseDatabase");
@@ -85,7 +85,7 @@ public class PlanFactsPanelTests
     [Fact]
     public async Task Values_that_were_read_are_shown_and_encoded()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
         PlanRelationFacts orders = Orders() with
         {
             Values = PlanValuesState.Read,
@@ -102,7 +102,7 @@ public class PlanFactsPanelTests
     [Fact]
     public async Task A_withheld_relation_is_named_withheld_and_nothing_about_it_is_shown_or_counted()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
 
         IRenderedComponent<PlanFactsPanel> panel = Panel(context, Facts(new PlanRelationFacts("hr", "salaries", PlanRelationState.Withheld)));
 
@@ -115,7 +115,7 @@ public class PlanFactsPanelTests
     [Fact]
     public async Task Relations_not_read_and_scans_without_a_schema_are_said_and_a_failure_is_a_notice()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
 
         IRenderedComponent<PlanFactsPanel> panel = Panel(context, Facts(Orders()) with { NotRead = 3, Unqualified = 2, Failure = "The facts could not be read (SQLSTATE 57014)." });
 
@@ -130,7 +130,7 @@ public class PlanFactsPanelTests
     [Fact]
     public async Task The_plans_own_settings_come_first_and_say_where_each_value_is_from()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
         PlanFacts facts = new(Now, [], [new PlanSettingFact("random_page_cost", "1.1", null, null, FromPlan: true), new PlanSettingFact("work_mem", "4096", "kB", "default", FromPlan: false)]);
 
         IRenderedComponent<PlanFactsPanel> panel = Panel(context, facts);
@@ -144,7 +144,7 @@ public class PlanFactsPanelTests
     [Fact]
     public async Task Every_table_the_panel_draws_is_in_a_labelled_scroll_region()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
 
         IRenderedComponent<PlanFactsPanel> panel = Panel(context, Facts(Orders()));
 
@@ -156,20 +156,20 @@ public class PlanFactsPanelTests
     [Fact]
     public async Task Without_facts_the_panel_draws_nothing()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
 
         Panel(context, null).Markup.Trim().Should().BeEmpty();
     }
 
     // ---- In the view ---------------------------------------------------------------------------------------------------------
 
-    private static IRenderedComponent<PlanView> View(PostgresStudioComponentContext context, string json, PlanFacts? facts, bool analyzer = true) =>
+    private static IRenderedComponent<PlanView> View(PostgresComponentContext context, string json, PlanFacts? facts, bool analyzer = true) =>
         context.Render<PlanView>(parameters => parameters.Add(x => x.Json, json).Add(x => x.Analyzer, analyzer).Add(x => x.PlanFactsValue, facts));
 
     [Fact]
     public async Task The_view_judges_P15_with_the_facts_and_draws_the_panel_and_lists_what_it_cannot_judge_without_them()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
         string json = PlanFixtures.Get("p15-fires");
 
         IRenderedComponent<PlanView> with = View(context, json, Facts(Orders()));
@@ -188,7 +188,7 @@ public class PlanFactsPanelTests
     [Fact]
     public async Task The_console_style_view_without_the_analyzer_shows_no_facts_and_names_no_facts_insight_as_unjudged()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
 
         IRenderedComponent<PlanView> view = View(context, PlanFixtures.Get("p15-fires"), Facts(Orders()), analyzer: false);
 
@@ -199,7 +199,7 @@ public class PlanFactsPanelTests
     [Fact]
     public async Task Facts_arriving_for_a_plan_already_drawn_judge_it_again_and_keep_the_selection()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
         string json = PlanFixtures.Get("p15-fires");
         IRenderedComponent<PlanView> view = View(context, json, null);
 
@@ -213,7 +213,7 @@ public class PlanFactsPanelTests
     [Fact]
     public async Task The_node_table_has_a_Facts_column_with_the_scans_relation_and_the_selected_nodes_detail_lists_its_columns()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
         PlanRelationFacts addresses = new("public", "addresses", PlanRelationState.Read)
         {
             EstimatedRows = 80_000,
@@ -237,7 +237,7 @@ public class PlanFactsPanelTests
     [Fact]
     public async Task A_withheld_scan_shows_the_withheld_label_in_the_table_and_no_columns_in_the_detail()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
 
         IRenderedComponent<PlanView> view = View(context, PlanFixtures.Get("p16-fires"), Facts(new PlanRelationFacts("public", "addresses", PlanRelationState.Withheld)));
         view.Find(".ms-plan-view-table").Click();
@@ -254,7 +254,7 @@ public class PlanFactsPanelTests
     [Fact]
     public async Task A_run_reads_the_facts_once_for_the_plan_it_drew_and_draws_the_panel()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
         context.PlanFacts.Answer = _ => Facts(Orders());
         context.SqlConsole.NextPlan = new PlanRunResult
         {
@@ -277,7 +277,7 @@ public class PlanFactsPanelTests
     [Fact]
     public async Task A_pasted_plan_reads_no_facts()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
         IRenderedComponent<PlanPage> page = context.Render<PlanPage>();
 
         string text = PlanFixtures.Get("p15-fires");
@@ -298,7 +298,7 @@ public class PlanFactsPanelTests
     [Fact]
     public async Task A_facts_read_that_the_gate_refuses_keeps_the_plan_and_says_why()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
         context.PlanFacts.Throws = new StudioNotAuthorizedException(new StudioScope("default", "default", null));
         context.SqlConsole.NextPlan = new PlanRunResult
         {
@@ -322,7 +322,7 @@ public class PlanFactsPanelTests
     [Fact]
     public async Task Two_withheld_relations_render_twice_without_a_duplicate_key()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
 
         // Every withheld record is called the same and holds no name: only its position tells two apart.
         PlanFacts Withheld() => Facts(new PlanRelationFacts(string.Empty, string.Empty, PlanRelationState.Withheld), new PlanRelationFacts(string.Empty, string.Empty, PlanRelationState.Withheld), Orders());
@@ -340,7 +340,7 @@ public class PlanFactsPanelTests
     [Fact]
     public async Task Statistics_objects_of_one_name_in_two_schemas_render_twice_without_a_duplicate_key()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
 
         PlanFacts Both() => Facts(Orders() with
         {
@@ -363,7 +363,7 @@ public class PlanFactsPanelTests
     [Fact]
     public async Task A_column_a_node_uses_twice_is_listed_once_and_the_view_renders_twice()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
         string json = PlanFixtures.Get("p16-fires").Replace(
             "((city = 'Oslo'::text) AND (postcode = '0150'::text))",
             "((city > 'a'::text) AND ((city)::text = 'Oslo'::text))",

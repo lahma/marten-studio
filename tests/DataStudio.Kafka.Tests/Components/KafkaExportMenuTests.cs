@@ -100,7 +100,7 @@ public class KafkaExportMenuTests
 
         await Items(page)[1].ClickAsync(new MouseEventArgs());
 
-        page.WaitForAssertion(() => page.Find(".ms-k-export [role=alert]").TextContent.Should().Be(KafkaStudioText.ExportNotDelivered));
+        page.WaitForAssertion(() => page.Find(".ms-k-export [role=alert]").TextContent.Should().Be(KafkaText.ExportNotDelivered));
         rig.Ring.Where(static x => x.Action == "ExportRecords").Should().ContainSingle().Which.Succeeded.Should().BeFalse();
     }
 
@@ -265,9 +265,9 @@ public class KafkaExportMenuTests
     [Fact]
     public void The_chips_tooltip_says_what_each_profile_does_and_Development_does_not_claim_to_lower_anything()
     {
-        KafkaStudioText.ProfileChipTitle(KafkaProfile.Development).Should().Contain("caps nothing").And.NotContain("lower");
-        KafkaStudioText.ProfileChipTitle(KafkaProfile.Test).Should().Contain("default limits");
-        KafkaStudioText.ProfileChipTitle(KafkaProfile.Production).Should().Contain("turns export and live tail off");
+        KafkaText.ProfileChipTitle(KafkaProfile.Development).Should().Contain("caps nothing").And.NotContain("lower");
+        KafkaText.ProfileChipTitle(KafkaProfile.Test).Should().Contain("default limits");
+        KafkaText.ProfileChipTitle(KafkaProfile.Production).Should().Contain("turns export and live tail off");
     }
 
     // ---- Settings and the selector
@@ -286,7 +286,7 @@ public class KafkaExportMenuTests
         IRenderedComponent<KafkaSettingsPage> page = rig.Studio.Context.Render<KafkaSettingsPage>();
 
         page.WaitForAssertion(() => page.Find("p.ms-k-profile").TextContent.Should().Be(expected));
-        page.Markup.Contains(KafkaStudioText.NoProfileWarning, StringComparison.Ordinal).Should().Be(warns);
+        page.Markup.Contains(KafkaText.NoProfileWarning, StringComparison.Ordinal).Should().Be(warns);
     }
 
     [Fact]

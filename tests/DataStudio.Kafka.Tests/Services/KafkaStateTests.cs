@@ -19,7 +19,7 @@ public class KafkaStateTests
     [Fact]
     public async Task The_address_names_the_cluster_to_open()
     {
-        using KafkaStudioHarness harness = new(null, Entry("primary"), Entry("secondary"));
+        using KafkaHarness harness = new(null, Entry("primary"), Entry("secondary"));
         harness.Context.Navigate("/studio/kafka?cluster=secondary");
 
         await harness.State.EnsureInitializedAsync(Ct);
@@ -32,7 +32,7 @@ public class KafkaStateTests
     [Fact]
     public async Task An_unknown_cluster_in_the_address_falls_back_and_is_logged_at_Debug_only()
     {
-        using KafkaStudioHarness harness = new(null, Entry("primary"), Entry("secondary"));
+        using KafkaHarness harness = new(null, Entry("primary"), Entry("secondary"));
         harness.Context.Navigate("/studio/kafka?cluster=nope%0D%0Aforged");
 
         await harness.State.EnsureInitializedAsync(Ct);
@@ -43,7 +43,7 @@ public class KafkaStateTests
     [Fact]
     public async Task A_refused_cluster_reads_as_an_unknown_one()
     {
-        using KafkaStudioHarness harness = new(static o => o.ClusterAuthorizationPolicy = "kafka-topics", Entry("primary"), Entry("secondary"));
+        using KafkaHarness harness = new(static o => o.ClusterAuthorizationPolicy = "kafka-topics", Entry("primary"), Entry("secondary"));
         harness.Authorization.AllowKafka(static r => r.Cluster != "secondary");
         harness.Context.Navigate("/studio/kafka?cluster=secondary");
 
@@ -56,7 +56,7 @@ public class KafkaStateTests
     [Fact]
     public async Task A_cluster_is_compared_ordinally()
     {
-        using KafkaStudioHarness harness = new(null, Entry("primary"), Entry("secondary"));
+        using KafkaHarness harness = new(null, Entry("primary"), Entry("secondary"));
         harness.Context.Navigate("/studio/kafka?cluster=SECONDARY");
 
         await harness.State.EnsureInitializedAsync(Ct);
@@ -67,7 +67,7 @@ public class KafkaStateTests
     [Fact]
     public async Task A_cluster_the_listing_does_not_carry_is_ignored_when_picked()
     {
-        using KafkaStudioHarness harness = new(null, Entry("primary"), Entry("secondary"));
+        using KafkaHarness harness = new(null, Entry("primary"), Entry("secondary"));
         int changes = 0;
         await harness.State.EnsureInitializedAsync(Ct);
         harness.State.ClusterChanged += () =>
@@ -93,7 +93,7 @@ public class KafkaStateTests
     [Fact]
     public async Task Each_tenant_of_a_broker_per_tenant_cluster_is_its_own_entry()
     {
-        using KafkaStudioHarness harness = new(null, Entry("primary", "tenant-a"), Entry("primary-b", "tenant-b"));
+        using KafkaHarness harness = new(null, Entry("primary", "tenant-a"), Entry("primary-b", "tenant-b"));
 
         await harness.State.EnsureInitializedAsync(Ct);
 
@@ -104,7 +104,7 @@ public class KafkaStateTests
     [Fact]
     public async Task A_visitor_who_may_see_no_cluster_has_none_in_scope()
     {
-        using KafkaStudioHarness harness = new(static o => o.ClusterAuthorizationPolicy = "kafka-topics", Entry("primary"));
+        using KafkaHarness harness = new(static o => o.ClusterAuthorizationPolicy = "kafka-topics", Entry("primary"));
         harness.Authorization.AllowKafka(static _ => false);
 
         await harness.State.EnsureInitializedAsync(Ct);
@@ -127,7 +127,7 @@ public class KafkaStateTests
     [Fact]
     public void The_state_is_resolved_as_the_circuits_own()
     {
-        using KafkaStudioHarness harness = new();
+        using KafkaHarness harness = new();
 
         harness.Context.Services.GetRequiredService<NavigationManager>().Should().NotBeNull();
         harness.State.Should().BeSameAs(harness.Context.Services.GetRequiredService<KafkaState>());
@@ -137,7 +137,7 @@ public class KafkaStateTests
     public async Task An_escaped_tenant_entry_key_selects_the_entry()
     {
         // D43, decision 6: the entry key travels in the query string escaped, wolverine%2Facme, and selects exactly that entry.
-        using KafkaStudioHarness harness = new(null, Entry("wolverine"), Entry("wolverine/acme", "acme"), Entry("wolverine/globex", "globex"));
+        using KafkaHarness harness = new(null, Entry("wolverine"), Entry("wolverine/acme", "acme"), Entry("wolverine/globex", "globex"));
         harness.Context.Navigate("/studio/kafka?cluster=wolverine%2Facme");
 
         await harness.State.EnsureInitializedAsync(Ct);
@@ -151,7 +151,7 @@ public class KafkaStateTests
     [Fact]
     public async Task An_unknown_tenant_entry_in_the_address_falls_back_to_the_first_available_one_and_is_logged_as_9610()
     {
-        using KafkaStudioHarness harness = new(null, Entry("wolverine"), Entry("wolverine/acme", "acme"));
+        using KafkaHarness harness = new(null, Entry("wolverine"), Entry("wolverine/acme", "acme"));
         harness.Context.Navigate("/studio/kafka?cluster=wolverine%2Finitech");
         CapturingLoggerProvider logs = new();
         KafkaState state = new(harness.Entries, harness.KafkaAuthorization, harness.Navigation, logs.CreateFactory().CreateLogger<KafkaState>());

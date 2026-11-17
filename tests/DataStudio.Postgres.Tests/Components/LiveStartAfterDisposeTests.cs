@@ -20,7 +20,7 @@ public class LiveStartAfterDisposeTests
     [Fact]
     public async Task The_Overview_left_during_its_first_reads_starts_no_loop_and_ends_no_circuit()
     {
-        await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
+        await using PostgresComponentContext context = await new PostgresComponentContext().ReadyAsync();
 
         await AssertLeftDuringTheFirstReadStartsNothingAsync<PostgresOverview>(context);
     }
@@ -28,7 +28,7 @@ public class LiveStartAfterDisposeTests
     [Fact]
     public async Task The_rail_left_during_its_first_reads_starts_no_loop_and_ends_no_circuit()
     {
-        await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
+        await using PostgresComponentContext context = await new PostgresComponentContext().ReadyAsync();
 
         await AssertLeftDuringTheFirstReadStartsNothingAsync<NavMenu>(context);
     }
@@ -37,7 +37,7 @@ public class LiveStartAfterDisposeTests
     /// Holds the first interactive read (the browser's muted findings) pending, disposes the component, completes the read: the
     /// renderer has no unhandled exception and no <c>visibility.watch</c> was ever called, which a loop would have done.
     /// </summary>
-    private static async Task AssertLeftDuringTheFirstReadStartsNothingAsync<TComponent>(PostgresStudioComponentContext context)
+    private static async Task AssertLeftDuringTheFirstReadStartsNothingAsync<TComponent>(PostgresComponentContext context)
         where TComponent : IComponent
     {
         var muted = context.JSInterop.Setup<string?>(Muted, static _ => true);

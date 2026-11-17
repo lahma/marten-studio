@@ -22,7 +22,7 @@ public class PostgresRelationshipsWordsTests
     [Fact]
     public async Task The_screen_draws_no_view_switch_and_names_no_document_type()
     {
-        await using PostgresStudioComponentContext context = await NewContextAsync(FakeRelationshipDataService.PlainTables());
+        await using PostgresComponentContext context = await NewContextAsync(FakeRelationshipDataService.PlainTables());
 
         var page = context.Render<Relationships>();
 
@@ -31,7 +31,7 @@ public class PostgresRelationshipsWordsTests
         page.FindAll(".ms-segmented-option").Should().BeEmpty();
         page.FindAll(".ms-graph-schema-chip").Should().NotBeEmpty("the schema chips still narrow the picture");
 
-        page.Find("table.ms-graph-table caption").TextContent.Should().Be(PostgresStudioText.Instance.RelationshipTableCaption);
+        page.Find("table.ms-graph-table caption").TextContent.Should().Be(PostgresText.Instance.RelationshipTableCaption);
         page.Find(".ms-graph-isolated-list").GetAttribute("aria-label").Should().Be("Tables with no foreign key");
         page.Find("svg.ms-graph-svg").GetAttribute("aria-label").Should().Be(
             "A diagram of 5 tables and 3 foreign keys between them. The table below lists the same relationships.");
@@ -46,7 +46,7 @@ public class PostgresRelationshipsWordsTests
     [Fact]
     public async Task The_table_draws_no_member_column_and_the_unplaced_key_sentences_are_the_studios_own()
     {
-        await using PostgresStudioComponentContext context = await NewContextAsync(FakeRelationshipDataService.PlainTables());
+        await using PostgresComponentContext context = await NewContextAsync(FakeRelationshipDataService.PlainTables());
 
         var page = context.Render<Relationships>();
 
@@ -54,15 +54,15 @@ public class PostgresRelationshipsWordsTests
         page.FindAll("table.ms-graph-table th").Select(static x => x.TextContent).Should().NotContain("Member");
         page.FindAll(".ms-graph-row").Should().OnlyContain(static x => x.QuerySelectorAll("td").Length == 5);
 
-        PostgresStudioText.Instance.RelationshipUnplacedTarget.Should().Be("It points at a table this studio does not draw.");
-        PostgresStudioText.Instance.RelationshipUnplacedSource.Should().Be("It is on a table this studio does not draw.");
-        ShouldNameNoDocumentType(PostgresStudioText.Instance.RelationshipUnplacedTarget + PostgresStudioText.Instance.RelationshipUnplacedSource);
+        PostgresText.Instance.RelationshipUnplacedTarget.Should().Be("It points at a table this studio does not draw.");
+        PostgresText.Instance.RelationshipUnplacedSource.Should().Be("It is on a table this studio does not draw.");
+        ShouldNameNoDocumentType(PostgresText.Instance.RelationshipUnplacedTarget + PostgresText.Instance.RelationshipUnplacedSource);
     }
 
     [Fact]
     public async Task A_documents_view_in_the_url_draws_every_table_rather_than_nothing()
     {
-        await using PostgresStudioComponentContext context = await NewContextAsync(FakeRelationshipDataService.PlainTables());
+        await using PostgresComponentContext context = await NewContextAsync(FakeRelationshipDataService.PlainTables());
         context.Navigate("studio/postgres/relationships?view=documents");
 
         var page = context.Render<Relationships>();
@@ -77,7 +77,7 @@ public class PostgresRelationshipsWordsTests
     [Fact]
     public async Task Past_the_cap_it_asks_for_a_schema_and_not_for_a_view_it_has_none_of()
     {
-        await using PostgresStudioComponentContext context = await NewContextAsync(Chain(RelationshipViews.NodeCap + 10));
+        await using PostgresComponentContext context = await NewContextAsync(Chain(RelationshipViews.NodeCap + 10));
 
         var page = context.Render<Relationships>();
 
@@ -89,7 +89,7 @@ public class PostgresRelationshipsWordsTests
     [Fact]
     public async Task A_database_with_no_foreign_key_says_so_in_terms_of_tables()
     {
-        await using PostgresStudioComponentContext context = await NewContextAsync(
+        await using PostgresComponentContext context = await NewContextAsync(
             new GraphModel([], [], [], DateTimeOffset.UnixEpoch) { VisibleSchemas = ["public"] });
 
         var page = context.Render<Relationships>();
@@ -105,7 +105,7 @@ public class PostgresRelationshipsWordsTests
     [Fact]
     public async Task Tables_that_could_not_be_read_are_said_not_to_be_drawn()
     {
-        await using PostgresStudioComponentContext context = await NewContextAsync(
+        await using PostgresComponentContext context = await NewContextAsync(
             new GraphModel([], [], [], DateTimeOffset.UnixEpoch) { TablesUnavailable = "The database browser's gate could not be read." });
 
         var page = context.Render<Relationships>();
@@ -119,25 +119,25 @@ public class PostgresRelationshipsWordsTests
     [Fact]
     public async Task A_key_the_screen_cannot_draw_is_explained_without_a_document_type()
     {
-        await using PostgresStudioComponentContext context = await NewContextAsync(WithUnmatched());
+        await using PostgresComponentContext context = await NewContextAsync(WithUnmatched());
 
         var page = context.Render<Relationships>();
 
         page.WaitForAssertion(() => page.Find(".ms-graph-unmatched .ms-schema-note").TextContent.Should().Be(
-            PostgresStudioText.Instance.RelationshipUnmatchedNote));
+            PostgresText.Instance.RelationshipUnmatchedNote));
     }
 
     [Fact]
     public async Task The_object_details_tab_names_no_document_type_either()
     {
-        await using PostgresStudioComponentContext context = await NewContextAsync(FakeRelationshipDataService.PlainTables());
+        await using PostgresComponentContext context = await NewContextAsync(FakeRelationshipDataService.PlainTables());
 
         var tab = context.Render<DatabaseRelationshipsSlot>(parameters => parameters
             .Add(x => x.Schema, "quartz")
             .Add(x => x.Name, "qrtz_triggers"));
 
         tab.WaitForAssertion(() => tab.FindAll(".ms-graph-svg .ms-graph-edge").Should().HaveCount(2));
-        tab.Find("table.ms-graph-table caption").TextContent.Should().Be(PostgresStudioText.Instance.RelationshipTableCaption);
+        tab.Find("table.ms-graph-table caption").TextContent.Should().Be(PostgresText.Instance.RelationshipTableCaption);
         tab.FindAll(".ms-graph-views").Should().BeEmpty();
 
         ShouldNameNoDocumentType(tab.Markup);
@@ -146,7 +146,7 @@ public class PostgresRelationshipsWordsTests
     [Fact]
     public async Task The_tabs_key_it_cannot_draw_is_explained_without_a_document_type()
     {
-        await using PostgresStudioComponentContext context = await NewContextAsync(WithUnmatched());
+        await using PostgresComponentContext context = await NewContextAsync(WithUnmatched());
 
         var tab = context.Render<DatabaseRelationshipsSlot>(parameters => parameters
             .Add(x => x.Schema, "legacy")
@@ -217,9 +217,9 @@ public class PostgresRelationshipsWordsTests
         return new GraphModel([], edges, [], DateTimeOffset.UnixEpoch) { Tables = tables, VisibleSchemas = ["wide"] };
     }
 
-    private static async Task<PostgresStudioComponentContext> NewContextAsync(GraphModel graph)
+    private static async Task<PostgresComponentContext> NewContextAsync(GraphModel graph)
     {
-        PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
+        PostgresComponentContext context = await new PostgresComponentContext().ReadyAsync();
         context.RelationshipData.Graph = graph;
         return context;
     }

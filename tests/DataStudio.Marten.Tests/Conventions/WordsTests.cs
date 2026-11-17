@@ -11,7 +11,7 @@ public class WordsTests
 {
     [Fact]
     public Task The_Marten_modules_words_are_pinned() =>
-        Verify(WordsSnapshot.OfStudioText(MartenStudioText.Instance, "MartenOptions.ReadOnly"), extension: "txt")
+        Verify(WordsSnapshot.OfStudioText(MartenText.Instance, "MartenOptions.ReadOnly"), extension: "txt")
             .UseDirectory("../Verify")
             .UseFileName("WordsTests_DataStudioMarten");
 
@@ -19,8 +19,8 @@ public class WordsTests
     [Fact]
     public void The_snapshot_reads_the_modules_own_words()
     {
-        string marten = WordsSnapshot.OfStudioText(MartenStudioText.Instance, "MartenOptions.ReadOnly");
-        string postgres = WordsSnapshot.OfStudioText(PostgresStudioText.Instance, "PostgresOptions.ReadOnly");
+        string marten = WordsSnapshot.OfStudioText(MartenText.Instance, "MartenOptions.ReadOnly");
+        string postgres = WordsSnapshot.OfStudioText(PostgresText.Instance, "PostgresOptions.ReadOnly");
 
         marten.Should().Contain("MartenOptions.Capabilities.BrowseDatabase").And.NotContain("PostgresOptions");
         postgres.Should().Contain("PostgresOptions.Capabilities.BrowseDatabase").And.NotContain("MartenOptions");

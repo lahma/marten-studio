@@ -29,7 +29,7 @@ public class HealthCheckConventionTests
     /// <summary>Every check class in the studio's check assemblies - the engine's, the studio's own posture ones and MartenStudio's.</summary>
     private static IReadOnlyList<Type> Discovered =>
     [
-        .. DataStudio.Marten.Services.MartenStudioDescriptor.Instance.HealthCheckAssemblies
+        .. DataStudio.Marten.Services.MartenDescriptor.Instance.HealthCheckAssemblies
             .Select(static x => x.Assembly).Distinct().SelectMany(HealthCheckRegistry.Discover),
     ];
 

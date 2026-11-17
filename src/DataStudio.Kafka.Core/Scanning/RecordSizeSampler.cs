@@ -17,7 +17,7 @@ internal sealed class RecordSizeSampler(
     KafkaWires wires,
     KafkaEngineSnapshot settings,
     OwnerByteBudget budget,
-    KStudioLoggers loggers,
+    KafkaEngineLoggers loggers,
     TimeProvider time)
 {
     /// <summary>The most records read.</summary>
@@ -155,7 +155,7 @@ internal sealed class RecordSizeSampler(
             string topicText = KafkaLogValue.Cap(topic)!;
             string clusterText = KafkaLogValue.Cap(cluster)!;
             string kind = exception.GetType().Name;
-            KStudioLog.SampleFailed(loggers.Scans, topicText, clusterText, kind);
+            KafkaEngineLog.SampleFailed(loggers.Scans, topicText, clusterText, kind);
             return null;
         }
         finally

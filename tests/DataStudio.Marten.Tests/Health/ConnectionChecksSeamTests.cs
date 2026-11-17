@@ -27,7 +27,7 @@ public class ConnectionChecksSeamTests
     [Fact]
     public void Each_check_is_registered_in_both_studios_at_the_database_gate_in_the_regular_sweep_with_its_variants()
     {
-        foreach (HealthCheckRegistry registry in (HealthCheckRegistry[]) [StudioHealthChecks.Registry, new(DataStudio.Postgres.Services.Postgres.PostgresStudioDescriptor.Instance)])
+        foreach (HealthCheckRegistry registry in (HealthCheckRegistry[]) [StudioHealthChecks.Registry, new(DataStudio.Postgres.Services.Postgres.PostgresDescriptor.Instance)])
         {
             foreach ((string code, HealthArea area, string[] variants) in Checks)
             {

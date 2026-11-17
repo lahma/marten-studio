@@ -221,7 +221,7 @@
 
     private async Task OnLiveFailedAsync(Exception exception)
     {
-        refreshError = KafkaStudioText.CouldNotRefresh;
+        refreshError = KafkaText.CouldNotRefresh;
         await InvokeAsync(StateHasChanged);
     }
 
@@ -405,7 +405,7 @@
         catch (Exception e) when (!disposed)
         {
             Logger.LogWarning(e, "The Kafka topics page failed to read the catalog");
-            error = KafkaStudioText.ReadFailed;
+            error = KafkaText.ReadFailed;
             loading = false;
         }
 
@@ -424,7 +424,7 @@
             else
             {
                 <BreakableName Value="@row.Name" />
-                <span class="ms-muted ms-k-not-listed">@KafkaStudioText.TopicNotListed</span>
+                <span class="ms-muted ms-k-not-listed">@KafkaText.TopicNotListed</span>
             }
         </td>
         <td class="ms-table-cell">@row.Description</td>

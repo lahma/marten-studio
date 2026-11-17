@@ -687,7 +687,7 @@ internal sealed class LinqQueryService : ILinqQueryService
 
         try
         {
-            HypotheticalIndexRead read = await hypothetical.ReadAsync(MartenStudioDatabase.Of(resolved.Database), index, planner, cancellationToken)
+            HypotheticalIndexRead read = await hypothetical.ReadAsync(MartenSourceDatabase.Of(resolved.Database), index, planner, cancellationToken)
                 .ConfigureAwait(false);
             result = WhatIfResult.From(index, read);
         }
@@ -731,7 +731,7 @@ internal sealed class LinqQueryService : ILinqQueryService
             Role = value.SqlConsoleRole,
         });
 
-        await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
+        await using NpgsqlConnection connection = MartenSourceDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
 
         var stopwatch = new Stopwatch();
         LinqPage? page = null;

@@ -165,7 +165,7 @@ internal sealed class KafkaSearchService(
 
             if (!plan.IsValid)
             {
-                await NotRunAsync(input, KafkaStudioText.PredicateDidNotRun(plan.Errors), KafkaStudioText.PredicateDidNotParse(input.PredicateText?.Length ?? 0)).ConfigureAwait(false);
+                await NotRunAsync(input, KafkaText.PredicateDidNotRun(plan.Errors), KafkaText.PredicateDidNotParse(input.PredicateText?.Length ?? 0)).ConfigureAwait(false);
             }
 
             return new KafkaSearchPlanResult.Planned(new KafkaSearchPlanned(input, plan, grant));
@@ -173,8 +173,8 @@ internal sealed class KafkaSearchService(
         catch (Exception e) when (e is not OperationCanceledException)
         {
             logger.LogWarning(e, "Data Studio could not plan a search");
-            await NotRunAsync(input, KafkaStudioText.SearchFailed, PredicateNotRecorded(input)).ConfigureAwait(false);
-            return new KafkaSearchPlanResult.Refused(KafkaStudioText.SearchFailed);
+            await NotRunAsync(input, KafkaText.SearchFailed, PredicateNotRecorded(input)).ConfigureAwait(false);
+            return new KafkaSearchPlanResult.Refused(KafkaText.SearchFailed);
         }
     }
 
@@ -199,8 +199,8 @@ internal sealed class KafkaSearchService(
         // A grant lower than the one the visitor was planned under refuses the start; a higher one starts the planned (lower) grant.
         if (!grant.AtLeast(planned.Grant))
         {
-            await NotRunAsync(input, KafkaStudioText.GrantChanged, planned.Plan.IsValid ? planned.Plan.AuditText : KafkaStudioText.PredicateDidNotParse(input.PredicateText?.Length ?? 0)).ConfigureAwait(false);
-            return new KafkaSearchStartResult.Refused(KafkaStudioText.GrantChanged);
+            await NotRunAsync(input, KafkaText.GrantChanged, planned.Plan.IsValid ? planned.Plan.AuditText : KafkaText.PredicateDidNotParse(input.PredicateText?.Length ?? 0)).ConfigureAwait(false);
+            return new KafkaSearchStartResult.Refused(KafkaText.GrantChanged);
         }
 
         KafkaScanPlan plan = planned.Plan;
@@ -208,8 +208,8 @@ internal sealed class KafkaSearchService(
 
         if (!plan.IsValid)
         {
-            await NotRunAsync(input, KafkaStudioText.PredicateDidNotRun(plan.Errors), KafkaStudioText.PredicateDidNotParse(input.PredicateText?.Length ?? 0)).ConfigureAwait(false);
-            return new KafkaSearchStartResult.Refused(KafkaStudioText.PredicateInvalid);
+            await NotRunAsync(input, KafkaText.PredicateDidNotRun(plan.Errors), KafkaText.PredicateDidNotParse(input.PredicateText?.Length ?? 0)).ConfigureAwait(false);
+            return new KafkaSearchStartResult.Refused(KafkaText.PredicateInvalid);
         }
 
         try
@@ -219,7 +219,7 @@ internal sealed class KafkaSearchService(
 
             if (start.Handle is not { } handle)
             {
-                string text = KafkaStudioText.Refusal(start.Refusal ?? KafkaScanRefusal.ShuttingDown, start.SpentBudget);
+                string text = KafkaText.Refusal(start.Refusal ?? KafkaScanRefusal.ShuttingDown, start.SpentBudget);
                 await NotRunAsync(input, text, plan.AuditText).ConfigureAwait(false);
                 return new KafkaSearchStartResult.Refused(text);
             }
@@ -229,8 +229,8 @@ internal sealed class KafkaSearchService(
         catch (Exception e) when (e is not OperationCanceledException)
         {
             logger.LogWarning(e, "Data Studio could not start a search");
-            await NotRunAsync(input, KafkaStudioText.SearchFailed, plan.AuditText).ConfigureAwait(false);
-            return new KafkaSearchStartResult.Refused(KafkaStudioText.SearchFailed);
+            await NotRunAsync(input, KafkaText.SearchFailed, plan.AuditText).ConfigureAwait(false);
+            return new KafkaSearchStartResult.Refused(KafkaText.SearchFailed);
         }
     }
 
@@ -240,7 +240,7 @@ internal sealed class KafkaSearchService(
     {
         ArgumentNullException.ThrowIfNull(planned);
 
-        await NotRunAsync(planned.Input, KafkaStudioText.NotConfirmed, planned.Plan.IsValid ? planned.Plan.AuditText : KafkaStudioText.PredicateDidNotParse(planned.Input.PredicateText?.Length ?? 0))
+        await NotRunAsync(planned.Input, KafkaText.NotConfirmed, planned.Plan.IsValid ? planned.Plan.AuditText : KafkaText.PredicateDidNotParse(planned.Input.PredicateText?.Length ?? 0))
             .ConfigureAwait(false);
     }
 
@@ -249,7 +249,7 @@ internal sealed class KafkaSearchService(
     {
         KafkaClusterEntry cluster = input.Cluster;
         IReadOnlyList<string> topics = input.Topics;
-        string target = KafkaStudioText.SearchTarget(topics, input.From, input.To);
+        string target = KafkaText.SearchTarget(topics, input.From, input.To);
 
         // 1. The capability.
         try
@@ -274,7 +274,7 @@ internal sealed class KafkaSearchService(
         if (!await authorization.IsAuthorizedAsync(cluster, null, null, cancellationToken).ConfigureAwait(false))
         {
             actionLog.RecordClusterDenied(cluster, null, topics, authorization.PolicyFor(null) ?? "(none)", Action, target, KafkaCapability.SearchRecords);
-            return (KafkaStudioText.SearchNamesRefusedTopic, [], KafkaGrantDecision.EnvelopeOnly);
+            return (KafkaText.SearchNamesRefusedTopic, [], KafkaGrantDecision.EnvelopeOnly);
         }
 
         foreach (KafkaTopicName name in names)
@@ -283,7 +283,7 @@ internal sealed class KafkaSearchService(
                 || !await authorization.IsAuthorizedAsync(cluster, name.Value, KafkaCapability.SearchRecords, cancellationToken).ConfigureAwait(false))
             {
                 actionLog.RecordClusterDenied(cluster, name.Value, topics, authorization.PolicyFor(KafkaCapability.SearchRecords) ?? "(none)", Action, target, KafkaCapability.SearchRecords);
-                return (KafkaStudioText.SearchNamesRefusedTopic, [], KafkaGrantDecision.EnvelopeOnly);
+                return (KafkaText.SearchNamesRefusedTopic, [], KafkaGrantDecision.EnvelopeOnly);
             }
         }
 
@@ -310,9 +310,9 @@ internal sealed class KafkaSearchService(
     {
         names = [];
 
-        if (input.Topics.Count is < 1 or > KafkaStudioText.MaxSearchTopics)
+        if (input.Topics.Count is < 1 or > KafkaText.MaxSearchTopics)
         {
-            return KafkaStudioText.SearchTopicCount;
+            return KafkaText.SearchTopicCount;
         }
 
         List<KafkaTopicName> parsed = [];
@@ -320,7 +320,7 @@ internal sealed class KafkaSearchService(
         {
             if (!KafkaTopicName.TryCreate(topic, out KafkaTopicName name))
             {
-                return KafkaStudioText.SearchTopicInvalid;
+                return KafkaText.SearchTopicInvalid;
             }
 
             if (!parsed.Contains(name))
@@ -334,9 +334,9 @@ internal sealed class KafkaSearchService(
             return problem;
         }
 
-        if (input.PredicateText is { Length: > KafkaStudioText.MaxPredicateLength })
+        if (input.PredicateText is { Length: > KafkaText.MaxPredicateLength })
         {
-            return KafkaStudioText.PredicateTooLong;
+            return KafkaText.PredicateTooLong;
         }
 
         names = [.. parsed];
@@ -362,7 +362,7 @@ internal sealed class KafkaSearchService(
     private async Task NotRunAsync(KafkaSearchInput input, string reason, string predicate)
     {
         string user = await authorization.UserNameAsync().ConfigureAwait(false);
-        string target = KafkaStudioText.SearchTarget(input.Topics, input.From, input.To);
+        string target = KafkaText.SearchTarget(input.Topics, input.From, input.To);
 
         actionLog.Record(input.Cluster, input.Topics, Action, target, succeeded: false, reason, KafkaCapability.SearchRecords);
         logger.SearchNotRun(user, string.Join(", ", input.Topics), input.Cluster.Cluster, input.Cluster.TenantId, reason, predicate);
@@ -371,7 +371,7 @@ internal sealed class KafkaSearchService(
     /// <summary>Records a search that ran, once, when it ended: the ring entry and event 9600. Needs nothing from a scope that may be disposing.</summary>
     private void RecordScan(KafkaSearchInput input, KafkaScanPlan plan, string user, KafkaScanResult? result)
     {
-        string target = KafkaStudioText.SearchTarget(input.Topics, input.From, input.To);
+        string target = KafkaText.SearchTarget(input.Topics, input.From, input.To);
 
         if (result is null)
         {

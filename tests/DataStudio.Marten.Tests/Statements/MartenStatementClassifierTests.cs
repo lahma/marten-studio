@@ -144,10 +144,10 @@ public class MartenStatementClassifierTests
     public void A_Marten_database_hands_out_metered_connections()
     {
         using DocumentStore store = DocumentStore.For("Host=db.example;Port=5433;Database=orders;Username=app;Password=secret");
-        MartenStudioDatabase database = MartenStudioDatabase.Of(store.Storage.Database);
+        MartenSourceDatabase database = MartenSourceDatabase.Of(store.Storage.Database);
 
         using NpgsqlConnection seam = database.CreateConnection(StudioConnectionUsage.Read);
-        using NpgsqlConnection own = MartenStudioDatabase.CreateConnection(store.Storage.Database, ConnectionUsage.Read);
+        using NpgsqlConnection own = MartenSourceDatabase.CreateConnection(store.Storage.Database, ConnectionUsage.Read);
         using NpgsqlConnection marten = store.Storage.Database.CreateConnection();
 
         StudioConnectionMeter.IsMetered(seam).Should().BeTrue();

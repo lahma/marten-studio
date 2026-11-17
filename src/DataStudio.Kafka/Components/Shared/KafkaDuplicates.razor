@@ -9,8 +9,8 @@
 @if (groups.Count > 0)
 {
     <details class="ms-k-duplicates">
-        <summary>@KafkaStudioText.DuplicatesHeading(groups.Count)</summary>
-        <p class="ms-muted">@KafkaStudioText.DuplicatesScope(Compared)</p>
+        <summary>@KafkaText.DuplicatesHeading(groups.Count)</summary>
+        <p class="ms-muted">@KafkaText.DuplicatesScope(Compared)</p>
         @foreach (KafkaDuplicateGroup group in groups)
         {
             <section class="ms-k-duplicate-group" @key="@(group.Topic + "/" + group.Basis + "/" + group.Copies[0].Offset + "/" + group.Copies[0].Partition)">
@@ -21,7 +21,7 @@
                     @Preferences.FormatInSelectedTimeZone(group.First, "yyyy-MM-dd HH:mm:ss") to @Preferences.FormatInSelectedTimeZone(group.Last, "yyyy-MM-dd HH:mm:ss")
                     @if (group.ComparedAsShown)
                     {
-                        <span> · @KafkaStudioText.DuplicatesComparedAsShown</span>
+                        <span> · @KafkaText.DuplicatesComparedAsShown</span>
                     }
                 </p>
                 <TableScroll Label="@("Copies on " + group.Topic)">

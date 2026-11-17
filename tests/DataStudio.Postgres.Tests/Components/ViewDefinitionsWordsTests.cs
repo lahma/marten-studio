@@ -18,7 +18,7 @@ namespace DataStudio.Postgres.Tests.Components;
 /// </summary>
 public class ViewDefinitionsWordsTests
 {
-    private static readonly StudioText Words = PostgresStudioText.Instance;
+    private static readonly StudioText Words = PostgresText.Instance;
 
     private static readonly DatabasePolicyAnswer DefinitionsPass = new(true, true, DatabaseRefusal.None);
 
@@ -105,7 +105,7 @@ public class ViewDefinitionsWordsTests
     [Fact]
     public async Task The_notice_with_nothing_on_says_what_each_capability_would_add_and_names_no_Marten_option()
     {
-        await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
+        await using PostgresComponentContext context = await new PostgresComponentContext().ReadyAsync();
         context.Navigate("studio/postgres/database");
 
         DatabaseAccessState access = Gate(browse: false, authorized: null, definitions: null).State;
@@ -124,7 +124,7 @@ public class ViewDefinitionsWordsTests
     [Fact]
     public async Task The_notice_with_only_ViewDefinitions_says_definitions_are_shown_and_rows_need_BrowseDatabase()
     {
-        await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
+        await using PostgresComponentContext context = await new PostgresComponentContext().ReadyAsync();
         context.Navigate("studio/postgres/database");
 
         DatabaseAccessState access = Gate(browse: false, authorized: null, DefinitionsPass).State;

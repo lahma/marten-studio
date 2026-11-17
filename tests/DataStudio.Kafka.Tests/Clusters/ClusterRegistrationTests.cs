@@ -263,7 +263,7 @@ public class ClusterRegistrationTests
         services.AddSingleton<IKafkaWireFactory>(new FakeKafkaWireFactory(cluster));
         KafkaEngineOptions options = new();
         options.AddCluster("prod", Config("unreachable.invalid:9092"));
-        KStudioEngineRegistration.Add(services, _ => options, _ => new TestEngineSettings(TimeSpan.FromSeconds(5)));
+        KafkaEngineRegistration.Add(services, _ => options, _ => new TestEngineSettings(TimeSpan.FromSeconds(5)));
 
         services.Should().NotContain(static x => x.ServiceType == typeof(IHostedService), "no hosted service (decision 4)");
         services.Should().OnlyContain(static x => x.Lifetime == ServiceLifetime.Singleton, "singletons only");
@@ -288,7 +288,7 @@ public class ClusterRegistrationTests
         services.AddSingleton<IKafkaWireFactory>(factory);
         KafkaEngineOptions options = new();
         options.AddCluster("prod", Config());
-        KStudioEngineRegistration.Add(services, _ => options, _ => new TestEngineSettings(TimeSpan.FromSeconds(5)));
+        KafkaEngineRegistration.Add(services, _ => options, _ => new TestEngineSettings(TimeSpan.FromSeconds(5)));
 
         await using ServiceProvider provider = services.BuildServiceProvider();
 
@@ -317,7 +317,7 @@ public class ClusterRegistrationTests
         KafkaClusterDefinition definition = new KafkaClusterRegistry(options).Get("prod");
 
         CapturingLoggerProvider logs = new();
-        ConfluentClientEvents events = new(new KStudioLoggers(logs.CreateFactory()), new KafkaLogOnce(TimeProvider.System), TimeProvider.System);
+        ConfluentClientEvents events = new(new KafkaEngineLoggers(logs.CreateFactory()), new KafkaLogOnce(TimeProvider.System), TimeProvider.System);
 
         using IAdminClient admin = ConfluentWireFactory.BuildAdminClient(definition, events);
 
@@ -350,7 +350,7 @@ public class ClusterRegistrationTests
         KafkaClusterDefinition definition = new KafkaClusterRegistry(options).Get("prod");
 
         CapturingLoggerProvider logs = new();
-        ConfluentClientEvents events = new(new KStudioLoggers(logs.CreateFactory()), new KafkaLogOnce(TimeProvider.System), TimeProvider.System);
+        ConfluentClientEvents events = new(new KafkaEngineLoggers(logs.CreateFactory()), new KafkaLogOnce(TimeProvider.System), TimeProvider.System);
 
         // A consumer serves its callbacks from Consume, so the reader is polled on a thread of its own, as a scan does.
         using CancellationTokenSource stop = new();

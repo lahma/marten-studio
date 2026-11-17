@@ -62,6 +62,6 @@ public class WireTypesStayInTheEngineTests
         using PEReader pe = new(stream);
         MetadataReader reader = pe.GetMetadataReader();
 
-        return [.. reader.TypeReferences.Select(handle => KStudioReadsNoRawSettingsTests.FullName(reader, handle))];
+        return [.. reader.TypeReferences.Select(handle => KafkaReadsNoRawSettingsTests.FullName(reader, handle))];
     }
 }

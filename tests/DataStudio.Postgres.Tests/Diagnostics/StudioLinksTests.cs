@@ -17,7 +17,7 @@ public class StudioLinksTests
     private static readonly StudioScope Scope = new("main", "db1", null);
 
     private static PostgresDiagnosticsService Service() =>
-        new(null!, null!, null!, null!, null!, null!, NullLogger<PostgresDiagnosticsService>.Instance, PostgresStudioDescriptor.Instance);
+        new(null!, null!, null!, null!, null!, null!, NullLogger<PostgresDiagnosticsService>.Instance, PostgresDescriptor.Instance);
 
     [Fact]
     public void A_mapped_finding_names_its_card_on_the_health_page()
@@ -98,7 +98,7 @@ public class StudioLinksTests
         // Issue #55: the one spelling the page's own link (ConnectionLinks) and the diagnostics API share, so a host's link and a
         // visitor's cannot drift; both studios mount it (Marten Studio's navigation names the same route).
         path.Should().StartWith(DataStudio.Postgres.Services.Connection.ConnectionLinks.Route + "?").And.Contain("store=main").And.Contain("db=db1");
-        PostgresStudioDescriptor.Instance.Navigation(PostgresStudioSettings.Of(Microsoft.Extensions.Options.Options.Create(new PostgresOptions()))).SelectMany(static x => x.Items).Should().Contain(x => x.Route == "postgres/database/connection");
+        PostgresDescriptor.Instance.Navigation(PostgresSettings.Of(Microsoft.Extensions.Options.Options.Create(new PostgresOptions()))).SelectMany(static x => x.Items).Should().Contain(x => x.Route == "postgres/database/connection");
     }
 
     [Fact]

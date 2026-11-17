@@ -238,7 +238,7 @@ public class AuditSweepQuestionsTests
         // The fail-closed branch of the database's gate (REVIEW-A2c finding 2): the entry is of the database's kind, so the database's gate judges it,
         // and what it carries is not a DatabaseAuditScope, so there is nothing to ask a policy about and nothing to recognise it by.
         using var context = Context(storePolicy: true, writePolicy: true, on: [StudioCapability.RunSql]);
-        context.ActivityRing.Record(new StudioAuditScope(DataStudio.Marten.Services.MartenStudioDescriptor.Key, ["x"], "x", new object()), "Foreign", "target", succeeded: true);
+        context.ActivityRing.Record(new StudioAuditScope(DataStudio.Marten.Services.MartenDescriptor.Key, ["x"], "x", new object()), "Foreign", "target", succeeded: true);
 
         (string trace, string[] kept) = await SweepAsync(context);
 

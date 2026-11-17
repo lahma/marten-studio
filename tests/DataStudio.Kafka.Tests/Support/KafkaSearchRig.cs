@@ -33,7 +33,7 @@ internal sealed class KafkaSearchRig : IAsyncDisposable
         Cluster = new FakeKafkaCluster(TimeProvider.System);
         FakeKafkaWire wire = new(Cluster, EngineHarness.ClusterKey);
         Engine = EngineHarness.ForWire(wrap?.Invoke(wire) ?? wire, TimeProvider.System, TimeSpan.Zero, engine, profile is { } p ? c => c.Profile(p) : null);
-        Studio = new KafkaStudioHarness(
+        Studio = new KafkaHarness(
             options =>
             {
                 options.Capabilities.SearchRecords = searchOn;
@@ -61,7 +61,7 @@ internal sealed class KafkaSearchRig : IAsyncDisposable
 
     public EngineHarness Engine { get; }
 
-    public KafkaStudioHarness Studio { get; }
+    public KafkaHarness Studio { get; }
 
     /// <summary>Everything the services this rig builds by hand logged.</summary>
     public CapturingLoggerProvider Logs { get; } = new();

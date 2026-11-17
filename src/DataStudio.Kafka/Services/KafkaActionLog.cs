@@ -56,7 +56,7 @@ internal sealed class KafkaActionLog(
 
         string label = Bounded(cluster.Label);
         activity.Record(
-            new StudioAuditScope(KafkaStudioText.Key, [label], label, new KafkaAuditScope(cluster.Cluster, cluster.TenantId, [.. topics])),
+            new StudioAuditScope(KafkaText.Key, [label], label, new KafkaAuditScope(cluster.Cluster, cluster.TenantId, [.. topics])),
             action,
             Bounded(target),
             succeeded,
@@ -107,7 +107,7 @@ internal sealed class KafkaActionLog(
     {
         ArgumentNullException.ThrowIfNull(cluster);
 
-        Record(cluster, topics, action, target, succeeded: false, KafkaStudioText.RefusedEntry, capability);
+        Record(cluster, topics, action, target, succeeded: false, KafkaText.RefusedEntry, capability);
         logger.ClusterRefused(UserName(), cluster.Cluster, cluster.TenantId, topic, policy);
     }
 

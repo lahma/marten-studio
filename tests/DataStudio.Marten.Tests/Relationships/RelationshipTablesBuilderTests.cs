@@ -200,7 +200,7 @@ public class RelationshipTablesBuilderTests
             hidesDocumentTypes: true);
 
         // Short of the browser's gate: the store's own schema only, "secrets" withheld.
-        DatabaseGate gate = new([Doc], DatabaseTestStores.LiveSchemas(), ["secrets"], capabilityEnabled: false, readOnly: false, authorized: null, classifier, MartenStudioText.Instance);
+        DatabaseGate gate = new([Doc], DatabaseTestStores.LiveSchemas(), ["secrets"], capabilityEnabled: false, readOnly: false, authorized: null, classifier, MartenText.Instance);
 
         RelationshipNodeSet nodes = new(
             [new RelationshipNode("dbcustomer", "DbCustomer", 0, DocumentCount.Unknown, false, []) { Schema = Doc, Table = CustomerTable }],
@@ -215,7 +215,7 @@ public class RelationshipTablesBuilderTests
             [To("mt_doc_vaultsecret"), To("mt_hilo"), To("ledger")],
             [],
             ReadAt,
-            MartenStudioText.Instance,
+            MartenText.Instance,
             new RelationshipDatabaseView(gate, []));
 
         graph.Withheld.Should().ContainSingle("only the key into the ordinary table is one into a schema this visitor is not shown")
@@ -574,7 +574,7 @@ public class RelationshipTablesBuilderTests
                 Key("legacy", "customer_credit", ["customer_id"], Doc, CustomerTable, primaryKey: ["customer_id"], linkedPrimaryKey: ["id"]),
             ],
             ReadAt,
-            MartenStudioText.Instance,
+            MartenText.Instance,
             new RelationshipDatabaseView(Open("quartz", "legacy"), []));
 
         graph.Nodes.Should().BeEmpty("a source with no node source has no document types to draw");
@@ -633,7 +633,7 @@ public class RelationshipTablesBuilderTests
             readOnly: false,
             authorized: true,
             DatabaseTestStores.Classifier(),
-            MartenStudioText.Instance);
+            MartenText.Instance);
 
     /// <summary>A visitor without the capability: the store's own schemas, and nothing else.</summary>
     private static DatabaseGate Closed() =>
@@ -645,7 +645,7 @@ public class RelationshipTablesBuilderTests
             readOnly: false,
             authorized: null,
             DatabaseTestStores.Classifier(),
-            MartenStudioText.Instance);
+            MartenText.Instance);
 
     private static PhysicalForeignKey Quartz(string table, string[] columns, string linkedTable) =>
         Key(

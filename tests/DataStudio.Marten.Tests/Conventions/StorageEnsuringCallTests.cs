@@ -288,7 +288,7 @@ public class StorageEnsuringCallTests
     [Fact]
     public void The_route_links_are_scanned_and_have_no_allowed_site()
     {
-        const string routeLinks = "src/DataStudio.Marten/Services/Links/MartenStudioRouteLinks.cs";
+        const string routeLinks = "src/DataStudio.Marten/Services/Links/MartenRouteLinks.cs";
 
         SourceScanner.ShippedSourceFiles().Select(SourceScanner.Relative).Should().Contain(routeLinks, "it is a shipped source file the scan reads");
 
@@ -298,7 +298,7 @@ public class StorageEnsuringCallTests
         IlScan.Result scan = IlScan.Scan(typeof(MartenOptions).Assembly, IlScan.EnsuresStorage);
 
         scan.Unresolved.Should().BeEmpty();
-        scan.Calls.Keys.Select(static x => x.Type).Should().NotContain(typeof(DataStudio.Marten.Services.Links.MartenStudioRouteLinks).FullName);
+        scan.Calls.Keys.Select(static x => x.Type).Should().NotContain(typeof(DataStudio.Marten.Services.Links.MartenRouteLinks).FullName);
     }
 
     /// <summary>The allow-list is a statement about code that exists, not a permanent exemption.</summary>

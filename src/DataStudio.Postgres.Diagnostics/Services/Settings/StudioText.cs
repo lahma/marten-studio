@@ -7,9 +7,9 @@ namespace DataStudio.Postgres.Services.Settings;
 /// <remarks>
 /// <para>
 /// <b>One per module, read through <see cref="IDiagnosticsSettings.Text" />.</b> Shared code never spells a module's options type,
-/// policy or configuration itself: it reads the sentence here. The Postgres module's instance is <c>PostgresStudioText.Instance</c> and
+/// policy or configuration itself: it reads the sentence here. The Postgres module's instance is <c>PostgresText.Instance</c> and
 /// the Marten module's is built in <c>DataStudio.Marten</c>, and a host with no studio is read in the engine's own
-/// (<c>PostgresStudioText.DiagnosticsInstance</c>). No shared code falls back to one module's words: it takes the registered settings'.
+/// (<c>PostgresText.DiagnosticsInstance</c>). No shared code falls back to one module's words: it takes the registered settings'.
 /// </para>
 /// <para>
 /// <b>It holds only what differs.</b> A sentence that is the same in both modules but for the nouns below
@@ -369,7 +369,7 @@ internal sealed class StudioText
 
     // ---------------------------------------------------------------------------------------------------------------
     // Health: the words a shared check says of the application and its tables. Each module says them in its own words - a plain data
-    // source has no store, no documents, no events and no daemon, and PostgresStudioWordsTests evaluates every shared check to hold it to that.
+    // source has no store, no documents, no events and no daemon, and PostgresWordsTests evaluates every shared check to hold it to that.
 
     /// <summary>
     /// The title a check's status row and its findings carry in this module, by code, where it is not the check's own

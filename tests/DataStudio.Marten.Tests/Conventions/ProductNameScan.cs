@@ -6,14 +6,14 @@ namespace DataStudio.Marten.Tests.Conventions;
 /// <summary>
 /// Reads the text a visitor can be shown out of the shipped source: the string literals of a C# file (concatenations joined), the markup and code of a
 /// Razor file with its comments taken out, and the text files under <c>wwwroot</c> with theirs. The names of 1.x are looked for in that text only -
-/// an identifier such as <c>KStudioLog</c> is not text a visitor reads, and a comment is not either.
+/// an identifier such as <c>KafkaEngineLog</c> is not text a visitor reads, and a comment is not either.
 /// </summary>
 internal static partial class ProductNameScan
 {
     /// <summary>
     /// The 1.x names no sentence, title, credit, tile or heading says any more: the product is Data Studio, and a module is Marten, Postgres or Kafka.
     /// Both spellings of each - the product's ("Marten Studio") and the type's (<c>MartenStudio</c>) - because a message that names a type is read too.
-    /// A name is a name when nothing that could continue an identifier follows it (<c>MartenStudioDescriptor</c> and <c>KStudioValue</c> are the
+    /// A name is a name when nothing that could continue an identifier follows it (<c>MartenDescriptor</c> and <c>KStudioValue</c> are the
     /// types' and members', which a Razor file's code names and a visitor never reads), and <c>KStudio</c> must begin a word, so that nothing
     /// that merely ends in it is one.
     /// </summary>

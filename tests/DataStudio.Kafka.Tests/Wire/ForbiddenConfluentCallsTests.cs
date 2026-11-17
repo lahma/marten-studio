@@ -17,7 +17,7 @@ namespace DataStudio.Kafka.Tests.Wire;
 /// a formatted name. <b>Reflection is closed by <c>KStudio_Core_calls_no_reflection_entry_point</c></b>: the engine calls none of
 /// <c>MethodBase.Invoke</c>, <c>Delegate.DynamicInvoke</c>, <c>CreateDelegate</c>, <c>Type.InvokeMember</c>, <c>Type.GetMethod(s)</c>,
 /// <c>LambdaExpression.Compile</c> or <c>Activator.CreateInstance</c>, so a forbidden method cannot be reached by a name this scan never
-/// sees. <c>KStudioCoreFenceTests</c> checks assembly references, not reflection.
+/// sees. <c>KafkaCoreFenceTests</c> checks assembly references, not reflection.
 /// </summary>
 public class ForbiddenConfluentCallsTests
 {

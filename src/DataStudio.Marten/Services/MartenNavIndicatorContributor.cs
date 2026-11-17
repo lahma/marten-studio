@@ -154,7 +154,7 @@ internal static class MartenNavBadges
         // Zero and "could not tell" are different answers, and neither draws a badge.
         if (deadLetters is { } count && count > 0)
         {
-            badges[MartenStudioDescriptor.DeadLettersBadge] = new StudioNavBadge(
+            badges[MartenDescriptor.DeadLettersBadge] = new StudioNavBadge(
                 count.ToString("N0", CultureInfo.InvariantCulture),
                 "ms-nav-badge-danger",
                 count == 1
@@ -164,7 +164,7 @@ internal static class MartenNavBadges
 
         if (projectionsNeedAttention)
         {
-            badges[MartenStudioDescriptor.ProjectionsBadge] = new StudioNavBadge(
+            badges[MartenDescriptor.ProjectionsBadge] = new StudioNavBadge(
                 string.Empty,
                 "ms-nav-badge-dot ms-nav-badge-warning",
                 projectionsExplanation ?? "A projection needs attention");

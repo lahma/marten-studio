@@ -21,12 +21,12 @@ public class HealthSourceKindTests
     {
         await using HealthHarness harness = HealthHarness.Create(
             checks: [typeof(ScriptedConfigurationCheck), typeof(AnotherScriptedConfigurationCheck)],
-            sourceKinds: static type => type == typeof(ScriptedConfigurationCheck) ? MartenStudioDescriptor.MartenStoreOnly : null);
+            sourceKinds: static type => type == typeof(ScriptedConfigurationCheck) ? MartenDescriptor.MartenStoreOnly : null);
 
         ResolvedSource plain = new(
             new StudioScope("plain", harness.Scope.DatabaseId, null),
             new StudioSourceRegistration("plain", "Plain", StudioSourceKind.DataSource),
-            MartenStudioDatabase.Of(harness.Store.Storage.Database));
+            MartenSourceDatabase.Of(harness.Store.Storage.Database));
 
         HealthSweep overPlain = await harness.Sweeper.SweepAsync(plain, HealthSweepKind.Regular, Token);
 
@@ -43,11 +43,11 @@ public class HealthSourceKindTests
     public void A_check_found_by_several_entries_runs_only_against_a_kind_every_one_of_them_admits()
     {
         StudioHealthCheckAssembly[] shared = [new(typeof(HealthSourceKindTests).Assembly)];
-        StudioHealthCheckAssembly[] marten = [.. shared, new(typeof(HealthSourceKindTests).Assembly, MartenStudioDescriptor.MartenStoreOnly)];
+        StudioHealthCheckAssembly[] marten = [.. shared, new(typeof(HealthSourceKindTests).Assembly, MartenDescriptor.MartenStoreOnly)];
         StudioHealthCheckAssembly[] disjoint = [.. marten, new(typeof(HealthSourceKindTests).Assembly, DataSourceOnly)];
 
         Kinds(shared).Should().OnlyContain(static x => x == null, "an unrestricted entry admits every kind");
-        Kinds(marten).Should().OnlyContain(static x => x != null && x.SetEquals(MartenStudioDescriptor.MartenStoreOnly));
+        Kinds(marten).Should().OnlyContain(static x => x != null && x.SetEquals(MartenDescriptor.MartenStoreOnly));
         Kinds(disjoint).Should().OnlyContain(static x => x != null && x.Count == 0, "no kind is admitted by all three");
 
         Kinds(shared).Should().NotBeEmpty("the test assembly declares scripted checks, so the rule is not judged over nothing");
@@ -60,7 +60,7 @@ public class HealthSourceKindTests
     public void A_registry_offers_a_costlier_tier_only_where_a_check_of_it_runs_against_the_source()
     {
         HealthCheckRegistry registry = HealthCheckRegistry.ForTypes(
-            [(typeof(ScriptedDeeperCheck), MartenStudioDescriptor.MartenStoreOnly), (typeof(ScriptedConfigurationCheck), null)]);
+            [(typeof(ScriptedDeeperCheck), MartenDescriptor.MartenStoreOnly), (typeof(ScriptedConfigurationCheck), null)]);
 
         registry.HasTier(HealthCostTier.BoundedData, StudioSourceKind.MartenStore).Should().BeTrue();
         registry.HasTier(HealthCostTier.BoundedData, StudioSourceKind.DataSource).Should().BeFalse(
@@ -80,7 +80,7 @@ public class HealthSourceKindTests
     public void MartenStudios_own_checks_run_against_Marten_stores_only()
     {
         HealthCheckRegistry registry = StudioHealthChecks.Registry;
-        HealthCheckDescriptor[] marten = [.. registry.All.Where(static x => x.Info.CheckType.Assembly == typeof(MartenStudioDescriptor).Assembly)];
+        HealthCheckDescriptor[] marten = [.. registry.All.Where(static x => x.Info.CheckType.Assembly == typeof(MartenDescriptor).Assembly)];
         HealthCheckDescriptor[] restricted = [.. registry.All.Where(static x => x.SourceKinds is not null)];
 
         // 50; W5-V1's T16 and T24, W5-CAP's C11, W5-R2's R02-R04, W5-S2's ten and W5-B1's five in the shared engine; and
@@ -90,7 +90,7 @@ public class HealthSourceKindTests
         marten.Should().NotBeEmpty().And.OnlyContain(
             static x => !x.RunsAgainst(StudioSourceKind.DataSource) && !x.RunsAgainst(StudioSourceKind.HostProvider));
 
-        if (typeof(HealthCheckRegistry).Assembly == typeof(MartenStudioDescriptor).Assembly)
+        if (typeof(HealthCheckRegistry).Assembly == typeof(MartenDescriptor).Assembly)
         {
             restricted.Should().HaveCount(87, "one assembly: a check found by both entries runs against what both admit");
         }

@@ -33,7 +33,7 @@ public class StatementChecksApiSurfaceTests
     [Fact]
     public void The_remedy_is_the_line_compiled_here()
     {
-        DataStudio.Marten.Services.MartenStudioText.Instance.JitRemedyCode.Should().Be(
+        DataStudio.Marten.Services.MartenText.Instance.JitRemedyCode.Should().Be(
             "opts.ConfigureNpgsqlDataSourceBuilder(b =>\n"
             + "    b.ConnectionStringBuilder.Options = ((b.ConnectionStringBuilder.Options ?? string.Empty) + \" -c jit=off\").Trim());",
             "the text the page offers is the C# below, which compiles against the Marten and Npgsql this build uses");

@@ -15,9 +15,9 @@ public class ServerWordsTests
     [Fact]
     public void Postgres_Studios_words_name_no_Marten_write_and_no_daemon()
     {
-        PostgresStudioText.Instance.ReadOnlyWrites.Should().Be("write the application makes");
-        PostgresStudioText.Instance.ReadOnlyNeverAsks.Should().Be("and most data access never asks");
-        PostgresStudioText.Instance.LeaderTimeoutClause.Should().BeEmpty("a data source has no HotCold daemon, and Postgres Studio no K08");
+        PostgresText.Instance.ReadOnlyWrites.Should().Be("write the application makes");
+        PostgresText.Instance.ReadOnlyNeverAsks.Should().Be("and most data access never asks");
+        PostgresText.Instance.LeaderTimeoutClause.Should().BeEmpty("a data source has no HotCold daemon, and Postgres Studio no K08");
     }
 
     [Fact]
@@ -39,6 +39,6 @@ public class ServerWordsTests
     [Fact]
     public void T14s_timeout_backstop_names_no_K08_in_the_Postgres_module()
     {
-        ("is the DBA's backstop" + PostgresStudioText.Instance.LeaderTimeoutClause + ".").Should().Be("is the DBA's backstop.");
+        ("is the DBA's backstop" + PostgresText.Instance.LeaderTimeoutClause + ".").Should().Be("is the DBA's backstop.");
     }
 }

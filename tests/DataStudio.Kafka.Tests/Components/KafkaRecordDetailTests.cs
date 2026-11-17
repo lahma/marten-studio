@@ -112,7 +112,7 @@ public class KafkaRecordDetailTests
         match.Key.Truncated.Should().BeFalse("the match keeps up to 1 KB of key");
         KafkaMatchView.KeyPredicate(match).Should().BeNull();
         KafkaMatchView.KeyTooLongForPredicate(match).Should().BeTrue();
-        Render(rig, match).Markup.Should().Contain(KafkaStudioText.CopyLiteralTooLong);
+        Render(rig, match).Markup.Should().Contain(KafkaText.CopyLiteralTooLong);
     }
 
     [Fact]
@@ -126,7 +126,7 @@ public class KafkaRecordDetailTests
 
         KafkaMatchView.Chips(match).Should().BeEmpty("no chip would be a search the parser reads");
         KafkaMatchView.HasLiteralTooLong(match).Should().BeTrue();
-        Render(rig, match).Markup.Should().Contain(KafkaStudioText.CopyLiteralTooLong);
+        Render(rig, match).Markup.Should().Contain(KafkaText.CopyLiteralTooLong);
     }
 
     [Fact]
@@ -151,7 +151,7 @@ public class KafkaRecordDetailTests
         command.Should().StartWith("kcat -C -b 'broker-1.example:9093,broker-2.example:9093' -t 'orders.v1' -p 3 -o 1200 -c 1 -J");
         command.Should().Contain("-X security.protocol=").And.Contain("-X sasl.mechanism=");
         command.Should().NotContain(Secret).And.NotContain("svc-orders");
-        command.Should().EndWith(KafkaStudioText.KcatCredentialsHint);
+        command.Should().EndWith(KafkaText.KcatCredentialsHint);
     }
 
     [Fact]

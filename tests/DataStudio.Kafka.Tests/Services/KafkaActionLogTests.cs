@@ -18,12 +18,12 @@ public class KafkaActionLogTests
     [Fact]
     public void A_capability_refusal_is_recorded_on_failure_to_the_ring_and_as_9602()
     {
-        using KafkaStudioHarness harness = new();
+        using KafkaHarness harness = new();
         CapturingLoggerProvider captured = new();
         KafkaActionLog log = new(harness.Context.ActivityRing, captured.CreateFactory().CreateLogger<KafkaActionLog>(), harness.Visitor);
         KafkaCapabilityDeniedException denial = new(KafkaCapability.SearchRecords, DataStudio.Services.CapabilityDenialReason.Disabled, "DataStudioOptions.ReadOnly");
 
-        log.RecordCapabilityDenied(KafkaStudioHarness.Primary, ["orders.v1"], denial, "SearchRecords", "orders.v1");
+        log.RecordCapabilityDenied(KafkaHarness.Primary, ["orders.v1"], denial, "SearchRecords", "orders.v1");
 
         StudioActionLogEntry entry = harness.Context.Services.GetRequiredService<StudioActionLogService>().GetLatest().Should().ContainSingle().Which;
         entry.Succeeded.Should().BeFalse();
@@ -37,22 +37,22 @@ public class KafkaActionLogTests
     [Fact]
     public void A_policy_refusal_is_recorded_as_9603_and_the_ring_entry_says_nothing_about_why()
     {
-        using KafkaStudioHarness harness = new();
+        using KafkaHarness harness = new();
         CapturingLoggerProvider captured = new();
         KafkaActionLog log = new(harness.Context.ActivityRing, captured.CreateFactory().CreateLogger<KafkaActionLog>(), harness.Visitor);
 
-        log.RecordClusterDenied(KafkaStudioHarness.Primary, "secrets.v1", ["secrets.v1"], "kafka-topics", "SearchRecords", "secrets.v1", KafkaCapability.SearchRecords);
+        log.RecordClusterDenied(KafkaHarness.Primary, "secrets.v1", ["secrets.v1"], "kafka-topics", "SearchRecords", "secrets.v1", KafkaCapability.SearchRecords);
 
         StudioActionLogEntry entry = harness.Context.Services.GetRequiredService<StudioActionLogService>().GetLatest().Should().ContainSingle().Which;
         entry.Succeeded.Should().BeFalse();
-        entry.Message.Should().Be(KafkaStudioText.RefusedEntry);
+        entry.Message.Should().Be(KafkaText.RefusedEntry);
         captured.Entries.Should().ContainSingle().Which.EventId.Id.Should().Be(9603);
     }
 
     [Fact]
     public void A_target_and_a_label_are_bounded_like_the_consoles()
     {
-        using KafkaStudioHarness harness = new();
+        using KafkaHarness harness = new();
 
         harness.ActionLog.Record(new KafkaClusterEntry("primary", null, new string('x', 500), null), [], "SearchRecords", new string('t', 500), succeeded: true);
 
@@ -65,7 +65,7 @@ public class KafkaActionLogTests
     [Fact]
     public async Task A_line_break_in_a_cluster_from_the_address_is_escaped_in_9610()
     {
-        using KafkaStudioHarness harness = new(null, KafkaStudioHarness.Primary);
+        using KafkaHarness harness = new(null, KafkaHarness.Primary);
         harness.Context.Navigate("/studio/kafka?cluster=evil%0D%0A2026-11-12%20forged%20line");
         CapturingLoggerProvider captured = new();
         KafkaState state = new(

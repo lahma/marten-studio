@@ -16,8 +16,8 @@ public class ScopeCatalogTryListTests
     private static StudioScopeCatalog Catalog(FakeStudioSourceProvider sources)
     {
         StudioAuthorization authorization = new(
-            MartenStudioSettings.Of(Microsoft.Extensions.Options.Options.Create(new MartenOptions())),
-            MartenStudioDescriptor.Instance,
+            MartenSettings.Of(Microsoft.Extensions.Options.Options.Create(new MartenOptions())),
+            MartenDescriptor.Instance,
             new TestStoreAuthorizationService(),
             new TestAuthenticationStateProvider());
 

@@ -25,7 +25,7 @@
                 {
                     @* `selected` as well as the select's `value`: during static server-side rendering `value` on a <select> is ignored. *@
                     <option value="@cluster.Key"
-                            selected="@(cluster.Key == State.ActiveCluster?.Key)">@KafkaStudioText.ClusterOptionText(cluster.Label, cluster.SameServersNames(State.AvailableClusters))</option>
+                            selected="@(cluster.Key == State.ActiveCluster?.Key)">@KafkaText.ClusterOptionText(cluster.Label, cluster.SameServersNames(State.AvailableClusters))</option>
                 }
             </select>
         </div>
@@ -42,7 +42,7 @@
     @if (State.ActiveCluster?.Profile is { } profile)
     {
         <span class="ms-chip ms-k-profile-chip ms-k-profile-@profile.ToString().ToLowerInvariant()"
-              title="@KafkaStudioText.ProfileChipTitle(profile)">@profile profile</span>
+              title="@KafkaText.ProfileChipTitle(profile)">@profile profile</span>
     }
 </div>
 
@@ -169,7 +169,7 @@
     private bool IsKafkaAddress(string uri) =>
         StudioLink.ToDashboardRelativePath(uri, Navigation.BaseUri, Settings) is { } relative
         && Descriptor.Routes.Match(relative, Settings) is { } match
-        && Descriptor.ModuleOf(match.PageType)?.Key == KafkaStudioText.Key;
+        && Descriptor.ModuleOf(match.PageType)?.Key == KafkaText.Key;
 
     public void Dispose()
     {

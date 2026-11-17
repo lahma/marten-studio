@@ -338,7 +338,7 @@ public class ScanFollowUpTests
     [Fact]
     public void No_engine_log_event_takes_an_exception_because_its_message_can_hold_what_the_broker_or_a_host_decoder_said()
     {
-        MethodInfo[] events = [.. typeof(KStudioLog).GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.DeclaredOnly)
+        MethodInfo[] events = [.. typeof(KafkaEngineLog).GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.DeclaredOnly)
             .Where(static x => x.GetCustomAttributes().Any(static a => a.GetType().Name == "LoggerMessageAttribute"))];
 
         events.Should().NotBeEmpty();

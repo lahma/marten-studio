@@ -20,7 +20,7 @@ internal sealed class KafkaWireReads(
     KafkaWires wires,
     KafkaSnapshotCache cache,
     IKafkaEngineSettings settings,
-    KStudioLoggers loggers,
+    KafkaEngineLoggers loggers,
     KafkaLogOnce once)
 {
     /// <summary>How long configs, authorized operations and the cluster description are reused.</summary>
@@ -195,7 +195,7 @@ internal sealed class KafkaWireReads(
 
                     if (once.ShouldLog($"{cluster}|{call}|{refusal.ResourceType}|{resource}"))
                     {
-                        KStudioLog.AccessRefused(logger, cluster, callName, operation, resourceType, resource);
+                        KafkaEngineLog.AccessRefused(logger, cluster, callName, operation, resourceType, resource);
                     }
 
                     break;
@@ -204,7 +204,7 @@ internal sealed class KafkaWireReads(
             case WireError.Unsupported unsupported:
                 if (once.ShouldLog($"{cluster}|unsupported|{unsupported.Api}"))
                 {
-                    KStudioLog.ApiUnsupported(logger, cluster, unsupported.Api);
+                    KafkaEngineLog.ApiUnsupported(logger, cluster, unsupported.Api);
                 }
 
                 break;
@@ -215,7 +215,7 @@ internal sealed class KafkaWireReads(
                     LogLevel level = KafkaLogOnce.WarningOrDebug(once, $"{cluster}|unavailable");
                     string callName = call.ToString();
                     string code = error.Code;
-                    KStudioLog.ClusterUnavailable(logger, level, cluster, callName, code);
+                    KafkaEngineLog.ClusterUnavailable(logger, level, cluster, callName, code);
                     break;
                 }
         }

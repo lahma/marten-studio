@@ -39,11 +39,11 @@
 
     @if (!Capabilities.IsEnabled(KafkaCapability.LiveTail))
     {
-        <KafkaCapabilityDisabled Capability="@nameof(KafkaCapabilities.LiveTail)" Action="@KafkaStudioText.LiveTailAction" />
+        <KafkaCapabilityDisabled Capability="@nameof(KafkaCapabilities.LiveTail)" Action="@KafkaText.LiveTailAction" />
     }
     else if (State.ActiveCluster is { } profiled && Tail.ForbiddenByProfile(profiled))
     {
-        <p class="ms-k-note ms-k-note-warning ms-k-tail-forbidden" role="note">@KafkaStudioText.ProfileForbids(KafkaStudioText.LiveTailAction, profiled)</p>
+        <p class="ms-k-note ms-k-note-warning ms-k-tail-forbidden" role="note">@KafkaText.ProfileForbids(KafkaText.LiveTailAction, profiled)</p>
     }
     else if (!Capabilities.IsEnabled(KafkaCapability.SearchRecords))
     {
@@ -61,7 +61,7 @@
     {
         @if (droppedFromLink > 0)
         {
-            <p class="ms-k-note" role="note">@KafkaStudioText.LinkTopicsDropped(droppedFromLink)</p>
+            <p class="ms-k-note" role="note">@KafkaText.LinkTopicsDropped(droppedFromLink)</p>
         }
 
         @if (topicsRefusal is not null)
@@ -74,7 +74,7 @@
                 <legend>Topics</legend>
                 <div class="ms-k-topics-header">
                     <KafkaFilterBox Placeholder="Filter topics" Value="@topicFilter" OnFilterChanged="OnTopicFilterAsync" />
-                    <span class="ms-muted ms-k-topic-count" aria-live="polite">@KafkaStudioText.TopicsSelected(selected.Count)</span>
+                    <span class="ms-muted ms-k-topic-count" aria-live="polite">@KafkaText.TopicsSelected(selected.Count)</span>
                 </div>
                 @if (VisibleTopics().ToList() is { Count: > 0 } shownTopics)
                 {
@@ -85,7 +85,7 @@
                             <label class="ms-k-topic-option" @key="name">
                                 <input type="checkbox"
                                        checked="@isSelected"
-                                       disabled="@(!isSelected && selected.Count >= KafkaStudioText.MaxSearchTopics)"
+                                       disabled="@(!isSelected && selected.Count >= KafkaText.MaxSearchTopics)"
                                        @onchange="e => ToggleTopic(name, e.Value is true)" />
                                 <span>@name</span>
                             </label>
@@ -105,7 +105,7 @@
             <label class="ms-k-isolation">
                 <input type="checkbox" checked="@includeUncommitted" disabled="@busy" @onchange="e => includeUncommitted = e.Value is true" />
                 Include uncommitted records
-                <span class="ms-muted">@KafkaStudioText.UncommittedHelp</span>
+                <span class="ms-muted">@KafkaText.UncommittedHelp</span>
             </label>
 
             <div class="ms-k-predicate-field">
@@ -115,7 +115,7 @@
                           spellcheck="false"
                           autocomplete="off"
                           rows="3"
-                          maxlength="@KafkaStudioText.MaxPredicateLength"
+                          maxlength="@KafkaText.MaxPredicateLength"
                           placeholder="header.tenant-id = 'acme'  (empty: every record)"
                           disabled="@busy"
                           value="@predicate"
@@ -149,7 +149,7 @@
                 </ul>
                 @if (Capabilities.IsEnabled(KafkaCapability.ReadPayloads))
                 {
-                    <p>@KafkaStudioText.SearchSyntaxValues</p>
+                    <p>@KafkaText.SearchSyntaxValues</p>
                     <ul class="ms-k-syntax-examples">
                         @foreach (string example in KafkaSearchBody.ValueSyntaxExamples)
                         {
@@ -159,7 +159,7 @@
                 }
                 else
                 {
-                    <p class="ms-muted">@KafkaStudioText.SearchSyntaxNeedsReadPayloads</p>
+                    <p class="ms-muted">@KafkaText.SearchSyntaxNeedsReadPayloads</p>
                 }
             </details>
 
@@ -403,7 +403,7 @@
 
             HashSet<string> visible = new(topicNames, StringComparer.Ordinal);
             selected.Clear();
-            selected.AddRange(addressTopics.Where(visible.Contains).Distinct(StringComparer.Ordinal).Take(KafkaStudioText.MaxSearchTopics));
+            selected.AddRange(addressTopics.Where(visible.Contains).Distinct(StringComparer.Ordinal).Take(KafkaText.MaxSearchTopics));
             droppedFromLink = addressTopics.Distinct(StringComparer.Ordinal).Count() - selected.Count;
             allowance = await Search.AllowanceAsync(State.ActiveCluster);
         }
@@ -414,7 +414,7 @@
         catch (Exception e) when (!disposed)
         {
             Logger.LogWarning(e, "The Kafka tail page failed to read the catalog");
-            error = KafkaStudioText.ReadFailed;
+            error = KafkaText.ReadFailed;
         }
 
         loadingTopics = false;
@@ -436,10 +436,10 @@
                 .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                 .Concat(KafkaAddress.GetAll(uri, KafkaAddress.TopicParameter))
                 .Distinct(StringComparer.Ordinal)
-                .Take(KafkaStudioText.MaxSearchTopics),
+                .Take(KafkaText.MaxSearchTopics),
         ];
         includeUncommitted = string.Equals(KafkaAddress.Get(uri, KafkaAddress.IsolationParameter), KafkaAddress.UncommittedValue, StringComparison.Ordinal);
-        predicate = KafkaAddress.ReadPredicate(uri, KafkaStudioText.MaxPredicateLength) ?? string.Empty;
+        predicate = KafkaAddress.ReadPredicate(uri, KafkaText.MaxPredicateLength) ?? string.Empty;
 
         planned = null;
         errors = [];
@@ -508,7 +508,7 @@
         hiddenTopics = Math.Max(0, matching.Count - MaxListedTopics);
 
         // A selected topic stays visible, whatever the filter says.
-        return selected.Union(matching.Take(MaxListedTopics), StringComparer.Ordinal).Where(topicNames.Contains).OrderBy(static x => x, StringComparer.Ordinal).Take(MaxListedTopics + KafkaStudioText.MaxSearchTopics);
+        return selected.Union(matching.Take(MaxListedTopics), StringComparer.Ordinal).Where(topicNames.Contains).OrderBy(static x => x, StringComparer.Ordinal).Take(MaxListedTopics + KafkaText.MaxSearchTopics);
     }
 
     private Task OnTopicFilterAsync(string text)
@@ -519,7 +519,7 @@
 
     private void ToggleTopic(string name, bool on)
     {
-        if (on && !selected.Contains(name, StringComparer.Ordinal) && selected.Count < KafkaStudioText.MaxSearchTopics)
+        if (on && !selected.Contains(name, StringComparer.Ordinal) && selected.Count < KafkaText.MaxSearchTopics)
         {
             selected.Add(name);
         }
@@ -637,7 +637,7 @@
 
             if (!planned.Plan.IsValid)
             {
-                refusal = KafkaStudioText.PredicateInvalid;
+                refusal = KafkaText.PredicateInvalid;
                 return;
             }
 
@@ -661,7 +661,7 @@
         catch (Exception e) when (!disposed)
         {
             Logger.LogWarning(e, "The Kafka tail page failed to plan a live tail");
-            refusal = KafkaStudioText.TailFailed;
+            refusal = KafkaText.TailFailed;
             return;
         }
         finally
@@ -784,7 +784,7 @@
         catch (Exception e) when (!disposed)
         {
             Logger.LogWarning(e, "The Kafka tail page failed while reading a live tail");
-            refusal = KafkaStudioText.TailFailed;
+            refusal = KafkaText.TailFailed;
             failed = true;
         }
         finally
@@ -893,7 +893,7 @@
 
             if (!toStart.Plan.IsValid)
             {
-                refusal = KafkaStudioText.PredicateInvalid;
+                refusal = KafkaText.PredicateInvalid;
                 return null;
             }
 
@@ -919,7 +919,7 @@
         catch (Exception e) when (!disposed)
         {
             Logger.LogWarning(e, "The Kafka tail page failed to start a live tail");
-            refusal = KafkaStudioText.TailFailed;
+            refusal = KafkaText.TailFailed;
             return null;
         }
         finally
@@ -1080,7 +1080,7 @@
         {
             // Never unobserved: a resume nobody awaits says what went wrong where the visitor looks.
             Logger.LogWarning(e, "The Kafka tail page failed to resume a live tail");
-            refusal = KafkaStudioText.TailFailed;
+            refusal = KafkaText.TailFailed;
             await InvokeAsync(StateHasChanged);
         }
     }
@@ -1211,7 +1211,7 @@
     private string AllowanceLine() => allowance switch
     {
         null => "Hourly allowance left: —",
-        { ClusterProfile: { } profile } own => KafkaStudioText.ClusterAllowance(own.Left, own.PerHour, profile),
+        { ClusterProfile: { } profile } own => KafkaText.ClusterAllowance(own.Left, own.PerHour, profile),
         { } process => "Hourly allowance left: " + KafkaDisplay.Bytes(process.Left),
     };
 

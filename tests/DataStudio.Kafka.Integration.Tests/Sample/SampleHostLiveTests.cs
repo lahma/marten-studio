@@ -221,9 +221,9 @@ public sealed class SampleHostFixture : IAsyncLifetime
 {
     private static readonly Regex Token = new(@"name=""__RequestVerificationToken""[^>]*value=""(?<token>[^""]+)""", RegexOptions.None, TimeSpan.FromSeconds(5));
 
-    private KStudioSampleProcess? host;
+    private KafkaSampleProcess? host;
 
-    internal KStudioSampleProcess Host => host ?? throw new InvalidOperationException("The sample host was not started (no Docker).");
+    internal KafkaSampleProcess Host => host ?? throw new InvalidOperationException("The sample host was not started (no Docker).");
 
     public async ValueTask InitializeAsync()
     {
@@ -231,7 +231,7 @@ public sealed class SampleHostFixture : IAsyncLifetime
 
         if (DockerAvailability.IsAvailable)
         {
-            host = await KStudioSampleProcess.StartAsync();
+            host = await KafkaSampleProcess.StartAsync();
         }
     }
 

@@ -86,7 +86,7 @@ public class KafkaRecordLinksTests
         IRenderedComponent<KafkaRecordDetail> detail = Render(rig, await ReadAsync(rig));
 
         detail.FindAll("a.ms-k-marten-link").Should().BeEmpty();
-        detail.Find(".ms-k-record-links").TextContent.Should().Contain(KafkaStudioText.LinksTenantHidden);
+        detail.Find(".ms-k-record-links").TextContent.Should().Contain(KafkaText.LinksTenantHidden);
         detail.Markup.Should().NotContain(Secret);
         routes.Documents.Should().BeEmpty();
     }
@@ -113,7 +113,7 @@ public class KafkaRecordLinksTests
 
         var note = links.Find(".ms-k-record-links-compact .ms-muted");
         note.TextContent.Should().Be("no links (tenant hidden)");
-        note.GetAttribute("title").Should().Be(KafkaStudioText.LinksTenantHidden);
+        note.GetAttribute("title").Should().Be(KafkaText.LinksTenantHidden);
         links.Markup.Should().NotContain(Secret);
     }
 

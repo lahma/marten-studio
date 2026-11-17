@@ -19,9 +19,9 @@ public class PlanCompareTests
     /// </summary>
     private static readonly TimeSpan Wait = TimeSpan.FromSeconds(10);
 
-    private static async Task<PostgresStudioComponentContext> ReadyAsync()
+    private static async Task<PostgresComponentContext> ReadyAsync()
     {
-        PostgresStudioComponentContext context = new();
+        PostgresComponentContext context = new();
         context.WithAllCapabilities();
 
         return await context.ReadyAsync();
@@ -51,7 +51,7 @@ public class PlanCompareTests
         await page.InvokeAsync(() => page.Find(".ms-query-run").Click());
     }
 
-    private static async Task<IRenderedComponent<PlanPage>> FirstAsync(PostgresStudioComponentContext context, string pair, string statement = "select * from orders", IReadOnlyList<PlanSettingRow>? offers = null)
+    private static async Task<IRenderedComponent<PlanPage>> FirstAsync(PostgresComponentContext context, string pair, string statement = "select * from orders", IReadOnlyList<PlanSettingRow>? offers = null)
     {
         context.SqlConsole.NextPlan = Ran(pair, offers);
 
@@ -67,7 +67,7 @@ public class PlanCompareTests
     [Fact]
     public async Task A_plan_on_screen_can_be_kept_as_Before_and_the_next_plan_run_becomes_After_and_opens_Compare()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
         IRenderedComponent<PlanPage> page = await FirstAsync(context, "seq-before");
 
         page.FindAll(".ms-plan-compare").Should().BeEmpty("one plan is no comparison");
@@ -89,7 +89,7 @@ public class PlanCompareTests
     [Fact]
     public async Task Clearing_Before_returns_to_the_single_plan_page_and_a_failed_run_keeps_Before()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
         IRenderedComponent<PlanPage> page = await FirstAsync(context, "seq-before");
 
         page.Find(".ms-plan-keep").Click();
@@ -118,7 +118,7 @@ public class PlanCompareTests
     [Fact]
     public async Task A_run_s_own_timeout_is_the_one_its_timeout_message_names()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
         IRenderedComponent<PlanPage> page = await FirstAsync(context, "seq-before");
 
         page.Find("#ms-plan-timeout").Change("1");
@@ -147,7 +147,7 @@ public class PlanCompareTests
     [Fact]
     public async Task A_pasted_plan_is_compared_with_nothing_read_from_the_database()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
         IRenderedComponent<PlanPage> page = context.Render<PlanPage>();
 
         await PasteAsync(context, page, PlanFixtures.GetPair("seq-before"));
@@ -167,7 +167,7 @@ public class PlanCompareTests
     [Fact]
     public async Task Compare_hides_the_unchanged_nodes_until_asked()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
         IRenderedComponent<PlanPage> page = await FirstAsync(context, "wrap-before");
 
         page.Find(".ms-plan-keep").Click();
@@ -189,7 +189,7 @@ public class PlanCompareTests
     [Fact]
     public async Task The_settings_panel_offers_only_the_names_the_server_has_and_plans_again_with_the_chosen_ones()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
         IRenderedComponent<PlanPage> page = await FirstAsync(context, "seq-before", offers: Offers);
 
         context.SqlConsole.Plans[0].Request.OfferSettings.Should().BeTrue("the first run asks the server which settings it has");
@@ -218,7 +218,7 @@ public class PlanCompareTests
     [Fact]
     public async Task A_settings_run_needs_a_setting_and_a_value_and_shows_nothing_for_a_pasted_plan()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
         IRenderedComponent<PlanPage> page = await FirstAsync(context, "seq-before", offers: Offers);
 
         await page.InvokeAsync(() => page.Find(".ms-plan-whatif-settings-run").Click());
@@ -234,7 +234,7 @@ public class PlanCompareTests
     [Fact]
     public async Task Generic_and_custom_are_planned_by_one_action_the_generic_plan_is_Before_and_P21_judges_the_pair()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
         context.SqlConsole.QueuedPlans.Enqueue(Ran("generic-fires", placeholders: 1));
         context.SqlConsole.QueuedPlans.Enqueue(Ran("custom", placeholders: 1));
 
@@ -256,7 +256,7 @@ public class PlanCompareTests
     [Fact]
     public async Task A_generic_plan_that_is_not_ten_times_dearer_is_compared_without_P21()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
         context.SqlConsole.QueuedPlans.Enqueue(Ran("generic-quiet", placeholders: 1));
         context.SqlConsole.QueuedPlans.Enqueue(Ran("custom", placeholders: 1));
 
@@ -273,7 +273,7 @@ public class PlanCompareTests
     [Fact]
     public async Task The_generic_comparison_is_offered_only_for_a_statement_with_placeholders()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
         IRenderedComponent<PlanPage> page = context.Render<PlanPage>();
 
         page.Find("#ms-plan-sql").Change("select 1");
@@ -288,7 +288,7 @@ public class PlanCompareTests
     [Fact]
     public async Task What_if_in_place_plans_the_pages_own_statement_and_fills_Compare_without_drawing_the_two_plans_twice()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
         context.SqlConsole.WhatIf = static index => new WhatIfResult
         {
             Index = index,
@@ -314,7 +314,7 @@ public class PlanCompareTests
     [Fact]
     public async Task Without_hypopg_What_if_in_place_says_so_and_compares_nothing()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
         IRenderedComponent<PlanPage> page = await FirstAsync(context, "generic-fires", "select * from orders where customer_id = 42");
 
         await page.InvokeAsync(() => page.Find(".ms-whatif-run").Click());
@@ -326,7 +326,7 @@ public class PlanCompareTests
     [Fact]
     public async Task A_late_What_if_answer_does_not_overwrite_the_Compare_of_a_plan_that_arrived_after_it_was_asked()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
         context.SqlConsole.WhatIf = static index => new WhatIfResult
         {
             Index = index,
@@ -365,7 +365,7 @@ public class PlanCompareTests
     [Fact]
     public async Task A_run_in_flight_when_the_database_changes_is_cancelled_and_nothing_of_it_is_left_under_the_new_one()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
 
         // A first plan, kept as Before; then a second run whose service is slow, and which ignores the token a slow service may.
         IRenderedComponent<PlanPage> page = await FirstAsync(context, "seq-before", offers: Offers);
@@ -396,7 +396,7 @@ public class PlanCompareTests
     [Fact]
     public async Task The_timeout_box_travels_in_the_request_empty_is_the_hosts_and_text_that_is_not_seconds_runs_nothing()
     {
-        await using PostgresStudioComponentContext context = await ReadyAsync();
+        await using PostgresComponentContext context = await ReadyAsync();
         context.SqlConsole.NextPlan = Ran("seq-before");
 
         IRenderedComponent<PlanPage> page = context.Render<PlanPage>();
@@ -419,7 +419,7 @@ public class PlanCompareTests
         context.SqlConsole.Plans.Should().HaveCount(2, "zero is not 'no timeout'");
     }
 
-    private static async Task PasteAsync(PostgresStudioComponentContext context, IRenderedComponent<PlanPage> page, string text)
+    private static async Task PasteAsync(PostgresComponentContext context, IRenderedComponent<PlanPage> page, string text)
     {
         JSRuntimeInvocationHandler<int> sending = context.JSInterop.Setup<int>("martenStudio.query.sendInChunks", static _ => true);
 

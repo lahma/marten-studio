@@ -28,7 +28,7 @@ public sealed class BrowserSuite : ICollectionFixture<BrowserSuiteFixture>
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Pointed at the suite's container</b> rather than started zero-config (<see cref="PostgresStudioSampleHostTests" />
+/// <b>Pointed at the suite's container</b> rather than started zero-config (<see cref="PostgresSampleHostTests" />
 /// proves that start): so the scenarios can read what the sample's databases hold. The admin database is
 /// <see cref="AdminDatabase" />, and the sample - started with <c>--allow-data-generation</c>, without which it writes nothing
 /// to a database it did not start - creates its three tenant databases beside it, as it would on any server.

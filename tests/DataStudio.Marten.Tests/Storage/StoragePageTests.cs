@@ -106,11 +106,11 @@ public class StoragePageTests
         readOnly: false,
         authorized: true,
         new DatabaseObjectClassifier([]),
-        DataStudio.Marten.Services.MartenStudioText.Instance);
+        DataStudio.Marten.Services.MartenText.Instance);
 
     private static StorageService Service(MartenOptions options) => new(
-        MartenStudioSettings.Of(options),
-        MartenStudioDescriptor.Instance,
+        MartenSettings.Of(options),
+        MartenDescriptor.Instance,
         authorization: null!,
         resolver: null!,
         facts: null!,
@@ -265,8 +265,8 @@ public class StoragePageTests
             link.GetAttribute("href").Should().Be("postgres/maintenance?store=default&db=localhost.marten");
         }
 
-        DataStudio.Postgres.Services.Settings.IStudioSettings settings = MartenStudioSettings.Of(new MartenOptions());
-        DataStudio.Postgres.Services.Settings.StudioDescriptor marten = MartenStudioDescriptor.Instance;
+        DataStudio.Postgres.Services.Settings.IStudioSettings settings = MartenSettings.Of(new MartenOptions());
+        DataStudio.Postgres.Services.Settings.StudioDescriptor marten = MartenDescriptor.Instance;
 
         MaintenanceLinks.ToMaintenance(settings, marten, scope).Should().NotBeNull();
         MaintenanceLinks.ToMaintenance(settings, Without(marten, hide: false), scope)
@@ -364,7 +364,7 @@ public class StoragePageTests
     {
         FakeStorageService storage = new()
         {
-            View = StorageView.Refused(DatabaseRefusal.StorePolicy, DataStudio.Marten.Services.MartenStudioText.Instance.StorageStorePolicyDenial),
+            View = StorageView.Refused(DatabaseRefusal.StorePolicy, DataStudio.Marten.Services.MartenText.Instance.StorageStorePolicyDenial),
         };
         await using StudioComponentContext context = await ContextAsync(storage);
 
@@ -423,7 +423,7 @@ public class StoragePageTests
         readOnly: false,
         authorized: false,
         new DatabaseObjectClassifier([]),
-        DataStudio.Marten.Services.MartenStudioText.Instance);
+        DataStudio.Marten.Services.MartenText.Instance);
 
     [Fact]
     public void The_facts_keep_both_readings_of_the_tables_tile()

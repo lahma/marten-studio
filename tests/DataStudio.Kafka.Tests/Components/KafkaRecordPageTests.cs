@@ -157,7 +157,7 @@ public class KafkaRecordPageTests
 
         IRenderedComponent<KafkaRecordPage> page = await OpenAsync(rig, "topic=orders&partition=0&offset=3");
 
-        page.WaitForAssertion(() => page.Markup.Should().Contain(KafkaStudioText.NoRecordAtThisOffset));
+        page.WaitForAssertion(() => page.Markup.Should().Contain(KafkaText.NoRecordAtThisOffset));
         page.Find(".ms-k-note").TextContent.Should().Contain("No record at offset 3");
     }
 }

@@ -38,7 +38,7 @@ internal sealed partial class DocumentDataService
 
         try
         {
-            await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
+            await using NpgsqlConnection connection = MartenSourceDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
             await connection.OpenStudioAsync(cancellationToken).ConfigureAwait(false);
 
             CollectionContext? context = await LoadContextAsync(resolved, connection, alias, cancellationToken)
@@ -132,7 +132,7 @@ internal sealed partial class DocumentDataService
 
         try
         {
-            await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
+            await using NpgsqlConnection connection = MartenSourceDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
             await connection.OpenStudioAsync(cancellationToken).ConfigureAwait(false);
 
             CollectionContext? context = await LoadContextAsync(resolved, connection, alias, cancellationToken)
@@ -223,7 +223,7 @@ internal sealed partial class DocumentDataService
             // with no tenant in scope was *DEFAULT* - a link that never appeared for a stream the page shows.
             string schema = resolved.Store.Options.Events.DatabaseSchemaName;
 
-            await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
+            await using NpgsqlConnection connection = MartenSourceDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
             await connection.OpenStudioAsync(cancellationToken).ConfigureAwait(false);
 
             TableColumns streams = await columnCatalog
@@ -286,7 +286,7 @@ internal sealed partial class DocumentDataService
 
         try
         {
-            await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
+            await using NpgsqlConnection connection = MartenSourceDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
             await connection.OpenStudioAsync(cancellationToken).ConfigureAwait(false);
 
             foreach (IDocumentType documentType in VisibleDocumentTypes(resolved.Store))
@@ -345,7 +345,7 @@ internal sealed partial class DocumentDataService
         int probed = 0;
         bool limited = false;
 
-        await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
+        await using NpgsqlConnection connection = MartenSourceDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
         await connection.OpenStudioAsync(cancellationToken).ConfigureAwait(false);
 
         foreach (IDocumentType documentType in VisibleDocumentTypes(resolved.Store))

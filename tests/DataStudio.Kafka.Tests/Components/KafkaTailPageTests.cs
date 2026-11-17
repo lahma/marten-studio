@@ -128,7 +128,7 @@ public class KafkaTailPageTests
 
         IRenderedComponent<KafkaTailPage> page = await OpenAsync(rig);
 
-        page.Find(".ms-k-tail-forbidden").TextContent.Should().Be(KafkaStudioText.ProfileForbids(KafkaStudioText.LiveTailAction, rig.Entry));
+        page.Find(".ms-k-tail-forbidden").TextContent.Should().Be(KafkaText.ProfileForbids(KafkaText.LiveTailAction, rig.Entry));
         page.Find(".ms-k-tail-forbidden").TextContent.Should().Be("This cluster's profile does not allow live tail.").And.NotContain("KafkaClusterBuilder");
         page.FindAll("textarea").Should().BeEmpty("there is no form: granting the capability is not enough");
     }
@@ -345,7 +345,7 @@ public class KafkaTailPageTests
 
         rig.Studio.Authorization.AllowKafka(static resource => resource.Capability != "LiveTail");
         await ReturnAsync(rig);
-        page.WaitForAssertion(() => page.Find(".ms-k-tail-form [role=alert]").TextContent.Should().Be(KafkaStudioText.RequestRefused), Wait);
+        page.WaitForAssertion(() => page.Find(".ms-k-tail-form [role=alert]").TextContent.Should().Be(KafkaText.RequestRefused), Wait);
         page.Find(".ms-k-tail-paused").TextContent.Should().Contain("the connection to this page was lost").And.Contain("Resume");
         page.FindAll(".ms-k-tail-line").Should().BeEmpty("it did not read on");
 
@@ -625,7 +625,7 @@ public class KafkaTailPageTests
         // The text no longer parses: the new Start is refused before it reads anything, and the tail on screen is as it was.
         await page.Find("textarea.ms-k-predicate").InputAsync(new ChangeEventArgs { Value = "key ^^ 'n'" });
         await ClickAsync(page, "Start");
-        page.WaitForAssertion(() => page.Find(".ms-k-tail-form [role=alert]").TextContent.Should().Be(KafkaStudioText.PredicateInvalid), Wait);
+        page.WaitForAssertion(() => page.Find(".ms-k-tail-form [role=alert]").TextContent.Should().Be(KafkaText.PredicateInvalid), Wait);
 
         page.Find(".ms-k-tail-paused").TextContent.Should().Contain("Paused: you paused it. 1 record shown.").And.Contain("Resume");
         Rows(page).Should().Equal("0 / 3");
@@ -761,7 +761,7 @@ public class KafkaTailPageTests
         // The policy changed while the tab was hidden: the tab shown again tries once, is refused, and says so.
         rig.Studio.Authorization.AllowKafka(static resource => resource.Capability != "LiveTail");
         watch.Value.OnVisibilityChanged(false);
-        page.WaitForAssertion(() => page.Find(".ms-k-tail-form [role=alert]").TextContent.Should().Be(KafkaStudioText.RequestRefused), Wait);
+        page.WaitForAssertion(() => page.Find(".ms-k-tail-form [role=alert]").TextContent.Should().Be(KafkaText.RequestRefused), Wait);
         int asked = rig.Studio.Authorization.KafkaCalls.Count();
 
         watch.Value.OnVisibilityChanged(true);

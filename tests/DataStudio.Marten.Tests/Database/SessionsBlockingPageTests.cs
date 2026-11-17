@@ -18,7 +18,7 @@ namespace DataStudio.Marten.Tests.Database;
 public class SessionsBlockingPageTests
 {
     private static readonly SessionDetailsAccess Closed =
-        new(false, false, null, DatabaseRefusal.CapabilityOff, DataStudio.Marten.Services.MartenStudioText.Instance.SessionsCapabilityDenial);
+        new(false, false, null, DatabaseRefusal.CapabilityOff, DataStudio.Marten.Services.MartenText.Instance.SessionsCapabilityDenial);
 
     private static readonly SessionDetailsAccess Open = new(true, false, true, DatabaseRefusal.None, null);
 

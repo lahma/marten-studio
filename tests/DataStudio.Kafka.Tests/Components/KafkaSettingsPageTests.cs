@@ -52,7 +52,7 @@ public class KafkaSettingsPageTests
         Row(page, "Your settings", "ssl.key.pem").TextContent.Should().Contain("set");
         Row(page, "Your settings", "bootstrap.servers").TextContent.Should().Contain("broker-1:9092");
         Row(page, "Your settings", "ssl.ca.location").TextContent.Should().Contain("/nowhere/ca.pem").And.Contain("path");
-        page.Markup.Should().Contain(KafkaStudioText.SettingsLead);
+        page.Markup.Should().Contain(KafkaText.SettingsLead);
     }
 
     [Fact]

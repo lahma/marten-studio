@@ -219,9 +219,9 @@ internal sealed class LongestStreamsAction(IOptions<MartenOptions> options, Colu
 
     private static HealthActionResult TimedOut(HealthActionContext context, bool canNarrow, DateTimeOffset now) =>
         HealthActionResult.TimedOut(
-            "It ran past its statement_timeout (" + MartenStudioText.Instance.OptionName("QueryTimeout") + ", "
+            "It ran past its statement_timeout (" + MartenText.Instance.OptionName("QueryTimeout") + ", "
             + EventHealth.Duration(context.Session.StatementTimeout) + "). "
-            + (canNarrow ? "Pick a tenant to narrow it, or raise " : "Raise ") + MartenStudioText.Instance.OptionName("QueryTimeout") + ".",
+            + (canNarrow ? "Pick a tenant to narrow it, or raise " : "Raise ") + MartenText.Instance.OptionName("QueryTimeout") + ".",
             now);
 
     /// <summary>Reads the statement's rows, at most <see cref="LongestStreamsQuery.MaxTake" />.</summary>

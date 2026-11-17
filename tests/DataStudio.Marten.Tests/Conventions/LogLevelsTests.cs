@@ -238,11 +238,11 @@ public class LogLevelsTests
         ["src/DataStudio.Postgres.Diagnostics/Services/StudioLog.HealthActions.cs : 9223 HealthActionFailedRaw"] = (Verdict.VisitorAction,
             "A finding's action the visitor pressed failed after its gates passed; one line per press, never polled, and the card shows it."),
         // ---- KS-SHELL: KStudio's own events (D34, D35) -------------------------------------------------
-        ["src/DataStudio.Kafka/Services/KafkaStudioLog.cs : 9602 CapabilityRefusedCore"] = (Verdict.Refusal,
+        ["src/DataStudio.Kafka/Services/KafkaLog.cs : 9602 CapabilityRefusedCore"] = (Verdict.Refusal,
             "A Kafka capability refusal reaches the service only when a client drives a control the page disabled or hid."),
-        ["src/DataStudio.Kafka/Services/KafkaStudioLog.cs : 9603 ClusterRefusedCore"] = (Verdict.Refusal,
+        ["src/DataStudio.Kafka/Services/KafkaLog.cs : 9603 ClusterRefusedCore"] = (Verdict.Refusal,
             "A policy refusal of a cluster or topic on a request that names it; listings are filtered and log nothing."),
-        ["src/DataStudio.Kafka/Services/KafkaStudioLog.cs : 9611 LiveUpdateHandlerFailedCore"] = (Verdict.Throttled,
+        ["src/DataStudio.Kafka/Services/KafkaLog.cs : 9611 LiveUpdateHandlerFailedCore"] = (Verdict.Throttled,
             "9220's twin: a Kafka page's own refresh-failure handler threw, on a loop that runs every RefreshInterval; the level comes from the throttle."),
 
         // ---- KS-UI-A: the catalog pages (D-UI decisions 7 to 9) --------------------------------------
@@ -356,17 +356,17 @@ public class LogLevelsTests
         ["src/DataStudio.Postgres.Diagnostics/Services/StudioLog.Aurora.cs : 9501 AuroraReadFailed"] = (Verdict.Throttled,
             "One of Aurora's own reads failed by connection or an unexpected SQLSTATE; a privilege or a timeout is Debug, and the sweep and the Server page re-read every HealthInterval."),
         // ---- DataStudio.Kafka.Core: the engine's events above Debug (9650 to 9699) ----------------------------
-        ["src/DataStudio.Kafka.Core/Logging/KStudioLog.Catalog.cs : 9654 ClusterUnavailable"] = (Verdict.Throttled,
+        ["src/DataStudio.Kafka.Core/Logging/KafkaEngineLog.Catalog.cs : 9654 ClusterUnavailable"] = (Verdict.Throttled,
             "A Kafka cluster the catalog cannot reach; every polling page asks it, so Warning once per cluster per ten minutes, Debug in between."),
-        ["src/DataStudio.Kafka.Core/Logging/KStudioLog.Clusters.cs : 9677 ClusterSourceItemNotListed"] = (Verdict.Throttled,
+        ["src/DataStudio.Kafka.Core/Logging/KafkaEngineLog.Clusters.cs : 9677 ClusterSourceItemNotListed"] = (Verdict.Throttled,
             "A cluster, tenant or topic a source (Wolverine) found was not listed; the registry is built once, so Warning once per source, item and reason per ten minutes, Debug in between, with no tenant, topic or value in the line."),
-        ["src/DataStudio.Kafka.Core/Logging/KStudioLog.Clients.cs : 9655 AuthenticationFailed"] = (Verdict.Throttled,
+        ["src/DataStudio.Kafka.Core/Logging/KafkaEngineLog.Clients.cs : 9655 AuthenticationFailed"] = (Verdict.Throttled,
             "The cluster refused KStudio's credentials; every client meets it, so Warning once per cluster per ten minutes, Debug in between."),
-        ["src/DataStudio.Kafka.Core/Logging/KStudioLog.Clients.cs : 9658 ClientFatalError"] = (Verdict.Fault,
+        ["src/DataStudio.Kafka.Core/Logging/KafkaEngineLog.Clients.cs : 9658 ClientFatalError"] = (Verdict.Fault,
             "librdkafka declared a client fatally failed; the client is unusable until it is rebuilt."),
-        ["src/DataStudio.Kafka.Core/Logging/KStudioLog.Clients.cs : 9663 ShutdownTimedOut"] = (Verdict.Fault,
+        ["src/DataStudio.Kafka.Core/Logging/KafkaEngineLog.Clients.cs : 9663 ShutdownTimedOut"] = (Verdict.Fault,
             "Scans did not stop within 10 s of shutdown; an operation ended half-done, once per host stop."),
-        ["src/DataStudio.Kafka.Core/Logging/KStudioLog.Scans.cs : 9668 ScanFailed"] = (Verdict.VisitorAction,
+        ["src/DataStudio.Kafka.Core/Logging/KafkaEngineLog.Scans.cs : 9668 ScanFailed"] = (Verdict.VisitorAction,
             "A scan a visitor started ended with an unexpected exception; one line per scan, exception kind only, and the page says the same."),
 
         // ---- W5-API ---------------------------------------------------------------------------------

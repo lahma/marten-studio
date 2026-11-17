@@ -36,14 +36,14 @@ public class ActivityScopeMarkupTests
     [Fact]
     public async Task A_database_entry_and_a_Kafka_entry_render_the_rows_the_page_always_drew()
     {
-        using KafkaStudioHarness harness = new();
+        using KafkaHarness harness = new();
         await harness.Context.ReadyAsync();
         harness.Context.AuthenticationState.SignIn("ops");
         harness.Context.Preferences.SelectedTimeZoneId = TimeZoneInfo.Utc.Id;
 
         StudioActionLogService ring = harness.Context.Services.GetRequiredService<StudioActionLogService>();
         DateTimeOffset at = new(2026, 11, 14, 9, 30, 15, TimeSpan.Zero);
-        string database = PostgresStudioDescriptor.Key;
+        string database = PostgresDescriptor.Key;
 
         ring.Record(new StudioActionLogEntry(
             at, "ops", new DatabaseAuditScope("default", "main", "acme").ToAuditScope(database), "OpenRow", "public.orders", true, "done", null));

@@ -110,7 +110,7 @@ public class ServerSettingsFactsTests
     {
         ServerPageView counted = ServerPageService.Build(
             Facts(posture: Posture() with { DataChecksums = "on", ChecksumFailures = 4, LastChecksumFailure = Now.AddMinutes(-5) }),
-            DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance,
+            DataStudio.Postgres.Services.Postgres.PostgresText.Instance,
             consoleRoleSet: false);
         ServerPageView unread = ServerPageService.Build(
             new ServerSettingsFacts(
@@ -121,7 +121,7 @@ public class ServerSettingsFactsTests
                 ServerRead<ServerExtensionsRead>.Of(new ServerExtensionsRead([], 0)),
                 new ServerRead<ServerConnectionPosture>(null, "This could not be read (SQLSTATE 57014)."),
                 []),
-            DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance,
+            DataStudio.Postgres.Services.Postgres.PostgresText.Instance,
             consoleRoleSet: false);
 
         (counted.DataChecksums, counted.ChecksumFailures, counted.LastChecksumFailure).Should().Be(("on", (long?) 4, (DateTimeOffset?) Now.AddMinutes(-5)));
@@ -331,7 +331,7 @@ public class ServerSettingsFactsTests
     {
         ServerSettingsFacts facts = Facts(grants: Grants("console_role", roles: "pg_read_all_stats"), posture: Posture("console_login", reading: "console_role"));
 
-        ServerPageView view = ServerPageService.Build(facts, DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance, consoleRoleSet: true);
+        ServerPageView view = ServerPageService.Build(facts, DataStudio.Postgres.Services.Postgres.PostgresText.Instance, consoleRoleSet: true);
 
         view.ReadsAs.Should().Be("console_role");
         view.LoginRole.Should().Be("console_login");
@@ -345,7 +345,7 @@ public class ServerSettingsFactsTests
     [Fact]
     public void Grants_that_could_not_be_read_are_a_sentence_and_hidden_settings_still_list()
     {
-        ServerPageView view = ServerPageService.Build(Facts(grants: null), DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance, consoleRoleSet: false);
+        ServerPageView view = ServerPageService.Build(Facts(grants: null), DataStudio.Postgres.Services.Postgres.PostgresText.Instance, consoleRoleSet: false);
 
         view.Grants.Should().BeEmpty();
         view.GrantsNote.Should().Contain("42501");

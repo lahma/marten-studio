@@ -27,6 +27,6 @@ internal static class MartenHealthEvaluationAt
             IStudioRuntime? runtime = null,
             HealthHistoryView? history = null,
             StudioText? text = null) =>
-            new(now, runtime ?? NoStudioRuntime.Instance, history ?? HealthHistoryView.Empty) { Text = text ?? MartenStudioText.Instance };
+            new(now, runtime ?? NoStudioRuntime.Instance, history ?? HealthHistoryView.Empty) { Text = text ?? MartenText.Instance };
     }
 }

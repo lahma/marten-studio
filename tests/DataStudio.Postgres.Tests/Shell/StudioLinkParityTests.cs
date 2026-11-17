@@ -45,7 +45,7 @@ public class StudioLinkParityTests
     {
         PostgresRoutes.Root.Should().Be("postgres");
         PostgresRoutes.Page("query").Should().Be("postgres/query");
-        DataStudio.Postgres.Services.Postgres.PostgresStudioDescriptor.PageRoot.Should().Be("/" + PostgresRoutes.Root);
-        DataStudio.Postgres.Services.Postgres.PostgresStudioDescriptor.Key.Should().Be(PostgresRoutes.Root);
+        DataStudio.Postgres.Services.Postgres.PostgresDescriptor.PageRoot.Should().Be("/" + PostgresRoutes.Root);
+        DataStudio.Postgres.Services.Postgres.PostgresDescriptor.Key.Should().Be(PostgresRoutes.Root);
     }
 }

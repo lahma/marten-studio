@@ -74,8 +74,8 @@ internal sealed class FakeStorage : DataStudio.Postgres.Services.Storage.IStorag
             ]);
 
         DataStudio.Postgres.Services.Storage.StorageService service = new(
-            new PostgresStudioSettings(Microsoft.Extensions.Options.Options.Create(new PostgresOptions()), new DataStudio.Services.Settings.ShellSettings(Microsoft.Extensions.Options.Options.Create(new DataStudioOptions()))),
-            PostgresStudioDescriptor.Instance,
+            new PostgresSettings(Microsoft.Extensions.Options.Options.Create(new PostgresOptions()), new DataStudio.Services.Settings.ShellSettings(Microsoft.Extensions.Options.Options.Create(new DataStudioOptions()))),
+            PostgresDescriptor.Instance,
             authorization: null!,
             resolver: null!,
             facts: null!,

@@ -166,7 +166,7 @@ internal sealed class KafkaExportService(
         catch (Exception e)
         {
             await AbandonAsync(input, audited, e).ConfigureAwait(false);
-            return new KafkaExportOutcome(false, KafkaStudioText.ExportFailed);
+            return new KafkaExportOutcome(false, KafkaText.ExportFailed);
         }
     }
 
@@ -187,7 +187,7 @@ internal sealed class KafkaExportService(
         string? place = input.Source == KafkaExportSource.Record && input.Matches.Count == 1
             ? $"{input.Matches[0].Topic}/{input.Matches[0].Partition}/{input.Matches[0].Offset}"
             : null;
-        string target = KafkaStudioText.ExportTarget(input.Source, topics, input.From, input.To, place);
+        string target = KafkaText.ExportTarget(input.Source, topics, input.From, input.To, place);
 
         // 1. The capability, and the one it needs.
         try
@@ -196,7 +196,7 @@ internal sealed class KafkaExportService(
         }
         catch (KafkaCapabilityDeniedException denial)
         {
-            actionLog.RecordCapabilityDenied(cluster, topics, denial, KafkaStudioText.ExportAction, target);
+            actionLog.RecordCapabilityDenied(cluster, topics, denial, KafkaText.ExportAction, target);
             audited.Mark();
             return new KafkaExportOutcome(false, denial.VisitorText);
         }
@@ -204,12 +204,12 @@ internal sealed class KafkaExportService(
         // 2. The cluster's profile: Production never exports, even when the capability is granted.
         if (!registry.TryGet(cluster.Key, out KafkaClusterDefinition? definition))
         {
-            return await NotRunAsync(input, audited, target, KafkaStudioText.RequestRefused).ConfigureAwait(false);
+            return await NotRunAsync(input, audited, target, KafkaText.RequestRefused).ConfigureAwait(false);
         }
 
         if (KafkaProfileCeilings.ForbidsExport(definition.Profile))
         {
-            return await NotRunAsync(input, audited, target, KafkaStudioText.ProfileForbids(KafkaStudioText.ExportingRecords, cluster)).ConfigureAwait(false);
+            return await NotRunAsync(input, audited, target, KafkaText.ProfileForbids(KafkaText.ExportingRecords, cluster)).ConfigureAwait(false);
         }
 
         // 3. The input's own bounds.
@@ -221,9 +221,9 @@ internal sealed class KafkaExportService(
         // 4. The cluster policy, then both policies for every topic: any refusal refuses the whole export and names nothing.
         if (!await authorization.IsAuthorizedAsync(cluster, null, null, cancellationToken).ConfigureAwait(false))
         {
-            actionLog.RecordClusterDenied(cluster, null, topics, authorization.PolicyFor(null) ?? "(none)", KafkaStudioText.ExportAction, target, KafkaCapability.ExportRecords);
+            actionLog.RecordClusterDenied(cluster, null, topics, authorization.PolicyFor(null) ?? "(none)", KafkaText.ExportAction, target, KafkaCapability.ExportRecords);
             audited.Mark();
-            return new KafkaExportOutcome(false, KafkaStudioText.RequestRefused);
+            return new KafkaExportOutcome(false, KafkaText.RequestRefused);
         }
 
         foreach (string topic in topics)
@@ -237,11 +237,11 @@ internal sealed class KafkaExportService(
                     topic,
                     topics,
                     authorization.PolicyFor(KafkaCapability.ExportRecords) ?? "(none)",
-                    KafkaStudioText.ExportAction,
+                    KafkaText.ExportAction,
                     target,
                     KafkaCapability.ExportRecords);
                 audited.Mark();
-                return new KafkaExportOutcome(false, KafkaStudioText.RequestRefused);
+                return new KafkaExportOutcome(false, KafkaText.RequestRefused);
             }
         }
 
@@ -262,7 +262,7 @@ internal sealed class KafkaExportService(
 
             if (!grant.HasPayload)
             {
-                return await NotRunAsync(input, audited, target, KafkaStudioText.ExportGrantChanged).ConfigureAwait(false);
+                return await NotRunAsync(input, audited, target, KafkaText.ExportGrantChanged).ConfigureAwait(false);
             }
         }
 
@@ -270,7 +270,7 @@ internal sealed class KafkaExportService(
         using IDisposable? lease = gate.TryEnter();
         if (lease is null)
         {
-            return await NotRunAsync(input, audited, target, KafkaStudioText.ExportsBusy).ConfigureAwait(false);
+            return await NotRunAsync(input, audited, target, KafkaText.ExportsBusy).ConfigureAwait(false);
         }
 
         string user = await authorization.UserNameAsync().ConfigureAwait(false);
@@ -285,7 +285,7 @@ internal sealed class KafkaExportService(
         // A single value larger than the limit: nothing fits, and an empty file is not an export.
         if (file.Written == 0)
         {
-            return await NotRunAsync(input, audited, target, KafkaStudioText.ExportLimited(0, file.LeftOut, maxBytes)).ConfigureAwait(false);
+            return await NotRunAsync(input, audited, target, KafkaText.ExportLimited(0, file.LeftOut, maxBytes)).ConfigureAwait(false);
         }
 
         KafkaMatch first = input.Matches[0];
@@ -324,26 +324,26 @@ internal sealed class KafkaExportService(
 
     private static string? Bounds(KafkaExportInput input)
     {
-        if (input.Topics.Count is < 1 or > KafkaStudioText.MaxSearchTopics)
+        if (input.Topics.Count is < 1 or > KafkaText.MaxSearchTopics)
         {
-            return KafkaStudioText.SearchTopicCount;
+            return KafkaText.SearchTopicCount;
         }
 
         if (input.Matches.Count == 0)
         {
-            return KafkaStudioText.ExportNothing;
+            return KafkaText.ExportNothing;
         }
 
         HashSet<string> named = new(input.Topics, StringComparer.Ordinal);
 
         if (input.Matches.Any(x => !named.Contains(x.Topic)))
         {
-            return KafkaStudioText.ExportRecordsNotFromTopics;
+            return KafkaText.ExportRecordsNotFromTopics;
         }
 
         if (input.Format == KafkaExportFormat.Value && (input.Matches.Count != 1 || input.Source != KafkaExportSource.Record))
         {
-            return KafkaStudioText.ExportValueFromOneRecord;
+            return KafkaText.ExportValueFromOneRecord;
         }
 
         return null;
@@ -371,11 +371,11 @@ internal sealed class KafkaExportService(
             string? place = input.Source == KafkaExportSource.Record && input.Matches.Count == 1
                 ? $"{input.Matches[0].Topic}/{input.Matches[0].Partition}/{input.Matches[0].Offset}"
                 : null;
-            string target = KafkaStudioText.ExportTarget(input.Source, input.Topics, input.From, input.To, place);
+            string target = KafkaText.ExportTarget(input.Source, input.Topics, input.From, input.To, place);
 
-            actionLog.Record(input.Cluster, input.Topics, KafkaStudioText.ExportAction, target, succeeded: false, KafkaStudioText.ExportAbandoned, KafkaCapability.ExportRecords);
+            actionLog.Record(input.Cluster, input.Topics, KafkaText.ExportAction, target, succeeded: false, KafkaText.ExportAbandoned, KafkaCapability.ExportRecords);
             audited.Mark();
-            logger.ActionNotRun(user, "export", string.Join(", ", input.Topics), input.Cluster.Cluster, input.Cluster.TenantId, KafkaStudioText.ExportAbandoned, input.AuditText);
+            logger.ActionNotRun(user, "export", string.Join(", ", input.Topics), input.Cluster.Cluster, input.Cluster.TenantId, KafkaText.ExportAbandoned, input.AuditText);
         }
         catch (Exception e)
         {
@@ -387,7 +387,7 @@ internal sealed class KafkaExportService(
     {
         string user = await authorization.UserNameAsync().ConfigureAwait(false);
 
-        actionLog.Record(input.Cluster, input.Topics, KafkaStudioText.ExportAction, target, succeeded: false, reason, KafkaCapability.ExportRecords);
+        actionLog.Record(input.Cluster, input.Topics, KafkaText.ExportAction, target, succeeded: false, reason, KafkaCapability.ExportRecords);
         audited.Mark();
         logger.ActionNotRun(user, "export", string.Join(", ", input.Topics), input.Cluster.Cluster, input.Cluster.TenantId, reason, input.AuditText);
 
@@ -400,13 +400,13 @@ internal sealed class KafkaExportService(
 
         if (!delivered)
         {
-            actionLog.Record(input.Cluster, input.Topics, KafkaStudioText.ExportAction, target, succeeded: false, KafkaStudioText.ExportNotDelivered, KafkaCapability.ExportRecords);
+            actionLog.Record(input.Cluster, input.Topics, KafkaText.ExportAction, target, succeeded: false, KafkaText.ExportNotDelivered, KafkaCapability.ExportRecords);
             audited.Mark();
-            logger.ActionNotRun(user, "export", string.Join(", ", input.Topics), input.Cluster.Cluster, input.Cluster.TenantId, KafkaStudioText.ExportNotDelivered, input.AuditText);
-            return new KafkaExportOutcome(false, KafkaStudioText.ExportNotDelivered, fileName, file.Written, file.LeftOut);
+            logger.ActionNotRun(user, "export", string.Join(", ", input.Topics), input.Cluster.Cluster, input.Cluster.TenantId, KafkaText.ExportNotDelivered, input.AuditText);
+            return new KafkaExportOutcome(false, KafkaText.ExportNotDelivered, fileName, file.Written, file.LeftOut);
         }
 
-        string message = KafkaStudioText.ExportMessage(
+        string message = KafkaText.ExportMessage(
             file.Written,
             file.Bytes,
             format,
@@ -417,7 +417,7 @@ internal sealed class KafkaExportService(
             input.SourceBytes,
             input.AuditText);
 
-        actionLog.Record(input.Cluster, input.Topics, KafkaStudioText.ExportAction, target, succeeded: true, message, KafkaCapability.ExportRecords);
+        actionLog.Record(input.Cluster, input.Topics, KafkaText.ExportAction, target, succeeded: true, message, KafkaCapability.ExportRecords);
         audited.Mark();
         logger.RecordsExported(
             user,
@@ -431,8 +431,8 @@ internal sealed class KafkaExportService(
             input.AuditText);
 
         string text = file.LeftOut > 0
-            ? KafkaStudioText.ExportLimited(file.Written, file.Written + file.LeftOut, scanner.LimitsFor(input.Cluster.Key).MaxExportBytes)
-            : KafkaStudioText.ExportSaved(fileName);
+            ? KafkaText.ExportLimited(file.Written, file.Written + file.LeftOut, scanner.LimitsFor(input.Cluster.Key).MaxExportBytes)
+            : KafkaText.ExportSaved(fileName);
         return new KafkaExportOutcome(true, text, fileName, file.Written, file.LeftOut);
     }
 

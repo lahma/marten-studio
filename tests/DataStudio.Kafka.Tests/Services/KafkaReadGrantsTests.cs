@@ -61,10 +61,10 @@ public class KafkaReadGrantsTests
 
         KafkaSearchPlanResult plan = await rig.Search().PlanAsync(rig.Input(["orders", "secret.v1"], "value ~ 'v'"), Ct);
 
-        plan.Should().BeOfType<KafkaSearchPlanResult.Refused>().Which.Text.Should().Be(KafkaStudioText.SearchValuesRefusedTopic).And.NotContain("secret");
+        plan.Should().BeOfType<KafkaSearchPlanResult.Refused>().Which.Text.Should().Be(KafkaText.SearchValuesRefusedTopic).And.NotContain("secret");
         rig.BrokerCalls.Should().Be(callsBefore, "a refused search reads nothing, not even a window");
         rig.Ring.Should().ContainSingle().Which.Should().Match<DataStudio.Services.StudioActionLogEntry>(
-            static x => !x.Succeeded && x.Capability == "ReadPayloads" && x.Message == KafkaStudioText.RefusedEntry);
+            static x => !x.Succeeded && x.Capability == "ReadPayloads" && x.Message == KafkaText.RefusedEntry);
         rig.Logs.Entries.Should().ContainSingle(static x => x.EventId.Id == 9603);
     }
 
@@ -137,7 +137,7 @@ public class KafkaReadGrantsTests
         rig.Studio.Authorization.AllowKafka(static r => r.Capability != "ReadPayloads");
         KafkaSearchStartResult start = await search.StartAsync(planned, confirmed: true, Ct);
 
-        start.Should().BeOfType<KafkaSearchStartResult.Refused>().Which.Text.Should().Be(KafkaStudioText.SearchValuesRefusedTopic, "a value search is refused whole at the gate");
+        start.Should().BeOfType<KafkaSearchStartResult.Refused>().Which.Text.Should().Be(KafkaText.SearchValuesRefusedTopic, "a value search is refused whole at the gate");
 
         // A key search planned with values, whose values are then refused: the lower grant is a refusal of its own.
         rig.Studio.Authorization.AllowKafka(static _ => true);
@@ -146,7 +146,7 @@ public class KafkaReadGrantsTests
 
         KafkaSearchStartResult lower = await search.StartAsync(keyPlan, confirmed: true, Ct);
 
-        lower.Should().BeOfType<KafkaSearchStartResult.Refused>().Which.Text.Should().Be(KafkaStudioText.GrantChanged);
+        lower.Should().BeOfType<KafkaSearchStartResult.Refused>().Which.Text.Should().Be(KafkaText.GrantChanged);
         rig.Logs.Entries.Should().Contain(static x => x.EventId.Id == 9601);
     }
 

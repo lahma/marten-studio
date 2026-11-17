@@ -206,7 +206,7 @@ public class StudioConnectionPoolsTests
     [Fact]
     public void The_health_pages_share_line_names_the_pool_size_only_when_it_held_the_cap()
     {
-        IStudioSettings settings = PostgresStudioSettings.Of(new PostgresOptions());
+        IStudioSettings settings = PostgresSettings.Of(new PostgresOptions());
 
         HealthPresentation.Share(new StudioConnectionShare(2, 1, 2, null), settings).Should().Be(
             "It holds at most 2 of the pool's connections at a time (PostgresOptions.MaxStudioConnections), 1 now.");

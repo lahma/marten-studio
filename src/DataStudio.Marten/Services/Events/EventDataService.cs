@@ -2507,7 +2507,7 @@ internal sealed partial class EventDataService : IEventDataService
         ConnectionUsage usage,
         CancellationToken cancellationToken)
     {
-        NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, usage);
+        NpgsqlConnection connection = MartenSourceDatabase.CreateConnection(resolved.Database, usage);
 
         try
         {

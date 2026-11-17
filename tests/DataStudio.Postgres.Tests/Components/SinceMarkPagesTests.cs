@@ -88,10 +88,10 @@ public class SinceMarkPagesTests
         ],
     };
 
-    private static async Task<(PostgresStudioComponentContext Context, FakeStatements Service)> StatementsContextAsync(StatementsView view)
+    private static async Task<(PostgresComponentContext Context, FakeStatements Service)> StatementsContextAsync(StatementsView view)
     {
         FakeStatements service = new() { View = view };
-        PostgresStudioComponentContext context = new(services => services.AddSingleton<IStatementsService>(service));
+        PostgresComponentContext context = new(services => services.AddSingleton<IStatementsService>(service));
         context.WithAllCapabilities();
         return (await context.ReadyAsync(), service);
     }
@@ -102,8 +102,8 @@ public class SinceMarkPagesTests
     [Fact]
     public async Task Mark_is_offered_only_once_the_page_is_interactive_and_has_a_read()
     {
-        (PostgresStudioComponentContext context, FakeStatements service) = await StatementsContextAsync(Statements(T0, 10, 100, 1_000));
-        await using PostgresStudioComponentContext disposing = context;
+        (PostgresComponentContext context, FakeStatements service) = await StatementsContextAsync(Statements(T0, 10, 100, 1_000));
+        await using PostgresComponentContext disposing = context;
         service.Pending = new TaskCompletionSource<StatementsView>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         var page = context.Render<StatementsPage>();
@@ -118,9 +118,9 @@ public class SinceMarkPagesTests
     [Fact]
     public async Task Mark_is_disabled_for_a_page_that_shows_a_status_and_no_read()
     {
-        (PostgresStudioComponentContext context, FakeStatements _) = await StatementsContextAsync(
+        (PostgresComponentContext context, FakeStatements _) = await StatementsContextAsync(
             new StatementsView { State = StatementsState.NotInstalled, MeasuredAt = T0, Status = "pg_stat_statements is not installed." });
-        await using PostgresStudioComponentContext disposing = context;
+        await using PostgresComponentContext disposing = context;
 
         var page = context.Render<StatementsPage>();
 
@@ -131,8 +131,8 @@ public class SinceMarkPagesTests
     [Fact]
     public async Task Statements_count_from_the_mark_and_Clear_restores_the_advisors_window()
     {
-        (PostgresStudioComponentContext context, FakeStatements service) = await StatementsContextAsync(Statements(T0, 10, 100, 1_000));
-        await using PostgresStudioComponentContext disposing = context;
+        (PostgresComponentContext context, FakeStatements service) = await StatementsContextAsync(Statements(T0, 10, 100, 1_000));
+        await using PostgresComponentContext disposing = context;
         context.Preferences.SelectedTimeZoneId = "Asia/Kolkata";
 
         var page = context.Render<StatementsPage>();
@@ -160,8 +160,8 @@ public class SinceMarkPagesTests
     [Fact]
     public async Task A_mark_that_no_longer_holds_is_said_on_the_page_and_Mark_again_counts_from_the_new_read()
     {
-        (PostgresStudioComponentContext context, FakeStatements service) = await StatementsContextAsync(Statements(T0, 10, 100, 1_000));
-        await using PostgresStudioComponentContext disposing = context;
+        (PostgresComponentContext context, FakeStatements service) = await StatementsContextAsync(Statements(T0, 10, 100, 1_000));
+        await using PostgresComponentContext disposing = context;
         context.Preferences.SelectedTimeZoneId = "Asia/Kolkata";
 
         var page = context.Render<StatementsPage>();
@@ -186,8 +186,8 @@ public class SinceMarkPagesTests
     [Fact]
     public async Task A_mark_survives_a_new_page_instance_and_another_database_shows_none()
     {
-        (PostgresStudioComponentContext context, FakeStatements _) = await StatementsContextAsync(Statements(T0, 10, 100, 1_000));
-        await using PostgresStudioComponentContext disposing = context;
+        (PostgresComponentContext context, FakeStatements _) = await StatementsContextAsync(Statements(T0, 10, 100, 1_000));
+        await using PostgresComponentContext disposing = context;
 
         var first = context.Render<StatementsPage>();
         first.WaitForAssertion(() => first.Find(".ms-mark-button").HasAttribute("disabled").Should().BeFalse());
@@ -241,7 +241,7 @@ public class SinceMarkPagesTests
     [Fact]
     public async Task Storage_adds_one_column_since_the_mark_and_a_withheld_table_is_a_dash()
     {
-        await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
+        await using PostgresComponentContext context = await new PostgresComponentContext().ReadyAsync();
         context.Storage.View = Storage(T0, 400L << 20, 100L << 20, 1_000);
 
         var page = context.Render<StoragePage>();
@@ -272,7 +272,7 @@ public class SinceMarkPagesTests
     [Fact]
     public async Task Storage_says_so_when_the_statistics_began_again_after_the_mark()
     {
-        await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
+        await using PostgresComponentContext context = await new PostgresComponentContext().ReadyAsync();
         context.Storage.View = Storage(T0, 400L << 20, 100L << 20, 1_000);
 
         var page = context.Render<StoragePage>();
@@ -321,7 +321,7 @@ public class SinceMarkPagesTests
     public async Task Maintenance_adds_one_column_since_the_mark_and_Clear_removes_it()
     {
         FakeMaintenance service = new() { View = Maintenance(T0, 10) };
-        await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext(services => services.AddSingleton<IMaintenanceService>(service)).ReadyAsync();
+        await using PostgresComponentContext context = await new PostgresComponentContext(services => services.AddSingleton<IMaintenanceService>(service)).ReadyAsync();
 
         var page = context.Render<MaintenancePage>();
         page.WaitForAssertion(() => page.Find(".ms-mark-button").HasAttribute("disabled").Should().BeFalse());
@@ -346,7 +346,7 @@ public class SinceMarkPagesTests
     public async Task Maintenance_says_so_when_the_statistics_began_again_after_the_mark()
     {
         FakeMaintenance service = new() { View = Maintenance(T0, 10) };
-        await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext(services => services.AddSingleton<IMaintenanceService>(service)).ReadyAsync();
+        await using PostgresComponentContext context = await new PostgresComponentContext(services => services.AddSingleton<IMaintenanceService>(service)).ReadyAsync();
 
         var page = context.Render<MaintenancePage>();
         page.WaitForAssertion(() => page.Find(".ms-mark-button").HasAttribute("disabled").Should().BeFalse());
@@ -374,8 +374,8 @@ public class SinceMarkPagesTests
     [Fact]
     public async Task The_drill_in_counts_from_the_mark_with_the_window_line_not_from_the_advisors_window()
     {
-        (PostgresStudioComponentContext context, FakeStatements service) = await StatementsContextAsync(Statements(T0, 10, 100, 1_000));
-        await using PostgresStudioComponentContext disposing = context;
+        (PostgresComponentContext context, FakeStatements service) = await StatementsContextAsync(Statements(T0, 10, 100, 1_000));
+        await using PostgresComponentContext disposing = context;
         service.Plan = AdvisorPlan;
         context.Navigate("studio/postgres/statements?queryid=1");
 
@@ -400,8 +400,8 @@ public class SinceMarkPagesTests
     [Fact]
     public async Task The_drill_in_of_a_statement_the_mark_cannot_count_says_why_and_not_the_advisors_numbers()
     {
-        (PostgresStudioComponentContext context, FakeStatements service) = await StatementsContextAsync(Statements(T0, 10, 100, 1_000));
-        await using PostgresStudioComponentContext disposing = context;
+        (PostgresComponentContext context, FakeStatements service) = await StatementsContextAsync(Statements(T0, 10, 100, 1_000));
+        await using PostgresComponentContext disposing = context;
         service.Plan = AdvisorPlan;
         context.Navigate("studio/postgres/statements?queryid=2");
 
@@ -427,8 +427,8 @@ public class SinceMarkPagesTests
     [Fact]
     public async Task A_refused_read_after_a_mark_counts_nothing_and_Clear_stays_available_on_Statements()
     {
-        (PostgresStudioComponentContext context, FakeStatements service) = await StatementsContextAsync(Statements(T0, 10, 100, 1_000));
-        await using PostgresStudioComponentContext disposing = context;
+        (PostgresComponentContext context, FakeStatements service) = await StatementsContextAsync(Statements(T0, 10, 100, 1_000));
+        await using PostgresComponentContext disposing = context;
 
         var page = context.Render<StatementsPage>();
         page.WaitForAssertion(() => page.Find(".ms-mark-button").HasAttribute("disabled").Should().BeFalse());
@@ -452,7 +452,7 @@ public class SinceMarkPagesTests
     [Fact]
     public async Task A_refused_read_after_a_mark_counts_nothing_and_Clear_stays_available_on_Storage()
     {
-        await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
+        await using PostgresComponentContext context = await new PostgresComponentContext().ReadyAsync();
         context.Storage.View = Storage(T0, 400L << 20, 100L << 20, 1_000);
 
         var page = context.Render<StoragePage>();
@@ -474,7 +474,7 @@ public class SinceMarkPagesTests
     public async Task A_refused_read_after_a_mark_counts_nothing_and_Clear_stays_available_on_Maintenance()
     {
         FakeMaintenance service = new() { View = Maintenance(T0, 10) };
-        await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext(services => services.AddSingleton<IMaintenanceService>(service)).ReadyAsync();
+        await using PostgresComponentContext context = await new PostgresComponentContext(services => services.AddSingleton<IMaintenanceService>(service)).ReadyAsync();
 
         var page = context.Render<MaintenancePage>();
         page.WaitForAssertion(() => page.Find(".ms-mark-button").HasAttribute("disabled").Should().BeFalse());
@@ -494,7 +494,7 @@ public class SinceMarkPagesTests
     [Fact]
     public async Task A_valid_marks_chip_says_which_read_it_counts_from_and_an_ended_marks_says_what_the_page_does_instead()
     {
-        await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
+        await using PostgresComponentContext context = await new PostgresComponentContext().ReadyAsync();
         context.Preferences.SelectedTimeZoneId = "Asia/Kolkata";
         context.Storage.View = Storage(T0, 400L << 20, 100L << 20, 1_000);
 
@@ -520,7 +520,7 @@ public class SinceMarkPagesTests
     public async Task Maintenances_ended_mark_says_the_Since_column_is_gone()
     {
         FakeMaintenance service = new() { View = Maintenance(T0, 10) };
-        await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext(services => services.AddSingleton<IMaintenanceService>(service)).ReadyAsync();
+        await using PostgresComponentContext context = await new PostgresComponentContext(services => services.AddSingleton<IMaintenanceService>(service)).ReadyAsync();
 
         var page = context.Render<MaintenancePage>();
         page.WaitForAssertion(() => page.Find(".ms-mark-button").HasAttribute("disabled").Should().BeFalse());
@@ -536,7 +536,7 @@ public class SinceMarkPagesTests
     [Fact]
     public async Task A_moment_is_spelt_in_the_selected_zone_and_carries_its_date_unless_it_is_today()
     {
-        await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
+        await using PostgresComponentContext context = await new PostgresComponentContext().ReadyAsync();
         context.Preferences.SelectedTimeZoneId = "Asia/Kolkata";
 
         SinceMarkTime.When(context.Preferences, T0, now: T0.AddHours(1)).Should().Be("17:30");
@@ -557,20 +557,20 @@ public class SinceMarkPagesTests
     [Fact]
     public async Task Today_is_taken_from_the_registered_clock_and_from_the_system_clock_without_one()
     {
-        await using PostgresStudioComponentContext pinned = new(static services => services.AddSingleton<TimeProvider>(new FixedClock(T0.AddHours(1))));
+        await using PostgresComponentContext pinned = new(static services => services.AddSingleton<TimeProvider>(new FixedClock(T0.AddHours(1))));
         await pinned.ReadyAsync();
         pinned.Preferences.SelectedTimeZoneId = "Asia/Kolkata";
 
         SinceMarkTime.When(pinned.Preferences, T0).Should().Be("17:30", "the pinned clock says it is 13:00 UTC on the same day");
 
-        await using PostgresStudioComponentContext later = new(static services => services.AddSingleton<TimeProvider>(new FixedClock(T0.AddDays(3))));
+        await using PostgresComponentContext later = new(static services => services.AddSingleton<TimeProvider>(new FixedClock(T0.AddDays(3))));
         await later.ReadyAsync();
         later.Preferences.SelectedTimeZoneId = "Asia/Kolkata";
 
         SinceMarkTime.When(later.Preferences, T0).Should().Be("2026-10-26 17:30", "three days later the date is spelt");
         SinceMarkTime.When(later.Preferences, T0.AddDays(3).AddMinutes(5)).Should().Be("17:35", "a moment of the pinned day is not given a date");
 
-        await using PostgresStudioComponentContext system = new();
+        await using PostgresComponentContext system = new();
         await system.ReadyAsync();
         system.Preferences.SelectedTimeZoneId = "Asia/Kolkata";
 
@@ -601,7 +601,7 @@ public class SinceMarkPagesTests
     {
         DateTimeOffset began = T0.AddMinutes(5);
         FakeStatements service = new() { View = Statements(T0, 10, 100, 1_000) };
-        await using PostgresStudioComponentContext context = new(services =>
+        await using PostgresComponentContext context = new(services =>
         {
             services.AddSingleton<IStatementsService>(service);
             services.AddSingleton<TimeProvider>(new FixedClock(T1));

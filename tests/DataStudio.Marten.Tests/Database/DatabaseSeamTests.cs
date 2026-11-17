@@ -24,7 +24,7 @@ public class DatabaseSeamTests
 {
     private static readonly StudioScope Scope = new("orders", "db1.orders", null);
 
-    private static readonly IStudioSettings Settings = MartenStudioSettings.Of(new MartenOptions());
+    private static readonly IStudioSettings Settings = MartenSettings.Of(new MartenOptions());
 
     [Fact]
     public void Every_browser_link_carries_the_scope_under_the_descriptors_source_parameter()
@@ -51,7 +51,7 @@ public class DatabaseSeamTests
     [Fact]
     public void MartenStudios_descriptor_still_writes_store_exactly_as_before()
     {
-        DatabaseLinks.ToObject(MartenStudioDescriptor.Instance, Scope, "public", "orders")
+        DatabaseLinks.ToObject(MartenDescriptor.Instance, Scope, "public", "orders")
             .Should().Be("postgres/database/object?schema=public&name=orders&store=orders&db=db1.orders");
     }
 
@@ -159,7 +159,7 @@ public class DatabaseSeamTests
     /// <summary>MartenStudio's descriptor, with another source parameter - a studio whose sources are not stores.</summary>
     private static StudioDescriptor WithSourceParameter(string parameter)
     {
-        StudioDescriptor marten = MartenStudioDescriptor.Instance;
+        StudioDescriptor marten = MartenDescriptor.Instance;
 
         return new StudioDescriptor
         {

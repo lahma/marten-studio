@@ -16,13 +16,13 @@ public class RelationshipSchemaSetTests
     [Fact]
     public void Without_BrowseDatabase_a_plain_data_source_reads_the_exactly_named_schemas_and_never_the_star()
     {
-        RelationshipReads.EntriesOf(PostgresStudioText.Instance, browse: false, Entries).Should().Equal("app", "reporting");
+        RelationshipReads.EntriesOf(PostgresText.Instance, browse: false, Entries).Should().Equal("app", "reporting");
     }
 
     [Fact]
     public void Without_BrowseDatabase_the_Marten_module_reads_no_schema_beyond_the_stores_own()
     {
-        RelationshipReads.EntriesOf(MartenStudioText.Instance, browse: false, Entries).Should().BeEmpty();
+        RelationshipReads.EntriesOf(MartenText.Instance, browse: false, Entries).Should().BeEmpty();
     }
 
     [Theory]
@@ -30,6 +30,6 @@ public class RelationshipSchemaSetTests
     [InlineData(false)]
     public void With_BrowseDatabase_both_read_every_entry(bool marten)
     {
-        RelationshipReads.EntriesOf(marten ? MartenStudioText.Instance : PostgresStudioText.Instance, browse: true, Entries).Should().Equal(Entries);
+        RelationshipReads.EntriesOf(marten ? MartenText.Instance : PostgresText.Instance, browse: true, Entries).Should().Equal(Entries);
     }
 }

@@ -172,9 +172,9 @@ public class StudioRegistrationTests
         // 1.2-PROJ: ProjectionThresholds' validator, a type of its own because its message names the projection.
         (typeof(IValidateOptions<MartenOptions>), ServiceLifetime.Singleton, How.Type, typeof(ProjectionThresholdsValidator)),
         (typeof(MartenStoreRegistry), ServiceLifetime.Singleton, How.Instance, typeof(MartenStoreRegistry)),
-        (typeof(IStudioSourceProvider), ServiceLifetime.Scoped, How.Type, typeof(MartenStudioSourceProvider)),
-        (typeof(IStudioLinks), ServiceLifetime.Singleton, How.Type, typeof(MartenStudioLinks)),
-        (typeof(IStudioRouteLinks), ServiceLifetime.Singleton, How.Type, typeof(DataStudio.Marten.Services.Links.MartenStudioRouteLinks)),
+        (typeof(IStudioSourceProvider), ServiceLifetime.Scoped, How.Type, typeof(MartenSourceProvider)),
+        (typeof(IStudioLinks), ServiceLifetime.Singleton, How.Type, typeof(MartenLinks)),
+        (typeof(IStudioRouteLinks), ServiceLifetime.Singleton, How.Type, typeof(DataStudio.Marten.Services.Links.MartenRouteLinks)),
         (typeof(ISessionLockLabeler), ServiceLifetime.Singleton, How.Type, typeof(MartenSessionLockLabeler)),
         (typeof(IDatabaseDeclarationsSource), ServiceLifetime.Scoped, How.Type, typeof(MartenDatabaseDeclarationsSource)),
         (typeof(IHealthTableSource), ServiceLifetime.Singleton, How.Type, typeof(MartenHealthTableSource)),
@@ -315,8 +315,8 @@ public class StudioRegistrationTests
     /// <summary>What each factory registration of the studio makes, by its concrete type.</summary>
     private static readonly Dictionary<Type, Type> FactoryResults = new()
     {
-        [typeof(IDiagnosticsSettings)] = typeof(MartenStudioSettings),
-        [typeof(IStudioSettings)] = typeof(MartenStudioSettings),
+        [typeof(IDiagnosticsSettings)] = typeof(MartenSettings),
+        [typeof(IStudioSettings)] = typeof(MartenSettings),
         [typeof(StudioLogThrottle)] = typeof(StudioLogThrottle),
         [typeof(IStudioRuntime)] = typeof(MartenStudioRuntime),
 

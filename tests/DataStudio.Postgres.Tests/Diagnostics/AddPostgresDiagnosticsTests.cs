@@ -226,17 +226,17 @@ public class AddPostgresDiagnosticsTests
 
         DataStudio.Postgres.Services.Settings.StudioText words = provider.GetRequiredService<DataStudio.Postgres.Services.Settings.IDiagnosticsSettings>().Text;
 
-        words.Should().BeSameAs(DataStudio.Postgres.Services.Postgres.PostgresStudioText.DiagnosticsInstance);
+        words.Should().BeSameAs(DataStudio.Postgres.Services.Postgres.PostgresText.DiagnosticsInstance);
         words.OptionsTypeName.Should().Be("PostgresDiagnosticsOptions");
         words.UnjudgedOldest.Should().Contain("a schema PostgresDiagnosticsOptions.BrowsableSchemas does not admit").And.NotContain("PostgresOptions");
 
-        DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance.UnjudgedOldest
+        DataStudio.Postgres.Services.Postgres.PostgresText.Instance.UnjudgedOldest
             .Should().Contain("a schema PostgresOptions.BrowsableSchemas does not admit", "a studio host's sentence is unchanged")
             .And.NotContain("PostgresDiagnosticsOptions");
 
         // The engine has no visitors, so what a studio shows with ViewDatabaseActivity is said to be returned when the call asks (D31).
         words.HasVisitors.Should().BeFalse();
-        DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance.HasVisitors.Should().BeTrue();
+        DataStudio.Postgres.Services.Postgres.PostgresText.Instance.HasVisitors.Should().BeTrue();
         words.ActivityShownWith.Should().Be("returned only when the call sets IncludeActivity = true");
         words.ActivityShownOnlyWith.Should().Be(words.ActivityShownWith);
 
@@ -249,7 +249,7 @@ public class AddPostgresDiagnosticsTests
                                    or nameof(DataStudio.Postgres.Services.Settings.StudioText.ActivityShownOnlyWith)
                                    or nameof(DataStudio.Postgres.Services.Settings.StudioText.StatementsOnSessionsPage))))
         {
-            string? own = (string?) property.GetValue(DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance);
+            string? own = (string?) property.GetValue(DataStudio.Postgres.Services.Postgres.PostgresText.Instance);
 
             property.GetValue(words).Should().BeOneOf([own, own?.Replace("PostgresOptions.", "PostgresDiagnosticsOptions.", StringComparison.Ordinal)], property.Name);
         }

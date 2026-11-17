@@ -225,7 +225,7 @@ internal sealed class QueryService : IQueryService
                 refusedShape.Predicate, rejected);
         }
 
-        await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
+        await using NpgsqlConnection connection = MartenSourceDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
         await connection.OpenStudioAsync(cancellationToken).ConfigureAwait(false);
 
         // The configuration describes the table Marten would create; the studio reads one somebody else
@@ -615,7 +615,7 @@ internal sealed class QueryService : IQueryService
 
         try
         {
-            await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
+            await using NpgsqlConnection connection = MartenSourceDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
             await connection.OpenStudioAsync(cancellationToken).ConfigureAwait(false);
             table = table.WithPhysicalColumns(await columnCatalog.GetAsync(connection, table.Schema, table.Table, cancellationToken).ConfigureAwait(false));
         }

@@ -23,7 +23,7 @@ namespace DataStudio.Marten.Tests.Components;
 /// </remarks>
 public class StudioRouteTableTests
 {
-    private static DataStudio.Marten.Services.MartenStudioSettings Options(string? path = null)
+    private static DataStudio.Marten.Services.MartenSettings Options(string? path = null)
     {
         DataStudioOptions shell = new();
         if (path is not null)
@@ -31,7 +31,7 @@ public class StudioRouteTableTests
             shell.Path = path;
         }
 
-        return DataStudio.Marten.Services.MartenStudioSettings.Of(
+        return DataStudio.Marten.Services.MartenSettings.Of(
             new MartenOptions(),
             new DataStudio.Services.Settings.ShellSettings(Microsoft.Extensions.Options.Options.Create(shell)));
     }

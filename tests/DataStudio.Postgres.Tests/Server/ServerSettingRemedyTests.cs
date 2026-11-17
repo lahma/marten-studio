@@ -11,7 +11,7 @@ namespace DataStudio.Postgres.Tests.Server;
 /// </summary>
 public class ServerSettingRemedyTests
 {
-    private static readonly StudioText Text = PostgresStudioText.Instance;
+    private static readonly StudioText Text = PostgresText.Instance;
 
     [Fact]
     public void The_plain_form_is_the_line_under_the_comment_and_ends_where_it_is_set()

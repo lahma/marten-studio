@@ -62,11 +62,11 @@
                 @foreach (StoreListing listing in State.UnlistableStores)
                 {
                     <li class="ms-stores-strip-item" @key="listing.Key">
-                        <a class="ms-stores-strip-link ms-stores-strip-unlistable" href="@Link(MartenStudioDescriptor.StoresRoute)">@(listing.DisplayName + " (could not be listed)")</a>
+                        <a class="ms-stores-strip-link ms-stores-strip-unlistable" href="@Link(MartenDescriptor.StoresRoute)">@(listing.DisplayName + " (could not be listed)")</a>
                     </li>
                 }
             </ul>
-            <a class="ms-stores-strip-all" href="@Link(MartenStudioDescriptor.StoresRoute)">All stores</a>
+            <a class="ms-stores-strip-all" href="@Link(MartenDescriptor.StoresRoute)">All stores</a>
         </nav>
     }
 

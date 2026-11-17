@@ -80,7 +80,7 @@ public class ShellModuleComponentTests
     [Fact]
     public async Task Modules_are_drawn_in_registration_order_and_the_shells_own_section_closes_the_rail()
     {
-        using KafkaStudioHarness harness = new();
+        using KafkaHarness harness = new();
         await harness.Context.ReadyAsync();
 
         IRenderedComponent<NavMenu> rail = harness.Context.Render<NavMenu>();
@@ -93,15 +93,15 @@ public class ShellModuleComponentTests
     [Fact]
     public async Task Search_is_on_the_rail_only_while_the_capability_is_effectively_on()
     {
-        using KafkaStudioHarness off = new();
-        using KafkaStudioHarness on = new(static o => o.Capabilities = KafkaCapabilities.All());
-        using KafkaStudioHarness readOnly = new(static o => o.Capabilities = KafkaCapabilities.All());
+        using KafkaHarness off = new();
+        using KafkaHarness on = new(static o => o.Capabilities = KafkaCapabilities.All());
+        using KafkaHarness readOnly = new(static o => o.Capabilities = KafkaCapabilities.All());
         readOnly.Context.ShellOptions.ReadOnly = true;
         await off.Context.ReadyAsync();
         await on.Context.ReadyAsync();
         await readOnly.Context.ReadyAsync();
 
-        static string[] Links(KafkaStudioHarness harness) =>
+        static string[] Links(KafkaHarness harness) =>
             [.. harness.Context.Render<NavMenu>().FindAll(".ms-nav-link-text").Select(static x => x.TextContent.Trim())];
 
         Links(off).Should().NotContain("Search");
@@ -112,17 +112,17 @@ public class ShellModuleComponentTests
     [Fact]
     public async Task Live_tail_is_on_the_rail_only_while_it_and_Search_are_effectively_on()
     {
-        using KafkaStudioHarness off = new();
-        using KafkaStudioHarness searchOnly = new(static o => o.Capabilities.SearchRecords = true);
-        using KafkaStudioHarness on = new(static o => o.Capabilities = KafkaCapabilities.All());
-        using KafkaStudioHarness readOnly = new(static o => o.Capabilities = KafkaCapabilities.All());
+        using KafkaHarness off = new();
+        using KafkaHarness searchOnly = new(static o => o.Capabilities.SearchRecords = true);
+        using KafkaHarness on = new(static o => o.Capabilities = KafkaCapabilities.All());
+        using KafkaHarness readOnly = new(static o => o.Capabilities = KafkaCapabilities.All());
         readOnly.Context.ShellOptions.ReadOnly = true;
         await off.Context.ReadyAsync();
         await searchOnly.Context.ReadyAsync();
         await on.Context.ReadyAsync();
         await readOnly.Context.ReadyAsync();
 
-        static string[] Links(KafkaStudioHarness harness) =>
+        static string[] Links(KafkaHarness harness) =>
             [.. harness.Context.Render<NavMenu>().FindAll(".ms-nav-link-text").Select(static x => x.TextContent.Trim())];
 
         Links(off).Should().NotContain("Live tail");
@@ -134,7 +134,7 @@ public class ShellModuleComponentTests
     [Fact]
     public async Task A_kafka_link_carries_no_host_scope_and_a_host_link_still_does()
     {
-        using KafkaStudioHarness harness = new();
+        using KafkaHarness harness = new();
         await harness.Context.ReadyAsync();
 
         IRenderedComponent<NavMenu> rail = harness.Context.Render<NavMenu>();
@@ -152,7 +152,7 @@ public class ShellModuleComponentTests
     [Fact]
     public async Task The_rail_credit_names_the_module()
     {
-        using KafkaStudioHarness harness = new();
+        using KafkaHarness harness = new();
         await harness.Context.ReadyAsync();
 
         IRenderedComponent<NavMenu> rail = harness.Context.Render<NavMenu>();
@@ -171,8 +171,8 @@ public class ShellModuleComponentTests
     [Fact]
     public async Task The_chip_counts_the_kafka_capabilities()
     {
-        using KafkaStudioHarness off = new();
-        using KafkaStudioHarness on = new(static o => o.Capabilities = KafkaCapabilities.All());
+        using KafkaHarness off = new();
+        using KafkaHarness on = new(static o => o.Capabilities = KafkaCapabilities.All());
         await off.Context.ReadyAsync();
         await on.Context.ReadyAsync();
         StudioCapabilityGuard host = off.Context.Services.GetRequiredService<StudioCapabilityGuard>();
@@ -188,7 +188,7 @@ public class ShellModuleComponentTests
     [Fact]
     public async Task The_banner_lists_the_kafka_group_with_its_options()
     {
-        using KafkaStudioHarness harness = new(static o => o.Capabilities = KafkaCapabilities.All());
+        using KafkaHarness harness = new(static o => o.Capabilities = KafkaCapabilities.All());
         await harness.Context.ReadyAsync();
 
         IRenderedComponent<CapabilityBanner> banner = harness.Context.Render<CapabilityBanner>();
@@ -207,7 +207,7 @@ public class ShellModuleComponentTests
     [Fact]
     public async Task A_kafka_capability_that_is_off_is_listed_off()
     {
-        using KafkaStudioHarness harness = new();
+        using KafkaHarness harness = new();
         await harness.Context.ReadyAsync();
 
         IRenderedComponent<CapabilityBanner> banner = harness.Context.Render<CapabilityBanner>();
@@ -218,7 +218,7 @@ public class ShellModuleComponentTests
     [Fact]
     public async Task ReadOnly_counts_the_kafka_capabilities_off()
     {
-        using KafkaStudioHarness harness = new(static o => o.Capabilities = KafkaCapabilities.All());
+        using KafkaHarness harness = new(static o => o.Capabilities = KafkaCapabilities.All());
         harness.Context.ShellOptions.ReadOnly = true;
         await harness.Context.ReadyAsync();
 
@@ -233,19 +233,19 @@ public class ShellModuleComponentTests
     [Fact]
     public void A_granted_cluster_runs_the_body()
     {
-        using KafkaStudioHarness harness = new(static o => o.ClusterAuthorizationPolicy = "kafka-topics");
+        using KafkaHarness harness = new(static o => o.ClusterAuthorizationPolicy = "kafka-topics");
         Counter counter = new();
 
         IRenderedComponent<KafkaPageFrame> frame = harness.Context.Render<KafkaPageFrame>(p => p.Add(x => x.ChildContent, ProbeBody(counter)));
 
         frame.WaitForAssertion(() => counter.Initialized.Should().Be(1));
-        frame.Find(".ms-k-trademark").TextContent.Should().Be(KafkaStudioText.Trademark);
+        frame.Find(".ms-k-trademark").TextContent.Should().Be(KafkaText.Trademark);
     }
 
     [Fact]
     public void A_body_is_created_only_once_the_frame_has_released_reads_so_neither_way_of_reading_runs_during_a_prerender()
     {
-        using KafkaStudioHarness harness = new();
+        using KafkaHarness harness = new();
         List<bool> naive = [];
         List<bool> awaiting = [];
 
@@ -264,7 +264,7 @@ public class ShellModuleComponentTests
     [Fact]
     public void A_frame_with_no_cluster_never_releases_Ready_and_creates_no_body()
     {
-        using KafkaStudioHarness harness = new();
+        using KafkaHarness harness = new();
         harness.Entries.Entries = [];
         List<bool> reads = [];
 
@@ -278,22 +278,22 @@ public class ShellModuleComponentTests
     [Fact]
     public async Task The_frame_applies_the_cluster_its_address_names_on_its_first_render()
     {
-        using KafkaStudioHarness harness = new(null, KafkaStudioHarness.Primary, KafkaStudioHarness.Secondary);
+        using KafkaHarness harness = new(null, KafkaHarness.Primary, KafkaHarness.Secondary);
         await harness.Context.ReadyAsync();
         await harness.State.EnsureInitializedAsync(Xunit.TestContext.Current.CancellationToken);
-        harness.State.ActiveCluster.Should().Be(KafkaStudioHarness.Primary, "the premise: the state first loaded from an address that named none");
+        harness.State.ActiveCluster.Should().Be(KafkaHarness.Primary, "the premise: the state first loaded from an address that named none");
 
         // Arriving from a host page, or by Back: the state is the circuit's, so it still holds the cluster it last had.
         harness.Context.Navigate("/studio/kafka?cluster=secondary");
         harness.Context.Render<KafkaPageFrame>(p => p.Add(x => x.ChildContent, ProbeBody(new Counter())));
 
-        harness.State.ActiveCluster.Should().Be(KafkaStudioHarness.Secondary);
+        harness.State.ActiveCluster.Should().Be(KafkaHarness.Secondary);
     }
 
     [Fact]
     public async Task The_frame_ignores_an_address_cluster_the_listing_does_not_carry()
     {
-        using KafkaStudioHarness harness = new(static o => o.ClusterAuthorizationPolicy = "kafka-topics", KafkaStudioHarness.Primary, KafkaStudioHarness.Secondary);
+        using KafkaHarness harness = new(static o => o.ClusterAuthorizationPolicy = "kafka-topics", KafkaHarness.Primary, KafkaHarness.Secondary);
         harness.Authorization.AllowKafka(static r => r.Cluster != "secondary");
         await harness.Context.ReadyAsync();
         await harness.State.EnsureInitializedAsync(Xunit.TestContext.Current.CancellationToken);
@@ -301,13 +301,13 @@ public class ShellModuleComponentTests
         harness.Context.Navigate("/studio/kafka?cluster=secondary");
         harness.Context.Render<KafkaPageFrame>(p => p.Add(x => x.ChildContent, ProbeBody(new Counter())));
 
-        harness.State.ActiveCluster.Should().Be(KafkaStudioHarness.Primary, "a refused cluster reads as an unknown one");
+        harness.State.ActiveCluster.Should().Be(KafkaHarness.Primary, "a refused cluster reads as an unknown one");
     }
 
     [Fact]
     public void A_refused_cluster_never_initializes_the_body()
     {
-        using KafkaStudioHarness harness = new(static o => o.ClusterAuthorizationPolicy = "kafka-topics");
+        using KafkaHarness harness = new(static o => o.ClusterAuthorizationPolicy = "kafka-topics");
 
         // The cluster passes the listing (the state's one question) and is refused by the frame's: a policy that changed its mind, or one that
         // answers differently when asked again. The body of a refused cluster must not start either way.
@@ -326,7 +326,7 @@ public class ShellModuleComponentTests
     [Fact]
     public void A_visitor_who_may_see_no_cluster_is_told_there_is_none()
     {
-        using KafkaStudioHarness harness = new();
+        using KafkaHarness harness = new();
         harness.Entries.Entries = [];
         Counter counter = new();
 
@@ -339,7 +339,7 @@ public class ShellModuleComponentTests
     [Fact]
     public void A_policy_that_throws_closes_the_page()
     {
-        using KafkaStudioHarness harness = new(static o => o.ClusterAuthorizationPolicy = "kafka-topics");
+        using KafkaHarness harness = new(static o => o.ClusterAuthorizationPolicy = "kafka-topics");
         Counter counter = new();
 
         // The state loads the entries through the same policy, so make the first question fail by emptying the entries under a policy that throws.
@@ -356,7 +356,7 @@ public class ShellModuleComponentTests
     [Fact]
     public async Task The_disabled_notice_is_one_neutral_sentence_whatever_turned_the_capability_off()
     {
-        using KafkaStudioHarness harness = new();
+        using KafkaHarness harness = new();
         await harness.Context.ReadyAsync();
 
         IRenderedComponent<KafkaCapabilityDisabled> off = harness.Context.Render<KafkaCapabilityDisabled>(
@@ -385,7 +385,7 @@ public class ShellModuleComponentTests
 
         foreach (Type page in pages)
         {
-            using KafkaStudioHarness harness = new();
+            using KafkaHarness harness = new();
             await harness.Context.ReadyAsync();
 
             IRenderedComponent<IComponent> rendered = harness.Context.Render<DynamicComponent>(p => p.Add(x => x.Type, page));
@@ -399,7 +399,7 @@ public class ShellModuleComponentTests
     [Fact]
     public async Task The_home_opens_the_first_cluster_the_visitor_may_see()
     {
-        using KafkaStudioHarness harness = new(static o => o.ClusterAuthorizationPolicy = "kafka-topics", KafkaStudioHarness.Primary, KafkaStudioHarness.Secondary);
+        using KafkaHarness harness = new(static o => o.ClusterAuthorizationPolicy = "kafka-topics", KafkaHarness.Primary, KafkaHarness.Secondary);
         harness.Authorization.AllowKafka(static r => r.Cluster != "primary");
         await harness.Context.ReadyAsync();
 

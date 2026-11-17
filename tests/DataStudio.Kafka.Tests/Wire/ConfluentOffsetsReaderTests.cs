@@ -24,7 +24,7 @@ public class ConfluentOffsetsReaderTests
         options.AddCluster("main", new ClientConfig { BootstrapServers = "localhost:1" });
         KafkaClusterDefinition cluster = new KafkaClusterRegistry(options).Get("main");
         CapturingLoggerProvider logs = new();
-        ConfluentClientEvents events = new(new KStudioLoggers(logs.CreateFactory()), new KafkaLogOnce(TimeProvider.System), TimeProvider.System);
+        ConfluentClientEvents events = new(new KafkaEngineLoggers(logs.CreateFactory()), new KafkaLogOnce(TimeProvider.System), TimeProvider.System);
 
         return (cluster, events, KafkaEngineSnapshot.Take(options));
     }
@@ -81,7 +81,7 @@ public class ConfluentOffsetsReaderTests
         }));
         KafkaClusterDefinition cluster = new KafkaClusterRegistry(options).Get("prod");
         CapturingLoggerProvider logs = new();
-        ConfluentClientEvents events = new(new KStudioLoggers(logs.CreateFactory()), new KafkaLogOnce(TimeProvider.System), TimeProvider.System);
+        ConfluentClientEvents events = new(new KafkaEngineLoggers(logs.CreateFactory()), new KafkaLogOnce(TimeProvider.System), TimeProvider.System);
 
         using ConfluentOffsetsReader reader = new(cluster, KafkaEngineSnapshot.Take(options).GroupIdPrefix, events);
         called.Task.IsCompleted.Should().BeFalse("the hook runs when the queue is served, on no thread of its own");
@@ -99,7 +99,7 @@ public class ConfluentOffsetsReaderTests
         services.AddLogging();
         KafkaEngineOptions options = new();
         options.AddCluster("prod", new ClientConfig { BootstrapServers = "unreachable.invalid:9092" });
-        KStudioEngineRegistration.Add(services, _ => options, _ => new TestEngineSettings(TimeSpan.FromSeconds(5)));
+        KafkaEngineRegistration.Add(services, _ => options, _ => new TestEngineSettings(TimeSpan.FromSeconds(5)));
 
         await using ServiceProvider provider = services.BuildServiceProvider(validateScopes: true);
 

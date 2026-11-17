@@ -12,7 +12,7 @@ public class JsonViewHostParametersTests
 {
     private const string Sample = """{"customer":{"id":"customer-042","email":"a@example.com"},"total":12.5}""";
 
-    private static IRenderedComponent<JsonView> Render(PostgresStudioComponentContext context, Action<ComponentParameterCollectionBuilder<JsonView>>? configure = null) =>
+    private static IRenderedComponent<JsonView> Render(PostgresComponentContext context, Action<ComponentParameterCollectionBuilder<JsonView>>? configure = null) =>
         context.Render<JsonView>(p =>
         {
             p.Add(x => x.Json, Sample);
@@ -25,7 +25,7 @@ public class JsonViewHostParametersTests
     [Fact]
     public void Download_is_hidden_when_not_allowed()
     {
-        using PostgresStudioComponentContext context = new();
+        using PostgresComponentContext context = new();
 
         Render(context).Markup.Should().Contain("Download", "by default a document can be downloaded, as before");
         IRenderedComponent<JsonView> hidden = Render(context, p => p.Add(x => x.AllowDownload, false));
@@ -36,7 +36,7 @@ public class JsonViewHostParametersTests
     [Fact]
     public void Postgres_items_are_hidden_when_asked()
     {
-        using PostgresStudioComponentContext context = new();
+        using PostgresComponentContext context = new();
 
         IRenderedComponent<JsonView> standard = Render(context);
         OpenMenuOfId(standard);
@@ -51,7 +51,7 @@ public class JsonViewHostParametersTests
     [Fact]
     public void Copy_as_search_appears_only_when_the_delegate_answers()
     {
-        using PostgresStudioComponentContext context = new();
+        using PostgresComponentContext context = new();
         List<string> asked = [];
 
         string? Answer(IReadOnlyList<(string? Key, int Index)> segments, string valueJson)

@@ -135,7 +135,7 @@ public sealed class ConnectionChecksSentinelTests
         HealthSweep sweep = new("default", "db", HealthSweepKind.Regular, At, TimeSpan.Zero, results);
         HealthExportSummary summary = HealthExportSummary.From(At, [sweep]);
 
-        string exported = summary.Describe(TimeSpan.FromSeconds(60), DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance) + "\n" + JsonSerializer.Serialize(summary.ToData(), Json) + "\n" + JsonSerializer.Serialize(summary, Json);
+        string exported = summary.Describe(TimeSpan.FromSeconds(60), DataStudio.Postgres.Services.Postgres.PostgresText.Instance) + "\n" + JsonSerializer.Serialize(summary.ToData(), Json) + "\n" + JsonSerializer.Serialize(summary, Json);
 
         foreach (string sentinel in Withheld)
         {

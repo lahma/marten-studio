@@ -31,16 +31,16 @@ public class PostgresServerReaderTests
             Root = services.BuildServiceProvider();
 
             PostgresOptions options = new() { HealthInterval = TimeSpan.FromSeconds(60) };
-            IStudioSettings settings = PostgresStudioSettings.Of(options);
-            PostgresStudioSourceProvider provider = new(
+            IStudioSettings settings = PostgresSettings.Of(options);
+            PostgresSourceProvider provider = new(
                 Microsoft.Extensions.Options.Options.Create(options),
                 new PostgresSourceRegistry(services, Root, Time),
-                NullLogger<PostgresStudioSourceProvider>.Instance);
+                NullLogger<PostgresSourceProvider>.Instance);
             StudioAuthorization authorization = new(
-                settings, PostgresStudioDescriptor.Instance, new TestSourceAuthorizationService(), new TestAuthenticationStateProvider());
+                settings, PostgresDescriptor.Instance, new TestSourceAuthorizationService(), new TestAuthenticationStateProvider());
 
             Reader = new PostgresServerReader(
-                new StudioSourceResolver(provider, authorization, PostgresStudioDescriptor.Instance),
+                new StudioSourceResolver(provider, authorization, PostgresDescriptor.Instance),
                 settings,
                 NullLogger<PostgresServerReader>.Instance,
                 throttle: null,

@@ -29,10 +29,10 @@ public class StudioLayoutModulePageTests
             Task.FromResult(FindContribution.NotApplicable);
     }
 
-    private static KafkaStudioHarness Harness(Action<KafkaOptions>? configure = null) =>
-        new(configure, extra: static services => services.AddSingleton<IFindContributor>(new AnyFind()), clusters: [KafkaStudioHarness.Primary, KafkaStudioHarness.Secondary]);
+    private static KafkaHarness Harness(Action<KafkaOptions>? configure = null) =>
+        new(configure, extra: static services => services.AddSingleton<IFindContributor>(new AnyFind()), clusters: [KafkaHarness.Primary, KafkaHarness.Secondary]);
 
-    private static async Task<IRenderedComponent<StudioRoutes>> RenderAtAsync(KafkaStudioHarness harness, string path)
+    private static async Task<IRenderedComponent<StudioRoutes>> RenderAtAsync(KafkaHarness harness, string path)
     {
         await harness.Context.ReadyAsync();
         harness.Context.Navigate(path);
@@ -51,7 +51,7 @@ public class StudioLayoutModulePageTests
     [Fact]
     public async Task A_kafka_page_draws_the_cluster_selector_and_no_find_box()
     {
-        using KafkaStudioHarness harness = Harness();
+        using KafkaHarness harness = Harness();
 
         IRenderedComponent<StudioRoutes> layout = await RenderAtAsync(harness, "/studio/kafka");
 
@@ -64,7 +64,7 @@ public class StudioLayoutModulePageTests
     [Fact]
     public async Task A_host_page_still_draws_the_find_box_and_not_the_cluster_selector()
     {
-        using KafkaStudioHarness harness = Harness();
+        using KafkaHarness harness = Harness();
 
         IRenderedComponent<StudioRoutes> layout = await RenderAtAsync(harness, "/studio/postgres/health");
 
@@ -75,7 +75,7 @@ public class StudioLayoutModulePageTests
     [Fact]
     public async Task A_kafka_page_renders_under_a_store_policy_that_refuses_every_store()
     {
-        using KafkaStudioHarness harness = Harness();
+        using KafkaHarness harness = Harness();
         await harness.Context.ReadyAsync();
         harness.Context.Options.SourceAuthorizationPolicy = "host-source";
         harness.Authorization.AllowHost(static _ => false);
@@ -96,7 +96,7 @@ public class StudioLayoutModulePageTests
     [Fact]
     public async Task A_module_with_no_scope_gate_draws_its_page_body_ungated()
     {
-        using KafkaStudioHarness harness = Harness();
+        using KafkaHarness harness = Harness();
         harness.Descriptor.Modules.Single(static x => x.Key == "kafka").ScopeGate.Should().BeNull("the premise: Data Studio's module has no gate");
 
         DatabaseScopeAccess access = harness.Context.Services.GetRequiredService<DatabaseScopeAccess>();
@@ -112,7 +112,7 @@ public class StudioLayoutModulePageTests
     [Fact]
     public async Task A_host_page_with_the_same_policy_still_shows_ScopeNotAuthorized()
     {
-        using KafkaStudioHarness harness = Harness();
+        using KafkaHarness harness = Harness();
         await harness.Context.ReadyAsync();
         harness.Context.Options.SourceAuthorizationPolicy = "host-source";
         harness.Authorization.AllowHost(static _ => false);
@@ -126,7 +126,7 @@ public class StudioLayoutModulePageTests
     [Fact]
     public async Task A_kafka_page_never_writes_store_db_or_tenant_into_the_address()
     {
-        using KafkaStudioHarness harness = Harness();
+        using KafkaHarness harness = Harness();
 
         IRenderedComponent<StudioRoutes> layout = await RenderAtAsync(harness, "/studio/kafka");
 
@@ -137,7 +137,7 @@ public class StudioLayoutModulePageTests
     [Fact]
     public async Task An_address_naming_a_host_scope_on_a_kafka_page_does_not_move_it()
     {
-        using KafkaStudioHarness harness = Harness();
+        using KafkaHarness harness = Harness();
         await harness.Context.ReadyAsync();
         StudioScope? before = harness.Context.State.ActiveScope;
 
@@ -149,7 +149,7 @@ public class StudioLayoutModulePageTests
     [Fact]
     public async Task Leaving_a_kafka_page_restores_the_host_scope_in_the_address_and_asks_the_gate_again()
     {
-        using KafkaStudioHarness harness = Harness();
+        using KafkaHarness harness = Harness();
         await harness.Context.ReadyAsync();
         harness.Context.Options.SourceAuthorizationPolicy = "host-source";
         IRenderedComponent<StudioRoutes> layout = await RenderAtAsync(harness, "/studio/kafka");
@@ -167,7 +167,7 @@ public class StudioLayoutModulePageTests
     [Fact]
     public async Task A_click_from_a_host_page_to_a_kafka_page_does_not_move_the_host_scope()
     {
-        using KafkaStudioHarness harness = Harness();
+        using KafkaHarness harness = Harness();
         IRenderedComponent<StudioRoutes> layout = await RenderAtAsync(harness, "/studio/postgres/health");
         StudioScope? before = harness.Context.State.ActiveScope;
 

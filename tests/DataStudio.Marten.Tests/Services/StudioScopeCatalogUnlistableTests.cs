@@ -79,7 +79,7 @@ public class StudioScopeCatalogUnlistableTests
         state.AvailableStores.Select(static x => x.Key).Should().Equal([nameof(IUnlistableCatalogStore)], "only a listable store is selectable");
         state.UnlistableStores.Select(static x => x.Key).Should().Equal(MartenStoreRegistry.DefaultStoreKey);
         state.KnownStoreCount.Should().Be(2);
-        string? condition = MartenStudioDescriptor.Instance.Navigation(MartenSpine.Settings()).SelectMany(static x => x.Items).Single(static x => x.Label == "Stores")
+        string? condition = MartenDescriptor.Instance.Navigation(MartenSpine.Settings()).SelectMany(static x => x.Items).Single(static x => x.Label == "Stores")
             .ShownWhen;
         condition.Should().Be(DatabaseRailConditions.SeveralSources);
         DatabaseRailConditions.IsShown(condition, state).Should().BeTrue("the Stores page is where a store that could not be listed is explained");

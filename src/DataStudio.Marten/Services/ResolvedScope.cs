@@ -31,7 +31,7 @@ internal sealed record ResolvedScope(
     MartenStoreRegistration Registration,
     IDocumentStore Store,
     IMartenDatabase Database)
-    : ResolvedSource(Scope, Registration.AsSource(), MartenStudioDatabase.Of(Database))
+    : ResolvedSource(Scope, Registration.AsSource(), MartenSourceDatabase.Of(Database))
 {
     /// <summary>The store's registration; get-only, because the base record's <c>Source</c> is built from it.</summary>
     public MartenStoreRegistration Registration { get; } = Registration;

@@ -3,7 +3,7 @@ namespace DataStudio.Kafka.Tests.Support;
 /// <summary>
 /// The bound on a wait for a gate a test holds shut: this suite's copy of <c>DataStudio.Marten.Tests.Support.TestBounds</c>. xunit has no timeout of
 /// its own, so a gate nobody opens is a test host that sits idle until a CI job's cancellation; awaiting it through <c>Bounded()</c> turns that
-/// into a <see cref="TimeoutException" /> on the test that held it. <c>KStudioNoUnboundedGateAwaitTests</c> scans this suite for an await that
+/// into a <see cref="TimeoutException" /> on the test that held it. <c>KafkaNoUnboundedGateAwaitTests</c> scans this suite for an await that
 /// does not say so.
 /// </summary>
 internal static class TestBounds

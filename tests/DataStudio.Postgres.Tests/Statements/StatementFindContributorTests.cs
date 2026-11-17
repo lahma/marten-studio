@@ -50,8 +50,8 @@ public class StatementFindContributorTests
 
     private static StatementFindContributor Contributor(FakeStatements statements) => new(
         statements,
-        PostgresStudioSettings.Of(Microsoft.Extensions.Options.Options.Create(new PostgresOptions())),
-        PostgresStudioDescriptor.Instance);
+        PostgresSettings.Of(Microsoft.Extensions.Options.Options.Create(new PostgresOptions())),
+        PostgresDescriptor.Instance);
 
     private static StatementsView Read(params StatementRowView[] rows) => new() { State = StatementsState.Read, Rows = rows };
 

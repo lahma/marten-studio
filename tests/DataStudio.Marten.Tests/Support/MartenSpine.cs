@@ -22,7 +22,7 @@ namespace DataStudio.Marten.Tests.Support;
 internal static class MartenSpine
 {
     /// <summary>MartenStudio's descriptor.</summary>
-    public static StudioDescriptor Descriptor => MartenStudioDescriptor.Instance;
+    public static StudioDescriptor Descriptor => MartenDescriptor.Instance;
 
     /// <summary>MartenStudio's route table.</summary>
     public static StudioRouteTable Routes => RouteTable.Value;
@@ -30,10 +30,10 @@ internal static class MartenSpine
     private static readonly Lazy<StudioRouteTable> RouteTable = new(static () => new StudioRouteTable([.. Descriptor.PageAssemblies, StudioShellDescriptor.ShellPages]));
 
     /// <summary>The settings over <paramref name="options" />, or over the defaults.</summary>
-    public static MartenStudioSettings Settings(MartenOptions? options = null) => MartenStudioSettings.Of(options ?? new MartenOptions());
+    public static MartenSettings Settings(MartenOptions? options = null) => MartenSettings.Of(options ?? new MartenOptions());
 
     /// <summary>The settings over <paramref name="options" />.</summary>
-    public static MartenStudioSettings Settings(IOptions<MartenOptions> options) => MartenStudioSettings.Of(options);
+    public static MartenSettings Settings(IOptions<MartenOptions> options) => MartenSettings.Of(options);
 
     /// <summary>The scope and write policies, over <paramref name="options" />.</summary>
     public static StudioAuthorization Authorization(
@@ -56,7 +56,7 @@ internal static class MartenSpine
     /// MartenStudio's source provider and the shared catalog and resolvers over it, built the way the container builds
     /// them for one circuit.
     /// </summary>
-    public static (MartenStudioSourceProvider Sources, StudioScopeCatalog Catalog, StudioScopeResolver Resolver) Scope(
+    public static (MartenSourceProvider Sources, StudioScopeCatalog Catalog, StudioScopeResolver Resolver) Scope(
         IOptions<MartenOptions> options,
         MartenStoreRegistry registry,
         StudioAuthorization authorization,
@@ -67,12 +67,12 @@ internal static class MartenSpine
     {
         loggers ??= NullLoggerFactory.Instance;
 
-        MartenStudioSourceProvider sources = new(
+        MartenSourceProvider sources = new(
             options,
             registry,
             tenants,
             provider,
-            loggers.CreateLogger<MartenStudioSourceProvider>(),
+            loggers.CreateLogger<MartenSourceProvider>(),
             throttle);
 
         StudioScopeCatalog catalog = new(sources, authorization, loggers.CreateLogger<StudioScopeCatalog>(), throttle);

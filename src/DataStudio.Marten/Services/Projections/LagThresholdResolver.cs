@@ -98,7 +98,7 @@ internal static class LagThresholdResolver
 
     /// <summary>The options a check reads off the studio's settings, or none when the settings are not Data Studio's.</summary>
     public static IReadOnlyDictionary<string, ProjectionLagThreshold> From(object? settings) =>
-        settings is MartenStudioSettings marten ? marten.ProjectionThresholds : None;
+        settings is MartenSettings marten ? marten.ProjectionThresholds : None;
 
     /// <summary>
     /// Where the thresholds that apply to each projection come from, for the Projections page's disclosure: only the

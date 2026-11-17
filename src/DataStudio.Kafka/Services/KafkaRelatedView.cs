@@ -127,13 +127,13 @@ internal static class KafkaRelatedView
 
             if (!lane.IsScanned)
             {
-                state = KafkaStudioText.RelatedNothingToCompare(lane.Query.Notes);
+                state = KafkaText.RelatedNothingToCompare(lane.Query.Notes);
                 rank = 2;
             }
             else if (refusal is not null)
             {
                 // A topic that does not exist says so once, on the page's own "Not found" line; the lane only says "not found" (#77).
-                state = KafkaStudioText.RelatedNotReadable(topicRefusal is { Missing: true } ? "not found" : refusal);
+                state = KafkaText.RelatedNotReadable(topicRefusal is { Missing: true } ? "not found" : refusal);
                 rank = 3;
             }
             else

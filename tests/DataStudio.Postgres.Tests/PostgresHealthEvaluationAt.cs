@@ -26,6 +26,6 @@ internal static class PostgresHealthEvaluationAt
             IStudioRuntime? runtime = null,
             HealthHistoryView? history = null,
             StudioText? text = null) =>
-            new(now, runtime ?? NoStudioRuntime.Instance, history ?? HealthHistoryView.Empty) { Text = text ?? PostgresStudioText.Instance };
+            new(now, runtime ?? NoStudioRuntime.Instance, history ?? HealthHistoryView.Empty) { Text = text ?? PostgresText.Instance };
     }
 }

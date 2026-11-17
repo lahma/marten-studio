@@ -76,7 +76,7 @@ internal static class CheckWordCases
 
     /// <summary>An evaluation in Postgres Studio's words, with its table remedies, as its sweep hands one over.</summary>
     private static HealthEvaluation Words(HealthHistoryView? history = null, StatisticsWindow? statistics = null) =>
-        HealthEvaluation.At(At, history: history, text: PostgresStudioText.Instance) with
+        HealthEvaluation.At(At, history: history, text: PostgresText.Instance) with
         {
             TableRemedies = PostgresHealthTableRemedies.Instance,
             Statistics = statistics,
@@ -397,7 +397,7 @@ internal static class CheckWordCases
     // Configuration: K05-K07, in Postgres Studio's options.
 
     private static StudioLintFacts Options(bool readOnly = false, StudioCapability[]? on = null, bool consoleRole = false, bool everySchema = false) =>
-        new(readOnly, on ?? [], consoleRole, everySchema, PostgresStudioText.OptionsTypeName, "AddPostgres", "PostgresCapabilities", PostgresStudioText.OptionsTypeName + ".ReadOnly");
+        new(readOnly, on ?? [], consoleRole, everySchema, PostgresText.OptionsTypeName, "AddPostgres", "PostgresCapabilities", PostgresText.OptionsTypeName + ".ReadOnly");
 
     private static IEnumerable<CheckWordCase> Configuration()
     {

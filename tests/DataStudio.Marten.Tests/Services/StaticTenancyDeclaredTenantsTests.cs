@@ -316,7 +316,7 @@ public class StaticTenancyDeclaredTenantsTests
 
         private Harness(
             ServiceProvider provider,
-            MartenStudioSourceProvider sources,
+            MartenSourceProvider sources,
             StudioScopeCatalog catalog,
             TestStoreAuthorizationService policies,
             string[] identities)
@@ -328,7 +328,7 @@ public class StaticTenancyDeclaredTenantsTests
             Everything = identities;
         }
 
-        public MartenStudioSourceProvider Sources { get; }
+        public MartenSourceProvider Sources { get; }
 
         public StudioScopeCatalog Catalog { get; }
 

@@ -432,10 +432,10 @@ public class DatabaseGateRedactionTests
     public void A_gate_shut_by_the_store_policy_says_so()
     {
         DatabaseGate gate = new(
-            StoreSchemas(), Live, ["*"], true, false, false, Classifier(), DataStudio.Marten.Services.MartenStudioText.Instance, null, DatabaseRefusal.StorePolicy);
+            StoreSchemas(), Live, ["*"], true, false, false, Classifier(), DataStudio.Marten.Services.MartenText.Instance, null, DatabaseRefusal.StorePolicy);
 
         gate.State.Refusal.Should().Be(DatabaseRefusal.StorePolicy);
-        gate.State.Denial.Should().Be(DataStudio.Marten.Services.MartenStudioText.Instance.BrowseStorePolicyDenial);
+        gate.State.Denial.Should().Be(DataStudio.Marten.Services.MartenText.Instance.BrowseStorePolicyDenial);
         gate.DataAccess("quartz").Refusal.Should().Be(DatabaseRefusal.StorePolicy);
     }
 
@@ -447,7 +447,7 @@ public class DatabaseGateRedactionTests
         DatabaseObjectClassifier? classifier = null,
         string? storeKey = null,
         IReadOnlyDictionary<string, DatabaseStoreAccess>? otherStores = null) =>
-        new(StoreSchemas(), Live, entries, capability, false, capability ? true : null, classifier ?? Classifier(), DataStudio.Marten.Services.MartenStudioText.Instance, null,
+        new(StoreSchemas(), Live, entries, capability, false, capability ? true : null, classifier ?? Classifier(), DataStudio.Marten.Services.MartenText.Instance, null,
             DatabaseRefusal.WritePolicy, storeKey, otherStores);
 
     private static CatalogSnapshot Snapshot(

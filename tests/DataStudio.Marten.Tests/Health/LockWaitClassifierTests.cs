@@ -143,10 +143,10 @@ public class LockWaitClassifierTests
             new MartenStoreRegistration("default", "Default", typeof(IDocumentStore)),
             store,
             store.Storage.Database),
-        MartenStudioSettings.Of(new MartenOptions()),
+        MartenSettings.Of(new MartenOptions()),
         MartenStudioRuntime.Current,
         services,
-        new HealthSqlRunner(new HealthConnection(MartenStudioDatabase.Of(store.Storage.Database)), new ReadOnlySqlOptions(), null),
+        new HealthSqlRunner(new HealthConnection(MartenSourceDatabase.Of(store.Storage.Database)), new ReadOnlySqlOptions(), null),
         DateTimeOffset.UnixEpoch,
         new HealthSweepMemo(),
         CancellationToken.None);

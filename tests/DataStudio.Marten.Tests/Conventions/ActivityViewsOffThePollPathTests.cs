@@ -178,7 +178,7 @@ public class ActivityViewsOffThePollPathTests
         primaryCalls.Should().Be(sessionCalls, "every one of the impact reads names the primary");
         impact.Should().NotContain("ConnectionUsage.Read)", "a Read usage would be a standby when the host opts in");
 
-        service.Should().Contain("MartenStudioDatabase.CreateConnection(resolved.Database, usage)", "InSessionAsync opens the usage it is given");
+        service.Should().Contain("MartenSourceDatabase.CreateConnection(resolved.Database, usage)", "InSessionAsync opens the usage it is given");
     }
 
     /// <summary>

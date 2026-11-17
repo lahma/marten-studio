@@ -540,7 +540,7 @@ internal sealed class TenantOverviewService : ITenantOverviewService
             return;
         }
 
-        await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(database, ConnectionUsage.Read);
+        await using NpgsqlConnection connection = MartenSourceDatabase.CreateConnection(database, ConnectionUsage.Read);
         await connection.OpenStudioAsync(cancellationToken).ConfigureAwait(false);
 
         // Projections: the row's own policy only (the rows are already the picker's).
@@ -1049,7 +1049,7 @@ internal sealed class TenantOverviewService : ITenantOverviewService
 
         try
         {
-            await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(database, ConnectionUsage.Read);
+            await using NpgsqlConnection connection = MartenSourceDatabase.CreateConnection(database, ConnectionUsage.Read);
             await connection.OpenStudioAsync(cancellationToken).ConfigureAwait(false);
 
             IReadOnlyDictionary<string, DocumentBrowseQueries.TableEstimate> estimates = await DocumentBrowseQueries

@@ -32,7 +32,7 @@ public class KafkaRecordServiceTests
         result.Should().BeOfType<KafkaRecordPageResult.NotAvailable>();
         rig.BrokerCalls.Should().Be(callsBefore, "the policy refused the topic before any broker call was made for it");
         rig.Ring.Should().ContainSingle().Which.Should().Match<DataStudio.Services.StudioActionLogEntry>(
-            static x => !x.Succeeded && x.Action == "ViewRecord" && x.Message == KafkaStudioText.RefusedEntry);
+            static x => !x.Succeeded && x.Action == "ViewRecord" && x.Message == KafkaText.RefusedEntry);
         rig.Logs.Entries.Should().ContainSingle(static x => x.EventId.Id == 9603);
     }
 

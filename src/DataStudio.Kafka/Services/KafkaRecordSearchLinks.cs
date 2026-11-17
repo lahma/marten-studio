@@ -22,7 +22,7 @@ namespace DataStudio.Kafka.Services;
 internal sealed class KafkaRecordSearchLinks(IServiceProvider services) : IStudioRecordSearchLinks
 {
     /// <inheritdoc />
-    public string Label => KafkaStudioText.FindInKafka;
+    public string Label => KafkaText.FindInKafka;
 
     /// <inheritdoc />
     public string? ToSearch(StudioRecordSearchRequest request)
@@ -147,7 +147,7 @@ internal sealed class KafkaRecordSearchLinks(IServiceProvider services) : IStudi
     private void Say(Exception exception)
     {
         KafkaLogOnce? once = services.GetService<KafkaLogOnce>();
-        KStudioLoggers? loggers = services.GetService<KStudioLoggers>();
+        KafkaEngineLoggers? loggers = services.GetService<KafkaEngineLoggers>();
         string kind = exception.GetType().Name;
 
         if (loggers is null || (once is not null && !once.ShouldLog("find-link|" + kind)))
@@ -155,6 +155,6 @@ internal sealed class KafkaRecordSearchLinks(IServiceProvider services) : IStudi
             return;
         }
 
-        KStudioLog.FindLinkClustersUnreadable(loggers.Catalog, kind);
+        KafkaEngineLog.FindLinkClustersUnreadable(loggers.Catalog, kind);
     }
 }

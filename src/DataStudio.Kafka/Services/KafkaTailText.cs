@@ -53,10 +53,10 @@ internal static class KafkaTailText
         {
             KafkaTailPause.You => "you paused it",
             KafkaTailPause.TabHidden => "the tab was hidden; it resumes when you come back",
-            KafkaTailPause.Time => "it read for " + KafkaStudioText.SpanText(limits.TailPauseAfter),
+            KafkaTailPause.Time => "it read for " + KafkaText.SpanText(limits.TailPauseAfter),
             KafkaTailPause.Bytes => $"it read {KafkaDisplay.Bytes(limits.MaxBytesPerScan)} in one stretch",
             KafkaTailPause.Records => $"it read {KafkaDisplay.Count(limits.MaxRecordsPerScan, "record")} in one stretch",
-            KafkaTailPause.Allowance => KafkaStudioText.Allowance(spent) + " is spent",
+            KafkaTailPause.Allowance => KafkaText.Allowance(spent) + " is spent",
             KafkaTailPause.Unavailable => "the cluster stopped answering",
             KafkaTailPause.ConnectionLost => "the connection to this page was lost",
             _ => pause.ToString(),
@@ -78,7 +78,7 @@ internal static class KafkaTailText
         KafkaScanStopReason.Cancelled => "Stopped by you.",
         KafkaScanStopReason.Shutdown => "Stopped: the application is shutting down.",
         KafkaScanStopReason.NotAuthorized => "Nothing was read: every partition refused READ.",
-        KafkaScanStopReason.Failed => KafkaStudioText.TailFailed,
+        KafkaScanStopReason.Failed => KafkaText.TailFailed,
         _ => "The live tail stopped.",
     };
 
@@ -89,7 +89,7 @@ internal static class KafkaTailText
     {
         KafkaScanRefusal.OwnerBusy => "Another search or live tail of yours is running, in this tab or another. Stop it, or wait for it to finish.",
         KafkaScanRefusal.ProcessBusy => "Two searches or live tails are already running in this application. Try again when one has finished.",
-        _ => KafkaStudioText.Refusal(refusal, spent),
+        _ => KafkaText.Refusal(refusal, spent),
     };
 
     /// <summary>The live line: what the tail follows and what it has read.</summary>
@@ -103,7 +103,7 @@ internal static class KafkaTailText
     public static string Running(IReadOnlyList<string> topics, bool fromEnd, long records, long bytes, long matches, TimeSpan elapsed, TimeSpan pausesAfter) =>
         string.Create(
             CultureInfo.InvariantCulture,
-            $"Live: reading {string.Join(", ", topics)} {(fromEnd ? "from the end" : "on from where it paused")} · {KafkaDisplay.Count(records, "record")}, {KafkaDisplay.Bytes(bytes)} read · {KafkaDisplay.Count(matches, "match", "matches")} · {Elapsed(elapsed)}, pauses itself after {KafkaStudioText.SpanText(pausesAfter)}");
+            $"Live: reading {string.Join(", ", topics)} {(fromEnd ? "from the end" : "on from where it paused")} · {KafkaDisplay.Count(records, "record")}, {KafkaDisplay.Bytes(bytes)} read · {KafkaDisplay.Count(matches, "match", "matches")} · {Elapsed(elapsed)}, pauses itself after {KafkaText.SpanText(pausesAfter)}");
 
     /// <summary>The chip of the partitions that have reported their end and wait for the next record.</summary>
     /// <param name="partitions">How many.</param>

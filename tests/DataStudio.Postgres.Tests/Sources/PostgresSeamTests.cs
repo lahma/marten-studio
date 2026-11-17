@@ -36,7 +36,7 @@ public sealed class PostgresSeamTests : IDisposable
             options.BrowsableSchemas.Add(schema);
         }
 
-        return new PostgresDatabaseDeclarationsSource(PostgresStudioSettings.Of(options));
+        return new PostgresDatabaseDeclarationsSource(PostgresSettings.Of(options));
     }
 
     // ---- The declarations ---------------------------------------------------------------------------------------
@@ -390,7 +390,7 @@ public sealed class PostgresSeamTests : IDisposable
     public void There_is_nowhere_to_link_a_Marten_object_to()
     {
         StudioScope scope = new("default", "default", null);
-        PostgresStudioLinks links = PostgresStudioLinks.Instance;
+        PostgresLinks links = PostgresLinks.Instance;
 
         new[]
         {

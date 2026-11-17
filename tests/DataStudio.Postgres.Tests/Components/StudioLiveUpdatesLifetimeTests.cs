@@ -94,7 +94,7 @@ public class StudioLiveUpdatesLifetimeTests
     [Fact]
     public async Task Sessions_left_before_its_watch_call_answers_ends_no_circuit()
     {
-        await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
+        await using PostgresComponentContext context = await new PostgresComponentContext().ReadyAsync();
 
         var watch = context.JSInterop.Setup<bool>(Watch, static _ => true);
 

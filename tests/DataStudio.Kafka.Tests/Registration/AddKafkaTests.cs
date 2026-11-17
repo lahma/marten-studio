@@ -27,7 +27,7 @@ public class AddKafkaTests
     }
 
     private static Task Start(IServiceProvider provider) =>
-        provider.GetServices<IHostedService>().OfType<KafkaStudioStartupGuard>().Single().StartAsync(Ct);
+        provider.GetServices<IHostedService>().OfType<KafkaStartupGuard>().Single().StartAsync(Ct);
 
     [Fact]
     public void The_real_registration_resolves_every_scoped_service_a_page_injects()
@@ -147,8 +147,8 @@ public class AddKafkaTests
         services.AddDataStudio().AddKafka();
         services.AddDataStudio().AddKafka();
 
-        services.Count(static x => x.ServiceType == typeof(IStudioModule) && x.ImplementationType == typeof(DataStudio.Kafka.Services.KafkaStudioModule)).Should().Be(1);
-        services.Count(static x => x.ServiceType == typeof(IHostedService) && x.ImplementationType == typeof(KafkaStudioStartupGuard)).Should().Be(1);
+        services.Count(static x => x.ServiceType == typeof(IStudioModule) && x.ImplementationType == typeof(DataStudio.Kafka.Services.KafkaModule)).Should().Be(1);
+        services.Count(static x => x.ServiceType == typeof(IHostedService) && x.ImplementationType == typeof(KafkaStartupGuard)).Should().Be(1);
     }
 
     [Fact]
@@ -156,7 +156,7 @@ public class AddKafkaTests
     {
         using ServiceProvider provider = Build(static services => services.AddDataStudio().AddPostgres());
 
-        provider.GetRequiredService<StudioDescriptor>().Should().BeSameAs(DataStudio.Postgres.Services.Postgres.PostgresStudioDescriptor.Instance);
+        provider.GetRequiredService<StudioDescriptor>().Should().BeSameAs(DataStudio.Postgres.Services.Postgres.PostgresDescriptor.Instance);
         provider.GetRequiredService<StudioShellDescriptor>().Modules.Should().ContainSingle().Which.HomeRoute.Should().Be("postgres", "the database is the one module");
     }
 

@@ -216,7 +216,7 @@ internal sealed class DocumentShapeCheckService : IDocumentShapeCheck
         string? tenantId = resolved.TenantId;
         int commandTimeout = (int) Math.Ceiling(statementTimeout.TotalSeconds) + 5;
 
-        await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
+        await using NpgsqlConnection connection = MartenSourceDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
         await connection.OpenStudioAsync(token).ConfigureAwait(false);
 
         DocumentTableInfo table = DocumentTableInfo.FromDocumentType(documentType);

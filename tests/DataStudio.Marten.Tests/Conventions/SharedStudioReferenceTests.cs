@@ -3,7 +3,7 @@ namespace DataStudio.Marten.Tests.Conventions;
 /// <summary>
 /// The shared studio is an assembly of its own, and the reference runs one way: MartenStudio references it, never the
 /// reverse. Everything that reads "both assemblies" stands on that. The other direction - that PostgresStudio and its
-/// suite reach no Marten at all - is <c>PostgresStudioFenceTests</c>, in DataStudio.Postgres.Tests, the one project that can
+/// suite reach no Marten at all - is <c>PostgresFenceTests</c>, in DataStudio.Postgres.Tests, the one project that can
 /// check its own output folder for it.
 /// </summary>
 public class SharedStudioReferenceTests

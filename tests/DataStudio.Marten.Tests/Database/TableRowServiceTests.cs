@@ -205,13 +205,13 @@ public class TableRowServiceTests
         TableRowError error = TableRowService.Describe(
             Postgres("55000", "materialized view \"monthly_order_totals\" has not been populated"),
             TableRowTestData.Relation("m"),
-            MartenStudioSettings.Of(new MartenOptions()));
+            MartenSettings.Of(new MartenOptions()));
 
         error.SqlState.Should().Be("55000");
         error.Sentence.Should().Be("This materialized view has never been refreshed.");
         error.PostgresMessage.Should().Contain("has not been populated");
 
-        TableRowService.Describe(Postgres("55000", "x"), TableRowTestData.Relation("r"), MartenStudioSettings.Of(new MartenOptions()))
+        TableRowService.Describe(Postgres("55000", "x"), TableRowTestData.Relation("r"), MartenSettings.Of(new MartenOptions()))
             .Sentence.Should().NotContain("materialized view");
     }
 
@@ -220,10 +220,10 @@ public class TableRowServiceTests
     {
         var options = new MartenOptions { SqlConsoleRole = "studio_reader" };
 
-        TableRowService.Describe(Postgres("42501", "permission denied for table departments"), TableRowTestData.Relation(), MartenStudioSettings.Of(options))
+        TableRowService.Describe(Postgres("42501", "permission denied for table departments"), TableRowTestData.Relation(), MartenSettings.Of(options))
             .Sentence.Should().Contain("'studio_reader'").And.Contain("MartenOptions.SqlConsoleRole");
 
-        TableRowService.Describe(Postgres("42501", "permission denied"), TableRowTestData.Relation(), MartenStudioSettings.Of(new MartenOptions()))
+        TableRowService.Describe(Postgres("42501", "permission denied"), TableRowTestData.Relation(), MartenSettings.Of(new MartenOptions()))
             .Sentence.Should().Contain("store's Postgres role").And.NotContain("SqlConsoleRole");
     }
 
@@ -232,10 +232,10 @@ public class TableRowServiceTests
     {
         var options = new MartenOptions { QueryTimeout = TimeSpan.FromSeconds(12) };
 
-        TableRowService.Describe(Postgres("57014", "canceling statement due to statement timeout"), TableRowTestData.Relation(), MartenStudioSettings.Of(options))
+        TableRowService.Describe(Postgres("57014", "canceling statement due to statement timeout"), TableRowTestData.Relation(), MartenSettings.Of(options))
             .Sentence.Should().Contain("MartenOptions.QueryTimeout (12 s)");
 
-        TableRowService.Describe(Postgres("57014", "canceling"), TableRowTestData.Relation("v"), MartenStudioSettings.Of(options))
+        TableRowService.Describe(Postgres("57014", "canceling"), TableRowTestData.Relation("v"), MartenSettings.Of(options))
             .Sentence.Should().Contain("A view runs its whole query for every page.");
     }
 
@@ -245,20 +245,20 @@ public class TableRowServiceTests
         TableRowService.Describe(
                 Postgres("42704", "unrecognized configuration parameter \"app.tenant\""),
                 TableRowTestData.Relation(rowSecurity: true),
-                MartenStudioSettings.Of(new MartenOptions()))
+                MartenSettings.Of(new MartenOptions()))
             .Sentence.Should().Contain("Row-level security is on");
 
-        TableRowService.Describe(Postgres("42704", "x"), TableRowTestData.Relation(), MartenStudioSettings.Of(new MartenOptions()))
+        TableRowService.Describe(Postgres("42704", "x"), TableRowTestData.Relation(), MartenSettings.Of(new MartenOptions()))
             .Sentence.Should().NotContain("Row-level security");
     }
 
     [Fact]
     public void A_value_that_does_not_fit_and_a_lost_connection_are_values_too()
     {
-        TableRowService.Describe(Postgres("22P02", "invalid input syntax for type integer: \"abc\""), TableRowTestData.Relation(), MartenStudioSettings.Of(new MartenOptions()))
+        TableRowService.Describe(Postgres("22P02", "invalid input syntax for type integer: \"abc\""), TableRowTestData.Relation(), MartenSettings.Of(new MartenOptions()))
             .Sentence.Should().Be("A filter or key value does not fit its column's type.", "the sentence never repeats the value");
 
-        TableRowError lost = TableRowService.Describe(new NpgsqlException("Exception while reading from stream"), null, MartenStudioSettings.Of(new MartenOptions()));
+        TableRowError lost = TableRowService.Describe(new NpgsqlException("Exception while reading from stream"), null, MartenSettings.Of(new MartenOptions()));
         lost.SqlState.Should().BeEmpty();
         lost.Sentence.Should().Be("The database could not be reached.");
     }
@@ -273,14 +273,14 @@ public class TableRowServiceTests
     {
         var statement = new NpgsqlException("Exception while reading from stream", new TimeoutException());
 
-        TableRowService.Describe(statement, TableRowTestData.Relation(), MartenStudioSettings.Of(new MartenOptions()))
+        TableRowService.Describe(statement, TableRowTestData.Relation(), MartenSettings.Of(new MartenOptions()))
             .Sentence.Should().Be("The read timed out before Postgres answered.");
         TableRowService.IsExpected(string.Empty, statement).Should().BeTrue();
 
         var exhausted = new NpgsqlException("The connection pool has been exhausted", new TimeoutException());
         DataStudio.Postgres.Services.PostgresFailure.MarkAsConnectionFailure(exhausted);
 
-        TableRowService.Describe(exhausted, TableRowTestData.Relation(), MartenStudioSettings.Of(new MartenOptions()))
+        TableRowService.Describe(exhausted, TableRowTestData.Relation(), MartenSettings.Of(new MartenOptions()))
             .Sentence.Should().Be("The database could not be reached.");
         TableRowService.IsExpected(string.Empty, exhausted).Should().BeFalse("an operator needs to see a pool that ran dry");
     }
@@ -353,19 +353,19 @@ public class TableRowServiceTests
         RowFilterVerdict redSort = new() { SortLevel = IndexVerdictLevel.Red };
         RowFilterVerdict green = new();
 
-        string? withheld = TableRowService.ShouldWithhold(TableRowTestData.Relation(estimatedRows: 2_000_000), redFilter, 100_000, DataStudio.Marten.Services.MartenStudioText.Instance);
+        string? withheld = TableRowService.ShouldWithhold(TableRowTestData.Relation(estimatedRows: 2_000_000), redFilter, 100_000, DataStudio.Marten.Services.MartenText.Instance);
 
         withheld.Should().Contain("MartenOptions.ExactCountThreshold").And.Contain("2,000,000").And.Contain("Run anyway");
-        TableRowService.ShouldWithhold(TableRowTestData.Relation(estimatedRows: 2_000_000), redSort, 100_000, DataStudio.Marten.Services.MartenStudioText.Instance).Should().Contain("the sort");
-        TableRowService.ShouldWithhold(TableRowTestData.Relation(estimatedRows: 2_000_000), green, 100_000, DataStudio.Marten.Services.MartenStudioText.Instance).Should().BeNull();
-        TableRowService.ShouldWithhold(TableRowTestData.Relation(estimatedRows: 99_999), redFilter, 100_000, DataStudio.Marten.Services.MartenStudioText.Instance).Should().BeNull();
+        TableRowService.ShouldWithhold(TableRowTestData.Relation(estimatedRows: 2_000_000), redSort, 100_000, DataStudio.Marten.Services.MartenText.Instance).Should().Contain("the sort");
+        TableRowService.ShouldWithhold(TableRowTestData.Relation(estimatedRows: 2_000_000), green, 100_000, DataStudio.Marten.Services.MartenText.Instance).Should().BeNull();
+        TableRowService.ShouldWithhold(TableRowTestData.Relation(estimatedRows: 99_999), redFilter, 100_000, DataStudio.Marten.Services.MartenText.Instance).Should().BeNull();
 
         TableRowService.ShouldWithhold(
-                TableRowTestData.Relation(estimatedRows: null, sizeBytes: (CountEstimator.MaxSpeculativePages + 1) * 8192L), redFilter, 100_000, DataStudio.Marten.Services.MartenStudioText.Instance)
+                TableRowTestData.Relation(estimatedRows: null, sizeBytes: (CountEstimator.MaxSpeculativePages + 1) * 8192L), redFilter, 100_000, DataStudio.Marten.Services.MartenText.Instance)
             .Should().Contain("never analysed");
-        TableRowService.ShouldWithhold(TableRowTestData.Relation(estimatedRows: null, sizeBytes: 8192), redFilter, 100_000, DataStudio.Marten.Services.MartenStudioText.Instance)
+        TableRowService.ShouldWithhold(TableRowTestData.Relation(estimatedRows: null, sizeBytes: 8192), redFilter, 100_000, DataStudio.Marten.Services.MartenText.Instance)
             .Should().BeNull();
-        TableRowService.ShouldWithhold(TableRowTestData.Relation("v", estimatedRows: null, sizeBytes: 0), redFilter, 100_000, DataStudio.Marten.Services.MartenStudioText.Instance)
+        TableRowService.ShouldWithhold(TableRowTestData.Relation("v", estimatedRows: null, sizeBytes: 0), redFilter, 100_000, DataStudio.Marten.Services.MartenText.Instance)
             .Should().BeNull("a view has no estimate, and each of its pages is bounded by the timeout");
     }
 
@@ -466,18 +466,18 @@ public class TableRowServiceTests
             TableRowTestData.Relation(estimatedRows: 5_000_000, schema: "legacy", name: "events"),
             TableRowTestData.Index("events_other", "created_on"));
 
-        string? reason = TableRowService.UnindexedInboundCount(large, ["order_id"], 100_000, DataStudio.Marten.Services.MartenStudioText.Instance);
+        string? reason = TableRowService.UnindexedInboundCount(large, ["order_id"], 100_000, DataStudio.Marten.Services.MartenText.Instance);
 
         reason.Should().Contain("legacy.events").And.Contain("5,000,000").And.Contain("ExactCountThreshold").And.Contain("order_id");
 
         TableRowService.UnindexedInboundCount(
                 TableRowTestData.Detail(TableRowTestData.Relation(estimatedRows: 5_000_000), TableRowTestData.Index("by_order", "order_id", "line")),
-                ["order_id"], 100_000, DataStudio.Marten.Services.MartenStudioText.Instance)
+                ["order_id"], 100_000, DataStudio.Marten.Services.MartenText.Instance)
             .Should().BeNull("an index leading with the key finds the pointing rows");
 
         TableRowService.UnindexedInboundCount(
                 TableRowTestData.Detail(TableRowTestData.Relation(estimatedRows: 5_000_000), TableRowTestData.Index("by_line", "line", "order_id")),
-                ["order_id"], 100_000, DataStudio.Marten.Services.MartenStudioText.Instance)
+                ["order_id"], 100_000, DataStudio.Marten.Services.MartenText.Instance)
             .Should().NotBeNull("an index the key is only inside does not lead with it");
 
         TableRowService.UnindexedInboundCount(
@@ -485,15 +485,15 @@ public class TableRowServiceTests
                     TableRowTestData.Relation(estimatedRows: 5_000_000),
                     new CatalogIndex("partial", "create index partial", false, false, true, true, false, ["order_id"]),
                     new CatalogIndex("broken", "create index broken", false, false, false, false, false, ["order_id"])),
-                ["order_id"], 100_000, DataStudio.Marten.Services.MartenStudioText.Instance)
+                ["order_id"], 100_000, DataStudio.Marten.Services.MartenText.Instance)
             .Should().NotBeNull("a partial index serves some rows and an invalid one none");
 
-        TableRowService.UnindexedInboundCount(TableRowTestData.Detail(TableRowTestData.Relation(estimatedRows: 99_999)), ["order_id"], 100_000, DataStudio.Marten.Services.MartenStudioText.Instance)
+        TableRowService.UnindexedInboundCount(TableRowTestData.Detail(TableRowTestData.Relation(estimatedRows: 99_999)), ["order_id"], 100_000, DataStudio.Marten.Services.MartenText.Instance)
             .Should().BeNull("a small table is counted, index or not");
 
         TableRowService.UnindexedInboundCount(
                 TableRowTestData.Detail(TableRowTestData.Relation(estimatedRows: null, sizeBytes: (CountEstimator.MaxSpeculativePages + 1) * 8192L)),
-                ["order_id"], 100_000, DataStudio.Marten.Services.MartenStudioText.Instance)
+                ["order_id"], 100_000, DataStudio.Marten.Services.MartenText.Instance)
             .Should().Contain("never analysed");
     }
 

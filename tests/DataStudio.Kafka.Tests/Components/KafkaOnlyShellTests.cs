@@ -18,19 +18,19 @@ namespace DataStudio.Kafka.Tests.Components;
 /// </summary>
 public class KafkaOnlyShellTests
 {
-    private static KafkaStudioHarness Harness() => new(
+    private static KafkaHarness Harness() => new(
         configure: null,
         extra: static services =>
         {
             services.RemoveAll<IStudioModule>();
-            services.AddSingleton<IStudioModule, DataStudio.Kafka.Services.KafkaStudioModule>();
+            services.AddSingleton<IStudioModule, DataStudio.Kafka.Services.KafkaModule>();
         },
-        clusters: [KafkaStudioHarness.Primary]);
+        clusters: [KafkaHarness.Primary]);
 
     [Fact]
     public async Task A_kafka_only_shell_has_the_one_module_and_its_rail_is_Kafkas_then_the_shells_own()
     {
-        using KafkaStudioHarness harness = Harness();
+        using KafkaHarness harness = Harness();
         await harness.Context.ReadyAsync();
 
         StudioShellDescriptor descriptor = harness.Context.Services.GetRequiredService<StudioShellDescriptor>();
@@ -42,7 +42,7 @@ public class KafkaOnlyShellTests
     [Fact]
     public async Task A_kafka_only_shells_shortcut_sheet_lists_no_key_of_a_component_it_does_not_have()
     {
-        using KafkaStudioHarness harness = Harness();
+        using KafkaHarness harness = Harness();
         await harness.Context.ReadyAsync();
 
         IRenderedComponent<DataStudio.Components.Shared.ShortcutSheet> sheet = harness.Context.Render<DataStudio.Components.Shared.ShortcutSheet>();
@@ -65,7 +65,7 @@ public class KafkaOnlyShellTests
     public async Task The_front_address_is_replaced_by_the_one_modules_home_with_the_query_it_came_with(string front, string home)
     {
         // The home is the front address's own path and the module's segment, an absolute path, so that it means the same on the prerender and on the circuit.
-        using KafkaStudioHarness harness = Harness();
+        using KafkaHarness harness = Harness();
         await harness.Context.ReadyAsync();
         harness.Navigation.Simulate(front, intercepted: false);
         harness.Navigation.Requests.Clear();
@@ -81,7 +81,7 @@ public class KafkaOnlyShellTests
     [Fact]
     public async Task A_navigation_to_the_front_address_on_the_circuit_leads_to_the_home_too()
     {
-        using KafkaStudioHarness harness = Harness();
+        using KafkaHarness harness = Harness();
         await harness.Context.ReadyAsync();
         harness.Navigation.Simulate("http://localhost/studio/kafka", intercepted: false);
         _ = harness.Context.Render<StudioRoutes>();
@@ -95,7 +95,7 @@ public class KafkaOnlyShellTests
     [Fact]
     public async Task Any_other_address_the_router_does_not_know_is_still_not_found_and_is_not_redirected()
     {
-        using KafkaStudioHarness harness = Harness();
+        using KafkaHarness harness = Harness();
         await harness.Context.ReadyAsync();
         harness.Navigation.Simulate("http://localhost/studio/no-such-page", intercepted: false);
         harness.Navigation.Requests.Clear();
@@ -109,7 +109,7 @@ public class KafkaOnlyShellTests
     [Fact]
     public async Task The_rail_closes_with_the_shells_Studio_section_holding_Activity_and_names_no_database_page()
     {
-        using KafkaStudioHarness harness = Harness();
+        using KafkaHarness harness = Harness();
         await harness.Context.ReadyAsync();
 
         IRenderedComponent<NavMenu> rail = harness.Context.Render<NavMenu>();
@@ -123,7 +123,7 @@ public class KafkaOnlyShellTests
     [Fact]
     public async Task The_capability_chip_lists_the_modules_capabilities_and_no_database_group()
     {
-        using KafkaStudioHarness harness = Harness();
+        using KafkaHarness harness = Harness();
         await harness.Context.ReadyAsync();
 
         IRenderedComponent<CapabilityBanner> chip = harness.Context.Render<CapabilityBanner>();

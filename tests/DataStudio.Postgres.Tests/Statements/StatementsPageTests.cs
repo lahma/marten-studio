@@ -83,13 +83,13 @@ public class StatementsPageTests
         }
     }
 
-    private static async Task<(PostgresStudioComponentContext Context, FakeStatements Service)> ContextAsync(
+    private static async Task<(PostgresComponentContext Context, FakeStatements Service)> ContextAsync(
         StatementsView view,
         Func<long, StatementPlanView>? plan = null,
         string? address = null)
     {
         FakeStatements service = new(view, plan);
-        PostgresStudioComponentContext context = new(services => services.AddSingleton<IStatementsService>(service));
+        PostgresComponentContext context = new(services => services.AddSingleton<IStatementsService>(service));
         context.WithAllCapabilities();
 
         if (address is not null)
@@ -103,7 +103,7 @@ public class StatementsPageTests
 
     private static StatementsView Shown(StatementFacts facts) =>
         new StatementsService(
-                PostgresStudioSettings.Of(Microsoft.Extensions.Options.Options.Create(new PostgresOptions())),
+                PostgresSettings.Of(Microsoft.Extensions.Options.Options.Create(new PostgresOptions())),
                 null!, null!, null!, null!, null!, new StudioLogThrottle(TimeProvider.System), NullLogger<StatementsService>.Instance)
             .Show(facts, AllSchemas()) with
         {
@@ -120,7 +120,7 @@ public class StatementsPageTests
             readOnly: false,
             authorized: true,
             new DatabaseObjectClassifier([]),
-            PostgresStudioText.Instance),
+            PostgresText.Instance),
         DatabaseRefusal.None,
         null);
 
@@ -133,9 +133,9 @@ public class StatementsPageTests
     [Fact]
     public async Task With_the_capability_off_the_page_names_the_option_and_shows_no_statement()
     {
-        (PostgresStudioComponentContext context, FakeStatements service) = await ContextAsync(
-            StatementsView.Refused(DatabaseRefusal.CapabilityOff, PostgresStudioText.Instance.StatementsCapabilityDenial));
-        await using PostgresStudioComponentContext owned = context;
+        (PostgresComponentContext context, FakeStatements service) = await ContextAsync(
+            StatementsView.Refused(DatabaseRefusal.CapabilityOff, PostgresText.Instance.StatementsCapabilityDenial));
+        await using PostgresComponentContext owned = context;
 
         var page = context.Render<StatementsPage>();
         page.WaitForAssertion(() => page.FindAll(".ms-capability-disabled").Should().ContainSingle());
@@ -153,8 +153,8 @@ public class StatementsPageTests
     [Fact]
     public async Task The_load_and_Refresh_read_and_the_polls_only_look()
     {
-        (PostgresStudioComponentContext context, FakeStatements service) = await ContextAsync(Shown(ThreeStatements()));
-        await using PostgresStudioComponentContext owned = context;
+        (PostgresComponentContext context, FakeStatements service) = await ContextAsync(Shown(ThreeStatements()));
+        await using PostgresComponentContext owned = context;
         context.ShellOptions.RefreshInterval = TimeSpan.FromMilliseconds(20);
         context.Options.HealthInterval = TimeSpan.FromMilliseconds(20);
 
@@ -169,9 +169,9 @@ public class StatementsPageTests
     [Fact]
     public async Task A_policys_refusal_is_its_own_sentence()
     {
-        (PostgresStudioComponentContext context, _) = await ContextAsync(
-            StatementsView.Refused(DatabaseRefusal.WritePolicy, PostgresStudioText.Instance.StatementsWritePolicyDenial));
-        await using PostgresStudioComponentContext owned = context;
+        (PostgresComponentContext context, _) = await ContextAsync(
+            StatementsView.Refused(DatabaseRefusal.WritePolicy, PostgresText.Instance.StatementsWritePolicyDenial));
+        await using PostgresComponentContext owned = context;
 
         var page = context.Render<StatementsPage>();
         page.WaitForAssertion(() => page.Find(".ms-stmts-refusal").TextContent.Should().Contain("refused ViewDatabaseActivity"));
@@ -185,8 +185,8 @@ public class StatementsPageTests
             "default", "default", Now,
             new StatementReadOutcome(StatementReadState.NotPreloaded, Pg17, null) { Platform = DataStudio.Postgres.Services.Health.PostgresPlatform.SelfHosted },
             null, DataStudio.Postgres.Services.Health.HealthHistoryView.Empty, null, StatementsTestFacts.Tables, null);
-        (PostgresStudioComponentContext context, _) = await ContextAsync(Shown(facts));
-        await using PostgresStudioComponentContext owned = context;
+        (PostgresComponentContext context, _) = await ContextAsync(Shown(facts));
+        await using PostgresComponentContext owned = context;
 
         var page = context.Render<StatementsPage>();
         page.WaitForAssertion(() => page.Find(".ms-stmts-status").TextContent.Should()
@@ -198,8 +198,8 @@ public class StatementsPageTests
     [Fact]
     public async Task The_statements_are_drawn_in_a_scroll_region_with_their_groups_and_the_withheld_sentence()
     {
-        (PostgresStudioComponentContext context, _) = await ContextAsync(Shown(ThreeStatements()));
-        await using PostgresStudioComponentContext owned = context;
+        (PostgresComponentContext context, _) = await ContextAsync(Shown(ThreeStatements()));
+        await using PostgresComponentContext owned = context;
 
         var page = context.Render<StatementsPage>();
         page.WaitForAssertion(() => page.FindAll(".ms-stmts-table tbody tr").Should().HaveCount(3));
@@ -247,9 +247,9 @@ public class StatementsPageTests
     [Fact]
     public async Task The_queryid_in_the_address_opens_the_statements_plan_as_a_tree_with_its_insights()
     {
-        (PostgresStudioComponentContext context, FakeStatements service) = await ContextAsync(
+        (PostgresComponentContext context, FakeStatements service) = await ContextAsync(
             Shown(ThreeStatements()), Planned, "studio/statements?queryid=1");
-        await using PostgresStudioComponentContext owned = context;
+        await using PostgresComponentContext owned = context;
 
         var page = context.Render<StatementsPage>();
         page.WaitForAssertion(() => page.FindAll(".ms-plan-tree").Should().ContainSingle());
@@ -269,9 +269,9 @@ public class StatementsPageTests
     [Fact]
     public async Task Plan_again_plans_again_and_the_poll_never_does()
     {
-        (PostgresStudioComponentContext context, FakeStatements service) = await ContextAsync(
+        (PostgresComponentContext context, FakeStatements service) = await ContextAsync(
             Shown(ThreeStatements()), Planned, "studio/statements?queryid=1");
-        await using PostgresStudioComponentContext owned = context;
+        await using PostgresComponentContext owned = context;
 
         // Both intervals: the page polls at EffectiveHealthInterval, the longer of the two, and RefreshInterval's five-second
         // default put the second poll on the ten-second wait's own deadline.
@@ -293,9 +293,9 @@ public class StatementsPageTests
     [InlineData("Not planned: Postgres refused the plan (SQLSTATE 42501) - SqlConsoleRole, which the studio plans as, may not read a table it names.")]
     public async Task A_statement_with_no_plan_says_why_in_place_of_the_tree(string why)
     {
-        (PostgresStudioComponentContext context, _) = await ContextAsync(
+        (PostgresComponentContext context, _) = await ContextAsync(
             Shown(ThreeStatements()), id => new StatementPlanView { QueryId = id, NoPlan = why }, "studio/statements?queryid=2");
-        await using PostgresStudioComponentContext owned = context;
+        await using PostgresComponentContext owned = context;
 
         var page = context.Render<StatementsPage>();
         page.WaitForAssertion(() => page.Find(".ms-plan-drill-none").TextContent.Should().Be(why));
@@ -305,11 +305,11 @@ public class StatementsPageTests
     [Fact]
     public async Task A_refused_plan_says_the_gates_sentence()
     {
-        (PostgresStudioComponentContext context, _) = await ContextAsync(
+        (PostgresComponentContext context, _) = await ContextAsync(
             Shown(ThreeStatements()),
-            id => StatementPlanView.Refused(id, DatabaseRefusal.WritePolicy, PostgresStudioText.Instance.StatementsWritePolicyDenial),
+            id => StatementPlanView.Refused(id, DatabaseRefusal.WritePolicy, PostgresText.Instance.StatementsWritePolicyDenial),
             "studio/statements?queryid=1");
-        await using PostgresStudioComponentContext owned = context;
+        await using PostgresComponentContext owned = context;
 
         var page = context.Render<StatementsPage>();
         page.WaitForAssertion(() => page.Find(".ms-plan-drill-refusal").TextContent.Should().Contain("refused ViewDatabaseActivity"));
@@ -323,11 +323,11 @@ public class StatementsPageTests
         const string literal = "hunter2";
         string json = "[{\"Plan\": {\"Node Type\": \"Seq Scan\", \"Relation Name\": \"orders\", \"Total Cost\": 42, \"Filter\": \"(note = '" + literal + "'::text)\"}}]";
 
-        (PostgresStudioComponentContext context, _) = await ContextAsync(
+        (PostgresComponentContext context, _) = await ContextAsync(
             Shown(ThreeStatements()),
             id => Planned(id) with { Plan = QueryPlanReader.Read(json, static x => x.Replace(literal, "[masked]", StringComparison.Ordinal)).Plan },
             "studio/statements?queryid=1");
-        await using PostgresStudioComponentContext owned = context;
+        await using PostgresComponentContext owned = context;
         context.JSInterop.Setup<bool>("martenStudio.clipboard.copyText", static _ => true).SetResult(true);
         context.JSInterop.Setup<bool>("martenStudio.download.text", static _ => true).SetResult(true);
 
@@ -353,18 +353,18 @@ public class StatementsPageTests
     [Fact]
     public async Task A_drill_in_with_no_plan_or_a_refusal_offers_no_export()
     {
-        (PostgresStudioComponentContext none, _) = await ContextAsync(
+        (PostgresComponentContext none, _) = await ContextAsync(
             Shown(ThreeStatements()), id => new StatementPlanView { QueryId = id, NoPlan = "nothing" }, "studio/statements?queryid=2");
-        await using PostgresStudioComponentContext ownedNone = none;
+        await using PostgresComponentContext ownedNone = none;
         var planless = none.Render<StatementsPage>();
         planless.WaitForAssertion(() => planless.Find(".ms-plan-drill-none"));
         planless.FindAll(".ms-plan-export").Should().BeEmpty();
 
-        (PostgresStudioComponentContext refused, _) = await ContextAsync(
+        (PostgresComponentContext refused, _) = await ContextAsync(
             Shown(ThreeStatements()),
-            id => StatementPlanView.Refused(id, DatabaseRefusal.WritePolicy, PostgresStudioText.Instance.StatementsWritePolicyDenial),
+            id => StatementPlanView.Refused(id, DatabaseRefusal.WritePolicy, PostgresText.Instance.StatementsWritePolicyDenial),
             "studio/statements?queryid=1");
-        await using PostgresStudioComponentContext ownedRefused = refused;
+        await using PostgresComponentContext ownedRefused = refused;
         var page = refused.Render<StatementsPage>();
         page.WaitForAssertion(() => page.Find(".ms-plan-drill-refusal"));
         page.FindAll(".ms-plan-export, .ms-plan-copy-markdown, .ms-plan-download-speedscope").Should().BeEmpty();
@@ -376,8 +376,8 @@ public class StatementsPageTests
     [InlineData("studio/statements")]
     public async Task An_address_with_no_queryid_opens_no_drill_in_and_plans_nothing(string address)
     {
-        (PostgresStudioComponentContext context, FakeStatements service) = await ContextAsync(Shown(ThreeStatements()), Planned, address);
-        await using PostgresStudioComponentContext owned = context;
+        (PostgresComponentContext context, FakeStatements service) = await ContextAsync(Shown(ThreeStatements()), Planned, address);
+        await using PostgresComponentContext owned = context;
 
         var page = context.Render<StatementsPage>();
         page.WaitForAssertion(() => page.FindAll(".ms-stmts-table tbody tr").Should().HaveCount(3));
@@ -400,8 +400,8 @@ public class StatementsPageTests
     [Fact]
     public async Task The_group_view_sums_the_top_statements_by_group()
     {
-        (PostgresStudioComponentContext context, _) = await ContextAsync(Shown(ThreeStatements()));
-        await using PostgresStudioComponentContext owned = context;
+        (PostgresComponentContext context, _) = await ContextAsync(Shown(ThreeStatements()));
+        await using PostgresComponentContext owned = context;
 
         var page = context.Render<StatementsPage>();
         page.WaitForAssertion(() => page.FindAll(".ms-stmts-table tbody tr").Should().HaveCount(3));
@@ -416,8 +416,8 @@ public class StatementsPageTests
     [Fact]
     public async Task On_Aurora_the_statements_can_be_ranked_by_storage_reads()
     {
-        (PostgresStudioComponentContext context, _) = await ContextAsync(Shown(ThreeStatements(aurora: true)));
-        await using PostgresStudioComponentContext owned = context;
+        (PostgresComponentContext context, _) = await ContextAsync(Shown(ThreeStatements(aurora: true)));
+        await using PostgresComponentContext owned = context;
 
         var page = context.Render<StatementsPage>();
         page.WaitForAssertion(() => page.FindAll(".ms-stmts-table tbody tr").Should().HaveCount(3));
@@ -462,8 +462,8 @@ public class StatementsPageTests
     [Fact]
     public async Task The_advisor_opens_from_the_address_and_plans_nothing_until_Run_is_pressed()
     {
-        (PostgresStudioComponentContext context, FakeStatements service) = await ContextAsync(Shown(ThreeStatements()), address: "studio/statements?advise=all");
-        await using PostgresStudioComponentContext owned = context;
+        (PostgresComponentContext context, FakeStatements service) = await ContextAsync(Shown(ThreeStatements()), address: "studio/statements?advise=all");
+        await using PostgresComponentContext owned = context;
         service.Advice = _ => Advised();
 
         var page = context.Render<StatementsPage>();
@@ -482,8 +482,8 @@ public class StatementsPageTests
     [Fact]
     public async Task Without_the_parameter_there_is_no_panel_and_the_header_links_to_it_carrying_the_scope()
     {
-        (PostgresStudioComponentContext context, _) = await ContextAsync(Shown(ThreeStatements()));
-        await using PostgresStudioComponentContext owned = context;
+        (PostgresComponentContext context, _) = await ContextAsync(Shown(ThreeStatements()));
+        await using PostgresComponentContext owned = context;
 
         var page = context.Render<StatementsPage>();
         page.WaitForAssertion(() => page.FindAll(".ms-advisor-open").Should().ContainSingle());
@@ -495,8 +495,8 @@ public class StatementsPageTests
     [Fact]
     public async Task A_run_draws_the_headline_the_remedy_with_a_copy_button_and_the_statements_with_their_links_in_a_scroll_region()
     {
-        (PostgresStudioComponentContext context, FakeStatements service) = await ContextAsync(Shown(ThreeStatements()), address: "studio/statements?advise=all");
-        await using PostgresStudioComponentContext owned = context;
+        (PostgresComponentContext context, FakeStatements service) = await ContextAsync(Shown(ThreeStatements()), address: "studio/statements?advise=all");
+        await using PostgresComponentContext owned = context;
         service.Advice = _ => Advised();
 
         var page = context.Render<StatementsPage>();
@@ -524,9 +524,9 @@ public class StatementsPageTests
     [Fact]
     public async Task A_run_naming_a_table_offers_the_picker_and_Try_this_index_sends_the_columns()
     {
-        (PostgresStudioComponentContext context, FakeStatements service) = await ContextAsync(
+        (PostgresComponentContext context, FakeStatements service) = await ContextAsync(
             Shown(ThreeStatements()), address: "studio/statements?advise=public.orders");
-        await using PostgresStudioComponentContext owned = context;
+        await using PostgresComponentContext owned = context;
         service.Advice = _ => Advised();
 
         var page = context.Render<StatementsPage>();
@@ -549,8 +549,8 @@ public class StatementsPageTests
     [Fact]
     public async Task Hypopgs_sentence_is_the_answer_when_it_is_not_there()
     {
-        (PostgresStudioComponentContext context, FakeStatements service) = await ContextAsync(Shown(ThreeStatements()), address: "studio/statements?advise=all");
-        await using PostgresStudioComponentContext owned = context;
+        (PostgresComponentContext context, FakeStatements service) = await ContextAsync(Shown(ThreeStatements()), address: "studio/statements?advise=all");
+        await using PostgresComponentContext owned = context;
         service.Advice = _ => new IndexAdviceView { Unavailable = HypotheticalIndexAvailability.NotInstalledSentence };
 
         var page = context.Render<StatementsPage>();
@@ -564,8 +564,8 @@ public class StatementsPageTests
     [Fact]
     public async Task A_failure_is_on_the_panel()
     {
-        (PostgresStudioComponentContext context, FakeStatements service) = await ContextAsync(Shown(ThreeStatements()), address: "studio/statements?advise=all");
-        await using PostgresStudioComponentContext owned = context;
+        (PostgresComponentContext context, FakeStatements service) = await ContextAsync(Shown(ThreeStatements()), address: "studio/statements?advise=all");
+        await using PostgresComponentContext owned = context;
         service.Advice = _ => throw new InvalidOperationException("the advisor failed");
 
         var page = context.Render<StatementsPage>();

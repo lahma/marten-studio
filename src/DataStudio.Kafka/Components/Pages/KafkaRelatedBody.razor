@@ -38,7 +38,7 @@
     {
         <div class="ms-empty" role="status">
             <p class="ms-empty-title">Nothing to look for</p>
-            <p class="ms-empty-description">@KafkaStudioText.RelatedLinkInvalid</p>
+            <p class="ms-empty-description">@KafkaText.RelatedLinkInvalid</p>
         </div>
     }
     else if (error is not null)
@@ -53,7 +53,7 @@
     {
         <div class="ms-empty" role="status">
             <p class="ms-empty-title">Not found</p>
-            <p class="ms-empty-description">@KafkaStudioText.TopicNotAvailable(anchorTopic ?? string.Empty)</p>
+            <p class="ms-empty-description">@KafkaText.TopicNotAvailable(anchorTopic ?? string.Empty)</p>
         </div>
     }
     else if (anchor is null && anchorNote is not null)
@@ -62,7 +62,7 @@
     }
     else
     {
-        <p class="ms-muted ms-k-related-lead">@KafkaStudioText.RelatedLead</p>
+        <p class="ms-muted ms-k-related-lead">@KafkaText.RelatedLead</p>
 
         @if (anchor is { } anchored)
         {
@@ -77,7 +77,7 @@
             <h2 class="ms-section-title">Keys</h2>
             @if (keys.IsEmpty)
             {
-                <p class="ms-k-note" role="note">@KafkaStudioText.RelatedNoKeys</p>
+                <p class="ms-k-note" role="note">@KafkaText.RelatedNoKeys</p>
             }
             else
             {
@@ -117,10 +117,10 @@
                     <summary>Topics searched (@TopicsSearched())</summary>
                     <fieldset class="ms-k-topics" disabled="@busy">
                         <legend>Topics</legend>
-                        <p class="ms-muted">@KafkaStudioText.RelatedScope</p>
+                        <p class="ms-muted">@KafkaText.RelatedScope</p>
                         @if (hiddenTopics > 0)
                         {
-                            <p class="ms-k-note" role="note">@KafkaStudioText.RelatedMoreTopics(hiddenTopics)</p>
+                            <p class="ms-k-note" role="note">@KafkaText.RelatedMoreTopics(hiddenTopics)</p>
                         }
                         <div class="ms-k-topic-list">
                             @foreach (string name in readable)
@@ -129,7 +129,7 @@
                                 <label class="ms-k-topic-option" @key="name">
                                     <input type="checkbox"
                                            checked="@isSelected"
-                                           disabled="@(!isSelected && selected.Count >= KafkaStudioText.MaxSearchTopics)"
+                                           disabled="@(!isSelected && selected.Count >= KafkaText.MaxSearchTopics)"
                                            @onchange="e => ToggleTopicAsync(name, e.Value is true)" />
                                     <span>@name</span>
                                 </label>
@@ -166,7 +166,7 @@
                 <label class="ms-k-isolation">
                     <input type="checkbox" checked="@includeUncommitted" disabled="@busy" @onchange="e => includeUncommitted = e.Value is true" />
                     Include uncommitted records
-                    <span class="ms-muted">@KafkaStudioText.UncommittedHelp</span>
+                    <span class="ms-muted">@KafkaText.UncommittedHelp</span>
                 </label>
 
                 <div class="ms-k-search-actions">
@@ -233,8 +233,8 @@
                     <p>@KafkaSearchText.Stop(result, planned.Plan.Limits)</p>
                     @if (continuedAfter is { } previous)
                     {
-                        <p class="ms-muted">@KafkaStudioText.ContinuedAfter(previous)</p>
-                        <p class="ms-muted ms-k-continued-showing">@KafkaStudioText.ContinuedShowing(earlierMatches, result.Matches, canExport: false)</p>
+                        <p class="ms-muted">@KafkaText.ContinuedAfter(previous)</p>
+                        <p class="ms-muted ms-k-continued-showing">@KafkaText.ContinuedShowing(earlierMatches, result.Matches, canExport: false)</p>
                     }
                     @if (KafkaSearchText.CanContinue(result.StopReason) && !result.Cursor.IsEmpty)
                     {
@@ -474,7 +474,7 @@
         addressTopics = [.. (KafkaAddress.Get(uri, KafkaAddress.TopicsParameter) ?? string.Empty)
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Distinct(StringComparer.Ordinal)
-            .Take(KafkaStudioText.MaxSearchTopics + 1)];
+            .Take(KafkaText.MaxSearchTopics + 1)];
 
         includeUncommitted = string.Equals(KafkaAddress.Get(uri, KafkaAddress.IsolationParameter), KafkaAddress.UncommittedValue, StringComparison.Ordinal);
 
@@ -553,7 +553,7 @@
 
             // The default set is the first 20 of the readable declared topics; a set the address names is checked as a whole when it is planned.
             selected.Clear();
-            selected.AddRange(addressTopics.Count > 0 ? addressTopics : readable.Take(KafkaStudioText.MaxSearchTopics));
+            selected.AddRange(addressTopics.Count > 0 ? addressTopics : readable.Take(KafkaText.MaxSearchTopics));
             hiddenTopics = addressTopics.Count > 0 ? 0 : Math.Max(0, readable.Count - selected.Count);
             allowanceLeft = await Search.OwnerBytesLeftThisHourAsync(State.ActiveCluster);
 
@@ -566,7 +566,7 @@
         catch (Exception e) when (!disposed)
         {
             Logger.LogWarning(e, "The Kafka related-records page failed to read the record");
-            error = KafkaStudioText.ReadFailed;
+            error = KafkaText.ReadFailed;
         }
         finally
         {
@@ -685,7 +685,7 @@
         if (selected.Count == 0)
         {
             lanes = [];
-            refusal = seed is not null && readable.Count == 0 ? KafkaStudioText.RelatedNoSeedTopic(seed.Kind) : KafkaStudioText.RelatedChooseTopic;
+            refusal = seed is not null && readable.Count == 0 ? KafkaText.RelatedNoSeedTopic(seed.Kind) : KafkaText.RelatedChooseTopic;
             return;
         }
 
@@ -711,7 +711,7 @@
             return;
         }
 
-        if (on && !selected.Contains(name, StringComparer.Ordinal) && selected.Count < KafkaStudioText.MaxSearchTopics)
+        if (on && !selected.Contains(name, StringComparer.Ordinal) && selected.Count < KafkaText.MaxSearchTopics)
         {
             selected.Add(name);
         }
@@ -734,7 +734,7 @@
         catch (Exception e) when (!disposed)
         {
             Logger.LogWarning(e, "The Kafka related-records page failed to prepare its topics");
-            refusal = KafkaStudioText.SearchFailed;
+            refusal = KafkaText.SearchFailed;
         }
 
         if (!disposed)
@@ -849,7 +849,7 @@
         catch (Exception e) when (!disposed)
         {
             Logger.LogWarning(e, "The Kafka related-records page failed to plan a search");
-            refusal = KafkaStudioText.SearchFailed;
+            refusal = KafkaText.SearchFailed;
             return;
         }
         finally
@@ -958,7 +958,7 @@
         catch (Exception e) when (!disposed)
         {
             Logger.LogWarning(e, "The Kafka related-records page failed while reading a search");
-            refusal = KafkaStudioText.SearchFailed;
+            refusal = KafkaText.SearchFailed;
         }
         finally
         {

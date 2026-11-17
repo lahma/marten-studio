@@ -7,10 +7,10 @@ namespace DataStudio.Postgres.Services.Postgres;
 /// <summary>
 /// The diagnostics engine's <see cref="IDiagnosticsSettings" /> for a host that registered
 /// <c>AddPostgresDiagnostics()</c>: a live adapter over <see cref="PostgresDiagnosticsOptions" />, with Postgres Studio's
-/// name and words (<see cref="PostgresStudioText" />).
+/// name and words (<see cref="PostgresText" />).
 /// </summary>
 /// <remarks>
-/// Every member reads <see cref="IOptions{TOptions}.Value" /> again, as <c>PostgresStudioSettings</c> does. A host that
+/// Every member reads <see cref="IOptions{TOptions}.Value" /> again, as <c>PostgresSettings</c> does. A host that
 /// registered a studio has the studio's own settings object instead, which answers the same interface.
 /// </remarks>
 internal sealed class PostgresDiagnosticsSettings : IDiagnosticsSettings
@@ -31,7 +31,7 @@ internal sealed class PostgresDiagnosticsSettings : IDiagnosticsSettings
     public string OptionsTypeName => nameof(PostgresDiagnosticsOptions);
 
     /// <inheritdoc />
-    public StudioText Text => PostgresStudioText.DiagnosticsInstance;
+    public StudioText Text => PostgresText.DiagnosticsInstance;
 
     /// <inheritdoc />
     public string SessionProduct => "Data Studio Diagnostics";
@@ -64,6 +64,6 @@ internal sealed class PostgresDiagnosticsSettings : IDiagnosticsSettings
     public Func<Type, bool>? IsDocumentTypeVisible => null;
 
     /// <inheritdoc />
-    /// <remarks>"Source" once <c>AddDataSource</c> or <c>AddDatabaseSource</c> named one, as <c>PostgresStudioSettings</c> says.</remarks>
+    /// <remarks>"Source" once <c>AddDataSource</c> or <c>AddDatabaseSource</c> named one, as <c>PostgresSettings</c> says.</remarks>
     public string? SourceLabel => Value.DataSources.Count + Value.DatabaseSources.Count > 0 ? "Source" : null;
 }

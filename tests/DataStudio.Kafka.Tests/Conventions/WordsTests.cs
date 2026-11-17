@@ -16,7 +16,7 @@ public class WordsTests
     [Fact]
     public void No_sentence_of_the_Kafka_modules_words_says_a_removed_product_name()
     {
-        string words = WordsSnapshot.OfStatic(typeof(KafkaStudioText), ObjectValue);
+        string words = WordsSnapshot.OfStatic(typeof(KafkaText), ObjectValue);
 
         System.Text.RegularExpressions.Regex.Matches(words, @"Marten Studio|Postgres Studio|KStudio").Select(static x => x.Value).Should().BeEmpty();
         words.Should().Contain("Apache Kafka is a trademark of the Apache Software Foundation. Data Studio is not affiliated", "the trademark line stays attached to the Kafka module");
@@ -24,7 +24,7 @@ public class WordsTests
 
     [Fact]
     public Task The_Kafka_modules_words_are_pinned() =>
-        Verify(WordsSnapshot.OfStatic(typeof(KafkaStudioText), ObjectValue), extension: "txt")
+        Verify(WordsSnapshot.OfStatic(typeof(KafkaText), ObjectValue), extension: "txt")
             .UseDirectory("../Verify")
             .UseFileName("WordsTests_DataStudioKafka");
 

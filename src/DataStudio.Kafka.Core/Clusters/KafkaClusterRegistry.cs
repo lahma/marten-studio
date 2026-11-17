@@ -71,7 +71,7 @@ internal sealed class KafkaClusterRegistry
         }
 
         this.options = options;
-        logger = services?.GetService<KStudioLoggers>()?.Catalog;
+        logger = services?.GetService<KafkaEngineLoggers>()?.Catalog;
         once = services?.GetService<KafkaLogOnce>();
 
         foreach (KafkaEngineOptions.ClusterRegistration registration in options.Clusters)
@@ -313,7 +313,7 @@ internal sealed class KafkaClusterRegistry
 
         // The item is the general words, never a name (event 9677). The Settings page shows the same general words (KafkaRegistryNote.Generic), not Text.
         LogLevel level = KafkaLogOnce.WarningOrDebug(once, source + "|" + note.What + "|" + note.Reason);
-        KStudioLog.ClusterSourceItemNotListed(logger, level, note.What, source, note.Reason);
+        KafkaEngineLog.ClusterSourceItemNotListed(logger, level, note.What, source, note.Reason);
     }
 
     private sealed record PendingSource(IKafkaClusterSource Source, string Name, string Note, CancellationToken When);

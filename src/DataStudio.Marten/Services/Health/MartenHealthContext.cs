@@ -75,7 +75,7 @@ internal static class MartenHealthContext
             {
                 TableRemedies = MartenHealthRemedyProvider.Instance,
                 PlanAdvisor = MartenStatementPlanAdvisor.Instance,
-                Text = MartenStudioText.Instance,
+                Text = MartenText.Instance,
             };
     }
 }
@@ -96,7 +96,7 @@ internal static class MartenHealthBridges
         /// (<c>PooledDaemonLockCheck</c>).
         /// </summary>
         /// <param name="database">The database.</param>
-        internal static DataSourceEndpoints? Of(IMartenDatabase database) => DataSourceEndpoints.Of(MartenStudioDatabase.Of(database));
+        internal static DataSourceEndpoints? Of(IMartenDatabase database) => DataSourceEndpoints.Of(MartenSourceDatabase.Of(database));
     }
 
     extension(HealthLinks)
@@ -107,7 +107,7 @@ internal static class MartenHealthBridges
         /// </summary>
         /// <param name="scope">The scope to carry.</param>
         internal static string ToPage(StudioScope? scope) =>
-            HealthLinks.ToPage(MartenStudioDescriptor.SourceQueryParameter, scope);
+            HealthLinks.ToPage(MartenDescriptor.SourceQueryParameter, scope);
 
         /// <summary>
         /// <see cref="HealthLinks.ToFinding(string, StudioScope?, HealthReportFinding)" /> with
@@ -117,6 +117,6 @@ internal static class MartenHealthBridges
         /// <param name="scope">The scope to carry.</param>
         /// <param name="finding">The finding.</param>
         internal static string ToFinding(StudioScope? scope, HealthReportFinding finding) =>
-            HealthLinks.ToFinding(MartenStudioDescriptor.SourceQueryParameter, scope, finding);
+            HealthLinks.ToFinding(MartenDescriptor.SourceQueryParameter, scope, finding);
     }
 }

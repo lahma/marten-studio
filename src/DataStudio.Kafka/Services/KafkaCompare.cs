@@ -178,9 +178,9 @@ internal static class KafkaCompare
         {
             string? sentence = access switch
             {
-                KafkaValueAccess.CapabilityOff => KafkaStudioText.CapabilityNotAvailable(KafkaCapability.ReadPayloads),
-                KafkaValueAccess.PolicyRefused => KafkaStudioText.ValueNotAvailable,
-                KafkaValueAccess.SearchWithoutValues => KafkaStudioText.ValueNotReadBySearch,
+                KafkaValueAccess.CapabilityOff => KafkaText.CapabilityNotAvailable(KafkaCapability.ReadPayloads),
+                KafkaValueAccess.PolicyRefused => KafkaText.ValueNotAvailable,
+                KafkaValueAccess.SearchWithoutValues => KafkaText.ValueNotReadBySearch,
                 _ => null,
             };
 
@@ -204,7 +204,7 @@ internal static class KafkaCompare
 
             if (record.ValueKind == KafkaValueKind.Undecodable)
             {
-                string why = record.UndecodableReason is { } reason ? KafkaStudioText.UndecodableReason(reason) : "the reason is not known";
+                string why = record.UndecodableReason is { } reason ? KafkaText.UndecodableReason(reason) : "the reason is not known";
                 return Sentence($"Not compared: the value of {label} could not be decoded: {why}.");
             }
         }

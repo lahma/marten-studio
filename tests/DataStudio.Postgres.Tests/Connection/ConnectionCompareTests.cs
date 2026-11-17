@@ -36,9 +36,9 @@ public sealed class ConnectionCompareTests
 
     private static readonly JsonSerializerOptions Dump = new() { IncludeFields = true, MaxDepth = 64 };
 
-    private static async Task<PostgresStudioComponentContext> ContextAsync(Action<IServiceCollection>? configure = null, string current = InEffect)
+    private static async Task<PostgresComponentContext> ContextAsync(Action<IServiceCollection>? configure = null, string current = InEffect)
     {
-        PostgresStudioComponentContext context = new(configure);
+        PostgresComponentContext context = new(configure);
         ConnectionFacts facts = Facts(current, Observed());
 
         context.ConnectionCompare.Answer = text => ConnectionCompareService.Compare(text, facts, new FakeEnvironment(), Now);
@@ -46,7 +46,7 @@ public sealed class ConnectionCompareTests
         return await context.ReadyAsync();
     }
 
-    private static IRenderedComponent<ConnectionCompare> Open(PostgresStudioComponentContext context)
+    private static IRenderedComponent<ConnectionCompare> Open(PostgresComponentContext context)
     {
         IRenderedComponent<ConnectionCompare> page = context.Render<ConnectionCompare>();
         page.Find("#conn-compare-input");
@@ -54,7 +54,7 @@ public sealed class ConnectionCompareTests
     }
 
     /// <summary>What studio.js does when Compare is pressed: hands the text over in chunks, then answers the length it sent.</summary>
-    private static async Task PasteAsync(PostgresStudioComponentContext context, IRenderedComponent<ConnectionCompare> page, string text)
+    private static async Task PasteAsync(PostgresComponentContext context, IRenderedComponent<ConnectionCompare> page, string text)
     {
         JSRuntimeInvocationHandler<int> sending = context.JSInterop.Setup<int>("martenStudio.query.sendInChunks", static _ => true);
 
@@ -81,7 +81,7 @@ public sealed class ConnectionCompareTests
     [Fact]
     public async Task It_is_a_disclosure_with_a_heading_and_says_what_happens_to_a_password_above_the_box()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
         IRenderedComponent<ConnectionCompare> page = Open(context);
 
         IElement details = page.Find("section#conn-compare details.ms-conn-compare-details");
@@ -97,7 +97,7 @@ public sealed class ConnectionCompareTests
     [Fact]
     public async Task The_box_is_not_bound_is_not_remembered_by_the_browser_and_is_described_by_the_promise()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
         IRenderedComponent<ConnectionCompare> page = Open(context);
 
         IElement box = page.Find("#conn-compare-input");
@@ -111,7 +111,7 @@ public sealed class ConnectionCompareTests
     [Fact]
     public async Task The_connection_page_draws_the_disclosure_between_the_settings_and_what_the_server_saw()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
         context.Connection.View = View(Facts(InEffect, Observed()), null, GateClosed);
         await context.ReadyAsync();
 
@@ -125,7 +125,7 @@ public sealed class ConnectionCompareTests
     [Fact]
     public async Task A_refused_visitor_is_drawn_no_disclosure()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
         context.Connection.View = ConnectionPageView.Refused(ConnectionRefusal.StorePolicy, "Your account may not see how this application connects.");
         await context.ReadyAsync();
 
@@ -145,7 +145,7 @@ public sealed class ConnectionCompareTests
     [Fact]
     public async Task The_pasted_column_shows_the_pasted_value_and_the_rows_that_differ_are_marked_in_words()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
         IRenderedComponent<ConnectionCompare> page = Open(context);
 
         await PasteAsync(context, page, Candidate);
@@ -167,7 +167,7 @@ public sealed class ConnectionCompareTests
     [Fact]
     public async Task Showing_every_setting_adds_the_ones_that_do_not_differ_marked_the_same()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
         IRenderedComponent<ConnectionCompare> page = Open(context);
         await PasteAsync(context, page, Candidate);
         Wait(() => page.FindAll(".ms-conn-compare-table").Should().NotBeEmpty(), page);
@@ -185,7 +185,7 @@ public sealed class ConnectionCompareTests
     [Fact]
     public async Task Pasting_the_same_settings_says_nothing_differs()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
         IRenderedComponent<ConnectionCompare> page = Open(context);
 
         await PasteAsync(context, page, InEffect + ";Maximum Pool Size=100");
@@ -197,7 +197,7 @@ public sealed class ConnectionCompareTests
     [Fact]
     public async Task The_advice_is_labelled_as_what_it_would_be_with_the_pasted_settings_and_says_whats_new_and_what_stops_applying()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync(current: "Host=db.example;SSL Mode=Prefer;Application Name=a");
+        await using PostgresComponentContext context = await ContextAsync(current: "Host=db.example;SSL Mode=Prefer;Application Name=a");
         IRenderedComponent<ConnectionCompare> page = Open(context);
 
         await PasteAsync(context, page, "Host=a.example,b.example;SSL Mode=VerifyFull;Root Certificate=/etc/ssl/ca.pem;Application Name=a");
@@ -218,7 +218,7 @@ public sealed class ConnectionCompareTests
     [Fact]
     public async Task A_row_with_advice_links_to_its_card_in_the_comparison_and_the_card_is_there()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
         IRenderedComponent<ConnectionCompare> page = Open(context);
 
         await PasteAsync(context, page, "Host=a.example,b.example;SSL Mode=Require");
@@ -232,7 +232,7 @@ public sealed class ConnectionCompareTests
     [Fact]
     public async Task A_removed_secret_is_said_to_have_been_in_the_text_by_its_keyword_and_nothing_else()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
         IRenderedComponent<ConnectionCompare> page = Open(context);
 
         await PasteAsync(context, page, Candidate);
@@ -243,7 +243,7 @@ public sealed class ConnectionCompareTests
     [Fact]
     public async Task The_result_opens_with_one_verdict_sentence_above_the_count_and_the_tables_are_labelled_for_the_phone()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync(current: "Host=db.example;SSL Mode=Prefer;Persist Security Info=true;Username=svc");
+        await using PostgresComponentContext context = await ContextAsync(current: "Host=db.example;SSL Mode=Prefer;Persist Security Info=true;Username=svc");
         IRenderedComponent<ConnectionCompare> page = Open(context);
 
         await PasteAsync(context, page, "Host=db.example;SSL Mode=VerifyFull;Root Certificate=/etc/ssl/ca.pem;Username=svc");
@@ -267,7 +267,7 @@ public sealed class ConnectionCompareTests
     [Fact]
     public async Task A_comparison_with_the_same_advice_says_so_in_its_verdict()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
         IRenderedComponent<ConnectionCompare> page = Open(context);
 
         await PasteAsync(context, page, InEffect + ";Maximum Pool Size=100");
@@ -279,7 +279,7 @@ public sealed class ConnectionCompareTests
     public async Task When_the_connection_in_effect_cannot_be_read_no_difference_count_is_claimed()
     {
         // A connection string Npgsql cannot read: the first column is empty, so "N settings differ" would be a count of everything.
-        await using PostgresStudioComponentContext context = await ContextAsync(current: "Port=not-a-port");
+        await using PostgresComponentContext context = await ContextAsync(current: "Port=not-a-port");
         IRenderedComponent<ConnectionCompare> page = Open(context);
 
         await PasteAsync(context, page, "Host=db.example;Database=app");
@@ -295,13 +295,13 @@ public sealed class ConnectionCompareTests
     {
         const string clause = "A password with ';' in it must be quoted, or Npgsql reads what follows as settings.";
 
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
         IRenderedComponent<ConnectionCompare> page = Open(context);
 
         await PasteAsync(context, page, "Host=a.example;Password=" + Sentinel);
         Wait(() => page.Find(".ms-conn-compare-removed").TextContent.Should().Contain("until you press Clear or leave the page. " + clause), page);
 
-        await using PostgresStudioComponentContext quoted = await ContextAsync();
+        await using PostgresComponentContext quoted = await ContextAsync();
         IRenderedComponent<ConnectionCompare> second = Open(quoted);
 
         await PasteAsync(quoted, second, "Host=a.example;Password='" + Sentinel + "'");
@@ -315,7 +315,7 @@ public sealed class ConnectionCompareTests
     [Fact]
     public async Task A_keyword_refused_after_an_unquoted_password_says_the_unnamed_sentence_on_the_page()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
         IRenderedComponent<ConnectionCompare> page = Open(context);
 
         await PasteAsync(context, page, "Host=a;Password=abc;def" + Sentinel + "=ghi");
@@ -328,7 +328,7 @@ public sealed class ConnectionCompareTests
     [Fact]
     public async Task A_keyword_npgsql_rejects_is_refused_by_name_and_the_value_is_never_on_the_page()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
         IRenderedComponent<ConnectionCompare> page = Open(context);
 
         await PasteAsync(context, page, "Host=a;Bogus Keyword=" + Sentinel + "-bad;Port=" + Sentinel + "-port;Password=" + Sentinel);
@@ -342,7 +342,7 @@ public sealed class ConnectionCompareTests
     [Fact]
     public async Task Text_npgsql_cannot_read_says_only_that_and_echoes_nothing_of_it()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
         IRenderedComponent<ConnectionCompare> page = Open(context);
 
         await PasteAsync(context, page, "postgresql://svc:" + Sentinel + "@db.example/app?sslmode=require");
@@ -354,7 +354,7 @@ public sealed class ConnectionCompareTests
     [Fact]
     public async Task An_empty_box_asks_for_a_string_and_asks_the_service_nothing()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
         IRenderedComponent<ConnectionCompare> page = Open(context);
         context.JSInterop.Setup<int>("martenStudio.query.sendInChunks", static _ => true).SetResult(0);
 
@@ -367,7 +367,7 @@ public sealed class ConnectionCompareTests
     [Fact]
     public async Task Text_longer_than_the_limit_is_refused_by_the_browsers_helper_before_any_of_it_is_sent()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
         IRenderedComponent<ConnectionCompare> page = Open(context);
         context.JSInterop.Setup<int>("martenStudio.query.sendInChunks", static _ => true).SetResult(ConnectionCompare.PastedTooLarge);
 
@@ -381,7 +381,7 @@ public sealed class ConnectionCompareTests
     [Fact]
     public async Task A_refusal_by_the_gate_is_the_services_sentence_in_a_warning()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
         context.ConnectionCompare.Answer = null;
         context.ConnectionCompare.View = ConnectionCompareView.Of(ConnectionCompareOutcome.Refused, "Your account may not see how this application connects.");
         IRenderedComponent<ConnectionCompare> page = Open(context);
@@ -396,7 +396,7 @@ public sealed class ConnectionCompareTests
     [Fact]
     public async Task A_service_that_fails_is_a_message_on_the_page_with_the_exceptions_type_and_nothing_it_says()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
         context.ConnectionCompare.Failure = new InvalidOperationException("the text was " + Sentinel);
         IRenderedComponent<ConnectionCompare> page = Open(context);
 
@@ -410,7 +410,7 @@ public sealed class ConnectionCompareTests
     [Fact]
     public async Task A_browser_that_went_away_mid_hand_over_is_said_in_a_sentence()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
         IRenderedComponent<ConnectionCompare> page = Open(context);
         context.JSInterop.Setup<int>("martenStudio.query.sendInChunks", static _ => true).SetException(new Microsoft.JSInterop.JSDisconnectedException("circuit"));
 
@@ -429,7 +429,7 @@ public sealed class ConnectionCompareTests
     [Fact]
     public async Task The_component_keeps_no_copy_of_the_text_after_the_call_and_clear_drops_the_answer_and_the_box()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
         IRenderedComponent<ConnectionCompare> page = Open(context);
         IElement before = page.Find("#conn-compare-input");
 
@@ -448,7 +448,7 @@ public sealed class ConnectionCompareTests
     [Fact]
     public async Task Leaving_the_page_drops_a_half_received_text_and_the_answer()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
         IRenderedComponent<ConnectionCompare> page = Open(context);
         ConnectionCompare compare = page.Instance;
 
@@ -464,7 +464,7 @@ public sealed class ConnectionCompareTests
     [Fact]
     public async Task A_chunk_past_the_bound_is_not_kept()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
         IRenderedComponent<ConnectionCompare> page = Open(context);
         ConnectionCompare compare = page.Instance;
 
@@ -580,7 +580,7 @@ public sealed class ConnectionCompareTests
         ConnectionCompareOutcome expected = Enum.Parse<ConnectionCompareOutcome>(outcome);
 
         CapturingProvider logs = new();
-        await using PostgresStudioComponentContext context = await ContextAsync(services => services.AddLogging(builder => builder.SetMinimumLevel(LogLevel.Trace).AddProvider(logs)));
+        await using PostgresComponentContext context = await ContextAsync(services => services.AddLogging(builder => builder.SetMinimumLevel(LogLevel.Trace).AddProvider(logs)));
         IRenderedComponent<ConnectionCompare> page = Open(context);
 
         await PasteAsync(context, page, pasted);

@@ -110,7 +110,7 @@ internal sealed partial class KafkaScanner(
     KafkaScanCoordinator coordinator,
     KafkaEngineSnapshot settings,
     TimeProvider time,
-    KStudioLoggers loggers,
+    KafkaEngineLoggers loggers,
     KafkaLogOnce once,
     KafkaIndexPlanner indexes,
     IScanObserver? observer = null) : IKafkaScanner
@@ -721,7 +721,7 @@ internal sealed partial class KafkaScanner(
             string cluster = KafkaLogValue.Cap(plan.Request.Cluster)!;
             int topicCount = plan.Request.Topics.Count;
             int partitionCount = plan.Ranges.Count(static x => !x.IsEmpty);
-            KStudioLog.ScanStarted(loggers.Scans, scanId, cluster, topicCount, partitionCount, offsets, isolation);
+            KafkaEngineLog.ScanStarted(loggers.Scans, scanId, cluster, topicCount, partitionCount, offsets, isolation);
 
             // One dedicated thread per scan; nothing in it awaits and the consumer lives and dies on it (decision 4.2).
             Task<KafkaScanResult> task = Task.Factory.StartNew(
@@ -757,7 +757,7 @@ internal sealed partial class KafkaScanner(
     {
         string cluster = KafkaLogValue.Cap(plan.Request.Cluster)!;
         string text = refusal.ToString();
-        KStudioLog.ScanRefused(loggers.Scans, cluster, text);
+        KafkaEngineLog.ScanRefused(loggers.Scans, cluster, text);
         return KafkaScanStart.Refused(refusal, spentBudget);
     }
 
@@ -840,7 +840,7 @@ internal sealed partial class KafkaScanner(
 }
 
 /// <summary>Holds every running scan, and stops them when the host stops (decision 4.3). No hosted service: disposing the container is the trigger.</summary>
-internal sealed class KafkaScanCoordinator(TimeProvider time, KStudioLoggers loggers) : IAsyncDisposable, IDisposable
+internal sealed class KafkaScanCoordinator(TimeProvider time, KafkaEngineLoggers loggers) : IAsyncDisposable, IDisposable
 {
     /// <summary>How long shutdown waits for running scans.</summary>
     public static readonly TimeSpan ShutdownTimeout = TimeSpan.FromSeconds(10);
@@ -889,7 +889,7 @@ internal sealed class KafkaScanCoordinator(TimeProvider time, KStudioLoggers log
             return;
         }
 
-        KStudioLog.ShutdownStarted(loggers.Scans, handles.Length);
+        KafkaEngineLog.ShutdownStarted(loggers.Scans, handles.Length);
 
         foreach (KafkaScanHandle handle in handles)
         {
@@ -902,7 +902,7 @@ internal sealed class KafkaScanCoordinator(TimeProvider time, KStudioLoggers log
         }
         catch (TimeoutException)
         {
-            KStudioLog.ShutdownTimedOut(loggers.Scans, handles.Count(static x => x.IsRunning));
+            KafkaEngineLog.ShutdownTimedOut(loggers.Scans, handles.Count(static x => x.IsRunning));
         }
     }
 }

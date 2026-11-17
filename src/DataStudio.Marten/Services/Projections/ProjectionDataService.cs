@@ -1061,7 +1061,7 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
     /// <summary>A read connection on the database the scope resolved, opened or not opened at all.</summary>
     private static async Task<NpgsqlConnection> OpenAsync(ResolvedScope resolved, CancellationToken cancellationToken)
     {
-        NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
+        NpgsqlConnection connection = MartenSourceDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
 
         try
         {

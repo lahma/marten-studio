@@ -27,9 +27,9 @@ public sealed class ConnectionPageTests
     private static ConnectionPageView DefaultView(SessionDetailsAccess? activity = null, HealthReport? report = null) =>
         View(Facts(Policy, Observed()), report, activity ?? GateClosed);
 
-    private static async Task<PostgresStudioComponentContext> ContextAsync(ConnectionPageView view, ConnectionApplicationsView? applications = null)
+    private static async Task<PostgresComponentContext> ContextAsync(ConnectionPageView view, ConnectionApplicationsView? applications = null)
     {
-        PostgresStudioComponentContext context = new();
+        PostgresComponentContext context = new();
         context.Connection.View = view;
 
         if (applications is not null)
@@ -40,7 +40,7 @@ public sealed class ConnectionPageTests
         return await context.ReadyAsync();
     }
 
-    private static IRenderedComponent<ConnectionPage> Open(PostgresStudioComponentContext context)
+    private static IRenderedComponent<ConnectionPage> Open(PostgresComponentContext context)
     {
         IRenderedComponent<ConnectionPage> page = context.Render<ConnectionPage>();
         page.WaitForAssertion(() => page.FindAll(".ms-conn-strip").Should().ContainSingle());
@@ -54,7 +54,7 @@ public sealed class ConnectionPageTests
     [Fact]
     public async Task The_page_draws_the_strip_then_the_sections_an_admin_reads_in_order()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync(DefaultView());
+        await using PostgresComponentContext context = await ContextAsync(DefaultView());
         IRenderedComponent<ConnectionPage> page = Open(context);
 
         page.Find(".ms-page-title").TextContent.Should().Be("Connection");
@@ -79,7 +79,7 @@ public sealed class ConnectionPageTests
     [InlineData("#conn-cmp-row-Host", "conn-cmp-row-Host")]
     public async Task A_fragment_the_page_names_is_scrolled_to_once_after_the_view_is_drawn(string fragment, string id)
     {
-        await using PostgresStudioComponentContext context = await ContextAsync(DefaultView());
+        await using PostgresComponentContext context = await ContextAsync(DefaultView());
         context.Navigate("studio/postgres/database/connection" + fragment);
 
         IRenderedComponent<ConnectionPage> page = Open(context);
@@ -99,7 +99,7 @@ public sealed class ConnectionPageTests
     [InlineData("#finding-x")]
     public async Task No_fragment_or_one_the_page_does_not_own_scrolls_nothing(string fragment)
     {
-        await using PostgresStudioComponentContext context = await ContextAsync(DefaultView());
+        await using PostgresComponentContext context = await ContextAsync(DefaultView());
         context.Navigate("studio/postgres/database/connection" + fragment);
 
         IRenderedComponent<ConnectionPage> page = Open(context);
@@ -109,13 +109,13 @@ public sealed class ConnectionPageTests
         ScrollInvocations(context).Should().BeEmpty("only an id the page itself draws (conn-…) goes to the script");
     }
 
-    private static List<Bunit.JSRuntimeInvocation> ScrollInvocations(PostgresStudioComponentContext context) =>
+    private static List<Bunit.JSRuntimeInvocation> ScrollInvocations(PostgresComponentContext context) =>
         [.. context.JSInterop.Invocations.Where(static x => x.Identifier == "martenStudio.scroll.intoView")];
 
     [Fact]
     public async Task Each_fact_links_to_a_row_or_section_the_page_has()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync(DefaultView());
+        await using PostgresComponentContext context = await ContextAsync(DefaultView());
         IRenderedComponent<ConnectionPage> page = Open(context);
 
         foreach (IElement link in page.FindAll(".ms-conn-fact a"))
@@ -129,7 +129,7 @@ public sealed class ConnectionPageTests
     public async Task With_nothing_to_say_the_block_says_nothing_to_change()
     {
         ConnectionPageView view = View(Facts("Host=db.example;SSL Mode=VerifyFull", Observed()));
-        await using PostgresStudioComponentContext context = await ContextAsync(view);
+        await using PostgresComponentContext context = await ContextAsync(view);
         IRenderedComponent<ConnectionPage> page = Open(context);
 
         page.Find(".ms-conn-nothing").TextContent.Should().Be("Nothing to change.");
@@ -140,7 +140,7 @@ public sealed class ConnectionPageTests
     public async Task Findings_a_visitor_is_not_shown_are_counted_and_the_block_does_not_claim_there_are_none()
     {
         ConnectionPageView view = View(Facts("Host=db.example;SSL Mode=VerifyFull", Observed()), Report(3, "They need Capabilities.ViewDatabaseActivity."));
-        await using PostgresStudioComponentContext context = await ContextAsync(view);
+        await using PostgresComponentContext context = await ContextAsync(view);
         IRenderedComponent<ConnectionPage> page = Open(context);
 
         page.Find(".ms-conn-nothing").TextContent.Should().Be("Nothing to change among what you are shown.");
@@ -151,7 +151,7 @@ public sealed class ConnectionPageTests
     public async Task A_finding_is_a_card_with_its_severity_its_code_its_remedy_and_a_link_to_the_health_page()
     {
         HealthReport report = Report(0, null, Finding("S11", HealthSeverity.Warning, "The server's certificate is not verified"));
-        await using PostgresStudioComponentContext context = await ContextAsync(DefaultView(report: report));
+        await using PostgresComponentContext context = await ContextAsync(DefaultView(report: report));
         IRenderedComponent<ConnectionPage> page = Open(context);
 
         IElement card = page.Find("article#conn-card-finding-s11");
@@ -169,7 +169,7 @@ public sealed class ConnectionPageTests
     [Fact]
     public async Task A_hint_is_a_card_with_every_form_of_its_fix_and_the_copy_buttons_copy_exactly_what_is_shown()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync(DefaultView());
+        await using PostgresComponentContext context = await ContextAsync(DefaultView());
         IRenderedComponent<ConnectionPage> page = Open(context);
 
         IElement card = page.Find("article#conn-card-hint-tls");
@@ -188,7 +188,7 @@ public sealed class ConnectionPageTests
     [Fact]
     public async Task A_card_anchors_to_the_rows_it_is_about_and_each_row_links_back_to_its_card()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync(DefaultView());
+        await using PostgresComponentContext context = await ContextAsync(DefaultView());
         IRenderedComponent<ConnectionPage> page = Open(context);
 
         page.FindAll("#conn-card-hint-tls .ms-conn-about-link").Select(static x => x.TextContent).Should().Contain(["SSL Mode", "Root Certificate"]);
@@ -205,7 +205,7 @@ public sealed class ConnectionPageTests
     [Fact]
     public async Task A_note_is_good_to_know_and_not_a_thing_worth_a_look()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync(View(Facts("Host=/var/run/postgresql;SSL Mode=Disable", Observed(ssl: false))));
+        await using PostgresComponentContext context = await ContextAsync(View(Facts("Host=/var/run/postgresql;SSL Mode=Disable", Observed(ssl: false))));
         IRenderedComponent<ConnectionPage> page = Open(context);
 
         page.Find(".ms-conn-nothing").TextContent.Should().Be("Nothing to change.");
@@ -219,7 +219,7 @@ public sealed class ConnectionPageTests
     public async Task A_finding_muted_in_this_browser_is_not_drawn_and_is_counted_in_a_line()
     {
         HealthReport report = Report(0, null, Finding("S11", HealthSeverity.Warning, "The server's certificate is not verified"));
-        await using PostgresStudioComponentContext context = await ContextAsync(DefaultView(report: report));
+        await using PostgresComponentContext context = await ContextAsync(DefaultView(report: report));
         await context.Services.GetRequiredService<HealthMutes>().SetAsync(context.JSInterop.JSRuntime, report.Findings[0].MuteKey, true, Xunit.TestContext.Current.CancellationToken);
 
         IRenderedComponent<ConnectionPage> page = Open(context);
@@ -232,7 +232,7 @@ public sealed class ConnectionPageTests
     public async Task A_finding_the_host_accepted_is_a_line_and_no_card()
     {
         HealthReport report = Report(0, null, Finding("S11", HealthSeverity.Warning, "The server's certificate is not verified", accepted: true));
-        await using PostgresStudioComponentContext context = await ContextAsync(DefaultView(report: report));
+        await using PostgresComponentContext context = await ContextAsync(DefaultView(report: report));
         IRenderedComponent<ConnectionPage> page = Open(context);
 
         page.FindAll("#conn-card-finding-s11").Should().BeEmpty();
@@ -246,7 +246,7 @@ public sealed class ConnectionPageTests
     [Fact]
     public async Task The_settings_are_grouped_by_category_each_in_a_labelled_scroll_region_with_the_four_columns()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync(DefaultView());
+        await using PostgresComponentContext context = await ContextAsync(DefaultView());
         IRenderedComponent<ConnectionPage> page = Open(context);
 
         page.FindAll(".ms-conn-group-button").Select(static x => x.TextContent).Should().Contain(static x => x.Contains("Pooling", StringComparison.Ordinal));
@@ -258,7 +258,7 @@ public sealed class ConnectionPageTests
     [Fact]
     public async Task A_row_shows_the_value_the_from_badge_the_default_and_the_builder_property_in_a_tooltip()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync(DefaultView());
+        await using PostgresComponentContext context = await ContextAsync(DefaultView());
         IRenderedComponent<ConnectionPage> page = Open(context);
 
         IElement row = page.Find("tr#conn-row-maximum-pool-size");
@@ -272,7 +272,7 @@ public sealed class ConnectionPageTests
     [Fact]
     public async Task The_toggle_is_on_by_default_hides_defaults_and_shows_them_when_turned_off_and_remembers_the_choice()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync(DefaultView());
+        await using PostgresComponentContext context = await ContextAsync(DefaultView());
         IRenderedComponent<ConnectionPage> page = Open(context);
 
         IElement toggle = page.Find("button.ms-conn-toggle");
@@ -294,7 +294,7 @@ public sealed class ConnectionPageTests
     [Fact]
     public async Task A_browser_that_remembered_all_settings_starts_with_them_and_a_closed_group_stays_closed()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync(DefaultView());
+        await using PostgresComponentContext context = await ContextAsync(DefaultView());
         context.JSInterop.Setup<string?>("martenStudio.prefs.get", static x => x.Arguments.Count == 1 && (string?) x.Arguments[0] == "ms_conn_only_differs").SetResult("0");
         context.JSInterop.Setup<string?>("martenStudio.prefs.get", static x => x.Arguments.Count == 1 && (string?) x.Arguments[0] == "ms_conn_collapsed").SetResult("Pooling");
 
@@ -314,7 +314,7 @@ public sealed class ConnectionPageTests
     [Fact]
     public async Task A_browser_that_refuses_to_remember_is_drawn_the_default()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync(DefaultView());
+        await using PostgresComponentContext context = await ContextAsync(DefaultView());
         context.JSInterop.SetupVoid("martenStudio.prefs.set", _ => true).SetException(new Microsoft.JSInterop.JSException("storage refused"));
 
         IRenderedComponent<ConnectionPage> page = Open(context);
@@ -331,7 +331,7 @@ public sealed class ConnectionPageTests
     [Fact]
     public async Task What_the_server_saw_says_whose_connection_it_is_before_it_shows_anything()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync(DefaultView());
+        await using PostgresComponentContext context = await ContextAsync(DefaultView());
         IRenderedComponent<ConnectionPage> page = Open(context);
 
         IElement section = page.Find("#conn-observed");
@@ -343,7 +343,7 @@ public sealed class ConnectionPageTests
     public async Task A_server_that_could_not_be_asked_is_a_sentence_and_the_rest_of_the_page_stands()
     {
         ConnectionPageView view = View(Facts(Policy, observed: null, observedNotRead: "the connection read failed (SQLSTATE 28P01)"));
-        await using PostgresStudioComponentContext context = await ContextAsync(view);
+        await using PostgresComponentContext context = await ContextAsync(view);
         IRenderedComponent<ConnectionPage> page = Open(context);
 
         page.Find("#conn-observed .ms-conn-unavailable").TextContent.Should().Contain("28P01");
@@ -354,7 +354,7 @@ public sealed class ConnectionPageTests
     [Fact]
     public async Task What_no_page_can_see_is_short_and_there()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync(DefaultView());
+        await using PostgresComponentContext context = await ContextAsync(DefaultView());
         IRenderedComponent<ConnectionPage> page = Open(context);
 
         page.FindAll("#conn-not-visible dt").Select(static x => x.TextContent).Should().Contain(["Passwords supplied by code", "The default password file"]);
@@ -367,7 +367,7 @@ public sealed class ConnectionPageTests
     [Fact]
     public async Task The_small_print_of_not_visible_from_here_is_a_closed_details_with_a_one_line_summary()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync(DefaultView());
+        await using PostgresComponentContext context = await ContextAsync(DefaultView());
         IRenderedComponent<ConnectionPage> page = Open(context);
 
         IElement details = page.Find("#conn-not-visible details.ms-conn-disclosure");
@@ -383,10 +383,10 @@ public sealed class ConnectionPageTests
     private static Task ToggledAsync(IRenderedComponent<ConnectionPage> page) =>
         page.Find("#conn-not-visible details").TriggerEventAsync("ontoggle", EventArgs.Empty);
 
-    private static void ElementSays(PostgresStudioComponentContext context, bool open) =>
+    private static void ElementSays(PostgresComponentContext context, bool open) =>
         context.JSInterop.Setup<bool>("martenStudio.disclosure.isOpen", static _ => true).SetResult(open);
 
-    private static IEnumerable<string?> Remembered(PostgresStudioComponentContext context) =>
+    private static IEnumerable<string?> Remembered(PostgresComponentContext context) =>
         context.JSInterop.Invocations
             .Where(static x => x.Identifier == "martenStudio.prefs.set" && x.Arguments.Count == 2 && (string?) x.Arguments[0] == "ms_conn_not_visible_open")
             .Select(static x => (string?) x.Arguments[1]);
@@ -394,7 +394,7 @@ public sealed class ConnectionPageTests
     [Fact]
     public async Task A_disclosure_the_browser_opens_itself_is_followed_and_remembered_as_open()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync(DefaultView());
+        await using PostgresComponentContext context = await ContextAsync(DefaultView());
         ElementSays(context, true);
 
         IRenderedComponent<ConnectionPage> page = Open(context);
@@ -409,7 +409,7 @@ public sealed class ConnectionPageTests
     [Fact]
     public async Task A_disclosure_the_browser_closes_is_followed_and_remembered_as_closed_and_a_remembered_open_starts_open()
     {
-        await using PostgresStudioComponentContext remembered = await ContextAsync(DefaultView());
+        await using PostgresComponentContext remembered = await ContextAsync(DefaultView());
         remembered.JSInterop.Setup<string?>("martenStudio.prefs.get", static x => x.Arguments.Count == 1 && (string?) x.Arguments[0] == "ms_conn_not_visible_open").SetResult("1");
 
         IRenderedComponent<ConnectionPage> page = Open(remembered);
@@ -425,7 +425,7 @@ public sealed class ConnectionPageTests
     [Fact]
     public async Task The_toggle_event_the_components_own_render_raises_changes_and_remembers_nothing()
     {
-        await using PostgresStudioComponentContext remembered = await ContextAsync(DefaultView());
+        await using PostgresComponentContext remembered = await ContextAsync(DefaultView());
         remembered.JSInterop.Setup<string?>("martenStudio.prefs.get", static x => x.Arguments.Count == 1 && (string?) x.Arguments[0] == "ms_conn_not_visible_open").SetResult("1");
         ElementSays(remembered, true);
 
@@ -441,7 +441,7 @@ public sealed class ConnectionPageTests
     [Fact]
     public async Task A_browser_that_refuses_to_remember_the_disclosure_still_opens_it_for_the_page()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync(DefaultView());
+        await using PostgresComponentContext context = await ContextAsync(DefaultView());
         ElementSays(context, true);
         context.JSInterop.SetupVoid("martenStudio.prefs.set", _ => true).SetException(new Microsoft.JSInterop.JSException("storage refused"));
 
@@ -454,7 +454,7 @@ public sealed class ConnectionPageTests
     [Fact]
     public async Task The_settings_table_keeps_its_table_roles_for_assistive_technology_where_the_cards_are_blocks()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync(DefaultView());
+        await using PostgresComponentContext context = await ContextAsync(DefaultView());
         IRenderedComponent<ConnectionPage> page = Open(context);
 
         // Safari drops the semantics of a table whose parts are display: block (the phone's stacked cards), so they are said outright.
@@ -478,7 +478,7 @@ public sealed class ConnectionPageTests
 
         notes.Should().BeGreaterThan(0);
 
-        await using PostgresStudioComponentContext context = await ContextAsync(withNotes);
+        await using PostgresComponentContext context = await ContextAsync(withNotes);
         IRenderedComponent<ConnectionPage> page = Open(context);
 
         int findings = withNotes.Cards.Count(static x => x.Finding is not null);
@@ -489,7 +489,7 @@ public sealed class ConnectionPageTests
 
         // No notes at all: the count is the plain number it always was.
         ConnectionPageView noNotes = View(Facts("Host=db.example;SSL Mode=VerifyFull", Observed()), Report(0, null, Finding("C16", HealthSeverity.Warning, "x"))) with { Notes = [] };
-        await using PostgresStudioComponentContext none = await ContextAsync(noNotes);
+        await using PostgresComponentContext none = await ContextAsync(noNotes);
         IRenderedComponent<ConnectionPage> plain = Open(none);
 
         plain.FindAll("#conn-worth-count").Should().BeEmpty();
@@ -501,10 +501,10 @@ public sealed class ConnectionPageTests
     {
         string policy = DataStudio.Postgres.Services.Health.HealthService.ActivityPolicyRefusal;
 
-        await using PostgresStudioComponentContext one = await ContextAsync(View(Facts("Host=db.example;SSL Mode=VerifyFull", Observed()), Report(1, policy)));
+        await using PostgresComponentContext one = await ContextAsync(View(Facts("Host=db.example;SSL Mode=VerifyFull", Observed()), Report(1, policy)));
         Open(one).Find(".ms-conn-withheld").TextContent.Should().Be("1 finding is hidden because your account may not see activity on this database.");
 
-        await using PostgresStudioComponentContext two = await ContextAsync(View(Facts("Host=db.example;SSL Mode=VerifyFull", Observed()), Report(2, policy)));
+        await using PostgresComponentContext two = await ContextAsync(View(Facts("Host=db.example;SSL Mode=VerifyFull", Observed()), Report(2, policy)));
         Open(two).Find(".ms-conn-withheld").TextContent.Should().Be("2 findings are hidden because your account may not see activity on this database.");
     }
 
@@ -517,7 +517,7 @@ public sealed class ConnectionPageTests
             Finding = plain.Finding with { Remedy = new HealthRemedy("SSL Mode=VerifyFull", UnencryptedConnectionCheckText(serverOff: true)) },
         };
 
-        await using PostgresStudioComponentContext context = await ContextAsync(View(Facts("Host=db.example;SSL Mode=Prefer", Observed(ssl: false)), Report(0, null, s05)));
+        await using PostgresComponentContext context = await ContextAsync(View(Facts("Host=db.example;SSL Mode=Prefer", Observed(ssl: false)), Report(0, null, s05)));
         IRenderedComponent<ConnectionPage> page = Open(context);
 
         IElement fix = page.Find("#conn-card-finding-s05 .ms-conn-fix");
@@ -532,7 +532,7 @@ public sealed class ConnectionPageTests
     [Fact]
     public async Task Every_group_table_has_the_same_four_columns_and_labels_its_cells_for_the_stacked_card()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync(DefaultView());
+        await using PostgresComponentContext context = await ContextAsync(DefaultView());
         IRenderedComponent<ConnectionPage> page = Open(context);
 
         IReadOnlyList<IElement> tables = page.FindAll("table.ms-conn-settings-table");
@@ -557,7 +557,7 @@ public sealed class ConnectionPageTests
     public async Task The_tls_tile_for_a_loopback_host_behind_a_container_network_is_amber_and_says_so()
     {
         ConnectionPageView view = View(Facts("Host=localhost;Port=5432;Database=app;Username=svc", Observed(ssl: false, clientAddress: "172.17.0.1")));
-        await using PostgresStudioComponentContext context = await ContextAsync(view);
+        await using PostgresComponentContext context = await ContextAsync(view);
         IRenderedComponent<ConnectionPage> page = Open(context);
 
         IElement tile = page.FindAll(".ms-conn-fact").Single(static x => x.QuerySelector("dt")!.TextContent == "TLS");
@@ -569,7 +569,7 @@ public sealed class ConnectionPageTests
     [Fact]
     public async Task The_overviews_line_says_the_same_words_as_the_tile()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync(View(Facts("Host=db.example", Observed(ssl: false)), Report()));
+        await using PostgresComponentContext context = await ContextAsync(View(Facts("Host=db.example", Observed(ssl: false)), Report()));
 
         IRenderedComponent<ConnectionGlanceLine> line = context.Render<ConnectionGlanceLine>(p => p.Add(static x => x.Revision, DateTimeOffset.UnixEpoch));
 
@@ -586,7 +586,7 @@ public sealed class ConnectionPageTests
         });
         ConnectionFacts facts = Facts("Host=db.example;Database=app", Observed()) with { Settings = settings };
 
-        await using PostgresStudioComponentContext context = await ContextAsync(View(facts));
+        await using PostgresComponentContext context = await ContextAsync(View(facts));
         IRenderedComponent<ConnectionPage> page = Open(context);
 
         IElement row = page.Find("tr#conn-row-application-name");
@@ -597,7 +597,7 @@ public sealed class ConnectionPageTests
     [Fact]
     public async Task The_contributors_slot_is_empty_in_postgres_studio_and_drawn_when_a_studio_fills_it()
     {
-        await using PostgresStudioComponentContext empty = await ContextAsync(DefaultView());
+        await using PostgresComponentContext empty = await ContextAsync(DefaultView());
         Open(empty).FindAll(".ms-conn-contributed").Should().BeEmpty();
 
         ConnectionContribution contribution = new()
@@ -613,7 +613,7 @@ public sealed class ConnectionPageTests
             ],
         };
 
-        await using PostgresStudioComponentContext filled = await ContextAsync(View(Facts(Policy, Observed()), contributions: contribution));
+        await using PostgresComponentContext filled = await ContextAsync(View(Facts(Policy, Observed()), contributions: contribution));
         IRenderedComponent<ConnectionPage> page = Open(filled);
 
         page.Find("#conn-marten h2").TextContent.Should().Be("Marten");
@@ -635,7 +635,7 @@ public sealed class ConnectionPageTests
             ],
         };
 
-        await using PostgresStudioComponentContext context = await ContextAsync(View(Facts(Policy, Observed()), contributions: contribution));
+        await using PostgresComponentContext context = await ContextAsync(View(Facts(Policy, Observed()), contributions: contribution));
         IRenderedComponent<ConnectionPage> page = Open(context);
 
         page.FindAll(".ms-conn-contributed").Should().HaveCount(2);
@@ -647,7 +647,7 @@ public sealed class ConnectionPageTests
     [Fact]
     public async Task The_lead_says_what_refresh_does_and_how_often_the_server_is_asked()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync(DefaultView());
+        await using PostgresComponentContext context = await ContextAsync(DefaultView());
         IRenderedComponent<ConnectionPage> page = Open(context);
 
         Normalize(page.Find(".ms-conn-lead").TextContent).Should().Contain("Refresh shows the latest read; the server is asked at most once per health interval.");
@@ -656,7 +656,7 @@ public sealed class ConnectionPageTests
     [Fact]
     public async Task The_strip_calls_gssapi_encryption_encryption()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync(View(Facts(Policy, Observed(ssl: false, gssEncrypted: true))));
+        await using PostgresComponentContext context = await ContextAsync(View(Facts(Policy, Observed(ssl: false, gssEncrypted: true))));
         IRenderedComponent<ConnectionPage> page = Open(context);
 
         page.FindAll(".ms-conn-fact dt").Select(static x => x.TextContent).Should().Contain("Encryption").And.NotContain("TLS");
@@ -666,7 +666,7 @@ public sealed class ConnectionPageTests
     [Fact]
     public async Task A_connection_string_that_could_not_be_read_is_an_alert_and_the_server_section_stays()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync(View(Facts("Host=db.example;Maximum Pool Size=not-a-number", Observed())));
+        await using PostgresComponentContext context = await ContextAsync(View(Facts("Host=db.example;Maximum Pool Size=not-a-number", Observed())));
         IRenderedComponent<ConnectionPage> page = Open(context);
 
         page.Find(".ms-conn-unreadable").TextContent.Should().Contain("could not be read");
@@ -682,7 +682,7 @@ public sealed class ConnectionPageTests
     public async Task A_visitor_the_database_gate_refuses_sees_the_sentence_and_no_section()
     {
         ConnectionPageView refused = ConnectionPageView.Refused(ConnectionRefusal.StorePolicy, "Your account may not see how this application connects.");
-        await using PostgresStudioComponentContext context = await ContextAsync(refused);
+        await using PostgresComponentContext context = await ContextAsync(refused);
 
         IRenderedComponent<ConnectionPage> page = context.Render<ConnectionPage>();
         page.WaitForAssertion(() => page.FindAll(".ms-conn-refusal").Should().ContainSingle());
@@ -696,7 +696,7 @@ public sealed class ConnectionPageTests
     [Fact]
     public async Task A_visitor_short_of_the_activity_gate_sees_everything_else_and_a_sentence_naming_the_option()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync(DefaultView(GateClosed));
+        await using PostgresComponentContext context = await ContextAsync(DefaultView(GateClosed));
         IRenderedComponent<ConnectionPage> page = Open(context);
 
         page.FindAll("#conn-settings").Should().ContainSingle();
@@ -710,7 +710,7 @@ public sealed class ConnectionPageTests
     public async Task A_policy_refusal_of_the_activity_gate_is_the_policys_sentence()
     {
         SessionDetailsAccess denied = new(true, false, false, DatabaseRefusal.WritePolicy, "Your account may not see who is using this database.");
-        await using PostgresStudioComponentContext context = await ContextAsync(DefaultView(denied));
+        await using PostgresComponentContext context = await ContextAsync(DefaultView(denied));
         IRenderedComponent<ConnectionPage> page = Open(context);
 
         page.Find("#conn-sessions").TextContent.Should().Contain("not shown").And.Contain("may not see who is using this database");
@@ -732,7 +732,7 @@ public sealed class ConnectionPageTests
             ],
         };
 
-        await using PostgresStudioComponentContext context = await ContextAsync(DefaultView(GateOpen), applications);
+        await using PostgresComponentContext context = await ContextAsync(DefaultView(GateOpen), applications);
         IRenderedComponent<ConnectionPage> page = Open(context);
 
         page.WaitForAssertion(() => page.FindAll("#conn-sessions tbody tr").Should().HaveCount(2));
@@ -755,7 +755,7 @@ public sealed class ConnectionPageTests
     [Fact]
     public async Task A_failed_read_of_the_sessions_is_a_sentence_and_not_an_empty_table()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync(
+        await using PostgresComponentContext context = await ContextAsync(
             DefaultView(GateOpen),
             ConnectionApplicationsView.Refused(DatabaseRefusal.Unavailable, "The role the studio reads as may not read the database's sessions (SQLSTATE 42501)."));
         IRenderedComponent<ConnectionPage> page = Open(context);
@@ -777,7 +777,7 @@ public sealed class ConnectionPageTests
     [Fact]
     public async Task The_overviews_line_says_tls_the_pool_and_how_many_things_are_worth_a_look_and_links_to_the_page()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync(TwoThings());
+        await using PostgresComponentContext context = await ContextAsync(TwoThings());
 
         IRenderedComponent<ConnectionGlanceLine> line = context.Render<ConnectionGlanceLine>(p => p.Add(static x => x.Revision, DateTimeOffset.UnixEpoch));
 
@@ -791,7 +791,7 @@ public sealed class ConnectionPageTests
     [Fact]
     public async Task The_overviews_line_calls_gssapi_encryption_encryption_and_not_tls()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync(View(
+        await using PostgresComponentContext context = await ContextAsync(View(
             Facts("Host=db.example", Observed(ssl: false, gssEncrypted: true)),
             Report(),
             pool: null));
@@ -806,7 +806,7 @@ public sealed class ConnectionPageTests
     public async Task The_overviews_line_leaves_out_what_this_browser_muted()
     {
         ConnectionPageView view = TwoThings();
-        await using PostgresStudioComponentContext context = await ContextAsync(view);
+        await using PostgresComponentContext context = await ContextAsync(view);
         await context.Services.GetRequiredService<HealthMutes>().SetAsync(context.JSInterop.JSRuntime, view.Cards[0].Finding!.MuteKey, true, Xunit.TestContext.Current.CancellationToken);
 
         IRenderedComponent<ConnectionGlanceLine> line = context.Render<ConnectionGlanceLine>(p => p.Add(static x => x.Revision, DateTimeOffset.UnixEpoch));
@@ -817,11 +817,11 @@ public sealed class ConnectionPageTests
     [Fact]
     public async Task The_overviews_line_says_nothing_to_change_when_there_is_nothing_and_is_absent_for_a_visitor_the_page_refuses()
     {
-        await using PostgresStudioComponentContext clear = await ContextAsync(View(Facts("Host=db.example;SSL Mode=VerifyFull", Observed())));
+        await using PostgresComponentContext clear = await ContextAsync(View(Facts("Host=db.example;SSL Mode=VerifyFull", Observed())));
         IRenderedComponent<ConnectionGlanceLine> line = clear.Render<ConnectionGlanceLine>(p => p.Add(static x => x.Revision, DateTimeOffset.UnixEpoch));
         line.WaitForAssertion(() => Normalize(line.Find(".ms-overview-connection").TextContent).Should().EndWith("· nothing to change"));
 
-        await using PostgresStudioComponentContext refused = await ContextAsync(ConnectionPageView.Refused(ConnectionRefusal.StorePolicy, "no"));
+        await using PostgresComponentContext refused = await ContextAsync(ConnectionPageView.Refused(ConnectionRefusal.StorePolicy, "no"));
         IRenderedComponent<ConnectionGlanceLine> none = refused.Render<ConnectionGlanceLine>(p => p.Add(static x => x.Revision, DateTimeOffset.UnixEpoch));
         refused.Connection.GlanceRequests.Should().NotBeEmpty();
         none.FindAll(".ms-overview-connection").Should().BeEmpty();
@@ -830,7 +830,7 @@ public sealed class ConnectionPageTests
     [Fact]
     public async Task The_postgres_overview_draws_the_line_once_it_is_interactive()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync(TwoThings());
+        await using PostgresComponentContext context = await ContextAsync(TwoThings());
 
         IRenderedComponent<StudioHome> overview = context.Render<StudioHome>();
 

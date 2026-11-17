@@ -179,7 +179,7 @@ public class MartenOptionsTest
         DataStudioOptions shell = new() { RefreshInterval = TimeSpan.FromMilliseconds(refreshMilliseconds) };
 
         options.HealthInterval.Should().Be(TimeSpan.FromMilliseconds(healthMilliseconds));
-        MartenStudioSettings.Of(options, new DataStudio.Services.Settings.ShellSettings(Options.Create(shell))).EffectiveHealthInterval
+        MartenSettings.Of(options, new DataStudio.Services.Settings.ShellSettings(Options.Create(shell))).EffectiveHealthInterval
             .Should().Be(TimeSpan.FromMilliseconds(effectiveMilliseconds), "the shell's RefreshInterval is the floor");
     }
 

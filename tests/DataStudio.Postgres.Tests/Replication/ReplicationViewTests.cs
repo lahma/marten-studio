@@ -61,7 +61,7 @@ public class ReplicationViewTests
         new(name, "10.0.0.3", "replicator", "streaming", "async", 2048, 1024, TimeSpan.FromMilliseconds(5), TimeSpan.FromMilliseconds(6), TimeSpan.FromMilliseconds(7));
 
     private static ReplicationView Build(ReplicationFacts facts, bool names, HealthHistoryView? history = null) =>
-        ReplicationService.Build(facts, names, names ? null : "needs ViewDatabaseActivity", history ?? HealthHistoryView.Empty, PostgresStudioText.Instance);
+        ReplicationService.Build(facts, names, names ? null : "needs ViewDatabaseActivity", history ?? HealthHistoryView.Empty, PostgresText.Instance);
 
     [Fact]
     public void Without_the_activity_gate_no_standby_slot_or_command_is_named()

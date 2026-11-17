@@ -324,7 +324,7 @@ public sealed class NpgsqlPoolInstrumentsTests
         await using HealthConnection connection = new(target);
         HealthCheckContext context = new(
             resolved,
-            PostgresStudioSettings.Of(Microsoft.Extensions.Options.Options.Create(new PostgresOptions())),
+            PostgresSettings.Of(Microsoft.Extensions.Options.Options.Create(new PostgresOptions())),
             NoStudioRuntime.Instance,
             services,
             new HealthSqlRunner(connection, new ReadOnlySqlOptions(), null),

@@ -26,7 +26,7 @@ internal sealed class KafkaCatalogRig : IAsyncDisposable
         Clock = new ManualTimeProvider(new DateTimeOffset(2026, 11, 8, 6, 0, 0, TimeSpan.Zero));
         Cluster = new FakeKafkaCluster(Clock);
         Engine = EngineHarness.ForWire(new FakeKafkaWire(Cluster, EngineHarness.ClusterKey), Clock, TimeSpan.FromSeconds(5), engine, profile is { } p ? c => c.Profile(p) : null);
-        Studio = new KafkaStudioHarness(studio, services, [Entry], Engine);
+        Studio = new KafkaHarness(studio, services, [Entry], Engine);
     }
 
     public ManualTimeProvider Clock { get; }
@@ -35,7 +35,7 @@ internal sealed class KafkaCatalogRig : IAsyncDisposable
 
     public EngineHarness Engine { get; }
 
-    public KafkaStudioHarness Studio { get; }
+    public KafkaHarness Studio { get; }
 
     /// <summary>How many list-offsets calls reached the fake broker.</summary>
     public int ListOffsetCalls => Cluster.Calls.Count(static x => x.Call == DataStudio.Kafka.Core.Wire.WireCall.ListOffsets);

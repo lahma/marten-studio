@@ -52,7 +52,7 @@ public class StudioActionLogTest
 
         var ring = new StudioActionLogService();
         var captured = new CapturingLoggerProvider();
-        var log = new StudioActionLog(new StudioActivity(ring, users, []), captured.CreateFactory().CreateLogger<StudioActionLog>(), users, state, MartenStudioDescriptor.Instance, MartenStudioSettings.Of(options));
+        var log = new StudioActionLog(new StudioActivity(ring, users, []), captured.CreateFactory().CreateLogger<StudioActionLog>(), users, state, MartenDescriptor.Instance, MartenSettings.Of(options));
 
         return new Harness(log, ring, captured, users, state, provider);
     }
@@ -149,7 +149,7 @@ public class StudioActionLogTest
         for (var i = 0; i < StudioActionLogService.MaxEntries + 25; i++)
         {
             ring.Record(new StudioActionLogEntry(
-                DateTimeOffset.UnixEpoch.AddSeconds(i), "ops", new DatabaseAuditScope("default", "db", null).ToAuditScope(MartenStudioDescriptor.Key),
+                DateTimeOffset.UnixEpoch.AddSeconds(i), "ops", new DatabaseAuditScope("default", "db", null).ToAuditScope(MartenDescriptor.Key),
                 "Action" + i, "target", true, null, null));
         }
 
@@ -167,7 +167,7 @@ public class StudioActionLogTest
         for (var i = 0; i < 10; i++)
         {
             ring.Record(new StudioActionLogEntry(
-                DateTimeOffset.UnixEpoch, "ops", new DatabaseAuditScope("default", "db", null).ToAuditScope(MartenStudioDescriptor.Key), "Action" + i, "target", true, null, null));
+                DateTimeOffset.UnixEpoch, "ops", new DatabaseAuditScope("default", "db", null).ToAuditScope(MartenDescriptor.Key), "Action" + i, "target", true, null, null));
         }
 
         ring.GetLatest(0).Should().HaveCount(1);
@@ -188,7 +188,7 @@ public class StudioActionLogTest
     {
         var ring = new StudioActionLogService();
         var entry = new StudioActionLogEntry(
-            DateTimeOffset.UnixEpoch, "ops", new DatabaseAuditScope("default", "db", null).ToAuditScope(MartenStudioDescriptor.Key), "DeleteDocument", "customer/42", true, "deleted", null);
+            DateTimeOffset.UnixEpoch, "ops", new DatabaseAuditScope("default", "db", null).ToAuditScope(MartenDescriptor.Key), "DeleteDocument", "customer/42", true, "deleted", null);
 
         ring.Record(entry);
         ring.Record(entry);

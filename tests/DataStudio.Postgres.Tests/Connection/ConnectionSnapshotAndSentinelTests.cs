@@ -97,7 +97,7 @@ public sealed class ConnectionSnapshotAndSentinelTests
     [Fact]
     public async Task No_withheld_sentinel_is_in_the_rendered_page_with_every_setting_shown()
     {
-        await using PostgresStudioComponentContext context = new();
+        await using PostgresComponentContext context = new();
         context.Connection.View = SentinelView();
         context.JSInterop.Setup<string?>("martenStudio.prefs.get", static x => x.Arguments.Count == 1 && (string?) x.Arguments[0] == "ms_conn_only_differs").SetResult("0");
         await context.ReadyAsync();
@@ -119,7 +119,7 @@ public sealed class ConnectionSnapshotAndSentinelTests
     [Fact]
     public async Task No_withheld_sentinel_is_in_the_overviews_connection_line_with_every_setting_shown()
     {
-        await using PostgresStudioComponentContext context = new();
+        await using PostgresComponentContext context = new();
         context.Connection.View = SentinelView();
         await context.ReadyAsync();
 
@@ -139,7 +139,7 @@ public sealed class ConnectionSnapshotAndSentinelTests
     // The snapshot's connection section
     // -------------------------------------------------------------------------------------------------
 
-    private static readonly HealthCheckRegistry Registry = new(PostgresStudioDescriptor.Instance);
+    private static readonly HealthCheckRegistry Registry = new(PostgresDescriptor.Instance);
 
     internal static string Json(ConnectionPageView? view, ConnectionApplicationsView? applications = null) =>
         VisitorSnapshotBuilder.Compose(

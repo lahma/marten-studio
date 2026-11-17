@@ -197,7 +197,7 @@ internal sealed partial class DocumentDataService : IDocumentDataService
 
         try
         {
-            await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
+            await using NpgsqlConnection connection = MartenSourceDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
             await connection.OpenStudioAsync(cancellationToken).ConfigureAwait(false);
 
             HashSet<string> schemas = SchemaNames(resolved.Store);
@@ -284,7 +284,7 @@ internal sealed partial class DocumentDataService : IDocumentDataService
 
         try
         {
-            await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
+            await using NpgsqlConnection connection = MartenSourceDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
 
             // Marked, so that a dry pool or a connect timeout is never read as the count's own statement
             // timeout by the IsTimeout filter below: that would draw "?" and offer the button again for a
@@ -382,7 +382,7 @@ internal sealed partial class DocumentDataService : IDocumentDataService
 
         try
         {
-            await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
+            await using NpgsqlConnection connection = MartenSourceDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
 
             // Through PostgresFailure, so that the timeout catch below never reads a pool that ran dry or
             // a connect that timed out - spelled exactly like a statement timeout - as "too large to scan".
@@ -535,7 +535,7 @@ internal sealed partial class DocumentDataService : IDocumentDataService
 
         try
         {
-            await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
+            await using NpgsqlConnection connection = MartenSourceDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
             await connection.OpenStudioAsync(cancellationToken).ConfigureAwait(false);
 
             CollectionContext? context = await LoadContextAsync(resolved, connection, alias, cancellationToken)
@@ -858,7 +858,7 @@ internal sealed partial class DocumentDataService : IDocumentDataService
                 planScope = named;
             }
 
-            await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
+            await using NpgsqlConnection connection = MartenSourceDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
             await connection.OpenStudioAsync(cancellationToken).ConfigureAwait(false);
 
             if (await LoadContextAsync(resolved, connection, alias, cancellationToken).ConfigureAwait(false) is { } context)
@@ -916,7 +916,7 @@ internal sealed partial class DocumentDataService : IDocumentDataService
 
         try
         {
-            result = WhatIfResult.From(index, await hypothetical.ReadAsync(MartenStudioDatabase.Of(resolved.Database), index, planner, cancellationToken).ConfigureAwait(false));
+            result = WhatIfResult.From(index, await hypothetical.ReadAsync(MartenSourceDatabase.Of(resolved.Database), index, planner, cancellationToken).ConfigureAwait(false));
         }
         catch (OperationCanceledException)
         {

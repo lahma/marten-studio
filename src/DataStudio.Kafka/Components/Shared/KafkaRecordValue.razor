@@ -17,10 +17,10 @@
                 <KafkaCapabilityDisabled Capability="@nameof(KafkaCapabilities.ReadPayloads)" Action="Reading values" />
                 break;
             case KafkaValueAccess.PolicyRefused:
-                <p class="ms-k-note" role="note">@KafkaStudioText.ValueNotAvailable</p>
+                <p class="ms-k-note" role="note">@KafkaText.ValueNotAvailable</p>
                 break;
             case KafkaValueAccess.SearchWithoutValues:
-                <p class="ms-k-note" role="note">@KafkaStudioText.ValueNotReadBySearch</p>
+                <p class="ms-k-note" role="note">@KafkaText.ValueNotReadBySearch</p>
                 break;
             default:
                 @Body()
@@ -71,31 +71,31 @@
 
         if (record.ValueKind == KafkaValueKind.Tombstone)
         {
-            Note(KafkaStudioText.ValueTombstone);
+            Note(KafkaText.ValueTombstone);
             return;
         }
 
         if (record.ValueKind == KafkaValueKind.Empty)
         {
-            Note(record.ValueIsCloudEventData ? "This CloudEvent has no data." : KafkaStudioText.ValueEmpty);
+            Note(record.ValueIsCloudEventData ? "This CloudEvent has no data." : KafkaText.ValueEmpty);
             return;
         }
 
         if (record.ValueWithheldBy is { } rule)
         {
-            Note(KafkaStudioText.ValueWithheld(rule));
+            Note(KafkaText.ValueWithheld(rule));
             return;
         }
 
         if (record.ValueKind == KafkaValueKind.Undecodable)
         {
-            Note(KafkaStudioText.ValueUndecodable(record.UndecodableReason is { } reason ? KafkaStudioText.UndecodableReason(reason) : "the reason is not known"));
+            Note(KafkaText.ValueUndecodable(record.UndecodableReason is { } reason ? KafkaText.UndecodableReason(reason) : "the reason is not known"));
             return;
         }
 
         if (record.ValueIsCloudEventData)
         {
-            Note(KafkaStudioText.ValueCloudEventData, "ms-k-value-lead");
+            Note(KafkaText.ValueCloudEventData, "ms-k-value-lead");
         }
 
         foreach (string maskedNote in MaskedNotes(record))
@@ -143,18 +143,18 @@
 
                 if (OnRecordPage)
                 {
-                    builder.AddContent(sequence++, KafkaStudioText.ValueCutOnRecordPage);
+                    builder.AddContent(sequence++, KafkaText.ValueCutOnRecordPage);
                 }
                 else if (RecordHref is { Length: > 0 } href)
                 {
                     builder.OpenElement(sequence++, "a");
                     builder.AddAttribute(sequence++, "href", href);
-                    builder.AddContent(sequence++, KafkaStudioText.ValueCutOpenRecordPage);
+                    builder.AddContent(sequence++, KafkaText.ValueCutOpenRecordPage);
                     builder.CloseElement();
                 }
                 else
                 {
-                    builder.AddContent(sequence++, KafkaStudioText.ValueCutOpenRecordPage);
+                    builder.AddContent(sequence++, KafkaText.ValueCutOpenRecordPage);
                 }
 
                 builder.CloseElement();

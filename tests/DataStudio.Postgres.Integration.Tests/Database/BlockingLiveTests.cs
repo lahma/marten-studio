@@ -100,7 +100,7 @@ public class BlockingLiveTests(PostgresFixture postgres)
 
             // C12, judged as of ten seconds past the read: idle-head, the holder named, the terminate statement handed over.
             BlockingChainFacts facts = await GatherAsync(host);
-            HealthFinding finding = new BlockingChainCheck().Evaluate(facts, HealthEvaluation.At(facts.ReadAt.AddSeconds(15), text: PostgresStudioText.Instance))
+            HealthFinding finding = new BlockingChainCheck().Evaluate(facts, HealthEvaluation.At(facts.ReadAt.AddSeconds(15), text: PostgresText.Instance))
                 .Findings.Should().ContainSingle().Subject;
 
             finding.Variant.Should().Be(BlockingChainCheck.IdleHead);
@@ -201,11 +201,11 @@ public class BlockingLiveTests(PostgresFixture postgres)
             BlockingChainFacts facts = await GatherAsync(host);
             BlockingChainCheck check = new();
 
-            HealthVerdict now = check.Evaluate(facts, HealthEvaluation.At(facts.ReadAt, text: PostgresStudioText.Instance));
+            HealthVerdict now = check.Evaluate(facts, HealthEvaluation.At(facts.ReadAt, text: PostgresText.Instance));
             now.Findings.Should().BeEmpty("a few seconds behind a running statement is a lock wait, not yet a long chain");
             now.Note.Should().Contain("2 min");
 
-            HealthFinding later = check.Evaluate(facts, HealthEvaluation.At(facts.ReadAt.AddMinutes(2), text: PostgresStudioText.Instance))
+            HealthFinding later = check.Evaluate(facts, HealthEvaluation.At(facts.ReadAt.AddMinutes(2), text: PostgresText.Instance))
                 .Findings.Should().ContainSingle().Subject;
 
             later.Variant.Should().Be(BlockingChainCheck.LongChain);
@@ -261,7 +261,7 @@ public class BlockingLiveTests(PostgresFixture postgres)
                 "C12's Show SQL is the sweep's one read of the lock table");
 
             BlockingChainFacts facts = await GatherAsync(host);
-            new BlockingChainCheck().Evaluate(facts, HealthEvaluation.At(facts.ReadAt.AddHours(1), text: PostgresStudioText.Instance))
+            new BlockingChainCheck().Evaluate(facts, HealthEvaluation.At(facts.ReadAt.AddHours(1), text: PostgresText.Instance))
                 .Findings.Should().BeEmpty("a transaction that blocks nobody is C04's, never a chain - however long it sits");
 
             await using StudioCircuit admin = host.Circuit("admin");

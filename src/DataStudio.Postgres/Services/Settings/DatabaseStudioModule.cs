@@ -36,7 +36,7 @@ internal sealed class DatabaseStudioModule : IStudioModule
         this.settings = settings;
         this.guard = guard;
         navigation = descriptor.Navigation(settings);
-        shortcuts = [.. PostgresStudioShortcuts.Groups, .. descriptor.ExtraShortcuts];
+        shortcuts = [.. PostgresShortcuts.Groups, .. descriptor.ExtraShortcuts];
     }
 
     /// <inheritdoc />

@@ -323,7 +323,7 @@
 
     private string PageHref(int page) =>
         EventLinks.To(
-            MartenStudioDescriptor.TenantsRoute,
+            MartenDescriptor.TenantsRoute,
             State.ActiveScope,
             new KeyValuePair<string, string?>("filter", loadedFilter),
             new KeyValuePair<string, string?>("page", (page + 1).ToString(CultureInfo.InvariantCulture)));
@@ -344,7 +344,7 @@
     private Task ApplyFilterAsync()
     {
         string? filter = string.IsNullOrWhiteSpace(filterText) ? null : filterText.Trim();
-        Navigation.NavigateTo(EventLinks.To(MartenStudioDescriptor.TenantsRoute, State.ActiveScope, new KeyValuePair<string, string?>("filter", filter)));
+        Navigation.NavigateTo(EventLinks.To(MartenDescriptor.TenantsRoute, State.ActiveScope, new KeyValuePair<string, string?>("filter", filter)));
 
         return Task.CompletedTask;
     }

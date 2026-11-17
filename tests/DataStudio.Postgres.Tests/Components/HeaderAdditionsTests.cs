@@ -17,7 +17,7 @@ namespace DataStudio.Postgres.Tests.Components;
 /// </summary>
 public class HeaderAdditionsTests
 {
-    private static PostgresStudioComponentContext Context(string? environment = "Production") => new(services =>
+    private static PostgresComponentContext Context(string? environment = "Production") => new(services =>
     {
         if (environment is not null)
         {
@@ -32,7 +32,7 @@ public class HeaderAdditionsTests
     [InlineData("QA", "ms-env-badge-other")]
     public void The_header_shows_the_environment_in_the_colour_of_its_kind(string name, string expectedClass)
     {
-        using PostgresStudioComponentContext context = Context(name);
+        using PostgresComponentContext context = Context(name);
 
         IRenderedComponent<StudioLayout> layout = context.Render<StudioLayout>(parameters => parameters.Add(x => x.Body, static builder => builder.AddContent(0, string.Empty)));
 
@@ -44,7 +44,7 @@ public class HeaderAdditionsTests
     [Fact]
     public void A_host_with_no_IHostEnvironment_has_no_badge()
     {
-        using PostgresStudioComponentContext context = Context(environment: null);
+        using PostgresComponentContext context = Context(environment: null);
 
         context.Render<StudioLayout>(parameters => parameters.Add(x => x.Body, static builder => builder.AddContent(0, string.Empty)))
             .FindAll(".ms-env-badge").Should().BeEmpty();
@@ -53,11 +53,11 @@ public class HeaderAdditionsTests
     [Fact]
     public void The_back_link_is_there_only_when_the_option_is_set_and_goes_where_it_says()
     {
-        using PostgresStudioComponentContext without = Context();
+        using PostgresComponentContext without = Context();
         without.Render<StudioLayout>(parameters => parameters.Add(x => x.Body, static builder => builder.AddContent(0, string.Empty)))
             .FindAll(".ms-back-link").Should().BeEmpty();
 
-        using PostgresStudioComponentContext with = Context();
+        using PostgresComponentContext with = Context();
         with.ShellOptions.ApplicationPath = "/";
         IElement link = with.Render<StudioLayout>(parameters => parameters.Add(x => x.Body, static builder => builder.AddContent(0, string.Empty)))
             .Find(".ms-header-right > a.ms-back-link");
@@ -69,7 +69,7 @@ public class HeaderAdditionsTests
     [Fact]
     public void Copy_link_puts_the_address_with_its_scope_on_the_clipboard()
     {
-        using PostgresStudioComponentContext context = Context();
+        using PostgresComponentContext context = Context();
         context.Navigate("postgres/database?store=default&db=default");
         context.JSInterop.Setup<bool>("martenStudio.clipboard.copyText", _ => true).SetResult(true);
 
@@ -84,13 +84,13 @@ public class HeaderAdditionsTests
     [Fact]
     public void A_refused_copy_shows_the_text_box_and_a_lost_circuit_does_too()
     {
-        using PostgresStudioComponentContext refused = Context();
+        using PostgresComponentContext refused = Context();
         refused.JSInterop.Setup<bool>("martenStudio.clipboard.copyText", _ => true).SetResult(false);
         IRenderedComponent<CopyLinkButton> first = refused.Render<CopyLinkButton>();
         first.Find("button.ms-copy-link-button").Click();
         first.Find(".ms-copy-link-fallback input").GetAttribute("value").Should().Be(refused.CurrentUri);
 
-        using PostgresStudioComponentContext gone = Context();
+        using PostgresComponentContext gone = Context();
         gone.JSInterop.Setup<bool>("martenStudio.clipboard.copyText", _ => true).SetException(new JSDisconnectedException("the circuit closed"));
         IRenderedComponent<CopyLinkButton> second = gone.Render<CopyLinkButton>();
         second.Invoking(x => x.Find("button.ms-copy-link-button").Click()).Should().NotThrow();

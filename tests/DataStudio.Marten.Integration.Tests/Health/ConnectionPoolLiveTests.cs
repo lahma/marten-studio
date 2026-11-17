@@ -162,6 +162,6 @@ public class ConnectionPoolLiveTests(PostgresFixture postgres)
         IReadOnlyList<NpgsqlPoolReading> pools = lease.Read();
 
         observer.MeasurementsReceived.Should().BeGreaterThan(before, "a reading is the only thing that produces measurements");
-        pools.Should().Contain(x => DatabasePoolSettings.IsPoolOf(DataStudio.Marten.Services.MartenStudioDatabase.Of(host.Store.Storage.Database), x.PoolName));
+        pools.Should().Contain(x => DatabasePoolSettings.IsPoolOf(DataStudio.Marten.Services.MartenSourceDatabase.Of(host.Store.Storage.Database), x.PoolName));
     }
 }

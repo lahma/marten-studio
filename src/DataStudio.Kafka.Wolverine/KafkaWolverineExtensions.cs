@@ -21,8 +21,8 @@ public static class KafkaWolverineExtensions
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        // Names only KafkaEngineOptions, which is public: everything of DataStudio.Kafka.Core's internals is behind the guard (KStudioWolverineVersionGuardTests).
-        KStudioWolverineVersionGuard.Ensure();
+        // Names only KafkaEngineOptions, which is public: everything of DataStudio.Kafka.Core's internals is behind the guard (KafkaWolverineVersionGuardTests).
+        KafkaWolverineVersionGuard.Ensure();
 
         KafkaWolverineOptions settings = new();
         configure?.Invoke(settings);

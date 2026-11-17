@@ -168,7 +168,7 @@ public class KafkaExportServiceTests
         outcome.Delivered.Should().BeTrue();
         outcome.LeftOut.Should().BeGreaterThan(0);
         (outcome.Written + outcome.LeftOut).Should().Be(20);
-        outcome.Text.Should().Be(KafkaStudioText.ExportLimited(outcome.Written, 20, OneMiB))
+        outcome.Text.Should().Be(KafkaText.ExportLimited(outcome.Written, 20, OneMiB))
             .And.NotContain("KafkaOptions", "an option's name is on Cluster settings only")
             .And.Contain("size limit for an export");
         capture.Bytes.Length.Should().BeLessThanOrEqualTo((int) OneMiB);
@@ -239,7 +239,7 @@ public class KafkaExportServiceTests
         KafkaExportOutcome outcome = await rig.Export().ExportAsync(InputOf(rig, planned, matches, result), capture.DeliverAsync, Ct);
 
         outcome.Delivered.Should().BeFalse();
-        outcome.Text.Should().Be(KafkaStudioText.ProfileForbids(KafkaStudioText.ExportingRecords, rig.Entry))
+        outcome.Text.Should().Be(KafkaText.ProfileForbids(KafkaText.ExportingRecords, rig.Entry))
             .And.Be("This cluster's profile does not allow exporting records.").And.NotContain("KafkaClusterBuilder");
         capture.Calls.Should().Be(0, "nothing was written, so nothing was delivered");
         rig.Studio.Authorization.KafkaCalls.Should().BeEmpty("the profile is judged before a policy is asked");
@@ -277,10 +277,10 @@ public class KafkaExportServiceTests
         KafkaExportOutcome outcome = await rig.Export().ExportAsync(InputOf(rig, planned, matches, result), capture.DeliverAsync, Ct);
 
         outcome.Delivered.Should().BeFalse();
-        outcome.Text.Should().Be(KafkaStudioText.RequestRefused).And.NotContain("secret");
+        outcome.Text.Should().Be(KafkaText.RequestRefused).And.NotContain("secret");
         capture.Calls.Should().Be(0, "a request naming a refused topic is refused whole, never narrowed to the allowed one");
         rig.Logs.Entries.Should().Contain(static x => x.EventId.Id == 9603);
-        Exports(rig).Should().ContainSingle().Which.Message.Should().Be(KafkaStudioText.RefusedEntry);
+        Exports(rig).Should().ContainSingle().Which.Message.Should().Be(KafkaText.RefusedEntry);
     }
 
     [Theory]
@@ -296,7 +296,7 @@ public class KafkaExportServiceTests
 
         KafkaExportOutcome outcome = await rig.Export().ExportAsync(InputOf(rig, planned, matches, result), capture.DeliverAsync, Ct);
 
-        outcome.Text.Should().Be(KafkaStudioText.RequestRefused);
+        outcome.Text.Should().Be(KafkaText.RequestRefused);
         capture.Calls.Should().Be(0);
         rig.Logs.Entries.Should().Contain(static x => x.EventId.Id == 9603);
     }
@@ -329,7 +329,7 @@ public class KafkaExportServiceTests
 
         KafkaExportOutcome outcome = await rig.Export().ExportAsync(InputOf(rig, planned, matches, result, topics: ["orders"]), capture.DeliverAsync, Ct);
 
-        outcome.Text.Should().Be(KafkaStudioText.ExportRecordsNotFromTopics);
+        outcome.Text.Should().Be(KafkaText.ExportRecordsNotFromTopics);
         capture.Calls.Should().Be(0);
         rig.Logs.Entries.Should().Contain(static x => x.EventId.Id == 9609);
     }
@@ -345,8 +345,8 @@ public class KafkaExportServiceTests
         KafkaExportOutcome several = await rig.Export().ExportAsync(InputOf(rig, planned, matches, result, KafkaExportFormat.Value), capture.DeliverAsync, Ct);
         KafkaExportOutcome fromSearch = await rig.Export().ExportAsync(InputOf(rig, planned, [matches[0]], result, KafkaExportFormat.Value), capture.DeliverAsync, Ct);
 
-        several.Text.Should().Be(KafkaStudioText.ExportValueFromOneRecord);
-        fromSearch.Text.Should().Be(KafkaStudioText.ExportValueFromOneRecord, "the value alone is the record page's");
+        several.Text.Should().Be(KafkaText.ExportValueFromOneRecord);
+        fromSearch.Text.Should().Be(KafkaText.ExportValueFromOneRecord, "the value alone is the record page's");
         capture.Calls.Should().Be(0);
 
         KafkaExportInput record = new(
@@ -355,7 +355,7 @@ public class KafkaExportServiceTests
             KafkaExportSource.Record,
             null,
             null,
-            KafkaStudioText.RecordExportAuditText,
+            KafkaText.RecordExportAuditText,
             1,
             matches[0].ValueLength,
             [matches[0]],
@@ -379,7 +379,7 @@ public class KafkaExportServiceTests
 
         KafkaExportOutcome outcome = await rig.Export().ExportAsync(InputOf(rig, planned, [], result), capture.DeliverAsync, Ct);
 
-        outcome.Text.Should().Be(KafkaStudioText.ExportNothing);
+        outcome.Text.Should().Be(KafkaText.ExportNothing);
         capture.Calls.Should().Be(0);
     }
 
@@ -398,7 +398,7 @@ public class KafkaExportServiceTests
         KafkaExportOutcome outcome = await rig.Export().ExportAsync(InputOf(rig, planned, matches, result), capture.DeliverAsync, Ct);
 
         outcome.Delivered.Should().BeFalse();
-        outcome.Text.Should().Be(KafkaStudioText.ExportGrantChanged);
+        outcome.Text.Should().Be(KafkaText.ExportGrantChanged);
         capture.Calls.Should().Be(0);
         rig.Logs.Entries.Should().Contain(static x => x.EventId.Id == 9609);
     }
@@ -414,7 +414,7 @@ public class KafkaExportServiceTests
 
         KafkaExportOutcome outcome = await rig.Export().ExportAsync(InputOf(rig, planned, matches, result), capture.DeliverAsync, Ct);
 
-        outcome.Text.Should().Be(KafkaStudioText.ExportGrantChanged);
+        outcome.Text.Should().Be(KafkaText.ExportGrantChanged);
         capture.Calls.Should().Be(0);
     }
 
@@ -444,10 +444,10 @@ public class KafkaExportServiceTests
         KafkaExportOutcome outcome = await rig.Export().ExportAsync(InputOf(rig, planned, matches, result), capture.DeliverAsync, Ct);
 
         outcome.Delivered.Should().BeFalse();
-        outcome.Text.Should().Be(KafkaStudioText.ExportNotDelivered);
+        outcome.Text.Should().Be(KafkaText.ExportNotDelivered);
         StudioActionLogEntry entry = Exports(rig).Should().ContainSingle().Which;
         entry.Succeeded.Should().BeFalse();
-        entry.Message.Should().Be(KafkaStudioText.ExportNotDelivered);
+        entry.Message.Should().Be(KafkaText.ExportNotDelivered);
         rig.Logs.Entries.Should().NotContain(static x => x.EventId.Id == 9606);
         rig.Logs.Entries.Should().Contain(static x => x.EventId.Id == 9609);
         rig.Logs.Entries.Single(static x => x.EventId.Id == 9609).Message.Should().NotContain("..", "the reason's own full stop is not doubled by the template's");
@@ -466,7 +466,7 @@ public class KafkaExportServiceTests
             Ct);
 
         outcome.Delivered.Should().BeFalse();
-        Exports(rig).Should().ContainSingle().Which.Message.Should().Be(KafkaStudioText.ExportNotDelivered);
+        Exports(rig).Should().ContainSingle().Which.Message.Should().Be(KafkaText.ExportNotDelivered);
     }
 
     [Fact]
@@ -481,7 +481,7 @@ public class KafkaExportServiceTests
             static (_, _, _, _) => throw new FormatException("boom"),
             Ct);
 
-        outcome.Text.Should().Be(KafkaStudioText.ExportFailed);
+        outcome.Text.Should().Be(KafkaText.ExportFailed);
         Exports(rig).Should().ContainSingle().Which.Succeeded.Should().BeFalse();
     }
 
@@ -502,7 +502,7 @@ public class KafkaExportServiceTests
         await export.Should().ThrowAsync<OperationCanceledException>();
         StudioActionLogEntry entry = Exports(rig).Should().ContainSingle("the browser may have saved the file, so the export is not left unaudited").Which;
         entry.Succeeded.Should().BeFalse();
-        entry.Message.Should().Be(KafkaStudioText.ExportAbandoned);
+        entry.Message.Should().Be(KafkaText.ExportAbandoned);
         entry.Capability.Should().Be("ExportRecords");
         rig.Logs.Entries.Where(static x => x.EventId.Id == 9609).Should().ContainSingle();
         rig.Logs.Entries.Should().NotContain(static x => x.EventId.Id == 9606);
@@ -520,7 +520,7 @@ public class KafkaExportServiceTests
         KafkaExportOutcome outcome = await rig.Export().ExportAsync(InputOf(rig, planned, matches, result), capture.DeliverAsync, Ct);
 
         outcome.Delivered.Should().BeFalse();
-        outcome.Text.Should().Be(KafkaStudioText.ExportFailed);
+        outcome.Text.Should().Be(KafkaText.ExportFailed);
         capture.Calls.Should().Be(0);
         Exports(rig).Should().ContainSingle().Which.Succeeded.Should().BeFalse();
         rig.Logs.Entries.Where(static x => x.EventId.Id == 9609).Should().ContainSingle();
@@ -558,7 +558,7 @@ public class KafkaExportServiceTests
         KafkaExportOutcome third = await rig.Export(gate).ExportAsync(InputOf(rig, planned, matches, result), capture.DeliverAsync, Ct);
 
         third.Delivered.Should().BeFalse();
-        third.Text.Should().Be(KafkaStudioText.ExportsBusy);
+        third.Text.Should().Be(KafkaText.ExportsBusy);
         capture.Calls.Should().Be(0);
 
         release.SetResult();

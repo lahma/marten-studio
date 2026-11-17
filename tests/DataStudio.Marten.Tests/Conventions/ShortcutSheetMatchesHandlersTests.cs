@@ -11,7 +11,7 @@ namespace DataStudio.Marten.Tests.Conventions;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The sheet is data (<see cref="StudioShortcuts" />, <see cref="MartenStudioShortcuts" />) and the handlers are code, in five
+/// The sheet is data (<see cref="StudioShortcuts" />, <see cref="MartenShortcuts" />) and the handlers are code, in five
 /// components and one script, so the two drift unless something reads both. This reads each handler's source for the key names it
 /// compares against - <c>case "ArrowDown":</c>, <c>"x"</c>, <c>" "</c> - maps them to the sheet's spelling, and requires the sheet's
 /// group for that place to list exactly those, in both directions: a key added to a handler and not the sheet fails, and so does a
@@ -41,7 +41,7 @@ public class ShortcutSheetMatchesHandlersTests
         ["Spacebar"] = "Space",
     };
 
-    private static readonly IReadOnlyList<StudioShortcutGroup> All = [.. StudioShortcuts.Shared, .. PostgresStudioShortcuts.Groups, .. MartenStudioShortcuts.Groups];
+    private static readonly IReadOnlyList<StudioShortcutGroup> All = [.. StudioShortcuts.Shared, .. PostgresShortcuts.Groups, .. MartenShortcuts.Groups];
 
     private static string Source(string relativePath) =>
         File.ReadAllText(RepositoryRoot.Combine(relativePath.Split('/'))).Replace("\r\n", "\n", StringComparison.Ordinal);

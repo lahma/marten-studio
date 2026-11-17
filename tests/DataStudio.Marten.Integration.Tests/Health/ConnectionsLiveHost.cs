@@ -184,7 +184,7 @@ internal sealed class ConnectionsLiveHost : IAsyncDisposable
 
         HealthCheckContext context = new(
             resolved,
-            MartenStudioSettings.Of(value),
+            MartenSettings.Of(value),
             MartenStudioRuntime.Current,
             circuit.ServiceProvider,
             sql,

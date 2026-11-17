@@ -24,7 +24,7 @@ internal interface IDiagnosticsSettings
     /// Every sentence the shared studio says in this module's own words (<see cref="StudioText" />). This member has no default
     /// implementation, so a module's settings must say, and no shared code falls back to one module's words when it is given none:
     /// every service reads the registered settings' words, and a host with no studio is read in the engine's own
-    /// (<c>PostgresStudioText.DiagnosticsInstance</c>).
+    /// (<c>PostgresText.DiagnosticsInstance</c>).
     /// </summary>
     StudioText Text { get; }
 

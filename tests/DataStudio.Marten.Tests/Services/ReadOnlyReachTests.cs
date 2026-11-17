@@ -16,8 +16,8 @@ public class ReadOnlyReachTests
     private const string Shell = "DataStudioOptions.ReadOnly";
     private const string Module = "MartenOptions.ReadOnly";
 
-    private static MartenStudioSettings Settings(bool shell, bool module) =>
-        MartenStudioSettings.Of(new MartenOptions { ReadOnly = module }, new ShellSettings(Options.Create(new DataStudioOptions { ReadOnly = shell })));
+    private static MartenSettings Settings(bool shell, bool module) =>
+        MartenSettings.Of(new MartenOptions { ReadOnly = module }, new ShellSettings(Options.Create(new DataStudioOptions { ReadOnly = shell })));
 
     [Theory]
     [InlineData(true, false, Shell, "every other capability.")]
@@ -25,7 +25,7 @@ public class ReadOnlyReachTests
     [InlineData(true, true, Shell, "every other capability.")]
     public void The_four_refusals_say_how_far_the_switch_that_is_on_reaches(bool shell, bool module, string name, string reach)
     {
-        MartenStudioSettings settings = Settings(shell, module);
+        MartenSettings settings = Settings(shell, module);
         settings.ReadOnlyOptionName.Should().Be(name, "the switch that is on is the shell's when it is on, else the module's");
 
         string[] sentences =
@@ -46,7 +46,7 @@ public class ReadOnlyReachTests
     [InlineData(true, true, "every capability")]
     public void What_the_switch_turns_off_is_said_from_the_same_source_as_its_name(bool shell, bool module, string turnedOff)
     {
-        MartenStudioSettings settings = Settings(shell, module);
+        MartenSettings settings = Settings(shell, module);
 
         settings.Text.EveryCapabilityOff(settings.ReadOnlyOptionName).Should().Be(turnedOff);
         new StudioCapabilityGuard(settings).EveryCapabilityOff.Should().Be(turnedOff);
@@ -57,7 +57,7 @@ public class ReadOnlyReachTests
     [InlineData(false, true, "which turns every capability of the Marten pages off.")]
     public void The_refusal_a_service_throws_says_it_too(bool shell, bool module, string said)
     {
-        MartenStudioSettings settings = Settings(shell, module);
+        MartenSettings settings = Settings(shell, module);
 
         Action act = () => new StudioCapabilityGuard(settings).Require(StudioCapability.RunSql);
 

@@ -60,7 +60,7 @@ public class KafkaSearchServiceTests
         rig.Studio.Authorization.AllowKafka(static resource => resource.Topic != "orders");
         KafkaSearchStartResult start = await search.StartAsync(plan.Value, confirmed: true, Ct);
 
-        start.Should().BeOfType<KafkaSearchStartResult.Refused>().Which.Text.Should().Be(KafkaStudioText.SearchNamesRefusedTopic);
+        start.Should().BeOfType<KafkaSearchStartResult.Refused>().Which.Text.Should().Be(KafkaText.SearchNamesRefusedTopic);
         rig.Logs.Entries.Should().Contain(static x => x.EventId.Id == 9603);
     }
 
@@ -76,12 +76,12 @@ public class KafkaSearchServiceTests
 
         KafkaSearchPlanResult plan = await search.PlanAsync(rig.Input(["orders", "secret.v1"]), Ct);
 
-        plan.Should().BeOfType<KafkaSearchPlanResult.Refused>().Which.Text.Should().Be(KafkaStudioText.SearchNamesRefusedTopic).And.NotContain("secret");
+        plan.Should().BeOfType<KafkaSearchPlanResult.Refused>().Which.Text.Should().Be(KafkaText.SearchNamesRefusedTopic).And.NotContain("secret");
         rig.BrokerCalls.Should().Be(callsBefore, "a refused request is not narrowed to the allowed topics and read: nothing is read at all");
 
         StudioActionLogEntry entry = rig.Ring.Should().ContainSingle().Which;
         entry.Succeeded.Should().BeFalse();
-        entry.Message.Should().Be(KafkaStudioText.RefusedEntry, "the entry says nothing about why");
+        entry.Message.Should().Be(KafkaText.RefusedEntry, "the entry says nothing about why");
         rig.Logs.Entries.Should().ContainSingle(static x => x.EventId.Id == 9603);
     }
 

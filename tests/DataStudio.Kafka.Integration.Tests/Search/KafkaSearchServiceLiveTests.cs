@@ -159,8 +159,8 @@ public abstract class KafkaSearchServiceLiveTests(KafkaFixture fixture)
 
         KafkaSearchPlanResult plan = await host.Search.PlanAsync(Input(host, [open, refused], null), Token);
 
-        plan.Should().BeOfType<KafkaSearchPlanResult.Refused>().Which.Text.Should().Be(KafkaStudioText.SearchNamesRefusedTopic).And.NotContain(refused);
-        host.Ring.Should().ContainSingle().Which.Message.Should().Be(KafkaStudioText.RefusedEntry);
+        plan.Should().BeOfType<KafkaSearchPlanResult.Refused>().Which.Text.Should().Be(KafkaText.SearchNamesRefusedTopic).And.NotContain(refused);
+        host.Ring.Should().ContainSingle().Which.Message.Should().Be(KafkaText.RefusedEntry);
         host.Logs.Entries.Should().ContainSingle(static x => x.EventId.Id == 9603);
         host.Logs.Entries.Select(static x => x.EventId.Id).Should().NotContain([9600, 9601], "nothing was planned, so nothing was read");
     }
@@ -239,7 +239,7 @@ public abstract class KafkaSearchServiceLiveTests(KafkaFixture fixture)
         next.Value.Plan.Estimate.Offsets.Should().Be(6 * 30 - 5, "the continued scan reads what the first left");
 
         KafkaSearchStartResult unconfirmed = await host.Search.StartAsync(next.Value, confirmed: false, Token).WaitAsync(bound, Token);
-        unconfirmed.Should().BeOfType<KafkaSearchStartResult.Refused>().Which.Text.Should().Be(KafkaStudioText.NeedsConfirmation);
+        unconfirmed.Should().BeOfType<KafkaSearchStartResult.Refused>().Which.Text.Should().Be(KafkaText.NeedsConfirmation);
 
         await using KafkaSearchRun continued = ((KafkaSearchStartResult.Running) await host.Search.StartAsync(next.Value, confirmed: true, Token).WaitAsync(bound, Token)).Run;
         (KafkaScanResult second, List<KafkaMatch> secondMatches) = await Drain(continued).WaitAsync(bound, Token);

@@ -127,7 +127,7 @@ public sealed class StudioPreferencesTests
     [Fact]
     public async Task A_time_zone_change_still_reaches_a_page_subscribed_to_the_scope_changed_event()
     {
-        await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
+        await using PostgresComponentContext context = await new PostgresComponentContext().ReadyAsync();
         int pages = 0;
         context.State.ScopeChanged += () => { pages++; return Task.CompletedTask; };
 
@@ -140,7 +140,7 @@ public sealed class StudioPreferencesTests
     [Fact]
     public async Task A_page_that_throws_on_a_time_zone_change_does_not_stop_the_next_page()
     {
-        await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
+        await using PostgresComponentContext context = await new PostgresComponentContext().ReadyAsync();
         bool second = false;
         context.State.ScopeChanged += () => throw new InvalidOperationException("a page broke");
         context.State.ScopeChanged += () => { second = true; return Task.CompletedTask; };
@@ -153,7 +153,7 @@ public sealed class StudioPreferencesTests
     [Fact]
     public void The_shell_settings_are_the_shells_own_and_the_modules_answer_the_shell_members_from_them()
     {
-        using PostgresStudioComponentContext context = new();
+        using PostgresComponentContext context = new();
 
         IShellSettings shell = context.Services.GetRequiredService<IShellSettings>();
         IStudioSettings module = context.Services.GetRequiredService<IStudioSettings>();
@@ -178,7 +178,7 @@ public sealed class StudioPreferencesTests
         using ServiceProvider provider = services.BuildServiceProvider();
 
         provider.GetRequiredService<IShellSettings>().Should().BeOfType<ShellSettings>();
-        provider.GetRequiredService<IStudioSettings>().Should().BeOfType<PostgresStudioSettings>();
+        provider.GetRequiredService<IStudioSettings>().Should().BeOfType<PostgresSettings>();
         provider.GetRequiredService<IStudioSettings>().Should().NotBeSameAs(provider.GetRequiredService<IShellSettings>());
     }
 
@@ -202,7 +202,7 @@ public sealed class StudioPreferencesTests
         provider.GetRequiredService<IOptions<PostgresOptions>>().Value.ReadOnly = true;
         settings.ReadOnly.Should().BeTrue();
         settings.ReadOnlyOptionName.Should().Be("PostgresOptions.ReadOnly");
-        PostgresStudioSettings.Offered.Should().OnlyContain(capability => !guard.IsEnabled(capability));
+        PostgresSettings.Offered.Should().OnlyContain(capability => !guard.IsEnabled(capability));
         FluentActions.Invoking(() => guard.Require(StudioCapability.RunSql)).Should().Throw<StudioCapabilityDeniedException>().WithMessage("*PostgresOptions.ReadOnly*");
 
         provider.GetRequiredService<IOptions<DataStudioOptions>>().Value.ReadOnly = true;
@@ -211,7 +211,7 @@ public sealed class StudioPreferencesTests
 
         provider.GetRequiredService<IOptions<PostgresOptions>>().Value.ReadOnly = false;
         settings.ReadOnly.Should().BeTrue("the shell's switch alone turns the module's capabilities off");
-        PostgresStudioSettings.Offered.Should().OnlyContain(capability => !guard.IsEnabled(capability));
+        PostgresSettings.Offered.Should().OnlyContain(capability => !guard.IsEnabled(capability));
 
         provider.GetRequiredService<IOptions<DataStudioOptions>>().Value.ReadOnly = false;
         guard.IsEnabled(StudioCapability.RunSql).Should().BeTrue("neither switch is on");

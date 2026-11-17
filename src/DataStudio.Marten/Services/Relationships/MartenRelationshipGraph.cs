@@ -158,7 +158,7 @@ internal static class MartenRelationshipGraph
             DeclaredKeys(storeOptions, isVisible),
             physicalKeys,
             readAt,
-            MartenStudioText.Instance,
+            MartenText.Instance,
             database);
 
     /// <summary>

@@ -84,16 +84,16 @@ public class SnapshotMenuTests
             throw new InvalidOperationException("The Snapshot menu never measures a tablespace.");
     }
 
-    private static async Task<(PostgresStudioComponentContext Context, FakeStatements Statements)> ContextAsync(Action<IServiceCollection>? more = null)
+    private static async Task<(PostgresComponentContext Context, FakeStatements Statements)> ContextAsync(Action<IServiceCollection>? more = null)
     {
         FakeStatements statements = new();
 
-        PostgresStudioComponentContext context = new(services =>
+        PostgresComponentContext context = new(services =>
         {
             services.AddSingleton<IStatementsService>(statements);
             services.AddSingleton<IServerPageService>(new FakeServer());
             services.AddSingleton<IReplicationService>(new FakeReplication());
-            services.AddSingleton(new HealthCheckRegistry(PostgresStudioDescriptor.Instance));
+            services.AddSingleton(new HealthCheckRegistry(PostgresDescriptor.Instance));
             services.AddScoped<VisitorSnapshotBuilder>();
             more?.Invoke(services);
         });
@@ -117,8 +117,8 @@ public class SnapshotMenuTests
     [Fact]
     public async Task The_menu_is_anchored_to_its_button_in_one_wrapper()
     {
-        (PostgresStudioComponentContext context, _) = await ContextAsync();
-        await using PostgresStudioComponentContext owned = context;
+        (PostgresComponentContext context, _) = await ContextAsync();
+        await using PostgresComponentContext owned = context;
 
         IRenderedComponent<SnapshotMenu> menu = context.Render<SnapshotMenu>();
 
@@ -137,8 +137,8 @@ public class SnapshotMenuTests
     [Fact]
     public async Task Download_hands_the_browser_the_visitors_json_under_the_designed_file_name()
     {
-        (PostgresStudioComponentContext context, FakeStatements statements) = await ContextAsync();
-        await using PostgresStudioComponentContext owned = context;
+        (PostgresComponentContext context, FakeStatements statements) = await ContextAsync();
+        await using PostgresComponentContext owned = context;
 
         context.JSInterop.Setup<bool>("martenStudio.download.text", static _ => true).SetResult(true);
 
@@ -172,8 +172,8 @@ public class SnapshotMenuTests
     [Fact]
     public async Task A_download_the_browser_did_not_save_is_not_called_saved()
     {
-        (PostgresStudioComponentContext context, _) = await ContextAsync();
-        await using PostgresStudioComponentContext owned = context;
+        (PostgresComponentContext context, _) = await ContextAsync();
+        await using PostgresComponentContext owned = context;
 
         context.JSInterop.Setup<bool>("martenStudio.download.text", static _ => true).SetResult(false);
 
@@ -188,12 +188,12 @@ public class SnapshotMenuTests
     public async Task A_snapshot_that_cannot_be_built_is_logged_and_says_so_without_the_exceptions_words()
     {
         CapturingLoggerProvider logs = new();
-        (PostgresStudioComponentContext context, _) = await ContextAsync(services =>
+        (PostgresComponentContext context, _) = await ContextAsync(services =>
         {
             services.AddSingleton<IServerPageService>(new ThrowingServer());
             services.AddLogging(builder => builder.AddProvider(logs));
         });
-        await using PostgresStudioComponentContext owned = context;
+        await using PostgresComponentContext owned = context;
 
         IRenderedComponent<SnapshotMenu> menu = context.Render<SnapshotMenu>();
         await SelectAsync(menu, "View JSON");
@@ -215,8 +215,8 @@ public class SnapshotMenuTests
     [Fact]
     public async Task View_opens_the_json_in_the_viewer_and_Close_closes_it()
     {
-        (PostgresStudioComponentContext context, _) = await ContextAsync();
-        await using PostgresStudioComponentContext owned = context;
+        (PostgresComponentContext context, _) = await ContextAsync();
+        await using PostgresComponentContext owned = context;
 
         IRenderedComponent<SnapshotMenu> menu = context.Render<SnapshotMenu>();
         menu.FindAll(".ms-snapshot-view").Should().BeEmpty();
@@ -233,8 +233,8 @@ public class SnapshotMenuTests
     [Fact]
     public async Task Copy_puts_the_json_on_the_clipboard()
     {
-        (PostgresStudioComponentContext context, _) = await ContextAsync();
-        await using PostgresStudioComponentContext owned = context;
+        (PostgresComponentContext context, _) = await ContextAsync();
+        await using PostgresComponentContext owned = context;
 
         context.JSInterop.Setup<bool>("martenStudio.clipboard.copyText", static _ => true).SetResult(true);
 
@@ -250,8 +250,8 @@ public class SnapshotMenuTests
     [Fact]
     public async Task Download_Markdown_hands_the_browser_the_report_as_markdown_under_the_json_files_name()
     {
-        (PostgresStudioComponentContext context, FakeStatements statements) = await ContextAsync();
-        await using PostgresStudioComponentContext owned = context;
+        (PostgresComponentContext context, FakeStatements statements) = await ContextAsync();
+        await using PostgresComponentContext owned = context;
 
         context.JSInterop.Setup<bool>("martenStudio.download.text", static _ => true).SetResult(true);
 
@@ -274,8 +274,8 @@ public class SnapshotMenuTests
     [Fact]
     public async Task Copy_Markdown_puts_the_report_on_the_clipboard()
     {
-        (PostgresStudioComponentContext context, _) = await ContextAsync();
-        await using PostgresStudioComponentContext owned = context;
+        (PostgresComponentContext context, _) = await ContextAsync();
+        await using PostgresComponentContext owned = context;
 
         context.JSInterop.Setup<bool>("martenStudio.clipboard.copyText", static _ => true).SetResult(true);
 
@@ -290,8 +290,8 @@ public class SnapshotMenuTests
     [Fact]
     public async Task A_markdown_report_the_browser_did_not_save_is_not_called_saved()
     {
-        (PostgresStudioComponentContext context, _) = await ContextAsync();
-        await using PostgresStudioComponentContext owned = context;
+        (PostgresComponentContext context, _) = await ContextAsync();
+        await using PostgresComponentContext owned = context;
 
         context.JSInterop.Setup<bool>("martenStudio.download.text", static _ => true).SetResult(false);
 
@@ -305,12 +305,12 @@ public class SnapshotMenuTests
     public async Task A_report_that_cannot_be_built_is_logged_and_says_so_without_the_exceptions_words()
     {
         CapturingLoggerProvider logs = new();
-        (PostgresStudioComponentContext context, _) = await ContextAsync(services =>
+        (PostgresComponentContext context, _) = await ContextAsync(services =>
         {
             services.AddSingleton<IServerPageService>(new ThrowingServer());
             services.AddLogging(builder => builder.AddProvider(logs));
         });
-        await using PostgresStudioComponentContext owned = context;
+        await using PostgresComponentContext owned = context;
 
         IRenderedComponent<SnapshotMenu> menu = context.Render<SnapshotMenu>();
         await SelectAsync(menu, "Copy Markdown");

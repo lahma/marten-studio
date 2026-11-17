@@ -59,7 +59,7 @@ internal sealed class LiveScanEngine : IAsyncDisposable
             services.AddSingleton(observer);
         }
 
-        KStudioEngineRegistration.Add(services, _ => options, _ => new TestEngineSettings(TimeSpan.Zero));
+        KafkaEngineRegistration.Add(services, _ => options, _ => new TestEngineSettings(TimeSpan.Zero));
         return new LiveScanEngine(services.BuildServiceProvider(), logs);
     }
 

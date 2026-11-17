@@ -190,7 +190,7 @@ public class KafkaRecordSearchLinksTests
         ServiceCollection services = new();
         services.AddSingleton(logs.CreateFactory());
         services.AddSingleton(TimeProvider.System);
-        services.AddSingleton<KStudioLoggers>();
+        services.AddSingleton<KafkaEngineLoggers>();
         services.AddSingleton(static provider => new KafkaLogOnce(provider.GetRequiredService<TimeProvider>()));
         services.AddSingleton<KafkaClusterRegistry>(static _ => throw new InvalidOperationException("S3NT1NEL host options are not valid"));
         await using ServiceProvider provider = services.BuildServiceProvider();

@@ -99,7 +99,7 @@ internal sealed class MartenDatabaseDeclarationsSource : IDatabaseDeclarationsSo
     {
         ArgumentNullException.ThrowIfNull(source);
 
-        return source is MartenStudioSource marten
+        return source is MartenSource marten
             ? ReadDeclarations(marten.Marten, marten.Store)
             : throw new ArgumentException("Data Studio's Marten module declares the objects of a Marten store only.", nameof(source));
     }
@@ -367,7 +367,7 @@ internal sealed class MartenDatabaseDeclarationsSource : IDatabaseDeclarationsSo
                 // The rows are refused by the capability anyway, and nobody is asked about a capability the
                 // process does not have.
                 others[store.StoreKey] = new DatabaseStoreAccess(
-                    true, DatabaseRowAccess.Refused(DatabaseRefusal.CapabilityOff, MartenStudioText.Instance.BrowseCapabilityDenial));
+                    true, DatabaseRowAccess.Refused(DatabaseRefusal.CapabilityOff, MartenText.Instance.BrowseCapabilityDenial));
                 continue;
             }
 

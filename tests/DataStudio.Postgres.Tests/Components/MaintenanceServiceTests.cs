@@ -27,7 +27,7 @@ public sealed class MaintenanceServiceTests : IAsyncDisposable
 
     private static CancellationToken Token => Xunit.TestContext.Current.CancellationToken;
 
-    private readonly PostgresStudioComponentContext context = new();
+    private readonly PostgresComponentContext context = new();
     private readonly FakeFacts facts = new();
     private readonly FakeGate gate = new();
     private readonly BloatMeasureFlights flights = new();
@@ -161,7 +161,7 @@ public sealed class MaintenanceServiceTests : IAsyncDisposable
         gate.State = state;
         facts.Value = Covered(Facts([Table("public", "orders"), Table("quartz", "qrtz_triggers", gated: true)]));
 
-        await using PostgresStudioComponentContext page = await new PostgresStudioComponentContext(services =>
+        await using PostgresComponentContext page = await new PostgresComponentContext(services =>
             services.AddSingleton<IMaintenanceService>(provider => ActivatorUtilities.CreateInstance<MaintenanceService>(
                 provider,
                 ActivatorUtilities.CreateInstance<StudioSourceResolver>(provider),
@@ -355,7 +355,7 @@ public sealed class MaintenanceServiceTests : IAsyncDisposable
                 readOnly: false,
                 authorized: open ? true : null,
                 new DatabaseObjectClassifier([]),
-                DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance);
+                DataStudio.Postgres.Services.Postgres.PostgresText.Instance);
 
             return Task.FromResult(new DatabaseGateRead(built, DatabaseRefusal.None, null));
         }

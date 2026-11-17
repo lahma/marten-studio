@@ -104,7 +104,7 @@ public class HealthSweeperCoverageTests
             readOnly: false,
             authorized: open,
             new DatabaseObjectClassifier([]),
-            MartenStudioText.Instance),
+            MartenText.Instance),
         DatabaseRefusal.None,
         null);
 

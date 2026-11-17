@@ -97,7 +97,7 @@ public class MartenCheckWordsTests
     public void The_same_facts_in_the_Postgres_modules_words_say_something_else()
     {
         PreparedRow orphan = new("gid-orphan", "tx_owner", At.AddHours(-3), TimeSpan.FromHours(3), "1234");
-        HealthEvaluation postgres = HealthEvaluation.At(At) with { Text = DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance };
+        HealthEvaluation postgres = HealthEvaluation.At(At) with { Text = DataStudio.Postgres.Services.Postgres.PostgresText.Instance };
 
         HealthFinding finding = new PreparedTransactionCheck()
             .Evaluate(new PreparedTransactionFacts(At, 10, [orphan]), postgres)

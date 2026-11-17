@@ -22,7 +22,7 @@ public class PlanConsoleTests
 
     private static CancellationToken Token => Xunit.TestContext.Current.CancellationToken;
 
-    private static SqlConsoleService Console(PostgresStudioComponentContext context) =>
+    private static SqlConsoleService Console(PostgresComponentContext context) =>
         new(
             ActivatorUtilities.CreateInstance<StudioSourceResolver>(context.Services),
             context.Services.GetRequiredService<StudioCapabilityGuard>(),
@@ -31,13 +31,13 @@ public class PlanConsoleTests
             NullLogger<SqlConsoleService>.Instance,
             context.Services.GetRequiredService<AuthenticationStateProvider>());
 
-    private static IReadOnlyList<StudioActionLogEntry> Ring(PostgresStudioComponentContext context) =>
+    private static IReadOnlyList<StudioActionLogEntry> Ring(PostgresComponentContext context) =>
         context.Services.GetRequiredService<StudioActionLogService>().GetLatest();
 
     [Fact]
     public async Task With_RunSql_off_a_plan_is_refused_before_anything_and_audited_with_what_it_would_have_sent()
     {
-        await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
+        await using PostgresComponentContext context = await new PostgresComponentContext().ReadyAsync();
 
         Func<Task> run = () => Console(context).PlanAsync(Scope, new PlanRunRequest("select 1", PlanMode.Analyze), Token);
 
@@ -53,7 +53,7 @@ public class PlanConsoleTests
     [Fact]
     public async Task ReadOnly_refuses_a_plan_as_it_refuses_the_console()
     {
-        await using PostgresStudioComponentContext context = new();
+        await using PostgresComponentContext context = new();
         context.WithAllCapabilities();
         context.Options.ReadOnly = true;
         await context.ReadyAsync();
@@ -67,7 +67,7 @@ public class PlanConsoleTests
     [Fact]
     public async Task A_write_policy_that_refuses_the_visitor_refuses_a_plan_for_the_database_as_a_whole()
     {
-        await using PostgresStudioComponentContext context = new();
+        await using PostgresComponentContext context = new();
         context.WithAllCapabilities();
         context.Options.WriteAuthorizationPolicy = "write-policy";
         await context.ReadyAsync();
@@ -91,7 +91,7 @@ public class PlanConsoleTests
     [InlineData("Analyze", "explain (analyze, buffers, format json) delete from t where id = 1")]
     public async Task A_write_is_refused_by_the_guard_in_every_mode_and_never_analyzed(string mode, string sent)
     {
-        await using PostgresStudioComponentContext context = new();
+        await using PostgresComponentContext context = new();
         context.WithAllCapabilities();
         await context.ReadyAsync();
 
@@ -110,7 +110,7 @@ public class PlanConsoleTests
     [Fact]
     public async Task A_generic_plan_of_a_write_is_refused_by_the_guard_too()
     {
-        await using PostgresStudioComponentContext context = new();
+        await using PostgresComponentContext context = new();
         context.WithAllCapabilities();
         await context.ReadyAsync();
 
@@ -126,7 +126,7 @@ public class PlanConsoleTests
     [InlineData("/* why */ explain analyze select 1")]
     public async Task A_statement_that_is_an_EXPLAIN_already_is_refused_and_audited(string statement)
     {
-        await using PostgresStudioComponentContext context = new();
+        await using PostgresComponentContext context = new();
         context.WithAllCapabilities();
         await context.ReadyAsync();
 
@@ -140,7 +140,7 @@ public class PlanConsoleTests
     [Fact]
     public async Task A_request_that_cannot_be_planned_is_refused_after_the_gate_and_audited()
     {
-        await using PostgresStudioComponentContext context = new();
+        await using PostgresComponentContext context = new();
         context.WithAllCapabilities();
         await context.ReadyAsync();
 
@@ -157,7 +157,7 @@ public class PlanConsoleTests
     [Fact]
     public async Task An_empty_statement_is_the_guards_refusal()
     {
-        await using PostgresStudioComponentContext context = new();
+        await using PostgresComponentContext context = new();
         context.WithAllCapabilities();
         await context.ReadyAsync();
 
@@ -169,7 +169,7 @@ public class PlanConsoleTests
     [Fact]
     public async Task The_value_of_a_placeholder_is_never_in_the_audit_ring()
     {
-        await using PostgresStudioComponentContext context = new();
+        await using PostgresComponentContext context = new();
         context.WithAllCapabilities();
         await context.ReadyAsync();
 

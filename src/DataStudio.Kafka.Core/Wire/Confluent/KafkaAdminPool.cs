@@ -76,7 +76,7 @@ internal sealed class KafkaAdminPool<TClient> : IDisposable, IAsyncDisposable
                 slot = new Slot(cluster.Key, create(cluster), timeProvider.GetUtcNow());
                 slots[cluster.Key] = slot;
                 string key = KafkaLogValue.Cap(cluster.Key);
-                KStudioLog.AdminClientCreated(logger, clientKind, key);
+                KafkaEngineLog.AdminClientCreated(logger, clientKind, key);
                 reaper ??= timeProvider.CreateTimer(Reap, null, idleTimeout / 2, idleTimeout / 2);
             }
 
@@ -206,7 +206,7 @@ internal sealed class KafkaAdminPool<TClient> : IDisposable, IAsyncDisposable
                 if (DisposeClient(pair.Key, pair.Value))
                 {
                     string key = KafkaLogValue.Cap(pair.Key);
-                    KStudioLog.AdminClientDisposed(logger, clientKind, key, (int) (now - pair.Value.LastUsed).TotalSeconds);
+                    KafkaEngineLog.AdminClientDisposed(logger, clientKind, key, (int) (now - pair.Value.LastUsed).TotalSeconds);
                 }
             }
         }
@@ -215,7 +215,7 @@ internal sealed class KafkaAdminPool<TClient> : IDisposable, IAsyncDisposable
             // The clients this pass had picked to dispose (the dispose of each is guarded in DisposeClient, so this is the pass itself failing).
             string clusters = expired.Count == 0 ? "(none picked)" : KafkaLogValue.Cap(string.Join(", ", expired.Select(static x => x.Key)));
             string kind = exception.GetType().Name;
-            KStudioLog.AdminClientDisposeFailed(logger, clientKind, clusters, kind);
+            KafkaEngineLog.AdminClientDisposeFailed(logger, clientKind, clusters, kind);
         }
     }
 
@@ -230,7 +230,7 @@ internal sealed class KafkaAdminPool<TClient> : IDisposable, IAsyncDisposable
         {
             string key = KafkaLogValue.Cap(cluster);
             string kind = exception.GetType().Name;
-            KStudioLog.AdminClientDisposeFailed(logger, clientKind, key, kind);
+            KafkaEngineLog.AdminClientDisposeFailed(logger, clientKind, key, kind);
             return false;
         }
     }

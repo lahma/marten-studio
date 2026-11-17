@@ -67,7 +67,7 @@ internal sealed class KafkaIndexPlanner(
     KafkaRecordIndexResolver resolver,
     KafkaEngineSnapshot settings,
     TimeProvider time,
-    KStudioLoggers loggers,
+    KafkaEngineLoggers loggers,
     KafkaLogOnce once)
 {
     /// <summary>Narrows <paramref name="ask" />'s ranges, or says why not; <see langword="null" /> when the index was not asked at all (none registered, or no clause to ask).</summary>
@@ -159,7 +159,7 @@ internal sealed class KafkaIndexPlanner(
 
         if (once.ShouldLog($"index|{clusterText}"))
         {
-            KStudioLog.RecordIndexNotAnswered(loggers.Scans, indexText, clusterText, kindText);
+            KafkaEngineLog.RecordIndexNotAnswered(loggers.Scans, indexText, clusterText, kindText);
         }
     }
 }

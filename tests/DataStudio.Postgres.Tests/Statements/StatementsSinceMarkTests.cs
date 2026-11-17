@@ -327,7 +327,7 @@ public class StatementsSinceMarkTests
             statistics: Window(Now.AddDays(-3), StatisticsResetReason.ServerStarted));
 
         StatementsView view = new StatementsService(
-                PostgresStudioSettings.Of(Microsoft.Extensions.Options.Options.Create(new PostgresOptions())),
+                PostgresSettings.Of(Microsoft.Extensions.Options.Options.Create(new PostgresOptions())),
                 null!, null!, null!, null!, null!, new StudioLogThrottle(TimeProvider.System),
                 Microsoft.Extensions.Logging.Abstractions.NullLogger<StatementsService>.Instance)
             .Show(facts, null);

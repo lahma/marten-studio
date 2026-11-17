@@ -66,14 +66,14 @@ internal static class SnapshotCompareFixtures
     }
 
     /// <summary>A bUnit context with the visitor's view built from fakes, and the real compare service over it.</summary>
-    public static async Task<PostgresStudioComponentContext> ContextAsync(Action<IServiceCollection>? more = null)
+    public static async Task<PostgresComponentContext> ContextAsync(Action<IServiceCollection>? more = null)
     {
-        PostgresStudioComponentContext context = new(services =>
+        PostgresComponentContext context = new(services =>
         {
             services.AddSingleton<IStatementsService>(new RefusedStatements());
             services.AddSingleton<IServerPageService>(new OneServer());
             services.AddSingleton<IReplicationService>(new NoReplication());
-            services.AddSingleton(new HealthCheckRegistry(PostgresStudioDescriptor.Instance));
+            services.AddSingleton(new HealthCheckRegistry(PostgresDescriptor.Instance));
             services.AddScoped<VisitorSnapshotBuilder>();
             services.AddScoped<ISnapshotCompareService, SnapshotCompareService>();
             more?.Invoke(services);
@@ -125,7 +125,7 @@ internal static class SnapshotCompareFixtures
     }
 
     /// <summary>A snapshot file of the current view of the fake database, as Download JSON would save it.</summary>
-    public static async Task<string> DownloadedJsonAsync(PostgresStudioComponentContext context)
+    public static async Task<string> DownloadedJsonAsync(PostgresComponentContext context)
     {
         VisitorSnapshotBuilder builder = context.Services.GetRequiredService<VisitorSnapshotBuilder>();
 
@@ -141,7 +141,7 @@ public class SnapshotCompareServiceTests
     [Fact]
     public async Task A_refused_current_view_never_opens_the_file()
     {
-        await using PostgresStudioComponentContext context = await SnapshotCompareFixtures.ContextAsync();
+        await using PostgresComponentContext context = await SnapshotCompareFixtures.ContextAsync();
         context.Health.Report = HealthReport.Refused(HealthRefusal.StorePolicy, "The store policy does not allow you this database.");
         int opened = 0;
 
@@ -164,7 +164,7 @@ public class SnapshotCompareServiceTests
     [Fact]
     public async Task A_file_is_opened_once_past_the_gate_and_disposed()
     {
-        await using PostgresStudioComponentContext context = await SnapshotCompareFixtures.ContextAsync();
+        await using PostgresComponentContext context = await SnapshotCompareFixtures.ContextAsync();
         string json = await SnapshotCompareFixtures.DownloadedJsonAsync(context);
         int opened = 0;
         MemoryStream stream = new(Encoding.UTF8.GetBytes(json));
@@ -187,7 +187,7 @@ public class SnapshotCompareServiceTests
     [Fact]
     public async Task A_snapshot_downloaded_now_compares_with_now_and_changes_nothing()
     {
-        await using PostgresStudioComponentContext context = await SnapshotCompareFixtures.ContextAsync();
+        await using PostgresComponentContext context = await SnapshotCompareFixtures.ContextAsync();
         string json = await SnapshotCompareFixtures.DownloadedJsonAsync(context);
         await using MemoryStream stream = new(Encoding.UTF8.GetBytes(json));
 
@@ -203,7 +203,7 @@ public class SnapshotCompareServiceTests
     [Fact]
     public async Task A_file_that_is_not_a_snapshot_is_unreadable_and_says_why_without_echoing_it()
     {
-        await using PostgresStudioComponentContext context = await SnapshotCompareFixtures.ContextAsync();
+        await using PostgresComponentContext context = await SnapshotCompareFixtures.ContextAsync();
         await using MemoryStream stream = new(Encoding.UTF8.GetBytes("SENTINEL not json"));
 
         SnapshotComparison result = await context.Services.GetRequiredService<ISnapshotCompareService>()
@@ -286,9 +286,9 @@ public class SnapshotCompareTests
 {
     private const string Sentinel = "SENTINEL-DRAWER-5e8d";
 
-    private static async Task<(PostgresStudioComponentContext Context, IRenderedComponent<SnapshotMenu> Menu)> OpenAsync(Action<IServiceCollection>? more = null)
+    private static async Task<(PostgresComponentContext Context, IRenderedComponent<SnapshotMenu> Menu)> OpenAsync(Action<IServiceCollection>? more = null)
     {
-        PostgresStudioComponentContext context = await SnapshotCompareFixtures.ContextAsync(more);
+        PostgresComponentContext context = await SnapshotCompareFixtures.ContextAsync(more);
         IRenderedComponent<SnapshotMenu> menu = context.Render<SnapshotMenu>();
 
         await Select(menu, "Compare with an earlier snapshot");
@@ -308,7 +308,7 @@ public class SnapshotCompareTests
     [Fact]
     public async Task The_menu_has_the_three_new_items_and_the_three_it_had()
     {
-        await using PostgresStudioComponentContext context = await SnapshotCompareFixtures.ContextAsync();
+        await using PostgresComponentContext context = await SnapshotCompareFixtures.ContextAsync();
         IRenderedComponent<SnapshotMenu> menu = context.Render<SnapshotMenu>();
 
         menu.FindAll("button.ms-menu-item").Select(static x => x.QuerySelector(".ms-menu-item-label")?.TextContent ?? x.TextContent.Trim())
@@ -319,8 +319,8 @@ public class SnapshotCompareTests
     [Fact]
     public async Task The_drawer_makes_its_promise_and_offers_a_file_input_that_asks_for_json()
     {
-        (PostgresStudioComponentContext context, IRenderedComponent<SnapshotMenu> menu) = await OpenAsync();
-        await using PostgresStudioComponentContext owned = context;
+        (PostgresComponentContext context, IRenderedComponent<SnapshotMenu> menu) = await OpenAsync();
+        await using PostgresComponentContext owned = context;
 
         menu.Find("section.ms-snapshot-compare").GetAttribute("aria-label").Should().Be("Compare with an earlier snapshot");
         string promise = System.Text.RegularExpressions.Regex.Replace(menu.Find(".ms-snapshot-compare-promise").TextContent, @"\s+", " ", System.Text.RegularExpressions.RegexOptions.None, TimeSpan.FromSeconds(1));
@@ -337,8 +337,8 @@ public class SnapshotCompareTests
     [Fact]
     public async Task Opening_the_compare_closes_the_json_view_and_the_other_way_round()
     {
-        (PostgresStudioComponentContext context, IRenderedComponent<SnapshotMenu> menu) = await OpenAsync();
-        await using PostgresStudioComponentContext owned = context;
+        (PostgresComponentContext context, IRenderedComponent<SnapshotMenu> menu) = await OpenAsync();
+        await using PostgresComponentContext owned = context;
 
         await Select(menu, "View JSON");
 
@@ -354,8 +354,8 @@ public class SnapshotCompareTests
     [Fact]
     public async Task A_file_over_four_megabytes_is_refused_before_a_byte_is_read()
     {
-        (PostgresStudioComponentContext context, IRenderedComponent<SnapshotMenu> menu) = await OpenAsync();
-        await using PostgresStudioComponentContext owned = context;
+        (PostgresComponentContext context, IRenderedComponent<SnapshotMenu> menu) = await OpenAsync();
+        await using PostgresComponentContext owned = context;
 
         menu.FindComponent<InputFile>().UploadFiles(InputFileContent.CreateFromBinary(new byte[SnapshotFileReader.MaxBytes + 1], "big.json"));
 
@@ -366,8 +366,8 @@ public class SnapshotCompareTests
     [Fact]
     public async Task A_snapshot_downloaded_now_is_compared_and_drawn_with_its_verdict()
     {
-        (PostgresStudioComponentContext context, IRenderedComponent<SnapshotMenu> menu) = await OpenAsync();
-        await using PostgresStudioComponentContext owned = context;
+        (PostgresComponentContext context, IRenderedComponent<SnapshotMenu> menu) = await OpenAsync();
+        await using PostgresComponentContext owned = context;
 
         // An earlier file: the current view plus a finding the current view has since lost, and a changed setting.
         PostgresDiagnosticsSnapshot current = SnapshotFileReader.Read(Encoding.UTF8.GetBytes(await SnapshotCompareFixtures.DownloadedJsonAsync(context))).Snapshot!;
@@ -411,8 +411,8 @@ public class SnapshotCompareTests
     [Fact]
     public async Task A_file_that_is_not_a_snapshot_is_told_so()
     {
-        (PostgresStudioComponentContext context, IRenderedComponent<SnapshotMenu> menu) = await OpenAsync();
-        await using PostgresStudioComponentContext owned = context;
+        (PostgresComponentContext context, IRenderedComponent<SnapshotMenu> menu) = await OpenAsync();
+        await using PostgresComponentContext owned = context;
 
         Upload(menu, "x.json", "{ not json " + Sentinel);
 
@@ -424,8 +424,8 @@ public class SnapshotCompareTests
     [Fact]
     public async Task A_visitor_whose_own_view_is_refused_is_told_so()
     {
-        (PostgresStudioComponentContext context, IRenderedComponent<SnapshotMenu> menu) = await OpenAsync();
-        await using PostgresStudioComponentContext owned = context;
+        (PostgresComponentContext context, IRenderedComponent<SnapshotMenu> menu) = await OpenAsync();
+        await using PostgresComponentContext owned = context;
         context.Health.Report = HealthReport.Refused(HealthRefusal.StorePolicy, "The store policy does not allow you this database.");
 
         Upload(menu, "x.json", DiagnosticsJson.Write(SnapshotFileReaderTests.Everything()));
@@ -437,8 +437,8 @@ public class SnapshotCompareTests
     [Fact]
     public async Task Each_compare_and_Close_replace_the_input_so_the_browser_drops_its_file()
     {
-        (PostgresStudioComponentContext context, IRenderedComponent<SnapshotMenu> menu) = await OpenAsync();
-        await using PostgresStudioComponentContext owned = context;
+        (PostgresComponentContext context, IRenderedComponent<SnapshotMenu> menu) = await OpenAsync();
+        await using PostgresComponentContext owned = context;
 
         AngleSharp.Dom.IElement first = menu.Find("input[type=file]");
 
@@ -460,9 +460,9 @@ public class SnapshotCompareTests
     public async Task A_file_of_sentinel_strings_reaches_no_log_no_audit_entry_no_interop_call_and_no_field()
     {
         SnapshotCompareFixtures.FullLogProvider logs = new();
-        (PostgresStudioComponentContext context, IRenderedComponent<SnapshotMenu> menu) = await OpenAsync(services =>
+        (PostgresComponentContext context, IRenderedComponent<SnapshotMenu> menu) = await OpenAsync(services =>
             services.AddLogging(builder => builder.SetMinimumLevel(LogLevel.Trace).AddProvider(logs)));
-        await using PostgresStudioComponentContext owned = context;
+        await using PostgresComponentContext owned = context;
 
         // A readable file whose every word is a sentinel: findings of checks the current view has no row for, a table, a statement,
         // a setting, an application and connection keywords.
@@ -522,12 +522,12 @@ public class SnapshotCompareTests
     public async Task A_compare_that_fails_unexpectedly_is_logged_once_and_nothing_of_the_file_is_in_the_log_or_the_page()
     {
         SnapshotCompareFixtures.FullLogProvider logs = new();
-        (PostgresStudioComponentContext context, IRenderedComponent<SnapshotMenu> menu) = await OpenAsync(services =>
+        (PostgresComponentContext context, IRenderedComponent<SnapshotMenu> menu) = await OpenAsync(services =>
         {
             services.AddLogging(builder => builder.SetMinimumLevel(LogLevel.Trace).AddProvider(logs));
             services.AddScoped<ISnapshotCompareService>(static _ => new FailingCompare(new FormatException("boom")));
         });
-        await using PostgresStudioComponentContext owned = context;
+        await using PostgresComponentContext owned = context;
 
         Upload(menu, "x.json", "{\"words\": \"" + Sentinel + "\"}");
 
@@ -543,12 +543,12 @@ public class SnapshotCompareTests
         foreach (Exception lost in (Exception[]) [new IOException("the circuit went away"), new TimeoutException("stalled"), new Microsoft.JSInterop.JSDisconnectedException("gone")])
         {
             SnapshotCompareFixtures.FullLogProvider logs = new();
-            (PostgresStudioComponentContext context, IRenderedComponent<SnapshotMenu> menu) = await OpenAsync(services =>
+            (PostgresComponentContext context, IRenderedComponent<SnapshotMenu> menu) = await OpenAsync(services =>
             {
                 services.AddLogging(builder => builder.SetMinimumLevel(LogLevel.Trace).AddProvider(logs));
                 services.AddScoped<ISnapshotCompareService>(_ => new FailingCompare(lost));
             });
-            await using PostgresStudioComponentContext owned = context;
+            await using PostgresComponentContext owned = context;
 
             Upload(menu, "x.json", "{}");
 
@@ -561,8 +561,8 @@ public class SnapshotCompareTests
     [Fact]
     public async Task A_change_of_scope_clears_the_comparison_and_the_json_view()
     {
-        (PostgresStudioComponentContext context, IRenderedComponent<SnapshotMenu> menu) = await OpenAsync();
-        await using PostgresStudioComponentContext owned = context;
+        (PostgresComponentContext context, IRenderedComponent<SnapshotMenu> menu) = await OpenAsync();
+        await using PostgresComponentContext owned = context;
 
         Upload(menu, "x.json", await SnapshotCompareFixtures.DownloadedJsonAsync(context));
         menu.WaitForAssertion(() => menu.FindAll(".ms-snapshot-compare-verdict").Should().ContainSingle());

@@ -117,7 +117,7 @@ public abstract class TailServiceLiveTests(KafkaFixture fixture)
 
         KafkaTailPlanResult plan = await host.Tail.PlanAsync(new KafkaTailInput(host.Entry, [allowed, hidden], null, IncludeUncommitted: false), null, Token);
 
-        plan.Should().BeOfType<KafkaTailPlanResult.Refused>().Which.Text.Should().Be(KafkaStudioText.RequestRefused).And.NotContain(hidden);
+        plan.Should().BeOfType<KafkaTailPlanResult.Refused>().Which.Text.Should().Be(KafkaText.RequestRefused).And.NotContain(hidden);
         host.Logs.Entries.Should().Contain(static x => x.EventId.Id == 9603);
     }
 }

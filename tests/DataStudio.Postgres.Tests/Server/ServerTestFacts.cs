@@ -45,7 +45,7 @@ internal static class ServerTestFacts
     public static ServerSettingsRead Settings(params ServerSettingValue[] rows) => new(rows);
 
     public static HealthEvaluation Evaluation(bool postgres = false) =>
-        HealthEvaluation.At(Now, text: postgres ? DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance : null);
+        HealthEvaluation.At(Now, text: postgres ? DataStudio.Postgres.Services.Postgres.PostgresText.Instance : null);
 
     /// <summary>The reading role's grants: <paramref name="roles" /> held, the others not.</summary>
     public static PostgresGrants Grants(string readsAs = "app", bool superuser = false, params string[] roles) =>

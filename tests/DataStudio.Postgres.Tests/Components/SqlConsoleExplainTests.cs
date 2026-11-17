@@ -35,7 +35,7 @@ public class SqlConsoleExplainTests
     [Fact]
     public async Task Explain_asks_for_a_plan_and_draws_it_in_place_of_the_grid()
     {
-        await using PostgresStudioComponentContext context = new();
+        await using PostgresComponentContext context = new();
         context.WithAllCapabilities();
         await context.ReadyAsync();
         context.SqlConsole.Next = Plan("15-offset-plain");
@@ -57,7 +57,7 @@ public class SqlConsoleExplainTests
     [Fact]
     public async Task Explain_analyze_asks_for_a_measured_plan_and_says_it_ran_and_was_rolled_back()
     {
-        await using PostgresStudioComponentContext context = new();
+        await using PostgresComponentContext context = new();
         context.WithAllCapabilities();
         await context.ReadyAsync();
         context.SqlConsole.Next = Plan("18-sort-spill-analyze");
@@ -75,7 +75,7 @@ public class SqlConsoleExplainTests
     [Fact]
     public async Task Run_sends_the_statement_as_typed_and_the_plan_tab_says_how_to_get_a_plan()
     {
-        await using PostgresStudioComponentContext context = new();
+        await using PostgresComponentContext context = new();
         context.WithAllCapabilities();
         await context.ReadyAsync();
 
@@ -93,7 +93,7 @@ public class SqlConsoleExplainTests
     [Fact]
     public async Task A_postgres_error_in_an_explained_statement_points_at_the_typed_text()
     {
-        await using PostgresStudioComponentContext context = new();
+        await using PostgresComponentContext context = new();
         context.WithAllCapabilities();
         await context.ReadyAsync();
 
@@ -112,7 +112,7 @@ public class SqlConsoleExplainTests
     [Fact]
     public async Task The_first_keystroke_after_an_error_takes_it_and_its_caret_away()
     {
-        await using PostgresStudioComponentContext context = new();
+        await using PostgresComponentContext context = new();
         context.WithAllCapabilities();
         await context.ReadyAsync();
 
@@ -135,7 +135,7 @@ public class SqlConsoleExplainTests
     // The console itself: the guard over what was typed, and the audit
     // ---------------------------------------------------------------------------------------------------------------
 
-    private static SqlConsoleService Console(PostgresStudioComponentContext context) =>
+    private static SqlConsoleService Console(PostgresComponentContext context) =>
         new(
             ActivatorUtilities.CreateInstance<StudioSourceResolver>(context.Services),
             context.Services.GetRequiredService<StudioCapabilityGuard>(),
@@ -144,13 +144,13 @@ public class SqlConsoleExplainTests
             NullLogger<SqlConsoleService>.Instance,
             context.Services.GetRequiredService<AuthenticationStateProvider>());
 
-    private static IReadOnlyList<StudioActionLogEntry> Ring(PostgresStudioComponentContext context) =>
+    private static IReadOnlyList<StudioActionLogEntry> Ring(PostgresComponentContext context) =>
         context.Services.GetRequiredService<StudioActionLogService>().GetLatest();
 
     [Fact]
     public async Task Explain_analyze_of_a_write_is_the_guards_refusal_of_what_was_typed_and_a_failed_RunSql_run()
     {
-        await using PostgresStudioComponentContext context = new();
+        await using PostgresComponentContext context = new();
         context.WithAllCapabilities();
         await context.ReadyAsync();
 
@@ -173,7 +173,7 @@ public class SqlConsoleExplainTests
     [InlineData("/* why */ explain analyze select 1")]
     public async Task An_explain_button_on_an_EXPLAIN_is_refused_and_audited(string statement)
     {
-        await using PostgresStudioComponentContext context = new();
+        await using PostgresComponentContext context = new();
         context.WithAllCapabilities();
         await context.ReadyAsync();
 
@@ -188,7 +188,7 @@ public class SqlConsoleExplainTests
     [Fact]
     public async Task With_RunSql_off_an_explain_is_refused_before_anything_and_names_what_it_would_have_sent()
     {
-        await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
+        await using PostgresComponentContext context = await new PostgresComponentContext().ReadyAsync();
 
         Func<Task> run = () => Console(context).RunSqlAsync(Scope, new SqlConsoleRequest("select 1") { Explain = SqlExplain.Analyze }, Token);
 

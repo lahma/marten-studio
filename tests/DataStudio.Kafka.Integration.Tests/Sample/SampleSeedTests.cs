@@ -13,7 +13,7 @@ namespace DataStudio.Kafka.Integration.Tests.Sample;
 /// </summary>
 /// <remarks>
 /// These live in the live suite's project, not the fast one: the sample hosts Marten Studio, and the fast suite is fenced from Marten
-/// (<c>KStudioFenceTests</c>). They start no container and read no broker.
+/// (<c>KafkaFenceTests</c>). They start no container and read no broker.
 /// </remarks>
 public class SampleSeedTests
 {

@@ -109,7 +109,7 @@ else if (CurrentMatches.Count > 0)
             return items;
         }
 
-        string shown = KafkaStudioText.ExportAsShown(CurrentMatches.Count);
+        string shown = KafkaText.ExportAsShown(CurrentMatches.Count);
 
         return
         [
@@ -155,7 +155,7 @@ else if (CurrentMatches.Count > 0)
         {
             Logger.LogWarning(e, "The Kafka export menu failed to save records");
             succeeded = false;
-            message = KafkaStudioText.ExportFailed;
+            message = KafkaText.ExportFailed;
         }
         finally
         {

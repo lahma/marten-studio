@@ -216,7 +216,7 @@ public class TableHealthBuildLiveTests(PostgresFixture postgres)
         partly.AutovacuumOffForTable.Should().BeFalse("one partition of several is not the table");
         partly.Row.DifferingStorageOptions.Should().ContainSingle("the partitions disagree, and that is said by the parameter's name alone")
             .Which.Should().Be("autovacuum_enabled");
-        Autovacuum.State(partly, "autovacuum_vacuum_scale_factor", "0.02", DataStudio.Marten.Services.MartenStudioText.Instance)
+        Autovacuum.State(partly, "autovacuum_vacuum_scale_factor", "0.02", DataStudio.Marten.Services.MartenText.Instance)
             .Should().Contain("may be switched off for some");
 
         await ExecuteAsync(postgres, [.. leaves.Select(static x => "alter table " + x + " set (autovacuum_enabled = false)")]);
@@ -225,7 +225,7 @@ public class TableHealthBuildLiveTests(PostgresFixture postgres)
         off.AutovacuumOffForTable.Should().BeTrue("every partition has it off, which is the partitioned table's whole storage");
         off.Row.DifferingStorageOptions.Should().BeEmpty();
         off.Row.PartitionLeaves.Should().Be(leaves.Count);
-        Autovacuum.State(off, "autovacuum_vacuum_scale_factor", "0.02", DataStudio.Marten.Services.MartenStudioText.Instance)
+        Autovacuum.State(off, "autovacuum_vacuum_scale_factor", "0.02", DataStudio.Marten.Services.MartenText.Instance)
             .Should().Contain("on every partition");
     }
 
@@ -253,7 +253,7 @@ public class TableHealthBuildLiveTests(PostgresFixture postgres)
     private static async Task<TableFacts> PartitionedTableAsync(HealthLiveHost host)
     {
         await using ServiceProvider services = new ServiceCollection().BuildServiceProvider();
-        await using HealthConnection connection = new(MartenStudioDatabase.Of(host.Store.Storage.Database));
+        await using HealthConnection connection = new(MartenSourceDatabase.Of(host.Store.Storage.Database));
 
         HealthCheckContext context = new(
             new ResolvedScope(
@@ -261,7 +261,7 @@ public class TableHealthBuildLiveTests(PostgresFixture postgres)
                 new MartenStoreRegistration("default", "Default", typeof(IDocumentStore)),
                 host.Store,
                 host.Store.Storage.Database),
-            MartenStudioSettings.Of(new MartenOptions()),
+            MartenSettings.Of(new MartenOptions()),
             MartenStudioRuntime.Current,
             services,
             new HealthSqlRunner(connection, new ReadOnlySqlOptions(), null),

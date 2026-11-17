@@ -14,11 +14,11 @@ public class KafkaExportCapabilityTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
-    private static ValueTask<List<StudioActionLogEntry>> Visible(KafkaStudioHarness harness) =>
+    private static ValueTask<List<StudioActionLogEntry>> Visible(KafkaHarness harness) =>
         harness.Context.ActivityRing.GetVisibleAsync(cancellationToken: Ct);
 
-    private static void Record(KafkaStudioHarness harness, string[] topics, KafkaCapability capability) =>
-        harness.ActionLog.Record(KafkaStudioHarness.Primary, topics, capability.ToString(), string.Join(", ", topics), succeeded: true, "done", capability);
+    private static void Record(KafkaHarness harness, string[] topics, KafkaCapability capability) =>
+        harness.ActionLog.Record(KafkaHarness.Primary, topics, capability.ToString(), string.Join(", ", topics), succeeded: true, "done", capability);
 
     // ---- the flags and the guard
 
@@ -51,7 +51,7 @@ public class KafkaExportCapabilityTests
     public void Requiring_a_capability_names_SearchRecords_first_when_it_is_off(string name)
     {
         KafkaCapability capability = Enum.Parse<KafkaCapability>(name);
-        using KafkaStudioHarness harness = new(options =>
+        using KafkaHarness harness = new(options =>
         {
             options.Capabilities.ReadPayloads = true;
             options.Capabilities.ExportRecords = true;
@@ -67,7 +67,7 @@ public class KafkaExportCapabilityTests
     [Fact]
     public void Requiring_a_capability_with_SearchRecords_on_names_the_capability_when_it_is_off()
     {
-        using KafkaStudioHarness harness = new(static o => o.Capabilities.SearchRecords = true);
+        using KafkaHarness harness = new(static o => o.Capabilities.SearchRecords = true);
         KafkaCapabilityGuard guard = harness.Context.Services.GetRequiredService<KafkaCapabilityGuard>();
 
         Action export = () => guard.Require(KafkaCapability.ExportRecords);
@@ -79,7 +79,7 @@ public class KafkaExportCapabilityTests
     [Fact]
     public void ReadOnly_turns_all_four_off()
     {
-        using KafkaStudioHarness harness = new(static o => o.Capabilities = KafkaCapabilities.All());
+        using KafkaHarness harness = new(static o => o.Capabilities = KafkaCapabilities.All());
         KafkaCapabilityGuard guard = harness.Context.Services.GetRequiredService<KafkaCapabilityGuard>();
         guard.Offered().Should().HaveCount(4);
         guard.Offered().Should().OnlyContain(c => guard.IsEnabled(c));
@@ -92,7 +92,7 @@ public class KafkaExportCapabilityTests
     [Fact]
     public void A_host_that_sets_ExportRecords_or_LiveTail_without_SearchRecords_still_starts_and_every_use_is_refused()
     {
-        using KafkaStudioHarness harness = new(static o => o.Capabilities.ExportRecords = true);
+        using KafkaHarness harness = new(static o => o.Capabilities.ExportRecords = true);
         KafkaCapabilityGuard guard = harness.Context.Services.GetRequiredService<KafkaCapabilityGuard>();
 
         guard.IsConfigured(KafkaCapability.ExportRecords).Should().BeTrue();
@@ -109,7 +109,7 @@ public class KafkaExportCapabilityTests
     public async Task An_entry_of_the_new_capabilities_is_judged_with_SearchRecords_per_topic(string name)
     {
         KafkaCapability capability = Enum.Parse<KafkaCapability>(name);
-        using KafkaStudioHarness harness = new(static o => o.CapabilityAuthorizationPolicy = "kafka-search");
+        using KafkaHarness harness = new(static o => o.CapabilityAuthorizationPolicy = "kafka-search");
         harness.Options.Capabilities.ExportRecords = true;
         harness.Options.Capabilities.LiveTail = true;
         Record(harness, ["orders.v1"], capability);
@@ -135,7 +135,7 @@ public class KafkaExportCapabilityTests
     [Fact]
     public async Task An_entry_of_the_new_capabilities_that_names_no_topic_is_judged_at_cluster_level_with_SearchRecords()
     {
-        using KafkaStudioHarness harness = new(static o => o.CapabilityAuthorizationPolicy = "kafka-search");
+        using KafkaHarness harness = new(static o => o.CapabilityAuthorizationPolicy = "kafka-search");
         harness.Options.Capabilities.SearchRecords = true;
         harness.Options.Capabilities.ExportRecords = true;
         Record(harness, [], KafkaCapability.ExportRecords);

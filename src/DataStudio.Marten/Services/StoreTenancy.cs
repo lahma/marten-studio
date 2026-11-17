@@ -124,7 +124,7 @@ internal sealed record StoreTenancy(StoreTenancyKind Kind, string Words)
     /// <summary>
     /// Whether anything in a store is tenanted per row: the event store itself, or any visible document type. The one answer behind a
     /// tenant selector meaning something (<see cref="TenantDiscovery.IsTenantScopeRelevant" />) and behind a link that names a tenant
-    /// (<c>MartenStudioRouteLinks</c>), so the two cannot drift.
+    /// (<c>MartenRouteLinks</c>), so the two cannot drift.
     /// </summary>
     /// <param name="options">The store's configuration.</param>
     /// <param name="isVisible">The host's visibility test, or <see langword="null" />.</param>

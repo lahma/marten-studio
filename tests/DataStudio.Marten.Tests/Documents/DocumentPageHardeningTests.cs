@@ -94,7 +94,7 @@ public class DocumentPageHardeningTests
     [InlineData("postgres/query?mode=sql")]
     public void A_return_link_the_studio_did_not_write_is_not_rendered(string from)
     {
-        SafeReturnLink.Sanitize(from, MartenStudioSettings.Of(new MartenOptions())).Should().BeNull();
+        SafeReturnLink.Sanitize(from, MartenSettings.Of(new MartenOptions())).Should().BeNull();
     }
 
     [Theory]
@@ -104,11 +104,11 @@ public class DocumentPageHardeningTests
     [InlineData("studio/marten/documents/customer?page=2")]
     public void A_return_link_into_the_documents_area_is_kept_exactly_as_it_was(string from)
     {
-        SafeReturnLink.Sanitize(from, MartenStudioSettings.Of(new MartenOptions())).Should().Be(from);
+        SafeReturnLink.Sanitize(from, MartenSettings.Of(new MartenOptions())).Should().Be(from);
     }
 
-    private static MartenStudioSettings AtMount(string path) =>
-        MartenStudioSettings.Of(new MartenOptions(), new ShellSettings(Microsoft.Extensions.Options.Options.Create(new DataStudioOptions { Path = path })));
+    private static MartenSettings AtMount(string path) =>
+        MartenSettings.Of(new MartenOptions(), new ShellSettings(Microsoft.Extensions.Options.Options.Create(new DataStudioOptions { Path = path })));
 
     /// <summary>
     /// A mount may be named like a module's segment (<c>/marten</c> was 1.x's default), and then every return link starts with the mount's own word:

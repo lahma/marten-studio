@@ -34,7 +34,7 @@ public class IndexAdviceServiceTests
         public StatementFacts? Latest(ResolvedSource resolved) => facts;
     }
 
-    private static StatementsService Service(PostgresStudioComponentContext context, IStatementFacts facts, IndexAdvisorFlights? flights = null)
+    private static StatementsService Service(PostgresComponentContext context, IStatementFacts facts, IndexAdvisorFlights? flights = null)
     {
         IServiceProvider services = context.Services;
 
@@ -54,19 +54,19 @@ public class IndexAdviceServiceTests
 
     private static readonly StudioScope Scope = new("default", "default", null);
 
-    private static IReadOnlyList<StudioActionLogEntry> Entries(PostgresStudioComponentContext context) =>
+    private static IReadOnlyList<StudioActionLogEntry> Entries(PostgresComponentContext context) =>
         [.. context.Services.GetRequiredService<StudioActionLogService>().GetLatest().Where(static x => x.Action == StatementsService.IndexAdviceAction)];
 
     [Fact]
     public async Task With_ViewDatabaseActivity_off_nothing_is_read_and_the_refusal_is_not_audited()
     {
-        await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
+        await using PostgresComponentContext context = await new PostgresComponentContext().ReadyAsync();
         CountingFacts facts = Some();
 
         IndexAdviceView view = await Service(context, facts).AdviseIndexesAsync(Scope, new IndexAdviceRequest(), TestContext.Current.CancellationToken);
 
         view.Refusal.Should().Be(DatabaseRefusal.CapabilityOff);
-        view.Reason.Should().Be(PostgresStudioText.Instance.StatementsCapabilityDenial);
+        view.Reason.Should().Be(PostgresText.Instance.StatementsCapabilityDenial);
         facts.Reads.Should().Be(0);
         Entries(context).Should().BeEmpty("the page's own refusal is not an audit entry");
     }
@@ -74,7 +74,7 @@ public class IndexAdviceServiceTests
     [Fact]
     public async Task Under_ReadOnly_the_advisor_says_ReadOnly_turned_it_off()
     {
-        await using PostgresStudioComponentContext context = new();
+        await using PostgresComponentContext context = new();
         context.WithAllCapabilities();
         context.Options.ReadOnly = true;
         await context.ReadyAsync();
@@ -88,7 +88,7 @@ public class IndexAdviceServiceTests
     [Fact]
     public async Task The_write_policy_is_asked_with_the_capability_named_and_no_tenant_and_its_refusal_runs_nothing()
     {
-        await using PostgresStudioComponentContext context = new();
+        await using PostgresComponentContext context = new();
         context.WithAllCapabilities();
         context.Options.SourceAuthorizationPolicy = "source";
         context.Options.WriteAuthorizationPolicy = "write";
@@ -110,7 +110,7 @@ public class IndexAdviceServiceTests
     [Fact]
     public async Task A_database_another_run_holds_is_refused_not_joined_and_the_refusal_is_audited_once()
     {
-        await using PostgresStudioComponentContext context = new();
+        await using PostgresComponentContext context = new();
         context.WithAllCapabilities();
         await context.ReadyAsync();
         CountingFacts facts = Some();
@@ -131,7 +131,7 @@ public class IndexAdviceServiceTests
     [Fact]
     public async Task A_run_that_cannot_reach_the_database_is_a_value_audited_once_as_failed_and_releases_the_database()
     {
-        await using PostgresStudioComponentContext context = new();
+        await using PostgresComponentContext context = new();
         context.WithAllCapabilities();
         await context.ReadyAsync();
         IndexAdvisorFlights flights = new();
@@ -152,7 +152,7 @@ public class IndexAdviceServiceTests
     [Fact]
     public async Task A_run_that_selected_no_statement_is_audited_as_the_top_statements_never_the_top_zero()
     {
-        await using PostgresStudioComponentContext context = new();
+        await using PostgresComponentContext context = new();
         context.WithAllCapabilities();
         await context.ReadyAsync();
 
@@ -164,7 +164,7 @@ public class IndexAdviceServiceTests
     [Fact]
     public async Task A_caller_that_records_the_press_itself_leaves_the_advisor_without_an_entry()
     {
-        await using PostgresStudioComponentContext context = new();
+        await using PostgresComponentContext context = new();
         context.WithAllCapabilities();
         await context.ReadyAsync();
 

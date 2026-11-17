@@ -22,15 +22,15 @@ public class PlanMaskedExportTests
 
     private static QueryPlan Masked() => QueryPlanReader.Read(Json, Mask).Plan!;
 
-    private static async Task<PostgresStudioComponentContext> ContextAsync()
+    private static async Task<PostgresComponentContext> ContextAsync()
     {
-        PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
+        PostgresComponentContext context = await new PostgresComponentContext().ReadyAsync();
         context.JSInterop.Setup<bool>("martenStudio.clipboard.copyText", static _ => true).SetResult(true);
         context.JSInterop.Setup<bool>("martenStudio.download.text", static _ => true).SetResult(true);
         return context;
     }
 
-    private static IRenderedComponent<PlanView> Drill(PostgresStudioComponentContext context, QueryPlan plan, bool masked = true) =>
+    private static IRenderedComponent<PlanView> Drill(PostgresComponentContext context, QueryPlan plan, bool masked = true) =>
         context.Render<PlanView>(parameters => parameters.Add(x => x.Plan, plan).Add(x => x.MaskedExport, masked).Add(x => x.Label, "The generic plan of statement 1"));
 
     [Fact]
@@ -48,7 +48,7 @@ public class PlanMaskedExportTests
     [Fact]
     public async Task The_drill_in_offers_Markdown_and_speedscope_and_no_JSON()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
         IRenderedComponent<PlanView> view = Drill(context, Masked());
 
         view.Find(".ms-plan-copy-markdown").TextContent.Should().Be("Copy as Markdown");
@@ -61,7 +61,7 @@ public class PlanMaskedExportTests
     [Fact]
     public async Task Copy_as_Markdown_hands_over_the_masked_plan_only()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
         IRenderedComponent<PlanView> view = Drill(context, Masked());
 
         view.Find(".ms-plan-copy-markdown").Click();
@@ -76,7 +76,7 @@ public class PlanMaskedExportTests
     [Fact]
     public async Task Download_for_speedscope_hands_over_the_masked_plan_only()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
         IRenderedComponent<PlanView> view = Drill(context, Masked());
 
         view.Find(".ms-plan-download-speedscope").Click();
@@ -94,7 +94,7 @@ public class PlanMaskedExportTests
     [Fact]
     public async Task Nothing_is_offered_unless_the_page_asks_for_it()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
 
         IRenderedComponent<PlanView> view = Drill(context, Masked(), masked: false);
 
@@ -104,7 +104,7 @@ public class PlanMaskedExportTests
     [Fact]
     public async Task A_view_with_no_plan_to_draw_offers_nothing()
     {
-        await using PostgresStudioComponentContext context = await ContextAsync();
+        await using PostgresComponentContext context = await ContextAsync();
 
         IRenderedComponent<PlanView> view = context.Render<PlanView>(parameters => parameters.Add(x => x.MaskedExport, true).Add(x => x.Label, "x"));
 

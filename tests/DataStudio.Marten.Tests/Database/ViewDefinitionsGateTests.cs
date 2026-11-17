@@ -46,11 +46,11 @@ public class ViewDefinitionsGateTests
 
         DatabaseRowAccess table = gate.RowsFor(Relation("quartz", "qrtz_triggers"), Other, dependsOnHidden: false);
         table.Allowed.Should().BeFalse();
-        table.Reason.Should().Be(DataStudio.Marten.Services.MartenStudioText.Instance.BrowseCapabilityDenial, "a table's rows are refused naming BrowseDatabase, in the sentence 0.4 wrote");
+        table.Reason.Should().Be(DataStudio.Marten.Services.MartenText.Instance.BrowseCapabilityDenial, "a table's rows are refused naming BrowseDatabase, in the sentence 0.4 wrote");
 
         DatabaseRowAccess view = gate.RowsFor(Relation("quartz", "job_summary", kind: "v"), Other, viewRefusal: null);
         view.Allowed.Should().BeFalse("a view's rows are rows");
-        view.Reason.Should().Be(DataStudio.Marten.Services.MartenStudioText.Instance.BrowseCapabilityDenial);
+        view.Reason.Should().Be(DataStudio.Marten.Services.MartenText.Instance.BrowseCapabilityDenial);
 
         DatabaseAccessState state = gate.State;
         state.IsOpen.Should().BeFalse();
@@ -124,7 +124,7 @@ public class ViewDefinitionsGateTests
         DatabaseRowAccess refused = definitionsOnly.SequenceValueAccess("quartz", Other);
         refused.Allowed.Should().BeFalse("a value says how many rows a table has had: data, not a definition");
         refused.Refusal.Should().Be(DatabaseRefusal.CapabilityOff);
-        refused.Reason.Should().Be(DataStudio.Marten.Services.MartenStudioText.Instance.BrowseCapabilityDenial).And.Contain("MartenOptions.Capabilities.BrowseDatabase");
+        refused.Reason.Should().Be(DataStudio.Marten.Services.MartenText.Instance.BrowseCapabilityDenial).And.Contain("MartenOptions.Capabilities.BrowseDatabase");
 
         definitionsOnly.DefinitionAccess("quartz", Other).Allowed.Should().BeTrue("while its definition is shown, as the rest of the schema's");
 
@@ -178,7 +178,7 @@ public class ViewDefinitionsGateTests
         gate.DefinitionAccess("quartz", Other).Allowed.Should().BeTrue();
         gate.DefinitionAccess("legacy", Other).Allowed.Should().BeFalse();
         gate.DataAccess("quartz").Refusal.Should().Be(DatabaseRefusal.WritePolicy);
-        gate.DataAccess("quartz").Reason.Should().Be(DataStudio.Marten.Services.MartenStudioText.Instance.BrowseWritePolicyDenial);
+        gate.DataAccess("quartz").Reason.Should().Be(DataStudio.Marten.Services.MartenText.Instance.BrowseWritePolicyDenial);
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -193,13 +193,13 @@ public class ViewDefinitionsGateTests
         DatabaseRowAccess access = gate.DefinitionAccess("quartz", Other);
         access.Allowed.Should().BeFalse();
         access.Refusal.Should().Be(DatabaseRefusal.CapabilityOff);
-        access.Reason.Should().Be(DataStudio.Marten.Services.MartenStudioText.Instance.DefinitionCapabilityDenial)
+        access.Reason.Should().Be(DataStudio.Marten.Services.MartenText.Instance.DefinitionCapabilityDenial)
             .And.Contain("MartenOptions.Capabilities.ViewDefinitions")
             .And.Contain("MartenOptions.Capabilities.BrowseDatabase");
 
         gate.State.DefinitionRefusal.Should().Be(DatabaseRefusal.CapabilityOff);
-        gate.State.DefinitionDenial.Should().Be(DataStudio.Marten.Services.MartenStudioText.Instance.DefinitionCapabilityDenial);
-        gate.State.Denial.Should().Be(DataStudio.Marten.Services.MartenStudioText.Instance.BrowseCapabilityDenial, "the rows' sentence is 0.4's, unchanged");
+        gate.State.DefinitionDenial.Should().Be(DataStudio.Marten.Services.MartenText.Instance.DefinitionCapabilityDenial);
+        gate.State.Denial.Should().Be(DataStudio.Marten.Services.MartenText.Instance.BrowseCapabilityDenial, "the rows' sentence is 0.4's, unchanged");
         gate.VisibleSchemas.Should().Equal(DocumentSchema, EventSchema, ReportingSchema); // no schema beyond the store's own
     }
 
@@ -211,10 +211,10 @@ public class ViewDefinitionsGateTests
         gate.DefinitionsOpen.Should().BeFalse();
         gate.DefinitionAccess("quartz", Other).Allowed.Should().BeFalse();
         gate.State.DefinitionRefusal.Should().Be(DatabaseRefusal.ReadOnly);
-        gate.State.DefinitionDenial.Should().Be(DataStudio.Marten.Services.MartenStudioText.Instance.DefinitionReadOnlyDenial("MartenOptions.ReadOnly"))
+        gate.State.DefinitionDenial.Should().Be(DataStudio.Marten.Services.MartenText.Instance.DefinitionReadOnlyDenial("MartenOptions.ReadOnly"))
             .And.Contain("MartenOptions.Capabilities.ViewDefinitions")
             .And.Contain("MartenOptions.Capabilities.BrowseDatabase");
-        gate.State.Denial.Should().Be(DataStudio.Marten.Services.MartenStudioText.Instance.BrowseReadOnlyDenial("MartenOptions.ReadOnly"), "the rows' sentence is 0.4's, unchanged");
+        gate.State.Denial.Should().Be(DataStudio.Marten.Services.MartenText.Instance.BrowseReadOnlyDenial("MartenOptions.ReadOnly"), "the rows' sentence is 0.4's, unchanged");
     }
 
     [Theory]
@@ -236,7 +236,7 @@ public class ViewDefinitionsGateTests
 
         DatabaseRowAccess access = gate.DefinitionAccess("quartz", Other);
         access.Refusal.Should().Be(DatabaseRefusal.WritePolicy);
-        access.Reason.Should().Be(DataStudio.Marten.Services.MartenStudioText.Instance.DefinitionWritePolicyDenialFor(refused))
+        access.Reason.Should().Be(DataStudio.Marten.Services.MartenText.Instance.DefinitionWritePolicyDenialFor(refused))
             .And.Contain("refused " + refused + " for this Marten store");
     }
 
@@ -251,7 +251,7 @@ public class ViewDefinitionsGateTests
 
         DatabaseRowAccess access = gate.DefinitionAccess("quartz", Other);
         access.Refusal.Should().Be(DatabaseRefusal.StorePolicy);
-        access.Reason.Should().Be(DataStudio.Marten.Services.MartenStudioText.Instance.BrowseStorePolicyDenial);
+        access.Reason.Should().Be(DataStudio.Marten.Services.MartenText.Instance.BrowseStorePolicyDenial);
     }
 
     [Fact]
@@ -345,7 +345,7 @@ public class ViewDefinitionsGateTests
             browseAuthorized,
             Classifier(),
             policyRefusal: policyRefusal,
-            text: DataStudio.Marten.Services.MartenStudioText.Instance,
+            text: DataStudio.Marten.Services.MartenText.Instance,
             definitions: definitions,
             readOnlyOption: "MartenOptions.ReadOnly");
 }

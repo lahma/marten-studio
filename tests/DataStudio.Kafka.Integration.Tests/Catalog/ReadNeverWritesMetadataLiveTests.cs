@@ -82,7 +82,7 @@ public abstract class ReadNeverWritesMetadataLiveTests(KafkaFixture fixture)
         KafkaEngineOptions options = new();
         options.AddCluster("live", fixture.Client("admin"));
         KafkaClusterDefinition definition = new KafkaClusterRegistry(options).Get("live");
-        ConfluentClientEvents events = new(new KStudioLoggers(NullLoggerFactory.Instance), new KafkaLogOnce(TimeProvider.System), TimeProvider.System);
+        ConfluentClientEvents events = new(new KafkaEngineLoggers(NullLoggerFactory.Instance), new KafkaLogOnce(TimeProvider.System), TimeProvider.System);
 
         using (IAdminClient admin = ConfluentWireFactory.BuildAdminClient(definition, events))
         {

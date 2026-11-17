@@ -47,7 +47,7 @@ public class LockWaitVacuumHeadTests
     [Fact]
     public void An_anti_wraparound_autovacuum_is_said_never_to_give_way_and_a_Marten_migration_is_named()
     {
-        string advice = LockWaitCheck.VacuumHeadAdvice(Head(true, true, true), DataStudio.Marten.Services.MartenStudioText.Instance);
+        string advice = LockWaitCheck.VacuumHeadAdvice(Head(true, true, true), DataStudio.Marten.Services.MartenText.Instance);
 
         advice.Should().Contain("An anti-wraparound autovacuum does not give way to a lock request")
             .And.Contain("ApplyAllDatabaseChangesOnStartup, db-apply");
@@ -56,7 +56,7 @@ public class LockWaitVacuumHeadTests
     [Fact]
     public void An_ordinary_autovacuum_is_said_to_give_way_after_deadlock_timeout_and_Postgres_Studio_names_no_Marten()
     {
-        string advice = LockWaitCheck.VacuumHeadAdvice(Head(true, true, false), DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance);
+        string advice = LockWaitCheck.VacuumHeadAdvice(Head(true, true, false), DataStudio.Postgres.Services.Postgres.PostgresText.Instance);
 
         advice.Should().Contain("cancelled by a lock request after deadlock_timeout").And.NotContain("Marten").And.NotContain("db-apply");
     }

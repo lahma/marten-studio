@@ -386,7 +386,7 @@ internal sealed partial class KafkaScanner
             ScanRun run = new(inputs);
             string clusterText = KafkaLogValue.Cap(request.Cluster)!;
             string isolationText = request.Isolation.ToString();
-            KStudioLog.ScanStarted(loggers.Scans, scanId, clusterText, 1, 1, offsets, isolationText);
+            KafkaEngineLog.ScanStarted(loggers.Scans, scanId, clusterText, 1, 1, offsets, isolationText);
 
             Task<KafkaScanResult> task;
 
@@ -521,7 +521,7 @@ internal sealed partial class KafkaScanner
     {
         string clusterText = KafkaLogValue.Cap(cluster)!;
         string refusalText = refusal.ToString();
-        KStudioLog.ScanRefused(loggers.Scans, clusterText, refusalText);
+        KafkaEngineLog.ScanRefused(loggers.Scans, clusterText, refusalText);
 
         return new KafkaRecordRead(
             KafkaRecordReadStatus.Refused, null, [], [], null, null, refusal, null, KafkaRecordRead.RefusalText(refusal, spent), 0, 0);

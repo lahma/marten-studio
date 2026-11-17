@@ -14,7 +14,7 @@ namespace DataStudio.Marten.Tests.Conventions;
 /// read the files a manifest said were bound for the shared one. Since PS-2 the shared studio is <c>DataStudio.Postgres.dll</c>,
 /// which references neither Marten nor MartenStudio, so the whole of <c>src/DataStudio.Postgres/</c> is the boundary and no
 /// manifest is needed for scope: every file under it is fenced, a file added there tomorrow included. A lean in code no
-/// longer compiles, and <c>PostgresStudioFenceTests</c> (in DataStudio.Postgres.Tests since PS-3a) holds the assembly and
+/// longer compiles, and <c>PostgresFenceTests</c> (in DataStudio.Postgres.Tests since PS-3a) holds the assembly and
 /// package half of that. What the
 /// compiler cannot see is text it does not bind: Razor markup text - <c>&lt;code&gt;MartenOptions.ReadOnly&lt;/code&gt;</c>
 /// builds with 0 warnings, and would tell a host of the shared studio to set an option it does not have - and an
@@ -409,7 +409,7 @@ public class CoreFenceTests
 
         stayBehind.Types.Should().Contain(
             ["MartenOptions", "MartenStoreResource", "MartenStoreRegistry", "MartenStoreRegistration", "ResolvedScope",
-             "StudioScopeResolver", "TenantDiscovery", "MartenStudioSettings", "MartenStudioDescriptor", "MartenLog",
+             "StudioScopeResolver", "TenantDiscovery", "MartenSettings", "MartenDescriptor", "MartenLog",
              "MartenServiceBridges", "DocumentComponentModel", "MartenTable"],
             "each is declared in a .cs file under src/DataStudio.Marten/ - MartenTable as a global alias");
 

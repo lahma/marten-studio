@@ -75,9 +75,9 @@ public class StartupGuardTest
     {
         // This test assembly claims the root the Postgres pages already use.
         StudioDescriptor descriptor = Clone(
-            MartenStudioDescriptor.Instance,
+            MartenDescriptor.Instance,
             [
-                .. MartenStudioDescriptor.Instance.PageAssemblies,
+                .. MartenDescriptor.Instance.PageAssemblies,
                 new StudioPageAssembly(typeof(StartupGuardTest).Assembly, "/POSTGRES"),
             ]);
 

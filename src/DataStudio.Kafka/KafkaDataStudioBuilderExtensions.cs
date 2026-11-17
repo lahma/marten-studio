@@ -46,8 +46,8 @@ public static class KafkaDataStudioBuilderExtensions
         // Before anything that names a DataStudio.Kafka.Core type: this body names none, so the JIT can compile it and the
         // guard can say what is wrong even when NuGet left one of the packages out of the deployment. Everything else is in
         // AddKafkaServices, which is NoInlining so that it is compiled only once the guard has passed.
-        // KStudioVersionGuardTests scans this method's IL to keep it that way.
-        KStudioVersionGuard.Ensure();
+        // KafkaCoreVersionGuardTests scans this method's IL to keep it that way.
+        KafkaCoreVersionGuard.Ensure();
 
         AddKafkaServices(builder, configure);
 
@@ -63,7 +63,7 @@ public static class KafkaDataStudioBuilderExtensions
         IServiceCollection services = builder.Services;
 
         // The module itself: TryAddEnumerable deduplicates by implementation type, so a second call adds it once.
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IStudioModule, KafkaStudioModule>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IStudioModule, KafkaModule>());
 
         OptionsBuilder<KafkaOptions> optionsBuilder = services
             .AddOptions<KafkaOptions>()
@@ -83,7 +83,7 @@ public static class KafkaDataStudioBuilderExtensions
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IValidateOptions<KafkaOptions>, KafkaExternalLinkOptionsValidator>());
 
         // The engine: the options object answers both seams, as a database module's does (D30).
-        KStudioEngineRegistration.Add(
+        KafkaEngineRegistration.Add(
             services,
             static provider => provider.GetRequiredService<IOptions<KafkaOptions>>().Value,
             static provider => new KafkaEngineSettings(provider.GetRequiredService<IShellSettings>()));
@@ -124,6 +124,6 @@ public static class KafkaDataStudioBuilderExtensions
         services.TryAddEnumerable(ServiceDescriptor.Scoped<IStudioAuditScopeGate, KafkaAuditGate>());
 
         // Refuses to start a host with a capability no policy answers.
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, KafkaStudioStartupGuard>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, KafkaStartupGuard>());
     }
 }

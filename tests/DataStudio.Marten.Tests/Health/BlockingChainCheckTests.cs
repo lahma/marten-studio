@@ -234,10 +234,10 @@ public class BlockingChainCheckTests
     {
         HealthFinding finding = new BlockingChainCheck().Evaluate(
             Facts(Head(), Waiter(4242, TimeSpan.FromSeconds(30))),
-            HealthEvaluation.At(Now, text: PostgresStudioText.Instance)).Findings.Single();
+            HealthEvaluation.At(Now, text: PostgresText.Instance)).Findings.Single();
 
         finding.Remedy!.Explanation.Should().NotContain("Marten").And.NotContain("HotCold");
-        finding.Remedy.Code.Should().StartWith("# " + PostgresStudioText.Instance.ServerSettingComment);
+        finding.Remedy.Code.Should().StartWith("# " + PostgresText.Instance.ServerSettingComment);
     }
 
     [Fact]

@@ -21,7 +21,7 @@ public class DiagnosticsSnapshotBuilderTests
     [Fact]
     public void The_storage_section_is_the_storage_pages_facts_with_every_table_named()
     {
-        PostgresStorageSection storage = DiagnosticsSnapshotBuilder.Storage(StorageOf(), PostgresStudioSettings.Of(new PostgresOptions()));
+        PostgresStorageSection storage = DiagnosticsSnapshotBuilder.Storage(StorageOf(), PostgresSettings.Of(new PostgresOptions()));
 
         storage.Outcome.Should().Be(PostgresReadOutcome.Read);
         storage.DatabaseBytes.Should().Be(51_234_567_890);
@@ -218,7 +218,7 @@ public class DiagnosticsSnapshotBuilderTests
     {
         PostgresStorageSection storage = DiagnosticsSnapshotBuilder.Storage(
             StorageOf() with { DatabaseBytes = null, DatabaseBytesNotRead = "Not measured: pg_database_size needs CONNECT on this database.", GrowthBytesPerDay = null, Window = null },
-            PostgresStudioSettings.Of(new PostgresOptions()));
+            PostgresSettings.Of(new PostgresOptions()));
 
         storage.DatabaseBytes.Should().Be(50_000_000_000);
         storage.Reason.Should().Contain("needs CONNECT").And.Contain("the catalog's estimate").And.Contain("No growth figure yet");
@@ -232,7 +232,7 @@ public class DiagnosticsSnapshotBuilderTests
             Statement(11, "select 1 from orders"),
             Statement(12, "select 2 from orders") with { Window = null });
 
-        PostgresStatementsSection section = DiagnosticsSnapshotBuilder.Statements(facts, Gate(true), PostgresStudioText.Instance);
+        PostgresStatementsSection section = DiagnosticsSnapshotBuilder.Statements(facts, Gate(true), PostgresText.Instance);
 
         section.Outcome.Should().Be(PostgresReadOutcome.Read);
         section.Window.Should().Be(TimeSpan.FromMinutes(10), "the facts' span");
@@ -260,7 +260,7 @@ public class DiagnosticsSnapshotBuilderTests
     {
         StatementFacts facts = StatementsOf() with { State = StatementsState.NotInstalled };
 
-        PostgresStatementsSection section = DiagnosticsSnapshotBuilder.Statements(facts, Gate(true), PostgresStudioText.Instance);
+        PostgresStatementsSection section = DiagnosticsSnapshotBuilder.Statements(facts, Gate(true), PostgresText.Instance);
 
         section.Outcome.Should().Be(PostgresReadOutcome.Unavailable);
         section.Reason.Should().Contain("pg_stat_statements is not installed in this database");

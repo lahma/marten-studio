@@ -64,11 +64,11 @@
 
         @if (found.Discovered is { } discovered)
         {
-            <section class="ms-k-discovered" aria-label="@KafkaStudioText.DiscoveredHeading(discovered.Source)">
-                <h2 class="ms-section-title">@KafkaStudioText.DiscoveredHeading(discovered.Source)</h2>
-                <p class="ms-muted">@KafkaStudioText.DiscoveredLead</p>
+            <section class="ms-k-discovered" aria-label="@KafkaText.DiscoveredHeading(discovered.Source)">
+                <h2 class="ms-section-title">@KafkaText.DiscoveredHeading(discovered.Source)</h2>
+                <p class="ms-muted">@KafkaText.DiscoveredLead</p>
                 <dl class="ms-k-discovered-facts">
-                    <dt>Role</dt><dd>@KafkaStudioText.DiscoveredRole(discovered.Role)</dd>
+                    <dt>Role</dt><dd>@KafkaText.DiscoveredRole(discovered.Role)</dd>
                     @if (discovered.MessageTypes.Count > 0)
                     {
                         <dt>Message types</dt>
@@ -106,7 +106,7 @@
 
         @if (openTransactions > 0)
         {
-            <p class="ms-k-note ms-k-note-warning" role="note">@KafkaStudioText.OpenTransaction(openTransactions)</p>
+            <p class="ms-k-note ms-k-note-warning" role="note">@KafkaText.OpenTransaction(openTransactions)</p>
         }
 
         <div class="ms-stat-grid ms-k-stats">
@@ -191,7 +191,7 @@
         IReadOnlyList<KafkaGroupOverview> idleGroups = [.. overview.Groups.Where(static x => x.HasNoCommittedOffset)];
         @if (overview.Groups.Count == 0)
         {
-            <p class="ms-muted">@(overview.ClusterHasGroups ? KafkaStudioText.NoGroupReadsTopic : KafkaStudioText.NoConsumerGroups)</p>
+            <p class="ms-muted">@(overview.ClusterHasGroups ? KafkaText.NoGroupReadsTopic : KafkaText.NoConsumerGroups)</p>
         }
         else
         {
@@ -231,7 +231,7 @@
 
             @if (idleGroups.Count > 0)
             {
-                <p class="ms-muted ms-k-idle-groups">@KafkaStudioText.GroupsWithoutOffsets(idleGroups.Select(static x => x.GroupId))</p>
+                <p class="ms-muted ms-k-idle-groups">@KafkaText.GroupsWithoutOffsets(idleGroups.Select(static x => x.GroupId))</p>
             }
 
             @foreach (KafkaGroupOverview group in readingGroups.Where(static x => x.Lag.IsAvailable))
@@ -290,7 +290,7 @@
     {
         <div class="ms-empty" role="status">
             <p class="ms-empty-title">Not found</p>
-            <p class="ms-empty-description">@(string.IsNullOrEmpty(topicName) ? KafkaStudioText.TopicMissing : KafkaStudioText.TopicNotAvailable(topicName))</p>
+            <p class="ms-empty-description">@(string.IsNullOrEmpty(topicName) ? KafkaText.TopicMissing : KafkaText.TopicNotAvailable(topicName))</p>
         </div>
     }
 </div>
@@ -388,7 +388,7 @@
 
     private async Task OnLiveFailedAsync(Exception exception)
     {
-        refreshError = KafkaStudioText.CouldNotRefresh;
+        refreshError = KafkaText.CouldNotRefresh;
         await InvokeAsync(StateHasChanged);
     }
 
@@ -406,7 +406,7 @@
         catch (Exception e) when (!disposed)
         {
             Logger.LogWarning(e, "The Kafka topic page failed to read the catalog");
-            error = KafkaStudioText.ReadFailed;
+            error = KafkaText.ReadFailed;
             loading = false;
         }
 

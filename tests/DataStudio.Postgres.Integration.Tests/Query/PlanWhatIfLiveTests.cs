@@ -81,7 +81,7 @@ public class PlanWhatIfLiveTests(HypopgServer server) : IClassFixture<HypopgServ
         PlanRunResult planned = await console.PlanAsync(Scope, new PlanRunRequest(statement, PlanMode.Plan), Token);
         planned.Error.Should().BeNull();
 
-        return PlanWhatIfCandidates.For(QueryPlanReader.Read(planned.PlanJson).Plan!, DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance)
+        return PlanWhatIfCandidates.For(QueryPlanReader.Read(planned.PlanJson).Plan!, DataStudio.Postgres.Services.Postgres.PostgresText.Instance)
             .Should().ContainSingle().Subject;
     }
 
@@ -104,7 +104,7 @@ public class PlanWhatIfLiveTests(HypopgServer server) : IClassFixture<HypopgServ
 
         // The plan the page drew for this statement and value suggests the index; the console builds it again from its parts.
         PlanRunResult planned = await console.PlanAsync(Scope, request, Token);
-        HypotheticalIndex index = PlanWhatIfCandidates.For(QueryPlanReader.Read(planned.PlanJson).Plan!, DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance)
+        HypotheticalIndex index = PlanWhatIfCandidates.For(QueryPlanReader.Read(planned.PlanJson).Plan!, DataStudio.Postgres.Services.Postgres.PostgresText.Instance)
             .Should().ContainSingle().Subject;
         index.Definition.Should().Be("CREATE INDEX ON \"t\" (\"b\");");
 
@@ -166,7 +166,7 @@ public class PlanWhatIfLiveTests(HypopgServer server) : IClassFixture<HypopgServ
         PlanRunRequest request = new(Statement, PlanMode.Plan) { Values = ["5"] };
 
         PlanRunResult planned = await console.PlanAsync(Scope, request, Token);
-        HypotheticalIndex index = PlanWhatIfCandidates.For(QueryPlanReader.Read(planned.PlanJson).Plan!, DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance)
+        HypotheticalIndex index = PlanWhatIfCandidates.For(QueryPlanReader.Read(planned.PlanJson).Plan!, DataStudio.Postgres.Services.Postgres.PostgresText.Instance)
             .Should().ContainSingle().Subject;
 
         // hypopg has made the index when the observer throws, between the first plan and the second.

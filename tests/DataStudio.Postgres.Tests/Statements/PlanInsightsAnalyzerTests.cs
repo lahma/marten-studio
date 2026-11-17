@@ -8,7 +8,7 @@ namespace DataStudio.Postgres.Tests.Statements;
 /// </summary>
 public class PlanInsightsAnalyzerTests
 {
-    private static IReadOnlyList<PlanInsightFinding> Evaluate(string json) => PlanInsights.Evaluate(QueryPlanReader.Read(json).Plan!, DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance);
+    private static IReadOnlyList<PlanInsightFinding> Evaluate(string json) => PlanInsights.Evaluate(QueryPlanReader.Read(json).Plan!, DataStudio.Postgres.Services.Postgres.PostgresText.Instance);
 
     private static List<string> Codes(string json) => [.. Evaluate(json).Select(static x => x.Insight.Code)];
 

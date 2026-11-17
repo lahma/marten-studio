@@ -31,7 +31,7 @@ internal static class FakeDatabaseObjects
     /// The words the fake refuses in: the Postgres module's, unless the test project that links this file says otherwise (the Marten suite sets
     /// its own from a module initializer).
     /// </summary>
-    public static StudioText Words { get; set; } = PostgresStudioText.Instance;
+    public static StudioText Words { get; set; } = PostgresText.Instance;
 
     /// <summary>The demo store's document schema.</summary>
     public const string StoreSchema = "studio_sample";

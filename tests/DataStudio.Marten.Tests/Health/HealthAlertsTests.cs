@@ -43,7 +43,7 @@ public class HealthAlertsTests
         configure?.Invoke(options);
         DataStudioOptions shell = new();
         configureShell?.Invoke(shell);
-        return new HealthAlerts(toasts, MartenStudioSettings.Of(options, new DataStudio.Services.Settings.ShellSettings(Microsoft.Extensions.Options.Options.Create(shell))));
+        return new HealthAlerts(toasts, MartenSettings.Of(options, new DataStudio.Services.Settings.ShellSettings(Microsoft.Extensions.Options.Options.Create(shell))));
     }
 
     /// <summary>

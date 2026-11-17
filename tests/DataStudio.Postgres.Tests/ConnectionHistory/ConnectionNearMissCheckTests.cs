@@ -177,7 +177,7 @@ public class ConnectionNearMissCheckTests
         ServerConnectionLimits limits = new(0, 0, 103, 3, 0, 170000);
 
         HealthFinding plain = Evaluate(Facts(90, limits: limits)).Findings.Single();
-        plain.Remedy.Should().Be(ServerConnectionHeadroomCheck.ServerRemedy(PostgresPlatform.SelfHosted, null, limits, DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance));
+        plain.Remedy.Should().Be(ServerConnectionHeadroomCheck.ServerRemedy(PostgresPlatform.SelfHosted, null, limits, DataStudio.Postgres.Services.Postgres.PostgresText.Instance));
 
         PostgresPlatform aurora = ServerTestFacts.Platform(PostgresPlatformKind.AmazonAurora);
         CapacityReading reading = new(PostgresComputeCapacity.AuroraServerlessV2(4, 0.5, 16, Now), Now, null, true);

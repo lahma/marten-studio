@@ -32,7 +32,7 @@ public class ServerSettingRemedyPinTests
         { "PostgresStudio", "A server setting" },
     };
 
-    private static StudioText Text(string studio) => studio == "MartenStudio" ? DataStudio.Marten.Services.MartenStudioText.Instance : PostgresStudioText.Instance;
+    private static StudioText Text(string studio) => studio == "MartenStudio" ? DataStudio.Marten.Services.MartenText.Instance : PostgresText.Instance;
 
     private static HealthRemedy S02(string studio, ServerSetting changed, PostgresPlatform? platform = null, string environment = "Production") =>
         new DangerousSettingsCheck().Evaluate(

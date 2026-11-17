@@ -514,7 +514,7 @@ internal sealed class TenantDiscovery
         MartenOptions value,
         CancellationToken cancellationToken)
     {
-        await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(database, ConnectionUsage.Read);
+        await using NpgsqlConnection connection = MartenSourceDatabase.CreateConnection(database, ConnectionUsage.Read);
         await connection.OpenStudioAsync(cancellationToken).ConfigureAwait(false);
 
         await using NpgsqlCommand command = connection.CreateCommand();

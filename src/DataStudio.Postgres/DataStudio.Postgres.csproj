@@ -71,7 +71,7 @@
 
     A host that ends up with another DataStudio.Postgres.Diagnostics anyway - a central PackageVersion under transitive
     pinning drops it from the graph with no NuGet diagnostic at all - is stopped at startup by
-    Internal/PostgresStudioDiagnosticsVersionGuard.cs.
+    Internal/PostgresDiagnosticsVersionGuard.cs.
   -->
   <Target Name="DataStudioPostgresPinsDiagnosticsExactly" AfterTargets="_GetProjectReferenceVersions">
     <ItemGroup>
@@ -85,7 +85,7 @@
 
   <!-- Exactly its own DataStudio, for the same reason and by the same mechanism as DataStudioPostgresPinsDiagnosticsExactly above: the shell grants this
        assembly its internals (no module grants the shell its own), so DataStudio [x.y.z] goes into the nuspec, not NuGet's default >=. A host that ends up with
-       another DataStudio anyway is stopped at startup by Internal/PostgresStudioDiagnosticsVersionGuard.cs, which checks the shell beside the engine. -->
+       another DataStudio anyway is stopped at startup by Internal/PostgresDiagnosticsVersionGuard.cs, which checks the shell beside the engine. -->
   <Target Name="DataStudioPostgresPinsShellExactly" AfterTargets="_GetProjectReferenceVersions">
     <ItemGroup>
       <_ProjectReferencesWithVersions Condition="'%(Filename)' == 'DataStudio'">

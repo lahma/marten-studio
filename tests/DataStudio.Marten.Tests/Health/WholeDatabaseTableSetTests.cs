@@ -77,10 +77,10 @@ public class WholeDatabaseTableSetTests
             new MartenStoreRegistration("default", "Default", typeof(IDocumentStore)),
             store,
             store.Storage.Database),
-        MartenStudioSettings.Of(options),
+        MartenSettings.Of(options),
         MartenStudioRuntime.Current,
         services,
-        new HealthSqlRunner(new HealthConnection(MartenStudioDatabase.Of(store.Storage.Database)), new ReadOnlySqlOptions(), null),
+        new HealthSqlRunner(new HealthConnection(MartenSourceDatabase.Of(store.Storage.Database)), new ReadOnlySqlOptions(), null),
         Now,
         new HealthSweepMemo(),
         CancellationToken.None);
@@ -107,7 +107,7 @@ public class WholeDatabaseTableSetTests
 
         MartenTableSet declared = MartenTables.Read(Context(store, options, services));
         DatabaseObjectClassifier classifier = Classifier(options, ("default", store), ("billing", other));
-        MartenTableScope scope = MartenTableScope.For(declared, classifier, MartenStudioSettings.Of(options), "default", tableCap);
+        MartenTableScope scope = MartenTableScope.For(declared, classifier, MartenSettings.Of(options), "default", tableCap);
 
         return (MartenDatabaseTables.Build(declared, rows, scope, classifier, tableCap), scope);
     }
@@ -348,7 +348,7 @@ public class WholeDatabaseTableSetTests
 
         MartenTableSet declared = MartenTables.Read(Context(store, options, services));
         DatabaseObjectClassifier classifier = Classifier(options, ("default", store), ("other", second));
-        return MartenTableScope.For(declared, classifier, MartenStudioSettings.Of(options), "default", MartenHealthTableSource.TableCap);
+        return MartenTableScope.For(declared, classifier, MartenSettings.Of(options), "default", MartenHealthTableSource.TableCap);
     }
 
     [Fact]

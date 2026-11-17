@@ -24,7 +24,7 @@ internal sealed class SingleWireFactory(IKafkaWire wire) : IKafkaWireFactory
 }
 
 /// <summary>
-/// The engine's real container (<c>KStudioEngineRegistration</c>) over one cluster named <c>test</c>, for the contract suites: the same
+/// The engine's real container (<c>KafkaEngineRegistration</c>) over one cluster named <c>test</c>, for the contract suites: the same
 /// resolver and catalog run over the fake in the fast suite and over a real broker in the live suite. The catalog time-to-live is zero
 /// unless a test says otherwise, so a read after a seed really reads.
 /// </summary>
@@ -93,7 +93,7 @@ internal sealed class EngineHarness : IAsyncDisposable
             services.AddSingleton(factory);
         }
 
-        KStudioEngineRegistration.Add(services, _ => options, _ => new TestEngineSettings(catalogTimeToLive ?? TimeSpan.Zero));
+        KafkaEngineRegistration.Add(services, _ => options, _ => new TestEngineSettings(catalogTimeToLive ?? TimeSpan.Zero));
 
         return new EngineHarness(services.BuildServiceProvider(), logs, time);
     }

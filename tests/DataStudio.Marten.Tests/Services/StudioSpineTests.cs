@@ -33,7 +33,7 @@ public class StudioSpineTests
     public void The_settings_read_the_shells_options_live_so_a_path_written_after_startup_is_seen()
     {
         DataStudioOptions options = new();
-        MartenStudioSettings settings = MartenStudioSettings.Of(new MartenOptions(), new ShellSettings(Options.Create(options)));
+        MartenSettings settings = MartenSettings.Of(new MartenOptions(), new ShellSettings(Options.Create(options)));
 
         settings.TrimmedPath.Should().Be("/studio");
         settings.HasCustomPath.Should().BeFalse();
@@ -62,7 +62,7 @@ public class StudioSpineTests
     public void The_settings_map_every_capability_and_offer_all_fourteen()
     {
         MartenOptions options = new() { Capabilities = new MartenCapabilities { BrowseDatabase = true } };
-        MartenStudioSettings settings = MartenSpine.Settings(options);
+        MartenSettings settings = MartenSpine.Settings(options);
 
         settings.Capabilities.Should().Equal(StudioCapabilityGuard.All);
         foreach (StudioCapability capability in StudioCapabilityGuard.All)
@@ -87,7 +87,7 @@ public class StudioSpineTests
         };
         options.BrowsableSchemas.Add("legacy");
 
-        MartenStudioSettings settings = MartenSpine.Settings(options);
+        MartenSettings settings = MartenSpine.Settings(options);
 
         settings.ScopePolicy.Should().Be("store");
         settings.WritePolicy.Should().Be("write");
@@ -123,8 +123,8 @@ public class StudioSpineTests
             "Health", "Statements", "Maintenance", "Storage", "Replication", "Projections", "Schema", "Server", "Configuration");
 
         // The navigation is built for the settings the studio is registered with, so a condition that reads them closes over them (5.6).
-        MartenStudioSettings visible = MartenSpine.Settings();
-        MartenStudioSettings hidden = MartenSpine.Settings(new MartenOptions { IsDocumentTypeVisible = static _ => false });
+        MartenSettings visible = MartenSpine.Settings();
+        MartenSettings hidden = MartenSpine.Settings(new MartenOptions { IsDocumentTypeVisible = static _ => false });
         StudioNavItem deadLetters = descriptor.Navigation(visible).SelectMany(static x => x.Items).Single(static x => x.Label == "Dead letters");
         deadLetters.IsShown.Should().NotBeNull();
         deadLetters.IsShown!(visible).Should().BeTrue();
@@ -169,10 +169,10 @@ public class StudioSpineTests
         await using AsyncServiceScope scope = provider.CreateAsyncScope();
         IServiceProvider scoped = scope.ServiceProvider;
 
-        scoped.GetRequiredService<IStudioSettings>().Should().BeOfType<MartenStudioSettings>();
-        scoped.GetRequiredService<StudioDescriptor>().Should().BeSameAs(MartenStudioDescriptor.Instance);
-        scoped.GetRequiredService<IStudioLinks>().Should().BeOfType<MartenStudioLinks>();
-        scoped.GetRequiredService<IStudioSourceProvider>().Should().BeOfType<MartenStudioSourceProvider>();
+        scoped.GetRequiredService<IStudioSettings>().Should().BeOfType<MartenSettings>();
+        scoped.GetRequiredService<StudioDescriptor>().Should().BeSameAs(MartenDescriptor.Instance);
+        scoped.GetRequiredService<IStudioLinks>().Should().BeOfType<MartenLinks>();
+        scoped.GetRequiredService<IStudioSourceProvider>().Should().BeOfType<MartenSourceProvider>();
         scoped.GetRequiredService<ISessionLockLabeler>().Should().BeOfType<MartenSessionLockLabeler>();
         scoped.GetRequiredService<IHealthTableSource>().Should().BeOfType<MartenHealthTableSource>();
         scoped.GetRequiredService<DataStudio.Postgres.Services.Health.Checks.IHealthTableRemedies>().Should().BeSameAs(MartenHealthRemedyProvider.Instance);
@@ -210,7 +210,7 @@ public class StudioSpineTests
         databases[0].Identity.Should().Be(marten.Id.Identity);
         databases[0].Name.Should().Be("spine");
         databases[0].DataSource.Should().NotBeNull("Marten 9's database is a Weasel PostgresqlDatabase with a data source");
-        MartenStudioDatabase.Unwrap(databases[0]).Should().BeSameAs(marten);
+        MartenSourceDatabase.Unwrap(databases[0]).Should().BeSameAs(marten);
     }
 
     [Fact]
@@ -223,7 +223,7 @@ public class StudioSpineTests
         resolved.Store.Should().BeSameAs(harness.Store);
         resolved.Source.Should().Be(new StudioSourceRegistration("default", "Default", StudioSourceKind.MartenStore));
         resolved.Target.Identity.Should().Be(resolved.Database.Id.Identity);
-        MartenStudioDatabase.Unwrap(resolved.Target).Should().BeSameAs(resolved.Database);
+        MartenSourceDatabase.Unwrap(resolved.Target).Should().BeSameAs(resolved.Database);
         resolved.Should().Be(new ResolvedScope(resolved.Scope, resolved.Registration, resolved.Store, resolved.Database), "a wrapper of one instance is equal to another of it");
     }
 
@@ -298,12 +298,12 @@ public class StudioSpineTests
         await using ServiceProvider provider = services.BuildServiceProvider();
 
         IOptions<MartenOptions> options = Options.Create(new MartenOptions());
-        MartenStudioSourceProvider sources = new(
+        MartenSourceProvider sources = new(
             options,
             new MartenStoreRegistry(services),
             new TenantDiscovery(options, NullLogger<TenantDiscovery>.Instance),
             provider,
-            NullLogger<MartenStudioSourceProvider>.Instance);
+            NullLogger<MartenSourceProvider>.Instance);
 
         List<StudioListedDatabase> listed = [];
         await foreach (StudioListedDatabase entry in sources.ListUnattendedAsync(Token))
@@ -331,12 +331,12 @@ public class StudioSpineTests
         await using ServiceProvider provider = services.BuildServiceProvider();
 
         IOptions<MartenOptions> options = Options.Create(new MartenOptions());
-        MartenStudioSourceProvider sources = new(
+        MartenSourceProvider sources = new(
             options,
             new MartenStoreRegistry(services),
             new TenantDiscovery(options, NullLogger<TenantDiscovery>.Instance),
             provider,
-            NullLogger<MartenStudioSourceProvider>.Instance);
+            NullLogger<MartenSourceProvider>.Instance);
 
         List<Npgsql.NpgsqlDataSource> held = [];
         await foreach (Npgsql.NpgsqlDataSource dataSource in sources.HeldDataSourcesAsync(Token))
@@ -358,12 +358,12 @@ public class StudioSpineTests
         await using ServiceProvider provider = services.BuildServiceProvider();
 
         IOptions<MartenOptions> options = Options.Create(new MartenOptions());
-        MartenStudioSourceProvider sources = new(
+        MartenSourceProvider sources = new(
             options,
             new MartenStoreRegistry(services),
             new TenantDiscovery(options, NullLogger<TenantDiscovery>.Instance),
             provider,
-            NullLogger<MartenStudioSourceProvider>.Instance);
+            NullLogger<MartenSourceProvider>.Instance);
 
         int count = 0;
         await foreach (Npgsql.NpgsqlDataSource _ in sources.HeldDataSourcesAsync(Token))
@@ -397,12 +397,12 @@ public class StudioSpineTests
     {
         IReadOnlyDictionary<string, StudioNavBadge> badges = MartenNavBadges.From(1234, projectionsNeedAttention: true, "OrderSummary:All is 5,000 events behind");
 
-        badges[MartenStudioDescriptor.DeadLettersBadge].Should().Be(
+        badges[MartenDescriptor.DeadLettersBadge].Should().Be(
             new StudioNavBadge("1,234", "ms-nav-badge-danger", $"{1234:N0} events the async daemon could not apply"));
-        badges[MartenStudioDescriptor.ProjectionsBadge].Should().Be(
+        badges[MartenDescriptor.ProjectionsBadge].Should().Be(
             new StudioNavBadge(string.Empty, "ms-nav-badge-dot ms-nav-badge-warning", "OrderSummary:All is 5,000 events behind"));
 
-        MartenNavBadges.From(1, false, null)[MartenStudioDescriptor.DeadLettersBadge].Title.Should().Be("One event the async daemon could not apply");
+        MartenNavBadges.From(1, false, null)[MartenDescriptor.DeadLettersBadge].Title.Should().Be("One event the async daemon could not apply");
         MartenNavBadges.From(0, false, null).Should().BeEmpty("zero draws no badge");
         MartenNavBadges.From(null, false, null).Should().BeEmpty("could not tell draws no badge");
     }
@@ -429,14 +429,14 @@ public class StudioSpineTests
     {
         private readonly ServiceProvider provider;
 
-        private SourceHarness(ServiceProvider provider, MartenStudioSourceProvider sources, StudioScopeResolver resolver)
+        private SourceHarness(ServiceProvider provider, MartenSourceProvider sources, StudioScopeResolver resolver)
         {
             this.provider = provider;
             Sources = sources;
             Resolver = resolver;
         }
 
-        public MartenStudioSourceProvider Sources { get; }
+        public MartenSourceProvider Sources { get; }
 
         public StudioScopeResolver Resolver { get; }
 

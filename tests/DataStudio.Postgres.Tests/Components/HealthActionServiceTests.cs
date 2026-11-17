@@ -25,7 +25,7 @@ public sealed class HealthActionServiceTests : IAsyncDisposable
 
     private static CancellationToken Token => Xunit.TestContext.Current.CancellationToken;
 
-    private readonly PostgresStudioComponentContext context = new();
+    private readonly PostgresComponentContext context = new();
     private readonly HealthActionFlights flights = new();
     private readonly CapturingLoggerProvider logs = new();
 

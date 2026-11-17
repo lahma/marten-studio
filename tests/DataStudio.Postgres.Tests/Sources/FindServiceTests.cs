@@ -23,8 +23,8 @@ public class FindServiceTests
         PostgresOptions? options = null,
         params IFindContributor[] contributors)
     {
-        PostgresStudioSettings settings = PostgresStudioSettings.Of(Microsoft.Extensions.Options.Options.Create(options ?? new PostgresOptions()));
-        StudioAuthorization gate = new(settings, PostgresStudioDescriptor.Instance, authorization ?? new TestSourceAuthorizationService(), new TestAuthenticationStateProvider());
+        PostgresSettings settings = PostgresSettings.Of(Microsoft.Extensions.Options.Options.Create(options ?? new PostgresOptions()));
+        StudioAuthorization gate = new(settings, PostgresDescriptor.Instance, authorization ?? new TestSourceAuthorizationService(), new TestAuthenticationStateProvider());
 
         return new FindService(contributors, gate, NullLogger<FindService>.Instance, time);
     }

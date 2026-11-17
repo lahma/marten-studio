@@ -578,7 +578,7 @@ public class TableRowsTabTests
     public async Task A_refusal_says_which_gate_and_draws_no_grid()
     {
         await using var context = await RowUiData.ContextAsync();
-        context.TableRows.Page = TableRowPage.Refused(DatabaseRefusal.CapabilityOff, DataStudio.Marten.Services.MartenStudioText.Instance.BrowseCapabilityDenial);
+        context.TableRows.Page = TableRowPage.Refused(DatabaseRefusal.CapabilityOff, DataStudio.Marten.Services.MartenText.Instance.BrowseCapabilityDenial);
 
         var tab = RowUiData.RenderTab(context);
 

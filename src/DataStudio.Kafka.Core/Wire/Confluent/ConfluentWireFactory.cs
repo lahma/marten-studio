@@ -11,7 +11,7 @@ internal sealed class ConfluentWireFactory(
     KafkaAdminPool<ConfluentOffsetsReader> offsetsPool,
     KafkaEngineSnapshot settings,
     ConfluentClientEvents events,
-    KStudioLoggers loggers) : IKafkaWireFactory
+    KafkaEngineLoggers loggers) : IKafkaWireFactory
 {
     /// <inheritdoc />
     public IKafkaWire Create(KafkaClusterDefinition cluster) => new ConfluentWire(cluster, pool, offsetsPool, settings, events, loggers);

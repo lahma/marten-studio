@@ -576,7 +576,7 @@
         EventLinks.To(MartenRoutes.Root, new StudioScope(storeKey, identity, null));
 
     private string TenantsHref(string storeKey, string identity) =>
-        EventLinks.To(MartenStudioDescriptor.TenantsRoute, new StudioScope(storeKey, identity, null));
+        EventLinks.To(MartenDescriptor.TenantsRoute, new StudioScope(storeKey, identity, null));
 
     private string HealthHref(string storeKey, string identity) =>
         HealthLinks.ToPage(new StudioScope(storeKey, identity, null));

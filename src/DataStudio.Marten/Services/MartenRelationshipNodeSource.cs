@@ -176,7 +176,7 @@ internal sealed class MartenRelationshipNodeSource : IRelationshipNodeSource
                 MartenRelationshipGraph.DeclaredKeys(storeOptions, isVisible),
                 keys.Keys,
                 timeProvider.GetUtcNow(),
-                MartenStudioText.Instance,
+                MartenText.Instance,
                 view);
 
             List<RelationshipEdge> inbound = [];

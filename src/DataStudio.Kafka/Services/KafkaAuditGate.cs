@@ -18,7 +18,7 @@ namespace DataStudio.Kafka.Services;
 internal sealed class KafkaAuditGate(KafkaAuthorization authorization, KafkaCapabilityGuard capabilities) : IStudioAuditScopeGate
 {
     /// <inheritdoc />
-    public string Kind => KafkaStudioText.Key;
+    public string Kind => KafkaText.Key;
 
     /// <inheritdoc />
     public IStudioAuditSweep BeginSweep(Func<ValueTask<ClaimsPrincipal>> principal)

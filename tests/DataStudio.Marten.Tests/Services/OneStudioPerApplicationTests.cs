@@ -27,7 +27,7 @@ public class OneStudioPerApplicationTests
         // A factory since D34 (the composition with the registered modules); with no module it answers the very instance.
         using ServiceProvider provider = services.BuildServiceProvider();
         provider.GetRequiredService<StudioDescriptor>()
-            .Should().BeSameAs(DataStudio.Marten.Services.MartenStudioDescriptor.Instance, "nothing of the refused studio was registered");
+            .Should().BeSameAs(DataStudio.Marten.Services.MartenDescriptor.Instance, "nothing of the refused studio was registered");
     }
 
     [Fact]

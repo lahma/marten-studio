@@ -18,11 +18,11 @@ public class RowLinksTests
 {
     private static readonly MartenOptions Options = new();
 
-    private static readonly IStudioSettings Settings = MartenStudioSettings.Of(Options);
+    private static readonly IStudioSettings Settings = MartenSettings.Of(Options);
 
-    private static readonly StudioDescriptor Descriptor = MartenStudioDescriptor.Instance;
+    private static readonly StudioDescriptor Descriptor = MartenDescriptor.Instance;
 
-    private static readonly IStudioLinks Links = new MartenStudioLinks();
+    private static readonly IStudioLinks Links = new MartenLinks();
 
     private static readonly StudioScope Scope = new("default", "localhost.marten", "acme");
 

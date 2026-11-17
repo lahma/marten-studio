@@ -115,7 +115,7 @@ internal sealed class KafkaReadGrants(KafkaCapabilityGuard capabilities, KafkaAu
         }
 
         return readsValues
-            ? new KafkaGrantDecision(KafkaReadGrant.Envelope, KafkaStudioText.SearchValuesRefusedTopic, null, without, first)
+            ? new KafkaGrantDecision(KafkaReadGrant.Envelope, KafkaText.SearchValuesRefusedTopic, null, without, first)
             : new KafkaGrantDecision(KafkaReadGrant.Envelope, null, null, without, first);
     }
 

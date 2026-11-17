@@ -71,7 +71,7 @@ public class EngineLogEventsTests
     private static readonly string[] ForbiddenPlaceholders = ["Key", "Value", "Header", "Predicate", "Literal", "Owner", "User", "Payload", "Record"];
 
     private static IEnumerable<(MethodInfo Method, LoggerMessageAttribute Attribute)> Events() =>
-        typeof(KStudioLog).GetMethods(Methods)
+        typeof(KafkaEngineLog).GetMethods(Methods)
             .Select(static x => (Method: x, Attribute: x.GetCustomAttribute<LoggerMessageAttribute>()))
             .Where(static x => x.Attribute is not null)
             .Select(static x => (x.Method, x.Attribute!));
@@ -134,7 +134,7 @@ public class EngineLogEventsTests
     [Fact]
     public void Only_the_text_parameter_carries_librdkafkas_own_words_and_it_is_the_only_unbounded_string()
     {
-        MethodInfo clientLog = typeof(KStudioLog).GetMethod(nameof(KStudioLog.ClientLog), Methods)!;
+        MethodInfo clientLog = typeof(KafkaEngineLog).GetMethod(nameof(KafkaEngineLog.ClientLog), Methods)!;
 
         clientLog.GetParameters().Select(static x => x.Name).Should().Contain("text");
         Events().Where(static x => x.Attribute.EventId != 9656).SelectMany(static x => x.Method.GetParameters()).Select(static x => x.Name).Should().NotContain("text");
@@ -146,7 +146,7 @@ public class EngineLogEventsTests
         CategoryProvider provider = new();
         using ILoggerFactory factory = LoggerFactory.Create(builder => builder.AddProvider(provider));
 
-        KStudioLoggers loggers = new(factory);
+        KafkaEngineLoggers loggers = new(factory);
 
         provider.Categories.Should().BeEquivalentTo("DataStudio.Kafka.Core.Clients", "DataStudio.Kafka.Core.Catalog", "DataStudio.Kafka.Core.Scans");
         loggers.Clients.Should().NotBeNull();

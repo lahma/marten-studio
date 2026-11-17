@@ -20,7 +20,7 @@ internal static class HealthExportSummaryInMartenWords
     {
         /// <summary><see cref="HealthExportSummary.Describe" /> in the Marten module's words.</summary>
         /// <param name="interval">How long the result is served before the next run.</param>
-        public string Describe(TimeSpan interval) => summary.Describe(interval, DataStudio.Marten.Services.MartenStudioText.Instance);
+        public string Describe(TimeSpan interval) => summary.Describe(interval, DataStudio.Marten.Services.MartenText.Instance);
     }
 }
 
@@ -241,11 +241,11 @@ public class HealthExportSummaryTests
     [Fact]
     public void A_run_that_could_not_check_anything_says_why_in_the_studios_own_words()
     {
-        HealthExportSummary.NotRegistered(Now, DataStudio.Marten.Services.MartenStudioText.Instance).Level.Should().Be(HealthExportLevel.Degraded);
-        HealthExportSummary.NotRegistered(Now, DataStudio.Marten.Services.MartenStudioText.Instance).Describe(TimeSpan.FromSeconds(60)).Should().Contain("services.AddDataStudio().AddMarten()");
-        HealthExportSummary.NoStores(Now, DataStudio.Marten.Services.MartenStudioText.Instance).Level.Should().Be(HealthExportLevel.Degraded);
+        HealthExportSummary.NotRegistered(Now, DataStudio.Marten.Services.MartenText.Instance).Level.Should().Be(HealthExportLevel.Degraded);
+        HealthExportSummary.NotRegistered(Now, DataStudio.Marten.Services.MartenText.Instance).Describe(TimeSpan.FromSeconds(60)).Should().Contain("services.AddDataStudio().AddMarten()");
+        HealthExportSummary.NoStores(Now, DataStudio.Marten.Services.MartenText.Instance).Level.Should().Be(HealthExportLevel.Degraded);
 
-        HealthExportSummary broken = HealthExportSummary.Broken(Now, nameof(InvalidOperationException), DataStudio.Marten.Services.MartenStudioText.Instance);
+        HealthExportSummary broken = HealthExportSummary.Broken(Now, nameof(InvalidOperationException), DataStudio.Marten.Services.MartenText.Instance);
         broken.Level.Should().Be(HealthExportLevel.Degraded);
         broken.Describe(TimeSpan.FromSeconds(60)).Should().Be(
             "Data Studio could not check: its health export failed with InvalidOperationException, logged as event 9270. Refreshed after 60 s, served for at most 120 s.");

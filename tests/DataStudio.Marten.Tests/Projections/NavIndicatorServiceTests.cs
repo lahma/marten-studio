@@ -491,11 +491,11 @@ public class NavIndicatorServiceTests
 
     /// <summary>The dead-letter entry's badge text, or <see langword="null" /> for no badge.</summary>
     private static string? DeadLetterBadge(NavIndicators indicators) =>
-        indicators.Badges.TryGetValue(MartenStudioDescriptor.DeadLettersBadge, out StudioNavBadge? badge) ? badge.Text : null;
+        indicators.Badges.TryGetValue(MartenDescriptor.DeadLettersBadge, out StudioNavBadge? badge) ? badge.Text : null;
 
     /// <summary>The projections entry's dot, or <see langword="null" /> for none.</summary>
     private static StudioNavBadge? ProjectionsDot(NavIndicators indicators) =>
-        indicators.Badges.TryGetValue(MartenStudioDescriptor.ProjectionsBadge, out StudioNavBadge? badge) ? badge : null;
+        indicators.Badges.TryGetValue(MartenDescriptor.ProjectionsBadge, out StudioNavBadge? badge) ? badge : null;
 
     /// <summary>The service under test, with its scope, MartenStudio's contributor over two fake data services, and a real cache.</summary>
     private sealed class Harness

@@ -253,12 +253,12 @@ public class SampleWolverineLiveTests(SampleHostFixture fixture) : IClassFixture
     /// </summary>
     private sealed class WolverineEngine : IAsyncDisposable
     {
-        private readonly KStudioSampleProcess host;
+        private readonly KafkaSampleProcess host;
         private readonly string bootstrap;
         private readonly ServiceProvider provider;
         private readonly IServiceScope scope;
 
-        private WolverineEngine(ServiceProvider provider, KStudioSampleProcess host, string bootstrap)
+        private WolverineEngine(ServiceProvider provider, KafkaSampleProcess host, string bootstrap)
         {
             this.host = host;
             this.provider = provider;
@@ -272,7 +272,7 @@ public class SampleWolverineLiveTests(SampleHostFixture fixture) : IClassFixture
 
         public KafkaCorrelationService Correlation => scope.ServiceProvider.GetRequiredService<KafkaCorrelationService>();
 
-        public static WolverineEngine Create(KStudioSampleProcess host, string user)
+        public static WolverineEngine Create(KafkaSampleProcess host, string user)
         {
             string bootstrap = host.KafkaBootstrap;
             string postgres = host.PostgresConnectionString;

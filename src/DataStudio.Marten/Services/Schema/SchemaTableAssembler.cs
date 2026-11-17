@@ -219,7 +219,7 @@ internal static class SchemaTableAssembler
             "the database browser's gate, because a per-tenant partition count and a tenancy table's row count " +
             "are both the number of tenants. ";
 
-        StudioText words = MartenStudioText.Instance;
+        StudioText words = MartenText.Instance;
 
         return Why + (readOnly
             ? words.BrowseReadOnlyDenial(readOnlyOption ?? words.OptionName("ReadOnly"))

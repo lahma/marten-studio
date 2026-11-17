@@ -380,7 +380,7 @@ internal static partial class KafkaMatchView
 
         string bootstrap = Shown("bootstrap.servers");
         StringBuilder command = new("kcat -C -b ");
-        command.Append(bootstrap.Length == 0 ? KafkaStudioText.KcatBootstrapVariable : Quote(bootstrap));
+        command.Append(bootstrap.Length == 0 ? KafkaText.KcatBootstrapVariable : Quote(bootstrap));
         command.Append(" -t ").Append(Quote(topic));
         command.Append(CultureInfo.InvariantCulture, $" -p {partition} -o {offset} -c 1 -J");
 
@@ -392,7 +392,7 @@ internal static partial class KafkaMatchView
             }
         }
 
-        return command.Append('\n').Append(KafkaStudioText.KcatCredentialsHint).ToString();
+        return command.Append('\n').Append(KafkaText.KcatCredentialsHint).ToString();
     }
 
     /// <summary>A shell word in single quotes, <c>'</c> written <c>'\''</c>.</summary>

@@ -69,14 +69,14 @@ public class RegisteredSettingsLinkTests
     [Fact]
     public void The_scan_sees_a_forbidden_call()
     {
-        Forbidden.IsMatch("var s = MartenStudioSettings.Of(options);").Should().BeTrue();
-        Forbidden.IsMatch("var s = new PostgresStudioSettings(Options.Create(x));").Should().BeTrue();
+        Forbidden.IsMatch("var s = MartenSettings.Of(options);").Should().BeTrue();
+        Forbidden.IsMatch("var s = new PostgresSettings(Options.Create(x));").Should().BeTrue();
         Forbidden.IsMatch("var s = new ShellSettings(Options.Create(new DataStudioOptions()));").Should().BeTrue();
-        Forbidden.IsMatch("static p => new MartenStudioSettings(a, b)").Should().BeFalse("the container's own two-argument registration is the one construction");
+        Forbidden.IsMatch("static p => new MartenSettings(a, b)").Should().BeFalse("the container's own two-argument registration is the one construction");
     }
 
     private static readonly Regex Forbidden = new(
-        @"\b(?:Marten|Postgres)StudioSettings\.Of\(|new\s+(?:Marten|Postgres)StudioSettings\(\s*[^,()]*(?:\([^()]*\))?[^,()]*\)|new\s+ShellSettings\(|new\s+DataStudioOptions\(",
+        @"\b(?:Marten|Postgres)Settings\.Of\(|new\s+(?:Marten|Postgres)Settings\(\s*[^,()]*(?:\([^()]*\))?[^,()]*\)|new\s+ShellSettings\(|new\s+DataStudioOptions\(",
         RegexOptions.Compiled | RegexOptions.CultureInvariant,
         TimeSpan.FromSeconds(5));
 }

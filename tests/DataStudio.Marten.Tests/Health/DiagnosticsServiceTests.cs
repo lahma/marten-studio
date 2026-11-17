@@ -39,7 +39,7 @@ public class DiagnosticsServiceTests
 
         // Issue #55: the same page, the same route and the store's scope, in both studios; Data Studio re-roots it under /marten.
         path.Should().StartWith("postgres/database/connection?store=default&db=");
-        DataStudio.Marten.Services.MartenStudioDescriptor.Instance.Navigation(DataStudio.Marten.Tests.Support.MartenSpine.Settings()).SelectMany(static x => x.Items)
+        DataStudio.Marten.Services.MartenDescriptor.Instance.Navigation(DataStudio.Marten.Tests.Support.MartenSpine.Settings()).SelectMany(static x => x.Items)
             .Should().Contain(x => x.Route == "postgres/database/connection");
     }
 
@@ -144,7 +144,7 @@ public class DiagnosticsServiceTests
     {
         Type[] every =
         [
-            .. DataStudio.Marten.Services.MartenStudioDescriptor.Instance.HealthCheckAssemblies
+            .. DataStudio.Marten.Services.MartenDescriptor.Instance.HealthCheckAssemblies
                 .Select(static x => x.Assembly).Distinct().SelectMany(HealthCheckRegistry.Discover),
         ];
 

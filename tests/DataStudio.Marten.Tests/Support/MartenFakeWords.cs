@@ -14,5 +14,5 @@ internal static class MartenFakeWords
 #pragma warning disable CA2255 // A test assembly is application code: this is the one place the suite picks the words its fakes speak.
     [ModuleInitializer]
 #pragma warning restore CA2255
-    internal static void Use() => FakeDatabaseObjects.Words = MartenStudioText.Instance;
+    internal static void Use() => FakeDatabaseObjects.Words = MartenText.Instance;
 }

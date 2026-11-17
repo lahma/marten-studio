@@ -90,9 +90,9 @@ internal class StudioComponentContext : BunitContext
         Services.AddSingleton<IOptions<DataStudioOptions>>(Microsoft.Extensions.Options.Options.Create(ShellOptions));
         Services.AddSingleton<IShellSettings, ShellSettings>();
         Services.AddSingleton<IStudioSettings>(static provider =>
-            new MartenStudioSettings(provider.GetRequiredService<IOptions<MartenOptions>>(), provider.GetRequiredService<IShellSettings>()));
-        Services.AddSingleton(MartenStudioDescriptor.Instance);
-        Services.AddSingleton<IStudioLinks, MartenStudioLinks>();
+            new MartenSettings(provider.GetRequiredService<IOptions<MartenOptions>>(), provider.GetRequiredService<IShellSettings>()));
+        Services.AddSingleton(MartenDescriptor.Instance);
+        Services.AddSingleton<IStudioLinks, MartenLinks>();
         Services.AddSingleton<IHttpContextAccessor>(new HttpContextAccessor());
         Services.AddSingleton<IStudioScopeCatalog>(Catalog);
         Services.AddSingleton<IStoreInfoService>(StoreInfo);

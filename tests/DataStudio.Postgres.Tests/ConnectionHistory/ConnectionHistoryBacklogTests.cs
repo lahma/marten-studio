@@ -45,7 +45,7 @@ public class ConnectionHistoryBacklogTests
                 provider.GetRequiredService<IServiceScopeFactory>(),
                 Options,
                 Store,
-                PostgresStudioSettings.Of(new PostgresOptions()),
+                PostgresSettings.Of(new PostgresOptions()),
                 Logs,
                 new StudioLogThrottle(Clock),
                 Clock);
@@ -429,7 +429,7 @@ public class ConnectionHistoryBacklogTests
         ConnectionHistoryReader reader = new(
             rig.Store,
             rig.Options,
-            PostgresStudioSettings.Of(new PostgresOptions()),
+            PostgresSettings.Of(new PostgresOptions()),
             rig.Clock);
 
         ConnectionHistoryRead read = await ConnectionHistoryLookup.ReadAsync(reader, rig.Sampler, Server, names: false, since: null, Token);
@@ -441,7 +441,7 @@ public class ConnectionHistoryBacklogTests
 
         rig.Store.FailReads = true;
         ConnectionHistoryRead down = await ConnectionHistoryLookup.ReadAsync(
-            new ConnectionHistoryReader(rig.Store, rig.Options, PostgresStudioSettings.Of(new PostgresOptions()), rig.Clock),
+            new ConnectionHistoryReader(rig.Store, rig.Options, PostgresSettings.Of(new PostgresOptions()), rig.Clock),
             rig.Sampler,
             Server,
             names: false,
@@ -488,7 +488,7 @@ public class ConnectionHistoryBacklogTests
         return new ConnectionHistoryReader(
             store,
             Microsoft.Extensions.Options.Options.Create(new PostgresConnectionHistoryOptions()),
-            PostgresStudioSettings.Of(new PostgresOptions()),
+            PostgresSettings.Of(new PostgresOptions()),
             new ManualTimeProvider(Start));
     }
 
@@ -636,7 +636,7 @@ public class ConnectionHistoryBacklogTests
             provider.GetRequiredService<IServiceScopeFactory>(),
             rig.Options,
             new InMemoryConnectionHistoryStore(rig.Options, rig.Clock),
-            PostgresStudioSettings.Of(new PostgresOptions()),
+            PostgresSettings.Of(new PostgresOptions()),
             rig.Logs,
             new StudioLogThrottle(rig.Clock),
             rig.Clock);

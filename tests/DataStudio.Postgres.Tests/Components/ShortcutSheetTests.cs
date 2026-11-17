@@ -23,7 +23,7 @@ public class ShortcutSheetTests
     private static IRenderedComponent<ShortcutSheet> Render(StudioDescriptor descriptor)
     {
         BunitContext context = new();
-        PostgresStudioSettings settings = PostgresStudioSettings.Of(Microsoft.Extensions.Options.Options.Create(new PostgresOptions()));
+        PostgresSettings settings = PostgresSettings.Of(Microsoft.Extensions.Options.Options.Create(new PostgresOptions()));
         context.Services.AddSingleton(StudioModuleComposition.Compose([new DatabaseStudioModule(descriptor, settings, new StudioCapabilityGuard(settings))]));
         return context.Render<ShortcutSheet>();
     }
@@ -40,7 +40,7 @@ public class ShortcutSheetTests
     [Fact]
     public void The_sheet_is_a_native_dialog_that_is_in_the_page_and_closed()
     {
-        IRenderedComponent<ShortcutSheet> sheet = Render(PostgresStudioDescriptor.Instance);
+        IRenderedComponent<ShortcutSheet> sheet = Render(PostgresDescriptor.Instance);
 
         IElement dialog = sheet.Find("dialog#ms-shortcuts");
         dialog.HasAttribute("open").Should().BeFalse("studio.js shows it with showModal() on '?'");
@@ -52,7 +52,7 @@ public class ShortcutSheetTests
     [Fact]
     public void Close_is_a_plain_button_the_script_answers_to_and_the_one_that_gets_focus()
     {
-        IRenderedComponent<ShortcutSheet> sheet = Render(PostgresStudioDescriptor.Instance);
+        IRenderedComponent<ShortcutSheet> sheet = Render(PostgresDescriptor.Instance);
 
         IElement close = sheet.Find("button[data-ms-dialog-close]");
         close.TextContent.Trim().Should().Be("Close");
@@ -64,7 +64,7 @@ public class ShortcutSheetTests
     [Fact]
     public void The_scrolling_list_can_be_reached_from_the_keyboard_and_is_named()
     {
-        IElement body = Render(PostgresStudioDescriptor.Instance).Find(".ms-shortcuts-body");
+        IElement body = Render(PostgresDescriptor.Instance).Find(".ms-shortcuts-body");
 
         body.GetAttribute("tabindex").Should().Be("0");
         body.GetAttribute("role").Should().Be("region");
@@ -74,7 +74,7 @@ public class ShortcutSheetTests
     [Fact]
     public void The_global_keys_come_first_and_every_other_key_names_where_it_works()
     {
-        IRenderedComponent<ShortcutSheet> sheet = Render(PostgresStudioDescriptor.Instance);
+        IRenderedComponent<ShortcutSheet> sheet = Render(PostgresDescriptor.Instance);
 
         Titles(sheet).Should().Equal(
             "Anywhere",
@@ -95,7 +95,7 @@ public class ShortcutSheetTests
     [Fact]
     public void A_chord_is_drawn_as_keycaps_and_alternatives_are_told_apart()
     {
-        IRenderedComponent<ShortcutSheet> sheet = Render(PostgresStudioDescriptor.Instance);
+        IRenderedComponent<ShortcutSheet> sheet = Render(PostgresDescriptor.Instance);
 
         IElement run = sheet.FindAll(".ms-shortcuts-row")
             .Single(static x => x.QuerySelector(".ms-shortcuts-does")!.TextContent.StartsWith("Run the statement", StringComparison.Ordinal));
@@ -110,9 +110,9 @@ public class ShortcutSheetTests
     [Fact]
     public void Postgres_Studio_lists_nothing_that_only_a_Marten_page_answers_to()
     {
-        IRenderedComponent<ShortcutSheet> sheet = Render(PostgresStudioDescriptor.Instance);
+        IRenderedComponent<ShortcutSheet> sheet = Render(PostgresDescriptor.Instance);
 
-        PostgresStudioDescriptor.Instance.ExtraShortcuts.Should().BeEmpty();
+        PostgresDescriptor.Instance.ExtraShortcuts.Should().BeEmpty();
         Titles(sheet).Should().NotContain(static x => x.Contains("Document", StringComparison.Ordinal));
     }
 }
