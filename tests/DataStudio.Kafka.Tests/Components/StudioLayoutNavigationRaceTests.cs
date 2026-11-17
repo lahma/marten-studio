@@ -75,21 +75,24 @@ public class StudioLayoutNavigationRaceTests
         Bodies(harness).Should().Be(0, "the notice stands in the body's place from the first render, not after it");
     }
 
+    /// <summary>
+    /// The other half of the gate: once it has answered yes, the page's body runs. The catalog-load case belongs to the database module's own suite, which has
+    /// a catalog to hold (this module's gate is a test's and has none); here the gate is held by the policy it asks.
+    /// </summary>
     [Fact]
-    public async Task A_rail_click_to_a_host_page_during_the_catalog_load_is_gated_too()
+    public async Task A_host_page_runs_its_body_once_the_scope_gate_has_answered_yes()
     {
         using KafkaHarness harness = Harness(KafkaPage);
-
-        // The catalog load asks the host's policy for every store, so it is pending for as long as the gate is held. The layout has not yet
-        // subscribed to the location while it waits: it used to see nothing of a click in that time.
+        await harness.Context.ReadyAsync();
         TaskCompletionSource<bool> gate = harness.Authorization.BlockHost();
+
         IRenderedComponent<StudioRoutes> routes = harness.Context.Render<StudioRoutes>();
         routes.WaitForAssertion(() => routes.Find("h1").TextContent.Should().Be("Kafka topics"));
 
         harness.Navigation.Simulate(HostPath, intercepted: true);
         await SettleAsync(routes);
 
-        Bodies(harness).Should().Be(0, "the host's page is not rendered ungated because its click arrived during the load");
+        Bodies(harness).Should().Be(0, "the host's page is not rendered ungated while its gate has not answered");
         routes.FindAll(".ms-loading-spinner").Should().NotBeEmpty();
 
         gate.SetResult(true);

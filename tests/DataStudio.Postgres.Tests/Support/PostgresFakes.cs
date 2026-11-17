@@ -27,14 +27,30 @@ public sealed class TestSourceAuthorizationService : IAuthorizationService
     public Task<AuthorizationResult> AuthorizeAsync(ClaimsPrincipal user, object? resource, IEnumerable<IAuthorizationRequirement> requirements) =>
         Task.FromResult(resource is PostgresResource source && rule(source) ? AuthorizationResult.Success() : AuthorizationResult.Failed());
 
-    public Task<AuthorizationResult> AuthorizeAsync(ClaimsPrincipal user, object? resource, string policyName)
+    /// <summary>
+    /// A gate a test can hold shut to keep every answer pending, which is what the scope gate's "unknown" frame looks like from the inside. The rule
+    /// is applied when the question is asked, not when the gate opens, so a test can hold the catalog's questions and change the rule behind them.
+    /// </summary>
+    public TaskCompletionSource? Gate { get; set; }
+
+    public async Task<AuthorizationResult> AuthorizeAsync(ClaimsPrincipal user, object? resource, string policyName)
     {
-        if (resource is PostgresResource source)
+        bool allowed = resource is PostgresResource source && rule(source);
+
+        if (resource is PostgresResource asked)
         {
-            Calls.Add((policyName, source));
+            lock (Calls)
+            {
+                Calls.Add((policyName, asked));
+            }
         }
 
-        return Task.FromResult(resource is PostgresResource allowed && rule(allowed) ? AuthorizationResult.Success() : AuthorizationResult.Failed());
+        if (Gate is { } gate)
+        {
+            await gate.Task.Bounded();
+        }
+
+        return allowed ? AuthorizationResult.Success() : AuthorizationResult.Failed();
     }
 }
 

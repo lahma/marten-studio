@@ -42,9 +42,9 @@
                         <span class="ms-capability-name">ViewDefinitions</span>
                         <code class="ms-capability-option">PostgresOptions.<wbr>Capabilities.<wbr>ViewDefinitions</code></li><li class="ms-capability ms-capability-on"><span class="ms-capability-state" aria-hidden="true">on</span>
                         <span class="ms-capability-name">ViewDatabaseActivity</span>
-                        <code class="ms-capability-option">PostgresOptions.<wbr>Capabilities.<wbr>ViewDatabaseActivity</code></li></ul><p class="ms-popover-footnote">
-            Every one of these is off until the host sets it. <code>PostgresCapabilities.All()</code>
-            turns them all on; <code>DataStudioOptions.ReadOnly</code> turns them all off again.
+                        <code class="ms-capability-option">PostgresOptions.<wbr>Capabilities.<wbr>ViewDatabaseActivity</code></li></ul><p class="ms-popover-footnote"><code>PostgresCapabilities.All()</code> turns every capability of this module on.
+                </p><p class="ms-popover-footnote">
+            Every one of these is off until the host sets it. <code>DataStudioOptions.ReadOnly</code> turns them all off again.
         </p></div>
                     
                     <div class="ms-copy-link"><button type="button" class="ms-button ms-btn-icon ms-copy-link-button" aria-label="Copy link to this page" title="Copy link to this page"><svg class="ms-copy-link-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.75 10.25a3.25 3.25 0 0 0 4.6 0l2.4-2.4a3.25 3.25 0 0 0-4.6-4.6l-.7.7"></path>

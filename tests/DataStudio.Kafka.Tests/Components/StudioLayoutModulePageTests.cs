@@ -112,24 +112,19 @@ public class StudioLayoutModulePageTests
         Heading(layout).Should().NotBe("Kafka topics", "the bypass is keyed on the page's assembly, not global");
     }
 
-    [Fact]
-    public async Task A_kafka_page_never_writes_store_db_or_tenant_into_the_address()
+    /// <summary>
+    /// The address of a Kafka page gains the cluster on screen and nothing else: every other parameter, another module's scope among them, stays as the
+    /// visitor wrote it, with another module composed or not. Fails when the module's own address rewrite replaces the query instead of adding to it.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_kafka_page_names_its_cluster_in_the_address_and_keeps_every_other_parameter_as_written(bool withHostModule)
     {
-        using KafkaHarness harness = Harness(withHostModule: false);
+        using KafkaHarness harness = Harness(withHostModule);
 
-        await RenderAtAsync(harness, "/studio/kafka");
+        IRenderedComponent<StudioRoutes> layout = await RenderAtAsync(harness, "/studio/kafka?store=other&db=other&tenant=x");
 
-        harness.Context.CurrentUri.Should().Contain("cluster=primary");
-        harness.Context.CurrentUri.Should().NotContain("store=").And.NotContain("db=").And.NotContain("tenant=");
-    }
-
-    [Fact]
-    public async Task An_address_naming_another_modules_scope_on_a_kafka_page_is_left_alone()
-    {
-        using KafkaHarness harness = Harness(withHostModule: true);
-
-        await RenderAtAsync(harness, "/studio/kafka?store=other&db=other&tenant=x");
-
-        harness.Context.CurrentUri.Should().Contain("store=other&db=other&tenant=x", "the shell does not rewrite an address it is not about");
+        layout.WaitForAssertion(() => harness.Context.CurrentUri.Should().EndWith("kafka?store=other&db=other&tenant=x&cluster=primary"));
     }
 }

@@ -48,6 +48,7 @@
     <Compile Include="../DataStudio.Marten.Tests/Support/TestAuthenticationHandler.cs" Link="Support/Linked/TestAuthenticationHandler.cs" />
     <Compile Include="../DataStudio.Marten.Tests/Support/TestAuthenticationStateProvider.cs" Link="Support/Linked/TestAuthenticationStateProvider.cs" />
     <Compile Include="../DataStudio.Marten.Tests/Support/ComposedRailAssertions.cs" Link="Support/Linked/ComposedRailAssertions.cs" />
+    <Compile Include="../DataStudio.Marten.Tests/Support/SecondModule.cs" Link="Support/Linked/SecondModule.cs" />
     <Compile Include="../DataStudio.Marten.Tests/Support/TestFileProvider.cs" Link="Support/Linked/TestFileProvider.cs" />
     <Compile Include="../DataStudio.Marten.Tests/Support/ShellGolden.cs" Link="Support/Linked/ShellGolden.cs" />
     <Compile Include="../DataStudio.Marten.Tests/Support/TestPersistentComponentStateStore.cs" Link="Support/Linked/TestPersistentComponentStateStore.cs" />

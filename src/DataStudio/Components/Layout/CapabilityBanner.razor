@@ -26,7 +26,7 @@ else
            answer per call and per scope, and a number that tried to sum them would be a guess. *@
         <p class="ms-popover-lead">What this studio allows. Your account's policies decide what you may do.</p>
         @* Every module's capabilities (D34): one list per group, in module order, with the same rows. *@
-        @foreach ((string groupKey, IStudioModule module, StudioModuleCapabilityGroup group, bool first) in ModuleGroups)
+        @foreach ((string groupKey, IStudioModule module, StudioModuleCapabilityGroup group, bool first, bool last) in ModuleGroups)
         {
             string heading = module.ProductName + ": " + group.Name;
             <p class="ms-popover-title" @key="groupKey">@heading</p>
@@ -47,6 +47,14 @@ else
                     <code>@ownSwitch</code> is true, so every capability of this module is off.
                 </p>
             }
+            @if (last && module.AllCapabilitiesOption is { } allOption)
+            {
+                @* The module's own opt-in, under the module's own last group and about nothing else: the other modules' capabilities are not
+                   turned on by it, so no line that sums the chip up may name one module's call. *@
+                <p class="ms-popover-footnote">
+                    <code>@allOption</code> turns every capability of this module on.
+                </p>
+            }
         }
         @Footnote
     </div>
@@ -56,11 +64,13 @@ else
     /// <summary>
     /// The groups of every module, in module order, each with its key: the module's key and the group's index in the
     /// module's own list. Never the heading - the composition proves a module's key unique and says nothing of the words of its groups, so
-    /// two modules whose groups share a name would throw a duplicate-key error and break the header. <c>First</c> marks a module's first group.
+    /// two modules whose groups share a name would throw a duplicate-key error and break the header. <c>First</c> marks a module's first group
+    /// and <c>Last</c> its last.
     /// </summary>
-    private IEnumerable<(string Key, IStudioModule Module, StudioModuleCapabilityGroup Group, bool First)> ModuleGroups =>
+    private IEnumerable<(string Key, IStudioModule Module, StudioModuleCapabilityGroup Group, bool First, bool Last)> ModuleGroups =>
         Descriptor.Modules.SelectMany(static module =>
-            module.CapabilityGroups.Select((group, index) => (module.Key + "/" + index.ToString(System.Globalization.CultureInfo.InvariantCulture), module, group, index == 0)));
+            module.CapabilityGroups.Select((group, index) =>
+                (module.Key + "/" + index.ToString(System.Globalization.CultureInfo.InvariantCulture), module, group, index == 0, index == module.CapabilityGroups.Count - 1)));
 
     /// <summary>Every group of every module, in module order.</summary>
     private IReadOnlyList<StudioModuleCapabilityGroup> Groups => [.. Descriptor.Modules.SelectMany(static x => x.CapabilityGroups)];
@@ -71,29 +81,15 @@ else
     /// <summary>The capabilities offered: each module's.</summary>
     private int OfferedCount => Groups.Sum(static x => x.Capabilities.Count);
 
-    /// <summary>The one-line opt-in that turns every capability on: the first module's that has one.</summary>
-    private string? AllCapabilitiesOption =>
-        Descriptor.Modules.Select(static x => x.AllCapabilitiesOption).FirstOrDefault(static x => x is not null);
-
     /// <summary>
     /// The popover's footnote. Written here, at the indentation its text has in the page, because the whitespace of a text node is part of the
     /// markup a visitor's browser receives.
     /// </summary>
     private RenderFragment Footnote => __builder =>
     {
-        if (AllCapabilitiesOption is { } allOption)
-        {
-<p class="ms-popover-footnote">
-            Every one of these is off until the host sets it. <code>@allOption</code>
-            turns them all on; <code>@Settings.ReadOnlyOptionName</code> turns them all off again.
-        </p>
-        }
-        else
-        {
 <p class="ms-popover-footnote">
             Every one of these is off until the host sets it. <code>@Settings.ReadOnlyOptionName</code> turns them all off again.
         </p>
-        }
     };
 
     /// <summary>
