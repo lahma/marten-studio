@@ -1,74 +1,81 @@
-# Postgres Studio
+# DataStudio.Postgres
 
-An embeddable Blazor Server admin UI for the PostgreSQL databases an ASP.NET Core application already registers as
-`NpgsqlDataSource`, shipped as one MIT-licensed Razor Class Library. You add `AddPostgresStudio()` to your container
-and `MapPostgresStudio()` to your endpoint pipeline, and the studio runs inside your own application against *its own*
-data sources: a database browser for tables, views, functions, triggers, sequences and types and their rows, the
-sessions and locks on the server, the foreign keys as a diagram, a health advisor that says what is wrong and how sure
-it is, the statements that take the database's time, autovacuum's view of every table, storage, replication and the
-server's settings - and, off until you turn it on, a read-only SQL console.
+```shell
+dotnet add package DataStudio.Postgres
+```
+
+The Postgres module of [Data Studio](https://github.com/lahma/marten-studio#readme): an embeddable Blazor Server admin UI
+for the PostgreSQL databases an ASP.NET Core application already registers as `NpgsqlDataSource`, shipped as MIT-licensed
+Razor Class Libraries. You add `AddDataStudio().AddPostgres()` to your container and `MapDataStudio()` to your endpoint
+pipeline, and the studio runs inside your own application against *its own* data sources: a database browser for tables,
+views, functions, triggers, sequences and types and their rows, the sessions and locks on the server, the foreign keys as a
+diagram, a health advisor that says what is wrong and how sure it is, the statements that take the database's time,
+autovacuum's view of every table, storage, replication and the server's settings - and, off until you turn it on, a
+read-only SQL console.
 
 It is **not** a connection-string tool. There is no "point it at a database" mode: the studio reads through the data
 sources your application configured, with their role, their pool and their TLS, and adds no new place that holds a
-credential. It is the core [Marten Studio](https://github.com/lahma/marten-studio#readme) is built on; an application
-that uses [Marten](https://martendb.io) takes the `MartenStudio` package instead, which brings this one with it.
+credential. It is the module the Marten module is built on; an application that uses [Marten](https://martendb.io) takes
+the `DataStudio.Marten` package instead, which brings this one with it.
 
 Registering the studio must never change how your application behaves: no global styles, no component-library version
-pinned onto your host, no middleware ordering requirement, no altered authentication. A host that adds the package and
-never maps it is byte-for-byte the application it was.
+pinned onto your host, no middleware ordering requirement, no altered authentication. A host that adds the packages and
+never maps them is byte-for-byte the application it was.
 
 The long form, with every option and the reasons behind them, is
-[`docs/postgresstudio.md`](https://github.com/lahma/marten-studio/blob/main/docs/postgresstudio.md).
+[`docs/postgres.md`](https://github.com/lahma/marten-studio/blob/main/docs/postgres.md).
 
 ## Install
 
-```shell
-dotnet add package PostgresStudio
-```
-
-One package reference. It brings [`PostgresStudio.Diagnostics`](https://www.nuget.org/packages/PostgresStudio.Diagnostics)
-at exactly its own version (the diagnostics engine, with `Npgsql` - floor `9.0.4`, tested at 9.0.4 and 10.0.3 - and the
-`Microsoft.Extensions.*` abstractions) and `Microsoft.AspNetCore.App.Internal.Assets` (floor `10.0.12`, three `.js` files
-and an MSBuild target, no runtime assembly), and takes everything else from the shared framework. It references no Marten,
-JasperFx or Weasel package.
-Target framework: `net10.0`. PostgreSQL 15 to 19 are tested, and 14 still works
+One package reference. It brings the shell, [`DataStudio`](https://www.nuget.org/packages/DataStudio) (the mount, the
+layout, the front page, Activity and `Microsoft.AspNetCore.App.Internal.Assets` - floor `10.0.12`, three `.js` files and an
+MSBuild target, no runtime assembly), and
+[`DataStudio.Postgres.Diagnostics`](https://www.nuget.org/packages/DataStudio.Postgres.Diagnostics) (the diagnostics engine,
+with `Npgsql` - floor `9.0.4`, tested at 9.0.4 and 10.0.3 - and the `Microsoft.Extensions.*` abstractions), each at exactly
+its own version, and takes everything else from the shared framework. It references no Marten, JasperFx or Weasel
+package. Target framework: `net10.0`. PostgreSQL 15 to 19 are tested, and 14 still works
 ([`docs/postgres-versions.md`](https://github.com/lahma/marten-studio/blob/main/docs/postgres-versions.md)).
 
 **Which package.** Want the UI: this one. Want only the findings in your own code - a worker that mails a daily summary, a
-shared library, a job host with nothing to mount - take `PostgresStudio.Diagnostics` alone: it has no ASP.NET Core in it
-([`docs/diagnostics.md`](https://github.com/lahma/marten-studio/blob/main/docs/diagnostics.md#without-the-ui)). The two are
-released together at one version, and this package depends on exactly its own `PostgresStudio.Diagnostics`
-(`[x.y.z]` in the nuspec), so a central `PackageVersion` for it must equal this package's, or be removed:
-`AddPostgresStudio()` checks a newer `PostgresStudio.Diagnostics`, or another build of this version, at startup and throws an
-`InvalidOperationException` that says which version to pin; a missing or older one fails when `AddPostgresStudio()` is first
+shared library, a job host with nothing to mount - take `DataStudio.Postgres.Diagnostics` alone: it has no ASP.NET Core in
+it ([`docs/diagnostics.md`](https://github.com/lahma/marten-studio/blob/main/docs/diagnostics.md#without-the-ui)). A
+Kafka section for the same studio is `DataStudio.Kafka` (a preview). The packages are released together at one version,
+and each depends on exactly its own version of the ones below it (`[x.y.z]` in the nuspec), so a central `PackageVersion`
+for any of them must equal this package's, or be removed: `AddPostgres()` checks the packages beneath it at startup and
+throws an `InvalidOperationException` that says which version to pin; a missing or older one fails when it is first
 called, in the loader, with a `FileNotFoundException` that names it and the version to pin.
 
-One studio per application: `AddPostgresStudio()` throws in an application that called `AddMartenStudio()`, and the
-reverse.
+One shell serves an application, and the Postgres module and the Marten module are not added together: `.AddPostgres()`
+beside `.AddMarten()` is refused, because the Marten module registers this one over its stores' databases itself.
 
 ## Register and mount
 
 The minimum is a data source, two calls, and a decision about who may open it:
 
 ```csharp
+using DataStudio;
+using DataStudio.Postgres;
+
 builder.Services.AddNpgsqlDataSource(connectionString);   // or AddSingleton(NpgsqlDataSource.Create(...))
-builder.Services.AddPostgresStudio();
+builder.Services
+    .AddDataStudio()
+    .AddPostgres();
 
 // ...
 
-app.MapPostgresStudio().RequireAuthorization();
+app.MapDataStudio().RequireAuthorization();
 ```
 
-The studio is then at `/postgres`, showing the structure of the `public` schema of the application's unkeyed data
-source, behind whatever `RequireAuthorization()` means in your application. The sample host does it with every option
-spelled out - this block is compiled from
-[`samples/PostgresStudio.Sample/Program.cs`](https://github.com/lahma/marten-studio/blob/main/samples/PostgresStudio.Sample/Program.cs),
+The studio is then at `/studio` (its pages under `/studio/postgres`), showing the structure of the `public` schema of the
+application's unkeyed data source, behind whatever `RequireAuthorization()` means in your application. The sample host
+does it with every option spelled out - this block is compiled from
+[`samples/DataStudio.Sample.Postgres/Program.cs`](https://github.com/lahma/marten-studio/blob/main/samples/DataStudio.Sample.Postgres/Program.cs),
 so it cannot drift:
 
 <!-- snippet: readme_register -->
 ```csharp
 // The application's own data source - what AddNpgsqlDataSource(connectionString) from Npgsql.DependencyInjection
-// registers, written out here so the sample needs no other package. Postgres Studio finds the unkeyed one by itself and
+// registers, written out here so the sample needs no other package. Data Studio finds the unkeyed one by itself and
 // lists it as the source "default". It reads through it, with its role, its TLS and its settings, and never holds a
 // connection string of its own.
 builder.Services.AddSingleton(_ => NpgsqlDataSource.Create(connectionString));
@@ -118,8 +125,8 @@ app.MapDataStudio().RequireAuthorization(SamplePolicies.Studio);
 ```
 <!-- endSnippet -->
 
-`MapPostgresStudio("/ops/postgres")` mounts it somewhere else; the pages, the static assets, the Blazor circuit and the
-framework script all move with it. It works in an API-only host with no `.razor` file of its own, and needs no
+`MapDataStudio("/ops")` mounts it somewhere else (its pages are then at `/ops/postgres`); the pages, the static assets, the
+Blazor circuit and the framework script all move with it. It works in an API-only host with no `.razor` file of its own, and needs no
 `app.UseAntiforgery()`.
 
 ### The opt-in health check
@@ -159,22 +166,23 @@ the URL (`?store=tenants&db=tenant_b`), so a link you paste into a chat reopens 
 
 Three layers and two switches, all yours; the studio authenticates nobody.
 
-1. **`AuthorizationPolicy`** - who gets in. Applied to every studio endpoint: the pages, the Blazor circuit and the
-   static assets. `RequireAuthorization()` on the builder `MapPostgresStudio()` returns does the same job for the pages
-   and the circuit.
+1. **`DataStudioOptions.AuthorizationPolicy`** - who gets in. Applied to every studio endpoint: the front page, the pages,
+   the Blazor circuit and the static assets. `RequireAuthorization()` on the builder `MapDataStudio()` returns does the same
+   job for the pages and the circuit.
 2. **`SourceAuthorizationPolicy`** - which data source and database, resource-based against a
-   `PostgresStudioResource(SourceName, DatabaseIdentifier, Capability)` and asked on every data call. A Postgres Studio
-   resource has no tenant.
+   `PostgresResource(SourceName, DatabaseIdentifier, Capability)` and asked on every data call. A `PostgresResource`
+   has no tenant.
 3. **`WriteAuthorizationPolicy`** - each read authorized like a write, against the same resource with the capability
    named. Falls back to `SourceAuthorizationPolicy`.
 
-On top: **`ReadOnly`** turns every capability off, and **`Capabilities`** decides which exist. A mapping that answers
+On top: **`ReadOnly`** turns every capability of this module off (`DataStudioOptions.ReadOnly` turns every module's off),
+and **`Capabilities`** decides which exist. A mapping that answers
 none of this refuses to start, before the host binds a listener; `AllowAnonymous()` is an answer, saying nothing is
 not.
 
 ## Capabilities
 
-Four, **all `false` by default**, all turned on by `PostgresStudioCapabilities.All()`. Each is a read, authorized like
+Four, **all `false` by default**, all turned on by `PostgresCapabilities.All()`. Each is a read, authorized like
 a write.
 
 | Capability | What it allows |
@@ -192,27 +200,27 @@ schema only `"*"` admits `BrowseDatabase`, each with the write policy. A name in
 
 ## Options
 
+The shell's (`DataStudioOptions`: `Path`, `Title`, `ApplicationPath`, `AuthorizationPolicy`, `ReadOnly` and
+`RefreshInterval`) are in the [README](https://github.com/lahma/marten-studio#options). This module's are every property of
+`PostgresOptions`:
+
 | Option | Default | |
 |---|---|---|
-| `Path` | `/postgres` | Where the studio is mounted. `MapPostgresStudio(pattern)` overrides it. |
-| `Title` | `Postgres Studio` | Browser tab and sidebar heading. |
-| `ApplicationPath` | `null` | Where the header's "Back to application" link goes; no link when `null`. A path that starts with a single `/` (`/`, `/app`; a host behind `UsePathBase` includes its base, `/myapp/`) or an absolute `http` or `https` URL without user information, used exactly as written and never re-rooted under the studio's mount path. Anything else fails startup. |
-| `AuthorizationPolicy`, `SourceAuthorizationPolicy`, `WriteAuthorizationPolicy` | `null` | The three layers above. |
-| `ReadOnly` | `false` | Every capability off. |
+| `SourceAuthorizationPolicy`, `WriteAuthorizationPolicy` | `null` | The two resource layers above. |
+| `ReadOnly` | `false` | Every capability of this module off; the other modules' are left alone. |
 | `Capabilities` | all off | `BrowseDatabase`, `ViewDefinitions`, `ViewDatabaseActivity`, `RunSql`. |
 | `BrowsableSchemas` | `public` | Exact schema names, or `"*"`. A list that names schemas replaces the default. |
 | `IncludeDefaultDataSource` | `true` | List the unkeyed `NpgsqlDataSource` as `default`. |
 | `SqlConsoleRole` | `null` | A role the console, the database browser and the health advisor's reads (bar its statement checks, which read `pg_stat_statements` as the data source's own role) switch to with `SET LOCAL ROLE`: the one real narrowing. |
 | `QueryTimeout` | 30 seconds | How long a studio query may run. 1 second … 10 minutes. |
 | `MaxStudioConnections` | 2 | The most connections the studio holds at a time of each pool it reads through - each of the application's own data sources. A read that finds all of them in use waits for one, at most `QueryTimeout`, and then says so; a nested read never waits for its own caller. The cap is never above the data source's own `Maximum Pool Size` (the smaller of the two, when `Pooling` is on), so a host never copies a pool's size into this option; a data source the connection history samples through keeps one more connection for it outside the cap, so a dedicated pool for both needs one more. The Health page's studio-cost line shows the cap in force and how many are in use, and C01 says how many of a saturated pool's connections were the studio's. 1 … 100. |
-| `StudioApplicationName` | derived | The `application_name` the studio's sessions carry in `pg_stat_activity`, Database › Sessions and an external monitor: by default the application's own `Application Name` with the studio's after it in parentheses (`orders-api (Postgres Studio)`), or the studio's alone. Set for each of the studio's read-only transactions only (`set_config(…, true)`), so a pooled connection goes back to the application as it came; `""` leaves the application's own name. Printable ASCII, at most 63 characters. |
+| `StudioApplicationName` | derived | The `application_name` the studio's sessions carry in `pg_stat_activity`, Database › Sessions and an external monitor: by default the application's own `Application Name` with the studio's after it in parentheses (`orders-api (Data Studio)`), or the studio's alone. Set for each of the studio's read-only transactions only (`set_config(…, true)`), so a pooled connection goes back to the application as it came; `""` leaves the application's own name. Printable ASCII, at most 63 characters. |
 | `DefaultPageSize`, `MaxPageSize` | `50`, `500` | Rows per page; 1 … 5000. |
 | `MaxInlineValueBytes` | 512 KiB | The largest cell value rendered inline. 1 byte … 64 MiB. |
 | `MaxSqlConsoleRows` | `500` | Row cap for the SQL console; the reader stops there. 1 … 10 000. |
 | `ExactCountThreshold` | `100000` | Above this estimate, counts stay `reltuples` estimates. |
-| `RefreshInterval` | 5 seconds | How often live pages poll. 1 second … 5 minutes. |
 | `HealthInterval` | 60 seconds | How often the health advisor re-checks a database while a page watches it. 15 seconds … 1 hour. |
-| `AcceptedChecks` | empty | Health checks the application accepts, by code with a reason: still run and shown, as accepted, but counted nowhere. Read once, at startup (1.2). |
+| `AcceptedChecks` | empty | Health checks the application accepts, by code with a reason: still run and shown, as accepted, but counted nowhere. Read once, at startup. |
 
 ## Screens
 
@@ -227,15 +235,15 @@ migration SQL "for your own migrations - the studio never runs this"), **Stateme
 statement by statement, grouped by verb and table), **Maintenance** (autovacuum's triggers per table, what runs now, the
 workers, the freeze forecast and the vacuum horizon), **Storage** (size, growth and the largest tables, from the
 catalog's page counts) and **Replication** (slots, standbys, the archiver, WAL, checkpoints and I/O). **System** -
-**Server** (version, platform, what the reading role can see, settings, extensions and the security posture) and
-**Activity** (the last 500 actions taken through the studio). **Find** (1.2), the header box (`/` or Ctrl+K), opens a
+**Server** (version, platform, what the reading role can see, settings, extensions and the security posture). The shell's
+**Activity** (`/studio/activity`) lists the last 500 actions taken through the studio. **Find**, the header box (`/` or Ctrl+K), opens a
 table or view by name or a statement by queryid, through the page it opens and under that page's gate.
 
-**Database › Connection** (1.1; the long form is
+**Database › Connection** (the long form is
 [`docs/connection.md`](https://github.com/lahma/marten-studio/blob/main/docs/connection.md)) shows how your application
 actually connects. A strip of facts gives the server and database, the role, whether the connection is encrypted and
 whether the server's certificate is checked, the pool, the Npgsql version loaded and any managed platform or pooler in
-front. "Worth a look" lists what the health advisor found about the connection and what Postgres Studio would change -
+front. "Worth a look" lists what the health advisor found about the connection and what the studio would change -
 each with the setting it is about and the fix as a connection string and as `NpgsqlDataSourceBuilder` code, ready to
 copy. Below that, every Npgsql setting with its value in effect, where the value came from (the connection string, an
 environment variable such as `PGUSER`, or Npgsql's default) and the default; by default only what differs from the default
@@ -270,7 +278,7 @@ with it. Operations › Statements opens one statement's drill-in (`?queryid=`):
 plan, planned as `SqlConsoleRole` behind the page's own gate, masked as the text is, and audited. Where a plan's
 sequential scan filters on plain columns, **What if?** plans the statement again with an index on them imagined by
 hypopg and draws both plans side by side; it creates nothing, and needs hypopg installed, which is your decision.
-Statements also has an **Index advisor** (1.2, hypopg): the top statements you may see, each index their plans suggest
+Statements also has an **Index advisor** (hypopg): the top statements you may see, each index their plans suggest
 tried one at a time, ranked by planned cost saved times calls, with `CREATE INDEX CONCURRENTLY` as the remedy; planned on
 a press behind the page's gate, nothing created. T01 and T15 findings offer it, and a what-if of the foreign key's own
 lookup.
@@ -288,7 +296,7 @@ and the rest together as "Other databases"; the applications, roles and addresse
 `ViewDatabaseActivity`. C13 names the application that holds a tenth of the server's client limit idle while the server is 80%
 used, and C14 the connections that set no `Application Name` (Info), both behind that capability.
 
-**Connection history** (1.0). Holders is the server's connections *now*. Register `AddPostgresConnectionHistory()` and a
+**Connection history**. Holders is the server's connections *now*. Register `AddPostgresConnectionHistory()` and a
 background sampler counts the server's client sessions by application every minute, over one connection it keeps open for the
 purpose, into a store you can replace with your own (`IPostgresConnectionHistoryStore`; the default keeps seven days in
 memory). Holders then says the peak against the client limit and when it happened, and, behind `ViewDatabaseActivity`, each
@@ -301,7 +309,7 @@ drops the oldest past that hour, and loses them only if it stops; make the store
 since its last read, less five minutes, with a full read every ten minutes; a store should serve `since` with an index on
 `(server, taken_at)`, which the example table's primary key already gives. Details in [docs/diagnostics.md](../../docs/diagnostics.md#connection-history).
 
-**Reader only (1.0.1).** A process that must never sample - the web application whose studio pool has no connection to spare -
+**Reader only.** A process that must never sample - the web application whose studio pool has no connection to spare -
 reads a history another process fills. The worker samples and appends to a store both processes share; the web application
 registers `AddPostgresConnectionHistoryReader()` with the same store. It adds no background service, opens no connection of its
 own, and refuses to start without the store:
@@ -313,7 +321,7 @@ builder.Services.AddSingleton<IPostgresConnectionHistoryStore, SharedHistoryStor
 builder.Services.AddPostgresConnectionHistory();
 
 // The web application: reads it, samples nothing.
-builder.Services.AddPostgresStudio();
+builder.Services.AddDataStudio().AddPostgres();
 builder.Services.AddSingleton<IPostgresConnectionHistoryStore, SharedHistoryStore>();
 builder.Services.AddPostgresConnectionHistoryReader(o => o.Retention = TimeSpan.FromDays(7));
 ```
@@ -322,10 +330,10 @@ The two registrations are exclusive in one container.
 
 ## The diagnostics API
 
-`IPostgresDiagnostics`, registered by `AddPostgresStudio()`, gives your own code what the studio reads: the databases it
+`IPostgresDiagnostics`, registered by `AddPostgres()`, gives your own code what the studio reads: the databases it
 would list, and for each the findings, with stable codes and variants, and Storage, Statements, Settings and Connections
 sections. It answers host code, not a visitor; Activity-grade data needs `IncludeActivity`, off by default; and the
-studio never serves a result. With no UI to mount, take `PostgresStudio.Diagnostics` and `AddPostgresDiagnostics()` for the
+studio never serves a result. With no UI to mount, take `DataStudio.Postgres.Diagnostics` and `AddPostgresDiagnostics()` for the
 same API alone. See
 [`docs/diagnostics.md`](https://github.com/lahma/marten-studio/blob/main/docs/diagnostics.md).
 
@@ -339,11 +347,11 @@ same API alone. See
   give `psql` to.
 - **`BrowsableSchemas` limits what the screens show, not what `RunSql` can read.** `"*"` with no `SqlConsoleRole` is a
   warning at startup.
-- **No tenant.** A Postgres Studio scope is a data source and a database; nothing filters a table by tenant.
-- **It cannot honour another application's `IsDocumentTypeVisible`.** A Marten store's database belongs in Marten
-  Studio, where the store's tenancy, soft deletes and visibility apply.
+- **No tenant.** A Postgres module scope is a data source and a database; nothing filters a table by tenant.
+- **It cannot honour another application's `IsDocumentTypeVisible`.** A Marten store's database belongs in the Marten
+  module, where the store's tenancy, soft deletes and visibility apply.
 
-The long form is [`docs/postgresstudio.md`](https://github.com/lahma/marten-studio/blob/main/docs/postgresstudio.md),
+The long form is [`docs/postgres.md`](https://github.com/lahma/marten-studio/blob/main/docs/postgres.md),
 and the security model in full is
 [`docs/security.md`](https://github.com/lahma/marten-studio/blob/main/docs/security.md). A release of any size may break the
 public API; what is promised is in

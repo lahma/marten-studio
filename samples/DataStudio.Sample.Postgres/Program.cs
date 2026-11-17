@@ -48,7 +48,7 @@ builder.Services.AddSamplePolicies();
 
 #region readme_register
 // The application's own data source - what AddNpgsqlDataSource(connectionString) from Npgsql.DependencyInjection
-// registers, written out here so the sample needs no other package. Postgres Studio finds the unkeyed one by itself and
+// registers, written out here so the sample needs no other package. Data Studio finds the unkeyed one by itself and
 // lists it as the source "default". It reads through it, with its role, its TLS and its settings, and never holds a
 // connection string of its own.
 builder.Services.AddSingleton(_ => NpgsqlDataSource.Create(connectionString));
