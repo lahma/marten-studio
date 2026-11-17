@@ -123,7 +123,7 @@ public class StudioLayoutTests
         var lines = credit.QuerySelectorAll(".ms-rail-credit-line").Select(static x => x.TextContent.Trim()).ToList();
         lines.Should().HaveCount(4, "the shell and its version, each module composed into it, the licence and the author, a line each");
         lines[0].Should().StartWith("Data Studio ").And.NotContain("MIT").And.NotContain("Marko");
-        lines[1].Should().Be("Marten Studio");
+        lines[1].Should().Be("Marten");
         lines[2].Should().Be("MIT licensed");
         lines[3].Should().Be("by Marko Lahma");
         credit.QuerySelectorAll("a").Select(static a => a.GetAttribute("href")).Should().Contain(

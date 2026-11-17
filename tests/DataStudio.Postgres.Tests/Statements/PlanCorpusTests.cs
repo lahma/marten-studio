@@ -126,12 +126,10 @@ public class PlanCorpusTests
     }
 
     [Fact]
-    public void P10s_remedy_is_each_studios_own_placement()
+    public void P10s_remedy_is_the_modules_own_placement()
     {
         QueryPlan plan = PlanFixtures.Plan("p10-fires");
 
-        PlanInsights.Evaluate(plan, DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance).Single(static x => x.Insight.Code == "P10").Remedy.Should()
-            .Contain(DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance.PlanIndexRemedy).And.Contain("CreateOrUpdate");
         PlanInsights.Evaluate(plan, PostgresStudioText.Instance).Single(static x => x.Insight.Code == "P10").Remedy.Should()
             .Contain(PostgresStudioText.Instance.PlanIndexRemedy).And.NotContain("Marten");
     }

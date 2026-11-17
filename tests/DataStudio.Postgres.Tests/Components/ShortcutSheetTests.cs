@@ -15,8 +15,8 @@ namespace DataStudio.Postgres.Tests.Components;
 
 /// <summary>
 /// 1.2-A11Y: the keyboard shortcut sheet <c>?</c> opens. The sheet is part of the shell and shown by studio.js, so what the server owns
-/// is its markup (a closed native dialog with a Close button the script answers to) and its list - the shared groups, then the
-/// studio's own, so a Postgres Studio host is never told about a key only a Marten page has.
+/// is its markup (a closed native dialog with a Close button the script answers to) and its list - the shell's own groups, then each
+/// module's, so a host is never told about a key only another module's page has.
 /// </summary>
 public class ShortcutSheetTests
 {
@@ -80,9 +80,9 @@ public class ShortcutSheetTests
             "Anywhere",
             "In a dialog",
             "Menus",
-            "SQL editor",
             "JSON viewer (a row has focus)",
             "JSON viewer search box",
+            "SQL editor",
             "Table rows (a row has focus)",
             "Plan icicle (a frame has focus)");
 

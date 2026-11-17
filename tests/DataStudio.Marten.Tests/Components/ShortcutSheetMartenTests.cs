@@ -12,7 +12,7 @@ using DataStudio.Postgres.Services.Settings;
 namespace DataStudio.Marten.Tests.Components;
 
 /// <summary>
-/// 1.2-A11Y: Marten Studio's sheet is the shared one plus the keys only its pages answer to - the document list and the document
+/// 1.2-A11Y: Data Studio's sheet is the shared one plus the keys only its pages answer to - the document list and the document
 /// editor - after the shared groups.
 /// </summary>
 public class ShortcutSheetMartenTests

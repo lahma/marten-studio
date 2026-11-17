@@ -131,7 +131,7 @@ public class RequestedCheckpointsCheckTests
         finding.Caveat.Should().Contain("skipped too");
 
         finding.Remedy!.Kind.Should().Be(HealthRemedyKind.ServerSetting);
-        finding.Remedy.Code.Should().Be("# A server setting, not a StoreOptions one:\nmax_wal_size = 2GB");
+        finding.Remedy.Code.Should().Be("# A server setting:\nmax_wal_size = 2GB");
         finding.Remedy.Explanation.Should().StartWith("Double it (from 1GB)").And.EndWith("Set it in postgresql.conf, followed by a reload.");
     }
 

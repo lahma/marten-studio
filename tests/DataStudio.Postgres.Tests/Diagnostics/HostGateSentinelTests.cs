@@ -85,7 +85,7 @@ public class HostGateSentinelTests
         PostgresDiagnosticsSnapshot snapshot = new()
         {
             SchemaVersion = 1,
-            Producer = "PostgresStudio 0.5.0",
+            Producer = "Data Studio 2.0.0",
             GeneratedAt = At,
             Database = new PostgresDatabaseRef("tenants", "acme"),
             Findings = findings,

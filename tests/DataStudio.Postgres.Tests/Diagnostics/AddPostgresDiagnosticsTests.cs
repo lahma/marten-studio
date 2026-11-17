@@ -234,11 +234,13 @@ public class AddPostgresDiagnosticsTests
             .Should().Contain("a schema PostgresOptions.BrowsableSchemas does not admit", "a studio host's sentence is unchanged")
             .And.NotContain("PostgresDiagnosticsOptions");
 
-        // Only the option's owner differs: every other word is the studio's.
+        // Only the option's owner differs: every other word is the module's, and a sentence composed over the options type names the other type.
         foreach (System.Reflection.PropertyInfo property in typeof(DataStudio.Postgres.Services.Settings.StudioText).GetProperties()
-            .Where(static x => x.PropertyType == typeof(string) && x.Name is not (nameof(DataStudio.Postgres.Services.Settings.StudioText.OptionsTypeName) or nameof(DataStudio.Postgres.Services.Settings.StudioText.UnjudgedOldest))))
+            .Where(static x => x.PropertyType == typeof(string) && x.Name is not nameof(DataStudio.Postgres.Services.Settings.StudioText.OptionsTypeName)))
         {
-            property.GetValue(words).Should().Be(property.GetValue(DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance), property.Name);
+            string? own = (string?) property.GetValue(DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance);
+
+            property.GetValue(words).Should().BeOneOf([own, own?.Replace("PostgresOptions.", "PostgresDiagnosticsOptions.", StringComparison.Ordinal)], property.Name);
         }
     }
 

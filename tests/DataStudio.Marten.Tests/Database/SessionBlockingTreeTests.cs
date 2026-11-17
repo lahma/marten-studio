@@ -71,7 +71,7 @@ public class SessionBlockingTreeTests
 
         BlockingNodeView waiter = tree.Single().Head.Waiters.Single();
         waiter.Target.Should().Be("a relation named like Marten's");
-        waiter.Relation.Should().BeNull("its name can carry a store's alias or a tenant, and Marten Studio is where it is read");
+        waiter.Relation.Should().BeNull("its name can carry a store's alias or a tenant, and Data Studio is where it is read");
     }
 
     [Fact]

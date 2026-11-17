@@ -188,7 +188,7 @@ public class ProjectionFallingBehindCheckTests
         HealthVerdict verdict = EvaluateWith(paused, null, Growing);
 
         verdict.Findings.Should().BeEmpty();
-        verdict.Note.Should().Contain(Shard + ": not judged: Marten Studio paused the projection coordinator");
+        verdict.Note.Should().Contain(Shard + ": not judged: Data Studio paused the projection coordinator");
     }
 
     /// <summary>A rebuild starts the shard again from zero: its lag jumps, and that is the rebuild, not a slow shard.</summary>

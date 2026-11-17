@@ -7,12 +7,13 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
 using DataStudio.Postgres.Services;
+using DataStudio.Postgres.Services.Postgres;
 using DataStudio.Postgres.Services.Settings;
 
 namespace DataStudio.Marten.Tests.Settings;
 
 /// <summary>
-/// D34 over Marten Studio's descriptor: with no other module the shell has the Marten module alone; with one the modules compose in key order, the
+/// D34 over Data Studio's descriptor: with no other module the shell has the Marten module alone; with one the modules compose in key order, the
 /// module's own sections and the static descriptor are untouched, the shell's own section closes the rail, and the module's pages join the assemblies.
 /// The module is a fake whose pages name this test assembly, so no route table is built.
 /// </summary>
@@ -88,7 +89,7 @@ public class MartenModuleCompositionTests
         StudioRouteTable own = new(Host.PageAssemblies);
         string[] paths = EveryPagePath(Host);
 
-        paths.Should().HaveCountGreaterThan(28, "Marten Studio's own pages and PostgresStudio's are all compared, not the rail's entries alone")
+        paths.Should().HaveCountGreaterThan(28, "Data Studio's own pages and PostgresStudio's are all compared, not the rail's entries alone")
             .And.Contain("marten/documents/value/doc", "a page only a link reaches is among them").And.Contain("postgres/database/row");
         foreach (string path in paths)
         {
@@ -125,7 +126,7 @@ public class MartenModuleCompositionTests
 
         // Every module's sections carry its key.
         composed.Navigation.Where(static x => x.ModuleKey == Host.Key).Should().HaveCount(hostTitles.Length);
-        composed.ExtraShortcuts.Should().HaveSameCount(Host.ExtraShortcuts, "Marten Studio's document shortcuts are carried");
+        composed.ExtraShortcuts.Should().HaveCount(PostgresStudioShortcuts.Groups.Count + Host.ExtraShortcuts.Count, "the Postgres module's own and the Marten pages' document shortcuts are carried");
         composed.PageAssemblies.Should().HaveCount(Host.PageAssemblies.Count + 2, "the fake module's and the shell's own");
     }
 

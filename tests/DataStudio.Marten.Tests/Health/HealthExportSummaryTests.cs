@@ -237,7 +237,7 @@ public class HealthExportSummaryTests
         HealthExportSummary broken = HealthExportSummary.Broken(Now, nameof(InvalidOperationException), DataStudio.Marten.Services.MartenStudioText.Instance);
         broken.Level.Should().Be(HealthExportLevel.Degraded);
         broken.Describe(TimeSpan.FromSeconds(60)).Should().Be(
-            "Marten Studio could not check: its health export failed with InvalidOperationException, logged as event 9270. Refreshed after 60 s, served for at most 120 s.");
+            "Data Studio could not check: its health export failed with InvalidOperationException, logged as event 9270. Refreshed after 60 s, served for at most 120 s.");
     }
 
     // ---- Accepted checks (issue #35) ----------------------------------------------------------------

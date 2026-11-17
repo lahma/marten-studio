@@ -222,14 +222,13 @@ public class StatementsServiceTests
     }
 
     [Fact]
-    public void A_status_names_the_sources_own_role_in_each_studios_words()
+    public void A_status_names_the_sources_own_role_in_the_modules_words()
     {
         StatementFacts nothing = StatementFacts.Build(
             "default", "default", Now,
             new StatementReadOutcome(StatementReadState.NothingRecorded, Pg17, null), null, HealthHistoryView.Empty, null, StatementsTestFacts.Tables, null);
 
         StatementsService.Status(nothing, PostgresStudioText.Instance).Should().Contain("of the data source's own role");
-        StatementsService.Status(nothing, DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance).Should().Contain("of the store's own role");
         StatementsService.Status(Facts(Read(null)), PostgresStudioText.Instance).Should().BeNull("it read");
     }
 
@@ -313,12 +312,6 @@ public class StatementsServiceTests
         {
             line.Should().NotContain("none is left out").And.NotContain("only its reads of pg_stat_statements are listed");
         }
-
-        // MartenStudio's reads of Marten's own tables run as the store's role whatever SqlConsoleRole is, and it says so.
-        DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance.StatementsStudioRoles.Should()
-            .Contain("The document, event and projection reads, tenant discovery")
-            .And.Contain("Marten's own sessions")
-            .And.Contain("run as the store's own role");
     }
 
     /// <summary>W5-Q1-fix F1: on pg_stat_statements 1.8 a statement's nested runs are in its row, and the caveat says so.</summary>

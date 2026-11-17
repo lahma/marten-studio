@@ -103,7 +103,7 @@ internal sealed class FakeProjectionDataService : IProjectionDataService
         return this;
     }
 
-    /// <summary>Says the daemon here is rebuilding these projections (JasperFx 2.86+), not Marten Studio.</summary>
+    /// <summary>Says the daemon here is rebuilding these projections (JasperFx 2.86+), not Data Studio.</summary>
     public FakeProjectionDataService WithRebuildingHere(params string[] projectionNames)
     {
         Daemon = Daemon with { RebuildingProjections = projectionNames };
@@ -228,7 +228,7 @@ internal sealed class FakeProjectionDataService : IProjectionDataService
     }
 
     /// <summary>
-    /// Says Marten Studio itself paused this store's coordinator, which is what makes the per-agent
+    /// Says Data Studio itself paused this store's coordinator, which is what makes the per-agent
     /// controls meaningful.
     /// </summary>
     public FakeProjectionDataService WithStudioPause(string user = "admin", DateTimeOffset? at = null)
@@ -271,7 +271,7 @@ internal sealed class FakeProjectionDataService : IProjectionDataService
     }
 
     /// <summary>
-    /// Says Marten Studio paused this store's coordinator and that the daemon is running anyway - the
+    /// Says Data Studio paused this store's coordinator and that the daemon is running anyway - the
     /// state a host resuming the coordinator itself leaves behind.
     /// </summary>
     public FakeProjectionDataService WithStudioPauseThatWasLifted(string user = "admin")

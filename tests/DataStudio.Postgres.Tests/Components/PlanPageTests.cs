@@ -838,7 +838,7 @@ public class PlanPageTests
         JsonElement file = JsonElement.Parse((string) download[2]!);
         file.GetProperty("$schema").GetString().Should().Be("https://www.speedscope.app/file-format-schema.json");
         file.GetProperty("name").GetString().Should().Be("select o.id", "the statement's first line");
-        file.GetProperty("exporter").GetString().Should().StartWith("Postgres Studio ");
+        file.GetProperty("exporter").GetString().Should().StartWith("Data Studio ");
         file.GetProperty("shared").GetProperty("frames").GetArrayLength().Should().Be(5);
         file.GetProperty("profiles").EnumerateArray().Select(static x => x.GetProperty("name").GetString()).Should().Equal("Self time", "Self cost", "Shared blocks read");
     }

@@ -129,7 +129,7 @@ public class CapabilityBannerTests
 
         var banner = context.Render<CapabilityBanner>();
 
-        banner.TextOfAll(".ms-popover-title").Should().Equal("Marten Studio: reads authorized like writes", "Marten Studio: mutating operations");
+        banner.TextOfAll(".ms-popover-title").Should().Equal("Marten: reads authorized like writes", "Marten: mutating operations");
 
         var groups = banner.FindAll(".ms-capability-list");
         groups.Should().HaveCount(2);

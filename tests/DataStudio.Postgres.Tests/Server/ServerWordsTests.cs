@@ -7,8 +7,8 @@ using static DataStudio.Postgres.Tests.Server.ServerTestFacts;
 namespace DataStudio.Postgres.Tests.Server;
 
 /// <summary>
-/// W5-S2-fix: the sentences S10 and T14 say differently in each studio, pinned in both - Postgres Studio has no Marten
-/// writes to name and no HotCold daemon, and so no K08, to point at.
+/// W5-S2-fix: the sentences S10 and T14 say differently in each module - the Postgres module has no Marten writes to name and no
+/// HotCold daemon, and so no K08, to point at. The Marten module's own are held by its <c>WordsTests</c> snapshot.
 /// </summary>
 public class ServerWordsTests
 {
@@ -21,17 +21,11 @@ public class ServerWordsTests
     }
 
     [Fact]
-    public void S10_says_whose_writes_fail_in_each_studios_words()
+    public void S10_says_whose_writes_fail_in_the_Postgres_modules_words()
     {
         ReadOnlyStoreFacts facts = new(Setting("default_transaction_read_only", "on", source: "user", boot: "off"), true, SelfHosted);
 
-        HealthVerdict marten = new ReadOnlyStoreCheck().Evaluate(facts, Evaluation());
         HealthVerdict postgres = new ReadOnlyStoreCheck().Evaluate(facts, Evaluation(postgres: true));
-
-        marten.Findings.Single(x => x.Variant == "read-only").WhyItMatters.Should().StartWith(
-            "With default_transaction_read_only = on, a transaction that does not ask otherwise is read-only - and Marten, like most "
-            + "data access, never asks: every SaveChanges, append and projection write fails with 25006");
-        marten.Findings.Single(x => x.Variant == "standby").WhyItMatters.Should().Contain("so every SaveChanges, append and projection write fails");
 
         HealthFinding readOnly = postgres.Findings.Single(x => x.Variant == "read-only");
         readOnly.WhyItMatters.Should().StartWith(
@@ -43,10 +37,8 @@ public class ServerWordsTests
     }
 
     [Fact]
-    public void T14s_timeout_backstop_names_K08_in_Marten_Studio_only()
+    public void T14s_timeout_backstop_names_no_K08_in_the_Postgres_module()
     {
-        DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance.LeaderTimeoutClause.Should().EndWith("(K08)");
-        ("is the DBA's backstop" + DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance.LeaderTimeoutClause + ".").Should().Contain("HotCold");
         ("is the DBA's backstop" + PostgresStudioText.Instance.LeaderTimeoutClause + ".").Should().Be("is the DBA's backstop.");
     }
 }

@@ -61,7 +61,7 @@ public class AcceptedChecksTests
     {
         new MartenOptions().AcceptedChecks.Should().NotBeNull().And.BeEmpty();
 
-        // D01 is Marten Studio's own check and K05 the shared engine's: both are in this studio's registry.
+        // D01 is Data Studio's own check and K05 the shared engine's: both are in this studio's registry.
         MartenOptions options = Resolve(static x =>
         {
             x.AcceptedChecks["d01"] = "the daemon is not run by this process";

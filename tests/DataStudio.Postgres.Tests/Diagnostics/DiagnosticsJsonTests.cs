@@ -16,7 +16,7 @@ public class DiagnosticsJsonTests
     internal static PostgresDiagnosticsSnapshot Full() => new()
     {
         SchemaVersion = 1,
-        Producer = "PostgresStudio 0.5.0",
+        Producer = "Data Studio 2.0.0",
         GeneratedAt = At.AddSeconds(3),
         Database = new PostgresDatabaseRef("tenants", "acme"),
         Outcome = PostgresReadOutcome.Read,
@@ -231,7 +231,7 @@ public class DiagnosticsJsonTests
     internal static PostgresDiagnosticsSnapshot Minimal() => new()
     {
         SchemaVersion = 1,
-        Producer = "PostgresStudio 0.5.0",
+        Producer = "Data Studio 2.0.0",
         GeneratedAt = At,
         Database = new PostgresDatabaseRef("tenants", "gone"),
         Outcome = PostgresReadOutcome.NotFound,
@@ -371,7 +371,7 @@ public class DiagnosticsJsonTests
         PostgresDiagnosticsSnapshot snapshot = new()
         {
             SchemaVersion = 1,
-            Producer = "PostgresStudio 0.10.0",
+            Producer = "Data Studio 2.0.0",
             GeneratedAt = At,
             Database = new PostgresDatabaseRef("default", string.Empty),
             Outcome = PostgresReadOutcome.Read,

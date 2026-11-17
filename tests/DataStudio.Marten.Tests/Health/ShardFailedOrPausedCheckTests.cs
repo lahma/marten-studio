@@ -113,7 +113,7 @@ public class ShardFailedOrPausedCheckTests
 
         HealthFinding finding = Evaluate([new DaemonShardRow("DailySales:All", 10, Now, Now, "Paused", "boom")], refused).Findings.Single();
 
-        finding.Evidence.Should().Contain(x => x.Label == "Last start from Marten Studio"
+        finding.Evidence.Should().Contain(x => x.Label == "Last start from Data Studio"
             && x.Value.Contains(": AgentPaused, which a retry will not resolve on its own", StringComparison.Ordinal));
     }
 

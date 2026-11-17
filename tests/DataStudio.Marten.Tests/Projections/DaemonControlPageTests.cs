@@ -59,11 +59,11 @@ public class DaemonControlPageTests
 
         IRenderedComponent<Page> page = context.Render<Page>();
 
-        page.Find(".ms-daemon-headline").TextContent.Trim().Should().Be("Hosted, paused by Marten Studio");
+        page.Find(".ms-daemon-headline").TextContent.Trim().Should().Be("Hosted, paused by Data Studio");
         page.Find(".ms-daemon-card").ClassList.Should().Contain("ms-daemon-paused");
 
         string pausedBy = page.Find(".ms-daemon-paused-by").TextContent;
-        pausedBy.Should().Contain("Paused by Marten Studio");
+        pausedBy.Should().Contain("Paused by Data Studio");
         pausedBy.Should().Contain("alice");
         pausedBy.Should().Contain("1970", "the time is formatted in the visitor's selected zone");
 
@@ -260,7 +260,7 @@ public class DaemonControlPageTests
         page.Find(".ms-shard-stop").HasAttribute("disabled").Should().BeTrue();
 
         page.Find(".ms-shard-control-hint").TextContent.Trim()
-            .Should().StartWith("Marten Studio's pause is still on the record");
+            .Should().StartWith("Data Studio's pause is still on the record");
     }
 
     /// <summary>

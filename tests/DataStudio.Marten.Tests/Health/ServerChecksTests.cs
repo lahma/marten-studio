@@ -315,7 +315,7 @@ public class ServerChecksTests
         finding.Severity.Should().Be(HealthSeverity.Info);
         finding.Subject.Should().Be(name);
         finding.Title.Should().Be(name + " = off on " + on.Name + ", whose storage manages durability itself");
-        finding.WhyItMatters.Should().Contain("Marten Studio cannot verify this setting's meaning on " + on.Name);
+        finding.WhyItMatters.Should().Contain("Data Studio cannot verify this setting's meaning on " + on.Name);
         finding.Remedy.Should().BeNull("there is nothing the host can be told to change with confidence");
     }
 

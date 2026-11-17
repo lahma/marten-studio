@@ -172,7 +172,7 @@ public class StudioModuleCompositionTests
         // The lists are the database's own, in order, then the shell's own pages (the front page and Activity). The navigation is built once per registration,
         // so the two builds are compared by what they say, and the shell's own section closes it.
         shell.PageAssemblies.Should().Equal([.. Host.PageAssemblies, StudioShellDescriptor.ShellPages]);
-        shell.ExtraShortcuts.Should().Equal(Host.ExtraShortcuts);
+        shell.ExtraShortcuts.Should().Equal([.. PostgresStudioShortcuts.Groups, .. Host.ExtraShortcuts]);
         shell.Navigation.Take(shell.Navigation.Count - 1).Select(Shape).Should().BeEquivalentTo(Host.Navigation(Settings).Select(Shape), static options => options.WithStrictOrdering());
         shell.Navigation[^1].Title.Should().Be("Studio", "the shell's own section is always titled Studio");
         shell.Navigation[^1].Items.Select(static x => (x.Label, x.Route)).Should().Equal(("Activity", "activity"));
@@ -206,7 +206,7 @@ public class StudioModuleCompositionTests
         composed.Navigation.Where(static x => x.ModuleKey == "postgres").Should().HaveCount(hostTitles.Length, "the database's own sections carry its key");
         composed.Modules.Select(static x => x.Key).Should().Equal("postgres", "b", "a");
         composed.PageAssemblies.Should().HaveCount(Host.PageAssemblies.Count + 3, "the two modules' and the shell's own");
-        composed.ExtraShortcuts.Select(static x => x.Title).Should().Equal([.. Host.ExtraShortcuts.Select(static x => x.Title), "b keys", "a keys"]);
+        composed.ExtraShortcuts.Select(static x => x.Title).Should().Equal([.. PostgresStudioShortcuts.Groups.Concat(Host.ExtraShortcuts).Select(static x => x.Title), "b keys", "a keys"]);
     }
 
     [Fact]

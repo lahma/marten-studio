@@ -21,7 +21,7 @@ public class LogEventConventionsTests
 
     /// <summary>The scan's anti-vacuity half: it finds an attribute and a direct call, and ignores one in a comment.</summary>
     [Theory]
-    [InlineData("[LoggerMessage(EventId = 7, Level = LogLevel.Warning, Message = \"Marten Studio user {User} did it\")]\npublic static partial void M(this ILogger l);", 7, "Marten Studio user {User} did it")]
+    [InlineData("[LoggerMessage(EventId = 7, Level = LogLevel.Warning, Message = \"Data Studio user {User} did it\")]\npublic static partial void M(this ILogger l);", 7, "Data Studio user {User} did it")]
     [InlineData("    [LoggerMessage(EventId = 8,\n        Message = \"KStudio \" + \"split\")]\nprivate static partial void M(this ILogger l);", 8, "KStudio split")]
     [InlineData("logger.LogWarning(exception, \"Postgres Studio could not {Thing}\", thing);", null, "Postgres Studio could not {Thing}")]
     [InlineData("Logger.LogDebug(\"Data Studio could not\");", null, "Data Studio could not")]
@@ -35,7 +35,7 @@ public class LogEventConventionsTests
 
     [Theory]
     [InlineData("/// [LoggerMessage(EventId = 3, Message = \"x\")]\nclass C { }")]
-    [InlineData("// logger.LogWarning(\"Marten Studio in a comment\");\nclass C { }")]
+    [InlineData("// logger.LogWarning(\"Data Studio in a comment\");\nclass C { }")]
     [InlineData("class C { string s = \"logger.LogWarning(x)\"; void M() { logger.LogDebug(exception, message); } }")]
     public void The_scan_ignores_prose_and_a_call_with_no_literal(string source)
     {

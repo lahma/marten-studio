@@ -1,6 +1,6 @@
 # Health report: `tenants` / `acme`
 
-What Postgres Studio’s pages showed you of this database at 2026-11-02 06:00:04 UTC, masked as they mask it. Sections you may not see are listed at the end.
+What Data Studio’s pages showed you of this database at 2026-11-02 06:00:04 UTC, masked as they mask it. Sections you may not see are listed at the end.
 
 ## Summary
 

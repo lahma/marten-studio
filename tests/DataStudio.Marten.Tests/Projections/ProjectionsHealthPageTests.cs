@@ -286,7 +286,7 @@ public class ProjectionsHealthPageTests
         IRenderedComponent<Page> page = context.Render<Page>();
 
         page.FindAll("[data-shard='DailySales:All'] .ms-shard-trend").Should().BeEmpty();
-        page.Find("[data-shard='DailySales:All'] .ms-shard-lag").GetAttribute("title").Should().Contain("Not judged: Marten Studio paused the projection coordinator");
+        page.Find("[data-shard='DailySales:All'] .ms-shard-lag").GetAttribute("title").Should().Contain("Not judged: Data Studio paused the projection coordinator");
     }
 
     /// <summary>The same rule is the service's, judged where the daemon's state is: the studio's pause withholds a growing lag.</summary>
@@ -343,7 +343,7 @@ public class ProjectionsHealthPageTests
 
         IElement rebuild = page.Find("[data-projection='DailySales'] .ms-projection-rebuild");
         rebuild.HasAttribute("disabled").Should().BeTrue();
-        rebuild.GetAttribute("title").Should().Contain("by something other than Marten Studio");
+        rebuild.GetAttribute("title").Should().Contain("by something other than Data Studio");
 
         IElement start = page.Find("[data-shard='DailySales:All'] .ms-shard-start");
         start.HasAttribute("disabled").Should().BeTrue();
@@ -355,7 +355,7 @@ public class ProjectionsHealthPageTests
     public async Task A_refused_rebuild_is_said_as_information()
     {
         await using StudioComponentContext context = await ReadyAsync(new CachedHealth(), static data =>
-            data.RebuildRefusal = "DailySales is already being rebuilt on this daemon, by something other than Marten Studio.");
+            data.RebuildRefusal = "DailySales is already being rebuilt on this daemon, by something other than Data Studio.");
 
         IRenderedComponent<Page> page = context.Render<Page>();
         page.Find(".ms-projection-rebuild").Click();

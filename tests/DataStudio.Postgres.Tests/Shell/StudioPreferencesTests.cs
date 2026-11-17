@@ -161,7 +161,7 @@ public sealed class StudioPreferencesTests
         shell.Should().NotBeSameAs(module, "the DI service IShellSettings is the shell's object, never a module's");
         shell.ReadOnlyOptionName.Should().Be("DataStudioOptions.ReadOnly");
         shell.ProductName.Should().Be("Data Studio");
-        module.ProductName.Should().Be("Postgres Studio", "a module's own sentences keep its name until the one wording");
+        module.ProductName.Should().Be("Data Studio", "a module's settings answer the shell's name: the module's own is on its descriptor");
 
         context.ShellOptions.Path = "/ops/data";
         context.ShellOptions.RefreshInterval = TimeSpan.FromSeconds(30);

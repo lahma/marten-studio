@@ -2,6 +2,7 @@ using System.Text.RegularExpressions;
 
 using DataStudio.Services;
 using DataStudio.Marten.Services;
+using DataStudio.Postgres.Services.Postgres;
 
 namespace DataStudio.Marten.Tests.Conventions;
 
@@ -40,7 +41,7 @@ public class ShortcutSheetMatchesHandlersTests
         ["Spacebar"] = "Space",
     };
 
-    private static readonly IReadOnlyList<StudioShortcutGroup> All = [.. StudioShortcuts.Shared, .. MartenStudioShortcuts.Groups];
+    private static readonly IReadOnlyList<StudioShortcutGroup> All = [.. StudioShortcuts.Shared, .. PostgresStudioShortcuts.Groups, .. MartenStudioShortcuts.Groups];
 
     private static string Source(string relativePath) =>
         File.ReadAllText(RepositoryRoot.Combine(relativePath.Split('/'))).Replace("\r\n", "\n", StringComparison.Ordinal);

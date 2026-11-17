@@ -193,7 +193,7 @@ public class StudioRegistrationTests
         (typeof(IRelationshipNodeSource), ServiceLifetime.Scoped, How.Type, typeof(MartenRelationshipNodeSource)),
         (typeof(INavIndicatorContributor), ServiceLifetime.Scoped, How.Type, typeof(MartenNavIndicatorContributor)),
 
-        // 1.0-P3C: Marten Studio's plan insights P26 to P28, the one registration the packet adds.
+        // 1.0-P3C: Data Studio's plan insights P26 to P28, the one registration the packet adds.
         (typeof(IPlanInsightContributor), ServiceLifetime.Scoped, How.Type, typeof(MartenPlanInsightContributor)),
 
         // 1.2-INDEX-A: the index advisor's Marten half, the one registration the packet adds.

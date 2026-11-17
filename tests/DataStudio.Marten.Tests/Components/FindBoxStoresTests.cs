@@ -188,7 +188,7 @@ public class FindBoxStoresTests
         box.Find(".ms-find-other").GetAttribute("aria-label").Should().Be("Search in another store");
     }
 
-    /// <summary>1.2-FINAL-FIX: Marten Studio keeps its hint, with documents, streams and natural keys in it.</summary>
+    /// <summary>1.2-FINAL-FIX: Data Studio keeps its hint, with documents, streams and natural keys in it.</summary>
     [Fact]
     public async Task Marten_Studios_hint_names_documents_streams_and_natural_keys()
     {

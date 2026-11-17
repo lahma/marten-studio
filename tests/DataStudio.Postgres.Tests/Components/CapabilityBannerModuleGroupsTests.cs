@@ -62,7 +62,8 @@ public class CapabilityBannerModuleGroupsTests
 
         IRenderedComponent<CapabilityBanner> banner = context.Render<CapabilityBanner>();
 
-        banner.FindAll(".ms-popover-title").Select(static x => x.TextContent.Trim()).Where(static x => x == "Same heading").Should().HaveCount(4, "two groups of two modules");
+        banner.FindAll(".ms-popover-title").Select(static x => x.TextContent.Trim()).Where(static x => x.EndsWith(": Same heading", StringComparison.Ordinal))
+            .Should().HaveCount(4, "two groups of two modules, each under its module's name");
         banner.FindAll(".ms-capability-name").Select(static x => x.TextContent.Trim()).Should().Contain(["aOne", "aTwo", "bOne", "bTwo"]);
     }
 }

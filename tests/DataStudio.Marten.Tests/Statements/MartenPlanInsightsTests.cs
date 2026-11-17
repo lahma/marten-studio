@@ -73,7 +73,7 @@ public sealed class ClashingDoc
 }
 
 /// <summary>
-/// 1.0-P3C: Marten Studio's plan insights P26 to P28 - judged against the document tables a store declares, from plans in the shape
+/// 1.0-P3C: Data Studio's plan insights P26 to P28 - judged against the document tables a store declares, from plans in the shape
 /// Marten's own statements have, with no Postgres and no store connection.
 /// </summary>
 public class MartenPlanInsightsTests

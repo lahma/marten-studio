@@ -210,7 +210,7 @@ public class OrphanRemovalPageTests
     [Fact]
     public void The_wording_says_what_the_service_does_and_does_not_leave_to_the_host()
     {
-        OrphanWording.HandOver.Should().Contain("Capabilities.CorrectProgression").And.NotContain("Marten Studio never does");
+        OrphanWording.HandOver.Should().Contain("Capabilities.CorrectProgression").And.NotContain("Data Studio never does");
         OrphanWording.RemoveMessage("X:All", null).Should()
             .Contain("removes the row X:All from mt_event_progression in this database, and nothing else")
             .And.NotContain("for this database)");

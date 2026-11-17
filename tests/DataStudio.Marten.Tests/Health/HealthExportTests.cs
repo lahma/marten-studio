@@ -259,7 +259,7 @@ public class HealthExportTests
 
         entry.Status.Should().Be(HealthStatus.Degraded);
         entry.Description.Should().Be(
-            "Marten Studio could not check: its health export failed with OptionsValidationException, logged as event 9270. Refreshed after 60 s, served for at most 120 s.");
+            "Data Studio could not check: its health export failed with OptionsValidationException, logged as event 9270. Refreshed after 60 s, served for at most 120 s.");
         entry.Description.Should().NotContain("Path", "the validation message is the log's, not the endpoint's");
         harness.StudioWarnings.Should().ContainSingle(static x => x.EventId.Id == 9270);
 

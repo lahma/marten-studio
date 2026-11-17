@@ -21,7 +21,7 @@ namespace DataStudio.Marten.Tests.Database;
 /// <summary>
 /// "Compare a connection string" (1.1-PASTE), through a real studio container: the page's gate asked first and with no tenant, the
 /// text never looked at for a visitor it refused, nothing audited, nothing logged, and no sentinel in anything that comes back.
-/// The same service serves Postgres Studio; this is the Marten Studio wording of it.
+/// The same service serves Postgres Studio; this is the Data Studio wording of it.
 /// </summary>
 public class ConnectionCompareServiceTests
 {

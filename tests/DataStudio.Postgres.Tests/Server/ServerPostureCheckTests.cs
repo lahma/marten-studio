@@ -74,7 +74,7 @@ public class ServerPostureCheckTests
             .Evaluate(new SuperuserConnectionFacts(Posture("app"), "Production", SelfHosted), Evaluation());
 
         verdict.Findings.Should().BeEmpty();
-        verdict.Note.Should().Contain("role app").And.StartWith("The store's data source");
+        verdict.Note.Should().Contain("role app").And.StartWith("The data source");
         HealthCheckRegistry.Describe(typeof(SuperuserConnectionCheck)).Gate.Should().Be(HealthGate.Database, "a role's name is the database-wide gate's (D29)");
     }
 

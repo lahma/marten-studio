@@ -23,7 +23,7 @@ public class StudioLintCheckTests
             consoleRole,
             everySchema,
             postgres ? "PostgresOptions" : "MartenOptions",
-            postgres ? "AddPostgres" : "AddMarten",
+            postgres ? "services.AddDataStudio().AddPostgres(options => ...)" : "services.AddDataStudio().AddMarten(options => ...)",
             postgres ? "PostgresCapabilities" : "MartenCapabilities",
             postgres ? "PostgresOptions.ReadOnly" : "MartenOptions.ReadOnly");
 
@@ -39,7 +39,7 @@ public class StudioLintCheckTests
         finding.Severity.Should().Be(HealthSeverity.Warning);
         finding.WhyItMatters.Should().Contain("MartenOptions.Capabilities.RunSql").And.Contain("MartenOptions.SqlConsoleRole");
         finding.Remedy!.Kind.Should().Be(HealthRemedyKind.Configuration);
-        finding.Remedy.Code.Should().Contain("// In AddMarten(options => ...)").And.Contain("options.SqlConsoleRole = ");
+        finding.Remedy.Code.Should().Contain("// In services.AddDataStudio().AddMarten(options => ...)").And.Contain("options.SqlConsoleRole = ");
         finding.Remedy.Explanation.Should().Contain("MartenOptions.SqlConsoleRole");
     }
 
@@ -50,7 +50,7 @@ public class StudioLintCheckTests
             .Findings.Single();
 
         finding.WhyItMatters.Should().Contain("PostgresOptions.SqlConsoleRole").And.NotContain("Marten");
-        finding.Remedy!.Code.Should().Contain("// In AddPostgres(options => ...)");
+        finding.Remedy!.Code.Should().Contain("// In services.AddDataStudio().AddPostgres(options => ...)");
     }
 
     [Theory]

@@ -49,7 +49,7 @@ public class CorePageSmokeTests
         var lines = credit.QuerySelectorAll(".ms-rail-credit-line").Select(static x => x.TextContent.Trim()).ToList();
         lines.Should().HaveCount(4, "the shell and its version, each module composed into it, the licence and the author, a line each");
         lines[0].Should().StartWith("Data Studio ").And.NotContain("MIT").And.NotContain("Marko");
-        lines[1].Should().Be("Postgres Studio");
+        lines[1].Should().Be("Postgres");
         lines[2].Should().Be("MIT licensed");
         lines[3].Should().Be("by Marko Lahma");
         rail.Find(".ms-sidebar-inner").LastElementChild!.ClassList.Should().Contain("ms-rail-credit", "the credit is the last thing in the rail's column, after the list");
@@ -344,7 +344,7 @@ public class CorePageSmokeTests
         var banner = context.Render<CapabilityBanner>();
 
         banner.Find("button.ms-chip").TextContent.Trim().Should().Be("0 / 4 capabilities");
-        banner.FindAll(".ms-popover-title").Select(static x => x.TextContent).Should().Equal("Postgres Studio: reads authorized like writes");
+        banner.FindAll(".ms-popover-title").Select(static x => x.TextContent).Should().Equal("Postgres: reads authorized like writes");
         banner.FindAll(".ms-capability-name").Select(static x => x.TextContent)
             .Should().Equal("RunSql", "BrowseDatabase", "ViewDefinitions", "ViewDatabaseActivity");
         banner.FindAll(".ms-capability-option").Select(static x => x.TextContent)

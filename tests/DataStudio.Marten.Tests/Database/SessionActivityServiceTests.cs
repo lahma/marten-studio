@@ -207,7 +207,7 @@ public class SessionActivityServiceTests
             .Should().Contain("MartenOptions.Capabilities.ViewDatabaseActivity", "the summary's own sentence says what the names need");
         document.RootElement.GetProperty("connections").GetProperty("database").GetProperty("total").GetInt32().Should().Be(3);
 
-        // Q36 (issue #36): Marten Studio's download carries the Replication page's WAL section too, at that page's gate - an
+        // Q36 (issue #36): Data Studio's download carries the Replication page's WAL section too, at that page's gate - an
         // unreachable database is a section with its outcome, never a withheld entry and never a thrown exception.
         document.RootElement.GetProperty("wal").ValueKind.Should().Be(System.Text.Json.JsonValueKind.Object);
         document.RootElement.GetProperty("withheld").TryGetProperty("wal", out _).Should().BeFalse();

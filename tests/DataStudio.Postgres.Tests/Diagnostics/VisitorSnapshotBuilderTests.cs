@@ -146,7 +146,7 @@ public class VisitorSnapshotBuilderTests
             Details(activity),
             Wal(),
             Registry,
-            "PostgresStudio 0.5.0",
+            "Data Studio 2.0.0",
             At).ToJson();
 
     [Fact]
@@ -261,7 +261,7 @@ public class VisitorSnapshotBuilderTests
             Details(open: true),
             Wal(),
             Registry,
-            "PostgresStudio 0.5.0",
+            "Data Studio 2.0.0",
             At);
 
         snapshot.Server.Should().BeNull();

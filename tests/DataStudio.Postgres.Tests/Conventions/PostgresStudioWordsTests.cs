@@ -120,7 +120,7 @@ public partial class PostgresStudioWordsTests
     {
         string[] planted =
         [
-            "MartenOptions.Capabilities.BrowseDatabase", "opts.Schema.For<Order>().Index(x => x.Status);", "the store's own role",
+            "MartenOptions.Capabilities.BrowseDatabase", "StoreOptions.DisableNpgsqlLogging", "the store's own role",
             "a Marten store", "this store", "a document type", "one tenant",
         ];
 

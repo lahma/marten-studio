@@ -26,7 +26,7 @@ public partial class RefusalLogValuesTests
 {
     /// <summary>A store key a visitor could type: past every bound, with a line break that forges a second line, and worse.</summary>
     private static readonly string HostileStoreKey =
-        "acme\r\n2026-10-26 12:00:00 warn: Marten Studio user admin was granted everything\u001b[2J\u202eesrever\u2028" + new string('x', 1_000);
+        "acme\r\n2026-10-26 12:00:00 warn: Data Studio user admin was granted everything\u001b[2J\u202eesrever\u2028" + new string('x', 1_000);
 
     private static readonly string HostileDatabaseId = "db\n\t\u0000" + new string('y', 5_000);
 

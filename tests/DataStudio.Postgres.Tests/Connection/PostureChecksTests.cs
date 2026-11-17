@@ -354,12 +354,11 @@ public sealed class PostureChecksTests
     }
 
     [Fact]
-    public void In_Postgres_Studios_words_there_is_no_Marten_and_the_builder_is_named()
+    public void In_the_Postgres_modules_words_there_is_no_Marten_and_the_builder_is_named()
     {
         HealthFinding finding = S11(Facts("Host=db.example", Observed(ssl: true)), postgres: true).Findings.Single();
 
         Everything(finding).Should().Contain("NpgsqlDataSourceBuilder").And.NotContain("Marten").And.NotContain("opts.");
-        Everything(S11(Facts("Host=db.example", Observed(ssl: true))).Findings.Single()).Should().Contain("opts.ConfigureNpgsqlDataSourceBuilder");
     }
 
     // ----------------------------------------------------------------------------------------------
@@ -548,20 +547,14 @@ public sealed class PostureChecksTests
     [Fact]
     public void Log_Parameters_says_it_logs_only_through_a_logger_factory_and_that_EnableParameterLogging_overrides_the_keyword()
     {
-        foreach (bool postgres in new[] { true, false })
-        {
-            HealthFinding finding = S13("Host=db.example;Log Parameters=true", "Production", postgres).Findings.Single();
+        HealthFinding finding = S13("Host=db.example;Log Parameters=true", "Production", postgres: true).Findings.Single();
 
-            finding.WhyItMatters.Should().Contain("Where the data source has a logger factory");
-            finding.Caveat.Should().Contain("only through a logger factory");
-            finding.Remedy!.Explanation.Should().Contain("EnableParameterLogging()").And.Contain("whatever this keyword says");
-        }
+        finding.WhyItMatters.Should().Contain("Where the data source has a logger factory");
+        finding.Caveat.Should().Contain("only through a logger factory");
+        finding.Remedy!.Explanation.Should().Contain("EnableParameterLogging()").And.Contain("whatever this keyword says");
 
-        // Marten Studio adds what Marten 9 does by default; Postgres Studio's words know nothing of it.
-        Everything(S13("Host=db.example;Log Parameters=true", "Production").Findings.Single())
-            .Should().Contain("StoreOptions.DisableNpgsqlLogging").And.Contain("logs nothing unless");
-        Everything(S13("Host=db.example;Log Parameters=true", "Production", postgres: true).Findings.Single())
-            .Should().NotContain("DisableNpgsqlLogging");
+        // The Marten module adds what Marten 9 does by default; the Postgres module's words know nothing of it.
+        Everything(finding).Should().NotContain("DisableNpgsqlLogging");
 
         // The other two variants carry none of it.
         Everything(S13("Host=db.example;Include Error Detail=true", "Production").Findings.Single())
@@ -569,13 +562,11 @@ public sealed class PostureChecksTests
     }
 
     [Fact]
-    public void In_Postgres_Studios_words_S13_names_no_Marten()
+    public void In_the_Postgres_modules_words_S13_names_no_Marten()
     {
         foreach (HealthFinding finding in S13("Host=db.example;Log Parameters=true", "Production", postgres: true).Findings)
         {
             Everything(finding).Should().NotContain("Marten").And.NotContain("opts.").And.Contain("NpgsqlDataSourceBuilder");
         }
-
-        Everything(S13("Host=db.example;Log Parameters=true", "Production").Findings.Single()).Should().Contain("opts.ConfigureNpgsqlDataSourceBuilder");
     }
 }

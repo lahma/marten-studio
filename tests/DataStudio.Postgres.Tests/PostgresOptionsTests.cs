@@ -241,7 +241,7 @@ public class PostgresOptionsTests
         PostgresOptions options = new() { SourceAuthorizationPolicy = "src", WriteAuthorizationPolicy = "write" };
         IStudioSettings settings = PostgresStudioSettings.Of(options);
 
-        settings.ProductName.Should().Be("Postgres Studio");
+        settings.ProductName.Should().Be("Data Studio", "the module's settings answer the shell's name; its own is its descriptor's");
         settings.OptionName("ReadOnly").Should().Be("PostgresOptions.ReadOnly");
         settings.CapabilityOption(StudioCapability.RunSql).Should().Be("PostgresOptions.Capabilities.RunSql");
         settings.AllCapabilities().Should().Be("PostgresCapabilities.All()");

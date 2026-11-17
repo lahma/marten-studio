@@ -23,7 +23,7 @@ public sealed class ShellSettingsTests
         shell.Should().NotBeSameAs(module, "the DI service IShellSettings is the shell's object, never a module's");
         shell.ReadOnlyOptionName.Should().Be("DataStudioOptions.ReadOnly");
         shell.ProductName.Should().Be("Data Studio");
-        module.ProductName.Should().Be("Marten Studio");
+        module.ProductName.Should().Be("Data Studio");
         module.ReadOnlyOption().Should().Be("MartenOptions.ReadOnly", "with neither switch on, the module's is the one a host reads to learn which exists");
     }
 

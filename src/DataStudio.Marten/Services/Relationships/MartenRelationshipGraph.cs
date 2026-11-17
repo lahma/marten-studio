@@ -158,7 +158,8 @@ internal static class MartenRelationshipGraph
             DeclaredKeys(storeOptions, isVisible),
             physicalKeys,
             readAt,
-            database);
+            database,
+            MartenStudioText.Instance);
 
     /// <summary>
     /// The .NET member behind each column Marten duplicated one into - the first one per column, ignoring case.

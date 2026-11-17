@@ -170,7 +170,7 @@ public class RebuildHandBackTests
         // The coordinator is paused, so removing the agent starts nothing; without it resuming would leave the shard down.
         daemon.StoppedAgents.Should().Equal(Shard);
         line.Should().Be(
-            "Completed. Marten Studio's pause is in effect, so nothing was started; cleared the Stopped agent the rebuild left for DailySales:All, which resuming the daemon starts.");
+            "Completed. Data Studio's pause is in effect, so nothing was started; cleared the Stopped agent the rebuild left for DailySales:All, which resuming the daemon starts.");
     }
 
     [Fact]

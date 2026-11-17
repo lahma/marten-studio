@@ -203,7 +203,7 @@ public class ShardLagAnalysisTests
     }
 
     /// <summary>
-    /// A rebuild Marten Studio started is known by its start, which cuts the run even where no reset shows - a shard that
+    /// A rebuild Data Studio started is known by its start, which cuts the run even where no reset shows - a shard that
     /// was low already.
     /// </summary>
     [Fact]
@@ -358,7 +358,7 @@ public class ShardLagAnalysisTests
         paused.Arrow.Should().BeEmpty();
         paused.HasTrend.Should().BeTrue("the page says why rather than falling back");
         paused.Summary().Should().Be(
-            "700 behind; not judged: Marten Studio paused the projection coordinator, and every lag grows until it is resumed.");
+            "700 behind; not judged: Data Studio paused the projection coordinator, and every lag grows until it is resumed.");
 
         ShardLagHistory.Build("Orders:All", growing, new ShardLagContext(Spacing, AgentStatusHere: "Paused"))
             .WithheldBecause.Should().Be("not judged: its agent here is Paused (D05)");

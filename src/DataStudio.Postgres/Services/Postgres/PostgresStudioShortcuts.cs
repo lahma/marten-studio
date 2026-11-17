@@ -5,7 +5,7 @@ namespace DataStudio.Postgres.Services.Postgres;
 /// <summary>
 /// The keyboard shortcuts of the components that live in the Postgres module: the SQL editor, the row grids and the plan view. Written from the
 /// handlers - the SQL editor's chords in studio.js (<c>enhanceEditor</c>), <c>RowGrid.OnRowKeyAsync</c> and <c>PlanIcicle.KeyAsync</c> - and listed
-/// by the database module (<see cref="Settings.DatabaseStudioModule" />), so that a host with no database module, a Kafka-only one, reads no shortcut
+/// by the database module (<see cref="Settings.DatabaseStudioModule" />), so that a host with no database module reads no shortcut
 /// it does not have.
 /// </summary>
 internal static class PostgresStudioShortcuts

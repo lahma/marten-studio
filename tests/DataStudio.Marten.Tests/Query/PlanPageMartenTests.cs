@@ -8,8 +8,8 @@ using DataStudio.Postgres.Services.Query;
 namespace DataStudio.Marten.Tests.Query;
 
 /// <summary>
-/// The Plan page under Marten Studio's own shell wiring (X3, issue #28): the page is PostgresStudio's, one copy of it, and
-/// Marten Studio gets it at its own route with its own words. A smoke test - the page's behaviour is PostgresStudio's tests'.
+/// The Plan page under Data Studio's own shell wiring (X3, issue #28): the page is PostgresStudio's, one copy of it, and
+/// Data Studio gets it at its own route with its own words. A smoke test - the page's behaviour is PostgresStudio's tests'.
 /// </summary>
 public class PlanPageMartenTests
 {

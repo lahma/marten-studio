@@ -237,7 +237,7 @@ public class ViewDefinitionsGateTests
         DatabaseRowAccess access = gate.DefinitionAccess("quartz", Other);
         access.Refusal.Should().Be(DatabaseRefusal.WritePolicy);
         access.Reason.Should().Be(DataStudio.Marten.Services.MartenStudioText.Instance.DefinitionWritePolicyDenialFor(refused))
-            .And.Contain("refused " + refused + " for this store");
+            .And.Contain("refused " + refused + " for this Marten store");
     }
 
     [Fact]
@@ -345,5 +345,7 @@ public class ViewDefinitionsGateTests
             browseAuthorized,
             Classifier(),
             policyRefusal: policyRefusal,
-            definitions: definitions);
+            text: DataStudio.Marten.Services.MartenStudioText.Instance,
+            definitions: definitions,
+            readOnlyOption: "MartenOptions.ReadOnly");
 }

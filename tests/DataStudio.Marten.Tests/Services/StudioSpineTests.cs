@@ -51,7 +51,7 @@ public class StudioSpineTests
     {
         IStudioSettings settings = MartenSpine.Settings();
 
-        settings.ProductName.Should().Be("Marten Studio");
+        settings.ProductName.Should().Be("Data Studio");
         settings.OptionName("ReadOnly").Should().Be("MartenOptions.ReadOnly");
         settings.CapabilityOption(StudioCapability.RunSql).Should().Be("MartenOptions.Capabilities.RunSql");
         settings.ReadOnlyOption().Should().Be("MartenOptions.ReadOnly");

@@ -142,7 +142,7 @@ public class DaemonControlTests
         status.CanControlAgents.Should().BeFalse("the leadership loop is running again");
 
         status.AgentControlRefusal.Should()
-            .StartWith("Marten Studio's pause is still on the record, but this daemon reports that it is running")
+            .StartWith("Data Studio's pause is still on the record, but this daemon reports that it is running")
             .And.Contain("as often as every 1 s", "the smaller interval is the one that applies");
     }
 

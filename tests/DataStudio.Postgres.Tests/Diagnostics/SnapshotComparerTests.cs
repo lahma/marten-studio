@@ -634,7 +634,7 @@ public class SnapshotComparerTests
         SnapshotComparison result = Compare(earlier, Now());
 
         result.Notices.Should().Contain("The earlier file is of other / elsewhere; you are looking at tenants / acme.");
-        result.Notices.Should().Contain(static x => x.StartsWith("The earlier file was written by SomethingElse; this is PostgresStudio.", StringComparison.Ordinal));
+        result.Notices.Should().Contain(static x => x.StartsWith("The earlier file was written by SomethingElse; this is Data Studio.", StringComparison.Ordinal));
         result.Notices.Should().Contain(static x => x.Contains("dated after now", StringComparison.Ordinal));
         result.EarlierProducer.Should().Be("SomethingElse 9.9.9");
     }

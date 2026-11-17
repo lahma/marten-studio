@@ -358,7 +358,7 @@ internal class StudioComponentContext : BunitContext
             RoutePatternFactory.Parse("/marten"),
             order: 0);
 
-        endpoint.Metadata.Add(new StudioEndpointMarker("Marten Studio", "(remedies)", isPage: true));
+        endpoint.Metadata.Add(new StudioEndpointMarker("Data Studio", "(remedies)", isPage: true));
         endpoint.Metadata.Add(new AllowAnonymousAttribute());
 
         MappedEndpoints.ObserveAnonymousPages([endpoint.Build()]);

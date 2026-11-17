@@ -315,7 +315,7 @@ public class HealthCodesTests
 
         RetiredFor("Marten").Should().NotBeEmpty("K10 was retired in 1.1, or this compares nothing");
 
-        MartenStudioDescriptor.Instance.RetiredCheckCodes.Should().BeEquivalentTo(RetiredFor("Marten"), "Marten Studio's descriptor");
+        MartenStudioDescriptor.Instance.RetiredCheckCodes.Should().BeEquivalentTo(RetiredFor("Marten"), "Data Studio's descriptor");
         PostgresStudioDescriptor.Instance.RetiredCheckCodes.Should().BeEquivalentTo(RetiredFor("Postgres"), "Postgres Studio's descriptor");
         PostgresDiagnosticsDescriptor.Instance.RetiredCheckCodes.Should().BeEquivalentTo(RetiredFor("Postgres"), "the diagnostics engine's descriptor");
     }

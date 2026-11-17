@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 
 using DataStudio.Marten.Internal;
+using DataStudio.Marten.Services;
 
 using DataStudio.Postgres.Services.Health.Export;
 
@@ -109,7 +110,9 @@ public static class MartenHealthChecksBuilderExtensions
     {
         // One runner per process however many registrations name it, so a liveness and a readiness check over
         // the same studio still cost one run per interval between them.
-        builder.Services.TryAddSingleton<HealthExportRunner>();
+        // Built with the Marten module's words, which are the ones it says "call services.AddDataStudio().AddMarten()" in when it was not added.
+        builder.Services.TryAddSingleton(static services =>
+            ActivatorUtilities.CreateInstance<HealthExportRunner>(services, MartenStudioText.Instance));
 
         return builder.Add(new HealthCheckRegistration(
             name,

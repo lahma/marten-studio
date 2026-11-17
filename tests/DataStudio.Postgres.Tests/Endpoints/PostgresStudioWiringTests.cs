@@ -81,7 +81,7 @@ public sealed class PostgresStudioWiringTests : IAsyncDisposable
         alone.GetRequiredService<HealthExportRunner>().Text.Should().BeSameAs(PostgresStudioText.Instance,
             "with no settings registered, the words are the registering studio's");
         HealthExportSummary.NotRegistered(DateTimeOffset.UnixEpoch, alone.GetRequiredService<HealthExportRunner>().Text).Problem
-            .Should().Be("Postgres Studio's services are not registered: call services.AddPostgresDiagnostics() or services.AddDataStudio().AddPostgres() as well as AddHealthChecks().AddPostgresDiagnostics()");
+            .Should().Be("Data Studio's services are not registered: call services.AddPostgresDiagnostics() or services.AddDataStudio().AddPostgres() as well as AddHealthChecks().AddPostgresDiagnostics()");
     }
 
     private sealed class Anonymous : AuthenticationStateProvider

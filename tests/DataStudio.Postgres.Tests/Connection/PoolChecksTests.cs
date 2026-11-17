@@ -192,7 +192,6 @@ public sealed class PoolChecksTests
             .And.Contain("Connection Idle Lifetime=30;Minimum Pool Size=0")
             .And.Contain("b.ConnectionStringBuilder.ConnectionIdleLifetime = 30;")
             .And.Contain("b.ConnectionStringBuilder.MinPoolSize = 0;");
-        finding.Remedy.Code.Should().Contain("opts.ConfigureNpgsqlDataSourceBuilder(b =>", "Marten Studio's words wrap the builder statements in the store's hook");
         finding.Remedy.Kind.Should().Be(HealthRemedyKind.Configuration);
         finding.Link.Should().NotBeNull();
     }
@@ -208,15 +207,13 @@ public sealed class PoolChecksTests
     }
 
     [Fact]
-    public void In_Postgres_Studios_words_there_is_no_Marten_and_no_K08_and_the_builder_is_named()
+    public void In_the_Postgres_modules_words_there_is_no_Marten_and_no_K08_and_the_builder_is_named()
     {
         HealthFinding finding = C16(Facts("Host=db.example", Observed(60_000)), postgres: true).Findings.Single();
         string text = Everything(finding);
 
         text.Should().Contain("NpgsqlDataSourceBuilder").And.Contain("b.ConnectionStringBuilder.KeepAlive = 30;");
         text.Should().NotContain("opts.").And.NotContain("K08").And.NotContain("Marten");
-
-        Everything(C16(Facts("Host=db.example", Observed(60_000))).Findings.Single()).Should().Contain("K08");
     }
 
     [Fact]
@@ -359,12 +356,9 @@ public sealed class PoolChecksTests
     }
 
     [Fact]
-    public void The_remedy_is_one_shared_data_source_and_in_Marten_Studio_hands_it_to_Marten()
+    public void The_remedy_is_one_shared_data_source()
     {
         ConnectionFacts facts = Facts("Host=db.example", siblings: new ConnectionPoolSiblings(2, 200, 0));
-
-        HealthFinding marten = C18(facts).Findings.Single();
-        marten.Remedy!.Code.Should().Contain("services.AddNpgsqlDataSource(connectionString);").And.Contain(".UseNpgsqlDataSource()");
 
         HealthFinding postgres = C18(facts, postgres: true).Findings.Single();
         postgres.Remedy!.Code.Should().Contain("services.AddNpgsqlDataSource(connectionString);");

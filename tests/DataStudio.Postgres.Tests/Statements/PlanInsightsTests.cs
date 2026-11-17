@@ -197,11 +197,10 @@ public class PlanInsightsTests
     }
 
     [Fact]
-    public void P04s_remedy_is_each_studios_own()
+    public void P04s_remedy_is_the_modules_own()
     {
         string json = Analyzed("""{"Node Type": "Seq Scan", "Filter": "(a = 1)", "Actual Rows": 1, "Rows Removed by Filter": 200000, "Actual Loops": 1}""");
 
-        Evaluate(json, Marten).Single(static x => x.Insight.Code == "P04").Remedy.Should().Be(Marten.PlanIndexRemedy).And.Contain("CreateOrUpdate");
         Evaluate(json, PostgresStudioText.Instance).Single(static x => x.Insight.Code == "P04").Remedy.Should().Be(PostgresStudioText.Instance.PlanIndexRemedy)
             .And.NotContain("Marten");
     }

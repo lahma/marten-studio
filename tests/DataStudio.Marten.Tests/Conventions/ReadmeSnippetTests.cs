@@ -45,7 +45,7 @@ public class ReadmeSnippetTests
         RegexOptions.Multiline | RegexOptions.Compiled,
         TimeSpan.FromSeconds(5));
 
-    /// <summary>The Marten Studio readme, the repository's own, and the Postgres Studio package's readme.</summary>
+    /// <summary>The Data Studio readme, the repository's own, and the Postgres Studio package's readme.</summary>
     public static TheoryData<string, string> Readmes => new()
     {
         { "README.md", "samples/DataStudio.Sample.Marten/Program.cs" },
