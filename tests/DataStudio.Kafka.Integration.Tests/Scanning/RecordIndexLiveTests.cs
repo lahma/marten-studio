@@ -44,7 +44,7 @@ public abstract class RecordIndexLiveTests(KafkaFixture fixture)
         plan.Index!.IsNarrowed.Should().BeTrue();
         plan.Estimate.Offsets.Should().Be(5);
         result.StopReason.Should().Be(KafkaScanStopReason.Completed);
-        result.Records.Should().Be(5, "the scan assigned offsets 10 to 14 of partition 1 and read nothing else");
+        result.Records.Should().Be(5, "the scan assigned offsets 10 to 14 of partition 1 and read nothing else; the result was {0}", Describe(result));
 
         // The needle at 1/33 is outside the range and was not looked for.
         matches.Select(static x => (x.Partition, x.Offset)).Should().Equal((1, 12L));
@@ -64,9 +64,31 @@ public abstract class RecordIndexLiveTests(KafkaFixture fixture)
 
         matches.Should().BeEmpty("neither range holds a needle, and the hint is where to look, not what was found");
         plan.Index!.Ranges.Single(static x => x.Partition == 1).To.Should().Be(PerPartition, "a hint is clipped to the real end of the partition");
-        result.Records.Should().Be(7);
+        result.Records.Should().Be(7, "the two clipped ranges hold seven offsets; the result was {0}", Describe(result));
         result.StopReason.Should().Be(KafkaScanStopReason.Completed);
     }
+
+    /// <summary>
+    /// The whole result for a failure message: on the 3.9 broker under a whole-suite run a narrowed scan has completed having read none of
+    /// its range (2026-11-17, twice), and the count alone does not say whether the records were refused, lost or never fetched.
+    /// </summary>
+    private static string Describe(KafkaScanResult result)
+    {
+        try
+        {
+            return System.Text.Json.JsonSerializer.Serialize(result, DescribeOptions);
+        }
+        catch (Exception e) when (e is NotSupportedException or System.Text.Json.JsonException or InvalidOperationException)
+        {
+            return result.ToString() ?? string.Empty;
+        }
+    }
+
+    private static readonly System.Text.Json.JsonSerializerOptions DescribeOptions = new()
+    {
+        IncludeFields = true,
+        Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() },
+    };
 
     [Fact]
     public async Task Search_the_whole_window_reads_what_the_hint_missed_on_a_real_broker()
