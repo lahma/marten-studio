@@ -25,7 +25,7 @@ internal sealed class MartenSessionLockLabeler : ISessionLockLabeler
 
         return source is ResolvedScope resolved
             ? For(resolved.Store, resolved.Registration.Key, classifier)
-            : throw new ArgumentException("MartenStudio labels the locks of a Marten store only.", nameof(source));
+            : throw new ArgumentException("Data Studio's Marten module labels the locks of a Marten store only.", nameof(source));
     }
 
     /// <summary>The labels for <paramref name="store" />, registered under <paramref name="storeKey" />.</summary>

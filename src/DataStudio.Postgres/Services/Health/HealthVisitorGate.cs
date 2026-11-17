@@ -81,7 +81,7 @@ internal sealed class HealthVisitorGate(
         if (!capabilities.IsEnabled(StudioCapability.ViewDatabaseActivity))
         {
             activityRefusal = capabilities.ReadOnly
-                ? "needs ViewDatabaseActivity, and " + settings.ReadOnlyOption() + " is true, which turns every capability off"
+                ? "needs ViewDatabaseActivity, and " + settings.ReadOnlyOption() + " is true, which turns " + settings.Text.EveryCapabilityOff(settings.ReadOnlyOption()) + " off"
                 : "needs " + capabilities.OptionFor(StudioCapability.ViewDatabaseActivity);
             activity = false;
             return false;

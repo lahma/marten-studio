@@ -403,10 +403,7 @@ internal sealed class ServerPageService : IServerPageService
 
     private static string StorePolicyDenial(StudioText text)
     {
-        string policy = text.ScopePolicyOption;
-
-        return "Your account may not see this database's server. The policy (" + policy + ") refused this " + text.SourceNoun
-            + " and database as a whole, with no tenant selected: the server's settings belong to no tenant.";
+        return "Your account may not see this database's server. " + text.ScopePolicyRefused("the server's settings belong to no tenant");
     }
 
     /// <summary>

@@ -119,7 +119,8 @@ public class StatementsPageTests
             capabilityEnabled: true,
             readOnly: false,
             authorized: true,
-            new DatabaseObjectClassifier([])),
+            new DatabaseObjectClassifier([]),
+            PostgresStudioText.Instance),
         DatabaseRefusal.None,
         null);
 

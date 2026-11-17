@@ -32,18 +32,22 @@ internal static class PostgresStudioText
     public const string DiagnosticsOptionsTypeName = "PostgresDiagnosticsOptions";
 
     /// <summary>The Postgres module's words.</summary>
-    public static StudioText Instance { get; } = Build(OptionsTypeName);
+    public static StudioText Instance { get; } = Build(OptionsTypeName, hasVisitors: true);
 
     /// <summary>
-    /// The same words for a host that registered <c>AddPostgresDiagnostics()</c> and no studio, which has no
-    /// <c>PostgresOptions</c>: every sentence composed over the options type names its option on <c>PostgresDiagnosticsOptions</c>.
+    /// The engine's own words, for a host that registered <c>AddPostgresDiagnostics()</c> and no studio: it has no
+    /// <c>PostgresOptions</c>, no <c>Capabilities</c> and no visitor to grant one to, so every sentence composed over the options type
+    /// names its option on <c>PostgresDiagnosticsOptions</c>, and what a studio shows a visitor with
+    /// <c>Capabilities.ViewDatabaseActivity</c> is said to be returned only when the call sets <c>IncludeActivity = true</c> (D31).
     /// Every other word is <see cref="Instance" />'s, and a studio's host never meets this instance.
     /// </summary>
-    public static StudioText DiagnosticsInstance { get; } = Build(DiagnosticsOptionsTypeName);
+    public static StudioText DiagnosticsInstance { get; } = Build(DiagnosticsOptionsTypeName, hasVisitors: false);
 
-    private static StudioText Build(string optionsTypeName) => new()
+    private static StudioText Build(string optionsTypeName, bool hasVisitors) => new()
     {
         OptionsTypeName = optionsTypeName,
+        HasVisitors = hasVisitors,
+        ModulePages = "the Postgres pages",
         SourceNoun = "data source",
         SourcePossessive = "the data source's",
         ScopePolicyName = "SourceAuthorizationPolicy",

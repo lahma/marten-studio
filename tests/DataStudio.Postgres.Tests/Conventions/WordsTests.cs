@@ -14,4 +14,16 @@ public class WordsTests
         Verify(WordsSnapshot.OfStudioText(PostgresStudioText.Instance, "PostgresOptions.ReadOnly"), extension: "txt")
             .UseDirectory("../Verify")
             .UseFileName("WordsTests_DataStudioPostgres");
+
+    /// <summary>
+    /// The engine's own words, for a host with <c>AddPostgresDiagnostics()</c> and no studio: the Postgres module's, over
+    /// <c>PostgresDiagnosticsOptions</c>, with no visitor to grant a capability to. A member that only a visitor reads (a page's refusal) is
+    /// still written, in the options type the engine has; <see cref="PostgresStudioWordsTests" /> holds that no sentence a check says names an
+    /// option that type lacks.
+    /// </summary>
+    [Fact]
+    public Task The_engines_own_words_are_pinned() =>
+        Verify(WordsSnapshot.OfStudioText(PostgresStudioText.DiagnosticsInstance, "PostgresDiagnosticsOptions.ReadOnly"), extension: "txt")
+            .UseDirectory("../Verify")
+            .UseFileName("WordsTests_DataStudioPostgresDiagnostics");
 }

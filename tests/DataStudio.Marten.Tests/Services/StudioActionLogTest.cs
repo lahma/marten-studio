@@ -52,7 +52,7 @@ public class StudioActionLogTest
 
         var ring = new StudioActionLogService();
         var captured = new CapturingLoggerProvider();
-        var log = new StudioActionLog(new StudioActivity(ring, users, []), captured.CreateFactory().CreateLogger<StudioActionLog>(), users, state, MartenStudioDescriptor.Instance);
+        var log = new StudioActionLog(new StudioActivity(ring, users, []), captured.CreateFactory().CreateLogger<StudioActionLog>(), users, state, MartenStudioDescriptor.Instance, MartenStudioSettings.Of(options));
 
         return new Harness(log, ring, captured, users, state, provider);
     }

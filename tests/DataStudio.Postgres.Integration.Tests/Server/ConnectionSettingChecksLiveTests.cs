@@ -203,7 +203,7 @@ public class ConnectionSettingChecksLiveTests(PostgresVersionMatrix matrix)
     {
         DataStudio.Postgres.Services.Health.Export.HealthExportSummary summary = DataStudio.Postgres.Services.Health.Export.HealthExportSummary.From(DateTimeOffset.UtcNow, [sweep]);
 
-        return summary.Describe(TimeSpan.FromSeconds(60)) + "\n" + JsonSerializer.Serialize(summary.ToData());
+        return summary.Describe(TimeSpan.FromSeconds(60), DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance) + "\n" + JsonSerializer.Serialize(summary.ToData());
     }
 
     private sealed class Environment(string name) : IHostEnvironment

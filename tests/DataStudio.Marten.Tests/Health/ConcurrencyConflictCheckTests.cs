@@ -96,6 +96,8 @@ public class ConcurrencyConflictCheckTests
         finding.DocumentTypes.Should().Equal(typeof(StatementDoc));
         finding.Evidence.Should().Contain(new HealthEvidence("Conflicts", TableText.Count(calls - rows)));
         finding.Caveat.Should().Contain("quick append's conflict is a unique violation").And.Contain("E02").And.Contain("C08");
+        finding.Caveat.Should().Contain("Read from pg_stat_statements as the store's own role", "a Marten host reads T22 in Marten's words, as it reads T02 and T23")
+            .And.NotContain("data source");
         finding.Remedy!.Code.Should().Contain("FetchForExclusiveWriting");
     }
 

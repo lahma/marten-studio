@@ -43,7 +43,7 @@ public sealed class MaintenanceServiceTests : IAsyncDisposable
         MaintenanceView view = await Service().GetAsync(Scope, Token);
 
         view.Refusal.Should().Be(MaintenanceRefusal.StorePolicy);
-        view.Reason.Should().Contain("SourceAuthorizationPolicy").And.Contain("no tenant selected");
+        view.Reason.Should().Contain("SourceAuthorizationPolicy").And.NotContain("tenant", "a plain data source has no tenants");
         facts.Reads.Should().Be(0, "a refused visitor costs the database nothing");
     }
 
@@ -354,7 +354,8 @@ public sealed class MaintenanceServiceTests : IAsyncDisposable
                 capabilityEnabled: open,
                 readOnly: false,
                 authorized: open ? true : null,
-                new DatabaseObjectClassifier([]));
+                new DatabaseObjectClassifier([]),
+                DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance);
 
             return Task.FromResult(new DatabaseGateRead(built, DatabaseRefusal.None, null));
         }

@@ -90,22 +90,23 @@ internal static class RelationshipGraphBuilder
     /// The visitor's gate and the relations it admits, or <see langword="null" /> for the source's own nodes only.
     /// </param>
     /// <param name="text">
-    /// The studio's words for a key it cannot draw (1.0-HARD): Marten Studio's, which name document types, unless a studio over
-    /// plain data sources says otherwise.
+    /// The words of the module the page belongs to, for a key it cannot draw: the Marten module's name document types, the Postgres
+    /// module's do not.
     /// </param>
     public static RelationshipGraph Build(
         RelationshipNodeSet nodes,
         IReadOnlyList<RelationshipDeclaredKey> declared,
         IReadOnlyList<PhysicalForeignKey> physicalKeys,
         DateTimeOffset readAt,
-        RelationshipDatabaseView? database = null,
-        StudioText? text = null)
+        StudioText text,
+        RelationshipDatabaseView? database = null)
     {
         ArgumentNullException.ThrowIfNull(nodes);
         ArgumentNullException.ThrowIfNull(declared);
         ArgumentNullException.ThrowIfNull(physicalKeys);
+        ArgumentNullException.ThrowIfNull(text);
 
-        var builder = new Builder(nodes, database, text ?? StudioText.Of(null));
+        var builder = new Builder(nodes, database, text);
 
         builder.RegisterTables(physicalKeys);
         builder.AddDeclared(declared);

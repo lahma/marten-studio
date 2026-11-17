@@ -136,7 +136,7 @@ public class AuroraServiceTests
 
         AuroraView view = await harness.Service.GetAsync(Scope, Token);
 
-        view.Refused.Should().Contain("PostgresOptions.SourceAuthorizationPolicy").And.Contain("the server belongs to no tenant");
+        view.Refused.Should().Contain("PostgresOptions.SourceAuthorizationPolicy").And.NotContain("tenant", "a plain data source has no tenants");
         view.IsAurora.Should().BeFalse("nothing was read to say so");
         harness.Cache.ReadCount.Should().Be(0);
         harness.Cache.SessionReadCount.Should().Be(0);

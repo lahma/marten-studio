@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 
+using DataStudio.Marten.Services;
 using DataStudio.Postgres.Internal.Sql;
 using DataStudio.Postgres.Services.Database;
 using DataStudio.Postgres.Services.Health;
@@ -102,7 +103,8 @@ public class HealthSweeperCoverageTests
             capabilityEnabled: true,
             readOnly: false,
             authorized: open,
-            new DatabaseObjectClassifier([])),
+            new DatabaseObjectClassifier([]),
+            MartenStudioText.Instance),
         DatabaseRefusal.None,
         null);
 

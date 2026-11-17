@@ -331,7 +331,7 @@ internal sealed partial class ProjectionDataService
         if (!capabilities.IsEnabled(StudioCapability.ViewDatabaseActivity))
         {
             return (false, capabilities.ReadOnly
-                ? "Naming sessions needs ViewDatabaseActivity, and " + capabilities.ReadOnlyOptionName + " is true, which turns every capability off."
+                ? "Naming sessions needs ViewDatabaseActivity, and " + capabilities.ReadOnlyOptionName + " is true, which turns " + capabilities.EveryCapabilityOff + " off."
                 : "Naming sessions needs " + StudioCapabilityGuard.OptionName(StudioCapability.ViewDatabaseActivity) + ".");
         }
 

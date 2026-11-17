@@ -341,7 +341,7 @@ internal sealed class ArchiverFailingCheck : HealthCheck<ArchiverFailingFacts>
         {
             yield return new HealthEvidence("archive_command", settings.ArchiveCommand switch
             {
-                ArchiveCommandState.Set => "set - its text is shown with " + text.OptionName("Capabilities.ViewDatabaseActivity"),
+                ArchiveCommandState.Set => "set - its text is " + text.ActivityShownWith,
                 ArchiveCommandState.Empty => "empty: Postgres keeps every WAL segment and archives none",
                 ArchiveCommandState.Disabled => "disabled",
                 _ => "not shown to role " + facts.Grants.ReadsAs,

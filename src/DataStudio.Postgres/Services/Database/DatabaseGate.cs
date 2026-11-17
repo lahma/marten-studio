@@ -86,6 +86,10 @@ internal sealed class DatabaseGate
     /// <param name="readOnly"><c>ReadOnly</c>.</param>
     /// <param name="authorized">The policies' answer; <see langword="null" /> when not asked.</param>
     /// <param name="classifier">Whose each object is.</param>
+    /// <param name="text">
+    /// The module's own words for each refusal (<see cref="IDiagnosticsSettings.Text" />): <c>DatabaseAccess</c>, the gate's one
+    /// builder, hands the settings' over, and a test says whose it is building for.
+    /// </param>
     /// <param name="sqlConsoleRole">The role reads run as, for the privilege sentence.</param>
     /// <param name="policyRefusal">
     /// When <paramref name="authorized" /> is <see langword="false" />, which policy said no:
@@ -95,11 +99,6 @@ internal sealed class DatabaseGate
     /// <param name="otherStores">
     /// What this visitor may know and read of every other registered store, by key. A store missing from it
     /// is shown as the classifier has it.
-    /// </param>
-    /// <param name="text">
-    /// The studio's own words for each refusal (<see cref="IDiagnosticsSettings.Text" />). <c>DatabaseAccess</c>, the gate's one
-    /// builder, always hands the settings' over; <see langword="null" /> is the Postgres module's, for a test that builds a gate
-    /// by hand.
     /// </param>
     /// <param name="definitions">
     /// The answer for <c>ViewDefinitions</c>, the second way in to a definition: on and not <c>ReadOnly</c>, and both
@@ -119,11 +118,11 @@ internal sealed class DatabaseGate
         bool readOnly,
         bool? authorized,
         DatabaseObjectClassifier classifier,
+        StudioText text,
         string? sqlConsoleRole = null,
         DatabaseRefusal policyRefusal = DatabaseRefusal.WritePolicy,
         string? storeKey = null,
         IReadOnlyDictionary<string, DatabaseStoreAccess>? otherStores = null,
-        StudioText? text = null,
         DatabasePolicyAnswer? definitions = null,
         string? readOnlyOption = null)
     {
@@ -131,8 +130,8 @@ internal sealed class DatabaseGate
         ArgumentNullException.ThrowIfNull(liveSchemas);
         ArgumentNullException.ThrowIfNull(configuredEntries);
         ArgumentNullException.ThrowIfNull(classifier);
+        ArgumentNullException.ThrowIfNull(text);
 
-        text ??= StudioText.Of(null);
         readOnlyOption ??= text.OptionName("ReadOnly");
 
         Classifier = classifier;

@@ -4,36 +4,57 @@ using System.Text.RegularExpressions;
 namespace DataStudio.Marten.Tests.Conventions;
 
 /// <summary>
-/// Reads the text a visitor can be shown out of the shipped source: the string literals of a C# file, and the markup and code of a Razor file
-/// with its comments taken out. The three product names of 1.x are looked for in that text only - an identifier such as <c>KStudioLog</c> is
-/// not text a visitor reads, and a comment is not either.
+/// Reads the text a visitor can be shown out of the shipped source: the string literals of a C# file (concatenations joined), the markup and code of a
+/// Razor file with its comments taken out, and the text files under <c>wwwroot</c> with theirs. The names of 1.x are looked for in that text only -
+/// an identifier such as <c>KStudioLog</c> is not text a visitor reads, and a comment is not either.
 /// </summary>
 internal static partial class ProductNameScan
 {
     /// <summary>
     /// The 1.x names no sentence, title, credit, tile or heading says any more: the product is Data Studio, and a module is Marten, Postgres or Kafka.
-    /// <c>KStudio</c> is looked for as a whole word, so that an identifier that begins with it is not one.
+    /// Both spellings of each - the product's ("Marten Studio") and the type's (<c>MartenStudio</c>) - because a message that names a type is read too.
+    /// A name is a name when nothing that could continue an identifier follows it (<c>MartenStudioDescriptor</c> and <c>KStudioValue</c> are the
+    /// types' and members', which a Razor file's code names and a visitor never reads), and <c>KStudio</c> must begin a word, so that nothing
+    /// that merely ends in it is one.
     /// </summary>
     public static readonly Regex Names = NamesRegex();
 
     /// <summary>
-    /// The literals that may keep one of the names, each with its reason. Empty today: a package id, a header a peer expects or a name a protocol
-    /// fixes would be listed here, by <c>file</c> and <c>literal</c>, and nothing else.
+    /// The literals that may keep one of the names, each with its reason, by <c>file</c> (<c>*</c> for any) and the exact text: a name a
+    /// visitor's browser or a host has already saved, a package id or a name a protocol fixes, and nothing else. The allowed text is taken out
+    /// of what is scanned, so the rest of the same literal is still read.
     /// </summary>
-    public static readonly IReadOnlyList<(string File, string Literal, string Why)> Allowed = [];
+    public static readonly IReadOnlyList<(string File, string Literal, string Why)> Allowed =
+    [
+        ("src/DataStudio.Postgres/Services/Health/HealthMutes.cs", "PostgresStudio.Health.MuteKeys.v1",
+            "Persisted: the data-protection purpose a mute's key is protected under, so a new name would orphan every mute a host has saved"),
+        ("src/DataStudio/Components/Layout/StudioLayout.razor", "MartenStudio.Preferences",
+            "The key the prerendered theme and time zone are handed to the circuit under, beside the ms_theme and ms_tz cookies (which carry no product "
+            + "name and keep theirs): kept so that a visitor's saved theme survives, as the packet that renamed the words decided"),
+        ("*", "martenStudio",
+            "The browser global studio.js defines and the interop calls name (martenStudio.prefs, .clipboard, .dialog ...): one identifier on both sides, "
+            + "not a sentence a visitor reads, and kept so that a host's own script that reaches it keeps working"),
+    ];
 
-    [GeneratedRegex(@"Marten Studio|Postgres Studio|\bKStudio\b", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 5000)]
+    [GeneratedRegex(@"(?:[Mm]arten ?Studio|Postgres ?Studio|\bKStudio)(?![A-Za-z0-9_])", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 5000)]
     private static partial Regex NamesRegex();
 
     [GeneratedRegex(@"@\*.*?\*@|<!--.*?-->|/\*.*?\*/", RegexOptions.Singleline | RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 5000)]
     private static partial Regex BlockComments();
 
-    /// <summary>The text a visitor can read in <paramref name="source" />: literals of a <c>.cs</c> file, the whole of a <c>.razor</c> file below its comments.</summary>
+    /// <summary>The close of one literal, a <c>+</c>, and the open of the next: <c>"Marten " + "Studio"</c> is one sentence.</summary>
+    [GeneratedRegex("\"\\s*\\+\\s*[$@]{0,2}\"", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 5000)]
+    private static partial Regex Concatenation();
+
+    /// <summary>The text files under <c>wwwroot</c> a visitor's browser is served, by extension.</summary>
+    public static readonly string[] ServedExtensions = [".js", ".css", ".html", ".json", ".svg", ".txt", ".md"];
+
+    /// <summary>The text a visitor can read in <paramref name="source" />: literals of a <c>.cs</c> file, the whole of a <c>.razor</c> file or a served file below its comments.</summary>
     /// <param name="path">The file's path, whose extension says which it is.</param>
     /// <param name="source">The file's text.</param>
     public static IEnumerable<string> TextOf(string path, string source)
     {
-        if (path.EndsWith(".razor", StringComparison.OrdinalIgnoreCase))
+        if (path.EndsWith(".razor", StringComparison.OrdinalIgnoreCase) || ServedExtensions.Any(x => path.EndsWith(x, StringComparison.OrdinalIgnoreCase)))
         {
             string markup = BlockComments().Replace(source, " ");
 
@@ -41,7 +62,7 @@ internal static partial class ProductNameScan
             yield break;
         }
 
-        foreach (string literal in Literals(source))
+        foreach (string literal in Literals(Concatenation().Replace(source, string.Empty)))
         {
             yield return literal;
         }

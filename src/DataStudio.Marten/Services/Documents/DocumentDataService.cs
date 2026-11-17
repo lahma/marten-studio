@@ -1117,7 +1117,7 @@ internal sealed partial class DocumentDataService : IDocumentDataService
             // that is the whole of it: a large table, and a header that says "?" about it.
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                logger.LogDebug(exception, "Data Studio's count of '{Alias}' timed out", table.Alias);
+                logger.LogDebug(exception, "Data Studio's count of '{Alias}' timed out", StudioLogValue.Cap(table.Alias));
             }
 
             return DocumentCount.Unknown;
@@ -1797,7 +1797,7 @@ internal sealed partial class DocumentDataService : IDocumentDataService
             // of a two-second budget is the budget working, so it is Debug.
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                logger.LogDebug(exception, "Data Studio's rail count of '{Alias}' timed out", table.Alias);
+                logger.LogDebug(exception, "Data Studio's rail count of '{Alias}' timed out", StudioLogValue.Cap(table.Alias));
             }
 
             return DocumentCount.Unknown;

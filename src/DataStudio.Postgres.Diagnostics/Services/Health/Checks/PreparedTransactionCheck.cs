@@ -107,8 +107,7 @@ internal sealed class PreparedTransactionCheck : HealthCheck<PreparedTransaction
             Evidence = evidence,
             Caveat =
                 "Read in pg_prepared_xacts, for this database, at " + EvidenceTime.Utc(facts.ReadAt)
-                + ". Its global identifier and owner are shown only with "
-                + evaluation.Text.OptionName("Capabilities.ViewDatabaseActivity") + ".",
+                + ". Its global identifier and owner are " + evaluation.Text.ActivityShownOnlyWith + ".",
             Remedy = null,
             Link = SessionEvidence.SessionsLink,
         });

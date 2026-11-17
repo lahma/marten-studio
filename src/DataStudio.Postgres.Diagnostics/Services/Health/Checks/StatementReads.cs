@@ -99,10 +99,10 @@ internal sealed record StatementReadOutcome(StatementReadState State, StatementE
     /// <summary>What Postgres said when the state is one Postgres raised (<see cref="StatementReadState.NotPreloaded" />).</summary>
     public Exception? Cause { get; init; }
 
-    /// <summary>The sentence a check's row says for a state that is not <see cref="StatementReadState.Read" />: H7's, unchanged.</summary>
-    public string? Reason => ReasonIn(StudioText.Of(null));
-
-    /// <summary><see cref="Reason" /> in the words of the studio <paramref name="text" /> is - whose role recorded nothing.</summary>
+    /// <summary>
+    /// The sentence a check's row says for a state that is not <see cref="StatementReadState.Read" />, in the words of the module
+    /// <paramref name="text" /> belongs to - whose role recorded nothing.
+    /// </summary>
     /// <param name="text">The studio's words.</param>
     public string? ReasonIn(StudioText text)
     {
@@ -268,7 +268,7 @@ internal static partial class StatementReads
         + "shared_preload_libraries, which takes a PostgreSQL restart. Until then the statement checks have nothing to read.";
 
     /// <summary>The read, once per sweep for every statement check that asks.</summary>
-    /// <exception cref="HealthCheckUnavailableException">An expected state stopped it: its row's reason (<see cref="StatementReadOutcome.Reason" />).</exception>
+    /// <exception cref="HealthCheckUnavailableException">An expected state stopped it: its row's reason (<see cref="StatementReadOutcome.ReasonIn" />).</exception>
     public static Task<StatementRead> ReadAsync(HealthCheckContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
@@ -797,13 +797,13 @@ internal static class StatementWindows
     /// <param name="read">The statement read.</param>
     /// <param name="window">The window the finding measured.</param>
     /// <param name="history">The advisor's samples.</param>
-    /// <param name="text">The studio's words for whose role it read as, or <see langword="null" /> for MartenStudio's.</param>
-    public static string Caveat(StatementRead read, StatementWindow window, HealthHistoryView history, StudioText? text = null)
+    /// <param name="text">The words of the module the sweep runs in, for whose role it read as: always the evaluation's own.</param>
+    public static string Caveat(StatementRead read, StatementWindow window, HealthHistoryView history, StudioText text)
     {
         ArgumentNullException.ThrowIfNull(read);
         ArgumentNullException.ThrowIfNull(window);
         ArgumentNullException.ThrowIfNull(history);
-        text ??= StudioText.Of(null);
+        ArgumentNullException.ThrowIfNull(text);
 
         string when = window.Watched
             ? "Measured " + Describe(window, read.ReadAt) + ", between two statement checks."

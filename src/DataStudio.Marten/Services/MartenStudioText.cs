@@ -16,6 +16,7 @@ internal static class MartenStudioText
     public static StudioText Instance { get; } = new()
     {
         OptionsTypeName = "MartenOptions",
+        ModulePages = "the Marten pages",
         SourceNoun = "Marten store",
         SourcePossessive = "the store's",
         ScopePolicyName = "StoreAuthorizationPolicy",

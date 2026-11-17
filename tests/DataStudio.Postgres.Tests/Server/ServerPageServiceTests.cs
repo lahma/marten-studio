@@ -47,7 +47,8 @@ public class ServerPageServiceTests
             .GetAsync(new StudioScope("default", "default", "a-tenant"), Token);
 
         view.Refusal.Should().Be(ServerRefusal.StorePolicy);
-        view.Reason.Should().Contain("PostgresOptions.SourceAuthorizationPolicy").And.Contain("with no tenant selected");
+        view.Reason.Should().Contain("The source policy (PostgresOptions.SourceAuthorizationPolicy) refused this data source and database")
+            .And.NotContain("tenant", "a plain data source has no tenants");
         provider.GetRequiredService<ServerSettingsFactsCache>().ReadCount.Should().Be(0, "nothing of the server is read for a refused visitor");
         // PostgresResource carries no tenant to assert on; that the question is the tenant-less one is
         // DataStudio.Marten.Tests' ServerPageStorePolicyTests, through MartenStoreResource.TenantId.

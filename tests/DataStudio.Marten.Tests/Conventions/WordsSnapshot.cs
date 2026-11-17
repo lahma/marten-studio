@@ -21,7 +21,10 @@ namespace DataStudio.Marten.Tests.Conventions;
 /// </remarks>
 internal static class WordsSnapshot
 {
-    /// <summary>The words held by an instance: the public string, bool and dictionary members, and the string methods the caller has samples for.</summary>
+    /// <summary>
+    /// The words held by an instance: the public string, bool and dictionary members, and the string methods the caller has samples for. A
+    /// public member of any other kind, or a method that returns anything but a string, fails the snapshot rather than being skipped.
+    /// </summary>
     /// <param name="words">The words.</param>
     /// <param name="samples">The arguments to call each string method with, by method name: one call per argument list.</param>
     /// <returns>The snapshot text, ending with a line feed.</returns>
@@ -50,12 +53,25 @@ internal static class WordsSnapshot
                     ? "(none)"
                     : string.Join('\n', dictionary.OrderBy(static x => x.Key, StringComparer.Ordinal).Select(static x => x.Key + " = " + x.Value))));
             }
+            else
+            {
+                throw new InvalidOperationException(
+                    "The words have a property, " + property.Name + " (" + property.PropertyType.Name + "), the snapshot cannot write: a baseline that skips it would let "
+                    + "a sentence move unseen. Make it a string, a bool or a dictionary of strings, or teach the snapshot to write it.");
+            }
         }
 
         foreach (MethodInfo method in words.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
-                     .Where(static x => !x.IsSpecialName && x.ReturnType == typeof(string))
+                     .Where(static x => !x.IsSpecialName)
                      .OrderBy(static x => x.Name, StringComparer.Ordinal))
         {
+            if (method.ReturnType != typeof(string))
+            {
+                throw new InvalidOperationException(
+                    "The words have a method, " + method.Name + ", that returns " + method.ReturnType.Name + ", which the snapshot cannot write: "
+                    + "a baseline that skips it would let a sentence move unseen. Make it return the sentence, or teach the snapshot to write it.");
+            }
+
             if (!samples.TryGetValue(method.Name, out object?[][]? calls))
             {
                 throw new InvalidOperationException(
@@ -85,6 +101,8 @@ internal static class WordsSnapshot
             ["DefinitionReadOnlyDenial"] = switches,
             ["SessionsReadOnlyDenial"] = switches,
             ["StatementsReadOnlyDenial"] = switches,
+            ["EveryCapabilityOff"] = switches,
+            ["ScopePolicyRefused"] = [[null], ["a thing belongs to no tenant"]],
             ["DefinitionWritePolicyDenialFor"] = [["ViewDefinitions"], ["BrowseDatabase"], ["ViewDefinitions and BrowseDatabase"]],
             ["OptionName"] = [["Example"]],
             ["CapabilityOption"] = [["Example"]],
@@ -103,20 +121,44 @@ internal static class WordsSnapshot
         List<(string Name, string Value)> entries = [];
         List<string> skipped = [];
 
-        foreach (FieldInfo field in type.GetFields(BindingFlags.Public | BindingFlags.Static).Where(static x => x.IsLiteral && x.FieldType == typeof(string)).OrderBy(static x => x.Name, StringComparer.Ordinal))
+        foreach (FieldInfo field in type.GetFields(BindingFlags.Public | BindingFlags.Static).OrderBy(static x => x.Name, StringComparer.Ordinal))
         {
-            entries.Add((field.Name, (string) field.GetRawConstantValue()!));
+            if (field.FieldType == typeof(string))
+            {
+                entries.Add((field.Name, (string) (field.IsLiteral ? field.GetRawConstantValue()! : field.GetValue(null)!)));
+            }
+            else if (!(field.IsLiteral && field.FieldType == typeof(int)))
+            {
+                // A numeric constant is a limit the sentences are built over, not a sentence; anything else is a member the snapshot cannot write.
+                throw new InvalidOperationException(
+                    "The words have a field, " + field.Name + " (" + field.FieldType.Name + "), the snapshot cannot write: a baseline that skips it would let "
+                    + "a sentence move unseen. Make it a string, or teach the snapshot to write it.");
+            }
         }
 
-        foreach (PropertyInfo property in type.GetProperties(BindingFlags.Public | BindingFlags.Static).Where(static x => x.PropertyType == typeof(string)).OrderBy(static x => x.Name, StringComparer.Ordinal))
+        foreach (PropertyInfo property in type.GetProperties(BindingFlags.Public | BindingFlags.Static).OrderBy(static x => x.Name, StringComparer.Ordinal))
         {
+            if (property.PropertyType != typeof(string))
+            {
+                throw new InvalidOperationException(
+                    "The words have a property, " + property.Name + " (" + property.PropertyType.Name + "), the snapshot cannot write: a baseline that skips it "
+                    + "would let a sentence move unseen. Make it a string, or teach the snapshot to write it.");
+            }
+
             entries.Add((property.Name, (string) property.GetValue(null)!));
         }
 
         foreach (MethodInfo method in type.GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.DeclaredOnly)
-                     .Where(static x => !x.IsSpecialName && x.ReturnType == typeof(string))
+                     .Where(static x => !x.IsSpecialName)
                      .OrderBy(static x => x.Name, StringComparer.Ordinal).ThenBy(static x => x.GetParameters().Length))
         {
+            if (method.ReturnType != typeof(string))
+            {
+                throw new InvalidOperationException(
+                    "The words have a method, " + method.Name + ", that returns " + method.ReturnType.Name + ", which the snapshot cannot write: "
+                    + "a baseline that skips it would let a sentence move unseen. Make it return the sentence, or teach the snapshot to write it.");
+            }
+
             IReadOnlyList<object?[]>? calls = CallsFor(method, objects);
 
             if (calls is null)

@@ -146,7 +146,7 @@ internal sealed partial class SchemaDataService
         if (!capabilities.IsEnabled(StudioCapability.ViewDatabaseActivity))
         {
             return (false, capabilities.ReadOnly
-                ? "Sessions on these tables are not shown: they are other people's activity and need ViewDatabaseActivity, and " + capabilities.ReadOnlyOptionName + " is true, which turns every capability off."
+                ? "Sessions on these tables are not shown: they are other people's activity and need ViewDatabaseActivity, and " + capabilities.ReadOnlyOptionName + " is true, which turns " + capabilities.EveryCapabilityOff + " off."
                 : "Sessions on these tables are not shown: they are other people's activity and need " + StudioCapabilityGuard.OptionName(StudioCapability.ViewDatabaseActivity) + ".");
         }
 

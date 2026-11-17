@@ -104,7 +104,7 @@ internal sealed class RelationshipDataService : IRelationshipDataService
 
             PhysicalForeignKeyRead keys = await reads.ForeignKeysAsync(resolved, own.OwnSchemas, cancellationToken).ConfigureAwait(false);
 
-            RelationshipGraph graph = RelationshipGraphBuilder.Build(own, declared, keys.Keys, readAt, view, reads.Text);
+            RelationshipGraph graph = RelationshipGraphBuilder.Build(own, declared, keys.Keys, readAt, reads.Text, view);
 
             return graph with
             {

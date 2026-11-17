@@ -38,6 +38,32 @@ public class ShortcutSheetMartenTests
         titles.Should().Contain("JSON viewer (a row has focus)", "the shared groups are still there");
     }
 
+    /// <summary>
+    /// The SQL editor, the row grids and the plan view are components of the Postgres module, which the Marten module is built on: a Marten host
+    /// has all three, between the shell's groups and its own, and the sheet says so (the Postgres host's is held by <c>ShortcutSheetTests</c>).
+    /// </summary>
+    [Fact]
+    public void The_Marten_sheet_lists_the_database_modules_three_groups_between_the_shells_and_its_own()
+    {
+        using BunitContext context = new();
+        context.Services.AddSingleton(ShellOf(MartenStudioDescriptor.Instance));
+
+        string[] titles = [.. context.Render<ShortcutSheet>().FindAll(".ms-shortcuts-title").Select(static x => x.TextContent.Trim())];
+
+        titles.Should().Equal(
+            "Anywhere",
+            "In a dialog",
+            "Menus",
+            "JSON viewer (a row has focus)",
+            "JSON viewer search box",
+            "SQL editor",
+            "Table rows (a row has focus)",
+            "Plan icicle (a frame has focus)",
+            "Document lists (a row has focus)",
+            "LINQ query (a box has focus)",
+            "Document editor");
+    }
+
     [Fact]
     public void The_document_editors_keys_are_listed_as_the_script_answers_them()
     {

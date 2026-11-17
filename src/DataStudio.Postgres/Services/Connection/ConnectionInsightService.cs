@@ -440,11 +440,7 @@ internal sealed class ConnectionInsightService : IConnectionInsightService
     /// <summary>The sentence for a visitor the source policy refused. Shared with the paste-to-compare service.</summary>
     internal static string StorePolicyDenial(IStudioSettings settings)
     {
-        StudioText text = settings.Text;
-        string policy = text.ScopePolicyOption;
-
-        return "Your account may not see how this application connects. The policy (" + policy + ") refused this " + text.SourceNoun
-            + " and database as a whole, with no tenant selected: a connection belongs to no tenant.";
+        return "Your account may not see how this application connects. " + settings.Text.ScopePolicyRefused("a connection belongs to no tenant");
     }
 
     /// <summary>An exception as the page may say it: its SQLSTATE, or its type - never its message, which can name what a gate withholds.</summary>

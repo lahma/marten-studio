@@ -367,7 +367,7 @@ internal sealed class AuroraService : IAuroraService
         if (!capabilities.IsEnabled(StudioCapability.ViewDatabaseActivity))
         {
             return (false, capabilities.ReadOnly
-                ? "Each session's waits need " + capability + ", and " + settings.ReadOnlyOption() + " is true, which turns every capability off."
+                ? "Each session's waits need " + capability + ", and " + settings.ReadOnlyOption() + " is true, which turns " + text.EveryCapabilityOff(settings.ReadOnlyOption()) + " off."
                 : "Each session's waits - its process id, role and application - need " + capability + ".");
         }
 
@@ -378,11 +378,7 @@ internal sealed class AuroraService : IAuroraService
 
     private string StorePolicyDenial()
     {
-        StudioText text = settings.Text;
-        string policy = text.ScopePolicyOption;
-
-        return "Your account may not see this database's server. The policy (" + policy + ") refused this " + text.SourceNoun
-            + " and database as a whole, with no tenant selected: the server belongs to no tenant.";
+        return "Your account may not see this database's server. " + settings.Text.ScopePolicyRefused("the server belongs to no tenant");
     }
 
     private void RecordFirstRead(ResolvedSource resolved, StudioScope whole)

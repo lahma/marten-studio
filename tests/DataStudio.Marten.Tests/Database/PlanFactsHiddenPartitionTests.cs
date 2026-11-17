@@ -20,7 +20,8 @@ public class PlanFactsHiddenPartitionTests
         capabilityEnabled: true,
         readOnly: false,
         authorized: true,
-        Classifier());
+        Classifier(),
+        DataStudio.Marten.Services.MartenStudioText.Instance);
 
     private static PlanFactsResolvedRow Partition(string[] ancestorSchemas, string[] ancestorNames) =>
         new(1, 16_385, DocumentSchema, "mt_doc_dbsecret_acme", "r") { AncestorSchemas = ancestorSchemas, AncestorNames = ancestorNames };

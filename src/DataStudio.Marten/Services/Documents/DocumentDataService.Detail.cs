@@ -411,7 +411,7 @@ internal sealed partial class DocumentDataService
             {
                 if (logger.IsEnabled(LogLevel.Debug))
                 {
-                    logger.LogDebug(exception, "Data Studio could not probe '{Alias}' for an id", table.Alias);
+                    logger.LogDebug(exception, "Data Studio could not probe '{Alias}' for an id", StudioLogValue.Cap(table.Alias));
                 }
 
                 continue;
@@ -510,7 +510,7 @@ internal sealed partial class DocumentDataService
         {
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                logger.LogDebug(exception, "Data Studio could not probe '{Alias}' for an id", table.Alias);
+                logger.LogDebug(exception, "Data Studio could not probe '{Alias}' for an id", StudioLogValue.Cap(table.Alias));
             }
 
             return false;

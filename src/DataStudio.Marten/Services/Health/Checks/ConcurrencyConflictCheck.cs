@@ -222,7 +222,7 @@ internal sealed partial class ConcurrencyConflictCheck : HealthCheck<Concurrency
                 new HealthEvidence("Statements", statements),
                 new HealthEvidence("Window", StatementWindows.Describe(span, read.ReadAt)),
             ],
-            Caveat = StatementWindows.Caveat(read, span, evaluation.History)
+            Caveat = StatementWindows.Caveat(read, span, evaluation.History, evaluation.Text)
                 + " A statement is counted only when it completes: a quick append's conflict is a unique violation that fails its "
                 + "statement, so it is never counted here - E02 counts the tombstones a failed rich append leaves, and C08 the rollbacks.",
             Remedy = streams

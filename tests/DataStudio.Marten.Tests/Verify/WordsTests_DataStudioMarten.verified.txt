@@ -1,3 +1,9 @@
+[ActivityShownOnlyWith]
+shown only with MartenOptions.Capabilities.ViewDatabaseActivity
+
+[ActivityShownWith]
+shown with MartenOptions.Capabilities.ViewDatabaseActivity
+
 [AmbiguousPoolNotChecked]
 More than one Npgsql pool in this process uses this database's connection string - the host's own AddNpgsqlDataSource beside Marten's, or NpgsqlConnections opened with Marten's connection string - and Npgsql reports each under that same name. Their numbers differ, so which pool is Marten's cannot be told, and the pool is not judged; naming the host's data source (NpgsqlDataSourceBuilder.Name), or giving its connections an Application Name of their own, tells them apart.
 
@@ -90,6 +96,9 @@ false
 [GenericPlanPlaceholders]
  - the JSON member names Marten writes into its SQL included - are placeholders; a filter on data ->> $n can never use an expression index in that plan, so a sequential scan filtering on one does not show that the table lacks an index.
 
+[HasVisitors]
+true
+
 [HealthCheckRegistration]
 services.AddDataStudio().AddMarten() as well as AddHealthChecks().AddMartenDiagnostics()
 
@@ -160,6 +169,9 @@ the Schema screen's Tables tab shows which parameters the partitions differ on
 
 [MigrationBehindVacuum]
 a migration queued behind it (ApplyAllDatabaseChangesOnStartup, db-apply)
+
+[ModulePages]
+the Marten pages
 
 [NamedSchemasAreOwn]
 false
@@ -376,7 +388,7 @@ every document Marten upserts leaves a dead row version that is never cleared
 including a document or an event the store still points at
 
 [BrowseReadOnlyDenial("MartenOptions.ReadOnly")]
-MartenOptions.ReadOnly is true, which turns MartenOptions.Capabilities.BrowseDatabase off with every other capability.
+MartenOptions.ReadOnly is true, which turns MartenOptions.Capabilities.BrowseDatabase off with every other capability of the Marten pages.
 
 [BrowseReadOnlyDenial("DataStudioOptions.ReadOnly")]
 DataStudioOptions.ReadOnly is true, which turns MartenOptions.Capabilities.BrowseDatabase off with every other capability.
@@ -391,7 +403,7 @@ Title of the check
 Title of the check
 
 [DefinitionReadOnlyDenial("MartenOptions.ReadOnly")]
-MartenOptions.ReadOnly is true, which turns MartenOptions.Capabilities.ViewDefinitions and MartenOptions.Capabilities.BrowseDatabase off with every other capability.
+MartenOptions.ReadOnly is true, which turns MartenOptions.Capabilities.ViewDefinitions and MartenOptions.Capabilities.BrowseDatabase off with every other capability of the Marten pages.
 
 [DefinitionReadOnlyDenial("DataStudioOptions.ReadOnly")]
 DataStudioOptions.ReadOnly is true, which turns MartenOptions.Capabilities.ViewDefinitions and MartenOptions.Capabilities.BrowseDatabase off with every other capability.
@@ -405,17 +417,29 @@ Your account may not read definitions here. The write policy (MartenOptions.Writ
 [DefinitionWritePolicyDenialFor("ViewDefinitions and BrowseDatabase")]
 Your account may not read definitions here. The write policy (MartenOptions.WriteAuthorizationPolicy, or StoreAuthorizationPolicy when no write policy is set) refused ViewDefinitions and BrowseDatabase for this Marten store and database as a whole, with no tenant selected.
 
+[EveryCapabilityOff("MartenOptions.ReadOnly")]
+every capability of the Marten pages
+
+[EveryCapabilityOff("DataStudioOptions.ReadOnly")]
+every capability
+
 [OptionName("Example")]
 MartenOptions.Example
 
+[ScopePolicyRefused(null)]
+The store policy (MartenOptions.StoreAuthorizationPolicy) refused this Marten store and database as a whole, with no tenant selected.
+
+[ScopePolicyRefused("a thing belongs to no tenant")]
+The store policy (MartenOptions.StoreAuthorizationPolicy) refused this Marten store and database as a whole, with no tenant selected: a thing belongs to no tenant.
+
 [SessionsReadOnlyDenial("MartenOptions.ReadOnly")]
-MartenOptions.ReadOnly is true, which turns MartenOptions.Capabilities.ViewDatabaseActivity off with every other capability.
+MartenOptions.ReadOnly is true, which turns MartenOptions.Capabilities.ViewDatabaseActivity off with every other capability of the Marten pages.
 
 [SessionsReadOnlyDenial("DataStudioOptions.ReadOnly")]
 DataStudioOptions.ReadOnly is true, which turns MartenOptions.Capabilities.ViewDatabaseActivity off with every other capability.
 
 [StatementsReadOnlyDenial("MartenOptions.ReadOnly")]
-MartenOptions.ReadOnly is true, which turns MartenOptions.Capabilities.ViewDatabaseActivity off with every other capability.
+MartenOptions.ReadOnly is true, which turns MartenOptions.Capabilities.ViewDatabaseActivity off with every other capability of the Marten pages.
 
 [StatementsReadOnlyDenial("DataStudioOptions.ReadOnly")]
 DataStudioOptions.ReadOnly is true, which turns MartenOptions.Capabilities.ViewDatabaseActivity off with every other capability.

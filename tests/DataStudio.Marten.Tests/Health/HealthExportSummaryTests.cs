@@ -13,6 +13,17 @@ using DataStudio.Postgres.Services.Health;
 
 namespace DataStudio.Marten.Tests.Health;
 
+/// <summary>The export's description in the Marten module's words, for a test that says nothing of whose they are.</summary>
+internal static class HealthExportSummaryInMartenWords
+{
+    extension(HealthExportSummary summary)
+    {
+        /// <summary><see cref="HealthExportSummary.Describe" /> in the Marten module's words.</summary>
+        /// <param name="interval">How long the result is served before the next run.</param>
+        public string Describe(TimeSpan interval) => summary.Describe(interval, DataStudio.Marten.Services.MartenStudioText.Instance);
+    }
+}
+
 /// <summary>
 /// The export's judgement, with no container and no Postgres: which status a run's findings report, and
 /// exactly what the description and the data say - codes and counts, and nothing a finding wrote.

@@ -300,12 +300,11 @@ internal sealed record HealthExportSummary
     /// </summary>
     /// <param name="interval">How long the result is served before the next run.</param>
     /// <param name="words">
-    /// The studio's words for a source it could not reach (<see cref="StudioText.ExportSourceNoun" />), or
-    /// <see langword="null" /> for MartenStudio's.
+    /// The words of the module the export runs in, for a source it could not reach (<see cref="StudioText.ExportSourceNoun" />).
     /// </param>
-    public string Describe(TimeSpan interval, StudioText? words = null)
+    public string Describe(TimeSpan interval, StudioText words)
     {
-        words ??= StudioText.Of(null);
+        ArgumentNullException.ThrowIfNull(words);
         StringBuilder text = new();
 
         if (Problem is not null)

@@ -105,7 +105,8 @@ public class StoragePageTests
         capabilityEnabled: true,
         readOnly: false,
         authorized: true,
-        new DatabaseObjectClassifier([]));
+        new DatabaseObjectClassifier([]),
+        DataStudio.Marten.Services.MartenStudioText.Instance);
 
     private static StorageService Service(MartenOptions options) => new(
         MartenStudioSettings.Of(options),
@@ -421,7 +422,8 @@ public class StoragePageTests
         capabilityEnabled: true,
         readOnly: false,
         authorized: false,
-        new DatabaseObjectClassifier([]));
+        new DatabaseObjectClassifier([]),
+        DataStudio.Marten.Services.MartenStudioText.Instance);
 
     [Fact]
     public void The_facts_keep_both_readings_of_the_tables_tile()

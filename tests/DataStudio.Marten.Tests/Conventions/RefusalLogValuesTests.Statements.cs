@@ -158,7 +158,7 @@ public partial class RefusalLogValuesTests
     [InlineData("logger.LogWarning(exception, \"x '{Id}' of '{Alias}'\", id, StudioLogValue.Cap(alias));", "id")]
     [InlineData("logger.LogError(exception, \"x {StoreKey}\", scope.StoreKey);", "scope.StoreKey")]
     [InlineData("logger.LogWarning(exception, \"x '{Alias}'\", item.Alias);", "item.Alias")]
-    [InlineData("logger.LogWarning(exception, \"x '{Alias}'\", table.Alias);", null)]
+    [InlineData("logger.LogWarning(exception, \"x '{Alias}'\", table.Alias);", "table.Alias")]
     [InlineData("logger.LogWarning(exception, \"x '{Alias}'\", StudioLogValue.Cap(table.Alias));", null)]
     [InlineData("logger.LogWarning(exception, \"x {StoreKey}\", resolved.Registration.Key, action);", null)]
     [InlineData("logger.LogWarning(exception, \"x {DatabaseId}\", resolved.Database.Id.Identity);", null)]
@@ -223,12 +223,12 @@ public partial class RefusalLogValuesTests
     private static partial Regex WarningCall();
 
     /// <summary>
-    /// The spellings the scan is shaped to flag that are the resolved source's or table's own names, never the address's: a health check
-    /// context's store and database (<see cref="The_canonical_spellings_a_template_may_be_passed_are_the_resolved_sources" />), and a
-    /// resolved document table's or relationship node's alias, which come from the store's configuration. The scan reads the shape of an
-    /// argument, not where it came from, so these are named here and every other spelling is capped.
+    /// The spellings the scan is shaped to flag that are the resolved source's own names, never the address's: a health check
+    /// context's store and database (<see cref="The_canonical_spellings_a_template_may_be_passed_are_the_resolved_sources" />). The scan
+    /// reads the shape of an argument, not where it came from, so these are named here and every other spelling - a table's or a node's
+    /// alias included, though it comes from the store's configuration - is capped, as the Warning siblings of one method are.
     /// </summary>
-    private static readonly string[] ResolvedSpellings = ["context.StoreKey", "context.DatabaseId", "table.Alias", "target.Alias"];
+    private static readonly string[] ResolvedSpellings = ["context.StoreKey", "context.DatabaseId"];
 
     /// <summary>A bare document id or collection alias, or a scope's or table's store, database, tenant or alias.</summary>
     [GeneratedRegex(@"^(?:id|alias|(?:[A-Za-z_]\w*\.)+(?:Alias|StoreKey|DatabaseId|TenantId))$", RegexOptions.CultureInvariant)]

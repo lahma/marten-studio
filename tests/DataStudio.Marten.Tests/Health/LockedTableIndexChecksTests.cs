@@ -1,6 +1,7 @@
 using static DataStudio.Marten.Tests.Health.TableCheckBuilders;
 
 using Npgsql;
+using DataStudio.Marten.Services;
 
 using DataStudio.Postgres.Internal.Sql;
 using DataStudio.Postgres.Services.Health;
@@ -196,11 +197,11 @@ public class LockedTableIndexChecksTests
         ExplainPlanScan[] scans = [new("Seq Scan", doc.Table, null, "((data ->> $2) = $1)", null)];
 
         CountingAdvisor unlocked = new();
-        _ = StatementPlanAdvice.Read(scans, statement, [], unlocked, Locked());
+        _ = StatementPlanAdvice.Read(scans, statement, [], unlocked, Locked(), MartenStudioText.Instance);
         unlocked.Calls.Should().Be(1, "the anti-vacuity half: an unlocked table's whole-table read is advised on");
 
         CountingAdvisor locked = new();
-        _ = StatementPlanAdvice.Read(scans, statement, [], locked, Locked(doc));
+        _ = StatementPlanAdvice.Read(scans, statement, [], locked, Locked(doc), MartenStudioText.Instance);
         locked.Calls.Should().Be(0, "a locked table's indexes were not read, so the advisor would advise an index it may have");
 
         new HealthIndexRead([], Locked(doc)).IsLocked(doc.Key).Should().BeTrue();

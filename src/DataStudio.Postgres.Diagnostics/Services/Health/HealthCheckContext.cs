@@ -177,14 +177,6 @@ internal sealed record HealthEvaluation(DateTimeOffset Now, IStudioRuntime Studi
     /// code, the tables it judges. The sweep sets it from its settings; there is no default to forget.
     /// </summary>
     public required StudioText Text { get; init; }
-
-    /// <summary>An evaluation at <paramref name="now" />, for a unit test - in MartenStudio's words unless it says otherwise.</summary>
-    /// <param name="now">When.</param>
-    /// <param name="runtime">The runtime, or <see langword="null" /> for none (<see cref="NoStudioRuntime" />).</param>
-    /// <param name="history">The history, or none.</param>
-    /// <param name="text">The studio's words, or <see langword="null" /> for MartenStudio's.</param>
-    public static HealthEvaluation At(DateTimeOffset now, IStudioRuntime? runtime = null, HealthHistoryView? history = null, StudioText? text = null) =>
-        new(now, runtime ?? NoStudioRuntime.Instance, history ?? HealthHistoryView.Empty) { Text = text ?? StudioText.Of(null) };
 }
 
 /// <summary>
@@ -503,7 +495,7 @@ internal sealed class HealthSqlRunner
     }
 
     /// <summary>The <see cref="Exception.Data" /> key that marks a failure of a statement read as the application's role.</summary>
-    internal const string ApplicationRoleKey = "PostgresStudio.Health.ReadAsApplicationRole";
+    internal const string ApplicationRoleKey = "DataStudio.Health.ReadAsApplicationRole";
 
     /// <summary>
     /// Whether <paramref name="exception" /> (or the exception it wraps) is Postgres refusing a statement this runner read as

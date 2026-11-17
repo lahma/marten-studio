@@ -176,8 +176,8 @@ internal sealed class MartenRelationshipNodeSource : IRelationshipNodeSource
                 MartenRelationshipGraph.DeclaredKeys(storeOptions, isVisible),
                 keys.Keys,
                 timeProvider.GetUtcNow(),
-                view,
-                MartenStudioText.Instance);
+                MartenStudioText.Instance,
+                view);
 
             List<RelationshipEdge> inbound = [];
             foreach (RelationshipEdge edge in graph.Edges)
@@ -535,7 +535,7 @@ internal sealed class MartenRelationshipNodeSource : IRelationshipNodeSource
                 logger.LogDebug(
                     "Data Studio did not count the rows of {Table} that reference a {Alias} document: {Reason}",
                     qualified,
-                    target.Alias,
+                    StudioLogValue.Cap(target.Alias),
                     grant.Reason);
             }
 
@@ -576,7 +576,7 @@ internal sealed class MartenRelationshipNodeSource : IRelationshipNodeSource
                     capped ? RelationshipQueries.DefaultInboundCap - 1 : count,
                     capped ? "+" : string.Empty,
                     qualified,
-                    target.Alias);
+                    StudioLogValue.Cap(target.Alias));
             }
 
             // The same columns and values the count used, in the row grammar, so the Rows tab it links to shows exactly

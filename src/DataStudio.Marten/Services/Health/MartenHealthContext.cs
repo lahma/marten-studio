@@ -54,7 +54,7 @@ internal static class MartenHealthContext
         /// filter, which are all they read, live from <c>MartenOptions</c>.
         /// </summary>
         public IStudioSettings StudioOptions => context.Settings as IStudioSettings
-            ?? throw new InvalidOperationException("MartenStudio's checks run under AddMarten(), whose one settings object is a studio's.");
+            ?? throw new InvalidOperationException("Data Studio's Marten checks run under AddMarten(), whose one settings object is a studio's.");
     }
 
     extension(HealthEvaluation evaluation)

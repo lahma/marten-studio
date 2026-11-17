@@ -309,7 +309,7 @@ public class DatabaseGateReachTests
         IReadOnlyDictionary<string, DatabaseStoreAccess>? otherStores = null,
         bool capability = true) =>
         new(StoreSchemas(), live ?? Live, ["quartz", "legacy", OtherSchema], capability, false, capability ? true : null,
-            classifier ?? Classifier(), null, DatabaseRefusal.WritePolicy, "default", otherStores, text: DataStudio.Marten.Services.MartenStudioText.Instance);
+            classifier ?? Classifier(), DataStudio.Marten.Services.MartenStudioText.Instance, null, DatabaseRefusal.WritePolicy, "default", otherStores);
 
     private static Dictionary<string, DatabaseStoreAccess> OtherStore(DatabaseStoreAccess access) =>
         new(StringComparer.OrdinalIgnoreCase) { [OtherStoreKey] = access };

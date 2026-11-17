@@ -452,7 +452,7 @@ public class DatabaseGateTests
         IReadOnlyList<string> entries,
         bool readOnly = false,
         string? role = null) =>
-        new(StoreSchemas(), LiveSchemas(), entries, capability, readOnly, authorized, Classifier(), role, text: DataStudio.Marten.Services.MartenStudioText.Instance, readOnlyOption: "MartenOptions.ReadOnly");
+        new(StoreSchemas(), LiveSchemas(), entries, capability, readOnly, authorized, Classifier(), DataStudio.Marten.Services.MartenStudioText.Instance, role, readOnlyOption: "MartenOptions.ReadOnly");
 
     private static List<string> Names(DatabaseGate gate, DatabaseObjectCategory category) =>
         [.. DatabaseObjectAssembler.Summaries(gate, Snapshot, category).Select(static x => x.Schema + "." + x.Name)];

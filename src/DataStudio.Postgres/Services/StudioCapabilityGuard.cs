@@ -83,6 +83,7 @@ internal sealed class StudioCapabilityDeniedException : InvalidOperationExceptio
             reason,
             Require(settings).ProductName,
             settings.ReadOnlyOption(),
+            settings.Text.EveryCapabilityOff(settings.ReadOnlyOption()),
             settings.CapabilityOption(capability))
     {
     }
@@ -92,9 +93,10 @@ internal sealed class StudioCapabilityDeniedException : InvalidOperationExceptio
         CapabilityDenialReason reason,
         string productName,
         string readOnlyOption,
+        string turnedOff,
         string capabilityOption)
         : base(reason == CapabilityDenialReason.ReadOnly
-            ? $"{productName} refused '{capability}' because {readOnlyOption} is true, which turns every capability off."
+            ? $"{productName} refused '{capability}' because {readOnlyOption} is true, which turns {turnedOff} off."
             : $"{productName} refused '{capability}' because {capabilityOption} is false.")
     {
         Capability = capability;
@@ -204,6 +206,12 @@ internal sealed class StudioCapabilityGuard
 
     /// <summary>The master switch that is on, as a host spells it: the shell's <c>DataStudioOptions.ReadOnly</c> when that is on, else this module's own.</summary>
     public string ReadOnlyOptionName => settings.ReadOnlyOptionName;
+
+    /// <summary>
+    /// What the switch that is on turns off, for a sentence that says so: <c>every capability</c> for the shell's switch, and
+    /// <c>every capability of the Marten pages</c> for this module's own, which no other module obeys.
+    /// </summary>
+    public string EveryCapabilityOff => settings.Text.EveryCapabilityOff(settings.ReadOnlyOptionName);
 
     /// <summary>How many of the offered capabilities are effectively enabled.</summary>
     public int EnabledCount

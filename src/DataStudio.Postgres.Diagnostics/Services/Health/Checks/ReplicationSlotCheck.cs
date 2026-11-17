@@ -534,6 +534,6 @@ internal sealed class ReplicationSlotCheck : HealthCheck<ReplicationSlotFacts>
         "Read in pg_replication_slots at " + EvidenceTime.Utc(snapshot.ReadAt)
         + "; what a slot holds is the server's WAL position less the slot's restart_lsn. Slots are the server's, not this "
         + "database's, so " + text.EverySourceDatabase + " counts the same ones. A physical slot's name, and a logical slot's "
-        + "name, plugin and database when it is this database's, are shown only with "
-        + text.OptionName("Capabilities.ViewDatabaseActivity") + "; a logical slot of another database is never named here.";
+        + "name, plugin and database when it is this database's, are "
+        + text.ActivityShownOnlyWith + "; a logical slot of another database is never named here.";
 }

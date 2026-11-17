@@ -155,7 +155,8 @@ public partial class RefusalLogValuesTests
             captured.CreateFactory().CreateLogger<StudioActionLog>(),
             users,
             new StudioState(catalog, NullLogger<StudioState>.Instance, new StudioPreferences(new HttpContextAccessor())),
-            MartenStudioDescriptor.Instance);
+            MartenStudioDescriptor.Instance,
+            MartenStudioSettings.Of(new MartenOptions()));
 
         log.RecordScopeDenied(new StudioScope(HostileStoreKey, HostileDatabaseId, "acme\nforged"), "studio-store", "Read rows", HostileStatement);
         log.RecordCapabilityDenied(

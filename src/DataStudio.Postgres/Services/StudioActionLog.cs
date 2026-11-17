@@ -41,21 +41,23 @@ internal sealed class StudioActionLog
     /// <param name="authenticationStateProvider">Who is asking.</param>
     /// <param name="state">The circuit's active scope.</param>
     /// <param name="descriptor">The studio's descriptor, whose key is the database module's: the kind its entries are recorded under.</param>
-    /// <param name="settings">The studio's settings, whose words the events are logged in (<see cref="StudioText.Of" />).</param>
+    /// <param name="settings">The registered module's settings, whose words the events are logged in.</param>
     public StudioActionLog(
         StudioActivity activity,
         ILogger<StudioActionLog> logger,
         AuthenticationStateProvider authenticationStateProvider,
         StudioState state,
         StudioDescriptor descriptor,
-        IStudioSettings? settings = null)
+        IStudioSettings settings)
     {
+        ArgumentNullException.ThrowIfNull(settings);
+
         this.activity = activity;
         this.logger = logger;
         this.authenticationStateProvider = authenticationStateProvider;
         this.state = state;
         this.descriptor = descriptor;
-        text = StudioText.Of(settings);
+        text = settings.Text;
     }
 
     /// <summary>

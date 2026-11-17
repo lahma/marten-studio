@@ -39,6 +39,6 @@ internal sealed record MartenStudioRuntime(MartenRuntime Runtime) : IStudioRunti
         ArgumentNullException.ThrowIfNull(feature);
 
         return feature as RuntimeFeature
-            ?? throw new ArgumentException("MartenStudio's runtime judges the features of its own probe table only.", nameof(feature));
+            ?? throw new ArgumentException("Data Studio's Marten runtime judges the features of its own probe table only.", nameof(feature));
     }
 }

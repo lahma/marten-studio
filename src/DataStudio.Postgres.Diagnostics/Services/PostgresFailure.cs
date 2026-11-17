@@ -20,7 +20,7 @@ internal static class PostgresFailure
     public const string QueryCanceled = "57014";
 
     /// <summary>The <see cref="Exception.Data" /> key <see cref="OpenAsync" /> marks an opening failure with.</summary>
-    private const string ConnectionOpenKey = "MartenStudio.PostgresFailure.ConnectionOpen";
+    private const string ConnectionOpenKey = "DataStudio.PostgresFailure.ConnectionOpen";
 
     /// <summary>
     /// Opens <paramref name="connection" />, marking whatever it throws as a failure to connect.

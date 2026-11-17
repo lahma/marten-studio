@@ -168,9 +168,7 @@ internal sealed class MaintenanceService : IMaintenanceService
 
     /// <summary>What a store-policy refusal of the page says, naming the option the studio's registration spells.</summary>
     internal string StorePolicyDenial =>
-        "Your account may not see this database's maintenance. The "
-        + settings.Text.ScopePolicyNoun + " policy (" + settings.Text.ScopePolicyOption + ")"
-        + " refused this " + settings.Text.SourceNoun + " and database as a whole, with no tenant selected: maintenance belongs to no tenant.";
+        "Your account may not see this database's maintenance. " + settings.Text.ScopePolicyRefused("maintenance belongs to no tenant");
 
     /// <inheritdoc />
     public async Task<MaintenanceView> GetAsync(StudioScope scope, CancellationToken cancellationToken = default)

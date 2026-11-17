@@ -133,28 +133,28 @@ internal sealed class HealthExportRunner
     private int runCount;
 
     /// <param name="services">The root container, read lazily for the studio's own services.</param>
+    /// <param name="registeredText">
+    /// The words of the module whose <c>AddHealthChecks().Add…()</c> registered this runner, for the one sentence said when that
+    /// module's own services are missing: a registration always hands its own, so no host is read in another module's words.
+    /// </param>
     /// <param name="timeProvider">The host's clock, or the system's.</param>
     /// <param name="limits">How much a run may do; <see cref="HealthExportLimits.Default" /> unless a test says otherwise.</param>
     /// <param name="logger">Where a failure of the export itself goes.</param>
     /// <param name="throttle">The studio's log throttle, which <c>AddMarten()</c> registers.</param>
     /// <param name="lifetime">The host's lifetime, whose stopping ends a run in flight.</param>
-    /// <param name="registeredText">
-    /// The words of the studio whose <c>AddHealthChecks().Add…()</c> registered this runner, for the one sentence
-    /// said when that studio's own services are missing: MartenStudio's when <see langword="null" />, which is what its
-    /// registration leaves it. A studio that registers the runner itself hands its own.
-    /// </param>
     public HealthExportRunner(
         IServiceProvider services,
+        StudioText registeredText,
         TimeProvider? timeProvider = null,
         HealthExportLimits? limits = null,
         ILogger<HealthExportRunner>? logger = null,
         StudioLogThrottle? throttle = null,
-        IHostApplicationLifetime? lifetime = null,
-        StudioText? registeredText = null)
+        IHostApplicationLifetime? lifetime = null)
     {
         ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(registeredText);
 
-        this.registeredText = registeredText ?? StudioText.Of(null);
+        this.registeredText = registeredText;
         this.services = services;
         this.timeProvider = timeProvider ?? TimeProvider.System;
         this.limits = limits ?? HealthExportLimits.Default;

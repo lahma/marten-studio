@@ -142,7 +142,7 @@ public class PostgresErrorTextTests
         ];
 
         DatabaseGate gate = new(
-            DatabaseTestStores.StoreSchemas(), live, ["quartz"], true, false, true, DatabaseTestStores.Classifier());
+            DatabaseTestStores.StoreSchemas(), live, ["quartz"], true, false, true, DatabaseTestStores.Classifier(), DataStudio.Marten.Services.MartenStudioText.Instance);
 
         gate.WithheldSchemas.Should().Contain("hr", "the premise");
 

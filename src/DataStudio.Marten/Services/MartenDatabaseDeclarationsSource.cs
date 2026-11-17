@@ -101,7 +101,7 @@ internal sealed class MartenDatabaseDeclarationsSource : IDatabaseDeclarationsSo
 
         return source is MartenStudioSource marten
             ? ReadDeclarations(marten.Marten, marten.Store)
-            : throw new ArgumentException("MartenStudio declares the objects of a Marten store only.", nameof(source));
+            : throw new ArgumentException("Data Studio's Marten module declares the objects of a Marten store only.", nameof(source));
     }
 
     /// <inheritdoc />
@@ -461,6 +461,6 @@ internal sealed class MartenDatabaseDeclarationsSource : IDatabaseDeclarationsSo
     {
         ArgumentNullException.ThrowIfNull(resolved);
         return resolved as ResolvedScope
-            ?? throw new ArgumentException("MartenStudio declares the objects of a Marten store only.", nameof(resolved));
+            ?? throw new ArgumentException("Data Studio's Marten module declares the objects of a Marten store only.", nameof(resolved));
     }
 }

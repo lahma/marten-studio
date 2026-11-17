@@ -234,9 +234,20 @@ public class AddPostgresDiagnosticsTests
             .Should().Contain("a schema PostgresOptions.BrowsableSchemas does not admit", "a studio host's sentence is unchanged")
             .And.NotContain("PostgresDiagnosticsOptions");
 
-        // Only the option's owner differs: every other word is the module's, and a sentence composed over the options type names the other type.
+        // The engine has no visitors, so what a studio shows with ViewDatabaseActivity is said to be returned when the call asks (D31).
+        words.HasVisitors.Should().BeFalse();
+        DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance.HasVisitors.Should().BeTrue();
+        words.ActivityShownWith.Should().Be("returned only when the call sets IncludeActivity = true");
+        words.ActivityShownOnlyWith.Should().Be(words.ActivityShownWith);
+
+        // Only the option's owner and the activity sentences differ: every other word is the module's, and a sentence composed over the
+        // options type names the other type.
         foreach (System.Reflection.PropertyInfo property in typeof(DataStudio.Postgres.Services.Settings.StudioText).GetProperties()
-            .Where(static x => x.PropertyType == typeof(string) && x.Name is not nameof(DataStudio.Postgres.Services.Settings.StudioText.OptionsTypeName)))
+            .Where(static x => x.PropertyType == typeof(string)
+                               && x.Name is not (nameof(DataStudio.Postgres.Services.Settings.StudioText.OptionsTypeName)
+                                   or nameof(DataStudio.Postgres.Services.Settings.StudioText.ActivityShownWith)
+                                   or nameof(DataStudio.Postgres.Services.Settings.StudioText.ActivityShownOnlyWith)
+                                   or nameof(DataStudio.Postgres.Services.Settings.StudioText.StatementsOnSessionsPage))))
         {
             string? own = (string?) property.GetValue(DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance);
 

@@ -1,5 +1,3 @@
-using DataStudio.Postgres.Services.Postgres;
-
 namespace DataStudio.Postgres.Services.Settings;
 
 /// <summary>
@@ -10,7 +8,8 @@ namespace DataStudio.Postgres.Services.Settings;
 /// <para>
 /// <b>One per module, read through <see cref="IDiagnosticsSettings.Text" />.</b> Shared code never spells a module's options type,
 /// policy or configuration itself: it reads the sentence here. The Postgres module's instance is <c>PostgresStudioText.Instance</c> and
-/// the Marten module's is built in <c>DataStudio.Marten</c>; <see cref="Of" /> falls back to the Postgres words.
+/// the Marten module's is built in <c>DataStudio.Marten</c>, and a host with no studio is read in the engine's own
+/// (<c>PostgresStudioText.DiagnosticsInstance</c>). No shared code falls back to one module's words: it takes the registered settings'.
 /// </para>
 /// <para>
 /// <b>It holds only what differs.</b> A sentence that is the same in both modules but for the nouns below
@@ -27,6 +26,16 @@ internal sealed class StudioText
 
     /// <summary>The public options type's name: <c>MartenOptions</c>.</summary>
     public required string OptionsTypeName { get; init; }
+
+    /// <summary>The module's own pages, where a switch of the module's reaches no further: <c>the Marten pages</c>.</summary>
+    public required string ModulePages { get; init; }
+
+    /// <summary>
+    /// Whether the host has a studio, and so visitors a capability is granted to. <see langword="false" /> only for the engine's own
+    /// words (a host with <c>AddPostgresDiagnostics()</c> and no studio), where there is no <c>Capabilities</c> to name and no page to
+    /// point at: activity-grade evidence is returned to the host's own code when the call sets <c>IncludeActivity = true</c> (D31).
+    /// </summary>
+    public bool HasVisitors { get; init; } = true;
 
     /// <summary>A source in a sentence: <c>Marten store</c>.</summary>
     public required string SourceNoun { get; init; }
@@ -70,12 +79,31 @@ internal sealed class StudioText
     public string ScopePolicyOption => OptionName(ScopePolicyName);
 
     /// <summary>
-    /// The words of the module <paramref name="settings" /> belong to - for a service whose settings are an optional constructor
-    /// argument only so that a test can build it by hand, the way its <c>StudioLogThrottle</c> is: the Postgres module's, as every
-    /// such test is, when there are none. The container always supplies them.
+    /// What decides whether activity-grade evidence is shown, after "is": <c>shown with MartenOptions.Capabilities.ViewDatabaseActivity</c>
+    /// for a visitor, and what is true of a host with no studio - the call's own switch - when there is none.
     /// </summary>
-    /// <param name="settings">The module's settings, or <see langword="null" /> for a hand-built owner.</param>
-    public static StudioText Of(IDiagnosticsSettings? settings) => settings?.Text ?? PostgresStudioText.Instance;
+    public string ActivityShownWith =>
+        HasVisitors ? "shown with " + CapabilityOption("ViewDatabaseActivity") : ActivityReturnedOnRequest;
+
+    /// <summary><see cref="ActivityShownWith" />, said as the only thing that shows it: <c>shown only with …</c>.</summary>
+    public string ActivityShownOnlyWith =>
+        HasVisitors ? "shown only with " + CapabilityOption("ViewDatabaseActivity") : ActivityReturnedOnRequest;
+
+    private const string ActivityReturnedOnRequest = "returned only when the call sets IncludeActivity = true";
+
+    /// <summary>
+    /// What <paramref name="readOnlyOption" /> turns off: <c>every capability</c> when it is the shell's switch, which turns every
+    /// module's off, and <c>every capability of the Marten pages</c> when it is this module's own, which turns off only this module's.
+    /// </summary>
+    /// <param name="readOnlyOption">The switch that is on, as a host spells it.</param>
+    public string EveryCapabilityOff(string readOnlyOption) => "every capability" + ReadOnlyReach(readOnlyOption);
+
+    /// <summary>The words after "every capability" or "every other capability" that say how far <paramref name="readOnlyOption" /> reaches.</summary>
+    private string ReadOnlyReach(string readOnlyOption)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(readOnlyOption);
+        return string.Equals(readOnlyOption, OptionName("ReadOnly"), StringComparison.Ordinal) ? " of " + ModulePages : string.Empty;
+    }
 
     /// <summary>What the Activity ring says of a scope a policy refused.</summary>
     public required string ScopeDeniedEntry { get; init; }
@@ -274,8 +302,10 @@ internal sealed class StudioText
 
     /// <summary>The sentence pointing at Database › Sessions for the statements a finding counts.</summary>
     public string StatementsOnSessionsPage =>
-        "The statements themselves are on Database › Sessions, behind " + CapabilityOption("ViewDatabaseActivity") + ", "
-        + "masked for the schemas you may not see.";
+        HasVisitors
+            ? "The statements themselves are on Database › Sessions, behind " + CapabilityOption("ViewDatabaseActivity") + ", "
+              + "masked for the schemas you may not see."
+            : "The statements themselves are " + ActivityReturnedOnRequest + ".";
 
     /// <summary>The comment above a server setting in a remedy: <c>A server setting, not a StoreOptions one</c>.</summary>
     public required string ServerSettingComment { get; init; }
@@ -554,19 +584,20 @@ internal sealed class StudioText
     // ---------------------------------------------------------------------------------------------------------------
     // The one shape the computed sentences share.
 
-    private static string ReadOnlyTurnsOff(string readOnlyOption, string what)
-    {
-        ArgumentException.ThrowIfNullOrEmpty(readOnlyOption);
-        return readOnlyOption + " is true, which turns " + what + " off with every other capability.";
-    }
+    private string ReadOnlyTurnsOff(string readOnlyOption, string what) =>
+        readOnlyOption + " is true, which turns " + what + " off with every other capability" + ReadOnlyReach(readOnlyOption) + ".";
 
     /// <summary>"The write policy (…, or … when no write policy is set) refused <paramref name="what" /> for this store and database", without the closing.</summary>
     private string WritePolicyRefused(string what) =>
         "The write policy (" + OptionName("WriteAuthorizationPolicy") + ", or " + ScopePolicyName + " when no write policy is set) refused "
         + what + " for this " + SourceNoun + " and database";
 
-    /// <summary>"The store policy (…) refused this store and database…", ending with a full stop.</summary>
-    private string ScopePolicyRefused(string? because) =>
+    /// <summary>
+    /// "The store policy (…) refused this store and database…", ending with a full stop: the one sentence every refusal by the scope policy
+    /// says, after what the visitor may not see.
+    /// </summary>
+    /// <param name="because">Why a source as a whole belongs to no tenant, or <see langword="null" /> for none.</param>
+    public string ScopePolicyRefused(string? because) =>
         "The " + ScopePolicyNoun + " policy (" + ScopePolicyOption + ") refused this " + SourceNoun + " and database" + Scope(because);
 
     /// <summary>What closes a refusal of a source: " for this …" is the caller's; this is the tenant clause and the full stop.</summary>

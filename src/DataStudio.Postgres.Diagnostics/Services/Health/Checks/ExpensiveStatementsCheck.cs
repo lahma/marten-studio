@@ -574,17 +574,16 @@ internal static class StatementPlanAdvice
     /// advisor is not asked about a whole-table read of one, whose indexes it did not see. Required, so that no caller can
     /// read a locked table as one with no index on the member it filters on.
     /// </param>
-    /// <param name="text">The studio's words for the tables it judges, or <see langword="null" /> for MartenStudio's.</param>
+    /// <param name="text">The words of the module the sweep runs in, for the tables it judges: always the evaluation's own.</param>
     public static Reading Read(
         IReadOnlyList<ExplainPlanScan> scans,
         ObservedStatement statement,
         IReadOnlyList<IndexFacts> indexes,
         IHealthPlanAdvisor? advisor,
         IReadOnlySet<string> lockedTables,
-        StudioText? text = null)
+        StudioText text)
     {
-        text ??= StudioText.Of(null);
-
+        ArgumentNullException.ThrowIfNull(text);
         ArgumentNullException.ThrowIfNull(scans);
         ArgumentNullException.ThrowIfNull(statement);
         ArgumentNullException.ThrowIfNull(lockedTables);

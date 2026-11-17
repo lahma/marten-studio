@@ -1,3 +1,9 @@
+[ActivityShownOnlyWith]
+shown only with PostgresOptions.Capabilities.ViewDatabaseActivity
+
+[ActivityShownWith]
+shown with PostgresOptions.Capabilities.ViewDatabaseActivity
+
 [AmbiguousPoolNotChecked]
 More than one Npgsql pool in this process uses this database's connection string - a second data source built from the same connection string, or NpgsqlConnections opened with it - and Npgsql reports each under that same name. Their numbers differ, so which pool is this data source's cannot be told, and the pool is not judged; naming the other data source (NpgsqlDataSourceBuilder.Name), or giving its connections an Application Name of their own, tells them apart.
 
@@ -89,6 +95,9 @@ true
 [GenericPlanPlaceholders]
  are placeholders; a filter that needs its constant to match an expression index, or a partial index's WHERE clause, cannot use that index in that plan, so a sequential scan filtering on one does not show that the table lacks an index.
 
+[HasVisitors]
+true
+
 [HealthCheckRegistration]
 services.AddPostgresDiagnostics() or services.AddDataStudio().AddPostgres() as well as AddHealthChecks().AddPostgresDiagnostics()
 
@@ -157,6 +166,9 @@ each partition's pg_class.reloptions says which; the Marten pages' Schema screen
 
 [MigrationBehindVacuum]
 a migration queued behind it (an ALTER TABLE, from whatever tool runs the host's migrations)
+
+[ModulePages]
+the Postgres pages
 
 [NamedSchemasAreOwn]
 true
@@ -370,7 +382,7 @@ every row updated or deleted leaves a dead row version that is never cleared
 including rows that other rows, or other systems, still point at
 
 [BrowseReadOnlyDenial("PostgresOptions.ReadOnly")]
-PostgresOptions.ReadOnly is true, which turns PostgresOptions.Capabilities.BrowseDatabase off with every other capability.
+PostgresOptions.ReadOnly is true, which turns PostgresOptions.Capabilities.BrowseDatabase off with every other capability of the Postgres pages.
 
 [BrowseReadOnlyDenial("DataStudioOptions.ReadOnly")]
 DataStudioOptions.ReadOnly is true, which turns PostgresOptions.Capabilities.BrowseDatabase off with every other capability.
@@ -385,7 +397,7 @@ Settings that blind or endanger the database
 Title of the check
 
 [DefinitionReadOnlyDenial("PostgresOptions.ReadOnly")]
-PostgresOptions.ReadOnly is true, which turns PostgresOptions.Capabilities.ViewDefinitions and PostgresOptions.Capabilities.BrowseDatabase off with every other capability.
+PostgresOptions.ReadOnly is true, which turns PostgresOptions.Capabilities.ViewDefinitions and PostgresOptions.Capabilities.BrowseDatabase off with every other capability of the Postgres pages.
 
 [DefinitionReadOnlyDenial("DataStudioOptions.ReadOnly")]
 DataStudioOptions.ReadOnly is true, which turns PostgresOptions.Capabilities.ViewDefinitions and PostgresOptions.Capabilities.BrowseDatabase off with every other capability.
@@ -399,17 +411,29 @@ Your account may not read definitions here. The write policy (PostgresOptions.Wr
 [DefinitionWritePolicyDenialFor("ViewDefinitions and BrowseDatabase")]
 Your account may not read definitions here. The write policy (PostgresOptions.WriteAuthorizationPolicy, or SourceAuthorizationPolicy when no write policy is set) refused ViewDefinitions and BrowseDatabase for this data source and database.
 
+[EveryCapabilityOff("PostgresOptions.ReadOnly")]
+every capability of the Postgres pages
+
+[EveryCapabilityOff("DataStudioOptions.ReadOnly")]
+every capability
+
 [OptionName("Example")]
 PostgresOptions.Example
 
+[ScopePolicyRefused(null)]
+The source policy (PostgresOptions.SourceAuthorizationPolicy) refused this data source and database.
+
+[ScopePolicyRefused("a thing belongs to no tenant")]
+The source policy (PostgresOptions.SourceAuthorizationPolicy) refused this data source and database.
+
 [SessionsReadOnlyDenial("PostgresOptions.ReadOnly")]
-PostgresOptions.ReadOnly is true, which turns PostgresOptions.Capabilities.ViewDatabaseActivity off with every other capability.
+PostgresOptions.ReadOnly is true, which turns PostgresOptions.Capabilities.ViewDatabaseActivity off with every other capability of the Postgres pages.
 
 [SessionsReadOnlyDenial("DataStudioOptions.ReadOnly")]
 DataStudioOptions.ReadOnly is true, which turns PostgresOptions.Capabilities.ViewDatabaseActivity off with every other capability.
 
 [StatementsReadOnlyDenial("PostgresOptions.ReadOnly")]
-PostgresOptions.ReadOnly is true, which turns PostgresOptions.Capabilities.ViewDatabaseActivity off with every other capability.
+PostgresOptions.ReadOnly is true, which turns PostgresOptions.Capabilities.ViewDatabaseActivity off with every other capability of the Postgres pages.
 
 [StatementsReadOnlyDenial("DataStudioOptions.ReadOnly")]
 DataStudioOptions.ReadOnly is true, which turns PostgresOptions.Capabilities.ViewDatabaseActivity off with every other capability.

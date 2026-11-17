@@ -560,7 +560,7 @@ public sealed class NamedPoolSiblingsTests
             JsonSerializer.Serialize(finding, json),
             ConnectionCheckFacts.Everything(finding),
             quiet.Note,
-            summary.Describe(TimeSpan.FromSeconds(60)),
+            summary.Describe(TimeSpan.FromSeconds(60), DataStudio.Postgres.Services.Postgres.PostgresStudioText.Instance),
             JsonSerializer.Serialize(summary.ToData(), json),
             JsonSerializer.Serialize(summary, json),
             JsonSerializer.Serialize(snapshotFindings, json),

@@ -23,8 +23,18 @@ public class ProductNamesTests
     [Fact]
     public void No_string_literal_or_Razor_text_of_src_says_a_removed_product_name()
     {
-        string[] files = SourceScanner.ShippedSourceFiles();
+        string[] files =
+        [
+            .. SourceScanner.ShippedSourceFiles(),
+            .. Directory.EnumerateFiles(RepositoryRoot.Combine("src"), "*.*", SearchOption.AllDirectories)
+                .Where(static x => x.Replace('\\', '/').Contains("/wwwroot/", StringComparison.Ordinal)
+                                   && !x.Replace('\\', '/').Contains("/obj/", StringComparison.Ordinal)
+                                   && !x.Replace('\\', '/').Contains("/bin/", StringComparison.Ordinal)
+                                   && ProductNameScan.ServedExtensions.Any(e => x.EndsWith(e, StringComparison.OrdinalIgnoreCase))),
+        ];
         files.Should().NotBeEmpty();
+        files.Should().Contain(static x => x.EndsWith("studio.js", StringComparison.Ordinal), "the served script is read too");
+        files.Should().Contain(static x => x.EndsWith("studio.css", StringComparison.Ordinal), "and the served stylesheet");
 
         List<string> found = [];
         int texts = 0;
@@ -33,22 +43,28 @@ public class ProductNamesTests
         {
             string relative = SourceScanner.Relative(file);
 
-            foreach (string text in ProductNameScan.TextOf(file, File.ReadAllText(file)))
+            foreach (string literal in ProductNameScan.TextOf(file, File.ReadAllText(file)))
             {
                 texts++;
+                string text = literal;
+
+                foreach ((string allowedFile, string allowed, _) in ProductNameScan.Allowed)
+                {
+                    if (allowedFile == "*" || allowedFile == relative)
+                    {
+                        text = text.Replace(allowed, " ", StringComparison.Ordinal);
+                    }
+                }
 
                 foreach (System.Text.RegularExpressions.Match match in ProductNameScan.Names.Matches(text))
                 {
-                    if (!ProductNameScan.Allowed.Any(x => x.File == relative && text.Contains(x.Literal, StringComparison.Ordinal)))
-                    {
-                        found.Add(relative + ": " + match.Value + " in \"" + Context(text, match.Index) + "\"");
-                    }
+                    found.Add(relative + ": " + match.Value + " in \"" + Context(text, match.Index) + "\"");
                 }
             }
         }
 
         texts.Should().BeGreaterThan(10_000, "src/ holds thousands of literals and a scan that reads few has stopped working");
-        found.Should().BeEmpty("the product is Data Studio, and a module is Marten, Postgres or Kafka");
+        string.Join('\n', found).Should().BeEmpty("the product is Data Studio, and a module is Marten, Postgres or Kafka");
     }
 
     private static string Context(string text, int at) =>
@@ -59,6 +75,11 @@ public class ProductNamesTests
     [InlineData("string s = $\"{x} Postgres Studio's {y}\";", "Postgres Studio")]
     [InlineData("string s = @\"a \"\"KStudio\"\" b\";", "KStudio")]
     [InlineData("string s = \"\"\"\n    Postgres Studio says\n    \"\"\";", "Postgres Studio")]
+    [InlineData("throw new ArgumentException(\"MartenStudio declares the objects of a store only.\");", "MartenStudio")]
+    [InlineData("string s = \"PostgresStudio.Health\";", "PostgresStudio")]
+    [InlineData("string s = \"Marten \" + \"Studio says\";", "Marten Studio")]
+    [InlineData("string s = \"Postgres\" +\n    $\" Studio {x}\" + \"!\";", "Postgres Studio")]
+    [InlineData("string s = \"a K\" + @\"Studio\";", "KStudio")]
     public void The_scan_finds_a_name_in_a_literal(string source, string name)
     {
         string text = string.Join('\n', ProductNameScan.TextOf("f.cs", source));
@@ -77,6 +98,36 @@ public class ProductNamesTests
         string text = string.Join('\n', ProductNameScan.TextOf("f.cs", source));
 
         ProductNameScan.Names.Matches(text).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Every_allowed_name_says_why_and_is_still_where_it_was_allowed()
+    {
+        ProductNameScan.Allowed.Should().NotBeEmpty();
+
+        foreach ((string file, string literal, string why) in ProductNameScan.Allowed)
+        {
+            why.Should().NotBeNullOrWhiteSpace(literal + " needs its reason");
+            ProductNameScan.Names.IsMatch(literal).Should().BeTrue(literal + " is not one of the names, so it needs no entry");
+
+            IEnumerable<string> files = file == "*"
+                ? SourceScanner.ShippedSourceFiles().Concat(Directory.EnumerateFiles(RepositoryRoot.Combine("src", "DataStudio", "wwwroot"), "*.js", SearchOption.AllDirectories))
+                : [RepositoryRoot.Combine(file.Split('/'))];
+
+            files.Any(x => File.ReadAllText(x).Contains(literal, StringComparison.Ordinal)).Should().BeTrue(
+                literal + " is no longer in " + file + ": delete its entry, so that the name cannot come back under it");
+        }
+    }
+
+    [Theory]
+    [InlineData("/* Marten Studio's helpers */\nwindow.helpers = {};\n// KStudio\n", true)]
+    [InlineData("window.x = \"Postgres Studio says\";", false)]
+    [InlineData("a { content: \"MartenStudio\"; }", false)]
+    public void The_scan_reads_a_served_file_and_not_its_comments(string source, bool clean)
+    {
+        string text = string.Join('\n', ProductNameScan.TextOf("wwwroot/js/f.js", source));
+
+        ProductNameScan.Names.IsMatch(text).Should().Be(!clean);
     }
 
     [Fact]
