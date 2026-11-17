@@ -1,6 +1,6 @@
 # UI, CSS, JS and Blazor
 
-This is the full text of D22 to D26, moved word for word from AGENTS.md on 2026-10-31. AGENTS.md states each rule in brief; this document holds the detail and wins where they differ.
+This is the full text of D22 to D26. AGENTS.md states each rule in brief; this document holds the detail and wins where they differ.
 
 ## D22
 
@@ -13,13 +13,13 @@ pack's `buildTransitive` targets run in any Web SDK executable that references t
 and make `_framework/blazor.web.js` **that project's own** static web asset, served by its `MapStaticAssets()` and
 forwarded to by the studio's `{Path}/_framework/blazor.web.js` endpoint. `MapStudioFrameworkScript` tries the host
 web root, then the host endpoint, then a normally absent packaged copy
-(`_content/PostgresStudio/_framework/blazor.web.js`), as the host's copy must always win. Since 1.2 the same
+(`_content/DataStudio/_framework/blazor.web.js`), as the host's copy must always win. The same
 studio-rooted `<base href>` is answered for the rest of the `_framework` tree by `MapStudioFrameworkFiles`
 (`{Path}/_framework/{**file}`): it forwards to whatever the host serves at `/_framework/{file}` (the exact-route endpoint
 `MapStaticAssets` registers per file), else to the web root's `_framework/`, and answers 404 for a missing file or a path
 containing `..`. Unlike the other mirrored endpoints, which serve package content and may be anonymous, these are the
 **host's** files, so the forward never opts out and never serves a visitor what the host itself would refuse: it carries
-the studio's `AuthorizationPolicy`, else it belongs to the builder `Map*Studio()` returns (the caller's
+the shell's `AuthorizationPolicy`, else it belongs to the builder `MapDataStudio()` returns (the caller's
 `RequireAuthorization()` / `AllowAnonymous()` and the host's `FallbackPolicy` govern it as they govern the page that imports
 the files), skips a root endpoint that does not answer the request's method, and answers 404 where the root endpoint's own
 authorization (or, for a web-root file, the `FallbackPolicy`) refuses the visitor (`IPolicyEvaluator`). A Debug build with the .NET 11
@@ -36,7 +36,7 @@ SignalR's own same-origin check is what stands between a cross-site page and tha
 `<AntiforgeryToken />` in the shell was therefore protecting nothing — and it cost the host a hard
 requirement, because `MapRazorComponents` stamps `IAntiforgeryMetadata` that *requires* validation and
 the framework refuses to serve such an endpoint when the middleware is absent: a host that never called
-`app.UseAntiforgery()` got a 500 for `GET /marten`. "Registering the studio must never change host
+`app.UseAntiforgery()` got a 500 for `GET /studio`. "Registering the studio must never change host
 behaviour" includes not dictating the host's middleware order, so the token is gone from the shell and
 the studio's component endpoints say `.DisableAntiforgery()`. A host that *does* use the middleware is
 unaffected — it simply has nothing to validate here. If a screen ever grows a real form, it brings the
@@ -48,10 +48,10 @@ token back with it, scoped to that endpoint rather than to the whole studio.
 **D24 — The packages ship no Blazor JS initializer; the shell loads `js/studio.js` itself.** A file named
 `*.lib.module.js` in an RCL's `wwwroot` *is* a JS initializer, and Blazor loads every referenced RCL's into **every**
 Blazor app in the process, so a host's own app fetched the studio's from the **site root** on every page and, behind
-`AuthorizationPolicy`, logged a MIME-type error on each (issue #2). The script is a classic one, PostgresStudio's
-`wwwroot/js/studio.js`, loaded by the shared shell document `StudioDocument.razor` at the end of `<body>`, before
+`AuthorizationPolicy`, logged a MIME-type error on each (issue #2). The script is a classic one, the shell's
+`wwwroot/js/studio.js`, loaded by the shell document `StudioDocument.razor` at the end of `<body>`, before
 `blazor.web.js`, with a **relative** `src` that resolves against the studio-rooted `<base href>` to the
-`_content/PostgresStudio` mirror under the mount path; its global keeps the name `window.martenStudio`. So the
+`_content/DataStudio` mirror under the mount path; its global keeps the name `window.martenStudio`. So the
 remembered theme applies to the prerendered markup, and every global exists before the circuit starts.
 `NoJsInitializerTests` holds both halves: no `*.lib.module.js` under `wwwroot`, and a shell that still asks for the
 script. A studio navigation resets the `<html>` element's attributes, so state the script keeps there lives in JS and an
@@ -79,8 +79,8 @@ drawn at its natural size and scrolls sideways rather than shrinking until its l
 ## D26
 
 **D26 — The stylesheet's UX sections are appended in cascade order, and later wins on purpose.** Each packet
-puts its new rules in a titled section appended to PostgresStudio's `wwwroot/css/studio.css`, which holds both studios'
-rules (a Marten-only sheet, if one is ever needed, is linked *after* it), and edits an existing rule in place only
+puts its new rules in a titled section appended to the shell's `wwwroot/css/studio.css`, which holds every module's
+rules (a module's own sheet, if one is ever needed, is linked *after* it), and edits an existing rule in place only
 where its report says so. Sections that re-declare an earlier selector (`.ms-event-card`, `.ms-projection-note`,
 `.ms-overview-list-stream`, `.ms-doc-detail-actions`, and `UX-6`'s notices' contrast and heading focus ring) win by
 source order: keep that when touching those selectors, as a rule added *before* the section that overrides it does
@@ -100,8 +100,9 @@ order; `1.2-FIND` re-declares
 `1.2-HEADER`'s phone gaps on purpose (the Find box needs them), and `1.2-UX` (the UI sweep's fixes) re-declares the
 Projections table's widths, `1.2-POLISH`'s Triggers name wrapping and the Overview's stat cards; `1.2-FINAL` and
 `1.2-FINAL-FIX-4` re-declare the Projections table again (seven columns, the version and shard count in the name cell).
+The Kafka module's sections are headed `KS-…` (`KS-SHELL` to `KS-PUI`, with classes prefixed `ms-k-`; D34), after the Marten ones, and the last section is `V2-C`, the shell's front page with one tile per module.
 
-## Menus and the rail (1.0-UIFIX)
+## Menus and the rail
 
 **A popover is placed by its own anchor, never by the user agent.** A `popover` is a top-layer element, and an unplaced one is
 centred in the viewport over whatever is there: the Health page's Snapshot menu (a `MenuButton` with only `.ms-menu-popover`)
@@ -112,7 +113,7 @@ anchor to that name and flip when there is no room; a new class given to `MenuBu
 and two menus on a page never share a name. The JSON viewer has one menu for every row, so `studio.js` gives
 `--ms-menu-invoker` to the key button that asked for it (or, from the keyboard, to the focused row's key) and
 `.ms-copy-menu:popover-open` anchors to that. A popover in the top layer still needs a Playwright check: where it lands is the
-browser's layout, and no bUnit test sees it (`PostgresStudioMenuScenarioTests` measures each menu against its button). The
+browser's layout, and no bUnit test sees it (`PostgresMenuScenarioTests` measures each menu against its button). The
 item detail of the Snapshot menu is prose and takes the UI font; a copy menu's details are values (names, statements) and
 stay in the code font.
 
@@ -124,11 +125,11 @@ list when it is longer, and never over it. It is three `.ms-rail-credit-line` bl
 On the 56 px rail (at 1024 px and below) it is clipped out of sight the way the entries' names are, and stays in the
 accessibility tree.
 
-## Navigation inside the studio (1.2)
+## Navigation inside the studio
 
 **The studio intercepts its own navigation.** `StudioRoutes` matches routes itself (D11), so nothing called
 `EnableNavigationInterceptionAsync` and every link, Back and `NavigateTo` inside the mount was an enhanced navigation: a `GET`
-of the whole page, which the next one aborted (`net::ERR_ABORTED`). Since 1.2 `StudioRoutes` asks for interception once, in its
+of the whole page, which the next one aborted (`net::ERR_ABORTED`). `StudioRoutes` asks for interception once, in its
 first interactive render, as the built-in `Router` does; a link or Back is then rendered by the circuit, and a page's
 `NavigateTo` is a `replaceState` or `pushState` the browser reports back one round trip later. It is confined to the mount by
 the studio-rooted `<base href>`, and it is per document, so a host's own Blazor app is untouched. An intercepted address that no
@@ -137,19 +138,18 @@ works; a link to a file says `download` or `target="_blank"` as well (`data-enha
 a location change whose path or fragment changes, `StudioRoutes` scrolls to the fragment as the `Router` does; a page whose
 content arrives after its first render reveals its own fragment once drawn (Health, Connection). Nothing waits for a
 navigation to land, and the shell writes the scope into the address only after it has read the address's own scope.
-`data-ms-interactive` on `.ms-studio` is the browser suites' sign that the circuit has rendered and interception is on. The
-1.2 AppContext switch `PostgresStudio.DisableNavigationInterception`, which restored 1.1's enhanced navigation, was removed in
-1.3. Apart from the static page before the circuit's first interactive render, the one remaining way interception is off is an ask
+`data-ms-interactive` on `.ms-studio` is the browser suites' sign that the circuit has rendered and interception is on. No
+switch turns it off (`RemovedNavigationSwitchTests`). Apart from the static page before the circuit's first interactive render, the one remaining way interception is off is an ask
 that failed (a closed circuit, or another renderer holding it), when the enhanced navigation handles links and `StudioRoutes`
 neither force-loads nor scrolls to a fragment.
 
-## Dialogs are native modals (1.2-A11Y)
+## Dialogs are native modals
 
 A studio dialog is a `ModalDialog` (`<dialog class="ms-modal ms-confirm-overlay">`) that the server renders with `open`
 and `studio.js` upgrades with `showModal()` (`martenStudio.dialog.present`/`release`): focus goes to the element marked
 `data-ms-dialog-focus` (a typed confirmation's box, else Cancel; never a danger or save button), Tab loops inside, Esc
 calls the owner's Cancel through `OnEscapeAsync`, and release restores focus to the invoker. Interop loss leaves the
 rendered overlay (hard rule 15). The shortcut sheet is `ShortcutSheet` in the shell, shown by `?`; its list is
-`StudioShortcuts` plus `StudioDescriptor.ExtraShortcuts`, and `ShortcutSheetMatchesHandlersTests` fails when a handler
+the shell's `StudioShortcuts.Shared` plus `StudioShellDescriptor.ExtraShortcuts`, which is every module's shortcuts in module order (the SQL editor's, the JSON viewer's, a table row's and the plan view's are the Postgres and Marten modules' own), and `ShortcutSheetMatchesHandlersTests` fails when a handler
 and the list drift. `::backdrop` is the only new visual. Native `close` events may arrive late: never act on one while
 `dialog.open`.

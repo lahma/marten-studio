@@ -44,7 +44,7 @@ partial class Build
     /// the referencing project's output directory at build time, so this path only exists after Compile.
     /// </summary>
     AbsolutePath PlaywrightScript =>
-        TestsDirectory / "MartenStudio.Integration.Tests" / "bin" /
+        TestsDirectory / "DataStudio.Marten.Integration.Tests" / "bin" /
         ((IHasConfiguration)this).Configuration / "net10.0" / "playwright.ps1";
 
     Target Browsers => _ => _

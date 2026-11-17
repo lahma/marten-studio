@@ -734,3 +734,17 @@ Pkcs, GHSA-7hqp-7c5m-4vq6, GHSA-c399-9853-6jmj and GHSA-r955-8q5j-3h83 (high) in
 are fixed, and `NuGet.Packaging`/`NuGet.Frameworks` 7.9.0, which is the exit the `NuGet.Frameworks` 7.9.0 pin was waiting for. So
 the upgrade removes a pin instead of adding two (user, 2026-11-12: "use it and minimize extra package pins"). 11.0.x stays out: it
 is the edge channel. Nothing shipped references any of these packages.
+
+**2026-11-17 — The shell takes `Microsoft.AspNetCore.App.Internal.Assets`, and the seven packages take their 2.0 ids. No package is added or removed and no version moves.**
+What: the `PackageReference` to `Microsoft.AspNetCore.App.Internal.Assets` (floor `10.0.12`) moved from `src/DataStudio.Postgres` to `src/DataStudio`, the shell that
+v2 step 3 extracted from the Postgres module, which is where `blazor.web.js` is used (D22); and the packages, assemblies, namespaces and MSBuild
+properties took the names of Data Studio 2.0: `PostgresStudio.Diagnostics` is `DataStudio.Postgres.Diagnostics`, `PostgresStudio` is `DataStudio.Postgres`,
+`MartenStudio` is `DataStudio.Marten`, `KStudio.Core`, `KStudio` and `KStudio.Wolverine` are `DataStudio.Kafka.Core`, `DataStudio.Kafka` and
+`DataStudio.Kafka.Wolverine`, and the shell is the new `DataStudio`; `MartenStudioMartenFloor`, `PostgresStudioNpgsqlFloor`, `KStudioConfluentFloor` and
+`KStudioPrereleaseLabel` (and their `Latest` and `Version` partners), `PostgresStudioPinsNpgsql`, `PostgresStudioDiagnosticsPinsExtensions` and
+`KStudioCorePinsExtensions` are `DataStudioMartenFloor`, `DataStudioNpgsqlFloor`, `DataStudioConfluentFloor`, `KafkaPrereleaseLabel` (dropped the same day: *decision-notes.md*, "The Kafka packages' preview label"),
+`DataStudioPostgresPinsNpgsql`, `DataStudioDiagnosticsPinsExtensions` and `DataStudioKafkaCorePinsExtensions`. Why: the Kafka module references the shell and not the Postgres module, so a host with only
+Kafka needs the script and must not need Npgsql to get it; the shell is the one project whose pages use it. Measured: the nuspecs of `DataStudio`,
+`DataStudio.Postgres`, `DataStudio.Marten` and `DataStudio.Kafka` each list the pack at its central row (`Pack` asserts every line), and the nuspecs of the shell and of
+the three Kafka packages name no database package (`Pack` asserts that too). Nothing in the budget table changed but the *Where* column. Exit: none; the
+six 1.x ids are deprecated on nuget.org with their successors after the first 2.0 tag.

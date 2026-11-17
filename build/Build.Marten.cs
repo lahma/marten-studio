@@ -14,14 +14,14 @@ using Serilog;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Both versions live in <c>Directory.Packages.props</c> and nowhere else: <c>MartenStudioMartenFloor</c>
-/// and <c>MartenStudioMartenLatest</c>. This file only reads them, so bumping either one is an edit to
+/// Both versions live in <c>Directory.Packages.props</c> and nowhere else: <c>DataStudioMartenFloor</c>
+/// and <c>DataStudioMartenLatest</c>. This file only reads them, so bumping either one is an edit to
 /// that file and to nothing in <c>build/</c> or <c>.github/</c>. The <c>marten-latest</c> workflow sets
 /// <c>MARTEN_VERSION: latest</c>, which Fallout binds to <see cref="MartenVersion"/>; every other
 /// workflow, and every local run that does not ask, gets the floor.
 /// </para>
 /// <para>
-/// The resolved version is passed as <c>-p:MartenStudioMartenVersion=</c> to Restore, Compile and Test
+/// The resolved version is passed as <c>-p:DataStudioMartenVersion=</c> to Restore, Compile and Test
 /// <em>always</em>, the floor included, so an environment variable of that name on somebody's machine
 /// (MSBuild reads every environment variable as a property) cannot quietly change what a Fallout run
 /// tests. Restore needs it as much as Compile does: Compile runs <c>--no-restore</c> after Restore, so a
@@ -29,7 +29,7 @@ using Serilog;
 /// </para>
 /// <para>
 /// <c>Pack</c> refuses any version but the floor (<see cref="AssertPackingAtTheMartenFloor"/>), and
-/// <c>src/MartenStudio/MartenStudio.csproj</c> refuses the same thing for a bare <c>dotnet pack</c> -
+/// <c>src/DataStudio.Marten/DataStudio.Marten.csproj</c> refuses the same thing for a bare <c>dotnet pack</c> -
 /// checking what <c>project.assets.json</c> resolved as well as the property, because that file is where
 /// NuGet takes the range from: the nuspec says <c>Marten &gt;= {the version it was restored at}</c>, so a
 /// package packed on the latest leg would raise every host's floor without anybody having decided to.
@@ -38,7 +38,7 @@ using Serilog;
 partial class Build
 {
     /// <summary>The MSBuild property <c>Directory.Packages.props</c> takes the Marten version from.</summary>
-    const string MartenVersionProperty = "MartenStudioMartenVersion";
+    const string MartenVersionProperty = "DataStudioMartenVersion";
 
     [Parameter("The Marten version to restore, compile and test against: 'floor' (the default - the version " +
                "the package depends on, and the only one Pack packs at), 'latest' (the newest 9.x CI tests, " +
@@ -47,10 +47,10 @@ partial class Build
 
     AbsolutePath PackagesPropsFile => RootDirectory / "Directory.Packages.props";
 
-    /// <summary><c>MartenStudioMartenFloor</c> from <c>Directory.Packages.props</c>.</summary>
+    /// <summary><c>DataStudioMartenFloor</c> from <c>Directory.Packages.props</c>.</summary>
     string MartenFloor { get; set; }
 
-    /// <summary><c>MartenStudioMartenLatest</c> from <c>Directory.Packages.props</c>.</summary>
+    /// <summary><c>DataStudioMartenLatest</c> from <c>Directory.Packages.props</c>.</summary>
     string MartenLatest { get; set; }
 
     /// <summary>The exact Marten version this run restores, compiles and tests against.</summary>
@@ -68,8 +68,8 @@ partial class Build
     {
         var props = XDocument.Load(PackagesPropsFile);
 
-        MartenFloor = ReadPackagesProperty(props, "MartenStudioMartenFloor");
-        MartenLatest = ReadPackagesProperty(props, "MartenStudioMartenLatest");
+        MartenFloor = ReadPackagesProperty(props, "DataStudioMartenFloor");
+        MartenLatest = ReadPackagesProperty(props, "DataStudioMartenLatest");
 
         var requested = MartenVersion?.Trim();
 
@@ -100,8 +100,8 @@ partial class Build
     void AssertPackingAtTheMartenFloor()
     {
         Assert.True(ResolvedMartenVersion == MartenFloor,
-            $"Refusing to pack against Marten {ResolvedMartenVersion}: MartenStudio is packed only at the Marten " +
-            $"floor ({MartenFloor}, MartenStudioMartenFloor in Directory.Packages.props). The nuspec would say " +
+            $"Refusing to pack against Marten {ResolvedMartenVersion}: the Marten module is packed only at the Marten " +
+            $"floor ({MartenFloor}, DataStudioMartenFloor in Directory.Packages.props). The nuspec would say " +
             $"'Marten >= {ResolvedMartenVersion}' and raise every host's floor. Run Pack without --marten-version " +
             "(and without MARTEN_VERSION in the environment), or raise the floor deliberately and record why in " +
             "docs/maintainers/package-budget-changes.md.");

@@ -1,0 +1,421 @@
+@implements IAsyncDisposable
+@inject NavigationManager Navigation
+@inject IShellSettings Settings
+@inject StudioShellDescriptor Shell
+@inject IEnumerable<IStudioModuleRail> Rails
+@inject StudioLiveUpdatesFactory LiveFactory
+@inject IJSRuntime JsRuntime
+
+@*
+    The rail's own column: it sticks to the top of the window and is as tall as the window, so the credit at its
+    foot is at the foot of what is on screen, whatever the page's length, and a rail longer than the window
+    scrolls inside itself. The aside round it (StudioLayout) keeps the full height of the page for the rail's
+    background and border.
+*@
+<div class="ms-sidebar-inner">
+    <div class="ms-sidebar-brand">
+        <svg class="ms-sidebar-brand-logo" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <ellipse cx="14" cy="7" rx="10" ry="4" stroke="currentColor" stroke-width="2" />
+            <path d="M4 7v14c0 2.2 4.5 4 10 4s10-1.8 10-4V7" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+            <path d="M4 14c0 2.2 4.5 4 10 4s10-1.8 10-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+        </svg>
+        <span class="ms-sidebar-brand-text">@Settings.Title</span>
+    </div>
+
+    <nav>
+        <ul class="ms-sidebar-nav">
+            @foreach (StudioNavSection section in Shell.Navigation)
+            {
+                <li class="ms-sidebar-section" @key="section.Title">@section.Title</li>
+
+                @foreach (StudioNavItem item in section.Items.Where(entry => Shown(section, entry)))
+                {
+                    <li class="ms-nav-item" @key="item.Label">
+                        @if (item.Route is null)
+                        {
+                            @* No @page yet: rendered as a disabled entry rather than omitted, so the
+                               information architecture is visible from the first release and the route
+                               table's fail-fast is not tripped by a template nothing can match. *@
+                            <span class="ms-nav-link ms-nav-link-disabled" aria-disabled="true" title="@ComingSoon">
+                                @Icon(item.Icon)
+                                <span class="ms-nav-link-text">@item.Label</span>
+                            </span>
+                        }
+                        else
+                        {
+                            @* `title` as well as the label: below 1024 px the rail is 56 px wide and the
+                               label is visually hidden (the sr-only technique, so the link keeps its
+                               accessible name), which leaves a sighted mouse user with ten icons and no
+                               way to read what they are. The tooltip is that way. An entry whose one-word
+                               label undersells it - "Tables" is six kinds of object - says more there. *@
+                            <a class="ms-nav-link @NavClass(item, item.Route)" href="@Link(section, item.Route)" title="@(item.Title ?? item.Label)">
+                                @Icon(item.Icon)
+                                <span class="ms-nav-link-text">@item.Label</span>
+                                @if (BadgeFor(item.BadgeKey) is { } badge)
+                                {
+                                    @* A sibling of the label, never part of it: the link's text is what a
+                                       screen reader announces and what every navigation test matches on, and
+                                       a count folded into it would change the name of the page. *@
+                                    <span class="ms-nav-badge @badge.CssClass" title="@badge.Title" aria-label="@badge.Title">
+                                        @badge.Text
+                                    </span>
+                                }
+                            </a>
+                        }
+                    </li>
+                }
+            }
+        </ul>
+    </nav>
+
+    <p class="ms-rail-credit">
+        <span class="ms-rail-credit-line">@Settings.ProductName @StudioVersion</span>
+        @foreach (IStudioModule module in Shell.Modules)
+        {
+            @* The credit names the shell on its first line, and then every module composed into it (D34), none of them the studio itself. *@
+            <span class="ms-rail-credit-line" @key="module.Key">@module.ProductName</span>
+        }
+        <span class="ms-rail-credit-line"><a href="https://github.com/lahma/marten-studio/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT licensed</a></span>
+        <span class="ms-rail-credit-line">by <a href="https://github.com/lahma/marten-studio" target="_blank" rel="noopener noreferrer">Marko Lahma</a></span>
+    </p>
+</div>
+
+@code
+{
+    private const string ComingSoon = "Coming in a later release";
+
+    /// <summary>
+    /// The shell assembly's version, cut at the first <c>+</c>. This is <c>DataStudio</c>'s, not the module's: all the packages ship at one version (D30) and each module is
+    /// packed on exactly its own build of the shell, so the string is the one the rail has always shown.
+    /// </summary>
+    private static readonly string StudioVersion = ReadVersion();
+
+    private static string ReadVersion()
+    {
+        System.Reflection.Assembly assembly = typeof(NavMenu).Assembly;
+        string? informational = assembly
+            .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+            .OfType<System.Reflection.AssemblyInformationalVersionAttribute>()
+            .FirstOrDefault()?.InformationalVersion;
+
+        if (!string.IsNullOrWhiteSpace(informational))
+        {
+            int plus = informational.IndexOf('+', StringComparison.Ordinal);
+            return plus < 0 ? informational : informational[..plus];
+        }
+
+        return assembly.GetName().Version?.ToString(3) ?? string.Empty;
+    }
+
+    /// <summary>
+    /// Whether an entry is drawn: every one whose descriptor has no condition, and otherwise what the condition says -
+    /// The Marten module's Dead letters entry is absent while the host hides <c>DeadLetterEvent</c>, failing closed, as a
+    /// hidden document type is absent (D27) and the page it would link to says why if it is reached by its address - and
+    /// then what the entry's module says of it, when the module has a rail.
+    /// </summary>
+    private bool Shown(StudioNavSection section, StudioNavItem item) =>
+        (item.IsShown is null || item.IsShown(Settings)) && (RailOf(section)?.IsShown(item) ?? true);
+
+    private readonly CancellationTokenSource cancellation = new();
+
+    /// <summary>
+    /// The sidebar's own polling loop, built rather than injected.
+    /// </summary>
+    /// <remarks>
+    /// <c>StudioLiveUpdates</c> is <c>IAsyncDisposable</c>, so a transient registration would leave the
+    /// circuit's container holding one per navigation for the life of the circuit. This component owns
+    /// the loop and disposes it. It is a second loop beside the current page's, which costs one extra
+    /// visibility watcher and one cached read per interval: the snapshot cache behind the badges' reader
+    /// is what keeps it from being a second pair of queries.
+    /// </remarks>
+    private StudioLiveUpdates? live;
+
+    /// <summary>The rails of the composed modules that have one (D34): the module's links, its entries' conditions and its badges.</summary>
+    private IStudioModuleRail[] rails = [];
+
+    /// <summary>
+    /// What each rail last read, and every rail's together by badge key. The poll runs on the thread pool and a scope change on the renderer,
+    /// and both write them, so they are written under the lock and the merged answer is replaced whole.
+    /// </summary>
+    private readonly Dictionary<IStudioModuleRail, IReadOnlyDictionary<string, StudioNavBadge>> railBadges = [];
+    private readonly Lock badgesGate = new();
+    private volatile IReadOnlyDictionary<string, StudioNavBadge> badges = new Dictionary<string, StudioNavBadge>(StringComparer.Ordinal);
+
+    private string? currentRelativePath;
+    private bool started;
+    private bool disposed;
+
+    protected override async Task OnInitializedAsync()
+    {
+        rails = [.. Rails];
+
+        UpdateCurrentRelativePath(Navigation.Uri);
+        Navigation.LocationChanged += OnLocationChanged;
+
+        foreach (IStudioModuleRail rail in rails)
+        {
+            rail.Changed += OnRailChangedAsync;
+            rail.LinksChanged += OnRailLinksChanged;
+        }
+
+        await RefreshBadgesAsync(cancellation.Token);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || started || disposed)
+        {
+            return;
+        }
+
+        started = true;
+
+        // Each rail's first interactive work, once: what a module keeps in the browser, and its first look at what is already on screen.
+        // The token is read here, before the awaits.
+        CancellationToken token = cancellation.Token;
+        foreach (IStudioModuleRail rail in rails)
+        {
+            await rail.StartAsync(JsRuntime, token);
+        }
+
+        // Leaving (the circuit ending) during the reads above disposes the menu under the awaits: its token source is gone (reading
+        // its token throws ObjectDisposedException), and a loop started now would be one nothing disposes.
+        if (disposed)
+        {
+            return;
+        }
+
+        live = LiveFactory.Create();
+
+        // No Failed handler: a badge that could not be read is a badge that is not drawn, and the
+        // sidebar is the last place in the studio that should put an error on the screen.
+        await live.StartAsync(Settings.RefreshInterval, TickAsync, cancellation.Token);
+    }
+
+    private async Task TickAsync(CancellationToken cancellationToken)
+    {
+        await RefreshBadgesAsync(cancellationToken);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>
+    /// Redraws the rail's links at once when the scope they carry moves (1.2). The scope's change is awaited one handler after another,
+    /// the shell's first, so by the time this component's handler runs the scope has been the new one for a policy read; the visitor who
+    /// clicks a link in that time must get the new scope's, and it is this synchronous event that raises the render - before anything is
+    /// awaited - from the scope being applied.
+    /// </summary>
+    private void OnRailLinksChanged()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OnRailChangedAsync()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        // Before the read: the links and the scope-dependent entries (Stores, Tenants) are drawn from state that is
+        // already the new scope's, and a round trip to the badges' reader is no reason to leave them stale.
+        _ = InvokeAsync(StateHasChanged);
+
+        await RefreshBadgesAsync(cancellation.Token);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>
+    /// Reads every rail's badges and merges them by key. A rail that answers <see langword="null" /> - its read was cancelled, or the scope
+    /// outran it - keeps the badges it last answered: a read the scope outran is not drawn, because the scope change that outran it starts a
+    /// read of its own, and a badge of the old database's counts under the new one would be wrong until the next poll.
+    /// </summary>
+    private async Task RefreshBadgesAsync(CancellationToken cancellationToken)
+    {
+        foreach (IStudioModuleRail rail in rails)
+        {
+            if (await rail.ReadBadgesAsync(cancellationToken) is not { } read)
+            {
+                continue;
+            }
+
+            lock (badgesGate)
+            {
+                railBadges[rail] = read;
+
+                Dictionary<string, StudioNavBadge> merged = new(StringComparer.Ordinal);
+                foreach (IStudioModuleRail each in rails)
+                {
+                    if (railBadges.TryGetValue(each, out IReadOnlyDictionary<string, StudioNavBadge>? answered))
+                    {
+                        foreach ((string key, StudioNavBadge badge) in answered)
+                        {
+                            merged.TryAdd(key, badge);
+                        }
+                    }
+                }
+
+                badges = merged;
+            }
+        }
+    }
+
+    /// <summary>The badge an entry wears right now, or <see langword="null" /> for none: what its module's rail read for the entry's key.</summary>
+    private StudioNavBadge? BadgeFor(string? key) =>
+        key is not null && badges.TryGetValue(key, out StudioNavBadge? badge) ? badge : null;
+
+    /// <summary>The rail of the module that contributed <paramref name="section" />, or <see langword="null" /> for a module with none.</summary>
+    private IStudioModuleRail? RailOf(StudioNavSection section) =>
+        section.ModuleKey is null
+            ? null
+            : rails.FirstOrDefault(rail => string.Equals(rail.ModuleKey, section.ModuleKey, StringComparison.Ordinal));
+
+    /// <summary>
+    /// The rail's href for a page: what its module's links carry (the database's: the scope the studio is about, 1.2), or the bare link of a
+    /// module with no rail (D34: its pages are about their own scope, and the host's waits in memory). Read at render, and the rail renders
+    /// again on every location change and, synchronously, whenever the links change (<see cref="IStudioModuleRail.LinksChanged" />), so it is
+    /// never older than the address.
+    /// </summary>
+    private string Link(StudioNavSection section, string subPath)
+    {
+        string href = StudioLink.To(subPath);
+        return RailOf(section) is { } rail ? rail.Decorate(href) : href;
+    }
+
+    private void UpdateCurrentRelativePath(string uri)
+    {
+        // Resolved once per location change (NavClass runs for every nav link on every render):
+        // ToDashboardRelativePath handles both the prerender and the interactive base URI shapes, and
+        // ResolveLeaf applies the same prefix-strip retry as route matching so highlighting is correct
+        // even when the application path base ends with the custom studio path.
+        string? relative = StudioLink.ToDashboardRelativePath(uri, Navigation.BaseUri, Settings);
+        currentRelativePath = relative is null ? null : Shell.Routes.ResolveLeaf(relative, Settings);
+    }
+
+    private string NavClass(StudioNavItem item, string route)
+    {
+        string? relativePath = currentRelativePath;
+        if (relativePath is null)
+        {
+            return string.Empty;
+        }
+
+        // Exact match for a module's overview (its home is the prefix of every page of the module), prefix match for sub-pages.
+        if (item.Exact)
+        {
+            return string.Equals(relativePath, route, StringComparison.OrdinalIgnoreCase) ? "ms-nav-active" : string.Empty;
+        }
+
+        // The most specific entry wins: under a studio whose sidebar has both "database" and "database/sessions", the
+        // Sessions page lights Sessions alone. A sidebar with no entry nested in another - the Marten module's - is unchanged.
+        bool isActive = Covers(route, relativePath)
+            && !Shell.Navigation.Any(section => section.Items.Any(item =>
+                item.Route is { Length: > 0 } other && other.Length > route.Length && Covers(other, relativePath)));
+
+        return isActive ? "ms-nav-active" : string.Empty;
+    }
+
+    /// <summary>Whether <paramref name="route" /> is <paramref name="relativePath" /> or one of its ancestors.</summary>
+    private static bool Covers(string route, string relativePath) =>
+        relativePath.Equals(route, StringComparison.OrdinalIgnoreCase)
+        || relativePath.StartsWith(route + "/", StringComparison.OrdinalIgnoreCase);
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        UpdateCurrentRelativePath(e.Location);
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>
+    /// Unsubscribes, stops the loop and cancels the token - in that order, and all of them however the
+    /// loop's own disposal goes.
+    /// </summary>
+    /// <remarks>
+    /// Idempotent, because Blazor disposes a component once and a test context disposes it again, and a
+    /// <see cref="CancellationTokenSource" /> that has already been disposed throws from
+    /// <c>CancelAsync</c>. A second disposal must never be the thing that finally puts an exception on
+    /// the circuit.
+    /// </remarks>
+    public async ValueTask DisposeAsync()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        disposed = true;
+
+        Navigation.LocationChanged -= OnLocationChanged;
+
+        foreach (IStudioModuleRail rail in rails)
+        {
+            rail.Changed -= OnRailChangedAsync;
+            rail.LinksChanged -= OnRailLinksChanged;
+        }
+
+        try
+        {
+            if (live is not null)
+            {
+                await live.DisposeAsync();
+                live = null;
+            }
+        }
+        finally
+        {
+            try
+            {
+                await cancellation.CancelAsync();
+            }
+            finally
+            {
+                cancellation.Dispose();
+            }
+        }
+
+        GC.SuppressFinalize(this);
+    }
+
+    /// <summary>
+    /// One hand-drawn icon. Constant markup only - no icon library, ever (AGENTS.md hard rule 3).
+    /// </summary>
+    private static MarkupString Icon(string name)
+    {
+        string body = name switch
+        {
+            "grid" => """<rect x="1" y="1" width="7" height="7" rx="1" /><rect x="10" y="1" width="7" height="7" rx="1" /><rect x="1" y="10" width="7" height="7" rx="1" /><rect x="10" y="10" width="7" height="7" rx="1" />""",
+            "doc" => """<path d="M4 1h7l3 3v13H4z" /><polyline points="11,1 11,4 14,4" /><line x1="6" y1="8" x2="12" y2="8" /><line x1="6" y1="11" x2="12" y2="11" />""",
+            "query" => """<circle cx="8" cy="8" r="6" /><line x1="12.5" y1="12.5" x2="17" y2="17" />""",
+            "plan" => """<rect x="6" y="1.5" width="6" height="4" rx="1" /><rect x="1.5" y="12.5" width="6" height="4" rx="1" /><rect x="10.5" y="12.5" width="6" height="4" rx="1" /><path d="M9 5.5v3M4.5 12.5v-4h9v4" />""",
+            "graph" => """<circle cx="4" cy="9" r="2.5" /><circle cx="14" cy="4" r="2.5" /><circle cx="14" cy="14" r="2.5" /><line x1="6.3" y1="8" x2="11.7" y2="5" /><line x1="6.3" y1="10" x2="11.7" y2="13" />""",
+            "flow" => """<circle cx="3.5" cy="9" r="2" /><circle cx="14.5" cy="4" r="2" /><circle cx="14.5" cy="14" r="2" /><path d="M5.5 9C9 9 9 4 12.5 4M5.5 9C9 9 9 14 12.5 14" />""",
+            "stream" => """<ellipse cx="9" cy="4" rx="6" ry="2.5" /><path d="M3 4v10c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5V4" /><path d="M3 9c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5" />""",
+            "feed" => """<path d="M3 3a12 12 0 0 1 12 12" /><path d="M3 8a7 7 0 0 1 7 7" /><circle cx="4" cy="14" r="1.5" fill="currentColor" />""",
+            "tag" => """<path d="M2 2h7l7 7-7 7-7-7z" /><circle cx="6" cy="6" r="1.2" fill="currentColor" />""",
+            "alert" => """<path d="M9 2 17 16H1z" /><line x1="9" y1="7" x2="9" y2="11" /><circle cx="9" cy="13.5" r="0.8" fill="currentColor" />""",
+            "projection" => """<rect x="1" y="3" width="6" height="12" rx="1" /><rect x="11" y="3" width="6" height="12" rx="1" /><line x1="7" y1="9" x2="11" y2="9" /><polyline points="9,7 11,9 9,11" />""",
+            "schema" => """<rect x="2" y="2" width="14" height="4" rx="1" /><rect x="2" y="7" width="14" height="4" rx="1" /><rect x="2" y="12" width="14" height="4" rx="1" />""",
+            "table" => """<rect x="1.5" y="2.5" width="15" height="13" rx="1.5" /><line x1="1.5" y1="6.5" x2="16.5" y2="6.5" /><line x1="1.5" y1="11" x2="16.5" y2="11" /><line x1="7" y1="6.5" x2="7" y2="15.5" />""",
+            "pulse" => """<polyline points="1,9 5,9 7,4 11,14 13,9 17,9" />""",
+            "statements" => """<line x1="2" y1="4" x2="16" y2="4" /><line x1="2" y1="9" x2="11" y2="9" /><line x1="2" y1="14" x2="7" y2="14" /><polyline points="13,11 15,14 17,11" /><line x1="15" y1="8" x2="15" y2="14" />""",
+            "maintenance" => """<path d="M11.5 2.5a3.5 3.5 0 0 0-4.3 4.4L2.5 11.6a1.4 1.4 0 0 0 2 2l4.7-4.7a3.5 3.5 0 0 0 4.4-4.3l-2.1 2.1-1.9-.3-.3-1.9z" />""",
+            "storage" => """<rect x="2" y="3" width="14" height="5" rx="1.5" /><rect x="2" y="10" width="14" height="5" rx="1.5" /><circle cx="13" cy="5.5" r="0.8" fill="currentColor" /><circle cx="13" cy="12.5" r="0.8" fill="currentColor" />""",
+            "replication" => """<ellipse cx="5" cy="4" rx="3.5" ry="1.5" /><path d="M1.5 4v5c0 .8 1.6 1.5 3.5 1.5s3.5-.7 3.5-1.5V4" /><ellipse cx="13" cy="9" rx="3.5" ry="1.5" /><path d="M9.5 9v5c0 .8 1.6 1.5 3.5 1.5s3.5-.7 3.5-1.5V9" /><polyline points="5,12.5 5,15 7.5,15" /><polyline points="6.5,13.8 7.8,15 6.5,16.2" />""",
+            "server" => """<rect x="2" y="2" width="14" height="6" rx="1" /><rect x="2" y="10" width="14" height="6" rx="1" /><circle cx="5" cy="5" r="0.8" fill="currentColor" /><circle cx="5" cy="13" r="0.8" fill="currentColor" /><line x1="9" y1="5" x2="14" y2="5" /><line x1="9" y1="13" x2="14" y2="13" />""",
+            "plug" => """<path d="M6 1.5v4M12 1.5v4" /><path d="M4 5.5h10v3.5a5 5 0 0 1-10 0z" /><path d="M9 14v2.5" />""",
+            "topics" => """<rect x="2" y="3" width="14" height="3" rx="1" /><rect x="2" y="7.5" width="14" height="3" rx="1" /><rect x="2" y="12" width="14" height="3" rx="1" /><line x1="5" y1="4.5" x2="5.01" y2="4.5" /><line x1="5" y1="9" x2="5.01" y2="9" /><line x1="5" y1="13.5" x2="5.01" y2="13.5" />""",
+            "search" => """<circle cx="7.5" cy="7.5" r="5" /><line x1="11.2" y1="11.2" x2="16" y2="16" /><line x1="5.2" y1="7.5" x2="9.8" y2="7.5" />""",
+            "consumers" => """<circle cx="6" cy="6" r="2.5" /><circle cx="13" cy="7" r="2" /><path d="M1.5 15c0-2.5 2-4.2 4.5-4.2s4.5 1.7 4.5 4.2M11 15c0-1.9 1.3-3.2 3-3.2s2.5 1.3 2.5 3.2" />""",
+            "broker" => """<circle cx="9" cy="9" r="2.2" /><circle cx="3" cy="3.5" r="1.5" /><circle cx="15" cy="3.5" r="1.5" /><circle cx="3" cy="14.5" r="1.5" /><circle cx="15" cy="14.5" r="1.5" /><path d="M4.2 4.5 7.3 7.5M13.8 4.5 10.7 7.5M4.2 13.5 7.3 10.5M13.8 13.5 10.7 10.5" />""",
+            "cog" => """<circle cx="9" cy="9" r="3" /><path d="M9 1v2M9 15v2M1 9h2M15 9h2M3.5 3.5l1.5 1.5M13 13l1.5 1.5M14.5 3.5 13 5M5 13l-1.5 1.5" />""",
+            _ => """<line x1="3" y1="4" x2="15" y2="4" /><line x1="3" y1="9" x2="15" y2="9" /><line x1="3" y1="14" x2="15" y2="14" />"""
+        };
+
+        return new MarkupString(
+            $"""<svg class="ms-nav-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{body}</svg>""");
+    }
+}

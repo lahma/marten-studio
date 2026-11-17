@@ -1,0 +1,62 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The Kafka module's fast suite (AGENTS.md D36): no Docker. The engine against the hand-written fake broker, the conventions
+       and the public API baseline. M2 adds bUnit and the Kafka module project. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsTestProject>true</IsTestProject>
+    <!-- The linked SourceScanner.cs documents itself with crefs to the other suite's tests (CS1574), which this project does not compile. -->
+    <NoWarn>$(NoWarn);CS1574</NoWarn>
+  </PropertyGroup>
+
+  <!-- Global usings: `Xunit` comes from Verify.XunitV3's build props. -->
+  <ItemGroup>
+    <Using Include="AwesomeAssertions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="GitHubActionsTestLogger" />
+    <PackageReference Include="AwesomeAssertions" />
+    <PackageReference Include="Verify.XunitV3" />
+    <PackageReference Include="PublicApiGenerator" />
+    <PackageReference Include="bunit" />
+    <PackageReference Include="Microsoft.AspNetCore.TestHost" />
+  </ItemGroup>
+
+  <!-- Not a package: the shared framework brings the container and logging implementations the engine's real registration is tested
+       with (DataStudio.Kafka.Core itself has no framework reference, which KafkaCoreFenceTests holds). -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/DataStudio.Kafka.Core/DataStudio.Kafka.Core.csproj" />
+    <ProjectReference Include="../../src/DataStudio.Kafka/DataStudio.Kafka.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="../DataStudio.Marten.Tests/Conventions/RepositoryRoot.cs" Link="Support/Linked/RepositoryRoot.cs" />
+    <Compile Include="../DataStudio.Marten.Tests/Conventions/SourceScanner.cs" Link="Support/Linked/SourceScanner.cs" />
+    <Compile Include="../DataStudio.Marten.Tests/Conventions/LogEventScan.cs" Link="Support/Linked/LogEventScan.cs" />
+    <Compile Include="../DataStudio.Marten.Tests/Conventions/WordsSnapshot.cs" Link="Support/Linked/WordsSnapshot.cs" />
+    <Compile Include="../DataStudio.Postgres.Tests/Support/ManualTimeProvider.cs" Link="Support/Linked/ManualTimeProvider.cs" />
+    <Compile Include="../DataStudio.Marten.Tests/Support/CapturingLoggerProvider.cs" Link="Support/Linked/CapturingLoggerProvider.cs" />
+  </ItemGroup>
+
+  <!-- The shell's bUnit doubles, compiled in from the other suites rather than copied: the visitor, the browser's navigation services, the router's file
+       provider and the persisted-state store. Each names only the shell's and the framework's types, so a Kafka page is rendered in the real shell with
+       the module's own services added beside it (KafkaShellContext), and no database module is anywhere in this suite's output. -->
+  <ItemGroup>
+    <Compile Include="../DataStudio.Postgres.Tests/Support/RecordingNavigationManager.cs" Link="Support/Linked/RecordingNavigationManager.cs" />
+    <Compile Include="../DataStudio.Marten.Tests/Support/ComposedRailAssertions.cs" Link="Support/Linked/ComposedRailAssertions.cs" />
+    <Compile Include="../DataStudio.Marten.Tests/Support/TestAuthenticationHandler.cs" Link="Support/Linked/TestAuthenticationHandler.cs" />
+    <Compile Include="../DataStudio.Marten.Tests/Support/TestAuthenticationStateProvider.cs" Link="Support/Linked/TestAuthenticationStateProvider.cs" />
+    <Compile Include="../DataStudio.Marten.Tests/Support/TestFileProvider.cs" Link="Support/Linked/TestFileProvider.cs" />
+    <Compile Include="../DataStudio.Marten.Tests/Support/ShellGolden.cs" Link="Support/Linked/ShellGolden.cs" />
+    <Compile Include="../DataStudio.Marten.Tests/Support/TestPersistentComponentStateStore.cs" Link="Support/Linked/TestPersistentComponentStateStore.cs" />
+  </ItemGroup>
+
+</Project>

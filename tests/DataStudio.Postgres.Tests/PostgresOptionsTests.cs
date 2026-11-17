@@ -1,0 +1,441 @@
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+
+using Npgsql;
+
+using DataStudio.Postgres.Services;
+using DataStudio.Postgres.Services.Postgres;
+using DataStudio.Postgres.Services.Settings;
+
+namespace DataStudio.Postgres.Tests;
+
+/// <summary>
+/// The options' defaults and their validation - the Marten module's bounds and messages in the Postgres module's own names - and the
+/// source names <c>AddDataSource</c> and <c>AddDatabaseSource</c> may carry. Plus the inbound types' own checks.
+/// </summary>
+public class PostgresOptionsTests
+{
+    private static PostgresOptions Resolve(Action<PostgresOptions> configure)
+    {
+        ServiceCollection services = new();
+        services.AddDataStudio().AddPostgres(configure);
+        using ServiceProvider provider = services.BuildServiceProvider();
+        return provider.GetRequiredService<IOptions<PostgresOptions>>().Value;
+    }
+
+    private static Action ResolveAction(Action<PostgresOptions> configure) => () => Resolve(configure);
+
+    [Fact]
+    public void The_defaults_mirror_Marten_and_name_Postgres()
+    {
+        PostgresOptions options = new();
+
+        options.SourceAuthorizationPolicy.Should().BeNull();
+        options.WriteAuthorizationPolicy.Should().BeNull();
+        options.ReadOnly.Should().BeFalse();
+        options.Capabilities.RunSql.Should().BeFalse();
+        options.Capabilities.BrowseDatabase.Should().BeFalse();
+        options.Capabilities.ViewDatabaseActivity.Should().BeFalse();
+        options.DefaultPageSize.Should().Be(50);
+        options.MaxPageSize.Should().Be(500);
+        options.QueryTimeout.Should().Be(TimeSpan.FromSeconds(30));
+        options.MaxInlineValueBytes.Should().Be(512 * 1024);
+        options.MaxSqlConsoleRows.Should().Be(500);
+        options.SqlConsoleRole.Should().BeNull();
+        options.ExactCountThreshold.Should().Be(100_000);
+        options.HealthInterval.Should().Be(TimeSpan.FromSeconds(60));
+        options.BrowsableSchemas.Should().BeEmpty("the default is applied after configuration, only when nothing named a schema");
+        options.IncludeDefaultDataSource.Should().BeTrue();
+        options.DataSources.Should().BeEmpty();
+        options.DatabaseSources.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void All_turns_on_the_four_reads()
+    {
+        PostgresCapabilities all = PostgresCapabilities.All();
+
+        all.RunSql.Should().BeTrue();
+        all.BrowseDatabase.Should().BeTrue();
+        all.ViewDefinitions.Should().BeTrue();
+        all.ViewDatabaseActivity.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Every_capability_is_off_until_the_host_says_otherwise()
+    {
+        PostgresCapabilities none = new();
+
+        none.RunSql.Should().BeFalse();
+        none.BrowseDatabase.Should().BeFalse();
+        none.ViewDefinitions.Should().BeFalse("a definition is read only when a host says so, or when it enables BrowseDatabase, which implies it");
+        none.ViewDatabaseActivity.Should().BeFalse();
+
+        foreach (StudioCapability capability in PostgresSettings.Offered)
+        {
+            PostgresSettings.IsConfigured(none, capability).Should().BeFalse(capability.ToString());
+        }
+
+        PostgresSettings.IsConfigured(new PostgresCapabilities { ViewDefinitions = true }, StudioCapability.ViewDefinitions).Should().BeTrue();
+        PostgresSettings.IsConfigured(new PostgresCapabilities { ViewDefinitions = true }, StudioCapability.BrowseDatabase)
+            .Should().BeFalse("ViewDefinitions does not imply the rows: BrowseDatabase implies ViewDefinitions, never the other way");
+    }
+
+    [Fact]
+    public void A_valid_configuration_resolves()
+    {
+        PostgresOptions options = Resolve(static options =>
+        {
+            options.BrowsableSchemas.Add("qrtz");
+            options.AddDataSource("orders", static sp => sp.GetRequiredKeyedService<NpgsqlDataSource>("orders"));
+            options.AddDatabaseSource("tenants.v2", static _ => throw new InvalidOperationException("never asked here"));
+        });
+
+        options.DataSources.Select(static x => x.Name).Should().Equal("orders");
+        options.DatabaseSources.Select(static x => x.Name).Should().Equal("tenants.v2");
+        options.BrowsableSchemas.Should().Equal(["qrtz"], "a list that names a schema replaces the default");
+    }
+
+    [Fact]
+    public void BrowsableSchemas_is_public_when_nothing_names_a_schema()
+    {
+        Resolve(static _ => { }).BrowsableSchemas.Should().Equal("public");
+    }
+
+    /// <summary>
+    /// Configuration binding appends to a list rather than replacing it, so a default written into the property would be
+    /// impossible to remove from appsettings. Applied after configuration instead, and only to an empty list.
+    /// </summary>
+    [Fact]
+    public void Bound_configuration_replaces_the_default_rather_than_adding_to_it()
+    {
+        IConfiguration configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Postgres:BrowsableSchemas:0"] = "legacy",
+                ["Postgres:BrowsableSchemas:1"] = "qrtz",
+            })
+            .Build();
+
+        ServiceCollection services = new();
+        services.AddDataStudio().AddPostgres();
+        services.Configure<PostgresOptions>(configuration.GetSection("Postgres"));
+        using ServiceProvider provider = services.BuildServiceProvider();
+
+        provider.GetRequiredService<IOptions<PostgresOptions>>().Value.BrowsableSchemas.Should().Equal("legacy", "qrtz");
+    }
+
+    [Theory]
+    [InlineData("has space")]
+    [InlineData("-leading")]
+    [InlineData("a/b")]
+    [InlineData("a|b")]
+    public void A_source_name_outside_the_key_pattern_fails(string name)
+    {
+        ResolveAction(options => options.AddDataSource(name, static _ => null!))
+            .Should().Throw<OptionsValidationException>().WithMessage("*AddDataSource and AddDatabaseSource names must each be*");
+    }
+
+    /// <summary>
+    /// A name that ends in a line break is refused by the same check and with the same sentence: .NET's <c>$</c> matches
+    /// before a final line feed, so the pattern is anchored with <c>\z</c>, and "tenant_a\n" is not a key of its own.
+    /// </summary>
+    [Theory]
+    [InlineData("tenant_a\n", false)]
+    [InlineData("tenant_a\r\n", false)]
+    [InlineData("tenant_a\u2028", false)]
+    [InlineData("tenant_a\n", true)]
+    [InlineData("tenant_a\r\n", true)]
+    [InlineData("tenant_a\u2028", true)]
+    public void A_source_name_ending_in_a_line_break_fails(string name, bool databaseSource)
+    {
+        ResolveAction(options =>
+            {
+                if (databaseSource)
+                {
+                    options.AddDatabaseSource(name, static _ => null!);
+                }
+                else
+                {
+                    options.AddDataSource(name, static _ => null!);
+                }
+            })
+            .Should().Throw<OptionsValidationException>().WithMessage("*AddDataSource and AddDatabaseSource names must each be*");
+    }
+
+    [Fact]
+    public void A_source_name_longer_than_64_characters_fails()
+    {
+        ResolveAction(static options => options.AddDatabaseSource(new string('a', 65), static _ => null!))
+            .Should().Throw<OptionsValidationException>().WithMessage("*names must each be*");
+    }
+
+    [Theory]
+    [InlineData("default")]
+    [InlineData("Default")]
+    public void Default_is_reserved(string name)
+    {
+        ResolveAction(options => options.AddDataSource(name, static _ => null!))
+            .Should().Throw<OptionsValidationException>().WithMessage("*cannot name a source 'default'*");
+    }
+
+    [Fact]
+    public void Names_are_unique_ignoring_case_across_both_kinds()
+    {
+        ResolveAction(static options => options
+                .AddDataSource("orders", static _ => null!)
+                .AddDatabaseSource("Orders", static _ => null!))
+            .Should().Throw<OptionsValidationException>().WithMessage("*must be unique, ignoring case, across both*");
+    }
+
+    [Fact]
+    public void The_add_methods_refuse_a_blank_name_and_a_null_factory_at_the_call()
+    {
+        PostgresOptions options = new();
+
+        ((Action) (() => options.AddDataSource(" ", static _ => null!))).Should().Throw<ArgumentException>();
+        ((Action) (() => options.AddDataSource("x", null!))).Should().Throw<ArgumentNullException>();
+        ((Action) (() => options.AddDatabaseSource("", static _ => null!))).Should().Throw<ArgumentException>();
+        ((Action) (() => options.AddDatabaseSource("x", null!))).Should().Throw<ArgumentNullException>();
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(64 * 1024 * 1024 + 1)]
+    public void MaxInlineValueBytes_is_bounded(int bytes)
+    {
+        ResolveAction(options => options.MaxInlineValueBytes = bytes)
+            .Should().Throw<OptionsValidationException>().WithMessage("*PostgresOptions.MaxInlineValueBytes must be between 1 and 64 MiB*");
+    }
+
+    [Fact]
+    public void The_other_bounds_are_Marten_in_Postgres_names()
+    {
+        ResolveAction(static options => options.MaxPageSize = 5001).Should().Throw<OptionsValidationException>().WithMessage("*PostgresOptions.MaxPageSize*");
+        ResolveAction(static options => options.DefaultPageSize = 0).Should().Throw<OptionsValidationException>().WithMessage("*PostgresOptions.DefaultPageSize*");
+        ResolveAction(static options => options.QueryTimeout = TimeSpan.Zero).Should().Throw<OptionsValidationException>().WithMessage("*PostgresOptions.QueryTimeout*");
+        ResolveAction(static options => options.MaxSqlConsoleRows = 0).Should().Throw<OptionsValidationException>().WithMessage("*PostgresOptions.MaxSqlConsoleRows*");
+        ResolveAction(static options => options.SqlConsoleRole = "bad role").Should().Throw<OptionsValidationException>().WithMessage("*PostgresOptions.SqlConsoleRole*");
+        ResolveAction(static options => options.ExactCountThreshold = -1).Should().Throw<OptionsValidationException>().WithMessage("*PostgresOptions.ExactCountThreshold*");
+        ResolveAction(static options => options.HealthInterval = TimeSpan.FromSeconds(1)).Should().Throw<OptionsValidationException>().WithMessage("*PostgresOptions.HealthInterval*");
+        ResolveAction(static options => options.Capabilities = null!).Should().Throw<OptionsValidationException>().WithMessage("*PostgresCapabilities.All()*");
+        ResolveAction(static options => options.BrowsableSchemas.Add("a\"b")).Should().Throw<OptionsValidationException>().WithMessage("*PostgresOptions.BrowsableSchemas*");
+    }
+
+    /// <summary>The console's role is anchored the same way: a line break after a plain identifier is not one.</summary>
+    [Theory]
+    [InlineData("studio_reader\n")]
+    [InlineData("studio_reader\r\n")]
+    [InlineData("studio_reader\u2028")]
+    public void A_sql_console_role_ending_in_a_line_break_fails(string role)
+    {
+        ResolveAction(options => options.SqlConsoleRole = role)
+            .Should().Throw<OptionsValidationException>().WithMessage("*PostgresOptions.SqlConsoleRole must be a plain Postgres identifier*");
+        Resolve(static options => options.SqlConsoleRole = "studio_reader").SqlConsoleRole.Should().Be("studio_reader");
+    }
+
+    [Fact]
+    public void The_settings_speak_Postgres_names_and_offer_four_capabilities()
+    {
+        PostgresOptions options = new() { SourceAuthorizationPolicy = "src", WriteAuthorizationPolicy = "write" };
+        IStudioSettings settings = PostgresSettings.Of(options);
+
+        settings.ProductName.Should().Be("Data Studio", "the module's settings answer the shell's name; its own is its descriptor's");
+        settings.OptionName("ReadOnly").Should().Be("PostgresOptions.ReadOnly");
+        settings.CapabilityOption(StudioCapability.RunSql).Should().Be("PostgresOptions.Capabilities.RunSql");
+        settings.AllCapabilities().Should().Be("PostgresCapabilities.All()");
+        settings.OptionName(nameof(PostgresOptions.MaxInlineValueBytes)).Should().Be("PostgresOptions.MaxInlineValueBytes");
+        settings.ScopePolicy.Should().Be("src");
+        settings.WritePolicy.Should().Be("write");
+        settings.Capabilities.Should().Equal(
+            StudioCapability.RunSql, StudioCapability.BrowseDatabase, StudioCapability.ViewDefinitions, StudioCapability.ViewDatabaseActivity);
+        settings.CapabilityOption(StudioCapability.ViewDefinitions).Should().Be("PostgresOptions.Capabilities.ViewDefinitions");
+        settings.IsDocumentTypeVisible.Should().BeNull();
+        settings.TrimmedPath.Should().Be("/studio", "the shell's default mount");
+        settings.HasCustomPath.Should().BeFalse();
+    }
+
+    [Fact]
+    public void The_source_label_is_Source_once_a_named_source_exists_and_the_descriptors_otherwise()
+    {
+        IStudioSettings alone = PostgresSettings.Of(new PostgresOptions());
+        alone.SourceLabelOf(PostgresDescriptor.Instance).Should().Be("Database");
+
+        IStudioSettings withDataSource = PostgresSettings.Of(new PostgresOptions().AddDataSource("reporting", static _ => null!));
+        withDataSource.SourceLabelOf(PostgresDescriptor.Instance).Should().Be("Source");
+
+        IStudioSettings withHost = PostgresSettings.Of(new PostgresOptions().AddDatabaseSource("tenants", static _ => null!));
+        withHost.SourceLabelOf(PostgresDescriptor.Instance).Should().Be("Source");
+    }
+
+    [Theory]
+    [MemberData(nameof(EveryCapability))]
+    public void Every_capability_Postgres_does_not_offer_throws_rather_than_reads_false(string name)
+    {
+        StudioCapability capability = Enum.Parse<StudioCapability>(name);
+        PostgresSettings settings = PostgresSettings.Of(new PostgresOptions { Capabilities = PostgresCapabilities.All() });
+
+        if (settings.Capabilities.Contains(capability))
+        {
+            settings.IsConfigured(capability).Should().BeTrue();
+        }
+        else
+        {
+            ((Action) (() => settings.IsConfigured(capability))).Should().Throw<ArgumentOutOfRangeException>();
+        }
+    }
+
+    public static TheoryData<string> EveryCapability() => [.. Enum.GetNames<StudioCapability>()];
+
+    [Theory]
+    [InlineData(-1, 0, 1, "ACU")]
+    [InlineData(1, -1, 1, "ACU")]
+    [InlineData(1, 2, 1, "ACU")]
+    [InlineData(double.NaN, 0, 1, "ACU")]
+    [InlineData(1, 0, double.PositiveInfinity, "ACU")]
+    public void A_capacity_out_of_range_is_refused(double current, double minimum, double maximum, string unit)
+    {
+        ((Action) (() => PostgresComputeCapacity.Of(current, minimum, maximum, unit, DateTimeOffset.UnixEpoch)))
+            .Should().Throw<ArgumentOutOfRangeException>();
+    }
+
+    [Fact]
+    public void A_capacity_needs_a_unit_and_Aurora_is_bounded_at_384_ACU()
+    {
+        ((Action) (() => PostgresComputeCapacity.Of(1, 0, 2, " ", DateTimeOffset.UnixEpoch))).Should().Throw<ArgumentException>();
+        ((Action) (() => PostgresComputeCapacity.AuroraServerlessV2(1, 0.5, 385, DateTimeOffset.UnixEpoch))).Should().Throw<ArgumentOutOfRangeException>();
+        PostgresComputeCapacity.AuroraServerlessV2(1, 0.5, 384, DateTimeOffset.UnixEpoch).Maximum.Should().Be(384,
+            "platform version 4 allows 384 ACU (Performance and scaling for Aurora serverless)");
+
+        PostgresComputeCapacity aurora = PostgresComputeCapacity.AuroraServerlessV2(8, 0.5, 16, DateTimeOffset.UnixEpoch) with { IoOptimized = true };
+        aurora.Unit.Should().Be("ACU");
+        aurora.Current.Should().Be(8);
+        aurora.IoOptimized.Should().BeTrue();
+
+        PostgresComputeCapacity.Of(20, 0, 16, "vCPU", DateTimeOffset.UnixEpoch).Current.Should().Be(20, "current is not checked against maximum");
+    }
+
+    [Fact]
+    public void A_database_ref_needs_a_source_and_a_database_string()
+    {
+        ((Action) (() => _ = new PostgresDatabaseRef(" ", "acme"))).Should().Throw<ArgumentException>();
+        ((Action) (() => _ = new PostgresDatabaseRef("tenants", null!))).Should().Throw<ArgumentNullException>();
+
+        new PostgresDatabaseRef("tenants", "acme").Should().Be(new PostgresDatabaseRef("tenants", "acme"));
+        new PostgresDatabaseRef("tenants", "acme").Should().NotBe(new PostgresDatabaseRef("Tenants", "acme"), "equality is ordinal");
+        new PostgresDatabaseRef("default", string.Empty).Database.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void The_platform_kinds_have_explicit_values_that_never_move()
+    {
+        Enum.GetValues<PostgresPlatformKind>().Select(static x => ((int) x, x.ToString())).Should().Equal(
+            (0, "SelfHosted"), (1, "AmazonRds"), (2, "AmazonAurora"), (3, "Azure"), (4, "CloudSql"), (5, "Neon"), (6, "Supabase"));
+    }
+
+    // ---- AcceptedChecks (issue #35) -----------------------------------------------------------------------------------
+
+    [Fact]
+    public void AcceptedChecks_starts_empty_ignores_case_and_is_never_null()
+    {
+        PostgresOptions options = new();
+
+        options.AcceptedChecks.Should().NotBeNull().And.BeEmpty();
+
+        options.AcceptedChecks["k05"] = "managed roles";
+        options.AcceptedChecks["K05"].Should().Be("managed roles", "keys are compared ignoring case");
+        options.AcceptedChecks.Should().ContainSingle();
+    }
+
+    [Fact]
+    public void An_accepted_check_of_this_studio_is_valid_in_any_case_and_a_500_character_reason_is_the_longest()
+    {
+        PostgresOptions options = Resolve(static x =>
+        {
+            x.AcceptedChecks["k05"] = new string('r', 500);
+            x.AcceptedChecks["S04"] = "the login is a superuser on purpose";
+        });
+
+        options.AcceptedChecks.Should().HaveCount(2);
+        options.AcceptedCheckReasons["K05"].Should().HaveLength(500);
+        PostgresSettings.Of(options).AcceptedChecks["s04"].Should().Be("the login is a superuser on purpose");
+    }
+
+    /// <summary>
+    /// The entries are read once, at startup: options validation freezes a copy, so a change the host makes afterwards changes
+    /// nothing the sweep sees and cannot break an enumeration it is part-way through.
+    /// </summary>
+    [Fact]
+    public void Changing_AcceptedChecks_after_startup_changes_nothing_and_cannot_break_an_enumeration()
+    {
+        PostgresOptions options = Resolve(static x => x.AcceptedChecks["K05"] = "managed roles");
+        PostgresSettings settings = PostgresSettings.Of(options);
+
+        IReadOnlyDictionary<string, string> seen = settings.AcceptedChecks;
+        using IEnumerator<KeyValuePair<string, string>> enumerating = seen.GetEnumerator();
+        enumerating.MoveNext().Should().BeTrue();
+
+        options.AcceptedChecks["S04"] = "late";
+        options.AcceptedChecks.Remove("K05");
+
+        Action carryingOn = () => enumerating.MoveNext();
+        carryingOn.Should().NotThrow();
+
+        settings.AcceptedChecks.Should().ContainSingle().Which.Key.Should().Be("K05");
+        settings.AcceptedChecks.ContainsKey("k05").Should().BeTrue("keys are still compared ignoring case");
+    }
+
+    [Theory]
+    [InlineData("X99")]
+    [InlineData("K5")]
+    [InlineData("")]
+    [InlineData("  ")]
+    [InlineData("D01")]
+    [InlineData("K01")]
+    [InlineData("K10")]
+    public void An_accepted_key_that_is_not_a_check_of_this_studio_is_refused_naming_the_key_and_nothing_else(string key)
+    {
+        // D01 and K01 are the Marten module's checks: in the Postgres module's registry they do not exist.
+        OptionsValidationException refusal = ResolveAction(x => x.AcceptedChecks[key] = "a reason")
+            .Should().Throw<OptionsValidationException>().Which;
+
+        refusal.Failures.Should().ContainSingle().Which.Should()
+            .Be("PostgresOptions.AcceptedChecks key '" + key + "' is not a health check code of this studio");
+        refusal.Message.Should().NotContain("K05", "the message lists no valid code");
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("\t\n")]
+    public void An_empty_or_whitespace_reason_is_refused(string reason)
+    {
+        OptionsValidationException refusal = ResolveAction(x => x.AcceptedChecks["K05"] = reason)
+            .Should().Throw<OptionsValidationException>().Which;
+
+        refusal.Failures.Should().ContainSingle().Which.Should().StartWith("PostgresOptions.AcceptedChecks['K05'] needs a reason");
+    }
+
+    [Fact]
+    public void A_reason_over_500_characters_is_refused()
+    {
+        OptionsValidationException refusal = ResolveAction(x => x.AcceptedChecks["K05"] = new string('r', 501))
+            .Should().Throw<OptionsValidationException>().Which;
+
+        refusal.Failures.Should().ContainSingle().Which.Should().Be("PostgresOptions.AcceptedChecks['K05'] has a reason longer than 500 characters");
+    }
+
+    [Fact]
+    public void Every_refusal_of_one_configuration_is_listed()
+    {
+        OptionsValidationException refusal = ResolveAction(static x =>
+            {
+                x.AcceptedChecks["X99"] = "no such check";
+                x.AcceptedChecks["K05"] = " ";
+            })
+            .Should().Throw<OptionsValidationException>().Which;
+
+        refusal.Failures.Should().HaveCount(2);
+    }
+}

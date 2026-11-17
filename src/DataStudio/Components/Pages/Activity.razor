@@ -1,0 +1,180 @@
+@page "/activity"
+@implements IDisposable
+@inject IShellSettings Settings
+@inject StudioActivity ActivityRing
+@inject StudioPreferences Preferences
+@inject StudioShellDescriptor Descriptor
+
+<PageTitle>Activity</PageTitle>
+
+<div class="ms-page">
+    <div class="ms-page-header">
+        <h1 class="ms-page-title">Activity</h1>
+        <SearchFilter Placeholder="Filter by action, outcome or user" OnFilterChanged="OnFilterChangedAsync" />
+    </div>
+
+    <p class="ms-muted">
+        The most recent @StudioActionLogService.MaxEntries actions taken through @Settings.ProductName in this
+        process, newest first. The ring is in memory and goes away with the process - the durable record
+        is in this application's own log, under event ids 9200-9211@(ModuleEvents()).
+    </p>
+
+    @if (visible.Count == 0)
+    {
+        <div class="ms-empty">
+            <p class="ms-empty-title">Nothing to show</p>
+            <p class="ms-empty-description">
+                @(string.IsNullOrWhiteSpace(filter)
+                    ? "No one has changed anything through " + Settings.ProductName + " since this process started."
+                    : "No recorded action matches that filter.")
+            </p>
+        </div>
+    }
+    else
+    {
+        <TableScroll Label="Activity table">
+            <table class="ms-table">
+                <thead>
+                    <tr>
+                        <th>When</th>
+                        <th>User</th>
+                        @* Store, database and tenant were three columns, and on a single-store host they
+                           carry the same three values on every row - 300px of the width of this table to
+                           say "default" a hundred times. One Scope cell says it in a third of the space
+                           and still says all of it. *@
+                        <th>Scope</th>
+                        <th>Action</th>
+                        <th>Target</th>
+                        <th>Outcome</th>
+                        <th>Capability</th>
+                        <th>Message</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (StudioActionLogEntry entry in visible)
+                    {
+                        @* Keyed by the ring's own sequence number, not by the entry: the record has value
+                           equality, and two identical actions a second apart would collide on one key and
+                           make the diff reuse the wrong row. *@
+                        <tr class="ms-table-row" @key="entry.Sequence">
+                            <td class="ms-table-cell ms-table-cell-mono ms-activity-when">@Preferences.FormatInSelectedTimeZone(entry.Timestamp)</td>
+                            <td class="ms-table-cell">@entry.User</td>
+                            <td class="ms-table-cell ms-table-cell-mono ms-activity-scope" title="@ScopeTitle(entry)">
+                                @* The separators are text and not `aria-hidden` decoration: hiding them
+                                   would leave a screen reader reading the three values run together as
+                                   one word, and a dot between them is how the cell reads out loud too. *@
+                                @* A module's entry says its own scope (D34), in as many parts as the module has. *@
+                                @for (int part = 0; part < entry.Scope.Label.Count; part++)
+                                {
+                                    if (part > 0)
+                                    {
+                                        <span class="ms-activity-scope-separator"> · </span>
+                                    }
+
+                                    @entry.Scope.Label[part]
+                                }
+                            </td>
+                            <td class="ms-table-cell">@entry.Action</td>
+                            <td class="ms-table-cell ms-table-cell-mono ms-activity-target">@entry.Target</td>
+                            <td class="ms-table-cell">
+                                <span class="ms-state-indicator">
+                                    <span class="ms-state-dot @(entry.Succeeded ? "ms-state-success" : "ms-state-error")" aria-hidden="true"></span>
+                                    <span class="ms-state-label">@Outcome(entry)</span>
+                                </span>
+                            </td>
+                            <td class="ms-table-cell">@(entry.Capability ?? "-")</td>
+                            <td class="ms-table-cell ms-activity-message">@entry.Message</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </TableScroll>
+    }
+</div>
+
+@code {
+    private string filter = string.Empty;
+    private List<StudioActionLogEntry> visible = [];
+
+    /// <summary>
+    /// What the footer adds for each composed module that logs events of its own (#77): " and {product}'s under {ids}". The text is the module's, so this
+    /// source names no module's product. A studio with no module renders exactly the footer it always did.
+    /// </summary>
+    private string ModuleEvents() => string.Concat(Descriptor.Modules
+        .Where(static module => !string.IsNullOrWhiteSpace(module.AuditEventIds))
+        .Select(static module => " and " + module.ProductName + "'s under " + module.AuditEventIds));
+
+    /// <summary>Failures are recorded too, which is the point - so the outcome is a column, not a filter.</summary>
+    private static string Outcome(StudioActionLogEntry entry) => entry.Succeeded ? "succeeded" : "failed";
+
+    /// <summary>
+    /// The scope behind the Scope cell, spelled out by the module that recorded it, for its <c>title</c>.
+    /// </summary>
+    /// <remarks>
+    /// A cell reads <c>default · localhost.marten · all</c>, which is short enough for the column and
+    /// ambiguous on its own about which dot-separated part is which. The title says.
+    /// </remarks>
+    private static string ScopeTitle(StudioActionLogEntry entry) => entry.Scope.Title;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Preferences.Changed += OnPreferencesChanged;
+        await ReloadAsync();
+    }
+
+    /// <summary>
+    /// Reads the ring, drops every entry the visitor may not see, then applies the text filter.
+    /// </summary>
+    /// <remarks>
+    /// The ring is process-wide and every circuit writes into it, so it is the one place in the studio
+    /// where one visitor's actions can be read by another. <see cref="StudioActivity.GetVisibleAsync" />
+    /// decides, entry by entry, through the gate of the module that wrote it, and the Overview asks it the same way.
+    /// </remarks>
+    private async Task ReloadAsync()
+    {
+        List<StudioActionLogEntry> allowed = await ActivityRing.GetVisibleAsync();
+
+        if (string.IsNullOrWhiteSpace(filter))
+        {
+            visible = allowed;
+            return;
+        }
+
+        string needle = filter.Trim();
+        List<StudioActionLogEntry> matches = [];
+        foreach (StudioActionLogEntry entry in allowed)
+        {
+            if (entry.Action.Contains(needle, StringComparison.OrdinalIgnoreCase)
+                || entry.User.Contains(needle, StringComparison.OrdinalIgnoreCase)
+                || Outcome(entry).Contains(needle, StringComparison.OrdinalIgnoreCase))
+            {
+                matches.Add(entry);
+            }
+        }
+
+        visible = matches;
+    }
+
+    /// <summary>
+    /// A time zone change reads the ring again and draws it again, as the page always did. The page does not follow the
+    /// visitor's scope any more: what the ring shows a visitor never depended on the scope on screen, so a scope change has
+    /// nothing to re-judge, and the page keeps no reference to the database's state to hear of one.
+    /// </summary>
+    private async Task OnPreferencesChanged()
+    {
+        await ReloadAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OnFilterChangedAsync(string value)
+    {
+        filter = value;
+        await ReloadAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        Preferences.Changed -= OnPreferencesChanged;
+    }
+}

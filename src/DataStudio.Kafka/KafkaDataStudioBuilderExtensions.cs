@@ -1,0 +1,129 @@
+using System.Runtime.CompilerServices;
+
+using DataStudio.Services.Settings;
+using DataStudio.Services;
+using DataStudio.Kafka;
+using DataStudio.Kafka.Core.Clusters;
+using DataStudio.Kafka.Internal;
+using DataStudio.Kafka.Services;
+
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
+
+namespace DataStudio;
+
+/// <summary>Adds the Kafka module to Data Studio.</summary>
+public static class KafkaDataStudioBuilderExtensions
+{
+    /// <summary>
+    /// Adds the Kafka module to the studio: its pages, rail section, cluster selector, capabilities and audit entries join the shell's own (D34).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// There is no map call of its own: <c>MapDataStudio()</c> serves the Kafka pages under the studio's path, at <c>/kafka</c>. The module needs no
+    /// database module and no database; it may be called twice, and the host is refused at start when a capability is on that no policy answers.
+    /// </para>
+    /// <para>
+    /// Nothing here connects to Kafka, creates a topic or commits an offset, and nothing is a hosted service but the startup guard.
+    /// </para>
+    /// </remarks>
+    /// <param name="builder">The builder <c>AddDataStudio()</c> returned.</param>
+    /// <param name="configure">Registers the clusters and topics, and sets the policies and capabilities.</param>
+    /// <returns>The same builder, so calls can be chained.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="builder" /> is null.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The application was deployed without the DataStudio (the shell) or DataStudio.Kafka.Core build this one was released
+    /// with, or with another version of it.
+    /// </exception>
+    public static DataStudioBuilder AddKafka(
+        this DataStudioBuilder builder,
+        Action<KafkaOptions>? configure = null)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        // Before anything that names a DataStudio.Kafka.Core type: this body names none, so the JIT can compile it and the
+        // guard can say what is wrong even when NuGet left one of the packages out of the deployment. Everything else is in
+        // AddKafkaServices, which is NoInlining so that it is compiled only once the guard has passed.
+        // KafkaCoreVersionGuardTests scans this method's IL to keep it that way.
+        KafkaCoreVersionGuard.Ensure();
+
+        AddKafkaServices(builder, configure);
+
+        return builder;
+    }
+
+    /// <summary>The body of <see cref="AddKafka" />, once the shell and the engine are known to be the right builds.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void AddKafkaServices(
+        DataStudioBuilder builder,
+        Action<KafkaOptions>? configure)
+    {
+        IServiceCollection services = builder.Services;
+
+        // The module itself: TryAddEnumerable deduplicates by implementation type, so a second call adds it once.
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IStudioModule, KafkaModule>());
+
+        OptionsBuilder<KafkaOptions> optionsBuilder = services
+            .AddOptions<KafkaOptions>()
+            .Validate(
+                static options => options.Capabilities is not null,
+                "KafkaOptions.Capabilities cannot be null: use new KafkaCapabilities() for none, or KafkaCapabilities.All()")
+            .Validate(
+                static options => options.Capabilities is null || !options.Capabilities.ReadPayloads || options.Capabilities.SearchRecords,
+                "KafkaOptions.Capabilities.ReadPayloads needs KafkaOptions.Capabilities.SearchRecords: a value is read only as part of a record a search or a permalink opened");
+
+        if (configure is not null)
+        {
+            optionsBuilder.Configure(configure);
+        }
+
+        // The host's external links (D44): refused at the first read of the options, which the startup guard makes at host start.
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IValidateOptions<KafkaOptions>, KafkaExternalLinkOptionsValidator>());
+
+        // The engine: the options object answers both seams, as a database module's does (D30).
+        KafkaEngineRegistration.Add(
+            services,
+            static provider => provider.GetRequiredService<IOptions<KafkaOptions>>().Value,
+            static provider => new KafkaEngineSettings(provider.GetRequiredService<IShellSettings>()));
+
+        services.TryAddSingleton<IKafkaClusterEntrySource, CatalogClusterEntrySource>();
+        services.TryAddSingleton<KafkaCapabilityGuard>();
+
+        // Scoped, because each is about one circuit: the visitor, the cluster it is pointed at and what it has been told.
+        services.TryAddScoped<KafkaState>();
+        services.TryAddScoped<KafkaAuthorization>();
+        services.TryAddScoped<KafkaActionLog>();
+        services.TryAddScoped<KafkaCatalogService>();
+
+        // Search and the record page (UI-B): scoped, because a search and its audit are one circuit's, and so is the owner of its scans.
+        services.TryAddScoped<KafkaOwnerKey>();
+        services.TryAddScoped<KafkaReadGrants>();
+        services.TryAddScoped<KafkaSearchService>();
+        services.TryAddScoped<KafkaRecordService>();
+
+        // Export (UI-EXPORT, D45): a file from the records a page already holds; two exports at a time, process-wide.
+        services.TryAddSingleton<KafkaExportGate>();
+        services.TryAddScoped<KafkaExportService>();
+
+        // Live tail (UI-TAIL, D46): a scan with no end, whose sessions and audit are one circuit's.
+        services.TryAddScoped<KafkaTailService>();
+
+        // A tail whose browser vanished is paused when the circuit's connection drops (D46): the module's own handler, a no-op on a circuit with no tail.
+        services.TryAddScoped<KafkaTailCircuitRegistry>();
+        services.TryAddEnumerable(ServiceDescriptor.Scoped<Microsoft.AspNetCore.Components.Server.Circuits.CircuitHandler, KafkaTailCircuitHandler>());
+
+        // Related records (UI-D): one audited scan over several topics, each searched by its own fields.
+        services.TryAddScoped<KafkaCorrelationService>();
+
+        // Links (UI-E, D44): "Find in Kafka" is offered to a studio's record screens through its internal seam, pure and registered once.
+        services.TryAddSingleton<IStudioRecordSearchLinks, KafkaRecordSearchLinks>();
+
+        // Which of the module's audit entries a visitor may read (D34): its own gate, never the host's store policy.
+        services.TryAddEnumerable(ServiceDescriptor.Scoped<IStudioAuditScopeGate, KafkaAuditGate>());
+
+        // Refuses to start a host with a capability no policy answers.
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, KafkaStartupGuard>());
+    }
+}

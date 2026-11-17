@@ -1,0 +1,73 @@
+namespace DataStudio.Marten
+{
+    public sealed class MartenCapabilities
+    {
+        public MartenCapabilities() { }
+        public bool ApplySchemaChanges { get; set; }
+        public bool ArchiveStreams { get; set; }
+        public bool BrowseDatabase { get; set; }
+        public bool CompactStreams { get; set; }
+        public bool ControlDaemon { get; set; }
+        public bool CorrectProgression { get; set; }
+        public bool DeleteDocuments { get; set; }
+        public bool EditDocuments { get; set; }
+        public bool ManageDeadLetters { get; set; }
+        public bool RebuildProjections { get; set; }
+        public bool RunLinqQueries { get; set; }
+        public bool RunSql { get; set; }
+        public bool ViewDatabaseActivity { get; set; }
+        public bool ViewDefinitions { get; set; }
+        public static DataStudio.Marten.MartenCapabilities All() { }
+    }
+    public static class MartenHealthChecksBuilderExtensions
+    {
+        public static Microsoft.Extensions.DependencyInjection.IHealthChecksBuilder AddMartenDiagnostics(this Microsoft.Extensions.DependencyInjection.IHealthChecksBuilder builder, string name = "data-studio-marten", Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus? failureStatus = default, System.Collections.Generic.IEnumerable<string>? tags = null, System.TimeSpan? timeout = default) { }
+    }
+    public sealed class MartenOptions
+    {
+        public MartenOptions() { }
+        public System.Collections.Generic.IDictionary<string, string> AcceptedChecks { get; }
+        public System.Collections.Generic.IList<string> BrowsableSchemas { get; }
+        public DataStudio.Marten.MartenCapabilities Capabilities { get; set; }
+        public int DefaultPageSize { get; set; }
+        public bool DiscoverTenantIds { get; set; }
+        public long ExactCountThreshold { get; set; }
+        public System.TimeSpan HealthInterval { get; set; }
+        public bool IncludeAncillaryStores { get; set; }
+        public System.Func<System.Type, bool>? IsDocumentTypeVisible { get; set; }
+        public System.Collections.Generic.IList<string> KnownTenantIds { get; }
+        public int MaxInlineValueBytes { get; set; }
+        public int MaxPageSize { get; set; }
+        public int MaxSqlConsoleRows { get; set; }
+        public int MaxStudioConnections { get; set; }
+        public System.Collections.Generic.IDictionary<string, DataStudio.Marten.ProjectionLagThreshold> ProjectionThresholds { get; }
+        public System.TimeSpan QueryTimeout { get; set; }
+        public bool ReadOnly { get; set; }
+        public System.TimeSpan RebuildShardTimeout { get; set; }
+        public string? SqlConsoleRole { get; set; }
+        public string? StoreAuthorizationPolicy { get; set; }
+        public string? StudioApplicationName { get; set; }
+        public string? WriteAuthorizationPolicy { get; set; }
+    }
+    public sealed record MartenStoreResource : System.IEquatable<DataStudio.Marten.MartenStoreResource>
+    {
+        public MartenStoreResource(string StoreName, string DatabaseIdentifier, string? TenantId, string? Capability) { }
+        public string? Capability { get; init; }
+        public string DatabaseIdentifier { get; init; }
+        public string StoreName { get; init; }
+        public string? TenantId { get; init; }
+    }
+    public sealed record ProjectionLagThreshold : System.IEquatable<DataStudio.Marten.ProjectionLagThreshold>
+    {
+        public ProjectionLagThreshold(long WarningBehind, long CriticalBehind) { }
+        public long CriticalBehind { get; init; }
+        public long WarningBehind { get; init; }
+    }
+}
+namespace DataStudio
+{
+    public static class MartenDataStudioBuilderExtensions
+    {
+        public static DataStudio.DataStudioBuilder AddMarten(this DataStudio.DataStudioBuilder builder, System.Action<DataStudio.Marten.MartenOptions>? configure = null) { }
+    }
+}

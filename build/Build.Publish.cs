@@ -18,11 +18,11 @@ using Serilog;
 using static Fallout.Common.Tools.DotNet.DotNetTasks;
 
 /// <summary>
-/// The NuGet distribution channel (D17): <c>Pack</c> builds the six packages - PostgresStudio.Diagnostics, the
-/// engine; PostgresStudio, a Razor Class Library which depends on exactly the engine packed beside it; MartenStudio,
-/// which depends on exactly the PostgresStudio packed beside it; and, since K8, KStudio.Core (the Kafka engine), KStudio
-/// (which depends on exactly the PostgresStudio and KStudio.Core packed beside it) and KStudio.Wolverine (exactly the
-/// KStudio.Core) - and <c>Publish</c> pushes all six to nuget.org with one short-lived API key minted from the
+/// The NuGet distribution channel (D17): <c>Pack</c> builds the seven packages - DataStudio.Postgres.Diagnostics, the
+/// engine; DataStudio, the shell (v2 step 3); DataStudio.Postgres, a Razor Class Library which depends on exactly the engine and the shell packed beside it; DataStudio.Marten,
+/// which depends on exactly the DataStudio.Postgres packed beside it; and, since K8, DataStudio.Kafka.Core (the Kafka engine), DataStudio.Kafka
+/// (which depends on exactly the DataStudio and DataStudio.Kafka.Core packed beside it) and DataStudio.Kafka.Wolverine (exactly the
+/// DataStudio.Kafka.Core) - and <c>Publish</c> pushes all seven to nuget.org with one short-lived API key minted from the
 /// workflow's GitHub OIDC token (trusted publishing - no stored NuGet API key anywhere).
 /// </summary>
 /// <remarks>
@@ -32,8 +32,8 @@ using static Fallout.Common.Tools.DotNet.DotNetTasks;
 /// <c>Build.cs</c> is deliberately empty and the release carries only the changelog notes. There is no
 /// feed for untagged builds: every tagged version is published from <c>publish.yml</c> by trusted publishing, which
 /// is why <c>Publish</c> is a single-source target gated on <see cref="Build.IsTaggedBuild"/> rather than
-/// a two-way switch between a release feed and a development one. (KStudio's packages are a preview by version,
-/// <c>&lt;version&gt;-&lt;label&gt;</c>, and go out on the same feed with the same tag.)
+/// a two-way switch between a release feed and a development one. A prerelease of the family (a hyphen in the CHANGELOG's version, such as
+/// <c>2.0.0-beta.1</c>) is all seven packages at that version, pushed to the same feed by the same tag.
 /// </remarks>
 partial class Build
 {
@@ -63,55 +63,43 @@ partial class Build
 
     AbsolutePath PackagesDirectory => ArtifactsDirectory / "packages";
 
-    const string DiagnosticsPackageId = "PostgresStudio.Diagnostics";
-    const string PostgresStudioPackageId = "PostgresStudio";
-    const string MartenStudioPackageId = "MartenStudio";
-    const string KStudioCorePackageId = "KStudio.Core";
-    const string KStudioPackageId = "KStudio";
-    const string KStudioWolverinePackageId = "KStudio.Wolverine";
+    const string DiagnosticsPackageId = "DataStudio.Postgres.Diagnostics";
+    const string ShellPackageId = "DataStudio";
+    const string PostgresPackageId = "DataStudio.Postgres";
+    const string MartenPackageId = "DataStudio.Marten";
+    const string KafkaCorePackageId = "DataStudio.Kafka.Core";
+    const string KafkaPackageId = "DataStudio.Kafka";
+    const string KafkaWolverinePackageId = "DataStudio.Kafka.Wolverine";
 
-    AbsolutePath KStudioCoreProject => SourceDirectory / "KStudio.Core" / "KStudio.Core.csproj";
-    AbsolutePath KStudioProject => SourceDirectory / "KStudio" / "KStudio.csproj";
-    AbsolutePath KStudioWolverineProject => SourceDirectory / "KStudio.Wolverine" / "KStudio.Wolverine.csproj";
-
-    /// <summary>
-    /// <c>KStudioPrereleaseLabel</c> from <c>Directory.Build.props</c> (K8), the one place the preview label lives: empty
-    /// when KStudio has graduated. The three KStudio projects pack at <see cref="KStudioVersion"/>; nothing else reads it.
-    /// </summary>
-    string KStudioPrereleaseLabel => XDocument.Load(RootDirectory / "Directory.Build.props").Descendants()
-        .Where(x => x.Name.LocalName == "KStudioPrereleaseLabel")
-        .Select(x => x.Value.Trim())
-        .SingleOrDefault() ?? string.Empty;
+    AbsolutePath ShellProject => SourceDirectory / "DataStudio" / "DataStudio.csproj";
+    AbsolutePath KafkaCoreProject => SourceDirectory / "DataStudio.Kafka.Core" / "DataStudio.Kafka.Core.csproj";
+    AbsolutePath KafkaProject => SourceDirectory / "DataStudio.Kafka" / "DataStudio.Kafka.csproj";
+    AbsolutePath KafkaWolverineProject => SourceDirectory / "DataStudio.Kafka.Wolverine" / "DataStudio.Kafka.Wolverine.csproj";
 
     /// <summary>
-    /// The version the three KStudio packages carry: the CHANGELOG's <see cref="Version"/>, plus <c>-&lt;label&gt;</c> while the
-    /// label is set. The same string the projects compute for their <c>PackageVersion</c>, and the one the exact pins
-    /// between them carry (<c>[1.3.0-preview.1]</c>).
-    /// </summary>
-    string KStudioVersion => KStudioPrereleaseLabel.Length == 0 ? Version : $"{Version}-{KStudioPrereleaseLabel}";
-
-    /// <summary>
-    /// The six packages a release consists of, in the order they are packed and pushed, each below the one that
-    /// depends on exactly it: PostgresStudio.Diagnostics, then PostgresStudio, then MartenStudio, then KStudio.Core, then
-    /// KStudio (which needs PostgresStudio and KStudio.Core), then KStudio.Wolverine (which needs KStudio.Core). Pushing in
+    /// The seven packages a release consists of, in the order they are packed and pushed, each below the one that
+    /// depends on exactly it: DataStudio.Postgres.Diagnostics, then DataStudio (the shell), then DataStudio.Postgres (which needs both), then
+    /// DataStudio.Marten, then DataStudio.Kafka.Core, then DataStudio.Kafka (which needs DataStudio and DataStudio.Kafka.Core), then
+    /// DataStudio.Kafka.Wolverine (which needs DataStudio.Kafka.Core). Pushing in
     /// this order means a failed push stops the run before any package that needs it is uploaded. It does not make
-    /// the six appear together: nuget.org validates and indexes each package on its own, so for a few minutes PostgresStudio
-    /// can be listed while its PostgresStudio.Diagnostics is not yet restorable (and MartenStudio while its
-    /// PostgresStudio is not, and KStudio while its KStudio.Core is not), and a host restoring in that window gets NU1102
-    /// until it is. The three KStudio packages carry the preview label (<see cref="KStudioVersion"/>).
+    /// the seven appear together: nuget.org validates and indexes each package on its own, so for a few minutes DataStudio.Postgres
+    /// can be listed while its DataStudio.Postgres.Diagnostics or DataStudio is not yet restorable (and DataStudio.Marten while its
+    /// DataStudio.Postgres is not, and DataStudio.Kafka while its DataStudio.Kafka.Core is not), and a host restoring in that window gets NU1102
+    /// until it is.
     /// </summary>
     AbsolutePath[] ReleasePackages =>
     [
         PackagesDirectory / $"{DiagnosticsPackageId}.{Version}.nupkg",
-        PackagesDirectory / $"{PostgresStudioPackageId}.{Version}.nupkg",
-        PackagesDirectory / $"{MartenStudioPackageId}.{Version}.nupkg",
-        PackagesDirectory / $"{KStudioCorePackageId}.{KStudioVersion}.nupkg",
-        PackagesDirectory / $"{KStudioPackageId}.{KStudioVersion}.nupkg",
-        PackagesDirectory / $"{KStudioWolverinePackageId}.{KStudioVersion}.nupkg",
+        PackagesDirectory / $"{ShellPackageId}.{Version}.nupkg",
+        PackagesDirectory / $"{PostgresPackageId}.{Version}.nupkg",
+        PackagesDirectory / $"{MartenPackageId}.{Version}.nupkg",
+        PackagesDirectory / $"{KafkaCorePackageId}.{Version}.nupkg",
+        PackagesDirectory / $"{KafkaPackageId}.{Version}.nupkg",
+        PackagesDirectory / $"{KafkaWolverinePackageId}.{Version}.nupkg",
     ];
 
     Target Pack => _ => _
-        .Description("Packs the PostgresStudio.Diagnostics, PostgresStudio, MartenStudio, KStudio.Core, KStudio and KStudio.Wolverine NuGet packages into artifacts/packages")
+        .Description("Packs the DataStudio.Postgres.Diagnostics, DataStudio, DataStudio.Postgres, DataStudio.Marten, DataStudio.Kafka.Core, DataStudio.Kafka and DataStudio.Kafka.Wolverine NuGet packages into artifacts/packages")
         .Produces(PackagesDirectory / "*.nupkg")
         .Executes(() =>
         {
@@ -122,7 +110,7 @@ partial class Build
             AssertPackingAtTheConfluentFloor();
 
             // Independent of Compile for the same reason PublishAot is: this is a Release build of
-            // six projects, and `dotnet pack` runs its own build anyway.
+            // seven projects, and `dotnet pack` runs its own build anyway.
             PackagesDirectory.CreateOrCleanDirectory();
 
             // One project at a time, the engine first, in a plain loop rather than the combinatorial overload
@@ -130,8 +118,8 @@ partial class Build
             // and two packs writing one obj/ folder at once is a race.
             foreach (var project in new[]
                      {
-                         DiagnosticsProject, PostgresStudioProject, StudioProject,
-                         KStudioCoreProject, KStudioProject, KStudioWolverineProject,
+                         DiagnosticsProject, ShellProject, PostgresProject, MartenProject,
+                         KafkaCoreProject, KafkaProject, KafkaWolverineProject,
                      })
             {
                 DotNetPack(_ => _
@@ -153,40 +141,66 @@ partial class Build
                 Log.Information("Packed {Package}", package.Name);
             }
 
-            // MartenStudio depends on exactly its own PostgresStudio and on the Marten floor. The exact range comes
-            // from MartenStudioPinsPostgresStudioExactly in MartenStudio.csproj, which works through two NuGet-private
+            // Before the exact sets below, so that the sentence a maintainer reads when the Kafka module grows a database dependency is the one that says what
+            // is wrong, and not "must depend on exactly [...]": the shell and the three Kafka packages depend on no database module, no Npgsql and no part of
+            // the Marten family, so a Kafka-only host restores none of them (KafkaOnlyHostTests holds the same line on the built output). The exact sets
+            // would refuse the same dependency a second time if this check were ever loosened.
+            foreach (var package in new[]
+                     {
+                         PackagesDirectory / $"{ShellPackageId}.{Version}.nupkg",
+                         PackagesDirectory / $"{KafkaCorePackageId}.{Version}.nupkg",
+                         PackagesDirectory / $"{KafkaPackageId}.{Version}.nupkg",
+                         PackagesDirectory / $"{KafkaWolverinePackageId}.{Version}.nupkg",
+                     })
+            {
+                AssertNuspecDependsOnNoneOf(package, PostgresPackageId, DiagnosticsPackageId, MartenPackageId, "Npgsql", "Marten", "JasperFx", "Weasel");
+            }
+
+            // The Marten module depends on exactly its own Postgres module and on the Marten floor. The exact range comes
+            // from DataStudioMartenPinsPostgresExactly in DataStudio.Marten.csproj, which works through two NuGet-private
             // names; this is what turns a NuGet that renamed them into a failed build rather than a shipped `>=`.
-            // The assets pack is there too without MartenStudio referencing it: under transitive pinning NuGet writes
+            // The assets pack is there too without the Marten module referencing it: under transitive pinning NuGet writes
             // a centrally pinned transitive package (project.assets.json's centralTransitiveDependencyGroups) into the
-            // nuspec - the same line MartenStudio 0.4.0 carried when it referenced the pack directly. Npgsql is not,
-            // because its central row applies only to projects that set PostgresStudioPinsNpgsql, and neither is
-            // PostgresStudio.Diagnostics: it reaches a MartenStudio host through PostgresStudio's own exact pin.
+            // nuspec - the same line the Marten module 0.4.0 carried when it referenced the pack directly. Npgsql is not,
+            // because its central row applies only to projects that set DataStudioPostgresPinsNpgsql, and neither is
+            // DataStudio.Postgres.Diagnostics: it reaches a Marten module host through the Postgres module's own exact pin.
             var assetsPack = CentralPackageVersion("Microsoft.AspNetCore.App.Internal.Assets");
 
-            AssertNuspecDependencies(PackagesDirectory / $"{MartenStudioPackageId}.{Version}.nupkg",
+            AssertNuspecDependencies(PackagesDirectory / $"{MartenPackageId}.{Version}.nupkg",
                 new Dictionary<string, string>
                 {
                     ["Marten"] = MartenFloor,
-                    [PostgresStudioPackageId] = $"[{Version}]",
+                    [PostgresPackageId] = $"[{Version}]",
                     ["Microsoft.AspNetCore.App.Internal.Assets"] = assetsPack,
                 });
 
-            // PostgresStudio depends on exactly its own PostgresStudio.Diagnostics (the exact range comes from
-            // PostgresStudioPinsDiagnosticsExactly in PostgresStudio.csproj, through the same two NuGet-private names),
-            // on the assets pack that carries blazor.web.js (D22), and on Npgsql at its floor: PostgresStudio no longer
-            // references Npgsql itself, but it still sets PostgresStudioPinsNpgsql, so the central row pins the Npgsql
+            // The shell depends on the assets pack that carries blazor.web.js (D22) and on nothing else: no driver, no Marten, no Kafka
+            // client and no project of the family (ShellFenceTests holds the same line at the project file and the restore graph). It
+            // references the pack itself since v2 step 3, so this is its one declared dependency.
+            AssertNuspecDependencies(PackagesDirectory / $"{ShellPackageId}.{Version}.nupkg",
+                new Dictionary<string, string>
+                {
+                    ["Microsoft.AspNetCore.App.Internal.Assets"] = assetsPack,
+                });
+
+            // The Postgres module depends on exactly its own DataStudio.Postgres.Diagnostics and exactly its own DataStudio (the exact ranges come from
+            // DataStudioPostgresPinsDiagnosticsExactly and DataStudioPostgresPinsShellExactly in DataStudio.Postgres.csproj, through the same
+            // two NuGet-private names), on the assets pack that carries blazor.web.js (D22), which reaches it through the shell and is a
+            // centrally pinned transitive line, and on Npgsql at its floor: The Postgres module no longer
+            // references Npgsql itself, but it still sets DataStudioPostgresPinsNpgsql, so the central row pins the Npgsql
             // that arrives through the engine and NuGet writes that pinned transitive package into the nuspec, the same
-            // way it writes the assets pack into MartenStudio's. It names no part of the Marten family: a host without
+            // way it writes the assets pack into the Marten module's. It names no part of the Marten family: a host without
             // Marten must not get it through this package.
-            AssertNuspecDependencies(PackagesDirectory / $"{PostgresStudioPackageId}.{Version}.nupkg",
+            AssertNuspecDependencies(PackagesDirectory / $"{PostgresPackageId}.{Version}.nupkg",
                 new Dictionary<string, string>
                 {
                     [DiagnosticsPackageId] = $"[{Version}]",
+                    [ShellPackageId] = $"[{Version}]",
                     ["Npgsql"] = NpgsqlFloor,
                     ["Microsoft.AspNetCore.App.Internal.Assets"] = assetsPack,
                 });
 
-            // PostgresStudio.Diagnostics depends on Npgsql at its floor and on the four Microsoft.Extensions.*
+            // DataStudio.Postgres.Diagnostics depends on Npgsql at its floor and on the four Microsoft.Extensions.*
             // abstractions it registers into, logs through and exports a health check with, at their central floors;
             // and on no ASP.NET Core package and no part of the Marten family: a worker host must not need either
             // through it.
@@ -200,10 +214,10 @@ partial class Build
                     ["Microsoft.Extensions.Diagnostics.HealthChecks"] = CentralPackageVersion("Microsoft.Extensions.Diagnostics.HealthChecks"),
                 });
 
-            // KStudio.Core depends on Confluent.Kafka at its floor and on the three Microsoft.Extensions.* abstractions it
-            // registers into, logs through and binds options with, at their central floors (KStudioCorePinsExtensions): no
+            // DataStudio.Kafka.Core depends on Confluent.Kafka at its floor and on the three Microsoft.Extensions.* abstractions it
+            // registers into, logs through and binds options with, at their central floors (DataStudioKafkaCorePinsExtensions): no
             // ASP.NET Core and no part of the Marten family.
-            AssertNuspecDependencies(PackagesDirectory / $"{KStudioCorePackageId}.{KStudioVersion}.nupkg",
+            AssertNuspecDependencies(PackagesDirectory / $"{KafkaCorePackageId}.{Version}.nupkg",
                 new Dictionary<string, string>
                 {
                     ["Confluent.Kafka"] = ConfluentFloor,
@@ -212,31 +226,31 @@ partial class Build
                     ["Microsoft.Extensions.Options"] = CentralPackageVersion("Microsoft.Extensions.Options"),
                 });
 
-            // KStudio depends on exactly its own PostgresStudio (the family version) and exactly its own KStudio.Core (the
-            // preview version): KStudioPinsFamilyExactly in KStudio.csproj, which takes each range from the referenced
-            // project's PackageVersion. Two more lines are CPM's transitive pinning, as MartenStudio's assets line is (measured
-            // by K8): the assets pack that carries blazor.web.js (D22), which reaches KStudio through PostgresStudio, and
-            // Confluent.Kafka at its floor, which reaches it through KStudio.Core. KStudio references neither, and its built
-            // assembly references no Confluent assembly (KStudioFenceTests); the lines only keep a host from lowering them.
-            AssertNuspecDependencies(PackagesDirectory / $"{KStudioPackageId}.{KStudioVersion}.nupkg",
+            // DataStudio.Kafka depends on exactly its own DataStudio and exactly its own DataStudio.Kafka.Core
+            // (both the family version): DataStudioKafkaPinsFamilyExactly in DataStudio.Kafka.csproj, which takes each range from the referenced
+            // project's PackageVersion. It depends on no database module and no Npgsql. Two more lines are CPM's transitive pinning, as
+            // The Marten module's assets line is (measured by K8): the assets pack that carries blazor.web.js (D22), which reaches it through the shell, and
+            // Confluent.Kafka at its floor, which reaches it through DataStudio.Kafka.Core. The Kafka module references neither, and its built
+            // assembly references no Confluent assembly (KafkaFenceTests); the lines only keep a host from lowering them.
+            AssertNuspecDependencies(PackagesDirectory / $"{KafkaPackageId}.{Version}.nupkg",
                 new Dictionary<string, string>
                 {
-                    [PostgresStudioPackageId] = $"[{Version}]",
-                    [KStudioCorePackageId] = $"[{KStudioVersion}]",
+                    [ShellPackageId] = $"[{Version}]",
+                    [KafkaCorePackageId] = $"[{Version}]",
                     ["Confluent.Kafka"] = ConfluentFloor,
                     ["Microsoft.AspNetCore.App.Internal.Assets"] = assetsPack,
                 });
 
-            // KStudio.Wolverine depends on exactly its own KStudio.Core (KStudioWolverinePinsCoreExactly) and on
+            // DataStudio.Kafka.Wolverine depends on exactly its own DataStudio.Kafka.Core (DataStudioKafkaWolverinePinsCoreExactly) and on
             // WolverineFx.Kafka at its central floor, which pins the Confluent.Kafka floor, so a Wolverine host is never raised.
-            // The rest is CPM's transitive pinning (measured by K8), because the project sets KStudioCorePinsExtensions: the
-            // Confluent.Kafka floor and the three abstractions, as KStudio.Core's own, and Microsoft.Extensions.Hosting, which
+            // The rest is CPM's transitive pinning (measured by K8), because the project sets DataStudioKafkaCorePinsExtensions: the
+            // Confluent.Kafka floor and the three abstractions, as DataStudio.Kafka.Core's own, and Microsoft.Extensions.Hosting, which
             // WolverineFx brings and the same conditional group (Directory.Packages.props) has a row for. All are floors a host
             // can raise and none is a reference of this project.
-            AssertNuspecDependencies(PackagesDirectory / $"{KStudioWolverinePackageId}.{KStudioVersion}.nupkg",
+            AssertNuspecDependencies(PackagesDirectory / $"{KafkaWolverinePackageId}.{Version}.nupkg",
                 new Dictionary<string, string>
                 {
-                    [KStudioCorePackageId] = $"[{KStudioVersion}]",
+                    [KafkaCorePackageId] = $"[{Version}]",
                     ["WolverineFx.Kafka"] = CentralPackageVersion("WolverineFx.Kafka"),
                     ["Confluent.Kafka"] = ConfluentFloor,
                     ["Microsoft.Extensions.DependencyInjection.Abstractions"] = CentralPackageVersion("Microsoft.Extensions.DependencyInjection.Abstractions"),
@@ -247,7 +261,6 @@ partial class Build
 
             ReportSummary(_ => _
                 .AddPair("Version", Version)
-                .AddPair("KStudio version", KStudioVersion)
                 .AddPair("Marten floor", MartenFloor)
                 .AddPair("Npgsql floor", NpgsqlFloor)
                 .AddPair("Confluent.Kafka floor", ConfluentFloor)
@@ -262,21 +275,21 @@ partial class Build
         {
             AssertPublishContext();
 
-            // All six packages or none: a PostgresStudio on nuget.org whose exact PostgresStudio.Diagnostics is not
-            // there, a MartenStudio whose exact PostgresStudio is not, or a KStudio whose exact PostgresStudio or KStudio.Core
+            // All seven packages or none: a DataStudio.Postgres on nuget.org whose exact DataStudio.Postgres.Diagnostics or DataStudio is not
+            // there, a DataStudio.Marten whose exact DataStudio.Postgres is not, or a DataStudio.Kafka whose exact DataStudio or DataStudio.Kafka.Core
             // is not, cannot be restored by anybody. Checked
             // before the key is minted, so a wrong set wastes nothing that expires.
             AssertTheReleasePackagesAndNothingElse();
             var packages = ReleasePackages;
 
             // Minted here rather than in an earlier target or job: the key lives 15-60 minutes and
-            // one OIDC token mints exactly one key - which pushes all six packages, in ReleasePackages' order.
+            // one OIDC token mints exactly one key - which pushes all seven packages, in ReleasePackages' order.
             var apiKey = GetTrustedPublishingApiKey();
 
             // One push per package, in order, and the first failure ends the run: a single DotNetNuGetPush throws
-            // on a non-zero exit, so a push that fails never reaches the packages after it: a PostgresStudio.Diagnostics
-            // failure never uploads PostgresStudio, a PostgresStudio failure never uploads MartenStudio, and a KStudio.Core
-            // failure never uploads KStudio or KStudio.Wolverine - each of which would be on nuget.org and nobody could
+            // on a non-zero exit, so a push that fails never reaches the packages after it: a DataStudio.Postgres.Diagnostics
+            // failure never uploads the Postgres module, a Postgres module failure never uploads the Marten module, and a DataStudio.Kafka.Core
+            // failure never uploads the Kafka module or DataStudio.Kafka.Wolverine - each of which would be on nuget.org and nobody could
             // restore it, because it depends on exactly the one before.
             // Deliberately not the combinatorial overload: it runs its items through PLINQ, which promises no order
             // even at a degree of parallelism of 1, and with completeOnFailure it pushes the rest after a failure.
@@ -302,9 +315,8 @@ partial class Build
         });
 
     /// <summary>
-    /// <c>artifacts/packages</c> holds exactly the six release packages - the first three at the CHANGELOG version, the
-    /// three KStudio packages at that version with the preview label - no seventh package, no stale version left behind,
-    /// none of the six missing.
+    /// <c>artifacts/packages</c> holds exactly the seven release packages - all at the CHANGELOG version - no eighth package, no stale version left behind,
+    /// none of the seven missing.
     /// </summary>
     void AssertTheReleasePackagesAndNothingElse()
     {
@@ -313,8 +325,8 @@ partial class Build
 
         Assert.True(found.SequenceEqual(expected),
             $"'{PackagesDirectory}' must hold exactly {string.Join(", ", expected)}; it holds " +
-            $"[{string.Join(", ", found)}]. Run Pack, which packs all six at the CHANGELOG version {Version} " +
-            $"(the KStudio packages as {KStudioVersion}).");
+            $"[{string.Join(", ", found)}]. Run Pack, which packs all seven at the CHANGELOG version {Version} " +
+            $"(the Kafka packages as {Version}).");
     }
 
     /// <summary>
@@ -357,6 +369,35 @@ partial class Build
                 Log.Information("{Package} ({Framework}) depends on {Dependency}", package.Name, framework, line);
             }
         }
+    }
+
+    /// <summary>
+    /// Asserts that no dependency of <paramref name="package" />, in any target-framework group, is one of <paramref name="idPrefixes" /> or below it
+    /// (<c>DataStudio.Postgres</c> is itself and <c>DataStudio.Postgres.Diagnostics</c>; <c>Marten</c> is every package whose id starts with it).
+    /// </summary>
+    static void AssertNuspecDependsOnNoneOf(AbsolutePath package, params string[] idPrefixes)
+    {
+        Assert.True(package.FileExists(), $"'{package}' does not exist");
+
+        using var archive = ZipFile.OpenRead(package);
+        var entry = archive.Entries.SingleOrDefault(x => !x.FullName.Contains('/') && x.FullName.EndsWith(".nuspec", StringComparison.OrdinalIgnoreCase))
+            .NotNull($"{package.Name} has no .nuspec at its root");
+
+        XDocument nuspec;
+        using (var stream = entry.Open())
+        {
+            nuspec = XDocument.Load(stream);
+        }
+
+        var forbidden = nuspec.Descendants()
+            .Where(x => x.Name.LocalName == "dependency")
+            .Select(x => (string) x.Attribute("id"))
+            .Where(id => idPrefixes.Any(prefix => id.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        Assert.True(forbidden.Count == 0,
+            $"{package.Name} must depend on no database module, no Npgsql and no part of the Marten family, and its nuspec names [{string.Join(", ", forbidden)}]");
     }
 
     /// <summary>A package's version from its <c>PackageVersion</c> row in <c>Directory.Packages.props</c>.</summary>

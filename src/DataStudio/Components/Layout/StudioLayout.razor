@@ -1,0 +1,360 @@
+@inherits LayoutComponentBase
+@implements IDisposable
+@using DataStudio.Internal
+@using DataStudio.Services.Settings
+@inject StudioPreferences Preferences
+@inject StudioShellDescriptor Descriptor
+@inject IShellSettings Settings
+@inject IJSRuntime JsRuntime
+@inject NavigationManager Navigation
+@inject PersistentComponentState PersistentState
+@inject StudioMappedEndpoints MappedEndpoints
+
+@* The stylesheet is not linked from here. It is static markup in StudioDocument's own <head>: a
+   <HeadContent> put it inside the <HeadOutlet> marker, and the interactive outlet's first render - which
+   happens before this layout has registered any section content - removed it from the live DOM. *@
+
+@* data-ms-interactive (1.2): present once the circuit has rendered this shell and read the browser's preferences. StudioRoutes asked for
+   navigation interception before that render batch was sent, so the attribute in the DOM means a link, Back or NavigateTo is
+   handled by the circuit. It is the browser suites' readiness signal; nothing else reads it. *@
+<div class="ms-studio" data-theme="@Preferences.SelectedTheme" data-ms-interactive="@(preferencesLoaded ? "true" : null)">
+    @* A module's circuit host (D34): no markup, one per module that has one, rendered first and kept for the life of the circuit - before the
+       rail, so that what it subscribes to is subscribed to before the rail's own handlers - and told whether the page on screen is its module's. *@
+    @foreach (IStudioModule hosted in Descriptor.Modules)
+    {
+        if (hosted.CircuitHost is { } circuitHost)
+        {
+            @Draw(circuitHost, hosted.Key, HostParameters(hosted))
+        }
+    }
+    @* 1.1: the first focusable element of every page, hidden until it has focus. Its fragment is handled in studio.js, not by the
+       browser: the document's <base href> would send a bare #fragment to the studio's front page. *@
+    <a class="ms-skip-link" href="#ms-main-content">Skip to content</a>
+    @if (MappedEndpoints.ServedAnonymously)
+    {
+        @* Not a toast and not dismissible. A studio that anyone can open looks exactly like one behind a
+           policy, so the only honest place for this is the top of every page, always. The shell's lead is one line, and each registered
+           module says what its own pages expose in a sentence of its own (D34), in module order. *@
+        <div class="ms-anonymous-banner" role="alert">
+            <strong>@StudioShellIdentity.BannerLead</strong>
+            @foreach (IStudioModule registered in Descriptor.Modules)
+            {
+                <span @key="registered.Key">@registered.ExposedSentence</span>
+            }
+        </div>
+    }
+    <div class="ms-layout">
+        <aside class="ms-sidebar" role="navigation" aria-label="@($"{StudioShellIdentity.ProductName} navigation")">
+            <NavMenu />
+        </aside>
+
+        <div class="ms-main">
+            <header class="ms-header">
+                <div class="ms-header-left">
+                    @* The environment first: it is context like the scope, and the first thing to check before doing anything to a
+                       database (1.2). *@
+                    <EnvironmentBadge />
+                    @* The scope selector of the module whose page is on screen (D34): a page is about its module's own scope. *@
+                    @if (currentModule?.ScopeSelector is { } scopeSelector)
+                    {
+                        @Draw(scopeSelector)
+                    }
+                </div>
+                @* The module's own search (D34), between the context on the left and the actions on the right: the database's is Find by id (1.2),
+                   drawn only with a scope to search in and a kind to search for, a magnifier below 1024 px (see FindBox). A module with none draws
+                   none: the database's contributors search the database's scope, which another module's page is not about. *@
+                @if (currentModule?.HeaderSearch is { } headerSearch)
+                {
+                    @Draw(headerSearch)
+                }
+                <div class="ms-header-right">
+                    <CapabilityBanner />
+                    @* The way out (ApplicationPath, absent unless the host set it) and the address of this page with its scope in it. *@
+                    <BackToApplication />
+                    <CopyLinkButton />
+                    @* The scope selector on the left is the context of every screen in the studio, so it
+                       keeps the header row at every width. Theme and time zone are set once and then left
+                       alone, so they are behind the gear - which is what turns a four-row header on a
+                       390 px phone into one row of 56 px. The two pickers keep their ids, their labels
+                       and their `aria-label`s inside it; see PreferencesMenu. *@
+                    <PreferencesMenu SelectedTheme="@Preferences.SelectedTheme"
+                                     SelectedTimeZoneId="@Preferences.SelectedTimeZoneId"
+                                     ThemeChanged="OnThemeChangedAsync"
+                                     TimeZoneChanged="OnTimeZoneChangedAsync" />
+                </div>
+            </header>
+
+            <main class="ms-content" role="main" id="ms-main-content" tabindex="-1">
+                @* The page frame is where a per-store refusal belongs: a page that is never rendered never
+                   runs its OnInitializedAsync, so nothing about a store the visitor may not see is read on
+                   their behalf. The header above stays, so they can pick one they may. *@
+                @* A module's page (D34) is gated by the module's own frame, never by another module's scope: a visitor the database's store policy
+                   refuses still reaches a module whose own policies admit them. Keyed on the matched page's assembly (currentModule). *@
+                @if (currentModule?.ScopeGate is { } scopeGate)
+                {
+                    @Draw(scopeGate, null, GateParameters())
+                }
+                else
+                {
+                    @Body
+                }
+            </main>
+        </div>
+    </div>
+    <ToastHost />
+    <ShortcutSheet />
+</div>
+
+@code {
+    /// <summary>
+    /// What the prerendered scope hands to the circuit's own scope.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="StudioPreferences" /> is scoped, and the circuit's scope is not the request's: it has no
+    /// <c>HttpContext</c>, so the cookie that seeded the prerendered theme is invisible to it and the
+    /// studio flashed from dark to light the moment the circuit attached. Carried across as persisted
+    /// component state rather than re-fetched over JS interop, because a round trip is a flash by another
+    /// name.
+    /// </remarks>
+    private sealed record PersistedPreferences(string Theme, string TimeZoneId);
+
+    private const string PreferencesStateKey = "DataStudio.Preferences";
+
+    private bool preferencesLoaded;
+
+    /// <summary>
+    /// The module whose page the address names (D34), or <see langword="null" /> for a page of no module (Activity, the front page) and for an address no page
+    /// matches (Not found): such a page has no scope selector, no header search and no scope gate. Found from the matched page's assembly
+    /// (<see cref="StudioShellDescriptor.ModuleOf" />) and never from the address's text, so that no address can name a page that is not a
+    /// module's and be treated as one - a module's own frame is skipped only for another module's pages.
+    /// </summary>
+    private IStudioModule? currentModule;
+
+    private PersistingComponentStateSubscription persistingSubscription;
+
+    /// <summary>
+    /// Whether the first-render read of the browser's stored preferences has finished, however it went.
+    /// </summary>
+    /// <remarks>
+    /// <c>internal</c> rather than a <c>[Parameter]</c> or a rendered attribute: it is not a fact any
+    /// page needs, and the shipped public surface is two static classes, two classes and one record
+    /// (AGENTS.md hard rule 7). What it is for is the tests - a bUnit test that acts on the theme picker
+    /// before this is true is racing <see cref="LoadPreferencesAsync" /> rather than testing anything,
+    /// which is what <c>StudioLayoutTests</c> was doing about one full-suite run in four.
+    /// </remarks>
+    internal bool PreferencesLoaded => preferencesLoaded;
+
+    protected override void OnInitialized()
+    {
+        // Before the first render, so the circuit's first paint already carries the prerendered theme.
+        if (PersistentState.TryTakeFromJson(PreferencesStateKey, out PersistedPreferences? persisted) && persisted is not null)
+        {
+            Preferences.SelectedTheme = persisted.Theme;
+            Preferences.SelectedTimeZoneId = persisted.TimeZoneId;
+        }
+
+        persistingSubscription = PersistentState.RegisterOnPersisting(PersistPreferences);
+
+        currentModule = ModuleOfAddress(Navigation.Uri);
+    }
+
+    /// <summary>
+    /// Follows the page on screen, on every render the router causes (D34, D-SHELL 4.1): <see cref="StudioRoutes" /> re-renders the page
+    /// before a module's own handler of the location may have run - and for as long as its circuit host loads, before it is subscribed
+    /// at all - so the module is found here, from the address the router just matched, never from a handler, and told to each module's
+    /// circuit host as its <c>Active</c> parameter in this same render.
+    /// </summary>
+    protected override void OnParametersSet()
+    {
+        currentModule = ModuleOfAddress(Navigation.Uri);
+    }
+
+    /// <summary>
+    /// The module whose page <paramref name="uri" /> names, or <see langword="null" />: the route table matches the address, and the matched
+    /// page's assembly decides (D34). An address no page matches is no module's.
+    /// </summary>
+    private IStudioModule? ModuleOfAddress(string uri)
+    {
+        if (StudioLink.ToDashboardRelativePath(uri, Navigation.BaseUri, Settings) is not { } relative
+            || Descriptor.Routes.Match(relative, Settings) is not { } match)
+        {
+            return null;
+        }
+
+        return Descriptor.ModuleOf(match.PageType);
+    }
+
+    /// <summary>
+    /// A module's component, drawn as part of this layout's own render tree - not through <c>DynamicComponent</c>, which would create it one
+    /// render later. Components are initialized in the order the layout's tree names them, which is what keeps a module's circuit host the first
+    /// subscriber to the scope, ahead of the rail's (DESIGN-A 5.4), and keeps every other component created exactly when it was.
+    /// </summary>
+    private static RenderFragment Draw(Type type, object? key = null, IReadOnlyDictionary<string, object?>? parameters = null) => builder =>
+    {
+        builder.OpenComponent(0, type);
+
+        int sequence = 1;
+        foreach ((string name, object? value) in parameters ?? new Dictionary<string, object?>())
+        {
+            builder.AddComponentParameter(sequence++, name, value);
+        }
+
+        if (key is not null)
+        {
+            builder.SetKey(key);
+        }
+
+        builder.CloseComponent();
+    };
+
+    /// <summary>The one parameter of a module's circuit host: whether the page on screen is the module's.</summary>
+    private Dictionary<string, object?> HostParameters(IStudioModule module) =>
+        new(StringComparer.Ordinal) { ["Active"] = ReferenceEquals(module, currentModule) };
+
+    /// <summary>The one parameter of a module's scope gate: the page's body.</summary>
+    private Dictionary<string, object?> GateParameters() =>
+        new(StringComparer.Ordinal) { ["ChildContent"] = Body };
+
+    private Task PersistPreferences()
+    {
+        PersistentState.PersistAsJson(
+            PreferencesStateKey,
+            new PersistedPreferences(Preferences.SelectedTheme, Preferences.SelectedTimeZoneId));
+        return Task.CompletedTask;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        await LoadPreferencesAsync();
+        preferencesLoaded = true;
+
+        // Unconditionally, and after the flag: the stored preferences may have moved the theme or the
+        // time zone, and this is the render that puts the answer - whichever way it went - on screen.
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>
+    /// Reads the browser's own remembered preferences once the circuit exists.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The cookie has already seeded <see cref="StudioPreferences" /> in the prerender scope and persisted
+    /// component state carried that across to the circuit, which is what keeps a dark studio from
+    /// flashing light. This covers the case neither can: a preference stored only in
+    /// <c>localStorage</c>, and a browser whose cookie was cleared.
+    /// </para>
+    /// <para>
+    /// <em>A stored preference never overwrites one the visitor expressed while it was being read.</em>
+    /// These are two awaited round trips to the browser, and on a slow one the visitor can use the theme
+    /// picker before they finish. What comes back was read before that click, so applying it would put
+    /// the theme they have just moved away from back on the screen - the picker snapping back on its own
+    /// a moment after it was used. <see cref="StudioPreferences.PreferenceVersion" /> is stamped before the
+    /// awaits and checked after them, and the visitor wins: whatever they chose is both newer and
+    /// already written to the same storage this was reading.
+    /// </para>
+    /// </remarks>
+    private async Task LoadPreferencesAsync()
+    {
+        try
+        {
+            long version = Preferences.PreferenceVersion;
+
+            string? storedTheme = await JsRuntime.InvokeAsync<string?>("martenStudio.prefs.get", new object?[] { StudioPreferences.ThemePreferenceKey });
+            string? storedTimeZoneId = await JsRuntime.InvokeAsync<string?>("martenStudio.prefs.get", new object?[] { StudioPreferences.TimeZonePreferenceKey });
+
+            if (Preferences.PreferenceVersion != version)
+            {
+                // The visitor picked something while the browser was being asked. Theirs is the newer
+                // answer and it has already been persisted, so there is nothing here to apply.
+                return;
+            }
+
+            string previousTimeZoneId = Preferences.SelectedTimeZoneId;
+
+            if (!string.IsNullOrWhiteSpace(storedTheme))
+            {
+                Preferences.SelectedTheme = storedTheme;
+            }
+
+            if (!string.IsNullOrWhiteSpace(storedTimeZoneId))
+            {
+                Preferences.SelectedTimeZoneId = storedTimeZoneId;
+            }
+
+            if (!string.Equals(previousTimeZoneId, Preferences.SelectedTimeZoneId, StringComparison.Ordinal))
+            {
+                // Every page re-renders its timestamps in the new zone. The theme needs no such notice:
+                // it is one attribute on this component's own root.
+                await Preferences.NotifyChangedAsync();
+            }
+        }
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
+        {
+            // JS interop is unavailable during prerendering, and a browser can refuse storage outright.
+        }
+    }
+
+    private async Task OnTimeZoneChangedAsync(ChangeEventArgs args)
+    {
+        string? selected = args.Value?.ToString();
+        if (string.IsNullOrWhiteSpace(selected))
+        {
+            return;
+        }
+
+        string previous = Preferences.SelectedTimeZoneId;
+        Preferences.SelectedTimeZoneId = selected;
+        if (!string.Equals(previous, Preferences.SelectedTimeZoneId, StringComparison.Ordinal))
+        {
+            await Preferences.NotifyChangedAsync();
+            await PersistPreferenceAsync(StudioPreferences.TimeZonePreferenceKey);
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task OnThemeChangedAsync(ChangeEventArgs args)
+    {
+        string previous = Preferences.SelectedTheme;
+        Preferences.SelectedTheme = args.Value?.ToString() ?? "system";
+        if (!string.Equals(previous, Preferences.SelectedTheme, StringComparison.Ordinal))
+        {
+            await PersistPreferenceAsync(StudioPreferences.ThemePreferenceKey);
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    /// <summary>
+    /// Writes one preference to the browser's own storage.
+    /// </summary>
+    /// <remarks>
+    /// The value is read from <see cref="StudioPreferences" /> here rather than passed in, so what is written
+    /// is what the studio currently shows. Two clicks in quick succession are two handlers whose interop
+    /// calls can finish in either order; a value captured by the first and written after the second's had
+    /// landed would leave <c>localStorage</c> remembering the theme the visitor moved away from, and the
+    /// next visit would open on it.
+    /// </remarks>
+    private async Task PersistPreferenceAsync(string key)
+    {
+        string value = string.Equals(key, StudioPreferences.ThemePreferenceKey, StringComparison.Ordinal)
+            ? Preferences.SelectedTheme
+            : Preferences.SelectedTimeZoneId;
+
+        try
+        {
+            await JsRuntime.InvokeVoidAsync("martenStudio.prefs.set", new object?[] { key, value });
+        }
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
+        {
+        }
+    }
+
+    public void Dispose()
+    {
+        persistingSubscription.Dispose();
+    }
+}

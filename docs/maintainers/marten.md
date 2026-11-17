@@ -1,6 +1,6 @@
 # Marten documents, events, the daemon and LINQ mode
 
-This is the full text of D6, D7 and D28, moved word for word from AGENTS.md on 2026-10-31. AGENTS.md states each rule in brief; this document holds the detail and wins where they differ.
+This is the full text of D6, D7 and D28. AGENTS.md states each rule in brief; this document holds the detail and wins where they differ.
 
 ## D6
 
@@ -12,7 +12,7 @@ verified non-generic) keep metadata columns, soft-delete semantics and tenancy e
 them. The studio never hand-writes document DML; writes go through the session — re-implementing Marten's
 write path is how a UI corrupts a store (and there is no upsert function to call: decision-notes.md, D6).
 
-The event flow (1.2) reads the projection graph by JasperFx's own rule (`SubscriptionDescriptor.appliedEventsFor`: an
+The event flow reads the projection graph by JasperFx's own rule (`SubscriptionDescriptor.appliedEventsFor`: an
 aggregation's `AllEventTypes`, anything else's `IncludedEventTypes`), restated over public members; it never calls
 `Describe`, `TryCreateUsage` or `CreateSchemaObjects`. An event type a projection declares that the registry has not met
 yet is shown, marked not registered. `Identity<T>()` groups events and does not declare `T`. A hidden document type's
@@ -26,7 +26,7 @@ an edited document means deserializing into the CLR type and serializing it back
 does not have is *gone*. The dialog lists dropped, changed and added properties before the save happens.
 Making the loss visible is the honest answer; silently dropping data is not, and refusing to edit at all
 would make the feature useless for the schemas that need it most. An edit keeps its document's id: preview and save
-refuse a JSON id that differs from the row's. Since Marten 9.53 (unconditional since the 1.1 floor of 9.57) the dialog lays
+refuse a JSON id that differs from the row's. Since Marten 9.53 (unconditional at the 9.57 floor) the dialog lays
 Marten's own `PreviewDocumentJsonAsync` beside the round trip - no session, no connection - and holds a save it
 disputes.
 
@@ -47,18 +47,18 @@ nothing to evaluate but literals. The statement comes from `BuildLinqParser()` a
 never `ToCommand`, which runs `EnsureStorageExists` - DDL on a read path (hard rule 14); a Marten that moves
 those internals makes the mode absent, never a fallback. And 9.48 (JasperFx 2.84, the first with
 `DynamicQuery`) was a light-up, not a floor, while the floor was 9.39: a host on 9.39-9.47 was not dragged forward for
-one mode. Since the floor moved to 9.57 (1.1, *Package budget changes* 2026-11-03) the `DynamicLinqQuery` probe is gone
+one mode. Since the floor moved to 9.57 (*Package budget changes* 2026-11-03) the `DynamicLinqQuery` probe is gone
 and the mode is unconditional; the adapter is still reached by reflection and still fails closed, pinned by
 `DynamicLinqAdapterTests` and `MartenLinqCommandTests`, and its absence is now only a JasperFx whose shape the studio
 does not recognise. `docs/linq-mode.md` is the threat model.
 
-Since 1.1 it also queries the event log through `IReadOnlyEventStore.QueryRawEvents()`, called with no tenant
+It also queries the event log through `IReadOnlyEventStore.QueryRawEvents()`, called with no tenant
 argument on the same pinned session (the overload with one opens an unpinned `QuerySession`), built by the same
 `BuildLinqParser`/`BuildDiagnosticCommand` path. The members are a closed list mirroring Marten's `EventQueryMapping`
 columns from `IReadOnlyStoreOptions.Events`, because every other `IEvent` member reads the JSON body and matches
 nothing. The statement must stay on the studio's session and read no `d.data`, or it is refused.
 
-## The shape check (1.2)
+## The shape check
 
 The shape check reads only with the studio's own SQL (`DocumentShapeQueries`, `EventShapeQueries`): keys and stored
 sizes first, from the primary key and `pg_stats.histogram_bounds`, chosen inside one statement so another tenant's ids
@@ -91,7 +91,7 @@ counted listing is one read shared by the Event types page and the check for 30 
 validated before the cache, so an arbitrary string never becomes a cache key or reaches SQL. An error result is handed to
 those waiting on it and is not cached; each run has its own in-flight marker.
 
-**Unregistered aliases never come from a scan the visitor did not ask for (1.2-UX-FIX-FU).** The Event types page lists
+**Unregistered aliases never come from a scan the visitor did not ask for.** The Event types page lists
 only registered types until Load counts, so the check learns which aliases only the log holds from, in order:
 - a counted listing in hand for the same resolved scope (the click's own, or the page's, read within five minutes);
 - the shared counted listing, peeked without inserting or starting a read;

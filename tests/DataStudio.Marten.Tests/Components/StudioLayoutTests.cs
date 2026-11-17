@@ -1,0 +1,1200 @@
+using AngleSharp.Dom;
+
+using Bunit;
+
+using DataStudio.Components.Layout;
+using DataStudio.Services;
+using JasperFx.Descriptors;
+
+using DataStudio.Postgres.Components.Layout;
+using DataStudio.Marten.Services;
+using DataStudio.Marten.Tests.Support;
+
+using Microsoft.AspNetCore.Components;
+using Microsoft.Extensions.DependencyInjection;
+using DataStudio.Postgres.Services;
+
+namespace DataStudio.Marten.Tests.Components;
+
+/// <summary>
+/// The page frame: it renders the page only for a scope the visitor may have, and the header stays put
+/// either way so they can pick one they may.
+/// </summary>
+public class StudioLayoutTests
+{
+    private const string BodyMarker = "the page itself";
+
+    private static readonly RenderFragment Body = builder =>
+    {
+        builder.OpenElement(0, "p");
+        builder.AddAttribute(1, "id", "body-marker");
+        builder.AddContent(2, BodyMarker);
+        builder.CloseElement();
+    };
+
+    /// <summary>
+    /// Renders the frame and waits for its first-render preference read to finish.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The wait is the whole reason this is a method. <c>StudioLayout.OnAfterRenderAsync</c> reads the
+    /// browser's remembered theme and time zone over two awaited JS calls, and bUnit's
+    /// <c>Change</c>/<c>Click</c> helpers dispatch through the renderer's dispatcher and
+    /// <em>discard the task</em> — so a test that rendered, clicked and asserted on the next line was
+    /// racing two pieces of asynchrony at once and lost about one full-suite run in four on CI.
+    /// </para>
+    /// <para>
+    /// The rule this file now follows: after any action whose handler awaits, wait — <c>WaitForState</c>,
+    /// <c>WaitForAssertion</c> or <c>WaitForElement</c> — never a bare <c>Find</c> or assertion on the
+    /// next line. The one exception is an assertion that <em>nothing</em> moved: a poll for a value that
+    /// never changes passes whether or not the action ever ran, so those tests are <c>async</c> and
+    /// <c>await</c> the <c>ChangeAsync</c>/<c>ClickAsync</c> dispatch task instead, which completes only
+    /// once the handler and its render have.
+    /// </para>
+    /// </remarks>
+    private static IRenderedComponent<StudioLayout> RenderLayout(StudioComponentContext context)
+    {
+        IRenderedComponent<StudioLayout> layout =
+            context.Render<StudioLayout>(parameters => parameters.Add(x => x.Body, Body));
+
+        layout.WaitForState(() => layout.Instance.PreferencesLoaded);
+
+        return layout;
+    }
+
+    [Fact]
+    public void The_page_is_rendered_when_the_visitor_may_have_the_scope()
+    {
+        using var context = new StudioComponentContext().WithPolicy("default");
+        context.Catalog.WithStore("default", "Default", databaseIdentities: "localhost.marten");
+
+        var layout = RenderLayout(context);
+
+        layout.Markup.Should().Contain(BodyMarker);
+        layout.FindAll(".ms-empty-title").Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// A page that is never rendered never runs its <c>OnInitializedAsync</c>, so nothing about a store
+    /// the visitor may not see is read on their behalf. That is the point of refusing in the frame rather
+    /// than in each page.
+    /// </summary>
+    [Fact]
+    public void The_not_authorized_frame_replaces_the_page_when_the_visitor_may_not()
+    {
+        using var context = new StudioComponentContext().WithPolicy("somebody-elses-store");
+        context.Catalog.WithStore("default", "Default", databaseIdentities: "localhost.marten");
+
+        var layout = RenderLayout(context);
+
+        layout.Markup.Should().NotContain(BodyMarker);
+        layout.Find(".ms-empty-title").TextContent.Should().Be("Not authorized");
+    }
+
+    /// <summary>1.1: the first focusable element of the shell is "Skip to content", and it points at the content region.</summary>
+    [Fact]
+    public void The_first_focusable_element_is_a_skip_link_to_the_content_region()
+    {
+        using var context = new StudioComponentContext().WithPolicy("default");
+        context.Catalog.WithStore("default", "Default", databaseIdentities: "localhost.marten");
+
+        var layout = RenderLayout(context);
+
+        IElement first = layout.FindAll("a[href], button, input, select, textarea, [tabindex]:not([tabindex='-1'])")
+            .First(static x => !x.HasAttribute("disabled"));
+        first.ClassList.Should().Contain("ms-skip-link");
+        first.TextContent.Trim().Should().Be("Skip to content");
+        first.GetAttribute("href").Should().Be("#ms-main-content");
+
+        IElement main = layout.Find("main");
+        main.Id.Should().Be("ms-main-content");
+        main.GetAttribute("tabindex").Should().Be("-1", "it takes focus from the link without being a tab stop of its own");
+    }
+
+    [Fact]
+    public void The_rail_ends_with_the_product_its_licence_and_its_author()
+    {
+        using var context = new StudioComponentContext().WithPolicy("default");
+        context.Catalog.WithStore("default", "Default", databaseIdentities: "localhost.marten");
+
+        var layout = RenderLayout(context);
+
+        var credit = layout.Find(".ms-rail-credit");
+        var lines = credit.QuerySelectorAll(".ms-rail-credit-line").Select(static x => x.TextContent.Trim()).ToList();
+        lines.Should().HaveCount(4, "the shell and its version, each module composed into it, the licence and the author, a line each");
+        lines[0].Should().StartWith("Data Studio ").And.NotContain("MIT").And.NotContain("Marko");
+        lines[1].Should().Be("Marten");
+        lines[2].Should().Be("MIT licensed");
+        lines[3].Should().Be("by Marko Lahma");
+        credit.QuerySelectorAll("a").Select(static a => a.GetAttribute("href")).Should().Contain(
+            "https://github.com/lahma/marten-studio/blob/main/LICENSE");
+    }
+
+    [Fact]
+    public void A_spinner_stands_in_while_the_policy_has_not_answered()
+    {
+        using var context = new StudioComponentContext().WithPolicy("default");
+        context.Catalog.WithStore("default", "Default", databaseIdentities: "localhost.marten");
+
+        // The policy is asked and does not answer, which is the state the frame calls "unknown".
+        context.AuthorizationService.Gate = new TaskCompletionSource();
+
+        var layout = RenderLayout(context);
+
+        layout.Markup.Should().NotContain(BodyMarker);
+        layout.FindAll(".ms-loading-spinner").Should().ContainSingle();
+
+        context.AuthorizationService.Gate.SetResult();
+    }
+
+    /// <summary>
+    /// No store at all is not a refusal: the page renders and says so for itself, which is the honest
+    /// answer both when nothing is registered and when the visitor may see none of it.
+    /// </summary>
+    [Fact]
+    public void With_no_store_at_all_the_page_still_renders()
+    {
+        using var context = new StudioComponentContext();
+
+        var layout = RenderLayout(context);
+
+        layout.Markup.Should().Contain(BodyMarker);
+    }
+
+    [Fact]
+    public void The_header_survives_a_refusal_so_another_store_can_be_picked()
+    {
+        using var context = new StudioComponentContext().WithPolicy("nothing-at-all");
+        context.Catalog
+            .WithStore("default", "Default", databaseIdentities: "localhost.marten")
+            .WithStore("invoicing", "Invoicing", databaseIdentities: "localhost.invoicing");
+
+        var layout = RenderLayout(context);
+
+        layout.Find(".ms-header").Should().NotBeNull();
+        layout.Find(".ms-sidebar").Should().NotBeNull();
+    }
+
+    // -------------------------------------------------------------------------------------------
+    // Theme
+    // -------------------------------------------------------------------------------------------
+
+    [Fact]
+    public void The_theme_defaults_to_system()
+    {
+        using var context = new StudioComponentContext();
+
+        RenderLayout(context).ThemeAttribute().Should().Be("system");
+    }
+
+    [Theory]
+    [InlineData("light")]
+    [InlineData("dark")]
+    [InlineData("system")]
+    public void The_theme_picker_is_three_way(string theme)
+    {
+        using var context = new StudioComponentContext();
+        var layout = RenderLayout(context);
+
+        layout.Find("#ms-theme-select").Change(theme);
+
+        layout.WaitForAssertion(() =>
+        {
+            layout.ThemeAttribute().Should().Be(theme);
+            context.Preferences.SelectedTheme.Should().Be(theme);
+        });
+    }
+
+    [Fact]
+    public void An_unknown_theme_falls_back_to_system_rather_than_being_written_into_the_markup()
+    {
+        using var context = new StudioComponentContext();
+        var layout = RenderLayout(context);
+
+        // "dark" first, so the fallback has something to be a fallback *from*: asserting "system" on a
+        // studio that already says "system" would pass whether or not the second change ever ran.
+        layout.Find("#ms-theme-select").Change("dark");
+        layout.WaitForAssertion(() => layout.ThemeAttribute().Should().Be("dark"));
+
+        layout.Find("#ms-theme-select").Change("\" onload=\"alert(1)");
+
+        layout.WaitForAssertion(() => layout.ThemeAttribute().Should().Be("system"));
+    }
+
+    [Fact]
+    public void The_theme_picker_offers_exactly_the_three_choices()
+    {
+        using var context = new StudioComponentContext();
+
+        RenderLayout(context).SelectorOptions("ms-theme-select").Should().Equal("system", "light", "dark");
+    }
+
+    /// <summary>
+    /// Seeded from the cookie on the server, so a dark studio renders dark during prerendering and there
+    /// is no flash of the light theme when the circuit takes over.
+    /// </summary>
+    [Fact]
+    public void The_theme_is_seeded_from_the_cookie_before_the_first_render()
+    {
+        using var context = new StudioComponentContext();
+        context.Preferences.SelectedTheme = "dark";
+
+        RenderLayout(context).ThemeAttribute().Should().Be("dark");
+    }
+
+    /// <summary>
+    /// The zone is picked out of the list rather than named: the context pins UTC, so a test that changed
+    /// to <c>"UTC"</c> asserted that nothing had happened — and the ids themselves are Windows' on one
+    /// machine and IANA's on another.
+    /// </summary>
+    [Fact]
+    public void The_time_zone_picker_changes_what_timestamps_are_rendered_in()
+    {
+        using var context = new StudioComponentContext();
+        var layout = RenderLayout(context);
+
+        string other = layout.SelectorOptions("ms-timezone-select")
+            .First(id => !string.Equals(id, context.Preferences.SelectedTimeZoneId, StringComparison.Ordinal));
+
+        layout.Find("#ms-timezone-select").Change(other);
+
+        layout.WaitForAssertion(() => context.Preferences.SelectedTimeZoneId.Should().Be(other));
+    }
+
+    /// <summary>
+    /// A time-zone change reaches every page that listens to <see cref="StudioState.ScopeChanged" /> exactly once (Shell A1 follow-up F3): the
+    /// layout calls <c>StudioPreferences.NotifyChangedAsync()</c>, whose one subscriber is the scope state. Without this a later packet could drop
+    /// that call with every other test still green.
+    /// </summary>
+    [Fact]
+    public async Task The_time_zone_picker_raises_the_scope_changed_event_once()
+    {
+        using var context = new StudioComponentContext();
+        var layout = RenderLayout(context);
+        int raised = 0;
+        context.State.ScopeChanged += () =>
+        {
+            Interlocked.Increment(ref raised);
+            return Task.CompletedTask;
+        };
+
+        string other = layout.SelectorOptions("ms-timezone-select")
+            .First(id => !string.Equals(id, context.Preferences.SelectedTimeZoneId, StringComparison.Ordinal));
+
+        // The dispatch task completes only once the handler and its render have, so nothing is still in flight when the count is read.
+        await layout.Find("#ms-timezone-select").ChangeAsync(other);
+
+        raised.Should().Be(1);
+    }
+
+    /// <summary>The stored zone read on the first render moves the zone the same way (follow-up F3, second half): once.</summary>
+    [Fact]
+    public void A_stored_time_zone_that_differs_raises_the_scope_changed_event_once()
+    {
+        using var context = new StudioComponentContext();
+        string stored = TimeZoneInfo.GetSystemTimeZones().First(x => !string.Equals(x.Id, context.Preferences.SelectedTimeZoneId, StringComparison.Ordinal)).Id;
+        context.JSInterop.Setup<string?>("martenStudio.prefs.get", StudioPreferences.ThemePreferenceKey).SetResult(null);
+        context.JSInterop.Setup<string?>("martenStudio.prefs.get", StudioPreferences.TimeZonePreferenceKey).SetResult(stored);
+        int raised = 0;
+        context.State.ScopeChanged += () =>
+        {
+            Interlocked.Increment(ref raised);
+            return Task.CompletedTask;
+        };
+
+        var layout = RenderLayout(context);
+
+        context.Preferences.SelectedTimeZoneId.Should().Be(stored);
+        raised.Should().Be(1);
+        layout.Instance.PreferencesLoaded.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// The database's circuit host is the first subscriber to the scope (Shell A2a, DESIGN-A 5.4): <c>StudioLayout</c> renders it before the rail,
+    /// so its handler - which writes the scope into the address, then asks the scope policy - runs before the rail's, which 1.2's N5b window
+    /// depends on. Read from the event's invocation list after a real render of the layout, with the rail and the header in it.
+    /// </summary>
+    [Fact]
+    public void The_database_host_is_subscribed_to_the_scope_before_the_rail_and_the_header()
+    {
+        using var context = new StudioComponentContext();
+        context.Catalog.WithStore("default", "Default", databaseIdentities: "localhost.marten");
+
+        RenderLayout(context);
+
+        System.Reflection.FieldInfo field = typeof(StudioState).GetField(nameof(StudioState.ScopeChanged), System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        string[] subscribers = [.. ((Delegate)field.GetValue(context.State)!).GetInvocationList().Select(static x => x.Target!.GetType().Name)];
+
+        subscribers.Should().Contain([nameof(DatabaseScopeHost), nameof(NavMenu), nameof(ScopeSelector)]);
+        subscribers[0].Should().Be(nameof(DatabaseScopeHost), "it is the first statement of the host's initialization, and the host is the first component the layout renders");
+    }
+
+    /// <summary>
+    /// The first render reads <c>localStorage</c> through <c>martenStudio.prefs.get</c>, and a closed
+    /// browser tab throws <see cref="Microsoft.JSInterop.JSDisconnectedException" /> out of that call - a
+    /// type that derives from <see cref="Exception" /> rather than from
+    /// <see cref="Microsoft.JSInterop.JSException" />. The layout has to render anyway rather than take
+    /// the rest of the circuit down with it.
+    /// </summary>
+    [Fact]
+    public void A_lost_circuit_reading_stored_preferences_does_not_escape_the_layout()
+    {
+        using var context = new StudioComponentContext();
+        context.JSInterop.Disconnect<string?>("martenStudio.prefs.get");
+
+        Action render = () => RenderLayout(context);
+
+        render.Should().NotThrow();
+    }
+
+    /// <summary>
+    /// What the browser remembered is applied when the visitor has not said otherwise. The companion to
+    /// the test below, and the reason it is here: a guard that refused every stored value would pass that
+    /// one and break the feature.
+    /// </summary>
+    [Fact]
+    public void A_stored_preference_is_applied_when_the_visitor_has_not_touched_the_pickers()
+    {
+        using var context = new StudioComponentContext();
+        context.JSInterop
+            .Setup<string?>("martenStudio.prefs.get", StudioPreferences.ThemePreferenceKey)
+            .SetResult("dark");
+
+        var layout = RenderLayout(context);
+
+        layout.WaitForAssertion(() => layout.ThemeAttribute().Should().Be("dark"));
+        context.Preferences.SelectedTheme.Should().Be("dark");
+    }
+
+    /// <summary>
+    /// A preference read that started before the visitor's click does not undo it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The first render asks the browser for the remembered theme and time zone — two awaited round
+    /// trips. On a slow browser the visitor can use the theme picker while those are in flight, and what
+    /// comes back was read <em>before</em> the click: it is the preference they have just moved away
+    /// from. Applying it turned their click into a picker that snapped back on its own a moment after
+    /// they used it, and the same ordering is what made <c>StudioLayoutTests</c> fail about one
+    /// full-suite run in four under parallel load.
+    /// </para>
+    /// <para>
+    /// The read is held open with a bUnit invocation handler that is completed by hand, so the ordering
+    /// is the test's to choose rather than the scheduler's — which is the only way to write this down
+    /// without writing another race.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void A_stored_preference_that_arrives_late_never_overwrites_the_visitors_own_choice()
+    {
+        using var context = new StudioComponentContext();
+
+        JSRuntimeInvocationHandler<string?> storedTheme =
+            context.JSInterop.Setup<string?>("martenStudio.prefs.get", StudioPreferences.ThemePreferenceKey);
+        JSRuntimeInvocationHandler<string?> storedZone =
+            context.JSInterop.Setup<string?>("martenStudio.prefs.get", StudioPreferences.TimeZonePreferenceKey);
+
+        var layout = context.Render<StudioLayout>(parameters => parameters.Add(x => x.Body, Body));
+
+        layout.Instance.PreferencesLoaded.Should().BeFalse("the browser has not answered yet");
+
+        layout.Find("#ms-theme-select").Change("dark");
+        layout.WaitForAssertion(() => context.Preferences.SelectedTheme.Should().Be("dark"));
+
+        // Only now does the read that started before the click come back, and it carries the theme the
+        // visitor has just moved away from.
+        storedTheme.SetResult("light");
+        storedZone.SetResult(null);
+
+        layout.WaitForState(() => layout.Instance.PreferencesLoaded);
+
+        context.Preferences.SelectedTheme.Should().Be("dark", "the visitor's choice is the newer answer");
+        layout.ThemeAttribute().Should().Be("dark");
+    }
+
+    // -------------------------------------------------------------------------------------------
+    // Navigation
+    // -------------------------------------------------------------------------------------------
+
+    [Fact]
+    public void The_nav_lists_every_section_and_marks_the_pages_that_do_not_exist_yet()
+    {
+        using var context = new StudioComponentContext();
+        var layout = RenderLayout(context);
+
+        layout.TextOfAll(".ms-sidebar-section").Should().Equal("Data", "Database", "Events", "Operations", "System", "Studio");
+
+        // Only the pages that have an @page yet are links; the rest are visible and disabled, so the
+        // information architecture is legible from the first version. This list grows one packet at a
+        // time - Projections joined it in P5, the four Events screens in P4, Schema and Configuration
+        // in P7, Documents in P2, Query in P6, and the database browser's Tables in DB-4, which also
+        // moved Relationships out of Data and under it. Health heads Operations from H1 (0.4), and Statements, Maintenance,
+        // Storage and Replication follow it from W5-Q1, W5-V1, W5-CAP and W5-R2 (0.5); Server heads System from W5-S2.
+        layout.TextOfAll(".ms-nav-link:not(.ms-nav-link-disabled) .ms-nav-link-text")
+            .Should().Equal(
+                "Overview",
+                "Documents",
+                "Query",
+                "Plan",
+                "Tables",
+                "Connection",
+                "Relationships",
+                "Streams",
+                "Feed",
+                "Event types",
+                "Event flow",
+                "Dead letters",
+                "Health",
+                "Statements",
+                "Maintenance",
+                "Storage",
+                "Replication",
+                "Projections",
+                "Schema",
+                "Server",
+                "Configuration",
+                "Activity");
+
+        layout.FindAll(".ms-nav-link-disabled").Should().OnlyContain(x =>
+            x.GetAttribute("title") == "Coming in a later release" && x.GetAttribute("aria-disabled") == "true");
+    }
+
+    [Fact]
+    public void The_nav_links_honour_the_configured_path()
+    {
+        using var context = new StudioComponentContext();
+        context.ShellOptions.Path = "/ops/marten";
+        context.Options.Capabilities.RunSql = true; // Plan is in the rail only while RunSql is on (issue #37)
+
+        var layout = RenderLayout(context);
+
+        // The shell roots the document at the studio itself, so links are relative to the studio root and
+        // an empty href resolves to it.
+        layout.FindAll("a.ms-nav-link").Select(x => x.GetAttribute("href")).Should().Equal(
+            "marten",
+            "marten/documents",
+            "postgres/query",
+            "postgres/plan",
+            "postgres/database",
+            "postgres/database/connection",
+            "postgres/relationships",
+            "marten/events/streams",
+            "marten/events/feed",
+            "marten/events/types",
+            "marten/events/flow",
+            "marten/events/dead-letters",
+            "postgres/health",
+            "postgres/statements",
+            "postgres/maintenance",
+            "postgres/storage",
+            "postgres/replication",
+            "marten/projections",
+            "marten/schema",
+            "postgres/server",
+            "marten/config",
+            "activity");
+    }
+
+    /// <summary>
+    /// The default mount is studio-rooted too, so its links have exactly the shape a custom path's do.
+    /// There is no second link shape any more: that was the branch nobody ran locally.
+    /// </summary>
+    [Fact]
+    public void The_nav_links_have_the_same_shape_at_the_default_path()
+    {
+        using var context = new StudioComponentContext();
+        context.Options.Capabilities.RunSql = true; // Plan is in the rail only while RunSql is on (issue #37)
+
+        var layout = RenderLayout(context);
+
+        layout.FindAll("a.ms-nav-link").Select(x => x.GetAttribute("href")).Should().Equal(
+            "marten",
+            "marten/documents",
+            "postgres/query",
+            "postgres/plan",
+            "postgres/database",
+            "postgres/database/connection",
+            "postgres/relationships",
+            "marten/events/streams",
+            "marten/events/feed",
+            "marten/events/types",
+            "marten/events/flow",
+            "marten/events/dead-letters",
+            "postgres/health",
+            "postgres/statements",
+            "postgres/maintenance",
+            "postgres/storage",
+            "postgres/replication",
+            "marten/projections",
+            "marten/schema",
+            "postgres/server",
+            "marten/config",
+            "activity");
+    }
+
+    /// <summary>
+    /// "Tables" is one word for six kinds of object, and below 1024 px the label is hidden and the tooltip
+    /// is all a sighted mouse user has. The tooltip adds to the name; it never replaces it, because the
+    /// label is the link's accessible name.
+    /// </summary>
+    [Fact]
+    public void The_tables_entry_says_in_its_tooltip_what_else_it_lists()
+    {
+        using var context = new StudioComponentContext();
+
+        var layout = RenderLayout(context);
+
+        IElement tables = layout.FindAll("a.ms-nav-link").Single(x => x.GetAttribute("href") == "postgres/database");
+        tables.GetAttribute("title").Should().Be("Tables, views, functions, triggers, sequences and types");
+        tables.QuerySelector(".ms-nav-link-text")!.TextContent.Trim().Should().Be("Tables");
+
+        layout.FindAll("a.ms-nav-link").Single(x => x.GetAttribute("href") == "postgres/relationships")
+            .GetAttribute("title").Should().Be("Relationships", "an entry with no tooltip of its own is titled with its label");
+    }
+
+    /// <summary>
+    /// The browser, object detail and row detail are all one place in the navigation. The prefix match is
+    /// what does it, and a row page that a later packet builds is covered before it exists.
+    /// </summary>
+    [Theory]
+    [InlineData("studio/postgres/database", "postgres/database")]
+    [InlineData("studio/postgres/database?schema=quartz&kind=views", "postgres/database")]
+    [InlineData("studio/postgres/database/object?schema=quartz&name=qrtz_triggers&tab=keys", "postgres/database")]
+    [InlineData("studio/postgres/database/row?schema=quartz&name=qrtz_triggers&key.sched_name=QRTZ", "postgres/database")]
+    [InlineData("studio/postgres/relationships", "postgres/relationships")]
+    public void The_database_entry_stays_lit_on_every_page_below_it(string uri, string active)
+    {
+        using var context = new StudioComponentContext();
+        context.Navigate(uri);
+
+        var layout = RenderLayout(context);
+
+        layout.FindAll("a.ms-nav-link.ms-nav-active").Select(x => x.GetAttribute("href"))
+            .Should().Equal(active);
+    }
+
+    // -------------------------------------------------------------------------------------------
+    // Navigation badges
+    // -------------------------------------------------------------------------------------------
+
+    [Fact]
+    public void Dead_letters_wear_a_red_count_when_there_are_any()
+    {
+        using var context = new StudioComponentContext();
+        context.NavBadges.DeadLetters = 12;
+
+        var layout = RenderLayout(context);
+
+        IElement badge = Badge(layout, "Dead letters")!;
+
+        badge.TextContent.Trim().Should().Be("12");
+        badge.ClassList.Should().Contain("ms-nav-badge-danger");
+        badge.GetAttribute("title").Should().Contain("could not apply");
+    }
+
+    /// <summary>
+    /// The count is a decoration on the link, never part of it: the link's text is what a screen reader
+    /// announces and what every navigation test matches on, and a badge folded into it would rename the
+    /// page.
+    /// </summary>
+    [Fact]
+    public void A_badge_never_changes_the_text_of_the_link_it_decorates()
+    {
+        using var context = new StudioComponentContext();
+        context.NavBadges.DeadLetters = 12;
+        context.NavBadges.ProjectionsNeedAttention = true;
+
+        var layout = RenderLayout(context);
+
+        layout.TextOfAll(".ms-nav-link:not(.ms-nav-link-disabled) .ms-nav-link-text")
+            .Should().Contain("Dead letters").And.Contain("Projections");
+
+        layout.FindAll("a.ms-nav-link").Select(x => x.GetAttribute("href")).Should()
+            .Contain("marten/events/dead-letters").And.Contain("marten/projections");
+    }
+
+    /// <summary>
+    /// Zero dead letters is good news, and "nobody could tell" is not news at all. Neither draws a badge -
+    /// a red nought would be an alarm about the absence of a problem.
+    /// </summary>
+    [Theory]
+    [InlineData(0L)]
+    [InlineData(null)]
+    public void No_badge_is_drawn_for_zero_or_for_an_unreadable_count(long? count)
+    {
+        using var context = new StudioComponentContext();
+        context.NavBadges.DeadLetters = count;
+
+        var layout = RenderLayout(context);
+
+        Badge(layout, "Dead letters").Should().BeNull();
+    }
+
+    [Fact]
+    public void Projections_wear_an_amber_dot_with_the_reason_in_its_tooltip()
+    {
+        using var context = new StudioComponentContext();
+        context.NavBadges.ProjectionsNeedAttention = true;
+        context.NavBadges.ProjectionsExplanation = "OrderSummary:All is 5,000 events behind";
+
+        var layout = RenderLayout(context);
+
+        IElement badge = Badge(layout, "Projections")!;
+
+        badge.ClassList.Should().Contain("ms-nav-badge-dot").And.Contain("ms-nav-badge-warning");
+        badge.TextContent.Trim().Should().BeEmpty("a count of 'needs attention' would mean nothing");
+        badge.GetAttribute("title").Should().Be("OrderSummary:All is 5,000 events behind");
+        badge.GetAttribute("aria-label").Should().Be("OrderSummary:All is 5,000 events behind");
+    }
+
+    [Fact]
+    public void Projections_wear_nothing_while_every_shard_is_keeping_up()
+    {
+        using var context = new StudioComponentContext();
+
+        var layout = RenderLayout(context);
+
+        Badge(layout, "Projections").Should().BeNull();
+    }
+
+    /// <summary>
+    /// Schema deliberately has no badge: finding drift costs a <c>CreateMigrationAsync</c>, which hard
+    /// rule 14 keeps off every navigation path, so it stays behind the button that says what it may
+    /// create.
+    /// </summary>
+    [Fact]
+    public void Schema_carries_no_badge_because_drift_cannot_be_found_without_building_schema()
+    {
+        using var context = new StudioComponentContext();
+        context.NavBadges.DeadLetters = 3;
+        context.NavBadges.ProjectionsNeedAttention = true;
+
+        var layout = RenderLayout(context);
+
+        Badge(layout, "Schema").Should().BeNull();
+    }
+
+    /// <summary>
+    /// 1.0-P3A (issue #28): Plan is in the rail for every visitor, after Query, whatever <c>RunSql</c> and the master switch say -
+    /// pasting a plan reads nothing; running one keeps the console's gate on the page. Query stays too: it hosts Mode A and LINQ
+    /// mode, which need no <c>RunSql</c> (issue #37).
+    /// </summary>
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void Plan_and_Query_are_in_the_rail_whatever_RunSql_and_ReadOnly_say(bool runSql, bool readOnly)
+    {
+        using var context = readOnly ? new StudioComponentContext().WithReadOnly() : new StudioComponentContext();
+        context.Options.Capabilities.RunSql = runSql;
+
+        var layout = RenderLayout(context);
+
+        string[] links = [.. layout.TextOfAll("a.ms-nav-link .ms-nav-link-text")];
+        links.Should().ContainInOrder("Query", "Plan", "Tables");
+    }
+
+    /// <summary>
+    /// The one thing the sidebar must never do is stop rendering. A badge is a decoration, and a
+    /// decoration that could take navigation down with it would be worse than no badge at all.
+    /// </summary>
+    [Fact]
+    public void An_indicator_service_that_throws_costs_the_badges_and_nothing_else()
+    {
+        using var context = new StudioComponentContext();
+        context.NavBadges.Failure = new InvalidOperationException("the database is gone");
+
+        var layout = RenderLayout(context);
+
+        layout.FindAll(".ms-nav-badge").Should().BeEmpty();
+        layout.FindAll("a.ms-nav-link").Should().HaveCount(22, "every entry, Health (0.4), Statements, Maintenance, Storage, Replication and Server (0.5) included, Plan (0.9; every visitor's since 1.0), Connection (1.1) and Event flow (1.2)");
+        layout.Markup.Should().Contain(BodyMarker);
+    }
+
+    /// <summary>The badge on the nav entry with this label, or <see langword="null" /> when it has none.</summary>
+    private static IElement? Badge(IRenderedComponent<StudioLayout> layout, string label)
+    {
+        foreach (IElement link in layout.FindAll(".ms-nav-link"))
+        {
+            if (string.Equals(link.QuerySelector(".ms-nav-link-text")?.TextContent.Trim(), label, StringComparison.Ordinal))
+            {
+                return link.QuerySelector(".ms-nav-badge");
+            }
+        }
+
+        throw new InvalidOperationException($"The sidebar has no entry called '{label}'.");
+    }
+
+    // -------------------------------------------------------------------------------------------
+    // The scope selector, through the layout that hosts it
+    // -------------------------------------------------------------------------------------------
+
+    [Fact]
+    public void The_store_picker_is_hidden_when_there_is_only_one_store()
+    {
+        using var context = new StudioComponentContext();
+        context.Catalog.WithStore("default", "Default", databaseIdentities: "localhost.marten");
+
+        RenderLayout(context).Selector("ms-store-select").Should().BeNull(
+            "a picker with one option is a control that cannot do anything");
+    }
+
+    [Fact]
+    public void The_store_picker_appears_once_there_is_more_than_one_store()
+    {
+        using var context = new StudioComponentContext();
+        context.Catalog
+            .WithStore("default", "Default", databaseIdentities: "localhost.marten")
+            .WithStore("IInvoicingStore", "Invoicing Store", databaseIdentities: "localhost.invoicing");
+
+        var layout = RenderLayout(context);
+
+        layout.SelectorOptions("ms-store-select").Should().Equal("default", "IInvoicingStore");
+        layout.TextOfAll("#ms-store-select option").Should().Equal("Default", "Invoicing Store");
+    }
+
+    /// <summary>
+    /// A store the application registered that will not build is offered and greyed out rather than
+    /// omitted: leaving it out is what made it look as though it had never been registered.
+    /// </summary>
+    [Fact]
+    public void An_unavailable_store_is_offered_disabled_with_what_it_said()
+    {
+        using var context = new StudioComponentContext();
+        context.Catalog
+            .WithStore("default", "Default", databaseIdentities: "localhost.marten")
+            .WithUnavailableStore("IInvoicingStore", "Invoicing Store", "no connection string was configured");
+
+        var layout = RenderLayout(context);
+
+        var broken = layout.FindAll("#ms-store-select option").Single(x => x.GetAttribute("value") == "IInvoicingStore");
+        broken.HasAttribute("disabled").Should().BeTrue();
+        broken.GetAttribute("title").Should().Be("no connection string was configured");
+        broken.TextContent.Trim().Should().Be("Invoicing Store (unavailable)");
+    }
+
+    [Fact]
+    public void The_database_picker_is_hidden_for_a_single_database_store()
+    {
+        using var context = new StudioComponentContext();
+        context.Catalog.WithStore("default", "Default", DatabaseCardinality.Single, "localhost.marten");
+
+        RenderLayout(context).Selector("ms-database-select").Should().BeNull();
+    }
+
+    [Fact]
+    public void The_database_picker_appears_for_a_statically_multi_tenanted_store()
+    {
+        using var context = new StudioComponentContext();
+        context.Catalog.WithStore("default", "Default", DatabaseCardinality.StaticMultiple, "srv.one", "srv.two");
+
+        var layout = RenderLayout(context);
+
+        layout.SelectorOptions("ms-database-select").Should().Equal("srv.one", "srv.two");
+        layout.FindAll("button").Should().NotContain(x => x.TextContent.Trim() == "Refresh",
+            "a static list does not change while the process runs");
+    }
+
+    /// <summary>
+    /// Dynamic tenancy adds databases while the process runs, so the listing is a snapshot and there has
+    /// to be a way to ask again.
+    /// </summary>
+    [Fact]
+    public void The_database_picker_gets_a_refresh_button_for_dynamic_tenancy()
+    {
+        using var context = new StudioComponentContext();
+        context.Catalog.WithStore("default", "Default", DatabaseCardinality.DynamicMultiple, "srv.one");
+
+        var layout = RenderLayout(context);
+        var refresh = layout.FindAll("button").Single(x => x.TextContent.Trim() == "Refresh");
+
+        refresh.Click();
+
+        layout.WaitForAssertion(() => context.Catalog.InvalidateCount.Should().Be(1));
+    }
+
+    [Fact]
+    public void The_tenant_picker_is_hidden_when_nothing_is_conjoined()
+    {
+        using var context = new StudioComponentContext();
+        context.Catalog.WithStore("default", "Default", databaseIdentities: "localhost.marten");
+
+        RenderLayout(context).Selector("ms-tenant-select").Should().BeNull();
+    }
+
+    [Fact]
+    public void The_tenant_picker_offers_all_tenants_and_then_the_listed_ones()
+    {
+        using var context = new StudioComponentContext();
+        context.Catalog
+            .WithStore("default", "Default", databaseIdentities: "localhost.marten")
+            .WithTenants("default", new TenantList(["acme", "globex"], IsTruncated: false, TenantListSource.Configured));
+
+        var layout = RenderLayout(context);
+
+        layout.SelectorOptions("ms-tenant-select").Should().Equal("", "acme", "globex");
+        layout.Find("#ms-tenant-select option").TextContent.Trim().Should().Be("All tenants");
+    }
+
+    /// <summary>
+    /// A picker that silently omitted tenants would be worse than none, so a truncated listing becomes a
+    /// box that takes the id.
+    /// </summary>
+    [Fact]
+    public void A_truncated_tenant_listing_becomes_a_free_text_box()
+    {
+        using var context = new StudioComponentContext();
+        context.Catalog
+            .WithStore("default", "Default", databaseIdentities: "localhost.marten")
+            .WithTenants("default", new TenantList(["acme"], IsTruncated: true, TenantListSource.Queried));
+
+        var layout = RenderLayout(context);
+        var input = layout.Find("#ms-tenant-select");
+
+        input.NodeName.Should().Be("INPUT");
+        input.GetAttribute("placeholder").Should().Be("All tenants");
+    }
+
+    [Fact]
+    public void Picking_a_tenant_moves_the_active_scope()
+    {
+        using var context = new StudioComponentContext();
+        context.Catalog
+            .WithStore("default", "Default", databaseIdentities: "localhost.marten")
+            .WithTenants("default", new TenantList(["acme", "globex"], IsTruncated: false, TenantListSource.Configured));
+
+        var layout = RenderLayout(context);
+
+        layout.Find("#ms-tenant-select").Change("globex");
+
+        layout.WaitForAssertion(() => context.State.ActiveScope!.TenantId.Should().Be("globex"));
+    }
+
+    /// <summary>
+    /// The value arrives from a browser change event, and Blazor does not check that the server offered
+    /// it. Without this the client could name any store in the process.
+    /// </summary>
+    [Fact]
+    public async Task A_tenant_the_listing_did_not_carry_is_ignored()
+    {
+        using var context = new StudioComponentContext();
+        context.Catalog
+            .WithStore("default", "Default", databaseIdentities: "localhost.marten")
+            .WithTenants("default", new TenantList(["acme"], IsTruncated: false, TenantListSource.Configured));
+
+        var layout = RenderLayout(context);
+
+        // Awaited rather than waited for. A refusal changes nothing, so there is no state a
+        // `WaitForAssertion` could poll for - it would pass whether or not the change had run at all.
+        // `ChangeAsync` returns the renderer's own dispatch task, so this is the one shape that proves
+        // the handler ran and then did nothing.
+        await layout.Find("#ms-tenant-select").ChangeAsync("acme");
+        context.State.ActiveScope!.TenantId.Should().Be("acme");
+
+        await layout.Find("#ms-tenant-select").ChangeAsync("somebody-elses-tenant");
+
+        context.State.ActiveScope!.TenantId.Should().Be("acme", "the previous value stands");
+    }
+
+    [Fact]
+    public async Task A_store_the_listing_did_not_carry_is_ignored()
+    {
+        using var context = new StudioComponentContext();
+        context.Catalog
+            .WithStore("default", "Default", databaseIdentities: "localhost.marten")
+            .WithStore("IInvoicingStore", "Invoicing Store", databaseIdentities: "localhost.invoicing");
+
+        var layout = RenderLayout(context);
+
+        await layout.Find("#ms-store-select").ChangeAsync("not-a-store");
+
+        context.State.ActiveScope!.StoreKey.Should().Be("default");
+    }
+
+    // -------------------------------------------------------------------------------------------
+    // The pickers actually reach the server, and what is on screen is in the URL (plan D9)
+    // -------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// The header's three pickers are the studio's only controls that are not on a page, and a browser
+    /// check found them doing nothing at all. They are written with an explicit <c>value</c> plus
+    /// <c>@onchange</c> rather than <c>@bind</c>, so this pins that the handler runs and that the selected
+    /// option is marked in the markup - during static server-side rendering <c>value</c> on a
+    /// <c>&lt;select&gt;</c> is an attribute browsers ignore, so without <c>selected</c> the prerendered
+    /// picker showed its first option whatever the state said.
+    /// </summary>
+    [Fact]
+    public void The_theme_picker_marks_the_selected_option_and_moves_the_state()
+    {
+        using var context = new StudioComponentContext();
+        var layout = RenderLayout(context);
+
+        layout.Find("#ms-theme-select").Change("dark");
+
+        layout.WaitForAssertion(() =>
+        {
+            context.Preferences.SelectedTheme.Should().Be("dark");
+            layout.ThemeAttribute().Should().Be("dark");
+            layout.Find("#ms-theme-select option[value=dark]").HasAttribute("selected").Should().BeTrue();
+            layout.Find("#ms-theme-select option[value=light]").HasAttribute("selected").Should().BeFalse();
+        });
+    }
+
+    [Fact]
+    public void The_time_zone_picker_marks_the_selected_option()
+    {
+        using var context = new StudioComponentContext();
+        var layout = RenderLayout(context);
+
+        string other = layout.SelectorOptions("ms-timezone-select")
+            .First(id => !string.Equals(id, context.Preferences.SelectedTimeZoneId, StringComparison.Ordinal));
+
+        layout.Find("#ms-timezone-select").Change(other);
+
+        layout.WaitForAssertion(() => layout.FindAll("#ms-timezone-select option")
+            .Where(x => x.HasAttribute("selected"))
+            .Select(x => x.GetAttribute("value"))
+            .Should().Equal(other));
+    }
+
+    [Fact]
+    public void The_store_picker_marks_the_active_store()
+    {
+        using var context = new StudioComponentContext();
+        context.Catalog
+            .WithStore("default", "Default", databaseIdentities: "localhost.marten")
+            .WithStore("IInvoicingStore", "Invoicing Store", databaseIdentities: "localhost.invoicing");
+
+        var layout = RenderLayout(context);
+        layout.Find("#ms-store-select").Change("IInvoicingStore");
+
+        layout.WaitForAssertion(() => layout.FindAll("#ms-store-select option")
+            .Where(x => x.HasAttribute("selected"))
+            .Select(x => x.GetAttribute("value"))
+            .Should().Equal("IInvoicingStore"));
+    }
+
+    /// <summary>
+    /// Plan D9: the scope lives in the URL for the same reason a document id does — a link someone pastes
+    /// into a chat has to reopen the same thing. It never did; the address bar stayed on the bare page.
+    /// </summary>
+    [Fact]
+    public void Changing_the_scope_writes_it_into_the_query_string()
+    {
+        using var context = new StudioComponentContext();
+        context.Catalog
+            .WithStore("default", "Default", databaseIdentities: "localhost.marten")
+            .WithStore("IInvoicingStore", "Invoicing Store", databaseIdentities: "localhost.invoicing");
+
+        // On a studio page: the shell writes the scope only into one (1.2-UX-FIX-FU4).
+        context.Navigate("studio/marten");
+
+        var layout = RenderLayout(context);
+        layout.Find("#ms-store-select").Change("IInvoicingStore");
+
+        layout.WaitForAssertion(() =>
+            context.CurrentUri.Should().Contain("store=IInvoicingStore").And.Contain("db=localhost.invoicing"));
+    }
+
+    [Fact]
+    public void The_scope_in_the_query_string_is_what_the_studio_opens_on()
+    {
+        using var context = new StudioComponentContext();
+        context.Catalog
+            .WithStore("default", "Default", databaseIdentities: "localhost.marten")
+            .WithStore("IInvoicingStore", "Invoicing Store", databaseIdentities: "localhost.invoicing");
+        context.Navigate("studio/marten?store=IInvoicingStore");
+
+        RenderLayout(context);
+
+        context.State.ActiveScope!.StoreKey.Should().Be("IInvoicingStore");
+    }
+
+    [Fact]
+    public void A_store_the_query_string_names_but_the_listing_does_not_carry_is_ignored()
+    {
+        using var context = new StudioComponentContext();
+        context.Catalog.WithStore("default", "Default", databaseIdentities: "localhost.marten");
+        context.Navigate("studio/marten?store=somebody-elses-store");
+
+        RenderLayout(context);
+
+        context.State.ActiveScope!.StoreKey.Should().Be("default", "a URL is something anyone can type");
+    }
+
+    /// <summary>
+    /// 1.2-NAV N5a: the shell never writes the address before it has read the address's own scope. The first interactive render can run
+    /// while the scope the address names is still being applied (a slow catalog), and <c>ActiveScope</c> is then the previous one: a
+    /// rewrite at that moment would put the default database over the pasted one, and the pasted link would be lost (D9).
+    /// </summary>
+    [Fact]
+    public async Task The_address_keeps_a_pasted_scope_while_the_scope_is_still_being_applied()
+    {
+        using var context = new StudioComponentContext();
+        context.Catalog.WithStore("default", "Default", DatabaseCardinality.StaticMultiple, "db-a", "db-b");
+        await context.State.EnsureInitializedAsync(Xunit.TestContext.Current.CancellationToken);
+        context.State.ActiveScope!.DatabaseId.Should().Be("db-a", "the premise: the circuit starts on the first database");
+
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        context.Catalog.DescribeGate = gate;
+
+        context.Navigate("studio/marten?store=default&db=db-b");
+        NavigationManager navigation = context.Services.GetRequiredService<NavigationManager>();
+        List<string> locations = [];
+        navigation.LocationChanged += (_, args) => locations.Add(args.Location);
+
+        var layout = RenderLayout(context);
+
+        locations.Should().NotContain(static x => x.Contains("db=db-a", StringComparison.Ordinal), "nothing is written before the address's scope is read");
+        context.CurrentUri.Should().Contain("db=db-b");
+
+        gate.SetResult();
+
+        layout.WaitForAssertion(() => context.State.ActiveScope!.DatabaseId.Should().Be("db-b"));
+        layout.WaitForAssertion(() => layout.Markup.Should().Contain(BodyMarker));
+        context.CurrentUri.Should().Contain("db=db-b");
+        locations.Should().NotContain(static x => x.Contains("db=db-a", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// 1.2-NAV N5b: a scope change is written into the address before the policy is asked about it. The address names the selected
+    /// scope whatever the policy says, and writing it first narrows the window in which a page's own push and the shell's rewrite can
+    /// overwrite each other.
+    /// </summary>
+    [Fact]
+    public void A_scope_change_is_in_the_address_while_the_policy_has_not_answered()
+    {
+        using var context = new StudioComponentContext().WithPolicy("default");
+        context.Catalog.WithStore("default", "Default", DatabaseCardinality.StaticMultiple, "db-a", "db-b");
+        context.Navigate("studio/marten");
+
+        var layout = RenderLayout(context);
+        layout.WaitForAssertion(() => layout.Markup.Should().Contain(BodyMarker));
+
+        // A slow policy from here on: the scope change below is asked about and the answer does not come.
+        var gate = new TaskCompletionSource();
+        context.AuthorizationService.Gate = gate;
+
+        layout.Find("#ms-database-select").Change("db-b");
+
+        layout.WaitForAssertion(() => context.CurrentUri.Should().Contain("db=db-b"));
+        context.State.ActiveScope!.DatabaseId.Should().Be("db-b");
+
+        gate.SetResult();
+    }
+
+    /// <summary>
+    /// 1.2-NAV (brief answer 3): every rail link carries the scope the studio is about, and follows it. A rail click is a client-side
+    /// navigation now, and a link without <c>store=&amp;db=</c> would show the page under no scope until the shell rewrote the address.
+    /// </summary>
+    [Fact]
+    public void Every_rail_link_carries_the_scope_and_follows_a_scope_change()
+    {
+        using var context = new StudioComponentContext();
+        context.Catalog
+            .WithStore("default", "Default", DatabaseCardinality.StaticMultiple, "db-a", "db-b")
+            .WithTenants("default", new TenantList(["acme", "globex"], IsTruncated: false, TenantListSource.Configured));
+
+        var layout = RenderLayout(context);
+        layout.Find("#ms-tenant-select").Change("acme");
+
+        layout.WaitForAssertion(() =>
+        {
+            string?[] hrefs = [.. layout.FindAll("a.ms-nav-link").Select(static x => x.GetAttribute("href")).Where(static x => x != "activity")];
+            hrefs.Should().NotBeEmpty().And.OnlyContain(static x => x != null && x.Contains("store=default&db=db-a&tenant=acme", StringComparison.Ordinal));
+        });
+
+        layout.Find("#ms-database-select").Change("db-b");
+
+        layout.WaitForAssertion(() =>
+        {
+            string?[] hrefs = [.. layout.FindAll("a.ms-nav-link").Select(static x => x.GetAttribute("href")).Where(static x => x != "activity")];
+            hrefs.Should().OnlyContain(static x => x != null && x.Contains("store=default&db=db-b", StringComparison.Ordinal));
+        });
+    }
+
+    /// <summary>
+    /// 1.2-NAV N5c: <c>data-ms-interactive</c> is absent until the shell has rendered and read the browser's preferences, and present
+    /// after. It is the browser suites' sign that the circuit is up and (StudioRoutes having asked first) that interception is on.
+    /// </summary>
+    [Fact]
+    public void The_shell_says_when_it_is_interactive()
+    {
+        using var context = new StudioComponentContext();
+
+        JSRuntimeInvocationHandler<string?> storedTheme =
+            context.JSInterop.Setup<string?>("martenStudio.prefs.get", StudioPreferences.ThemePreferenceKey);
+        JSRuntimeInvocationHandler<string?> storedZone =
+            context.JSInterop.Setup<string?>("martenStudio.prefs.get", StudioPreferences.TimeZonePreferenceKey);
+
+        var layout = context.Render<StudioLayout>(parameters => parameters.Add(x => x.Body, Body));
+
+        layout.Instance.PreferencesLoaded.Should().BeFalse("the browser has not answered yet");
+        layout.Find(".ms-studio").HasAttribute("data-ms-interactive").Should().BeFalse();
+
+        storedTheme.SetResult(null);
+        storedZone.SetResult(null);
+        layout.WaitForState(() => layout.Instance.PreferencesLoaded);
+
+        layout.WaitForAssertion(() => layout.Find(".ms-studio").GetAttribute("data-ms-interactive").Should().Be("true"));
+    }
+
+    // -------------------------------------------------------------------------------------------
+    // The "served to anyone" banner
+    // -------------------------------------------------------------------------------------------
+
+    [Fact]
+    public void An_anonymous_studio_says_so_on_every_page()
+    {
+        using var context = new StudioComponentContext();
+        context.ServedAnonymously();
+
+        var layout = RenderLayout(context);
+
+        layout.Find(".ms-anonymous-banner").TextContent
+            .Should().Contain("served to anyone").And.Contain("AllowAnonymous");
+    }
+
+    [Fact]
+    public void An_authorized_studio_draws_no_banner()
+    {
+        using var context = new StudioComponentContext();
+
+        RenderLayout(context).FindAll(".ms-anonymous-banner").Should().BeEmpty();
+    }
+
+    // -------------------------------------------------------------------------------------------
+    // The prerendered theme survives the circuit
+    // -------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// <see cref="StudioState" /> is scoped and the circuit's scope has no <c>HttpContext</c>, so the
+    /// cookie that themed the prerendered page is invisible to it: a dark studio flashed to light the
+    /// moment the circuit attached, and an interop round trip to fix it would only have made the flash
+    /// shorter. The prerender scope persists what it knew and the circuit reads it before its first
+    /// render.
+    /// </summary>
+    [Fact]
+    public void The_circuit_opens_on_the_theme_the_prerender_rendered()
+    {
+        using var context = new StudioComponentContext();
+        context.WithPersistedState(
+            "DataStudio.Preferences",
+            new { Theme = "dark", TimeZoneId = "UTC" });
+
+        var layout = RenderLayout(context);
+
+        layout.ThemeAttribute().Should().Be("dark");
+        context.Preferences.SelectedTheme.Should().Be("dark");
+        context.Preferences.SelectedTimeZoneId.Should().Be("UTC");
+    }
+
+    [Fact]
+    public void Nothing_persisted_leaves_the_state_as_the_scope_found_it()
+    {
+        using var context = new StudioComponentContext();
+        context.Preferences.SelectedTheme = "light";
+
+        RenderLayout(context).ThemeAttribute().Should().Be("light");
+    }
+}

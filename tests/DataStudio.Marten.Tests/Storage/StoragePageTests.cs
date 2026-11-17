@@ -1,0 +1,507 @@
+using Bunit;
+
+using DataStudio.Marten.Services;
+using DataStudio.Marten.Tests.Components;
+using DataStudio.Marten.Tests.Database;
+
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
+
+using DataStudio.Postgres.Internal.Sql;
+using DataStudio.Postgres.Services;
+using DataStudio.Postgres.Services.Database;
+using DataStudio.Postgres.Services.Health;
+using DataStudio.Postgres.Services.Health.Checks;
+using DataStudio.Postgres.Services.Maintenance;
+using DataStudio.Postgres.Services.Sources;
+using DataStudio.Postgres.Services.Storage;
+
+namespace DataStudio.Marten.Tests.Storage;
+
+/// <summary>
+/// The Storage page in the Marten module (W5-CAP), over views built by the real per-visitor step (<c>StorageService.ShowAsync</c>)
+/// from stated facts: its tiles, a table in a withheld schema listed without its name (D27), a hidden document type's table
+/// absent, the "needs a day" text before the window has counted a day, the store policy's refusal, and nothing read while
+/// prerendered.
+/// </summary>
+public class StoragePageTests
+{
+    private static readonly DateTimeOffset Now = new(2026, 10, 26, 12, 0, 0, TimeSpan.Zero);
+
+    /// <summary>A document type the host hides from the studio.</summary>
+    private sealed class HiddenDocument;
+
+    /// <summary>What the page is handed, and what it asked.</summary>
+    private sealed class FakeStorageService : IStorageService
+    {
+        public StorageView View { get; set; } = StorageView.Refused(DatabaseRefusal.Unavailable, "no view set");
+
+        public List<StudioScope> Requests { get; } = [];
+
+        public Task<StorageView> GetAsync(StudioScope scope, CancellationToken cancellationToken = default)
+        {
+            Requests.Add(scope);
+            return Task.FromResult(View);
+        }
+    }
+
+    private static StatisticsWindow Window(TimeSpan length) => new()
+    {
+        MeasuredAt = Now,
+        Since = Now - length,
+        Basis = StatisticsBasis.ServerReset,
+        Reason = StatisticsResetReason.ServerStarted,
+        SharedView = "pg_stat_checkpointer",
+    };
+
+    private static readonly StudioTable Orders = new("public", "orders", StudioTableKind.Relational, StudioTableOwnership.Owned);
+
+    private static readonly StudioTable Salaries = new("hr", "salaries", StudioTableKind.Relational, StudioTableOwnership.Other) { GatedSchemas = ["hr"] };
+
+    private static readonly StudioTable Triggers = new("quartz", "qrtz_triggers", StudioTableKind.Relational, StudioTableOwnership.Library)
+    {
+        GatedSchemas = ["quartz"],
+        Library = "Quartz.NET",
+    };
+
+    private static readonly StudioTable Hidden = new("public", "mt_doc_hiddendocument", StudioTableKind.DocumentTable, StudioTableOwnership.Owned)
+    {
+        DocumentTypes = [typeof(HiddenDocument)],
+        TypeName = "HiddenDocument",
+    };
+
+    private static StorageFacts Facts(TimeSpan window) => StorageFacts.Build(
+        "default",
+        "localhost.marten",
+        Window(window),
+        new StorageDatabaseRow(DatabaseBytes: 400L << 20, EstimatedBytes: 360L << 20, BlockSize: 8192, ServerVersion: 170_011),
+        new Set([Orders, Salaries, Triggers, Hidden]),
+        [
+            Row("public", "orders", heap: 120L << 20, index: 40L << 20, toast: 0, rows: 900_000, inserts: 120_000, deletes: 20_000),
+            Row("hr", "salaries", heap: 60L << 20, index: 6L << 20, toast: 0, rows: 50_000),
+            Row("quartz", "qrtz_triggers", heap: 10L << 20, index: 2L << 20, toast: 0, rows: 4_000),
+            Row("public", "mt_doc_hiddendocument", heap: 200L << 20, index: 10L << 20, toast: 30L << 20, rows: 2_000_000),
+        ]);
+
+    private static StorageTableRow Row(string schema, string table, long heap, long index, long toast, long rows, long? inserts = null, long? deletes = null) => new()
+    {
+        Schema = schema,
+        Table = table,
+        HeapBytes = heap,
+        IndexBytes = index,
+        ToastBytes = toast,
+        EstimatedRows = rows,
+        Inserts = inserts,
+        Deletes = deletes,
+        Updates = 1_000,
+        HotUpdates = 400,
+    };
+
+    /// <summary>The visitor's database-browser gate: <c>public</c> is the store's, <c>quartz</c> is browsable, <c>hr</c> is withheld.</summary>
+    private static DatabaseGate Gate() => new(
+        ["public"],
+        [new CatalogSchema("public", true, false), new CatalogSchema("quartz", true, false), new CatalogSchema("hr", true, false)],
+        ["quartz"],
+        capabilityEnabled: true,
+        readOnly: false,
+        authorized: true,
+        new DatabaseObjectClassifier([]),
+        DataStudio.Marten.Services.MartenText.Instance);
+
+    private static StorageService Service(MartenOptions options) => new(
+        MartenSettings.Of(options),
+        MartenDescriptor.Instance,
+        authorization: null!,
+        resolver: null!,
+        facts: null!,
+        new StudioLogThrottle(TimeProvider.System),
+        NullLogger<StorageService>.Instance);
+
+    private static MartenOptions Hiding() => new() { IsDocumentTypeVisible = static type => type != typeof(HiddenDocument) };
+
+    private static async Task<StudioComponentContext> ContextAsync(FakeStorageService storage) =>
+        await new StudioComponentContext(services => services.AddSingleton<IStorageService>(storage)).ReadyAsync();
+
+    [Fact]
+    public async Task The_view_names_own_and_browsable_tables_withholds_the_rest_and_drops_a_hidden_type()
+    {
+        int gateReads = 0;
+        StorageView view = await Service(Hiding()).ShowAsync(Facts(TimeSpan.FromDays(3)), new StudioScope("default", "localhost.marten", null), () =>
+        {
+            gateReads++;
+            return Task.FromResult<DatabaseGate?>(Gate());
+        });
+
+        view.Tables.Select(static x => x.Name).Should().Equal(["orders", null, "qrtz_triggers"], "largest first, the hidden type's table absent");
+        view.Tables[1].Should().Match<StorageTableView>(static x =>
+            x.Schema == null && x.Link == null && x.Owner == null && x.Ownership == null && x.TotalBytes == 66L << 20);
+        view.Tables[2].Owner.Should().Be("Quartz.NET");
+        view.WithheldReason.Should().Be(
+            "1 table is shown without its name: it sits in a schema the database browser does not show you (it needs "
+            + "MartenOptions.Capabilities.BrowseDatabase, the write policy and a BrowsableSchemas entry for that schema).");
+        gateReads.Should().Be(1, "the browser's gate is read once per view");
+        view.Tables[0].ShareOfDatabase.Should().BeApproximately(0.4, 0.0001, "160 MiB of 400 MiB measured");
+    }
+
+    [Fact]
+    public async Task With_no_table_outside_the_stores_schemas_the_gate_is_never_read()
+    {
+        StorageFacts facts = StorageFacts.Build("default", "db", Window(TimeSpan.FromHours(1)),
+            new StorageDatabaseRow(1L << 30, 1L << 30, 8192, 170_011), new Set([Orders]), [Row("public", "orders", 1, 0, 0, 1)]);
+
+        StorageView view = await Service(new MartenOptions()).ShowAsync(facts, new StudioScope("default", "db", null),
+            static () => throw new InvalidOperationException("the gate was read for no reason"));
+
+        view.Tables.Should().ContainSingle().Which.Name.Should().Be("orders");
+    }
+
+    [Fact]
+    public async Task A_gate_that_cannot_be_read_withholds_every_name_outside_the_stores_schemas()
+    {
+        StorageView view = await Service(Hiding()).ShowAsync(Facts(TimeSpan.FromDays(3)), new StudioScope("default", "localhost.marten", null),
+            static () => Task.FromResult<DatabaseGate?>(null));
+
+        view.Tables.Select(static x => x.Name).Should().Equal(["orders", null, null]);
+        view.WithheldReason.Should().StartWith("2 tables are shown without their names: they sit in a schema outside the store's own")
+            .And.EndWith("could not be checked against the database browser's gate for you.");
+    }
+
+    [Fact]
+    public async Task The_page_draws_the_tiles_the_withheld_row_and_no_hidden_type()
+    {
+        FakeStorageService storage = new()
+        {
+            View = await Service(Hiding()).ShowAsync(Facts(TimeSpan.FromDays(3)), new StudioScope("default", "localhost.marten", null),
+                static () => Task.FromResult<DatabaseGate?>(Gate())),
+        };
+        await using StudioComponentContext context = await ContextAsync(storage);
+
+        var page = context.Render<DataStudio.Postgres.Components.Pages.Storage.Storage>();
+        page.WaitForAssertion(() => page.FindAll(".ms-storage-tiles").Should().ContainSingle());
+
+        page.TextOfAll(".ms-storage-tile dt").Should().Equal("Database size", "Growth a day", "Growth a month", "Statistics since", "Tables");
+        page.Find(".ms-storage-tile-value").TextContent.Should().Be("400 MiB");
+        page.TextOfAll(".ms-storage-tile-value")[1].Should().StartWith("+", "100 000 net rows over three days");
+        page.Markup.Should().Contain("at the current daily rate").And.Contain("From pg_stat_checkpointer.stats_reset");
+
+        string[] firstCells = [.. page.FindAll(".ms-storage-table tbody tr td:first-child").Select(static x => x.TextContent.Trim())];
+        firstCells.Should().Equal("public.orders", WithheldNames.Token, "quartz.qrtz_triggers");
+        string[] owners = [.. page.FindAll(".ms-storage-table tbody tr td:nth-child(2)").Select(static x => x.TextContent.Trim())];
+        owners.Should().Equal(["application", WithheldNames.Token, "Quartz.NET"], "a withheld table's ownership would say what kind of schema it sits in");
+        page.Markup.Should().NotContain("salaries").And.NotContain("mt_doc_hiddendocument").And.NotContain("HiddenDocument");
+        page.Find(".ms-storage-withheld").TextContent.Should().Contain("MartenOptions.Capabilities.BrowseDatabase");
+        page.Find(".ms-storage-table tbody tr td:first-child a").GetAttribute("href").Should().Contain("postgres/database/object").And.Contain("name=orders");
+        page.Markup.Should().Contain("ms-storage-bar");
+    }
+
+    /// <summary>
+    /// 1.1-PG19: on PostgreSQL 19 the grid has a "Stats since" column - the time a table's counters were last reset, "never reset" for a table
+    /// with none recorded, a dash and nothing else for a withheld table's name or time - and below 19 there is no such column at all.
+    /// </summary>
+    [Theory]
+    [InlineData(190_000, true)]
+    [InlineData(180_006, false)]
+    public async Task The_stats_since_column_is_drawn_on_19_and_absent_below(int serverVersion, bool drawn)
+    {
+        StorageFacts facts = StorageFacts.Build(
+            "default",
+            "localhost.marten",
+            Window(TimeSpan.FromDays(3)),
+            new StorageDatabaseRow(DatabaseBytes: 400L << 20, EstimatedBytes: 360L << 20, BlockSize: 8192, ServerVersion: serverVersion),
+            new Set([Orders, Salaries, Triggers]),
+            [
+                Row("public", "orders", heap: 120L << 20, index: 40L << 20, toast: 0, rows: 900_000) with { CountersReset = new DateTimeOffset(2026, 10, 24, 8, 30, 0, TimeSpan.Zero) },
+                Row("hr", "salaries", heap: 60L << 20, index: 6L << 20, toast: 0, rows: 50_000) with { CountersReset = new DateTimeOffset(2026, 10, 25, 7, 0, 0, TimeSpan.Zero) },
+                Row("quartz", "qrtz_triggers", heap: 10L << 20, index: 2L << 20, toast: 0, rows: 4_000),
+            ]);
+
+        FakeStorageService storage = new()
+        {
+            View = await Service(Hiding()).ShowAsync(facts, new StudioScope("default", "localhost.marten", null), static () => Task.FromResult<DatabaseGate?>(Gate())),
+        };
+        await using StudioComponentContext context = await ContextAsync(storage);
+
+        var page = context.Render<DataStudio.Postgres.Components.Pages.Storage.Storage>();
+        page.WaitForAssertion(() => page.FindAll(".ms-storage-tiles").Should().ContainSingle());
+
+        page.TextOfAll(".ms-storage-table thead th").Contains("Stats since").Should().Be(drawn);
+
+        if (!drawn)
+        {
+            page.FindAll(".ms-storage-since").Should().BeEmpty("below 19 the column is absent, not a column of dashes");
+            return;
+        }
+
+        string[] since = [.. page.FindAll(".ms-storage-table tbody td.ms-storage-since").Select(static x => x.TextContent.Trim())];
+        since.Should().HaveCount(3);
+        since[0].Should().Be("2026-10-24 08:30", "orders' counters were last reset then");
+        since[1].Should().Be("–", "salaries' name is withheld, and so is when it was reset");
+        since[2].Should().Be("never reset", "no reset time is recorded for qrtz_triggers");
+        page.FindAll(".ms-storage-table tbody td.ms-storage-since")[2].GetAttribute("title").Should().Be("never reset");
+        page.FindAll(".ms-storage-table tbody td.ms-storage-since")[1].HasAttribute("title").Should().BeFalse("a withheld table's dash says nothing");
+        page.Markup.Should().NotContain("2026-10-25", "the withheld table's reset time is not drawn");
+    }
+
+    /// <summary>
+    /// W5b-int: Maintenance (W5-V1) has landed, so the page points at it for the same tables - the scope carried (D9), and only
+    /// while the studio's sidebar offers the page, which is what null-safe means for a studio without one.
+    /// </summary>
+    [Fact]
+    public async Task The_page_points_at_Maintenance_with_the_scope_and_only_while_the_studio_offers_it()
+    {
+        StudioScope scope = new("default", "localhost.marten", null);
+        StorageView view = await Service(Hiding()).ShowAsync(Facts(TimeSpan.FromDays(3)), scope, static () => Task.FromResult<DatabaseGate?>(Gate()));
+
+        view.MaintenanceLink.Should().Be("postgres/maintenance?store=default&db=localhost.marten");
+
+        FakeStorageService storage = new() { View = view };
+        await using (StudioComponentContext context = await ContextAsync(storage))
+        {
+            var page = context.Render<DataStudio.Postgres.Components.Pages.Storage.Storage>();
+            page.WaitForAssertion(() => page.FindAll(".ms-storage-tiles").Should().ContainSingle());
+
+            AngleSharp.Dom.IElement link = page.Find(".ms-storage-estimates a");
+            link.TextContent.Should().Be("Maintenance");
+            link.GetAttribute("href").Should().Be("postgres/maintenance?store=default&db=localhost.marten");
+        }
+
+        DataStudio.Postgres.Services.Settings.IStudioSettings settings = MartenSettings.Of(new MartenOptions());
+        DataStudio.Postgres.Services.Settings.StudioDescriptor marten = MartenDescriptor.Instance;
+
+        MaintenanceLinks.ToMaintenance(settings, marten, scope).Should().NotBeNull();
+        MaintenanceLinks.ToMaintenance(settings, Without(marten, hide: false), scope)
+            .Should().BeNull("a studio with no Maintenance entry is never linked to one");
+        MaintenanceLinks.ToMaintenance(settings, Without(marten, hide: true), scope)
+            .Should().BeNull("an entry the sidebar does not draw is not offered either");
+
+        static DataStudio.Postgres.Services.Settings.StudioDescriptor Without(DataStudio.Postgres.Services.Settings.StudioDescriptor descriptor, bool hide) => new()
+        {
+            Key = descriptor.Key,
+            ProductName = descriptor.ProductName,
+            PageAssemblies = descriptor.PageAssemblies,
+            HealthCheckAssemblies = descriptor.HealthCheckAssemblies,
+            Navigation = settings =>
+            [
+                .. descriptor.Navigation(settings).Select(section => section with
+                {
+                    Items =
+                    [
+                        .. section.Items
+                            .Where(item => hide || item.Route != DataStudio.Postgres.Services.Maintenance.MaintenanceLinks.Route)
+                            .Select(item => hide && item.Route == DataStudio.Postgres.Services.Maintenance.MaintenanceLinks.Route ? item with { IsShown = static _ => false } : item),
+                    ],
+                }),
+            ],
+            Summary = descriptor.Summary,
+            QueryComponent = descriptor.QueryComponent,
+            SourceQueryParameter = descriptor.SourceQueryParameter,
+            SourceNoun = descriptor.SourceNoun,
+            SourceLabel = descriptor.SourceLabel,
+            ExposedContent = descriptor.ExposedContent,
+            CreateResource = descriptor.CreateResource,
+        };
+    }
+
+    [Fact]
+    public async Task Before_a_day_of_statistics_the_growth_tiles_say_how_long_so_far()
+    {
+        FakeStorageService storage = new()
+        {
+            View = await Service(Hiding()).ShowAsync(Facts(TimeSpan.FromHours(5)), new StudioScope("default", "localhost.marten", null),
+                static () => Task.FromResult<DatabaseGate?>(Gate())),
+        };
+        await using StudioComponentContext context = await ContextAsync(storage);
+
+        var page = context.Render<DataStudio.Postgres.Components.Pages.Storage.Storage>();
+        page.WaitForAssertion(() => page.FindAll(".ms-storage-tiles").Should().ContainSingle());
+
+        string[] values = [.. page.TextOfAll(".ms-storage-tile-value")];
+        values[1].Should().Be("–");
+        values[2].Should().Be("–");
+        page.TextOfAll(".ms-storage-tile-note")[1].Should().Be("needs a day of statistics: 5 h so far");
+    }
+
+    [Fact]
+    public async Task A_window_that_could_not_be_read_still_shows_the_sizes_and_the_tables_and_says_why_growth_is_missing()
+    {
+        StorageFacts unwindowed = StorageFacts.Build(
+            "default",
+            "localhost.marten",
+            Now,
+            window: null,
+            new StorageDatabaseRow(DatabaseBytes: 400L << 20, EstimatedBytes: 360L << 20, BlockSize: 8192, ServerVersion: 170_011),
+            new Set([Orders]),
+            [Row("public", "orders", heap: 120L << 20, index: 40L << 20, toast: 0, rows: 900_000, inserts: 120_000, deletes: 20_000)])
+            with { WindowNotRead = "the statistics window could not be read (SQLSTATE 42501)" };
+
+        unwindowed.GrowthBytesPerDay.Should().BeNull("no window, no rate");
+
+        FakeStorageService storage = new()
+        {
+            View = await Service(Hiding()).ShowAsync(unwindowed, new StudioScope("default", "localhost.marten", null),
+                static () => Task.FromResult<DatabaseGate?>(Gate())),
+        };
+        await using StudioComponentContext context = await ContextAsync(storage);
+
+        var page = context.Render<DataStudio.Postgres.Components.Pages.Storage.Storage>();
+        page.WaitForAssertion(() => page.FindAll(".ms-storage-tiles").Should().ContainSingle());
+
+        string[] values = [.. page.TextOfAll(".ms-storage-tile-value")];
+        values[0].Should().Be("400 MiB");
+        values[1].Should().Be("–");
+        values[2].Should().Be("–");
+        values[3].Should().Be("–");
+
+        string[] notes = [.. page.TextOfAll(".ms-storage-tile-note")];
+        notes[1].Should().Be("not available: the statistics window could not be read (SQLSTATE 42501)");
+        notes[3].Should().Be("Not available: the statistics window could not be read (SQLSTATE 42501).");
+        page.FindAll(".ms-storage-table tbody tr").Should().ContainSingle("the tables are read without the window");
+        page.FindAll(".ms-error-alert").Should().BeEmpty("a missing window is a note, not a failed page");
+    }
+
+    [Fact]
+    public async Task A_store_policy_refusal_shows_its_sentence_and_nothing_else()
+    {
+        FakeStorageService storage = new()
+        {
+            View = StorageView.Refused(DatabaseRefusal.StorePolicy, DataStudio.Marten.Services.MartenText.Instance.StorageStorePolicyDenial),
+        };
+        await using StudioComponentContext context = await ContextAsync(storage);
+
+        var page = context.Render<DataStudio.Postgres.Components.Pages.Storage.Storage>();
+        page.WaitForAssertion(() => page.FindAll(".ms-storage-refusal").Should().ContainSingle());
+
+        page.Find(".ms-storage-refusal").TextContent.Should().Contain("MartenOptions.StoreAuthorizationPolicy");
+        page.FindAll(".ms-storage-table").Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Nothing_is_read_while_prerendered_and_the_circuit_reads_once()
+    {
+        FakeStorageService storage = new() { View = StorageView.Refused(DatabaseRefusal.Unavailable, "unread") };
+        await using StudioComponentContext context = await ContextAsync(storage);
+
+        string html = await DatabasePagePrerenderTests.StaticAsync<DataStudio.Postgres.Components.Pages.Storage.Storage>(context);
+
+        html.Should().Contain("ms-loading-spinner");
+        storage.Requests.Should().BeEmpty("a static render reads nothing");
+
+        var page = context.Render<DataStudio.Postgres.Components.Pages.Storage.Storage>();
+        page.WaitForAssertion(() => page.FindAll(".ms-storage-refusal").Should().ContainSingle());
+        storage.Requests.Should().ContainSingle().Which.Should().Be(context.State.ActiveScope);
+    }
+
+    // -----------------------------------------------------------------------------------------------
+    // H1b (G1M F6, Option A): the Tables tile counts the other schemas only past the browser's gate.
+    // -----------------------------------------------------------------------------------------------
+
+    /// <summary>What the set leaves out, over every admitted schema.</summary>
+    private const string WholeCoverage = "the store's 3 declared tables and the 1 largest of 3,412 other tables by estimated size (a sweep judges at most 4)";
+
+    /// <summary>The same, over the store's own schemas alone.</summary>
+    private const string OwnCoverage = "the store's 3 declared tables and the 0 largest of 7 other tables in its own schemas by estimated size";
+
+    /// <summary>The usual facts, read from a set that also judged schemas only <c>BrowsableSchemas</c> admits, and says so.</summary>
+    private static StorageFacts Covered() => StorageFacts.Build(
+        "default",
+        "localhost.marten",
+        Window(TimeSpan.FromDays(3)),
+        new StorageDatabaseRow(DatabaseBytes: 400L << 20, EstimatedBytes: 360L << 20, BlockSize: 8192, ServerVersion: 170_011),
+        new Set([Orders, Salaries, Triggers, Hidden], WholeCoverage, OwnCoverage),
+        [
+            Row("public", "orders", heap: 120L << 20, index: 40L << 20, toast: 0, rows: 900_000),
+            Row("hr", "salaries", heap: 60L << 20, index: 6L << 20, toast: 0, rows: 50_000),
+            Row("quartz", "qrtz_triggers", heap: 10L << 20, index: 2L << 20, toast: 0, rows: 4_000),
+        ]);
+
+    /// <summary>A visitor's gate the write policy shuts: the store's own schema is still theirs, nothing else is.</summary>
+    private static DatabaseGate ShutGate() => new(
+        ["public"],
+        [new CatalogSchema("public", true, false), new CatalogSchema("quartz", true, false), new CatalogSchema("hr", true, false)],
+        ["quartz"],
+        capabilityEnabled: true,
+        readOnly: false,
+        authorized: false,
+        new DatabaseObjectClassifier([]),
+        DataStudio.Marten.Services.MartenText.Instance);
+
+    [Fact]
+    public void The_facts_keep_both_readings_of_the_tables_tile()
+    {
+        StorageFacts facts = Covered();
+
+        facts.TableCount.Should().Be(4, "every table the set judges, for the host's own code (D31)");
+        facts.Coverage.Should().Be(WholeCoverage);
+        facts.OwnSchemasTableCount.Should().Be(2, "orders and the hidden type's table sit in public; salaries and qrtz_triggers do not");
+        facts.OwnSchemasCoverage.Should().Be(OwnCoverage);
+        facts.HasOwnSchemasReading.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// Past the browser's gate the tile counts every judged table and says what the whole set left out; short of it - a gate
+    /// the write policy shuts, or one that cannot be read - it counts the store's own schemas' tables and says only what they
+    /// hold, as the Health page's coverage does (G1M F6). Before H1b everyone past the database gate read the whole count.
+    /// </summary>
+    [Theory]
+    [InlineData("open", true)]
+    [InlineData("shut", false)]
+    [InlineData("unreadable", false)]
+    public async Task The_tables_tile_counts_the_other_schemas_only_past_the_browsers_gate(string gate, bool whole)
+    {
+        int gateReads = 0;
+
+        StorageView view = await Service(Hiding()).ShowAsync(Covered(), new StudioScope("default", "localhost.marten", null), () =>
+        {
+            gateReads++;
+            return Task.FromResult<DatabaseGate?>(gate switch
+            {
+                "open" => Gate(),
+                "shut" => ShutGate(),
+                _ => null,
+            });
+        });
+
+        view.TableCount.Should().Be(whole ? 4 : 2);
+        view.Coverage.Should().Be(whole ? WholeCoverage : OwnCoverage);
+        gateReads.Should().Be(1, "one gate read per view serves the names and the tile alike");
+    }
+
+    /// <summary>The page over each view: the tile's number and its note are the visitor's reading, and nothing else counts the rest.</summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task The_page_draws_the_tables_tile_this_visitor_may_read(bool open)
+    {
+        FakeStorageService storage = new()
+        {
+            View = await Service(Hiding()).ShowAsync(Covered(), new StudioScope("default", "localhost.marten", null),
+                () => Task.FromResult<DatabaseGate?>(open ? Gate() : ShutGate())),
+        };
+        await using StudioComponentContext context = await ContextAsync(storage);
+
+        var page = context.Render<DataStudio.Postgres.Components.Pages.Storage.Storage>();
+        page.WaitForAssertion(() => page.FindAll(".ms-storage-tiles").Should().ContainSingle());
+
+        page.TextOfAll(".ms-storage-tile-value")[^1].Should().Be(open ? "4" : "2");
+        page.TextOfAll(".ms-storage-tile-note")[^1].Should().Be("Judged: " + (open ? WholeCoverage : OwnCoverage) + ".");
+
+        if (!open)
+        {
+            page.Markup.Should().NotContain("3,412").And.NotContain("a sweep judges at most",
+                "nothing on the page counts what the schemas only BrowsableSchemas admits hold");
+        }
+    }
+
+    private sealed class Set(IReadOnlyList<StudioTable> tables, string? coverage = null, string? ownSchemasCoverage = null) : IStudioTableSet
+    {
+        public IReadOnlyList<StudioTable> Tables { get; } = tables;
+
+        public string? Coverage => coverage;
+
+        public string? OwnSchemasCoverage => ownSchemasCoverage ?? coverage;
+
+        public StudioTable? Find(string schema, string table) => Tables.FirstOrDefault(x => x.Schema == schema && x.Table == table);
+
+        public IndexOrigin OriginOf(HealthIndexRow index, StudioTable table) => IndexOrigin.Host;
+    }
+}

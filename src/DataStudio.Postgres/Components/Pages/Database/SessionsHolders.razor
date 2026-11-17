@@ -1,0 +1,299 @@
+@using DataStudio.Postgres.Services.Database
+@using DataStudio.Postgres.Services.ConnectionHistory
+@using DataStudio.Postgres.Services.Settings
+@using DataStudio.Postgres.Components.Shared
+@inject IStudioSettings Settings
+@inject StudioState State
+@inject StudioPreferences Preferences
+
+@*
+    Database › Sessions › Holders (issue #20): who holds the whole server's connections - every database on it, not only this one -
+    by database, application, role and client address, from the Sessions snapshot's one read of pg_stat_activity
+    (HealthConnectionQueries.ServerHolders), the statement C13 and C14 judge with.
+
+    Two audiences, as the rest of the page. The per-database counts name a database only when the visitor's source policy admits
+    it (SessionHolderNames: this database always, and a registered source's database the policy passes); every other database is
+    counted together as "Other databases", with no name. The groups - application, role and client address - name other people's
+    sessions, so they are drawn only from SessionActivityDetails, which the service gives only past ViewDatabaseActivity and the
+    write policy, and then every database is named. The budget is C03's own: max_connections less the reservations.
+
+    A role without pg_read_all_stats reads other roles' sessions with no state and no client address: they are counted, in
+    "State not visible", and the page says which grant would show them.
+*@
+
+<section class="ms-sessions-section ms-holders" aria-labelledby="ms-holders-heading">
+    <h2 class="ms-sessions-heading" id="ms-holders-heading">Holders</h2>
+
+    <p class="ms-holders-lead">
+        Who holds the server's connections: every client session on the server, every database included, not only this one's.
+        <code>max_connections</code> is the server's, and a database that is not the one open here can be the one using it up.
+    </p>
+
+    @if (Summary.Holders is not { } holders)
+    {
+        <p class="ms-muted ms-holders-none">The server's connections were not read.</p>
+    }
+    else
+    {
+        <p class="ms-sessions-budget ms-holders-budget">
+            @SessionText.Count(holders.ServerConnections, "client session") on the whole server, @SessionText.Percent(holders.Share) of the
+            @SessionText.Number(holders.Available) an ordinary role may open (<code>max_connections</code> less what is reserved:
+            @holders.AvailableText). The studio's own reading session is counted here and not listed below.
+        </p>
+
+        @* Issue #43: what held the server's connections before now - counts under the page's own gate, names past the activity gate. *@
+        @if (Summary.ConnectionHistory is { } history)
+        {
+            <h3 class="ms-holders-subheading" id="ms-holders-history">Since @Preferences.FormatInSelectedTimeZone(history.Since)</h3>
+            <p class="ms-holders-history">
+                The most client sessions one sample counted was @SessionText.Number(history.Peak) of the @SessionText.Number(history.ClientLimit)
+                an ordinary role may open, at @Preferences.FormatInSelectedTimeZone(history.PeakAt) - @SessionText.Count(history.Samples, "sample") up to
+                @Preferences.FormatInSelectedTimeZone(history.Until)@(history.InstanceChanges > 0 ? ", across " + SessionText.Count(history.InstanceChanges, "change") + " of the answering instance (a failover or a restart)" : string.Empty).
+            </p>
+
+            @if (ShowDetails && Details!.ConnectionHistory is { Applications.Count: > 0 } named)
+            {
+                <TableScroll Label="Each application's own peak since the history began">
+                    <table class="ms-table ms-sessions-table ms-holders-history-table">
+                        <thead>
+                            <tr>
+                                <th scope="col">Application</th>
+                                <th scope="col">Peak</th>
+                                <th scope="col">At</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (ConnectionHistoryPeak peak in named.Applications)
+                            {
+                                <tr>
+                                    <td>@(peak.Application ?? "(none set)")</td>
+                                    <td>@SessionText.Number(peak.Peak)</td>
+                                    <td>@Preferences.FormatInSelectedTimeZone(peak.At)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </TableScroll>
+            }
+        }
+        else if (Summary.ConnectionHistoryKept)
+        {
+            <p class="ms-muted ms-holders-history-none">
+                @if (Summary.ConnectionHistoryReadOnly)
+                {
+                    <text>
+                        The connection history has no sample of this server yet. This process only reads it: another process fills it, and
+                        has sampled nothing of this server within the window.
+                    </text>
+                }
+                else if (Summary.ConnectionHistorySampling == ConnectionHistorySampling.Chosen)
+                {
+                    @ConnectionHistorySamplingText.Chosen
+                }
+                else if (Summary.ConnectionHistorySampling == ConnectionHistorySampling.NotChosen)
+                {
+                    @ConnectionHistorySamplingText.NotChosen
+                }
+                else if (Summary.ConnectionHistorySampling == ConnectionHistorySampling.NotChosenInMemory)
+                {
+                    @ConnectionHistorySamplingText.NotChosenInMemory
+                }
+                else
+                {
+                    <text>
+                        The connection history has no sample of this server yet. It samples each server once an interval, and a server only a
+                        source of dynamic databases names is not sampled.
+                    </text>
+                }
+            </p>
+        }
+        else
+        {
+            <p class="ms-muted ms-holders-history-off">
+                This is the server's connections now. A history of them - what peaked, when, and who held them - is kept once the host
+                registers <code>AddPostgresConnectionHistory()</code>.
+            </p>
+        }
+
+        @if (Summary.ConnectionHistoryPending > 0)
+        {
+            <p class="ms-sessions-caveat ms-holders-history-pending">
+                <strong>@SessionText.Count(Summary.ConnectionHistoryPending, "sample")</strong>
+                @(Summary.ConnectionHistoryPending == 1 ? "is" : "are") waiting to be stored: the history store refused
+                @(Summary.ConnectionHistoryPending == 1 ? "it; it is" : "them; they are") written when it answers again.
+            </p>
+        }
+
+        <h3 class="ms-holders-subheading" id="ms-holders-databases">By database</h3>
+
+        @if (Rows(holders).Count == 0 && holders.Others is null)
+        {
+            <p class="ms-muted">At this reading, no session but the studio's own was connected to the server.</p>
+        }
+        else
+        {
+            <TableScroll Label="The server's client sessions by database">
+                <table class="ms-table ms-sessions-table ms-holders-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">Database</th>
+                            <th scope="col">Sessions</th>
+                            <th scope="col">Active</th>
+                            <th scope="col">Idle</th>
+                            <th scope="col">Idle in transaction</th>
+                            <th scope="col">State not visible</th>
+                            <th scope="col">Oldest idle</th>
+                            <th scope="col">Oldest idle in transaction</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (SessionHolderCounts database in Rows(holders))
+                        {
+                            <tr @key="@("db:" + database.Database)" class="@(database.ThisDatabase ? "ms-holders-this" : null)">
+                                <th scope="row" class="ms-holders-name">
+                                    @(string.IsNullOrEmpty(database.Database) ? "(no database)" : database.Database)
+                                    @if (database.ThisDatabase)
+                                    {
+                                        <span class="ms-holders-tag">this database</span>
+                                    }
+                                </th>
+                                @CountCells(database)
+                            </tr>
+                        }
+                        @if (!ShowDetails && holders.Others is { } others)
+                        {
+                            <tr @key="@("others")" class="ms-holders-others">
+                                <th scope="row" class="ms-holders-name">Other databases</th>
+                                @CountCells(others)
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </TableScroll>
+
+            @if (!ShowDetails && holders.Others is not null)
+            {
+                <p class="ms-muted ms-holders-note">
+                    The rest of the server's sessions are in databases whose names this page may not tell you: the @Settings.Text.ScopePolicyNoun
+                    policy does not admit you to them, or nothing registered with the studio reaches them. Their names, and who holds their
+                    sessions, are session details, shown when session details are.
+                </p>
+            }
+        }
+
+        @if (ShowDetails)
+        {
+            <h3 class="ms-holders-subheading" id="ms-holders-groups">By holder</h3>
+
+            @if (Details!.Holders.Groups.Count == 0)
+            {
+                <p class="ms-muted">At this reading, no session but the studio's own was connected to the server.</p>
+            }
+            else
+            {
+                <TableScroll Label="The server's client sessions by database, application, role and client address">
+                    <table class="ms-table ms-sessions-table ms-holders-table ms-holders-groups">
+                        <thead>
+                            <tr>
+                                <th scope="col">Database</th>
+                                <th scope="col">Application</th>
+                                <th scope="col">Role</th>
+                                <th scope="col">Client</th>
+                                <th scope="col">Sessions</th>
+                                <th scope="col">Active</th>
+                                <th scope="col">Idle</th>
+                                <th scope="col">Idle in transaction</th>
+                                <th scope="col">State not visible</th>
+                                <th scope="col">Oldest idle</th>
+                                <th scope="col">Oldest idle in transaction</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @for (int i = 0; i < Details.Holders.Groups.Count; i++)
+                            {
+                                SessionHolderGroup group = Details.Holders.Groups[i];
+                                <tr @key="i" class="@(group.ThisDatabase ? "ms-holders-this" : null)">
+                                    <td>@(group.Database.Length == 0 ? "(no database)" : group.Database)</td>
+                                    <td>@group.ApplicationText</td>
+                                    <td>@(group.Role.Length == 0 ? "–" : group.Role)</td>
+                                    <td class="ms-mono">@group.ClientText</td>
+                                    @CountCells(group.Total, group.Active, group.Idle, group.IdleInTransaction, group.StateUnknown, group.OldestIdle, group.OldestIdleInTransaction)
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </TableScroll>
+            }
+
+            @if (Details.Holders.Truncated)
+            {
+                <p class="ms-sessions-caveat"><strong>How sure:</strong> Only the @SessionText.Number(Details.Holders.Groups.Count) largest of @SessionText.Number(Details.Holders.GroupCount) groups are listed; the budget above counts every session.</p>
+            }
+        }
+        else
+        {
+            <p class="ms-muted ms-holders-gated">
+                Which application, role and client address hold the sessions is a session detail, shown here when session details are.
+            </p>
+        }
+
+        @if (!holders.AllSessionsVisible)
+        {
+            <p class="ms-sessions-caveat">
+                <strong>How sure:</strong> the studio's Postgres role is not a member of <code>pg_read_all_stats</code>, so other roles'
+                sessions are counted in "State not visible" and in no state, with no client address: not checked. Granting the role
+                <code>pg_read_all_stats</code> would show them; the totals count every session.
+            </p>
+        }
+
+        @if (holders.Truncated && !ShowDetails)
+        {
+            <p class="ms-sessions-caveat"><strong>How sure:</strong> the server has @SessionText.Number(holders.GroupCount) groups of sessions and this read lists the largest @SessionText.Number(holders.ListedGroups) of them, so the counts above can be lower than the server's.</p>
+        }
+    }
+</section>
+
+@code {
+    /// <summary>
+    /// The visitor's <c>SessionActivitySummary</c>: the per-database counts, and the budget. Typed <see cref="object" /> - see
+    /// <c>ComponentModel</c>.
+    /// </summary>
+    [Parameter]
+    [EditorRequired]
+    public object? SummaryModel { get; set; }
+
+    /// <summary>
+    /// The visitor's <c>SessionActivityDetails</c>, past the activity gate; <see langword="null" /> when they were not read. Typed
+    /// <see cref="object" /> - see <c>ComponentModel</c>.
+    /// </summary>
+    [Parameter]
+    public object? DetailsModel { get; set; }
+
+    /// <summary>Whether the details are on screen: the gate open and the service's answer a grant.</summary>
+    [Parameter]
+    public bool ShowDetails { get; set; }
+
+    private SessionActivitySummary Summary => (SessionActivitySummary) SummaryModel!;
+
+    private SessionActivityDetails? Details => DetailsModel as SessionActivityDetails;
+
+    /// <summary>The databases the table lists by name: every one past the gate, the ones the policy admits otherwise.</summary>
+    private IReadOnlyList<SessionHolderCounts> Rows(SessionHoldersSummary holders) =>
+        ShowDetails ? Details!.Holders.Databases : holders.Databases;
+
+    private static RenderFragment CountCells(SessionHolderCounts counts) =>
+        CountCells(counts.Total, counts.Active, counts.Idle, counts.IdleInTransaction, counts.StateUnknown, counts.OldestIdle, counts.OldestIdleInTransaction);
+
+    private static RenderFragment CountCells(long total, long active, long idle, long idleInTransaction, long unknown, TimeSpan? oldestIdle, TimeSpan? oldestIdleInTransaction) => __builder =>
+    {
+        <td>@SessionText.Number(total)</td>
+        <td>@SessionText.Number(active)</td>
+        <td>@SessionText.Number(idle)</td>
+        <td class="@(idleInTransaction > 0 ? "ms-sessions-stat-alert" : null)">@SessionText.Number(idleInTransaction)</td>
+        <td>@SessionText.Number(unknown)</td>
+        <td>@Age(oldestIdle)</td>
+        <td>@Age(oldestIdleInTransaction)</td>
+    };
+
+    private static string Age(TimeSpan? value) => value is { } age ? SessionText.Duration(age) : "–";
+}

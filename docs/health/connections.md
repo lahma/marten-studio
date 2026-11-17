@@ -8,9 +8,8 @@ transaction-mode pooler stands between the HotCold daemon and its lock (C10), an
 shared buffers hold (C11). Since 1.1, three more look at the data source's own pool settings: an idle cut the pool does not
 outlast (C16), a pool switched off (C17) and several pools to one database (C18). Back to the [index](../health.md).
 
-**Studios.** C01, C03 to C08, C11, C12 to C18 read Postgres alone and run in both studios, with the data source in place of
-the store in Postgres Studio. C02, C09 and C10 read a Marten store's configuration and daemon, and run only in Marten
-Studio. The list of every code and its studios is [codes.md](codes.md).
+**Modules.** C01, C03 to C08, C11, C12 to C18 read Postgres alone and run in both modules, with the data source in place of
+the store in a Postgres host. C02, C09 and C10 read a Marten store's configuration and daemon, and run only in a Marten host. The list of every code and its modules is [codes.md](codes.md).
 
 ## What these checks read, and when
 
@@ -124,8 +123,8 @@ publishes, and reads them with `RecordObservableInstruments` when the check runs
 
 Npgsql 10 renamed them to OpenTelemetry's current database client names; the kinds and values (`idle`, `used`) are
 the same (measured at 8.0.3, 9.0.4 and 10.0.0 to 10.0.3). The studio never asks which Npgsql it runs beside: it
-listens for both and recognises a pool by either tag, so a host on Npgsql 10 - Postgres Studio's own, or a Marten
-Studio host that brings it - is read as one on 9 is. The finding's caveat names the two it read.
+listens for both and recognises a pool by either tag, so a host on Npgsql 10 - the Postgres module's own, or a Marten
+host that brings it - is read as one on 9 is. The finding's caveat names the two it read.
 
 - **No synchronous instrument is ever enabled**, so nothing is recorded per command: Npgsql records
   `db.client.commands.*` (from 10, `db.client.operation.*`) on every command the host runs, and a listener on any
@@ -142,7 +141,7 @@ Studio host that brings it - is read as one on 9 is. The finding's caveat names 
 `SessionPoolObserverTests` (fast suite) prove those statements against a meter of the test's own - and pin
 the shapes of Npgsql's own instruments, so a later Npgsql that changes one fails there - and
 `ConnectionPoolLiveTests` that a burst of commands through a watched pool delivers nothing to the listener.
-`NpgsqlPoolInstrumentsTests` and `NpgsqlPoolLiveTests` in `PostgresStudio.Tests` do the same for both sets of names,
+`NpgsqlPoolInstrumentsTests` and `NpgsqlPoolLiveTests` in `DataStudio.Postgres.Tests` do the same for both sets of names,
 and read a real pool - C01's report and the Sessions panel - at the Npgsql floor and at the latest-tested Npgsql 10.
 
 The pool is matched to the database by its pool name tag, which is the data source's connection string unless the
@@ -200,7 +199,7 @@ Counts every client backend on the server, every database included - only the co
 The remedy is fewer connections per process, or a pooler in front of the server; `max_connections` is the
 server's own setting and the studio never changes it.
 
-Runs in both studios, Marten Studio and Postgres Studio. Variants: `server`, `role`, `database`.
+Runs in both modules, Marten and Postgres. Variants: `server`, `role`, `database`.
 
 **The limits Postgres enforces first.** A role's `CONNECTION LIMIT` refuses "too many connections for role", and a
 database's "too many connections for database", while `max_connections` still has room. So C03 also judges, on the same
@@ -325,7 +324,7 @@ wait itself - is described by its state and how long its transaction has been op
 statement says `autovacuum: VACUUM … (to prevent wraparound)` - a test made in SQL, so the statement, which names the
 table, never leaves the database. The finding then says what to do: a manual `VACUUM` and an anti-wraparound
 autovacuum do not give way to a lock request (an ordinary autovacuum is cancelled by one after `deadlock_timeout`), so
-a migration queued behind it - in Marten Studio `ApplyAllDatabaseChangesOnStartup` or `db-apply`, in Postgres Studio
+a migration queued behind it - in a Marten host `ApplyAllDatabaseChangesOnStartup` or `db-apply`, in a Postgres host
 whatever runs the host's migrations - holds every reader of the table behind itself. Let the vacuum finish and retry
 the migration, and never cancel the vacuum while T12 is near its line.
 
@@ -366,7 +365,7 @@ by how long they have counted - once that window is at least a day long and the 
 
 Variants: `deadlocks`, `rollbacks`, `temp-files` - at most one finding of each, about the database as a whole, so none has
 a subject. Until 0.5 the kind was the finding's subject; a finding's key (`C08|deadlocks`) is the same either way. Each
-finding says when the statistics were last reset. Both studios run it.
+finding says when the statistics were last reset. Both modules run it.
 
 **On Aurora** a temp-file finding says where the files go: "In Aurora PostgreSQL, these files share local storage with
 other log files" (*Managing temporary files with PostgreSQL*, Aurora User Guide), not the cluster volume, and "The local
@@ -498,7 +497,7 @@ database, or less to hold in it: an index that reads fewer pages, dead rows vacu
 out. The finding names no setting and no value: a size derived from the machine's memory is not advice the studio gives.
 
 Its evidence is the ratio, the blocks read a day, both totals, the window and where its start came from. One finding per
-database, with no kinds. Both studios run it; every role can read what it reads.
+database, with no kinds. Both modules run it; every role can read what it reads.
 
 **On Aurora a miss can be a bill** (issue #8 A5). A read that misses shared buffers goes to the cluster volume, and on
 *Aurora Standard* "you also pay a standard rate per 1 million requests for I/O operations", while *Aurora I/O-Optimized*
@@ -524,7 +523,7 @@ deadlock forming, which Postgres' detector ends after `deadlock_timeout`), or on
 head to name, and is not judged.
 
 Variants: `idle-head`, `long-chain` - at most one finding of each, covering every chain of that kind, so neither has a
-subject. Both studios run it, from the sweep's one read of the lock table (above); it reads nothing of its own.
+subject. Both modules run it, from the sweep's one read of the lock table (above); it reads nothing of its own.
 
 **An activity check** (`ViewDatabaseActivity`). Every finding names its heads - process id, role, application, client,
 when it connected, its state and how long, its transaction's age, the lock modes it holds and what its waiters want - and
@@ -547,7 +546,7 @@ server's backstop is a timeout, set where the platform sets settings, or for the
 idle_in_transaction_session_timeout = '5min'
 ```
 
-In Marten Studio, mind the HotCold daemon's leadership: with its lock transaction-scoped, a timeout shorter than the
+In the Marten module, mind the HotCold daemon's leadership: with its lock transaction-scoped, a timeout shorter than the
 leader's idle stretch ends the leadership too (K08). For `long-chain`, the remedy is the head's two statements, as a repair
 to run by hand.
 
@@ -590,7 +589,7 @@ whatever its pool thinks: set it above the pool's own idle lifetime. The studio 
 Connection Idle Lifetime=60
 ```
 
-Runs in both studios, from the sweep's holders read and C03's own read of the connection budget.
+Runs in both modules, from the sweep's holders read and C03's own read of the connection budget.
 
 ## C14 Connections with no application name
 
@@ -617,7 +616,7 @@ Application Name=billing-api/orders
 Name it by the container and the pool, `{host}/{pool}`, so one row of Database › Sessions › Holders is one pool of one
 container. The name is visible to every role on the server and in its logs, so it carries nothing secret.
 
-Runs in both studios, from the sweep's holders read.
+Runs in both modules, from the sweep's holders read.
 
 ## C15 Connections came close to the limit
 
@@ -626,7 +625,7 @@ Runs in both studios, from the sweep's holders read.
 
 C03 judges the connections *now*. A burst at 03:00 that came within a few connections of `max_connections` and was over by the
 time anyone looked is the most useful early warning a near-limit deployment gets, and C03 never saw it. The connection history
-(`AddPostgresConnectionHistory()`, 1.0) keeps what the sampler counted every minute; C15 reads the highest of the last 24 hours
+(`AddPostgresConnectionHistory()`) keeps what the sampler counted every minute; C15 reads the highest of the last 24 hours
 - or of the history's whole retention when that is shorter - and compares it with the client limit (`max_connections` less the
 reserved slots).
 
@@ -660,11 +659,11 @@ host that has reasons to run close to the limit accepts C15 and keeps C03.
 > C15 can make the opt-in ASP.NET Core health check report `Degraded` (Warning) or `Unhealthy` (Critical) on a host that runs
 > close to its limit and keeps a connection history. Accept the check with `AcceptedChecks` to keep the health check as it was.
 
-Runs in both studios, from the connection history and C03's own read of the server's settings.
+Runs in both modules, from the connection history and C03's own read of the server's settings.
 
 ## C16 Server or proxy ends idle pooled connections first
 
-**Warning**, both studios. Two variants. The data source's pool holds idle connections that something ends before the pool lets
+**Warning**, both modules. Two variants. The data source's pool holds idle connections that something ends before the pool lets
 go of them, and the pool is not keeping them alive:
 
 - **`idle-session-timeout`**: the server's `idle_session_timeout` (PostgreSQL 14) is above zero as a new session of the login
@@ -682,7 +681,7 @@ Npgsql does not check a connection when it hands it out of the pool, so the appl
 from the next command on it, which fails (SQLSTATE `57P05` for the server's timeout, or an I/O error), instead of the pool
 opening a fresh connection.
 
-What to change, in the connection string the data source is built from, or on its `NpgsqlDataSourceBuilder` (in Marten Studio
+What to change, in the connection string the data source is built from, or on its `NpgsqlDataSourceBuilder` (in a Marten host
 through `opts.ConfigureNpgsqlDataSourceBuilder`, which every data source Marten builds from a connection string passes through):
 
 ```text
@@ -703,13 +702,13 @@ proxy's own idle client timeout applies either way.
 **Not applicable** when `Pooling` is off (C17 judges that). Quiet when the server has no `idle_session_timeout` (older than
 PostgreSQL 14, or 0), or when `Keepalive` or `Connection Idle Lifetime` already covers the cut.
 
-In Marten Studio, K08 judges the same `idle_session_timeout` against the HotCold daemon's leadership connection, which this check
+In the Marten module, K08 judges the same `idle_session_timeout` against the HotCold daemon's leadership connection, which this check
 does not cover.
 
 ## C17 Connection pooling switched off
 
 **Warning** when the database's sessions last under a second on average, **Info** otherwise, or when that is not known. Both
-studios. `Pooling=false` and no connection pooler in front of the data source: every connection the application opens is a new TCP
+modules. `Pooling=false` and no connection pooler in front of the data source: every connection the application opens is a new TCP
 connection, a TLS handshake where TLS is on, an authentication exchange and a new PostgreSQL backend process, and the cost lands on
 the request that needed the connection. The server's connection count then follows the request rate instead of a pool's size.
 
@@ -728,7 +727,7 @@ connections.
 
 ## C18 Several pools to one database in this process
 
-**Info**, both studios. Two or more Npgsql pools of this process connect to the data source's database as the same login, by host,
+**Info**, both modules. Two or more Npgsql pools of this process connect to the data source's database as the same login, by host,
 port, database and login: each may open up to its own `Maximum Pool Size`, so together the process can hold the sum, which C01's
 saturation and C03's headroom - one pool at a time - do not add up.
 
@@ -742,11 +741,11 @@ its connection string, so the name alone says nothing about the database. (`AddN
 set no name of their own; a host sets one directly or in the builder callback they take.) The studio identifies such a pool through
 the data sources it already resolves - it adds no scan of your container:
 
-- the data source the sweep is about, and the other sources Postgres Studio lists: the unkeyed `NpgsqlDataSource` it discovers and
+- the data source the sweep is about, and the other sources the Postgres module lists: the unkeyed `NpgsqlDataSource` it discovers and
   each `AddDataSource(name, ...)` (a keyed registration goes in as `sp => sp.GetRequiredKeyedService<NpgsqlDataSource>(key)`).
   Listing a data source this way **also makes it a source the studio browses and sweeps**, with everything that implies;
-- in Marten Studio, the data source of each database the store's tenancy already holds (its primary pool, not a read pool), for
-  each Marten store the application registered. Marten Studio has no
+- in a Marten host, the data source of each database the store's tenancy already holds (its primary pool, not a read pool), for
+  each Marten store the application registered. The Marten module has no
   `AddDataSource` (and `AddPostgresDiagnostics` is refused beside it), so a named pool that no store uses - the host's own
   `AddNpgsqlDataSource`, Wolverine's standalone persistence - stays not judged for good. Drop its `Name`, or accept C18.
 
@@ -766,7 +765,7 @@ identify them in time". A pool name that is a connection string naming no `Host`
 
 Several pools are sometimes deliberate - a separate pool for a long-running job - in which case accept the check with
 `AcceptedChecks`. Otherwise the remedy is one shared `NpgsqlDataSource` for the process: register it once
-(`services.AddNpgsqlDataSource(connectionString)`) and resolve it wherever a connection is wanted; in Marten Studio, hand it to
+(`services.AddNpgsqlDataSource(connectionString)`) and resolve it wherever a connection is wanted; in a Marten host, hand it to
 Marten with `AddMarten(...).UseNpgsqlDataSource()`. Database › Sessions › Holders shows who holds the connections.
 
 Not checked where the process's Npgsql pools cannot be observed, or where the data source's own host, database and login cannot be
@@ -775,7 +774,7 @@ Quiet with one pool.
 
 ## Database › Sessions
 
-`/marten/database/sessions`, linked from the Database rail: this database's sessions with their state, age, wait
+`/studio/postgres/database/sessions`, linked from the Database rail: this database's sessions with their state, age, wait
 and what blocks them; the locks, labelled as above; and the prepared transactions. Counts are shown with the
 store policy; the details need `ViewDatabaseActivity`, and the page names that option where they would be.
 There is no cancel and no terminate button: the studio never ends another session.
@@ -791,7 +790,7 @@ the store policy passes; the trees are the details', behind the same gate and au
 
 The relation a session waits for is labelled as above and, past the gate, named as the database browser would name it
 (AGENTS.md D27): qualified for a schema the visitor may see, `‹withheld›` - and no name - for one they may not, and not at all
-for a relation nobody is told about (a hidden document type's, another store's, or in Postgres Studio one only the `mt_`
+for a relation nobody is told about (a hidden document type's, another store's, or in a Postgres host one only the `mt_`
 rule calls Marten's). Nothing is read from any relation: the tree is the lock table's and the catalog's, read without a
 `::regclass` cast, so an oid dropped since the read is simply not named.
 

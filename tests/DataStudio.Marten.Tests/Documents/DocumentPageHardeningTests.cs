@@ -1,0 +1,283 @@
+using DataStudio.Marten.Services;
+using DataStudio.Services.Settings;
+using Bunit;
+
+using DataStudio.Marten.Components.Pages.Documents;
+using DataStudio.Marten.Internal.Sql;
+using DataStudio.Marten.Services.Documents;
+using DataStudio.Marten.Tests.Support;
+
+using DetailPage = DataStudio.Marten.Components.Pages.Documents.DocumentDetail;
+using DetailModel = DataStudio.Marten.Services.Documents.DocumentDetail;
+using ListPage = DataStudio.Marten.Components.Pages.Documents.Documents;
+using DataStudio.Postgres.Components.Shared;
+using DataStudio.Postgres.Services.Query;
+
+namespace DataStudio.Marten.Tests.Documents;
+
+/// <summary>
+/// The three ways the documents pages could be driven into a state nobody intended, found by the P2
+/// review.
+/// </summary>
+public class DocumentPageHardeningTests
+{
+    private const string Id = "8f1d5a6e-0000-0000-0000-000000000001";
+
+    // --------------------------------------------------------------------------------------------
+    // Duplicate search terms
+    // --------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// <c>SearchChip</c> is a record, so two identical terms are equal to each other. Keyed by the chip,
+    /// the renderer threw "more than one sibling has the same key value" - which on a Blazor Server
+    /// circuit is a 500 and a dead page, produced by typing the same word twice into a search box.
+    /// </summary>
+    [Theory]
+    [InlineData("foo foo")]
+    [InlineData("is:deleted is:deleted")]
+    [InlineData("..")]
+    public void The_same_search_term_twice_renders_rather_than_killing_the_circuit(string search)
+    {
+        using var context = new DocumentsComponentContext();
+        context.Data.Rail = FakeDocuments.Rail(documents: [FakeDocuments.Collection("customer")]);
+        context.Data.Page = FakeDocuments.Page(
+            rows: [FakeDocuments.Row("id-1")],
+            verdict: Verdict(search));
+
+        context.Navigate("studio/marten/documents/customer?q=" + Uri.EscapeDataString(search));
+        var page = context.Render<ListPage>(parameters => parameters.Add(x => x.Alias, "customer"));
+
+        // Rendered twice on purpose. Blazor only compares keys when it *diffs* two renders of the same
+        // tree, so a first render with duplicate keys is quietly fine and the second one throws - which
+        // is why the bug showed up as a page that worked until something on it changed.
+        page.Invoking(x => x.Render(parameters => parameters.Add(y => y.Alias, "customer")))
+            .Should().NotThrow("two identical search terms are a search, not a crash");
+
+        page.FindAll(".ms-search-chip").Should().HaveCount(2, "both terms are drawn, identical or not");
+        page.FindAll(".ms-verdict-reason").Should().HaveCount(2);
+    }
+
+    /// <summary>Two chips that are equal as values but are two different terms on the screen.</summary>
+    private static SearchVerdict Verdict(string text)
+    {
+        string[] terms = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        string term = terms.Length > 0 ? terms[0] : text;
+
+        SearchChip chip = new(
+            SearchChipKind.Predicate,
+            term,
+            IndexVerdictLevel.Red,
+            "This reads every row of the collection.",
+            "opts.Schema.For<Customer>().Duplicate(x => x.Name);");
+
+        return SearchVerdict.Empty with { Chips = [chip, chip] };
+    }
+
+    // --------------------------------------------------------------------------------------------
+    // The return link
+    // --------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// <c>?from=</c> is reflected into an <c>href</c>, so it is an injection point. The studio's own
+    /// value is a relative path under the mount; anything else is a link somebody else wrote.
+    /// </summary>
+    [Theory]
+    [InlineData("javascript:alert(document.domain)")]
+    [InlineData("JavaScript:alert(1)")]
+    [InlineData("https://evil.example/steal")]
+    [InlineData("//evil.example/steal")]
+    [InlineData("/\\evil.example/steal")]
+    [InlineData("\\\\evil.example\\steal")]
+    [InlineData("/studio/documents/customer")]
+    [InlineData("data:text/html,<script>alert(1)</script>")]
+    [InlineData("documents\\..\\..\\evil")]
+    [InlineData("postgres/query?mode=sql")]
+    public void A_return_link_the_studio_did_not_write_is_not_rendered(string from)
+    {
+        SafeReturnLink.Sanitize(from, MartenSettings.Of(new MartenOptions())).Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData("marten/documents/customer")]
+    [InlineData("marten/documents/customer?q=is:deleted&sort=id&dir=desc")]
+    [InlineData("marten/documents")]
+    [InlineData("studio/marten/documents/customer?page=2")]
+    public void A_return_link_into_the_documents_area_is_kept_exactly_as_it_was(string from)
+    {
+        SafeReturnLink.Sanitize(from, MartenSettings.Of(new MartenOptions())).Should().Be(from);
+    }
+
+    private static MartenSettings AtMount(string path) =>
+        MartenSettings.Of(new MartenOptions(), new ShellSettings(Microsoft.Extensions.Options.Options.Create(new DataStudioOptions { Path = path })));
+
+    /// <summary>
+    /// A mount may be named like a module's segment (<c>/marten</c> was 1.x's default), and then every return link starts with the mount's own word:
+    /// the link is judged by its address as written first, and by its address below the mount only after that.
+    /// </summary>
+    [Theory]
+    [InlineData("/marten", "marten/documents/customer?q=ada&sort=id&dir=desc&page=2")]
+    [InlineData("/marten", "marten/marten/documents/customer?q=ada&sort=id&dir=desc&page=2")]
+    [InlineData("/marten", "marten/documents")]
+    [InlineData("/postgres", "marten/documents/customer?page=3")]
+    [InlineData("/kafka", "kafka/marten/documents/customer?page=3")]
+    [InlineData("/studio", "marten/documents/customer?q=ada&sort=id&dir=desc&page=2")]
+    [InlineData("/studio", "studio/marten/documents/customer?q=ada&sort=id&dir=desc&page=2")]
+    [InlineData("/a/b", "a/b/marten/documents/customer?page=2")]
+    public void A_return_link_into_the_documents_area_is_kept_whatever_the_mount_is_called(string mount, string from)
+    {
+        SafeReturnLink.Sanitize(from, AtMount(mount)).Should().Be(from);
+    }
+
+    [Theory]
+    [InlineData("/marten")]
+    [InlineData("/postgres")]
+    [InlineData("/kafka")]
+    [InlineData("/studio")]
+    public void And_whatever_the_mount_is_called_what_is_not_a_page_of_the_studio_is_still_refused(string mount)
+    {
+        string[] refused =
+        [
+            "marten",
+            "postgres/query?mode=sql",
+            "other/marten/documents/customer",
+            "//evil.example/marten/documents/customer",
+            "/marten/documents/customer",
+            "\\\\evil.example\\marten\\documents",
+            "/\\evil.example/marten/documents",
+            "https://evil.example/marten/documents/customer",
+            "javascript:alert(1)",
+            "marten/documents/../../../evil",
+            "marten/documents/%2E%2E/%2e%2e/evil",
+            "marten/documents/./../evil",
+        ];
+
+        foreach (string from in refused)
+        {
+            SafeReturnLink.Sanitize(from, AtMount(mount)).Should().BeNull("'{0}' is not a page of the studio's documents area under {1}", from, mount);
+        }
+    }
+
+    [Fact]
+    public void Back_from_a_document_keeps_the_lists_filter_sort_and_page_under_a_mount_named_marten()
+    {
+        using var context = new DocumentsComponentContext();
+        context.ShellOptions.Path = "/marten";
+        context.Data.Detail = DocumentDetailResult.Ok(Detail());
+
+        const string from = "marten/documents/customer?q=ada&sort=id&dir=desc&page=2";
+        context.Navigate($"marten/marten/documents/customer/doc?id={Id}&from=" + Uri.EscapeDataString(from));
+
+        var page = context.Render<DetailPage>(parameters => parameters.Add(x => x.Alias, "customer"));
+
+        page.Find(".ms-breadcrumb a:nth-of-type(2)").GetAttribute("href").Should().Be(from);
+    }
+
+    [Fact]
+    public void The_breadcrumb_falls_back_to_the_collection_when_the_return_link_is_poisoned()
+    {
+        using var context = new DocumentsComponentContext();
+        context.Data.Detail = DocumentDetailResult.Ok(Detail());
+
+        context.Navigate(
+            $"studio/marten/documents/customer/doc?id={Id}&from=" +
+            Uri.EscapeDataString("javascript:alert(document.domain)"));
+
+        var page = context.Render<DetailPage>(parameters => parameters.Add(x => x.Alias, "customer"));
+
+        string href = page.Find(".ms-breadcrumb a:nth-of-type(2)").GetAttribute("href")!;
+
+        href.Should().NotContain("javascript");
+        href.Should().StartWith("marten/documents/customer", "the fallback is where back was going anyway");
+    }
+
+    [Fact]
+    public void A_return_link_the_studio_wrote_still_works()
+    {
+        using var context = new DocumentsComponentContext();
+        context.Data.Detail = DocumentDetailResult.Ok(Detail());
+
+        const string from = "marten/documents/customer?q=ada&page=2";
+        context.Navigate($"studio/marten/documents/customer/doc?id={Id}&from=" + Uri.EscapeDataString(from));
+
+        var page = context.Render<DetailPage>(parameters => parameters.Add(x => x.Alias, "customer"));
+
+        page.Find(".ms-breadcrumb a:nth-of-type(2)").GetAttribute("href").Should().Be(from);
+    }
+
+    /// <summary>
+    /// The previous/next links carry the return link onward, so a poisoned one must not survive one hop
+    /// either - otherwise the fix only moves where the payload lands.
+    /// </summary>
+    [Fact]
+    public void A_poisoned_return_link_is_not_carried_onto_the_neighbour_links()
+    {
+        using var context = new DocumentsComponentContext();
+        context.Data.Detail = DocumentDetailResult.Ok(Detail());
+        context.Browser.RememberPage("customer", ["other-id", Id, "next-id"], "marten/documents/customer");
+
+        context.Navigate(
+            $"studio/marten/documents/customer/doc?id={Id}&from=" + Uri.EscapeDataString("javascript:alert(1)"));
+
+        var page = context.Render<DetailPage>(parameters => parameters.Add(x => x.Alias, "customer"));
+
+        foreach (var link in page.FindAll(".ms-doc-detail-nav a"))
+        {
+            link.GetAttribute("href").Should().NotContain("javascript");
+        }
+    }
+
+    // --------------------------------------------------------------------------------------------
+    // Interop that is simply gone
+    // --------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// <c>JSDisconnectedException</c> derives from <see cref="Exception" />, not from
+    /// <c>JSException</c>, so every <c>catch (JSException)</c> in the studio missed the commonest case
+    /// of all: the circuit closing while a call was in flight.
+    /// </summary>
+    [Fact]
+    public void A_closed_circuit_is_an_interop_failure_and_so_is_a_prerender()
+    {
+        DocumentsInterop.IsUnavailable(new Microsoft.JSInterop.JSDisconnectedException("gone")).Should().BeTrue();
+        DocumentsInterop.IsUnavailable(new Microsoft.JSInterop.JSException("no such function")).Should().BeTrue();
+        DocumentsInterop.IsUnavailable(new InvalidOperationException("prerendering")).Should().BeTrue();
+        DocumentsInterop.IsUnavailable(new TaskCanceledException()).Should().BeTrue();
+        DocumentsInterop.IsUnavailable(new System.Text.Json.JsonException("bad shape")).Should().BeTrue();
+
+        DocumentsInterop.IsUnavailable(new NotSupportedException()).Should().BeFalse(
+            "a real bug has to keep reaching the error handler");
+    }
+
+    [Fact]
+    public void A_copy_whose_circuit_has_gone_does_not_take_the_page_with_it()
+    {
+        using var context = new DocumentsComponentContext();
+        context.Data.Detail = DocumentDetailResult.Ok(Detail());
+        context.JSInterop.Setup<bool>("martenStudio.clipboard.copyText", _ => true)
+            .SetException(new Microsoft.JSInterop.JSDisconnectedException("the circuit closed"));
+
+        context.Navigate($"studio/marten/documents/customer/doc?id={Id}");
+        var page = context.Render<DetailPage>(parameters => parameters.Add(x => x.Alias, "customer"));
+
+        // The header's own copy, through the detail page's CopyTextAsync, rather than the viewer's:
+        // the two go through different components and it is this one the filter is on. Since the three
+        // copies became one menu the button is a menu item, so the selector names the menu.
+        page.Invoking(x => x
+                .FindAll(".ms-doc-copy-popover .ms-menu-item")
+                .First(b => b.TextContent.Contains("Copy JSON", StringComparison.Ordinal))
+                .Click())
+            .Should().NotThrow();
+    }
+
+    private static DetailModel Detail() => new()
+    {
+        Alias = "customer",
+        Id = Id,
+        Json = """{"Name":"Customer 01"}""",
+        TextBytes = 22,
+        StoredBytes = 22,
+        Columns = [new PhysicalColumnValue("id", Id, PhysicalColumnRole.Identity)],
+        TableName = "\"studio_sample\".\"mt_doc_customer\"",
+        IdColumnType = DocumentIdColumnType.Uuid,
+    };
+}

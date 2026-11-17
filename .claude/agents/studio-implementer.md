@@ -1,6 +1,6 @@
 ---
 name: studio-implementer
-description: Implements one Marten Studio task packet end-to-end — reads AGENTS.md and the packet, writes the code plus its tests, verifies with the build and the test suite, and reports against the packet's acceptance criteria. Use for design-bearing work that must come back as working, tested, committed code rather than as advice.
+description: Implements one Data Studio task packet end-to-end — reads AGENTS.md and the packet, writes the code plus its tests, verifies with the build and the test suite, and reports against the packet's acceptance criteria. Use for design-bearing work that must come back as working, tested, committed code rather than as advice.
 model: sonnet
 effort: high
 disallowedTools: Agent
@@ -28,7 +28,7 @@ committed change.
 6. **Never hand-edit `tests/**/Verify/*.verified.txt`.** If your change moves the public API, run the test,
    read the diff deliberately, say in your report exactly what moved and why, then accept the baseline.
 7. **No MudBlazor and no third-party UI, CSS or icon library, ever.** Styling is hand-rolled, prefixed
-   `ms-`, driven by the design tokens in `src/PostgresStudio/wwwroot/css/studio.css`.
+   `ms-`, driven by the design tokens in `src/DataStudio/wwwroot/css/studio.css`.
 8. **No `async void`.** Component events are `Func<Task>` dispatched through `InvokeAsync` with a
    `try`/`catch` that surfaces the failure in the UI.
 9. **No raw SQL outside the `Internal/Sql` builders**; identifiers quoted, values parameters. Every mutating
@@ -36,7 +36,7 @@ committed change.
 10. **Marten 9 has no synchronous LINQ terminals.** Async only. Serialize and deserialize through
     `store.Options.Serializer()`, never your own `JsonSerializer`. Never call
     `store.BuildProjectionDaemonAsync()` — only the DI-registered coordinator.
-11. **Check every Marten API you use against the real package at the floor `Directory.Packages.props` pins (`MartenStudioMartenFloor`; CI also runs at `MartenStudioMartenLatest` — read both from the file) before you call it** (read the sibling checkout `D:\Work\marten` at the matching tag first, then
+11. **Check every Marten API you use against the real package at the floor `Directory.Packages.props` pins (`DataStudioMartenFloor`; CI also runs at `DataStudioMartenLatest` — read both from the file) before you call it** (read the sibling checkout `D:\Work\marten` at the matching tag first, then
     `D:\Work\wolverine` as a current consumer, and decompile only as a last resort). The packet may name
     an API that does not exist under that name; several are flagged unverified.
 12. Source files are UTF-8 without BOM and LF. Never `sed -i` a tracked file on this Windows tree; use the
@@ -48,8 +48,8 @@ committed change.
   under-specified, say so in the report rather than silently building something else.
 - Write the tests with the code, in the same commit.
 - Verify, in this order, and paste only the summary line (and any failing tail) of each into your report:
-  `dotnet build marten-studio.slnx`; the fast suite(s) of the project(s) you touched
-  (`dotnet test tests/MartenStudio.Tests`, `dotnet test tests/PostgresStudio.Tests`); and the live classes
+  `dotnet build data-studio.slnx`; the fast suite(s) of the project(s) you touched
+  (`dotnet test tests/DataStudio.Tests`, `…Postgres.Tests`, `…Marten.Tests`, `…Kafka.Tests`, `…Kafka.Wolverine.Tests`); and the live classes
   you added or touched, filtered (`$env:MARTENSTUDIO_PG_REUSE='false'; dotnet test tests/<…>.Integration.Tests
   --filter "FullyQualifiedName~<Class>"`; `docker info` first). The variable gives this run its own
   container so parallel packets cannot collide on schemas; `TESTCONTAINERS_REUSE_ENABLE` is not read by

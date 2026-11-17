@@ -1,0 +1,150 @@
+using DataStudio.Marten.Internal.Sql;
+using DataStudio.Marten.Tests.Sql;
+
+using Npgsql;
+
+namespace DataStudio.Marten.Tests.Documents;
+
+/// <summary>
+/// 1.2-SCOPE-3: the statement behind Find's documents. It reads no document, only whether the id is there and, where the table has
+/// them, the tenant, the subclass discriminator and the soft-delete flag; every optional column is selected only when it is physical
+/// (hard rule 10), and the id and the tenant are parameters.
+/// </summary>
+public class DocumentFindBuilderTests
+{
+    [Fact]
+    public void A_fully_featured_hierarchy_selects_the_tenant_the_subclass_and_the_deleted_flag_and_never_the_document()
+    {
+        DocumentQueryBuilder.TryBuildFind(FeaturedHierarchy(), Guid.NewGuid().ToString("D"), null, null, 0, out NpgsqlCommand? command, out DocumentFindShape shape)
+            .Should().BeTrue();
+
+        using (command)
+        {
+            shape.Should().Be(new DocumentFindShape(Tenant: true, Type: true, Deleted: true));
+            command!.CommandText.Should().StartWith("select 1, d.\"tenant_id\", d.\"mt_doc_type\", d.\"mt_deleted\"\n");
+            command.CommandText.Should().NotContain("data");
+            command.CommandText.Should().Contain("where d.\"id\" = @id");
+            command.CommandText.Should().EndWith("limit 21");
+        }
+    }
+
+    /// <summary>Conjoined, soft-deleted and a hierarchy, which is what puts <c>mt_doc_type</c> on the table.</summary>
+    private static DocumentTableInfo FeaturedHierarchy() =>
+        DocumentTableInfo.FromDocumentType(SqlTestStore.DocumentType<SqlTestCustomer>(options =>
+            options.Schema.For<SqlTestCustomer>().AddSubClass<SqlTestVipCustomer>().SoftDeleted().MultiTenanted()));
+
+    [Fact]
+    public void A_table_without_subclasses_has_no_discriminator_to_select()
+    {
+        DocumentQueryBuilder.TryBuildFind(SqlTestTables.FullyFeatured(), Guid.NewGuid().ToString("D"), null, null, 0, out NpgsqlCommand? command, out DocumentFindShape shape)
+            .Should().BeTrue();
+
+        using (command)
+        {
+            shape.Should().Be(new DocumentFindShape(Tenant: true, Type: false, Deleted: true));
+            command!.CommandText.Should().StartWith("select 1, d.\"tenant_id\", d.\"mt_deleted\"\n");
+        }
+    }
+
+    [Fact]
+    public void The_limit_is_one_more_than_five_tenants_name()
+    {
+        DocumentQueryBuilder.FindLimit.Should().Be(21);
+    }
+
+    [Fact]
+    public void A_bare_table_selects_only_a_constant()
+    {
+        DocumentQueryBuilder.TryBuildFind(SqlTestTables.MetadataLess(), Guid.NewGuid().ToString("D"), null, null, 0, out NpgsqlCommand? command, out DocumentFindShape shape)
+            .Should().BeTrue();
+
+        using (command)
+        {
+            shape.Tenant.Should().BeFalse();
+            shape.Deleted.Should().BeFalse();
+            command!.CommandText.Should().StartWith("select 1");
+            command.CommandText.Should().NotContain("tenant_id").And.NotContain("mt_deleted");
+        }
+    }
+
+    [Fact]
+    public void A_selected_tenant_is_a_predicate_on_a_conjoined_table_and_a_parameter()
+    {
+        DocumentQueryBuilder.TryBuildFind(SqlTestTables.FullyFeatured(), Guid.NewGuid().ToString("D"), "acme'; drop table x; --", null, 0, out NpgsqlCommand? command, out _)
+            .Should().BeTrue();
+
+        using (command)
+        {
+            command!.CommandText.Should().Contain("and d.\"tenant_id\" = @tenant");
+            command.CommandText.Should().NotContain("acme").And.NotContain("drop table");
+            command.Parameters.Cast<NpgsqlParameter>().Select(static x => x.ParameterName).Should().Contain(["id", "tenant"]);
+        }
+    }
+
+    private static readonly string[] Tenants = ["acme", "globex'; --"];
+
+    [Fact]
+    public void With_no_tenant_selected_a_conjoined_table_is_read_only_for_the_tenants_given_and_they_are_a_parameter()
+    {
+        DocumentQueryBuilder.TryBuildFind(SqlTestTables.FullyFeatured(), Guid.NewGuid().ToString("D"), null, Tenants, 0, out NpgsqlCommand? command, out _)
+            .Should().BeTrue();
+
+        using (command)
+        {
+            command!.CommandText.Should().Contain("and d.\"tenant_id\" = any(@tenants)\nlimit 21");
+            command.CommandText.Should().NotContain("globex").And.NotContain("tenant_id\" = @tenant");
+            command.Parameters["tenants"].Value.Should().BeEquivalentTo(Tenants);
+        }
+    }
+
+    [Fact]
+    public void A_selected_tenant_wins_over_the_tenants_given_and_a_single_tenant_table_ignores_them()
+    {
+        DocumentQueryBuilder.TryBuildFind(SqlTestTables.FullyFeatured(), Guid.NewGuid().ToString("D"), "acme", ["globex"], 0, out NpgsqlCommand? selected, out _)
+            .Should().BeTrue();
+        DocumentQueryBuilder.TryBuildFind(SqlTestTables.MetadataLess(), Guid.NewGuid().ToString("D"), null, ["globex"], 0, out NpgsqlCommand? single, out _)
+            .Should().BeTrue();
+
+        using (selected)
+        using (single)
+        {
+            selected!.CommandText.Should().Contain("= @tenant").And.NotContain("any(@tenants)");
+            single!.CommandText.Should().NotContain("tenant");
+        }
+    }
+
+    [Fact]
+    public void The_id_is_always_a_parameter_whatever_the_column_type()
+    {
+        DocumentQueryBuilder.TryBuildFind(SqlTestTables.StringKeyed(), "ORD-1' or '1'='1", null, null, 0, out NpgsqlCommand? command, out _)
+            .Should().BeTrue();
+
+        using (command)
+        {
+            command!.CommandText.Should().NotContain("ORD-1").And.NotContain("1'='1");
+            command.Parameters["id"].Value.Should().Be("ORD-1' or '1'='1");
+        }
+    }
+
+    [Fact]
+    public void An_id_that_cannot_fit_the_column_is_not_probed_at_all()
+    {
+        DocumentQueryBuilder.TryBuildFind(SqlTestTables.FullyFeatured(), "not-a-guid", null, null, 0, out NpgsqlCommand? command, out DocumentFindShape shape)
+            .Should().BeFalse();
+
+        command.Should().BeNull();
+        shape.Should().Be(default(DocumentFindShape));
+    }
+
+    [Fact]
+    public void The_command_carries_the_studios_timeout()
+    {
+        DocumentQueryBuilder.TryBuildFind(SqlTestTables.FullyFeatured(), Guid.NewGuid().ToString("D"), null, null, 9, out NpgsqlCommand? command, out _)
+            .Should().BeTrue();
+
+        using (command)
+        {
+            command!.CommandTimeout.Should().Be(9);
+        }
+    }
+}

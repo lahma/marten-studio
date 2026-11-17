@@ -1,0 +1,670 @@
+using System.Globalization;
+
+using Npgsql;
+
+using NpgsqlTypes;
+using DataStudio.Postgres.Internal.Sql;
+
+namespace DataStudio.Marten.Internal.Sql;
+
+/// <summary>
+/// One row of <c>mt_event_progression</c>, exactly as the table holds it.
+/// </summary>
+/// <remarks>
+/// A row rather than a <c>JasperFx.Events.Projections.ShardState</c>, because this layer builds and reads
+/// SQL and nothing else: the mapping onto Marten's own type - including the rule that rebuilds a
+/// <c>ShardFailure</c> out of four nullable columns - belongs to the service that renders it, next to the
+/// rest of the studio's opinions about what a shard row means.
+/// </remarks>
+/// <param name="Name">The progression name, which is a <c>ShardName.Identity</c> for a real shard.</param>
+/// <param name="Sequence"><c>last_seq_id</c> - how far this shard has processed.</param>
+/// <param name="LastHeartbeat"><c>heartbeat</c>, or <see langword="null" /> without extended tracking.</param>
+/// <param name="AgentStatus"><c>agent_status</c>, or <see langword="null" />.</param>
+/// <param name="PauseReason"><c>pause_reason</c>, or <see langword="null" />.</param>
+/// <param name="RunningOnNode"><c>running_on_node</c>, or <see langword="null" />.</param>
+/// <param name="FailureCategory"><c>failure_category</c> - the presence flag for the other three.</param>
+/// <param name="FailureEventSequence"><c>failure_event_sequence</c>, when one event can be blamed.</param>
+/// <param name="FailureEventType"><c>failure_event_type</c>.</param>
+/// <param name="FailureEventTenantId"><c>failure_event_tenant_id</c>.</param>
+/// <param name="LastUpdated"><c>last_updated</c>: when the shard last advanced - Marten stamps it on every progress write (#4981).</param>
+/// <param name="WarningBehindThreshold"><c>warning_behind_threshold</c>, when somebody wrote one (Marten does not, #5173).</param>
+/// <param name="CriticalBehindThreshold"><c>critical_behind_threshold</c>, likewise.</param>
+/// <param name="ReadAt">The server's <c>transaction_timestamp()</c> when the row was read, so an age is server time minus server time.</param>
+internal sealed record ProgressionRow(
+    string Name,
+    long Sequence,
+    DateTimeOffset? LastHeartbeat = null,
+    string? AgentStatus = null,
+    string? PauseReason = null,
+    int? RunningOnNode = null,
+    string? FailureCategory = null,
+    long? FailureEventSequence = null,
+    string? FailureEventType = null,
+    string? FailureEventTenantId = null,
+    DateTimeOffset? LastUpdated = null,
+    long? WarningBehindThreshold = null,
+    long? CriticalBehindThreshold = null,
+    DateTimeOffset? ReadAt = null);
+
+/// <summary>
+/// The event store's two progress reads - the projection progression rows and the high-water mark - as
+/// the studio's own parameterised SQL.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>Why these are not Marten calls.</b> <c>IMartenDatabase.AllProjectionProgress</c> (both overloads)
+/// and <c>IMartenDatabase.FetchHighestEventSequenceNumber</c> each open with
+/// <c>await EnsureStorageExistsAsync(typeof(IEvent), token)</c> - verified in Marten 9.35,
+/// <c>src/Marten/Storage/MartenDatabase.EventStorage.cs</c> - which applies the event store's Weasel
+/// migration under the database's own <c>AutoCreate</c> before a row is read. The projections screen, the
+/// feed's follow tick, the Overview and the navigation badge all ask for those numbers on a timer, so
+/// calling them is a studio that creates <c>mt_events</c>, <c>mt_streams</c>, <c>mt_events_sequence</c>
+/// and <c>mt_event_progression</c> because somebody opened a tab, and applies any pending event-store
+/// change on a database that already had them. AGENTS.md hard rule 14 forbids exactly that, so the reads
+/// are re-expressed here against <c>IMartenDatabase.CreateConnection(ConnectionUsage.Read)</c> and the
+/// absence of the tables becomes a value.
+/// </para>
+/// <para>
+/// <b>They still answer the same numbers.</b> The progression statement is Marten's own
+/// (<c>Marten.Events.Daemon.Progress.ProjectionProgressStatement</c>): the same table, the same ordering
+/// of the same columns, the same <c>name &lt;&gt; all(...)</c> exclusion of the two high-water bookkeeping
+/// rows, and the same trailing-substring tenant filter. The high-water read is Marten's own two-branch
+/// statement, <c>select last_value from …mt_events_sequence</c> and - only on a store with
+/// <c>UseTenantPartitionedEvents</c>, where the store-global sequence is never advanced -
+/// <c>select coalesce(max(seq_id), 0) from …mt_events</c>.
+/// </para>
+/// <para>
+/// <b>The optional columns are read only when the flag and the catalog both say so.</b> The two are
+/// different questions and the studio has to ask both. Marten 9.35's <c>EventProgressionTable</c> creates
+/// <c>heartbeat</c>, <c>agent_status</c>, <c>pause_reason</c>, <c>running_on_node</c> and the four
+/// <c>failure_*</c> columns on <em>every</em> migrated table, deliberately ungated (#5309: gating the DDL
+/// made two stores over one schema resolve each other's columns as extras and drop them in turn). So the
+/// presence of a column says nothing about whether anything writes it - that is
+/// <c>Events.EnableExtendedProgressionTracking</c>, which defaults to <see langword="false" /> and is what
+/// <c>ShardStateSelector</c> branches on. A select driven by the catalog alone therefore reconstructs, on
+/// a store that once ran with the flag on and then turned it off - or one sharing a schema with a store
+/// that has it on - an <c>AgentStatus</c>, a <c>PauseReason</c> and a <c>ShardFailure</c> that
+/// <c>IMartenDatabase.AllProjectionProgress</c> would not report: a running shard drawn as paused with a
+/// failure, out of telemetry nothing is maintaining. The flag decides whether to ask at all; the catalog
+/// is then still consulted, as the <c>42703</c> guard for the reverse case - a store whose flag was
+/// switched on without the migration having been applied, which Marten's own read raises rather than
+/// survives, and which a read path must never be the thing that fixes by migrating. There is no
+/// <c>select *</c> (hard rule 10). <c>last_updated</c> and the two per-row thresholds are read whatever the
+/// flag says, when the table has them: the first is stamped on every progress write, the other two are written
+/// by nobody but a host - and every row carries the server's own read time beside them.
+/// </para>
+/// </remarks>
+internal static class ProjectionProgressQueries
+{
+    /// <summary>The table the async daemon records each shard's position in.</summary>
+    public const string ProgressionTable = "mt_event_progression";
+
+    /// <summary>
+    /// The sequence <c>seq_id</c> is drawn from, and the thing Marten's high-water read reads.
+    /// </summary>
+    /// <remarks>
+    /// A sequence, not a table - so it is absent from <c>information_schema.tables</c> and
+    /// <see cref="ColumnCatalog.HasSequenceAsync" /> is what settles whether it exists.
+    /// </remarks>
+    public const string EventsSequence = "mt_events_sequence";
+
+    /// <summary>
+    /// Where Marten 9.52 stores projection start floors (#5740), keyed by projection name and tenant. Not gated on any
+    /// option: every event store migrated at 9.52 or later has it.
+    /// </summary>
+    public const string ProjectionFloorsTable = "mt_event_projection_floors";
+
+    /// <summary>The two columns every progression row has.</summary>
+    private const string NameColumn = "name";
+
+    /// <summary>The position column.</summary>
+    private const string SequenceColumn = "last_seq_id";
+
+    /// <summary>
+    /// The extended-tracking columns, in the order Marten's own selector walks them.
+    /// </summary>
+    /// <remarks>
+    /// <c>mode</c>, <c>rebuild_threshold</c> and <c>assigned_node</c> - the three
+    /// <c>UseOptimizedProjectionRebuilds</c> columns - are deliberately absent: nothing the studio draws
+    /// reads them, and a select list that names a column nobody renders is a row width paid for on every
+    /// poll.
+    /// </remarks>
+    private static readonly string[] OptionalColumns =
+    [
+        "heartbeat",
+        "agent_status",
+        "pause_reason",
+        "running_on_node",
+        "failure_category",
+        "failure_event_sequence",
+        "failure_event_type",
+        "failure_event_tenant_id",
+    ];
+
+    /// <summary>The server-time column every read carries, so the screen's "last progress 12 s ago" is in one clock.</summary>
+    private const string ReadAtColumn = "read_at";
+
+    /// <summary>
+    /// The columns read whatever <c>EnableExtendedProgressionTracking</c> says, when the table has them: when the shard last
+    /// advanced - stamped on every progress write since #4981, the projections screen's liveness column - and the two per-row
+    /// thresholds, which Marten creates and writes nothing to (#5173) and the screen honours when a host does.
+    /// </summary>
+    private static readonly string[] ProgressColumns = ["last_updated", "warning_behind_threshold", "critical_behind_threshold"];
+
+    /// <summary>
+    /// The two rows in <c>mt_event_progression</c> that are high-water bookkeeping and not shards.
+    /// </summary>
+    /// <remarks>
+    /// <c>HighWaterAllocationFence.ProgressionName</c> and <c>HighWaterStuckGap.ProgressionName</c>
+    /// (Marten 9.35, <c>Events/Daemon/HighWater/HighWaterStatisticsDetector.cs</c>), which Marten's own
+    /// statement excludes in SQL. Both classes are <c>internal</c>, so the strings are repeated here
+    /// rather than referenced. They are not the studio's defence against a bookkeeping row being rendered
+    /// as a projection - <c>ProjectionDataService.IsBookkeepingRow</c> is, and it is the general rule
+    /// rather than a list of names - they are here so that this statement returns the same rows Marten's
+    /// does.
+    /// </remarks>
+    private static readonly string[] BookkeepingRowNames = ["HighWaterAllocationFence", "HighWaterStuckGap"];
+
+    /// <summary>
+    /// The progression rows of one database, with whichever of the optional columns the table has.
+    /// </summary>
+    /// <param name="schema">The event store's schema - <c>StoreOptions.Events.DatabaseSchemaName</c>.</param>
+    /// <param name="physicalColumns">
+    /// What <c>information_schema</c> says <c>mt_event_progression</c> has. An empty set is a caller bug:
+    /// probe the table first and answer "no event store here" instead of building a statement against a
+    /// table that does not exist.
+    /// </param>
+    /// <param name="extendedProgressionTracking">
+    /// <c>StoreOptions.Events.EnableExtendedProgressionTracking</c>, which is what decides whether anything
+    /// <em>writes</em> the optional columns. No default: a wrong guess either invents telemetry or drops
+    /// it, and both are silent.
+    /// </param>
+    /// <param name="tenantId">
+    /// When set, only rows whose name ends in <c>:{tenantId}</c>. Marten's own filter, and the caller
+    /// decides when it means anything - see <c>ProjectionDataService</c>.
+    /// </param>
+    /// <param name="commandTimeout">A bound on the read, from <c>MartenOptions.QueryTimeout</c>.</param>
+    public static NpgsqlCommand BuildProgressionRows(
+        string schema,
+        IReadOnlyCollection<string> physicalColumns,
+        bool extendedProgressionTracking,
+        string? tenantId = null,
+        TimeSpan? commandTimeout = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(schema);
+        ArgumentNullException.ThrowIfNull(physicalColumns);
+
+        var command = new NpgsqlCommand();
+
+        try
+        {
+            var sql = new System.Text.StringBuilder();
+
+            sql.Append("select ").Append(SqlIdentifier.Quote(NameColumn))
+                .Append(", ").Append(SqlIdentifier.Quote(SequenceColumn))
+                .Append(", transaction_timestamp() as ").Append(SqlIdentifier.Quote(ReadAtColumn));
+
+            foreach (var column in SelectedColumns(physicalColumns, extendedProgressionTracking))
+            {
+                sql.Append(", ").Append(SqlIdentifier.Quote(column));
+            }
+
+            sql.Append("\nfrom ").Append(SqlIdentifier.Qualify(schema, ProgressionTable)).Append('\n');
+
+            // The tenant suffix as a value and not a pattern. Marten changed this from `name like '%:' ||
+            // tenant` for the same reason it is written this way here: `_` is both a legal tenant-id
+            // character and a LIKE wildcard, so tenant `acme_corp` also matched `acmeXcorp`'s rows.
+            sql.Append("where (@tenantSuffix is null or right(")
+                .Append(SqlIdentifier.Quote(NameColumn))
+                .Append(", char_length(@tenantSuffix)) = @tenantSuffix)\n");
+
+            sql.Append("  and ").Append(SqlIdentifier.Quote(NameColumn)).Append(" <> all(@bookkeeping)\n");
+            sql.Append("order by ").Append(SqlIdentifier.Quote(NameColumn));
+
+            command.CommandText = sql.ToString();
+
+            command.Parameters.Add(new NpgsqlParameter("tenantSuffix", NpgsqlDbType.Text)
+            {
+                Value = tenantId is { Length: > 0 } tenant ? ":" + tenant : DBNull.Value,
+            });
+
+            command.Parameters.Add(new NpgsqlParameter("bookkeeping", NpgsqlDbType.Array | NpgsqlDbType.Text)
+            {
+                Value = BookkeepingRowNames,
+            });
+
+            ApplyTimeout(command, commandTimeout);
+
+            return command;
+        }
+        catch
+        {
+            command.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Whether <c>mt_event_progression</c> holds a row called exactly <paramref name="name" /> - one row, by its name, as a value.
+    /// </summary>
+    /// <param name="schema">The event store's schema.</param>
+    /// <param name="name">The row's name, as the table holds it.</param>
+    /// <param name="commandTimeout">A bound on the read.</param>
+    public static NpgsqlCommand BuildProgressionRowExists(string schema, string name, TimeSpan? commandTimeout = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(schema);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+
+        var command = new NpgsqlCommand();
+
+        try
+        {
+            command.CommandText =
+                "select exists (select 1 from " + SqlIdentifier.Qualify(schema, ProgressionTable)
+                + " where " + SqlIdentifier.Quote(NameColumn) + " = @name)";
+
+            command.Parameters.Add(new NpgsqlParameter("name", NpgsqlDbType.Varchar) { Value = name });
+
+            ApplyTimeout(command, commandTimeout);
+
+            return command;
+        }
+        catch
+        {
+            command.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Whether the progression table holds a row called exactly <paramref name="name" />; <see langword="false" /> when the table
+    /// does not exist. A read of that one name - not of the table.
+    /// </summary>
+    /// <param name="connection">An open read connection to the database in scope.</param>
+    /// <param name="catalog">The shared, expiring catalog.</param>
+    /// <param name="schema">The event store's schema.</param>
+    /// <param name="name">The row's name.</param>
+    /// <param name="commandTimeout">A bound on the read.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    public static async Task<bool> ProgressionRowExistsAsync(
+        NpgsqlConnection connection,
+        ColumnCatalog catalog,
+        string schema,
+        string name,
+        TimeSpan? commandTimeout,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(catalog);
+
+        TableColumns table = await catalog
+            .GetAsync(connection, schema, ProgressionTable, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (!table.Exists)
+        {
+            return false;
+        }
+
+        await using NpgsqlCommand command = BuildProgressionRowExists(schema, name, commandTimeout);
+        command.Connection = connection;
+
+        return await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) is true;
+    }
+
+    /// <summary>
+    /// The highest assigned event sequence number, which every projection lag is measured against.
+    /// </summary>
+    /// <param name="schema">The event store's schema.</param>
+    /// <param name="tenantPartitionedEvents">
+    /// <c>StoreOptions.Events.UseTenantPartitionedEvents</c>. Marten reads <c>max(seq_id)</c> in that mode
+    /// because each tenant's events draw their sequence from a partition sequence of their own and the
+    /// store-global <c>mt_events_sequence</c> is never advanced - its <c>last_value</c> reads as 1.
+    /// </param>
+    /// <param name="commandTimeout">A bound on the read.</param>
+    /// <remarks>
+    /// <para>
+    /// <c>last_value</c> is not a count and not the daemon's high-water mark: a sequence hands numbers out
+    /// before the transaction that took them commits, and burns them outright when it rolls back. That is
+    /// the number Marten answers and therefore the number the studio answers, and the places that render
+    /// it say what it is.
+    /// </para>
+    /// <para>
+    /// <b>Except on a sequence nothing has drawn from.</b> Postgres reports <c>last_value = 1</c>,
+    /// <c>is_called = false</c> for a fresh sequence - the value the <em>next</em> <c>nextval</c> will
+    /// return, not one that was ever handed out. Read as it stands, a store whose event tables exist and
+    /// hold no event had a high-water mark of 1, every async projection lagged it by one, and the
+    /// projections page raised its "nothing appears to be running these projections" alarm on a fresh
+    /// install (<c>ProjectionsView.NoDaemonAnywhere</c> needs a mark above zero precisely so that it does
+    /// not). Marten's own detector made the same correction for the same reason (its #5091: "the
+    /// allocated high reads 0 for a pristine sequence"). So the statement is
+    /// <c>case when is_called then last_value else 0 end</c>, and a sequence that has handed out 1 still
+    /// reads 1.
+    /// </para>
+    /// </remarks>
+    public static NpgsqlCommand BuildHighWaterMark(
+        string schema,
+        bool tenantPartitionedEvents,
+        TimeSpan? commandTimeout = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(schema);
+
+        var command = new NpgsqlCommand();
+
+        try
+        {
+            command.CommandText = tenantPartitionedEvents
+                ? "select coalesce(max(" + SqlIdentifier.Quote("seq_id") + "), 0) from "
+                  + SqlIdentifier.Qualify(schema, EventTableInfo.EventsTable)
+                : "select case when is_called then last_value else 0 end from "
+                  + SqlIdentifier.Qualify(schema, EventsSequence);
+
+            ApplyTimeout(command, commandTimeout);
+
+            return command;
+        }
+        catch
+        {
+            command.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// The progression rows of one database, or an empty list when the table does not exist.
+    /// </summary>
+    /// <param name="connection">An open read connection to the database in scope.</param>
+    /// <param name="catalog">The shared, expiring <c>information_schema</c> catalog.</param>
+    /// <param name="schema">The event store's schema.</param>
+    /// <param name="extendedProgressionTracking">
+    /// <c>StoreOptions.Events.EnableExtendedProgressionTracking</c>. With it off the optional columns are
+    /// not asked for, because nothing is writing them - see the class remarks.
+    /// </param>
+    /// <param name="tenantId">The tenant suffix filter, or <see langword="null" /> for every row.</param>
+    /// <param name="commandTimeout">A bound on the read.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    /// <returns>
+    /// The rows, and whether <c>mt_event_progression</c> exists at all - which are different answers: a
+    /// store whose daemon has never run has the table and no rows.
+    /// </returns>
+    public static async Task<ProgressionRows> ReadProgressionRowsAsync(
+        NpgsqlConnection connection,
+        ColumnCatalog catalog,
+        string schema,
+        bool extendedProgressionTracking,
+        string? tenantId,
+        TimeSpan? commandTimeout,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(catalog);
+
+        TableColumns table = await catalog
+            .GetAsync(connection, schema, ProgressionTable, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (!table.Exists)
+        {
+            return ProgressionRows.NoTable;
+        }
+
+        string[] columns = [.. table.Columns.Select(x => x.Name)];
+
+        await using NpgsqlCommand command =
+            BuildProgressionRows(schema, columns, extendedProgressionTracking, tenantId, commandTimeout);
+        command.Connection = connection;
+
+        // Which optional columns were selected decides what the ordinals after the first two mean, so the
+        // reader walks the same list the builder did rather than asking the reader for names.
+        string[] selected = [.. SelectedColumns(columns, extendedProgressionTracking)];
+
+        List<ProgressionRow> rows = [];
+
+        await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            rows.Add(ReadRow(reader, selected));
+        }
+
+        return new ProgressionRows(rows, TableExists: true);
+    }
+
+    /// <summary>
+    /// The high-water mark, or <see langword="null" /> when this database has no event store to read it
+    /// from.
+    /// </summary>
+    /// <param name="connection">An open read connection to the database in scope.</param>
+    /// <param name="catalog">The shared, expiring <c>information_schema</c> catalog.</param>
+    /// <param name="schema">The event store's schema.</param>
+    /// <param name="tenantPartitionedEvents"><c>StoreOptions.Events.UseTenantPartitionedEvents</c>.</param>
+    /// <param name="commandTimeout">A bound on the read.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    /// <remarks>
+    /// The probe is of the object the statement actually reads, which is the sequence in the ordinary case
+    /// and the table in the partitioned one. A store that has <c>mt_events</c> and no
+    /// <c>mt_events_sequence</c> - or the reverse - is not a shape Marten creates, but it is a shape a
+    /// half-applied migration leaves behind, and answering <see langword="null" /> for it is what keeps
+    /// the page a page instead of a stack trace.
+    /// </remarks>
+    public static async Task<long?> ReadHighWaterMarkAsync(
+        NpgsqlConnection connection,
+        ColumnCatalog catalog,
+        string schema,
+        bool tenantPartitionedEvents,
+        TimeSpan? commandTimeout,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(catalog);
+
+        if (tenantPartitionedEvents)
+        {
+            TableColumns events = await catalog
+                .GetAsync(connection, schema, EventTableInfo.EventsTable, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (!events.Exists)
+            {
+                return null;
+            }
+        }
+        else if (!await catalog.HasSequenceAsync(connection, schema, EventsSequence, cancellationToken).ConfigureAwait(false))
+        {
+            return null;
+        }
+
+        await using NpgsqlCommand command = BuildHighWaterMark(schema, tenantPartitionedEvents, commandTimeout);
+        command.Connection = connection;
+
+        object? scalar = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+
+        return scalar switch
+        {
+            null or DBNull => null,
+            long value => value,
+            _ => Convert.ToInt64(scalar, CultureInfo.InvariantCulture),
+        };
+    }
+
+    /// <summary>
+    /// The start floors stored for one projection, every tenant's - <c>mt_event_projection_floors</c>, Marten 9.52's
+    /// table (#5740, <c>Marten.Events.Schema.ProjectionFloorTable</c>).
+    /// </summary>
+    /// <param name="schema">The event store's schema.</param>
+    /// <param name="projectionName">
+    /// The projection's name, which is <c>ShardName.Name</c>: the floors are keyed by it <em>without</em> the version, so a
+    /// version bump inherits them, and by tenant - the empty string for a store-global floor.
+    /// </param>
+    /// <param name="commandTimeout">A bound on the read.</param>
+    /// <remarks>
+    /// <b>Why this is not <c>IEventDatabase.FetchProjectionFloorAsync</c>.</b> Marten's floor reads open with
+    /// <c>EnsureStorageExistsAsync(typeof(IEvent))</c> (<c>MartenDatabase.ProjectionFloors.cs</c> at <c>V9.54.1</c>), which
+    /// creates or migrates the event store under the database's <c>AutoCreate</c> - and on a store migrated below 9.52
+    /// creates this very table - because somebody opened a rebuild dialog (hard rule 14). The statement is Marten's own
+    /// <c>select floor ... where name = :name</c>, for every tenant at once.
+    /// </remarks>
+    public static NpgsqlCommand BuildProjectionFloors(string schema, string projectionName, TimeSpan? commandTimeout = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(schema);
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectionName);
+
+        var command = new NpgsqlCommand();
+
+        try
+        {
+            command.CommandText =
+                "select " + SqlIdentifier.Quote("tenant_id") + ", " + SqlIdentifier.Quote("floor")
+                + " from " + SqlIdentifier.Qualify(schema, ProjectionFloorsTable)
+                + " where " + SqlIdentifier.Quote("name") + " = @name"
+                + " order by " + SqlIdentifier.Quote("tenant_id");
+
+            command.Parameters.Add(new NpgsqlParameter("name", NpgsqlDbType.Varchar) { Value = projectionName });
+
+            ApplyTimeout(command, commandTimeout);
+
+            return command;
+        }
+        catch
+        {
+            command.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// The start floors stored for one projection, or <see langword="null" /> when this database has no
+    /// <c>mt_event_projection_floors</c> - a store migrated below Marten 9.52, or no event store at all - which is not the
+    /// same answer as "none stored".
+    /// </summary>
+    /// <param name="connection">An open read connection to the database in scope.</param>
+    /// <param name="catalog">The shared, expiring <c>information_schema</c> catalog.</param>
+    /// <param name="schema">The event store's schema.</param>
+    /// <param name="projectionName">The projection's name, without its version.</param>
+    /// <param name="commandTimeout">A bound on the read.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    public static async Task<IReadOnlyList<ProjectionFloorRow>?> ReadProjectionFloorsAsync(
+        NpgsqlConnection connection,
+        ColumnCatalog catalog,
+        string schema,
+        string projectionName,
+        TimeSpan? commandTimeout,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(catalog);
+
+        TableColumns table = await catalog
+            .GetAsync(connection, schema, ProjectionFloorsTable, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (!table.Exists)
+        {
+            return null;
+        }
+
+        await using NpgsqlCommand command = BuildProjectionFloors(schema, projectionName, commandTimeout);
+        command.Connection = connection;
+
+        List<ProjectionFloorRow> rows = [];
+
+        await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            rows.Add(new ProjectionFloorRow(reader.IsDBNull(0) ? string.Empty : reader.GetString(0), reader.GetInt64(1)));
+        }
+
+        return rows;
+    }
+
+    /// <summary>
+    /// Every column this read asks for after name, position and the read time, in select order: the progress
+    /// columns the table has (whatever the flag says), then the extended ones under the flag.
+    /// </summary>
+    /// <param name="physicalColumns">What <c>information_schema</c> says the table has.</param>
+    /// <param name="extendedProgressionTracking"><c>StoreOptions.Events.EnableExtendedProgressionTracking</c>.</param>
+    internal static IEnumerable<string> SelectedColumns(IReadOnlyCollection<string> physicalColumns, bool extendedProgressionTracking) =>
+        ProgressColumns.Where(x => physicalColumns.Contains(x, StringComparer.Ordinal))
+            .Concat(SelectedOptionalColumns(physicalColumns, extendedProgressionTracking));
+
+    /// <summary>
+    /// The extended-tracking columns this read asks for, in select order: none at all unless the store's own flag
+    /// says something is writing them, and then only those the table really has.
+    /// </summary>
+    /// <param name="physicalColumns">What <c>information_schema</c> says the table has.</param>
+    /// <param name="extendedProgressionTracking">
+    /// <c>StoreOptions.Events.EnableExtendedProgressionTracking</c>. The columns exist on every migrated table
+    /// regardless of it (Marten 9.35 #5309), so this is the half that decides whether the values mean anything.
+    /// </param>
+    internal static IEnumerable<string> SelectedOptionalColumns(
+        IReadOnlyCollection<string> physicalColumns,
+        bool extendedProgressionTracking) =>
+        extendedProgressionTracking
+            ? OptionalColumns.Where(x => physicalColumns.Contains(x, StringComparer.Ordinal))
+            : [];
+
+    private static ProgressionRow ReadRow(NpgsqlDataReader reader, string[] selected)
+    {
+        var row = new ProgressionRow(reader.GetString(0), reader.GetInt64(1)) { ReadAt = reader.GetFieldValue<DateTimeOffset>(2) };
+
+        for (var i = 0; i < selected.Length; i++)
+        {
+            var ordinal = i + 3;
+
+            if (reader.IsDBNull(ordinal))
+            {
+                continue;
+            }
+
+            row = selected[i] switch
+            {
+                "last_updated" => row with { LastUpdated = reader.GetFieldValue<DateTimeOffset>(ordinal) },
+                "warning_behind_threshold" => row with { WarningBehindThreshold = reader.GetInt64(ordinal) },
+                "critical_behind_threshold" => row with { CriticalBehindThreshold = reader.GetInt64(ordinal) },
+                "heartbeat" => row with { LastHeartbeat = reader.GetFieldValue<DateTimeOffset>(ordinal) },
+                "agent_status" => row with { AgentStatus = reader.GetString(ordinal) },
+                "pause_reason" => row with { PauseReason = reader.GetString(ordinal) },
+                "running_on_node" => row with { RunningOnNode = reader.GetInt32(ordinal) },
+                "failure_category" => row with { FailureCategory = reader.GetString(ordinal) },
+                "failure_event_sequence" => row with { FailureEventSequence = reader.GetInt64(ordinal) },
+                "failure_event_type" => row with { FailureEventType = reader.GetString(ordinal) },
+                "failure_event_tenant_id" => row with { FailureEventTenantId = reader.GetString(ordinal) },
+                _ => row,
+            };
+        }
+
+        return row;
+    }
+
+    /// <summary>
+    /// Puts the caller's budget on the command, rounded up to whole seconds and never to zero, which is
+    /// Npgsql for "wait forever".
+    /// </summary>
+    private static void ApplyTimeout(NpgsqlCommand command, TimeSpan? commandTimeout)
+    {
+        if (commandTimeout is { } timeout)
+        {
+            command.CommandTimeout = Math.Max((int) Math.Ceiling(timeout.TotalSeconds), 1);
+        }
+    }
+}
+
+/// <summary>One stored projection start floor, exactly as <c>mt_event_projection_floors</c> holds it.</summary>
+/// <param name="TenantId">The tenant the floor is for: the empty string for a store-global floor, which is every floor
+/// except under <c>UseTenantPartitionedEvents</c>.</param>
+/// <param name="Floor">The sequence a start or a rebuild begins after.</param>
+internal sealed record ProjectionFloorRow(string TenantId, long Floor);
+
+/// <summary>
+/// What one read of <c>mt_event_progression</c> found.
+/// </summary>
+/// <remarks>
+/// "No table" and "no rows" are drawn differently: the first means this database has no event store at
+/// all, the second means it has one and the daemon has never written to it.
+/// </remarks>
+/// <param name="Rows">The rows, in name order.</param>
+/// <param name="TableExists">Whether <c>mt_event_progression</c> exists in this database.</param>
+internal sealed record ProgressionRows(IReadOnlyList<ProgressionRow> Rows, bool TableExists)
+{
+    /// <summary>There is no progression table in this database.</summary>
+    public static ProgressionRows NoTable { get; } = new([], false);
+}

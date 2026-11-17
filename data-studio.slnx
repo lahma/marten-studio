@@ -1,0 +1,48 @@
+<Solution>
+  <Folder Name="/solution items/">
+    <File Path="AGENTS.md" />
+    <File Path="CHANGELOG.md" />
+    <File Path="Directory.Build.props" />
+    <File Path="Directory.Packages.props" />
+    <File Path="README.md" />
+    <File Path="global.json" />
+    <File Path="nuget.config" />
+  </Folder>
+  <Folder Name="/build/">
+    <!-- Build="false": the Fallout orchestrator is already running out of build/bin when
+         Compile builds the solution, so building it again would fail to overwrite the locked
+         _build.exe. Same shape as Fallout's own fallout.slnx. -->
+    <Project Path="build/_build.csproj">
+      <Configuration Solution="Debug|Any CPU" Project="Debug|Any CPU|NoBuild" />
+      <Configuration Solution="Release|Any CPU" Project="Debug|Any CPU|NoBuild" />
+      <Build Project="false" />
+    </Project>
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/DataStudio/DataStudio.csproj" />
+    <Project Path="src/DataStudio.Marten/DataStudio.Marten.csproj" />
+    <Project Path="src/DataStudio.Postgres.Diagnostics/DataStudio.Postgres.Diagnostics.csproj" />
+    <Project Path="src/DataStudio.Postgres/DataStudio.Postgres.csproj" />
+    <Project Path="src/DataStudio.Kafka.Core/DataStudio.Kafka.Core.csproj" />
+    <Project Path="src/DataStudio.Kafka/DataStudio.Kafka.csproj" />
+    <Project Path="src/DataStudio.Kafka.Wolverine/DataStudio.Kafka.Wolverine.csproj" />
+  </Folder>
+  <Folder Name="/samples/">
+    <Project Path="samples/DataStudio.Sample.Marten.Domain/DataStudio.Sample.Marten.Domain.csproj" />
+    <Project Path="samples/DataStudio.Sample.Marten/DataStudio.Sample.Marten.csproj" />
+    <Project Path="samples/DataStudio.Sample.Kafka/DataStudio.Sample.Kafka.csproj" />
+    <Project Path="samples/DataStudio.Sample.Postgres.Data/DataStudio.Sample.Postgres.Data.csproj" />
+    <Project Path="samples/DataStudio.Sample.Postgres/DataStudio.Sample.Postgres.csproj" />
+    <Project Path="samples/DataStudio.Sample.Postgres.Worker/DataStudio.Sample.Postgres.Worker.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/DataStudio.Tests/DataStudio.Tests.csproj" />
+    <Project Path="tests/DataStudio.Marten.Tests/DataStudio.Marten.Tests.csproj" />
+    <Project Path="tests/DataStudio.Marten.Integration.Tests/DataStudio.Marten.Integration.Tests.csproj" />
+    <Project Path="tests/DataStudio.Postgres.Tests/DataStudio.Postgres.Tests.csproj" />
+    <Project Path="tests/DataStudio.Postgres.Integration.Tests/DataStudio.Postgres.Integration.Tests.csproj" />
+    <Project Path="tests/DataStudio.Kafka.Tests/DataStudio.Kafka.Tests.csproj" />
+    <Project Path="tests/DataStudio.Kafka.Integration.Tests/DataStudio.Kafka.Integration.Tests.csproj" />
+    <Project Path="tests/DataStudio.Kafka.Wolverine.Tests/DataStudio.Kafka.Wolverine.Tests.csproj" />
+  </Folder>
+</Solution>

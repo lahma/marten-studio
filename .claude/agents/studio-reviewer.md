@@ -1,6 +1,6 @@
 ---
 name: studio-reviewer
-description: Adversarially reviews a completed Marten Studio task packet against its acceptance criteria and AGENTS.md — read-only, finds what the implementer's own tests would not catch, and returns ACCEPT / ACCEPT WITH FOLLOW-UPS / REJECT with evidence. Use after every implementer run, before the change is integrated.
+description: Adversarially reviews a completed Data Studio task packet against its acceptance criteria and AGENTS.md — read-only, finds what the implementer's own tests would not catch, and returns ACCEPT / ACCEPT WITH FOLLOW-UPS / REJECT with evidence. Use after every implementer run, before the change is integrated.
 model: opus
 effort: xhigh
 tools: Read, Glob, Grep, Bash, PowerShell, WebFetch, TodoWrite
@@ -26,7 +26,7 @@ orchestrator gives you.
    `WITH x AS (DELETE …) SELECT`, a leading comment hiding an `UPDATE`, `DO $$`, `COPY … FROM`, `CALL`,
    `SET`, and statement chaining — and is the read-only transaction the real guarantee? Is any identifier
    interpolated into SQL rather than quoted through the builder? Can a `tenant_id` the visitor is not
-   authorized for be reached? Does `AddMartenStudio()` change anything about the host (a global style,
+   authorized for be reached? Does `AddDataStudio()`, or a module's `Add…()`, change anything about the host (a global style,
    a changed default, an endpoint outside the studio path)?
 2. **The acceptance criteria, tested honestly.** For each one, find the test that proves it and read it.
    A test that only asserts a method was called, a test with no assertion, a `Skip` with no reason, a

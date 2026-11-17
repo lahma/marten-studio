@@ -1,0 +1,328 @@
+
+namespace DataStudio.Sample.Marten;
+
+/// <summary>
+/// The switches the demo host understands, read from the command line it was started with.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>A bare boolean switch is true and consumes nothing.</b> <c>--anonymous</c>, <c>--readonly</c>,
+/// <c>--allow-data-generation</c> and <c>--no-daemon</c> are switches, not <c>--key value</c> pairs: writing one means
+/// <see langword="true" /> and the next token is left entirely alone, so
+/// <c>dotnet run -- --anonymous --urls http://localhost:5000</c> starts an anonymous studio on port 5000
+/// and the order of the two does not matter. An explicit value is still accepted where a script wants to
+/// pass a variable — <c>--readonly true</c>, <c>--readonly false</c> and <c>--readonly=false</c> all
+/// work — and <em>only</em> a literal <c>true</c> or <c>false</c> is taken as one. <c>--path</c> is a
+/// pair and does take the token after it.
+/// </para>
+/// <para>
+/// <b>Three things are refused rather than guessed at</b>, each because guessing was silently wrong.
+/// An <c>=</c> value that is not a literal <c>true</c> or <c>false</c> — <c>--readonly=yes</c>,
+/// <c>--readonly=1</c>, <c>--readonly=on</c> — throws instead of yielding <see langword="false" />:
+/// writing the <c>=</c> is a claim that this token is the whole argument, and reading "yes" as "no" on
+/// the one switch that means <em>turn writes off</em> is the worst direction for a parser to fail in.
+/// A <c>--path</c> whose value begins with <c>-</c> throws instead of mounting the studio at
+/// <c>--urls</c> and swallowing the URL after it. And a switch is matched case-insensitively with a
+/// leading <c>/</c> read as <c>--</c>, so <c>--Anonymous</c> and <c>/anonymous</c> are the switch they
+/// obviously are rather than unrecognised tokens handed to the host — which is where they went before,
+/// and the host's provider then ate the token after them exactly as described below.
+/// </para>
+/// <para>
+/// <b>This is not how .NET's own command-line configuration provider reads arguments</b>, which is the
+/// whole reason the rule is written down. <c>WebApplication.CreateBuilder(args)</c> adds
+/// <c>CommandLineConfigurationProvider</c>, and that provider treats every <c>--key</c> without an
+/// <c>=</c> as the first half of a pair and swallows whatever follows it. So <c>--anonymous --urls
+/// http://localhost:5000</c> bound <c>anonymous</c> to the string <c>"--urls"</c> and then dropped the
+/// orphaned <c>http://localhost:5000</c> entirely — its <c>Load()</c> skips any token with no <c>-</c>,
+/// <c>--</c> or <c>/</c> prefix (read off the 10.0.12 assembly; an older .NET threw a
+/// <c>FormatException</c> there, and this one does not). Nothing warned, nothing threw, and Kestrel
+/// listened on the default port while the person who typed the command watched the wrong URL.
+/// <see cref="HostArguments" /> is what reconciles the two: it hands the builder the same command line
+/// with this record's own switches rewritten to the <c>--key=value</c> form the provider parses without
+/// consuming a neighbour, and every other argument — <c>--urls</c>, <c>--environment</c>, anything a host
+/// understands — passed through untouched, in order.
+/// </para>
+/// </remarks>
+/// <param name="Anonymous">
+/// <c>--anonymous</c>: map the studio with <c>AllowAnonymous()</c> instead of a policy, to show what an
+/// unauthenticated studio looks like. Never do this anywhere real.
+/// </param>
+/// <param name="ReadOnly">
+/// <c>--readonly</c>: set <see cref="DataStudioOptions.ReadOnly" />, which turns every mutating
+/// capability off however they were configured.
+/// </param>
+/// <param name="Path">
+/// <c>--path /ops/marten</c>: mount the studio somewhere other than <c>/studio</c>, which is what
+/// exercises the sub-path re-rooting.
+/// </param>
+/// <param name="AllowDataGeneration">
+/// <c>--allow-data-generation</c>: map the demo-data panel and its endpoints even outside Development.
+/// Generating a million documents is a write, and a long one, so outside a developer's own machine it
+/// has to be asked for on the command line rather than implied by being signed in as an admin.
+/// It also lets startup run <c>drop schema … cascade</c> on <c>studio_sample</c> and
+/// <c>studio_sample_events</c> when another build seeded them or their rows carry no seed marker
+/// (<see cref="SampleDatabaseCheck" />), and the cascade drops whatever in other schemas depends on them too.
+/// </param>
+/// <param name="NoDaemon">
+/// <c>--no-daemon</c>: register the store without hosting its async daemon here, the shape of a
+/// production host whose projections run in another process - or nowhere, on purpose. The studio shows
+/// progress read from the database, says there is no daemon in this process, and logs nothing about it
+/// above Debug.
+/// </param>
+internal sealed record SampleOptions(bool Anonymous, bool ReadOnly, string? Path, bool AllowDataGeneration, bool NoDaemon = false)
+{
+    /// <summary>The boolean switches, in the spelling the command line uses.</summary>
+    private const string AnonymousSwitch = "--anonymous";
+    private const string ReadOnlySwitch = "--readonly";
+    private const string AllowDataGenerationSwitch = "--allow-data-generation";
+    private const string NoDaemonSwitch = "--no-daemon";
+
+    /// <summary>The one switch that really is a <c>--key value</c> pair.</summary>
+    private const string PathSwitch = "--path";
+
+    /// <summary>Every switch this record understands, in the canonical spelling <c>Normalize</c> maps to.</summary>
+    private static readonly string[] Switches =
+        [AnonymousSwitch, ReadOnlySwitch, AllowDataGenerationSwitch, NoDaemonSwitch, PathSwitch];
+
+    /// <summary>
+    /// Whether the demo-data endpoints are mapped at all.
+    /// </summary>
+    /// <param name="environment">The host environment.</param>
+    /// <remarks>
+    /// Development or the explicit switch, and nothing else. A production host that never passed the
+    /// switch does not have the endpoints, so the answer to a POST is 404 rather than 403 - there is
+    /// nothing there to be refused.
+    /// </remarks>
+    public bool DataGenerationEnabled(IHostEnvironment environment)
+    {
+        ArgumentNullException.ThrowIfNull(environment);
+
+        return environment.IsDevelopment() || AllowDataGeneration;
+    }
+
+    /// <summary>Reads the switches out of <paramref name="args" />, ignoring anything else.</summary>
+    public static SampleOptions Parse(string[] args)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+
+        bool anonymous = false;
+        bool readOnly = false;
+        string? path = null;
+        bool allowDataGeneration = false;
+        bool noDaemon = false;
+
+        foreach (Argument argument in Read(args))
+        {
+            switch (argument.Name)
+            {
+                case AnonymousSwitch:
+                    anonymous = argument.Flag;
+                    break;
+                case ReadOnlySwitch:
+                    readOnly = argument.Flag;
+                    break;
+                case AllowDataGenerationSwitch:
+                    allowDataGeneration = argument.Flag;
+                    break;
+                case NoDaemonSwitch:
+                    noDaemon = argument.Flag;
+                    break;
+                case PathSwitch when argument.Value is { Length: > 0 } value:
+                    path = value;
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        return new SampleOptions(anonymous, readOnly, path, allowDataGeneration, noDaemon);
+    }
+
+    /// <summary>
+    /// The command line to hand to <c>WebApplication.CreateBuilder</c>.
+    /// </summary>
+    /// <remarks>
+    /// Every switch this record understands comes back in the <c>--key=value</c> form, which .NET's
+    /// command-line configuration provider reads without consuming the token after it; everything else is
+    /// passed through verbatim and in order, so <c>--urls</c>, <c>--environment</c> and any other host
+    /// argument keep working wherever they are written. See the note on the type for what goes wrong
+    /// without this.
+    /// </remarks>
+    public static string[] HostArguments(string[] args)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+
+        List<string> host = new(args.Length);
+
+        foreach (Argument argument in Read(args))
+        {
+            if (argument.Name is null)
+            {
+                host.Add(argument.Token);
+                continue;
+            }
+
+            if (argument.Name == PathSwitch)
+            {
+                // A --path with nothing after it is dropped rather than passed on: it is this record's
+                // switch, and left in place the provider would swallow whatever came next.
+                if (argument.Value is { Length: > 0 } value)
+                {
+                    host.Add(PathSwitch + "=" + value);
+                }
+
+                continue;
+            }
+
+            host.Add(argument.Name + "=" + (argument.Flag ? "true" : "false"));
+        }
+
+        return [.. host];
+    }
+
+    /// <summary>One token of the command line, and what this record made of it.</summary>
+    /// <param name="Token">The token verbatim, which is what an unrecognised argument is passed on as.</param>
+    /// <param name="Name">The switch it named, or <see langword="null" /> for anything not ours.</param>
+    /// <param name="Flag">A boolean switch's value.</param>
+    /// <param name="Value"><c>--path</c>'s value.</param>
+    private readonly record struct Argument(string Token, string? Name, bool Flag, string? Value);
+
+    /// <summary>
+    /// Walks the command line once, recognising this record's switches and leaving everything else alone.
+    /// </summary>
+    /// <remarks>
+    /// The single place the "present means true, and only a literal true/false is a value" rule is
+    /// written, so <see cref="Parse" /> and <see cref="HostArguments" /> cannot disagree about which
+    /// tokens belong to this record and which belong to the host.
+    /// </remarks>
+    private static IEnumerable<Argument> Read(string[] args)
+    {
+        for (int i = 0; i < args.Length; i++)
+        {
+            string token = args[i];
+            string name = token;
+            string? inline = null;
+
+            int equals = token.IndexOf('=');
+            if (equals > 0)
+            {
+                name = token[..equals];
+                inline = token[(equals + 1)..];
+            }
+
+            name = Normalize(name);
+
+            switch (name)
+            {
+                case AnonymousSwitch:
+                case ReadOnlySwitch:
+                case AllowDataGenerationSwitch:
+                case NoDaemonSwitch:
+                    if (inline is not null)
+                    {
+                        // An inline value is an explicit claim that this token is the whole argument, so
+                        // anything but a literal true/false is a mistake rather than somebody else's
+                        // token - and the one switch it matters most for is --readonly, where taking
+                        // "yes" for false would turn writes back on for a person who asked for them off.
+                        if (!IsBoolean(inline))
+                        {
+                            throw new ArgumentException(
+                                $"'{token}' is not a value this sample understands. {name} takes true or " +
+                                "false (any casing), or nothing at all, which means true.",
+                                nameof(args));
+                        }
+
+                        yield return new Argument(token, name, IsTrue(inline), null);
+                        break;
+                    }
+
+                    // The next token is consumed only when it is literally "true" or "false". Anything
+                    // else - another switch, a URL, a path - belongs to whoever else is reading this
+                    // command line.
+                    if (i + 1 < args.Length && IsBoolean(args[i + 1]))
+                    {
+                        yield return new Argument(token, name, IsTrue(args[i + 1]), null);
+                        i++;
+                        break;
+                    }
+
+                    yield return new Argument(token, name, true, null);
+                    break;
+
+                case PathSwitch:
+                    if (inline is not null)
+                    {
+                        if (inline.StartsWith('-'))
+                        {
+                            throw new ArgumentException(NotAPath(token, inline), nameof(args));
+                        }
+
+                        yield return new Argument(token, name, false, inline);
+                        break;
+                    }
+
+                    if (i + 1 < args.Length)
+                    {
+                        // --path really is a --key value pair, so the token after it is consumed. One
+                        // that begins with a dash is another switch, not a mount path: taking it would
+                        // mount the studio at "--urls" *and* swallow the URL that followed, which is
+                        // exactly the silent failure HostArguments exists to stop.
+                        if (args[i + 1].StartsWith('-'))
+                        {
+                            throw new ArgumentException(NotAPath(token, args[i + 1]), nameof(args));
+                        }
+
+                        yield return new Argument(token, name, false, args[i + 1]);
+                        i++;
+                        break;
+                    }
+
+                    yield return new Argument(token, name, false, null);
+                    break;
+
+                default:
+                    yield return new Argument(token, null, false, null);
+                    break;
+            }
+        }
+    }
+
+    /// <summary>
+    /// The switch name this token spells, in the one form <see cref="Read" /> matches on.
+    /// </summary>
+    /// <remarks>
+    /// Case-insensitively, and with a leading <c>/</c> read as <c>--</c>. Both spellings are ones .NET's
+    /// own command-line configuration provider accepts, so a person who writes <c>--Anonymous</c> or
+    /// <c>/anonymous</c> has written something the host half of this command line understands perfectly
+    /// well - and before this, the sample half did not recognise it, passed the token through verbatim,
+    /// and the provider went back to swallowing whatever followed it. A switch that silently means
+    /// nothing because of its casing is worse than one that is not supported at all.
+    /// </remarks>
+    private static string Normalize(string name)
+    {
+        string dashed = name.StartsWith('/') ? "--" + name[1..] : name;
+
+        foreach (string known in Switches)
+        {
+            if (dashed.Equals(known, StringComparison.OrdinalIgnoreCase))
+            {
+                return known;
+            }
+        }
+
+        // Not one of ours. Returned unchanged rather than dashed, because an unrecognised token is passed
+        // on to the host verbatim and a rewritten one would not be the command line anybody typed.
+        return name;
+    }
+
+    /// <summary>Why a token after <c>--path</c> is another switch rather than a mount path.</summary>
+    private static string NotAPath(string token, string value) =>
+        $"'{token} {value}' has no mount path: '{value}' is another switch. Write the path after --path, " +
+        "as in --path /ops/marten, or use --path=/ops/marten.";
+
+    private static bool IsBoolean(string token) =>
+        token.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+        token.Equals("false", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsTrue(string token) => token.Equals("true", StringComparison.OrdinalIgnoreCase);
+}

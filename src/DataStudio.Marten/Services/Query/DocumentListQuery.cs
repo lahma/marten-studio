@@ -1,0 +1,176 @@
+using DataStudio.Marten.Internal.Sql;
+using DataStudio.Postgres.Services.Query;
+
+namespace DataStudio.Marten.Services.Query;
+
+/// <summary>The tri-state the documents page offers for soft-deleted rows.</summary>
+internal enum DeletedFilter
+{
+    /// <summary>Only live documents — what a collection shows by default.</summary>
+    Exclude,
+
+    /// <summary>Live and soft-deleted together.</summary>
+    Include,
+
+    /// <summary>Only the soft-deleted ones.</summary>
+    Only,
+}
+
+/// <summary>
+/// A column a document list may show or be ordered by. This type <em>is</em> the allow-list: the query
+/// builder can only emit what one of these four cases describes, so no part of a sort or column choice
+/// ever arrives as SQL text.
+/// </summary>
+/// <remarks>
+/// <see cref="Metadata"/> and <see cref="Duplicated"/> are checked against the table before they are
+/// emitted — a metadata column that is disabled, or a duplicated column that does not exist, is a request
+/// the builder refuses rather than a column name it passes through. <see cref="JsonPath"/> never becomes
+/// SQL text at all: the path travels as a <c>text[]</c> parameter to <c>#&gt;&gt;</c>.
+/// </remarks>
+internal abstract record DocumentColumn
+{
+    private DocumentColumn()
+    {
+    }
+
+    /// <summary>The primary key. Always present, and always the tiebreaker of every sort.</summary>
+    public static DocumentColumn ById { get; } = new Id();
+
+    /// <summary>The <c>id</c> column.</summary>
+    public sealed record Id : DocumentColumn;
+
+    /// <summary>One of Marten's metadata columns, if the store has it enabled.</summary>
+    /// <param name="Column">Which metadata column.</param>
+    public sealed record Metadata(DocumentMetadataColumn Column) : DocumentColumn;
+
+    /// <summary>A duplicated-field column, by its physical column name.</summary>
+    /// <param name="ColumnName">The column name, checked against the table's duplicated fields.</param>
+    public sealed record Duplicated(string ColumnName) : DocumentColumn;
+
+    /// <summary>A JSON property, reached with <c>#&gt;&gt;</c> and a <c>text[]</c> parameter.</summary>
+    /// <remarks>
+    /// Equality is over the <em>segments</em>, not over the list instance. A record's generated equality
+    /// would compare <see cref="IReadOnlyList{T}"/> by reference, so two columns naming the same property
+    /// - one parsed from <c>?cols=</c> and one built from a sampled key - would be different columns, and
+    /// the same property would be selected twice.
+    /// </remarks>
+    /// <param name="Path">The path segments, for example <c>["Address", "City"]</c>.</param>
+    public sealed record JsonPath(IReadOnlyList<string> Path) : DocumentColumn
+    {
+        /// <summary>A display label for the column header.</summary>
+        public string Label => string.Join('.', Path);
+
+        /// <inheritdoc />
+        public bool Equals(JsonPath? other) =>
+            other is not null && Path.SequenceEqual(other.Path, StringComparer.Ordinal);
+
+        /// <inheritdoc />
+        public override int GetHashCode()
+        {
+            var hash = new HashCode();
+
+            foreach (var segment in Path)
+            {
+                hash.Add(segment, StringComparer.Ordinal);
+            }
+
+            return hash.ToHashCode();
+        }
+    }
+}
+
+/// <summary>
+/// Where the next page of a keyset-paged list starts: the last row's sort value and its id.
+/// </summary>
+/// <remarks>
+/// Both halves are needed because the id is the mandatory tiebreaker — a sort on
+/// <c>mt_last_modified</c> alone has no total order, and a keyset page that starts "after the last
+/// timestamp" silently drops every row written in the same millisecond.
+/// </remarks>
+/// <param name="SortValue">
+/// The last row's sort value as text, or <see langword="null"/> when that row's sort value was null. It is
+/// converted to the sort column's real type before it is bound.
+/// </param>
+/// <param name="LastId">The last row's id as text, converted against the id column's type.</param>
+internal sealed record DocumentKeysetCursor(string? SortValue, string LastId);
+
+/// <summary>
+/// Everything the documents page asks for, as data. The page builds one of these; the query builder turns
+/// it into exactly one parameterised command.
+/// </summary>
+internal sealed record DocumentListQuery
+{
+    /// <summary>The default page size, and what the page opens with.</summary>
+    public const int DefaultPageSize = 50;
+
+    /// <summary>The largest page the builder will emit, whatever the caller asks for.</summary>
+    public const int MaxPageSize = 500;
+
+    /// <summary>The default inline-JSON budget: bigger documents come back as a size, not as text.</summary>
+    public const int DefaultMaxInlineValueBytes = 64 * 1024;
+
+    /// <summary>The filter terms, ANDed. Normally <see cref="SearchGrammar.Parse"/>'s output.</summary>
+    public IReadOnlyList<DocumentPredicate> Predicates { get; init; } = [];
+
+    /// <summary>The sort key, from the allow-list that <see cref="DocumentColumn"/> is.</summary>
+    public DocumentColumn Sort { get; init; } = DocumentColumn.ById;
+
+    /// <summary>The sort direction.</summary>
+    public SortDirection Direction { get; init; } = SortDirection.Ascending;
+
+    /// <summary>The keyset cursor. When set, <see cref="Offset"/> is ignored.</summary>
+    public DocumentKeysetCursor? Cursor { get; init; }
+
+    /// <summary>
+    /// The offset, for the page's offset toggle. Capped at <see cref="DocumentQueryBuilder.MaxOffset"/>,
+    /// beyond which the builder refuses: a ten-thousand-row offset is already a scan of ten thousand rows.
+    /// </summary>
+    public int Offset { get; init; }
+
+    /// <summary>How many rows to return.</summary>
+    public int PageSize { get; init; } = DefaultPageSize;
+
+    /// <summary>What to do about soft-deleted documents.</summary>
+    public DeletedFilter IncludeDeleted { get; init; } = DeletedFilter.Exclude;
+
+    /// <summary>The selected tenant, or <see langword="null"/> for all of them.</summary>
+    public string? TenantId { get; init; }
+
+    /// <summary>
+    /// The columns to select beyond the id, the capped <c>data</c> and its size, or
+    /// <see langword="null"/> when the caller has expressed no preference.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see langword="null"/> means "whatever this table has": every enabled metadata column and every
+    /// duplicated column. It is the convenience a test or an ad-hoc read wants, and it is what this
+    /// property used to mean when it was empty.
+    /// </para>
+    /// <para>
+    /// An <em>empty list</em> is not that. It means "exactly nothing beyond the id", which is a real
+    /// answer and not an omission: a type with <c>Metadata(m =&gt; m.LastModified.Enabled = false)</c>
+    /// and no duplicated field has no other column worth a header, and so does a discovered table whose
+    /// only metadata column the page does not show. While the two were the same value, such a read
+    /// selected columns the grid never rendered — harmless, because the reader maps by column rather
+    /// than by ordinal, but it made "Show SQL" disagree with the headers above it, which is exactly the
+    /// thing that disclosure exists to prevent (D14).
+    /// </para>
+    /// </remarks>
+    public IReadOnlyList<DocumentColumn>? Columns { get; init; }
+
+    /// <summary>
+    /// The threshold above which <c>data</c> is not inlined. The list still reports every document's size.
+    /// </summary>
+    public int MaxInlineValueBytes { get; init; } = DefaultMaxInlineValueBytes;
+
+    /// <summary>
+    /// The command timeout the built read carries, in seconds. Zero leaves Npgsql's own default.
+    /// </summary>
+    /// <remarks>
+    /// On the query rather than on the builder call so that no caller can build a list read and forget it:
+    /// Npgsql's default is thirty seconds and has nothing to do with the host's <c>QueryTimeout</c>, and a
+    /// read that outlives the option configured to bound it is exactly the denial of service D8 exists to
+    /// prevent.
+    /// </remarks>
+    public int CommandTimeoutSeconds { get; init; }
+}

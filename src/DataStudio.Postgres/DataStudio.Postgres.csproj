@@ -1,0 +1,130 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <PropertyGroup>
+    <AssemblyName>DataStudio.Postgres</AssemblyName>
+    <RootNamespace>DataStudio.Postgres</RootNamespace>
+    <PackageId>DataStudio.Postgres</PackageId>
+    <Title>Data Studio for PostgreSQL</Title>
+    <IsPackable>true</IsPackable>
+    <Product>Data Studio</Product>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>postgresql;npgsql;database;admin;dashboard;ui;blazor;aspnetcore</PackageTags>
+    <Description>The Postgres pages of Data Studio: an embeddable Blazor Server admin UI for the PostgreSQL databases an ASP.NET Core application already registers as NpgsqlDataSource.</Description>
+    <EnablePackageValidation>true</EnablePackageValidation>
+    <!-- Selects the conditional Npgsql PackageVersion row in Directory.Packages.props (AGENTS.md D30). -->
+    <DataStudioPostgresPinsNpgsql>true</DataStudioPostgresPinsNpgsql>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <IsTrimmable>false</IsTrimmable>
+    <IsAotCompatible>false</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="/" />
+    <None Include="../../icon.png" Pack="true" PackagePath="/" Visible="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <!-- The diagnostics engine, with Npgsql and the Microsoft.Extensions.* abstractions it needs: Npgsql reaches this
+       project through it (0.11-C), and the Postgres module is packed with an exact dependency on its own build of it. -->
+  <ItemGroup>
+    <ProjectReference Include="../DataStudio.Postgres.Diagnostics/DataStudio.Postgres.Diagnostics.csproj" />
+  </ItemGroup>
+
+  <!-- The shell this module joins (v2 step 3): the document, the layout, the rail, the JSON toolkit, the studio's one stylesheet and blazor.web.js.
+       DataStudio.Postgres is packed with an exact dependency on its own build of it. -->
+  <ItemGroup>
+    <ProjectReference Include="../DataStudio/DataStudio.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <SupportedPlatform Include="browser" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="DataStudio.Marten" />
+    <InternalsVisibleTo Include="DataStudio.Marten.Tests" />
+    <InternalsVisibleTo Include="DataStudio.Marten.Integration.Tests" />
+    <InternalsVisibleTo Include="DataStudio.Postgres.Tests" />
+    <InternalsVisibleTo Include="DataStudio.Postgres.Integration.Tests" />
+    <InternalsVisibleTo Include="DataStudio.Kafka.Integration.Tests" />
+  </ItemGroup>
+
+  <!--
+    The Postgres module depends on exactly its own DataStudio.Postgres.Diagnostics: `DataStudio.Postgres.Diagnostics [0.11.0]` in the
+    nuspec, not NuGet's default `>= 0.11.0`. The two assemblies are one program split in two files - the engine grants
+    The Postgres module its internals - so the Postgres module 0.11.0 beside DataStudio.Postgres.Diagnostics 0.11.1 is a
+    MissingMethodException on the first internal signature that moved. The same mechanism, for the same reason, as
+    DataStudioMartenPinsPostgresExactly in src/DataStudio.Marten/DataStudio.Marten.csproj (measured by PS-0, 2026-10-20, SDK
+    10.0.402).
+
+    How: GenerateNuspec hands PackTask @(_ProjectReferencesWithVersions), which _GetProjectReferenceVersions fills
+    with each referenced project's $(PackageVersion) as ProjectVersion metadata, and PackTask reads that metadata as a
+    version RANGE. Bracketing it after that target is the whole change. Both names are NuGet-private, so the build's
+    Pack target also asserts the nuspec text: a NuGet that renames them fails the build instead of shipping `>=`. The
+    Error is the second half of the same defence: a pack that finds no DataStudio.Postgres.Diagnostics project reference to
+    pin refuses rather than shipping a package with no pin at all.
+
+    A host that ends up with another DataStudio.Postgres.Diagnostics anyway - a central PackageVersion under transitive
+    pinning drops it from the graph with no NuGet diagnostic at all - is stopped at startup by
+    Internal/PostgresDiagnosticsVersionGuard.cs.
+  -->
+  <Target Name="DataStudioPostgresPinsDiagnosticsExactly" AfterTargets="_GetProjectReferenceVersions">
+    <ItemGroup>
+      <_ProjectReferencesWithVersions Condition="'%(Filename)' == 'DataStudio.Postgres.Diagnostics'">
+        <ProjectVersion>[%(ProjectVersion)]</ProjectVersion>
+      </_ProjectReferencesWithVersions>
+    </ItemGroup>
+    <Error Condition="'@(_ProjectReferencesWithVersions->WithMetadataValue('Filename', 'DataStudio.Postgres.Diagnostics'))' == ''"
+           Text="DataStudio.Postgres must depend on exactly its own DataStudio.Postgres.Diagnostics build, and pack found no DataStudio.Postgres.Diagnostics project reference to pin." />
+  </Target>
+
+  <!-- Exactly its own DataStudio, for the same reason and by the same mechanism as DataStudioPostgresPinsDiagnosticsExactly above: the shell grants this
+       assembly its internals (no module grants the shell its own), so DataStudio [x.y.z] goes into the nuspec, not NuGet's default >=. A host that ends up with
+       another DataStudio anyway is stopped at startup by Internal/PostgresDiagnosticsVersionGuard.cs, which checks the shell beside the engine. -->
+  <Target Name="DataStudioPostgresPinsShellExactly" AfterTargets="_GetProjectReferenceVersions">
+    <ItemGroup>
+      <_ProjectReferencesWithVersions Condition="'%(Filename)' == 'DataStudio'">
+        <ProjectVersion>[%(ProjectVersion)]</ProjectVersion>
+      </_ProjectReferencesWithVersions>
+    </ItemGroup>
+    <Error Condition="'@(_ProjectReferencesWithVersions->WithMetadataValue('Filename', 'DataStudio'))' == ''"
+           Text="DataStudio.Postgres must depend on exactly its own DataStudio build, and pack found no DataStudio project reference to pin." />
+  </Target>
+
+  <!--
+    The package is packed at the Npgsql floor and nowhere else - the same refusal, for the same reason, as
+    MartenPackOnlyAtTheMartenFloor in src/DataStudio.Marten/DataStudio.Marten.csproj. A nupkg packed after a
+    restore at Npgsql 10.0.3 would say `Npgsql >= 10.0.3` and raise every host's Npgsql, every Marten module
+    host's included, since the Marten module depends on exactly this package. The build's Pack target refuses
+    first and names the Fallout parameter; this is the refusal for a bare `dotnet pack`.
+
+    Two checks, because the property is not what NuGet packs from: the dependency range comes from
+    project.assets.json, so a restore at the latest Npgsql (the second pass over data-studio-postgres.slnf)
+    followed by a pack with no-restore would pass a property-only check. The library key "Npgsql/<floor>",
+    quotes included (\x22 in the pattern), must be in that file. No assets file is a refusal, not a pass.
+  -->
+  <Target Name="PostgresPackOnlyAtTheNpgsqlFloor" BeforeTargets="GenerateNuspec">
+    <PropertyGroup>
+      <_PostgresAssetsFileExists>false</_PostgresAssetsFileExists>
+      <_PostgresAssetsFileExists Condition="'$(ProjectAssetsFile)' != '' and Exists('$(ProjectAssetsFile)')">true</_PostgresAssetsFileExists>
+      <_PostgresFloorLibraryKey>"Npgsql/$(DataStudioNpgsqlFloor)"</_PostgresFloorLibraryKey>
+      <_PostgresFloorLibraryPattern>\x22Npgsql/$(DataStudioNpgsqlFloor.Replace('.', '\.'))\x22</_PostgresFloorLibraryPattern>
+      <_PostgresAssets Condition="'$(_PostgresAssetsFileExists)' == 'true'">$([System.IO.File]::ReadAllText('$(ProjectAssetsFile)'))</_PostgresAssets>
+      <_PostgresAssetsAtFloor>false</_PostgresAssetsAtFloor>
+      <_PostgresAssetsAtFloor Condition="'$(_PostgresAssetsFileExists)' == 'true' and $([System.Text.RegularExpressions.Regex]::IsMatch($(_PostgresAssets), $(_PostgresFloorLibraryPattern)))">true</_PostgresAssetsAtFloor>
+    </PropertyGroup>
+
+    <Error Condition="'$(DataStudioNpgsqlVersion)' != '$(DataStudioNpgsqlFloor)'"
+           Text="DataStudio.Postgres is packed only at the Npgsql floor ($(DataStudioNpgsqlFloor), Directory.Packages.props), and this pack asks for Npgsql $(DataStudioNpgsqlVersion). A package packed here would depend on Npgsql &gt;= $(DataStudioNpgsqlVersion) and raise every host's Npgsql. Pack without DataStudioNpgsqlVersion, or raise DataStudioNpgsqlFloor deliberately and record why in AGENTS.md, Package budget changes." />
+    <Error Condition="'$(_PostgresAssetsFileExists)' != 'true'"
+           Text="DataStudio.Postgres is packed only at the Npgsql floor ($(DataStudioNpgsqlFloor)), and there is no restore output to prove it ('$(ProjectAssetsFile)' does not exist). NuGet writes the package's dependency range from that file, so the guard refuses rather than guess. Pack with a restore (without --no-restore) at the floor." />
+    <Error Condition="'$(_PostgresAssetsFileExists)' == 'true' and '$(_PostgresAssetsAtFloor)' != 'true'"
+           Text="DataStudio.Postgres is packed only at the Npgsql floor ($(DataStudioNpgsqlFloor)), but the last restore ('$(ProjectAssetsFile)') resolved another Npgsql - it has no $(_PostgresFloorLibraryKey) library. NuGet writes the package's dependency range from that file, so this pack would raise every host's Npgsql. Restore at the floor first: pack without --no-restore and without DataStudioNpgsqlVersion." />
+  </Target>
+
+</Project>

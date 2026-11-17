@@ -1,0 +1,511 @@
+using Microsoft.Extensions.DependencyInjection;
+
+using Npgsql;
+
+using DataStudio.Postgres.Internal.Sql;
+using DataStudio.Postgres.Services.Database;
+using DataStudio.Postgres.Services.Health;
+using DataStudio.Postgres.Services.Replication;
+using DataStudio.Postgres.Services.Server;
+using DataStudio.Postgres.Services.Sources;
+using DataStudio.Postgres.Services.Storage;
+
+namespace DataStudio.Postgres.Integration.Tests.Versions;
+
+/// <summary>What one matrix read is handed: an open read-only transaction as the role under test, and the studio's host.</summary>
+/// <param name="Connection">A connection as the role, in a read-only transaction with <c>search_path</c> pinned to <c>pg_catalog</c>.</param>
+/// <param name="Transaction">That transaction.</param>
+/// <param name="Schemas">The schemas a list reads: the fixture's <c>store</c> and <c>public</c>.</param>
+/// <param name="Timeout">A command timeout, in seconds.</param>
+/// <param name="Services">The Postgres module host the read's services come from.</param>
+/// <param name="Resolved">The host's source, resolved for the same role and database.</param>
+internal sealed record MatrixReadContext(
+    NpgsqlConnection Connection,
+    NpgsqlTransaction Transaction,
+    IReadOnlyList<string> Schemas,
+    int Timeout,
+    IServiceProvider Services,
+    ResolvedSource Resolved);
+
+/// <summary>One read the matrix runs on every version.</summary>
+/// <param name="Name">What it is, for a failure's message.</param>
+/// <param name="LockFree">
+/// Whether it promises to take no lock on what it reads, and so must return under a 300 ms <c>lock_timeout</c> while somebody
+/// holds <c>ACCESS EXCLUSIVE</c> on a table and a partition (D27: a list locks nothing it lists). A read of one named object
+/// - a table's detail, whose <c>pg_get_indexdef</c> briefly locks the table, or a sequence's value - does not.
+/// </param>
+/// <param name="RunAsync">The read; it throws what Postgres said.</param>
+internal sealed record MatrixRead(string Name, bool LockFree, Func<MatrixReadContext, CancellationToken, Task> RunAsync);
+
+/// <summary>
+/// Every core read the version matrix proves on PostgreSQL 14 to 19 beside the health sweep: the database browser's lists,
+/// details and definitions, the Overview's server read, the Sessions read and the relationship read. Append-only, and
+/// shared: a W5 packet that adds a facts read appends a <see cref="MatrixRead" /> here (W5-index §2.11), and
+/// <c>VersionMatrixLiveTests</c> runs it on every leg, as <c>app</c> and as <c>probe</c>, and - when it is
+/// <see cref="MatrixRead.LockFree" /> - behind a held lock.
+/// </summary>
+/// <remarks>
+/// A read gets the fixture's objects by name (<c>store.child</c>, <c>store.l</c>, <c>store.v</c>, <c>store.touch</c>,
+/// <c>store.s</c> - <see cref="PostgresVersionMatrix.SetupSql" />), so a read that ran over nothing cannot pass for one
+/// that ran.
+/// </remarks>
+internal static class MatrixReads
+{
+    /// <summary>The schemas the lists read.</summary>
+    public static IReadOnlyList<string> Schemas { get; } = ["store", "public"];
+
+    /// <summary>Every read, in the order the matrix runs them.</summary>
+    public static IReadOnlyList<MatrixRead> All { get; } =
+    [
+        // ---- The database browser (DatabaseCatalogQueries) ----------------------------------------------------------
+        new("browser: schemas", true, static (x, t) => DatabaseCatalogQueries.ReadSchemasAsync(x.Connection, x.Transaction, x.Timeout, t)),
+        new("browser: relations", true, static (x, t) => DatabaseCatalogQueries.ReadRelationsAsync(
+            x.Connection, x.Transaction, x.Schemas, null, null, DatabaseCatalog.ListCap, x.Timeout, t)),
+        new("browser: routines", true, static (x, t) => DatabaseCatalogQueries.ReadRoutinesAsync(
+            x.Connection, x.Transaction, x.Schemas, null, null, DatabaseCatalog.ListCap, x.Timeout, t)),
+        new("browser: triggers", true, static (x, t) => DatabaseCatalogQueries.ReadTriggersAsync(
+            x.Connection, x.Transaction, x.Schemas, null, null, null, DatabaseCatalog.ListCap, x.Timeout, t)),
+        new("browser: sequences", true, static (x, t) => DatabaseCatalogQueries.ReadSequencesAsync(
+            x.Connection, x.Transaction, x.Schemas, null, null, DatabaseCatalog.ListCap, x.Timeout, t)),
+        new("browser: types", true, static (x, t) => DatabaseCatalogQueries.ReadTypesAsync(
+            x.Connection, x.Transaction, x.Schemas, null, null, DatabaseCatalog.ListCap, x.Timeout, t)),
+        new("browser: foreign keys", true, static (x, t) => DatabaseCatalogQueries.ReadForeignKeysAsync(
+            x.Connection, x.Transaction, x.Schemas, null, null, DatabaseCatalog.ListCap, x.Timeout, t)),
+        new("browser: view dependencies", true, static (x, t) => DatabaseCatalogQueries.ReadViewDependenciesAsync(
+            x.Connection, x.Transaction, x.Schemas, null, DatabaseCatalog.ListCap, x.Timeout, t)),
+        new("browser: view references", true, static (x, t) => DatabaseCatalogQueries.ReadViewReferencesAsync(
+            x.Connection, x.Transaction, x.Schemas, null, DatabaseCatalog.ListCap, x.Timeout, t)),
+        new("browser: object counts", true, static (x, t) => DatabaseCatalogQueries.ReadObjectCountsAsync(
+            x.Connection, x.Transaction, x.Schemas, [], x.Timeout, t)),
+        new("browser: table detail", false, static async (x, t) => Found(
+            await DatabaseCatalogQueries.ReadRelationDetailAsync(x.Connection, x.Transaction, "store", "child", x.Timeout, t), "store.child")),
+        new("browser: partitioned table detail", false, static async (x, t) => Found(
+            await DatabaseCatalogQueries.ReadRelationDetailAsync(x.Connection, x.Transaction, "store", "l", x.Timeout, t), "store.l")),
+        new("browser: view definition", false, static async (x, t) => Found(
+            await DatabaseCatalogQueries.ReadViewDefinitionAsync(x.Connection, x.Transaction, "store", "v", x.Timeout, t), "store.v")),
+        new("browser: routine definition", false, static async (x, t) => Found(
+            await DatabaseCatalogQueries.ReadRoutineDefinitionAsync(x.Connection, x.Transaction, "store", "touch", string.Empty, x.Timeout, t), "store.touch()")),
+        new("browser: trigger definition", false, static async (x, t) => Found(
+            await DatabaseCatalogQueries.ReadTriggerDefinitionAsync(x.Connection, x.Transaction, "store", "child", "child_touch", x.Timeout, t), "store.child.child_touch")),
+        new("browser: sequence value", false, static async (x, t) => Found(
+            await DatabaseCatalogQueries.ReadSequenceValueAsync(x.Connection, x.Transaction, "store", "s", x.Timeout, t), "store.s")),
+
+        // ---- The Overview, Sessions and Relationships --------------------------------------------------------------
+        new("overview: server and platform", true, static (x, t) => OverviewServerQueries.ReadPlatformAsync(x.Connection, x.Transaction, x.Timeout, t)),
+        new("sessions: snapshot", true, static (x, t) => x.Services.GetRequiredService<ISessionActivityReader>().ReadAsync(x.Resolved, t)),
+
+        // ---- X3: Sessions › Blocking's lock table read, and PostgreSQL 19's pg_stat_lock, read on 19 and absent below --------
+        new("sessions: blocking and pg_stat_lock", true, static async (x, t) =>
+        {
+            SessionSnapshot snapshot = await x.Services.GetRequiredService<ISessionActivityReader>().ReadAsync(x.Resolved, t);
+            LockTableRead blocking = snapshot.Blocking ?? throw new InvalidOperationException("The sessions snapshot read no lock table.");
+
+            if (PostgresFeatures.Has(PostgresFeature.PgStatLock, blocking.ServerVersion))
+            {
+                Found(snapshot.LockStatistics?.FirstOrDefault(static y => y.LockType == "relation"), "pg_stat_lock row for relation locks, on PostgreSQL 19");
+            }
+            else if (snapshot.LockStatistics is not null)
+            {
+                throw new InvalidOperationException("pg_stat_lock was read on server_version_num " + blocking.ServerVersion + ", below 19, where it does not exist.");
+            }
+        }),
+        // ---- Issue #20: Sessions › Holders' read of the whole server's connections by holder, on every version and every role - a
+        // role without pg_read_all_stats reads other roles' sessions without a state, which are groups of their own ------------
+        new("sessions: server holders", true, static async (x, t) =>
+        {
+            SessionSnapshot snapshot = await x.Services.GetRequiredService<ISessionActivityReader>().ReadAsync(x.Resolved, t);
+            SessionServerHolders holders = snapshot.Holders ?? throw new InvalidOperationException("The sessions snapshot read no holders.");
+
+            if (holders.ServerConnections < 1 || holders.MaxConnections < 1 || holders.Limits.Available < 1)
+            {
+                throw new InvalidOperationException(
+                    "The holders read answered no budget: " + holders.ServerConnections + " sessions of max_connections " + holders.MaxConnections + ".");
+            }
+
+            // Every session but the studio's own is a group, so the groups add up to the server's count less its one.
+            if (!holders.Truncated && holders.Groups.Sum(static y => y.Total) != holders.ServerConnections - 1)
+            {
+                throw new InvalidOperationException(
+                    "The holders' groups hold " + holders.Groups.Sum(static y => y.Total) + " sessions of the server's " + holders.ServerConnections + ".");
+            }
+
+            // A role that reads every state has none whose state is unknown.
+            if (holders.CanReadAllStats && holders.Groups.Any(static y => y.StateUnknown > 0))
+            {
+                throw new InvalidOperationException("A role in pg_read_all_stats was told a session's state is unknown.");
+            }
+        }),
+
+        // ---- 1.0-PG18: the snapshot's per-backend I/O is read from 18 (pg_stat_get_backend_io, one statement for every session) and
+        // absent below it, as every role: a role that may not read another's backend gets no row for it, and no error -----------
+        new("sessions: per-backend I/O", true, static async (x, t) =>
+        {
+            SessionSnapshot snapshot = await x.Services.GetRequiredService<ISessionActivityReader>().ReadAsync(x.Resolved, t);
+            LockTableRead blocking = snapshot.Blocking ?? throw new InvalidOperationException("The sessions snapshot read no lock table.");
+            bool expected = PostgresFeatures.Has(PostgresFeature.BackendIo, blocking.ServerVersion);
+
+            if (expected != (snapshot.BackendIo is not null))
+            {
+                throw new InvalidOperationException(
+                    "The per-backend I/O was " + (snapshot.BackendIo is null ? "absent" : "read") + " on server_version_num "
+                    + blocking.ServerVersion + ", where the gate says " + (expected ? "present" : "absent") + ".");
+            }
+
+            int ioStatements = snapshot.Statements.Count(static y => y.Label == "each session's I/O");
+
+            if (ioStatements > 1 || (!expected && ioStatements != 0) || (expected && snapshot.Sessions.Count > 0 && ioStatements != 1))
+            {
+                throw new InvalidOperationException("The sessions snapshot ran " + ioStatements + " per-backend I/O statements for " + snapshot.Sessions.Count + " sessions.");
+            }
+        }),
+
+        // ---- 1.0-PG18: the 1.12 statement counters (PostgresFeature.StatementsParallelWorkers' extension) are read from 1.12 and null below it ------------------------------
+        new("statements: 1.12 counters", false, static async (x, t) =>
+        {
+            DataStudio.Postgres.Services.Statements.StatementFacts facts =
+                await x.Services.GetRequiredService<DataStudio.Postgres.Services.Statements.IStatementFacts>().ReadAsync(x.Resolved, t);
+
+            if (facts.State != DataStudio.Postgres.Services.Statements.StatementsState.Read || facts.Statements.Count == 0)
+            {
+                return;
+            }
+
+            bool expected = Version.TryParse(facts.ExtensionVersion, out Version? extension) && extension >= new Version(1, 12);
+
+            foreach (DataStudio.Postgres.Services.Statements.StatementFact fact in facts.Statements)
+            {
+                if (expected != (fact.WalBuffersFull is not null && fact.ParallelWorkersToLaunch is not null && fact.ParallelWorkersLaunched is not null))
+                {
+                    throw new InvalidOperationException(
+                        "Statement " + fact.QueryId + " read its 1.12 counters as " + fact.WalBuffersFull + "/" + fact.ParallelWorkersToLaunch + "/"
+                        + fact.ParallelWorkersLaunched + " on pg_stat_statements " + facts.ExtensionVersion + ", where the extension's version says "
+                        + (expected ? "present" : "absent") + ".");
+                }
+            }
+        }),
+        new("relationships: foreign keys", true, static (x, t) => RelationshipQueries.ReadForeignKeysTouchingAsync(
+            x.Connection, x.Transaction, x.Schemas, RelationshipQueries.DefaultForeignKeyCap, x.Timeout, t)),
+
+        // ---- W5-CAP: the Storage page's facts, and the statistics window's one statement ---------------------------------
+        new("storage: facts", true, static async (x, t) =>
+        {
+            StorageFacts facts = await x.Services.GetRequiredService<IStorageFacts>().ReadAsync(x.Resolved, t);
+            Found(facts.EstimatedDatabaseBytes > 0 ? facts : null, "the database's estimated size");
+
+            // Only the owner has USAGE on store: a role without it is admitted no table there, as the browser admits none.
+            if (x.Connection.UserName == "app")
+            {
+                Found(facts.LargestTables.FirstOrDefault(static y => y.Table.Table == "child"), "store.child among the largest tables");
+            }
+
+            // Issue #31: the all-visible ratio is a share, or nothing - never outside 0 to 1, on any release or role.
+            foreach (StorageTableFacts table in facts.LargestTables.Where(static y => y.AllVisibleRatio is < 0 or > 1))
+            {
+                throw new InvalidOperationException(table.Table.Schema + "." + table.Table.Table + " has an all-visible ratio of " + table.AllVisibleRatio + ".");
+            }
+        }),
+        new("stats: window", true, static async (x, t) =>
+        {
+            bool checkpointer = PostgresFeatures.Has(PostgresFeature.PgStatCheckpointer, x.Connection.PostgreSqlVersion.Major * 10_000);
+            var query = StatisticsWindowQueries.Read(checkpointer);
+
+            await using NpgsqlCommand command = new(query.Sql, x.Connection, x.Transaction) { CommandTimeout = x.Timeout };
+            await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(t);
+
+            Found(await reader.ReadAsync(t) ? StatisticsWindow.Map(reader, DateTimeOffset.UtcNow) : null, "this database's pg_stat_database row");
+        }),
+        new("stats: control privileges", true, static async (x, t) =>
+        {
+            await using NpgsqlCommand command = new(StatisticsWindowQueries.ControlPrivilegesSql, x.Connection, x.Transaction) { CommandTimeout = x.Timeout };
+            await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(t);
+
+            // Stock PostgreSQL grants both to PUBLIC, so every role of the matrix may call both.
+            Found(await reader.ReadAsync(t) && reader.GetBoolean(0) && reader.GetBoolean(1) ? reader : null, "EXECUTE on both control functions");
+        }),
+        new("stats: control", true, static async (x, t) =>
+        {
+            await using NpgsqlCommand command = new(StatisticsWindowQueries.ControlSql(true, true), x.Connection, x.Transaction) { CommandTimeout = x.Timeout };
+            await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(t);
+
+            StatisticsControl? control = await reader.ReadAsync(t) ? StatisticsWindow.MapControl(reader) : null;
+            Found(control is { Timeline: not null, SystemIdentifier: not null } ? control : null, "timeline and system identifier");
+        }),
+
+        // ---- W5-R2: the Replication page's facts - every section, as the read the page makes ---------------------
+        new("replication: facts", true, static async (x, t) => Clean(
+            await x.Services.GetRequiredService<IReplicationFactsReader>().ReadAsync(x.Resolved, t))),
+        new("replication: this database's tablespace size", false, static async (x, t) => Found(
+            await x.Services.GetRequiredService<IReplicationFactsReader>().TablespaceSizeAsync(x.Resolved, "pg_default", t), "pg_default's size")),
+
+        // ---- W5-S2: the Server page's facts - every section, as the read the page makes ----------------------------
+        new("server: settings, extensions, connection and grants", true, static async (x, t) => ServerClean(
+            await x.Services.GetRequiredService<DataStudio.Postgres.Services.Server.IServerSettingsFactsReader>().ReadAsync(x.Resolved, t))),
+
+        // ---- W5-Q1: the Statements page's facts - the statement sweep's own read, as the page takes it ----------------
+        // Not lock-free: the counters read takes the extension's own AccessShareLock on pg_stat_statements_info, as the
+        // statement checks always have - only DROP or ALTER EXTENSION queues against it. StatementsLiveTests proves it is the
+        // only lock beyond a catalog read.
+        new("statements: facts", false, static async (x, t) => StatementsClean(
+            await x.Services.GetRequiredService<DataStudio.Postgres.Services.Statements.IStatementFacts>().ReadAsync(x.Resolved, t))),
+        // ---- W5-B1: the lint reads - T15's keys, the usage guard's counters age, T26's keys, T19 and T20's partitions -------
+        new("lints: foreign keys", true, static async (x, t) =>
+        {
+            IReadOnlyList<HealthForeignKeyRow> keys = await QueryAsync(x, IndexLintQueries.ForeignKeys(LintTargets), IndexLintQueries.ReadForeignKey, t);
+            Owned(x, keys.FirstOrDefault(static y => y.Table == "child" && y.ReferencedTable == "parent"), "store.child's key to store.parent");
+        }),
+        new("lints: counters age", true, static (x, t) => QueryAsync(
+            x, IndexLintQueries.CountersAge(LintTargets, PostgresFeatures.Has(PostgresFeature.LastScanColumns, x.Connection.PostgreSqlVersion.Major * 10_000)),
+            IndexLintQueries.ReadCountersAge, t)),
+        new("lints: integer keys", true, static (x, t) => QueryAsync(x, IndexLintQueries.IntegerKeys(LintTargets), IndexLintQueries.ReadIntegerKey, t)),
+
+        // ---- 1.1-PG19: a table's own reset rides the table read on every version (null below 19); the scores and the multixact
+        // usage are asked only of a server that has them, and answer the fixture's tables / no error ----------------------------
+        new("tables: statistics, each table's own reset", true, static async (x, t) =>
+        {
+            IReadOnlyList<HealthTableRow> rows = await QueryAsync(x, HealthTableQueries.Tables(LintTargets, []), HealthTableQueries.ReadTable, t);
+            Owned(x, rows.FirstOrDefault(static y => y.Table == "child"), "store.child's statistics");
+
+            if (!PostgresFeatures.Has(PostgresFeature.StatsResetPerTable, x.Connection.PostgreSqlVersion.Major * 10_000)
+                && rows.FirstOrDefault(static y => y.CountersReset is not null) is { } wrong)
+            {
+                throw new InvalidOperationException(wrong.Key + " reports a reset of its own on a server below 19.");
+            }
+        }),
+        new("19: autovacuum scores of the listed tables", true, static async (x, t) =>
+        {
+            if (PostgresFeatures.Has(PostgresFeature.AutovacuumScores, x.Connection.PostgreSqlVersion.Major * 10_000))
+            {
+                IReadOnlyList<AutovacuumScoreRow> scores = await QueryAsync(x, HealthTableQueries.AutovacuumScores(LintTargets), HealthTableQueries.ReadAutovacuumScore, t);
+                Found(scores.FirstOrDefault(static y => y.Table == "child"), "a score for store.child, whatever the role may read of it");
+                scores.Select(static y => y.Schema + "." + y.Table).Should().OnlyContain(static y => y.StartsWith("store.", StringComparison.Ordinal),
+                    "only the listed tables are named");
+            }
+        }),
+        new("19: multixact usage", true, static async (x, t) =>
+        {
+            if (PostgresFeatures.Has(PostgresFeature.MultixactStats, x.Connection.PostgreSqlVersion.Major * 10_000))
+            {
+                IReadOnlyList<MultixactUsage> usage = await QueryAsync(x, HealthHorizonQueries.MultixactStats(), HealthHorizonQueries.ReadMultixactUsage, t);
+                usage.Should().ContainSingle("the function answers one row: zeros while no multixact exists, nulls to a role outside pg_read_all_stats");
+            }
+        }),
+        new("lints: partitions", true, static async (x, t) =>
+        {
+            // store.r's bounds are deparsed with no relation, so its partition the matrix holds ACCESS EXCLUSIVE on is read too.
+            IReadOnlyList<HealthPartitionedTableRow> tables = await QueryAsync(x, PartitionQueries.Partitions(LintTargets), PartitionQueries.ReadPartitionedTable, t);
+            Owned(x, tables.FirstOrDefault(static y => y.Table == "r" && y.NewestUpper is not null && y.HasDefault), "store.r's bounds and its default partition");
+        }),
+
+        // ---- X4: T18's column skew - store.l is list-partitioned on tenant_id, so it is read by its partitions, whose two
+        // bounds are deparsed with no relation; store.r's tenant_id is read through pg_stats, which the setup never analysed.
+        new("lints: column skew", true, static async (x, t) =>
+        {
+            IReadOnlyList<HealthColumnSkewRow> tables = await QueryAsync(x, ColumnSkewQueries.Skew(LintTargets, "tenant_id"), ColumnSkewQueries.ReadSkew, t);
+            Owned(
+                x,
+                tables.FirstOrDefault(static y => y is { Table: "l", ByPartition: true, Values: 2, TopValues.Count: 2 }
+                    && y.TopValues.All(static v => PartitionBoundText.SingleListValue(v) is "a" or "b")),
+                "store.l's two tenant partitions, read by their bounds");
+        }),
+
+        // ---- 1.2-SCOPE-2: the Tenants overview's two reads over the same tables: store.l's partition for tenant "a" by its bound, and
+        // the statistics of store.r's tenant_id for the values asked about - each returns behind the lock the matrix holds.
+        new("tenants: column value rows", true, static async (x, t) =>
+        {
+            IReadOnlyList<ColumnPartitionRow> partitions = await QueryAsync(
+                x, ColumnValueRowsQueries.PartitionRows(LintTargets, "tenant_id", ["FOR VALUES IN ('a')", "FOR VALUES IN ('nobody')"]), ColumnValueRowsQueries.ReadPartition, t);
+            partitions.Should().OnlyContain(static y => y.Table == "l" && (y.Bound == null || y.Bound == "FOR VALUES IN ('a')"), "only the bound asked about, and never a partition's name");
+
+            IReadOnlyList<ColumnStatisticsRow> statistics = await QueryAsync(
+                x, ColumnValueRowsQueries.StatisticsRows(LintTargets, "tenant_id", ["a", "zed"]), ColumnValueRowsQueries.ReadStatistics, t);
+            statistics.Should().OnlyContain(static y => y.Value == "a" || y.Value == "zed", "only the values asked about");
+        }),
+
+        // ---- 0.10-A: the Plan page's facts - the six statements of PlanFactsQueries, over store's tables by name, the two the matrix
+        // holds ACCESS EXCLUSIVE on among them: they resolve by name with no lock and read the catalog by oid with no size or deparse
+        // function, so each returns behind the lock (issue #28; D27).
+        new("plan facts: resolve, relations, indexes, extended statistics, columns and values", true, static (x, t) => PlanFactsReadAsync(x, t)),
+
+        // ---- 0.10-B: the Plan page's settings what-if - the one pg_settings read of the allow-list, and set_config of every setting it
+        // found to the value it has, in this read-only transaction as a role that is not a superuser (app, probe): the call the page's
+        // what-if makes before EXPLAIN, on every version, whose enable_* family grows from 14 to 18 --------------------------------
+        new("plan settings: the offered list, and set_config of each in a read-only transaction", true, static (x, t) => PlanSettingsReadAsync(x, t)),
+    ];
+
+    /// <summary>
+    /// The settings what-if's read and its call (0.10-B): every row is on the allow-list, the settings every supported major has are
+    /// there, and each is set - for this transaction alone, by a role that holds no privilege - to the value it has now.
+    /// </summary>
+    private static async Task PlanSettingsReadAsync(MatrixReadContext x, CancellationToken token)
+    {
+        IReadOnlyList<PlanSettingRow> offered = await PlanSettingsQueries.ReadAsync(x.Connection, x.Transaction, x.Timeout, token);
+
+        string[] everywhere = ["work_mem", "hash_mem_multiplier", "random_page_cost", "effective_io_concurrency", "jit", "enable_seqscan", "enable_indexscan", "enable_hashjoin"];
+
+        if (offered.Any(static y => !PlanSettingsQueries.IsAllowed(y.Name)) || everywhere.Except(offered.Select(static y => y.Name)).Any())
+        {
+            throw new InvalidOperationException("The settings read answered " + string.Join(", ", offered.Select(static y => y.Name)) + ".");
+        }
+
+        foreach (PlanSettingRow setting in offered)
+        {
+            await PlanSettingsQueries.SetAsync(x.Connection, x.Transaction, setting.Name, setting.Setting, x.Timeout, token);
+        }
+    }
+
+    /// <summary>
+    /// The Plan page's facts reads (0.10-A), asked about the fixture's tables by the names a VERBOSE plan prints: a table, a list
+    /// partition and its parent, a range partition, the table and the partition the matrix holds ACCESS EXCLUSIVE on, and a name
+    /// that is nothing. The owner finds every one; a role with no <c>USAGE</c> on <c>store</c> reads on without one - the read
+    /// raises nothing and finds what the catalog shows it.
+    /// </summary>
+    private static async Task PlanFactsReadAsync(MatrixReadContext x, CancellationToken token)
+    {
+        string[] names = ["child", "l_a", "l", "r_2026_10", "child", "no_such_relation"];
+        string[] schemas = [.. names.Select(static _ => "store")];
+
+        IReadOnlyList<PlanFactsResolvedRow> resolved = await PlanFactsQueries.ResolveAsync(x.Connection, x.Transaction, schemas, names, x.Timeout, token);
+
+        if (resolved.Count != names.Length || resolved[^1].Oid is not null)
+        {
+            throw new InvalidOperationException("The resolve answered " + resolved.Count + " rows, or found a relation that does not exist.");
+        }
+
+        List<uint> oids = [.. resolved.Where(static y => y.Oid is not null).Select(static y => y.Oid!.Value).Distinct()];
+        IReadOnlyList<PlanFactsRelationRow> relations = await PlanFactsQueries.ReadRelationsAsync(x.Connection, x.Transaction, oids, x.Timeout, token);
+
+        if (relations.Count != oids.Count)
+        {
+            throw new InvalidOperationException("The relations read answered " + relations.Count + " rows for " + oids.Count + " relations.");
+        }
+
+        // The partition: its parent, how many partitions the parent has, and its key - store.l is list-partitioned on tenant_id, two ways.
+        uint partition = resolved[1].Oid ?? 0;
+        PlanFactsRelationRow? listPartition = relations.FirstOrDefault(y => y.Oid == partition);
+        Owned(x, listPartition is { ParentName: "l", ParentSchema: "store", ParentPartitions: 2 } && listPartition.ParentKey.SequenceEqual(["tenant_id"]) ? listPartition : null,
+            "store.l_a, a partition of store.l by tenant_id, one of two");
+
+        // Its ancestors, found by walking pg_inherits (never pg_partition_root, which opens the relation): the partition's one is store.l.
+        Owned(x, resolved[1].AncestorNames.SequenceEqual(["l"]) && resolved[1].AncestorSchemas.SequenceEqual(["store"]) ? resolved[1] : null, "store.l_a's ancestor, store.l");
+
+        IReadOnlyList<PlanFactsIndexRow> indexes = await PlanFactsQueries.ReadIndexesAsync(x.Connection, x.Transaction, oids, x.Timeout, token);
+        Owned(x, indexes.FirstOrDefault(y => y.Table == resolved[0].Oid && y is { IsPrimary: true } && y.Keys.SequenceEqual(["id"])), "store.child's primary key on id");
+
+        await PlanFactsQueries.ReadExtendedStatisticsAsync(x.Connection, x.Transaction, oids, x.Timeout, token);
+
+        // Columns of store.child (analyzed by the setup) and of the locked partition: asked by relation oid and column name.
+        uint child = resolved[0].Oid ?? 0;
+        uint[] relids = [child, child, child, resolved[3].Oid ?? 0];
+        string[] columns = ["id", "n", "label", "id"];
+        IReadOnlyList<PlanFactsColumnRow> columnRows = await PlanFactsQueries.ReadColumnsAsync(x.Connection, x.Transaction, relids, columns, x.Timeout, token);
+        Owned(x, columnRows.FirstOrDefault(y => y.Table == child && y.Column == "n" && y is { HasStatistics: true, Distinct: > 0 }), "store.child.n's statistics");
+
+        // Values are data: the read is the row gate's to ask for, and runs here as the role to prove the statement itself.
+        await PlanFactsQueries.ReadValuesAsync(x.Connection, x.Transaction, relids, columns, x.Timeout, token);
+    }
+
+    /// <summary>The fixture's tables the lint reads are asked about (W5-B1): a range and a list partitioning, and a key.</summary>
+    /// <remarks>A property, not a field: <see cref="All" /> is initialised first, and reads it.</remarks>
+    private static HealthTableTarget[] LintTargets =>
+        [new("store", "r"), new("store", "l"), new("store", "parent"), new("store", "child")];
+
+    /// <summary>Runs a health statement on the read's transaction and maps every row.</summary>
+    private static async Task<IReadOnlyList<T>> QueryAsync<T>(MatrixReadContext x, HealthQuery query, Func<NpgsqlDataReader, T> map, CancellationToken token)
+    {
+        await using NpgsqlCommand command = new(query.Sql, x.Connection, x.Transaction) { CommandTimeout = x.Timeout };
+        command.Parameters.AddRange(query.Parameters.Select(static p => p.Clone()).ToArray());
+        await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(token);
+
+        List<T> rows = [];
+
+        while (await reader.ReadAsync(token))
+        {
+            rows.Add(map(reader));
+        }
+
+        return rows;
+    }
+
+    /// <summary>
+    /// Fails a read that found nothing the owner of <c>store</c> must find; a role without <c>USAGE</c> on it is admitted none,
+    /// as the browser admits none.
+    /// </summary>
+    private static void Owned(MatrixReadContext x, object? value, string what)
+    {
+        if (x.Connection.UserName == "app")
+        {
+            Found(value, what);
+        }
+    }
+
+    /// <summary>
+    /// Fails a Statements facts read that failed: on every release the read reads, or says which expected state stopped it -
+    /// the role with nothing recorded here yet - never a failure.
+    /// </summary>
+    private static void StatementsClean(DataStudio.Postgres.Services.Statements.StatementFacts facts)
+    {
+        if (facts.State == DataStudio.Postgres.Services.Statements.StatementsState.Failed)
+        {
+            throw new InvalidOperationException("The statements facts read failed: " + facts.Failure);
+        }
+    }
+
+    /// <summary>
+    /// Fails a facts read any section of which failed: on every release each section reads, or says it does not apply or is
+    /// not on that release - never a SQLSTATE.
+    /// </summary>
+    private static void Clean(ReplicationFacts facts)
+    {
+        if (facts.Failures.Count > 0)
+        {
+            throw new InvalidOperationException("The replication facts read failed: " + string.Join("; ", facts.Failures));
+        }
+
+        // Issue #31: pg_stat_wal is read on every release the matrix holds (14 and later), as every role: records, images and bytes.
+        if (facts.Wal is not { Outcome: ReplicationReadOutcome.Read, Value: { Records: >= 0, FullPageImages: >= 0, Bytes: >= 0 } })
+        {
+            throw new InvalidOperationException("The WAL counters were not read: " + facts.Wal.Outcome + " " + facts.Wal.Note);
+        }
+
+        // 0.9-C: the WAL writes and syncs mean the same on every release - pg_stat_wal's up to 17, pg_stat_io's WAL rows from 18 -
+        // so both are counts, never null, as every role. The times are null or non-negative milliseconds.
+        if (facts.Wal.Value is not { Writes: >= 0, Syncs: >= 0 } wal || wal.WriteTimeMs < 0 || wal.SyncTimeMs < 0)
+        {
+            throw new InvalidOperationException(
+                "The WAL writes and syncs were not read as counts on PostgreSQL " + facts.Server.VersionNumber + ": "
+                + facts.Wal.Value?.Writes + " writes, " + facts.Wal.Value?.Syncs + " syncs, " + facts.Wal.Value?.WriteTimeMs + " ms writing, "
+                + facts.Wal.Value?.SyncTimeMs + " ms syncing.");
+        }
+    }
+
+    /// <summary>Fails a Server page facts read any section of which failed: on every release each one reads.</summary>
+    private static void ServerClean(DataStudio.Postgres.Services.Server.ServerSettingsFacts facts)
+    {
+        if (facts.Failures.Count > 0)
+        {
+            throw new InvalidOperationException("The server facts read failed: " + string.Join("; ", facts.Failures));
+        }
+
+        // Issue #31: checksums are on or off - a bool on every release - and the failure count is null exactly while they are off.
+        DataStudio.Postgres.Services.Server.ServerConnectionPosture posture = facts.Posture.Value!;
+
+        if (posture.ChecksumsOn is not { } on)
+        {
+            throw new InvalidOperationException("data_checksums read as '" + posture.DataChecksums + "', which is neither on nor off.");
+        }
+
+        if (on != posture.ChecksumFailures.HasValue || posture.ChecksumFailures < 0)
+        {
+            throw new InvalidOperationException("data_checksums is " + posture.DataChecksums + " and checksum_failures reads " + posture.ChecksumFailures + ".");
+        }
+    }
+
+    /// <summary>Fails a by-name read that found nothing: the fixture made the object, so "nothing" is a read that did not read.</summary>
+    private static void Found(object? value, string what)
+    {
+        if (value is null)
+        {
+            throw new InvalidOperationException("The read found no " + what + ", which the matrix fixture creates.");
+        }
+    }
+}

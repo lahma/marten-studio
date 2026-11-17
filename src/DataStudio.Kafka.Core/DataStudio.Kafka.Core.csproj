@@ -1,0 +1,74 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>DataStudio.Kafka.Core</AssemblyName>
+    <RootNamespace>DataStudio.Kafka</RootNamespace>
+    <PackageId>DataStudio.Kafka.Core</PackageId>
+    <Title>Data Studio Kafka engine</Title>
+    <IsPackable>true</IsPackable>
+    <EnablePackageValidation>true</EnablePackageValidation>
+    <PackageTags>kafka;blazor;studio;admin</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <Product>Data Studio</Product>
+    <Description>The Kafka engine of Data Studio, with no ASP.NET Core: the catalog, window resolution, the scan engine, predicates, decoders, the governor and redaction, over Confluent.Kafka behind an internal wire seam. Apache Kafka is a trademark of the Apache Software Foundation. Data Studio is not affiliated with or endorsed by the Apache Software Foundation.</Description>
+    <!-- Selects the conditional Microsoft.Extensions.* rows in Directory.Packages.props (AGENTS.md D36). -->
+    <DataStudioKafkaCorePinsExtensions>true</DataStudioKafkaCorePinsExtensions>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <IsTrimmable>false</IsTrimmable>
+    <IsAotCompatible>false</IsAotCompatible>
+  </PropertyGroup>
+
+  <!-- No FrameworkReference: the engine has no ASP.NET Core (KafkaCoreFenceTests). -->
+
+  <ItemGroup>
+    <None Include="../DataStudio.Kafka/README.md" Pack="true" PackagePath="/" />
+    <None Include="../../icon.png" Pack="true" PackagePath="/" Visible="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Confluent.Kafka" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Options" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="DataStudio.Kafka" />
+    <InternalsVisibleTo Include="DataStudio.Kafka.Tests" />
+    <InternalsVisibleTo Include="DataStudio.Kafka.Integration.Tests" />
+    <!-- D43: the one cluster source, and its fast suite. DataStudio.Kafka.Wolverine checks its own build against this one's before it uses any of it. -->
+    <InternalsVisibleTo Include="DataStudio.Kafka.Wolverine" />
+    <InternalsVisibleTo Include="DataStudio.Kafka.Wolverine.Tests" />
+  </ItemGroup>
+
+  <!--
+    The package is packed at the Confluent.Kafka floor and nowhere else - the same refusal, for the same reason, as
+    PostgresDiagnosticsPackOnlyAtTheNpgsqlFloor in src/DataStudio.Postgres.Diagnostics. A nupkg packed after a restore at
+    Confluent.Kafka 2.16.0 would say `Confluent.Kafka >= 2.16.0` and raise every Wolverine host's Confluent.Kafka (WolverineFx.Kafka
+    pins the floor). The build's Pack target refuses first and names the Fallout parameter (AssertPackingAtTheConfluentFloor); this is
+    the refusal for a bare `dotnet pack`, by property and by project.assets.json (the dependency range is written from that file, so a
+    restore at the latest followed by a pack with no-restore would pass a property-only check). The Kafka module and DataStudio.Kafka.Wolverine take the
+    same range transitively; Pack asserts their nuspecs.
+  -->
+  <Target Name="KafkaCorePackOnlyAtTheConfluentFloor" BeforeTargets="GenerateNuspec">
+    <PropertyGroup>
+      <_KafkaCoreAssetsFileExists>false</_KafkaCoreAssetsFileExists>
+      <_KafkaCoreAssetsFileExists Condition="'$(ProjectAssetsFile)' != '' and Exists('$(ProjectAssetsFile)')">true</_KafkaCoreAssetsFileExists>
+      <_KafkaCoreFloorLibraryKey>"Confluent.Kafka/$(DataStudioConfluentFloor)"</_KafkaCoreFloorLibraryKey>
+      <_KafkaCoreFloorLibraryPattern>\x22Confluent\.Kafka/$(DataStudioConfluentFloor.Replace('.', '\.'))\x22</_KafkaCoreFloorLibraryPattern>
+      <_KafkaCoreAssets Condition="'$(_KafkaCoreAssetsFileExists)' == 'true'">$([System.IO.File]::ReadAllText('$(ProjectAssetsFile)'))</_KafkaCoreAssets>
+      <_KafkaCoreAssetsAtFloor>false</_KafkaCoreAssetsAtFloor>
+      <_KafkaCoreAssetsAtFloor Condition="'$(_KafkaCoreAssetsFileExists)' == 'true' and $([System.Text.RegularExpressions.Regex]::IsMatch($(_KafkaCoreAssets), $(_KafkaCoreFloorLibraryPattern)))">true</_KafkaCoreAssetsAtFloor>
+    </PropertyGroup>
+
+    <Error Condition="'$(DataStudioConfluentVersion)' != '$(DataStudioConfluentFloor)'"
+           Text="DataStudio.Kafka.Core is packed only at the Confluent.Kafka floor ($(DataStudioConfluentFloor), Directory.Packages.props), and this pack asks for Confluent.Kafka $(DataStudioConfluentVersion). A package packed here would depend on Confluent.Kafka &gt;= $(DataStudioConfluentVersion) and raise every host's Confluent.Kafka. Pack without DataStudioConfluentVersion, or raise DataStudioConfluentFloor deliberately and record why in AGENTS.md, Package budget changes." />
+    <Error Condition="'$(_KafkaCoreAssetsFileExists)' != 'true'"
+           Text="DataStudio.Kafka.Core is packed only at the Confluent.Kafka floor ($(DataStudioConfluentFloor)), and there is no restore output to prove it ('$(ProjectAssetsFile)' does not exist). NuGet writes the package's dependency range from that file, so the guard refuses rather than guess. Pack with a restore (without --no-restore) at the floor." />
+    <Error Condition="'$(_KafkaCoreAssetsFileExists)' == 'true' and '$(_KafkaCoreAssetsAtFloor)' != 'true'"
+           Text="DataStudio.Kafka.Core is packed only at the Confluent.Kafka floor ($(DataStudioConfluentFloor)), but the last restore ('$(ProjectAssetsFile)') resolved another Confluent.Kafka - it has no $(_KafkaCoreFloorLibraryKey) library. NuGet writes the package's dependency range from that file, so this pack would raise every host's Confluent.Kafka. Restore at the floor first: pack without --no-restore and without DataStudioConfluentVersion." />
+  </Target>
+
+</Project>

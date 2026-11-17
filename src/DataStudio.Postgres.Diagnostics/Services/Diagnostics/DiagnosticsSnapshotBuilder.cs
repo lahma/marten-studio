@@ -1,0 +1,400 @@
+using System.Globalization;
+
+using DataStudio.Postgres.Internal.Sql;
+using DataStudio.Postgres.Services.ConnectionHistory;
+using DataStudio.Postgres.Services.Database;
+using DataStudio.Postgres.Services.Health;
+using DataStudio.Postgres.Services.Replication;
+using DataStudio.Postgres.Services.Server;
+using DataStudio.Postgres.Services.Settings;
+using DataStudio.Postgres.Services.Statements;
+using DataStudio.Postgres.Services.Storage;
+
+namespace DataStudio.Postgres.Services.Diagnostics;
+
+/// <summary>
+/// The diagnostics API's sections, from the facts the pages read (API design §6.2): never a second read of anything - the
+/// sweep's results, the Storage page's facts, the Statements page's facts, the Server page's facts, the Replication page's facts
+/// (the write-ahead log) and the sessions snapshot -
+/// shown through the host gate. Pure, so every field's source is a unit test's.
+/// </summary>
+internal static class DiagnosticsSnapshotBuilder
+{
+    /// <summary>The most statements the statements section lists: the Statements page's own most.</summary>
+    public const int MaxStatements = DiagnosticsMapper.MaxStatements;
+
+    /// <summary>The most characters of a statement's text: the statement checks' read, as the Statements page shows it.</summary>
+    public const int StatementCharacters = HealthStatementQueries.MaxTextCharacters;
+
+    /// <summary>
+    /// The findings and every check's outcome, from the sweeps' results through the host gate: a finding the gate withholds
+    /// is counted and never described, and a check whose gate it is short of reads <see cref="PostgresReadOutcome.Withheld" />.
+    /// </summary>
+    /// <param name="results">Every check's part of the sweeps, regular first.</param>
+    /// <param name="gate">The host gate.</param>
+    /// <param name="runtime">The studio's runtime.</param>
+    /// <param name="sourceParameter">The studio's source parameter, for the findings' links.</param>
+    /// <param name="scope">The database, for the findings' links.</param>
+    public static (IReadOnlyList<PostgresFinding> Findings, IReadOnlyList<PostgresCheck> Checks, int Withheld) Findings(
+        IEnumerable<HealthCheckResult> results,
+        HostGate gate,
+        IStudioRuntime runtime,
+        string sourceParameter,
+        StudioScope scope)
+    {
+        ArgumentNullException.ThrowIfNull(results);
+        ArgumentNullException.ThrowIfNull(gate);
+        ArgumentNullException.ThrowIfNull(runtime);
+
+        List<PostgresFinding> findings = [];
+        List<PostgresCheck> checks = [];
+        int withheld = 0;
+
+        foreach (HealthCheckResult result in results)
+        {
+            int included = 0;
+
+            foreach (HealthFinding finding in result.Findings)
+            {
+                if (!gate.Shows(finding))
+                {
+                    withheld++;
+                    continue;
+                }
+
+                findings.Add(DiagnosticsMapper.Finding(finding, result.Check, gate, runtime, sourceParameter, scope));
+                included++;
+            }
+
+            checks.Add(DiagnosticsMapper.Check(result, gate, included));
+        }
+
+        findings.Sort(DiagnosticsMapper.Compare);
+        checks.Sort(static (a, b) => string.CompareOrdinal(a.Code, b.Code));
+
+        return (findings, checks, withheld);
+    }
+
+    /// <summary>
+    /// The storage section from the Storage page's facts. A hidden document type's table is left out, as from every list; a
+    /// table in a schema the database browser withholds from visitors is named, because the host's role reads <c>pg_class</c>
+    /// (API design §2.3).
+    /// </summary>
+    /// <param name="facts">The facts.</param>
+    /// <param name="settings">The studio's settings, for the document-type filter.</param>
+    public static PostgresStorageSection Storage(StorageFacts facts, IDiagnosticsSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(facts);
+        ArgumentNullException.ThrowIfNull(settings);
+
+        long share = facts.ShareBase;
+        StatisticsWindow? window = facts.Window;
+        List<string> reasons = [];
+
+        if (facts.DatabaseBytesNotRead is { } notMeasured)
+        {
+            reasons.Add(notMeasured + " The database's size is the catalog's estimate instead.");
+        }
+
+        if (facts.GrowthBytesPerDay is null)
+        {
+            reasons.Add("No growth figure yet: " + (window is null
+                ? facts.WindowNotRead ?? "the statistics window was not read."
+                : StorageGrowthText.Pending(window) + "."));
+        }
+
+        if (facts.TablesNotRead is { } tables)
+        {
+            reasons.Add(tables);
+        }
+
+        return new PostgresStorageSection
+        {
+            Outcome = PostgresReadOutcome.Read,
+            Reason = reasons.Count == 0 ? null : string.Join(" ", reasons),
+            MeasuredAt = facts.MeasuredAt,
+            DatabaseBytes = facts.DatabaseBytes ?? facts.EstimatedDatabaseBytes,
+            SizesAreEstimates = facts.SizesAreEstimates,
+            StatisticsSince = window?.Since,
+            GrowthBytesPerDay = Whole(facts.GrowthBytesPerDay),
+            LargestTables =
+            [
+                .. facts.LargestTables
+                    .Where(table => !table.Table.DocumentTypes.Any(type => settings.IsDocumentTypeVisible?.Invoke(type) == false))
+                    .Select(table => new PostgresTableStorage
+                    {
+                        Schema = table.Table.Schema,
+                        Name = table.Table.Table,
+                        Ownership = DiagnosticsMapper.Ownership(table.Table.Ownership),
+                        Owner = table.Table.Library,
+                        TotalBytes = table.TotalBytes,
+                        TableBytes = table.Row.HeapBytes,
+                        IndexBytes = table.Row.IndexBytes,
+                        ToastBytes = table.Row.ToastBytes,
+                        EstimatedRows = table.EstimatedRows,
+                        ShareOfDatabase = share > 0 ? Math.Clamp((double) table.TotalBytes / share, 0, 1) : 0,
+                        HotUpdateRatio = table.HotUpdateRatio,
+                        GrowthBytesPerDay = window is null ? null : Whole(table.GrowthBytesPerDay(window)),
+                        AllVisibleRatio = DiagnosticsMapper.Ratio(table.AllVisibleRatio),
+                    }),
+            ],
+        };
+    }
+
+    /// <summary>
+    /// The statements section from the Statements page's facts, through the host's screen: T02's withholding and comment
+    /// masking were applied where the text was read; here a hidden document type's text is withheld and every text capped.
+    /// Only statements with counters over the window are listed, so the shares add up.
+    /// </summary>
+    /// <param name="facts">The facts.</param>
+    /// <param name="gate">The host gate, whose screen masks the texts.</param>
+    /// <param name="text">The studio's words, for a read that did not read.</param>
+    public static PostgresStatementsSection Statements(StatementFacts facts, HostGate gate, StudioText text)
+    {
+        ArgumentNullException.ThrowIfNull(facts);
+        ArgumentNullException.ThrowIfNull(gate);
+        ArgumentNullException.ThrowIfNull(text);
+
+        if (facts.State != StatementsState.Read)
+        {
+            return new PostgresStatementsSection
+            {
+                Outcome = facts.State == StatementsState.Failed ? PostgresReadOutcome.Failed : PostgresReadOutcome.Unavailable,
+                Reason = StatementStatusText.Of(facts, text),
+                MeasuredAt = facts.MeasuredAt,
+                StatisticsSince = facts.StatsReset,
+            };
+        }
+
+        return new PostgresStatementsSection
+        {
+            Outcome = PostgresReadOutcome.Read,
+            Reason = facts.Watched ? null : "Counted since the counters began: the statement checks have not watched a window of this database yet.",
+            MeasuredAt = facts.MeasuredAt,
+            StatisticsSince = facts.StatsReset,
+            Window = facts.Span,
+            TotalMilliseconds = facts.TotalExecMs,
+            Top =
+            [
+                .. facts.Statements
+                    .Where(static x => x.Window is not null)
+                    .Take(MaxStatements)
+                    .Select(fact => Statement(fact, gate.Screen)),
+            ],
+        };
+    }
+
+    /// <summary>One statement, its text through the host's screen.</summary>
+    internal static PostgresStatement Statement(StatementFact fact, StatementScreen screen)
+    {
+        ArgumentNullException.ThrowIfNull(fact);
+        ArgumentNullException.ThrowIfNull(screen);
+
+        StatementCounts counts = fact.Window ?? fact.SinceBegan;
+        string? textShown = null;
+        string? withheld = fact.TextWithheld;
+        bool truncated = fact.TextTruncated;
+
+        if (withheld is null && fact.Text is { } read)
+        {
+            SessionStatementText masked = SessionQueryText.Present(read, fact.TextTruncated, screen, StatementCharacters);
+            textShown = masked.Text;
+            withheld = masked.Text is null ? masked.Note : null;
+            truncated = masked.Text is not null && (fact.TextTruncated || masked.Note is not null);
+        }
+
+        return new PostgresStatement
+        {
+            QueryId = fact.QueryId,
+            Text = textShown,
+            TextTruncated = truncated,
+            TextWithheld = withheld,
+            Calls = (long) counts.Calls,
+            TotalMilliseconds = counts.ExecMs,
+            MeanMilliseconds = counts.MeanMs ?? 0,
+            ShareOfTime = fact.Share ?? 0,
+            Rows = (long) counts.Rows,
+            SharedBlocksHit = (long) counts.SharedBlocksHit,
+            SharedBlocksRead = (long) counts.SharedBlocksRead,
+            TempBlocksWritten = (long) counts.TempBlocksWritten,
+            StorageBlocksRead = counts.StorageBlocksRead is { } storage ? (long) storage : null,
+        };
+    }
+
+    /// <summary>The settings section from the Server page's facts: the curated settings and the extension chips, read as the page reads them.</summary>
+    /// <param name="facts">The facts.</param>
+    public static PostgresSettingsSection Settings(ServerSettingsFacts facts)
+    {
+        ArgumentNullException.ThrowIfNull(facts);
+
+        bool read = facts.Settings.Read || facts.Extensions.Read;
+
+        return new PostgresSettingsSection
+        {
+            Outcome = read ? PostgresReadOutcome.Read : PostgresReadOutcome.Failed,
+            Reason = facts.Failures.Count == 0 ? null : string.Join(" ", facts.Failures.Select(static x => x.EndsWith('.') ? x : x + ".")),
+            MeasuredAt = facts.ReadAt,
+            Settings = [.. facts.CuratedSettings().Select(DiagnosticsMapper.Setting)],
+            Extensions = [.. facts.Chips().Select(DiagnosticsMapper.Extension)],
+            DataChecksums = facts.Posture.Value?.ChecksumsOn,
+            ChecksumFailures = facts.Posture.Value?.ChecksumFailures,
+            LastChecksumFailure = facts.Posture.Value?.LastChecksumFailure,
+        };
+    }
+
+    /// <summary>
+    /// The write-ahead log section from the Replication page's facts: <c>pg_stat_wal</c> as that page reads it, with the WAL
+    /// writes and syncs the same on every release (the platform and release gates are applied there, so Aurora and a release
+    /// without the view are <see cref="PostgresReadOutcome.NotApplicable" /> with the page's own sentence). Never gated:
+    /// nothing in it is another program's work.
+    /// </summary>
+    /// <param name="facts">The Replication page's facts.</param>
+    public static PostgresWalSection Wal(ReplicationFacts facts)
+    {
+        ArgumentNullException.ThrowIfNull(facts);
+
+        ReplicationRead<WalStatistics> read = facts.Wal;
+
+        return DiagnosticsMapper.Wal(read.Value, read.Outcome, read.Note, facts.ReadAt);
+    }
+
+    /// <summary>
+    /// The connections section from the sessions snapshot: the database's row and the budget always; the applications - their
+    /// names - only past the activity gate.
+    /// </summary>
+    /// <param name="snapshot">The snapshot.</param>
+    /// <param name="gate">The host gate.</param>
+    public static PostgresConnectionsSection Connections(SessionSnapshot snapshot, HostGate gate)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        ArgumentNullException.ThrowIfNull(gate);
+
+        if (snapshot.Connections is not { } connections)
+        {
+            return new PostgresConnectionsSection
+            {
+                Outcome = PostgresReadOutcome.Unavailable,
+                Reason = "The sessions snapshot did not read connections by application.",
+                MeasuredAt = snapshot.ReadAt,
+            };
+        }
+
+        bool capped = gate.IncludeActivity && connections.ApplicationCount > connections.Applications.Count;
+
+        return new PostgresConnectionsSection
+        {
+            Outcome = PostgresReadOutcome.Read,
+            Reason = capped
+                ? "Only the " + connections.Applications.Count.ToString(CultureInfo.InvariantCulture) + " applications with the most sessions, of "
+                  + connections.ApplicationCount.ToString(CultureInfo.InvariantCulture) + ", are listed; the database's total counts them all."
+                : null,
+            MeasuredAt = snapshot.ReadAt,
+            MaxConnections = connections.MaxConnections,
+            ReservedConnections = connections.Reserved,
+            ServerConnections = Count(connections.ServerConnections),
+            Database = DiagnosticsMapper.Counts(connections.Database),
+            ByApplication = gate.IncludeActivity ? [.. connections.Applications.Select(DiagnosticsMapper.Counts)] : [],
+            AllSessionsVisible = connections.AllSessionsVisible,
+        };
+    }
+
+    /// <summary>What the section says while the window holds no sample.</summary>
+    internal const string NoSamplesYet =
+        "The connection history holds no sample of this server yet: the first is taken a moment after the application starts. " + ConnectionHistorySamplingText.DynamicDatabases;
+
+    /// <summary>What the section says while the window holds no sample and the host's <c>ShouldSample</c> has chosen this process to sample (issue #57).</summary>
+    internal const string NoSamplesYetChosen = ConnectionHistorySamplingText.Chosen;
+
+    /// <summary>What the section says while the window holds no sample and <c>ShouldSample</c> has not chosen this process (issue #57).</summary>
+    internal const string NoSamplesYetNotChosen = ConnectionHistorySamplingText.NotChosen;
+
+    /// <summary>The sentence for an empty window, by whether the host's <c>ShouldSample</c> decides who samples (issue #57).</summary>
+    /// <param name="readerOnly">Whether this process only reads the history.</param>
+    /// <param name="sampling">This process's sampling state.</param>
+    internal static string NoSamples(bool readerOnly, ConnectionHistorySampling sampling) =>
+        readerOnly
+            ? NoSamplesYetReaderOnly
+            : sampling switch
+            {
+                ConnectionHistorySampling.Chosen => NoSamplesYetChosen,
+                ConnectionHistorySampling.NotChosen => NoSamplesYetNotChosen,
+                ConnectionHistorySampling.NotChosenInMemory => ConnectionHistorySamplingText.NotChosenInMemory,
+                _ => NoSamplesYet,
+            };
+
+    /// <summary>What the section says while the window holds no sample and this process only reads the history (<c>AddPostgresConnectionHistoryReader()</c>).</summary>
+    internal const string NoSamplesYetReaderOnly =
+        "The connection history has no sample of this server yet. This process only reads it: another process fills it, and has sampled nothing of this server within the window.";
+
+    /// <summary>
+    /// The connection history section from one read of the history - the arithmetic is <see cref="ConnectionHistoryView" />'s, the
+    /// same Holders shows. Per-application peaks only with the host gate's <c>IncludeActivity</c>.
+    /// </summary>
+    /// <param name="read">The lookup's answer.</param>
+    /// <param name="includeActivity">The request's switch.</param>
+    /// <param name="readerOnly">Whether this process only reads the history, so that it never samples and the reason for an empty window says so.</param>
+    /// <param name="sampling">Whether the host's <c>ShouldSample</c> chose this process to sample (issue #57); the reason for an empty window follows it.</param>
+    public static PostgresConnectionHistorySection ConnectionHistory(
+        ConnectionHistoryRead read,
+        bool includeActivity,
+        bool readerOnly = false,
+        ConnectionHistorySampling sampling = ConnectionHistorySampling.Always)
+    {
+        ArgumentNullException.ThrowIfNull(read);
+
+        switch (read.Outcome)
+        {
+            case PostgresReadOutcome.Read when read.View is { } view:
+                return new PostgresConnectionHistorySection
+                {
+                    Outcome = PostgresReadOutcome.Read,
+                    Server = read.Server,
+                    Window = read.Window,
+                    Since = view.Since,
+                    Until = view.Until,
+                    Samples = view.Samples,
+                    PendingSamples = read.PendingSamples,
+                    InstanceChanges = view.InstanceChanges,
+                    Peak = view.Peak,
+                    PeakAt = view.PeakAt,
+                    ClientLimit = view.ClientLimit,
+                    ClientLimitNow = view.ClientLimitNow,
+                    ByApplication = includeActivity
+                        ? [.. view.Applications.Select(static x => new PostgresConnectionPeak { ApplicationName = x.Application, Peak = x.Peak, At = x.At })]
+                        : [],
+                };
+
+            case PostgresReadOutcome.Unavailable:
+                return new PostgresConnectionHistorySection
+                {
+                    Outcome = PostgresReadOutcome.Unavailable,
+                    Reason = NoSamples(readerOnly, sampling),
+                    Server = read.Server,
+                    Window = read.Window,
+                    PendingSamples = read.PendingSamples,
+                };
+
+            case PostgresReadOutcome.TimedOut:
+                return new PostgresConnectionHistorySection
+                {
+                    Outcome = PostgresReadOutcome.TimedOut,
+                    Reason = "The history's store took longer than QueryTimeout to answer.",
+                    Server = read.Server,
+                    Window = read.Window,
+                };
+
+            default:
+                return new PostgresConnectionHistorySection
+                {
+                    Outcome = PostgresReadOutcome.Failed,
+                    Reason = "The connection history could not be read (" + (read.Failure?.GetType().Name ?? "unknown") + "); the server log has it (event 9251).",
+                    Server = read.Server,
+                    Window = read.Window,
+                };
+        }
+    }
+
+    private static int Count(long value) => DiagnosticsMapper.Count(value);
+
+    private static long? Whole(double? value) => value is { } number && double.IsFinite(number) ? (long) Math.Round(number) : null;
+}

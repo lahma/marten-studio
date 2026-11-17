@@ -1,0 +1,63 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <!-- The Kafka module's Razor Class Library (AGENTS.md D34, D35): AddDataStudio().AddKafka() adds a Kafka section to the studio the host
+       registered. It has no Marten, no Npgsql and no database module (hard rule 16: it joins the studio through the shell, DataStudio), no static web assets (its CSS is a section of the shell's one stylesheet) -->
+  <PropertyGroup>
+    <AssemblyName>DataStudio.Kafka</AssemblyName>
+    <RootNamespace>DataStudio.Kafka</RootNamespace>
+    <PackageId>DataStudio.Kafka</PackageId>
+    <Title>Data Studio for Apache Kafka</Title>
+    <IsPackable>true</IsPackable>
+    <EnablePackageValidation>true</EnablePackageValidation>
+    <PackageTags>kafka;blazor;studio;admin</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <Product>Data Studio</Product>
+    <Description>Data Studio for Apache Kafka: the Kafka pages of Data Studio, beside the Marten or Postgres pages or alone, over the application's own Kafka credentials. Apache Kafka is a trademark of the Apache Software Foundation. Data Studio is not affiliated with or endorsed by the Apache Software Foundation.</Description>
+  </PropertyGroup>
+
+  <!-- Components are bound by name, as in the other studios (D2). -->
+  <PropertyGroup>
+    <IsTrimmable>false</IsTrimmable>
+    <IsAotCompatible>false</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <!-- The shell this module joins, and the engine it shows. Confluent.Kafka reaches this project only through DataStudio.Kafka.Core: the
+       built DataStudio.Kafka.dll references no Confluent assembly (KafkaFenceTests). -->
+  <ItemGroup>
+    <ProjectReference Include="../DataStudio/DataStudio.csproj" />
+    <ProjectReference Include="../DataStudio.Kafka.Core/DataStudio.Kafka.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="../DataStudio.Kafka/README.md" Pack="true" PackagePath="/" />
+    <None Include="../../icon.png" Pack="true" PackagePath="/" Visible="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <SupportedPlatform Include="browser" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="DataStudio.Kafka.Tests" />
+    <InternalsVisibleTo Include="DataStudio.Kafka.Integration.Tests" />
+  </ItemGroup>
+
+  <!-- Exactly its own build of what sits below it, as the Marten module's DataStudioMartenPinsPostgresExactly does: `DataStudio [x.y.z]` and `DataStudio.Kafka.Core [x.y.z]`
+       in the nuspec, not NuGet's default `>=`. The version NuGet reads is that project's PackageVersion, the CHANGELOG's. -->
+  <Target Name="DataStudioKafkaPinsFamilyExactly" AfterTargets="_GetProjectReferenceVersions">
+    <ItemGroup>
+      <_ProjectReferencesWithVersions Condition="'%(Filename)' == 'DataStudio' or '%(Filename)' == 'DataStudio.Kafka.Core'">
+        <ProjectVersion>[%(ProjectVersion)]</ProjectVersion>
+      </_ProjectReferencesWithVersions>
+    </ItemGroup>
+    <Error Condition="'@(_ProjectReferencesWithVersions->WithMetadataValue('Filename', 'DataStudio'))' == ''"
+           Text="DataStudio.Kafka must depend on exactly its own DataStudio build, and pack found no DataStudio project reference to pin." />
+    <Error Condition="'@(_ProjectReferencesWithVersions->WithMetadataValue('Filename', 'DataStudio.Kafka.Core'))' == ''"
+           Text="DataStudio.Kafka must depend on exactly its own DataStudio.Kafka.Core build, and pack found no DataStudio.Kafka.Core project reference to pin." />
+  </Target>
+
+</Project>

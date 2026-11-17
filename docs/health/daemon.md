@@ -9,7 +9,7 @@ your documents are stored in. Each finding is about the database as a whole, so 
 store policy allows for the database with no tenant selected; a name of a session or a tenant sits behind
 `ViewDatabaseActivity`. Back to the [index](../health.md).
 
-**Studios.** Every check here reads a Marten store's event store and daemon, and runs only in Marten Studio
+**Modules.** Every check here reads a Marten store's event store and daemon, and runs only in a Marten host
 ([codes.md](codes.md)).
 
 Every age of a row below is measured in the **database server's** time (`transaction_timestamp()`), against
@@ -109,7 +109,7 @@ written for that long - a hung daemon, or a lock that outlived the process. Who 
 client address) is shown only with `ViewDatabaseActivity`.
 
 Never raised for `DaemonMode.ExternallyManaged` (Wolverine's leadership uses lock ids of its own: D03 alone
-applies), for a daemon hosted in this process that says it is running, while Marten Studio's own coordinator
+applies), for a daemon hosted in this process that says it is running, while the Marten module's own coordinator
 pause is recorded, or within `2 x SlowPollingTime + 1 min` of the start of a process that hosts a daemon - a
 HotCold node just restarted holds no lock and has written nothing yet, and is starting, not dead. Another store
 sharing this database with the same `DaemonLockId` would count as a holder; Marten asks for a lock id unique to
@@ -117,7 +117,7 @@ each application on a database.
 
 Variants: `no-daemon` (the Critical) and `lock-held-idle` (the Warning). Neither has a subject: each is about the store's
 daemon in this database as a whole. Until 0.5 the kind was the finding's subject; its key (`D02|no-daemon`) is the same
-either way. Marten Studio only.
+either way. Marten module only.
 
 ```csharp
 builder.Services.AddMarten(opts => { /* ... */ })
@@ -174,14 +174,14 @@ at N ev/s, caught up in ~T", which the check's status row says. The projections 
 own, from its own samples (below); it falls back to this check's arithmetic only while it has too few of them.
 
 **Only a shard that runs, moves, and is slower than its arrivals.** A lag grows for reasons that have nothing to do
-with speed, and each is somebody else's, so D04 says nothing of a shard while Marten Studio's coordinator pause is
+with speed, and each is somebody else's, so D04 says nothing of a shard while the Marten module's coordinator pause is
 recorded (every lag grows, by design), while its projection is known to be rebuilt (the position starts again from
 zero), while its agent here is paused or stopped (D05), when it has not moved while the advisor watched (stalled, D03,
 or not run, D02), or when the high-water mark has not moved (held behind a gap, D01). The status line says which. The
 projections screen's own arrow is withheld for the pause and the agent alone: a stall is coloured and said on its
 chart, and a rebuild's catching up is what its estimate is for.
 
-Thresholds, in this order: the host's `MartenStudioOptions.ProjectionThresholds` for the shard's projection (1.2: `o.ProjectionThresholds["Trips"] =
+Thresholds, in this order: the host's `MartenOptions.ProjectionThresholds` for the shard's projection (1.2: `o.ProjectionThresholds["Trips"] =
 new(WarningBehind: 5_000, CriticalBehind: 50_000)`, applied to every store by projection name); then a progression
 row's own `warning_behind_threshold` or `critical_behind_threshold`, if one is set; then the projections screen's
 defaults - 1,000 events behind for the warning, 100,000 for critical. A threshold a host writes into a row is honoured;
@@ -234,7 +234,7 @@ failure, and - for a studio beside a daemon in another process,
 which has only the row - every check that lands there. The memory is the advisor's own, kept only while a page is
 open.
 
-Classified where JasperFx classifies: a start Marten Studio asked for and the daemon refused carries
+Classified where JasperFx classifies: a start the Marten module asked for and the daemon refused carries
 `ShardStartException.Reason` (`AgentPaused`, `HighWaterNotRunning`, `ShardNotRegistered`, `StartRace`, `Faulted`,
 `Rebuilding`) and whether a retry is expected to help (JasperFx 2.76+, Marten 9.41+); a live failure is classified
 as transient or permanent by `TransientFailures.IsTransient` where it exists (JasperFx 2.89, Marten 9.50.3+). A
@@ -262,10 +262,10 @@ says it is not, the line stands as it is; and where nothing can say - every fail
 an error escaped unwrapped and the shard paused as `Other`; the floor is past that.)
 
 **Starting a shard during a rebuild.** Since Marten 9.50 (JasperFx 2.86) the daemon refuses a continuous start while
-the shard's projection is being rebuilt, and Marten Studio says it was refused and records why. (Before 9.50 a rebuild
-started outside Marten Studio was invisible, nothing refused the start, and the continuous agent it started wrote the
+the shard's projection is being rebuilt, and the Marten module says it was refused and records why. (Before 9.50 a rebuild
+started outside the Marten module was invisible, nothing refused the start, and the continuous agent it started wrote the
 shard's progression row beside the replay: whichever inserted second failed on `pk_mt_event_progression` (23505), and
-the rebuild could be the one that failed - measured at 9.39. The floor is past that.) A rebuild Marten Studio itself is
+the rebuild could be the one that failed - measured at 9.39. The floor is past that.) A rebuild the Marten module itself is
 running refuses the start too.
 
 **Stopping.** Pause, Stop and Rebuild give each agent `Projections.StopAndDrainTimeout` (5 s by default) to finish
@@ -379,7 +379,7 @@ restarting the shard continues it from its position, and a rebuild here starts i
 
 ## D09 Event sequence and daemon progression disagree
 
-**Critical.** Marten Studio only. The event sequence, the high-water mark, the registered shards and the events
+**Critical.** Marten module only. The event sequence, the high-water mark, the registered shards and the events
 already committed disagree about where the event store is. There are three kinds of finding, all from the snapshot the
 high-water read already takes: the sequence's `last_value` and `is_called`, the progression rows, and one more
 backward probe of `mt_events`' primary key (`max(seq_id)`, under the same `AccessShareLock` as D01's `min(seq_id)`
@@ -476,7 +476,7 @@ tenant draws from a sequence of its own there.
 
 ## D10 Orphaned progression rows
 
-**Info.** Marten Studio only. Rows of `mt_event_progression` that nothing this store registers advances: each was
+**Info.** Marten module only. Rows of `mt_event_progression` that nothing this store registers advances: each was
 written by a projection that has since been renamed, removed or given a new version, or by a subscription that was
 removed. One finding per projection a row names - its name, and above version 1 its version (`Trips:V2`) - so a rename
 is one finding however many shards or tenants it left rows for.

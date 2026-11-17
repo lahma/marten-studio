@@ -6,7 +6,7 @@ database's - a physical slot belongs to no database, and a logical slot for anot
 WAL this one writes - so, like C03, the numbers are the whole server's, and every store database on the server
 shows the same ones. Back to the [index](../health.md).
 
-**Studios.** R01 to R04 read Postgres alone and run in both studios ([codes.md](codes.md)).
+**Modules.** R01 to R04 read Postgres alone and run in both modules ([codes.md](codes.md)).
 
 ## What these checks read, and when
 
@@ -79,7 +79,7 @@ back vacuum everywhere; that horizon is T14's finding.
 Variants: `near-limit` (the Critical), `inactive` (the Warning) and `lost` (the Info), one finding of each at most, about
 every slot of its kind on the server. None has a subject - a slot's name is never part of a finding's key, which every
 visitor's mute is made of. Until 0.5 the kind was the finding's subject; its key (`R01|inactive`) is the same either way.
-Both studios run it.
+Both modules run it.
 
 **History.** Every slot the read returns - another database's too, at most 200, most WAL first - adds
 `replication.slot-idle-retained:<slot>` to the database's samples: the WAL it held while inactive, and zero while
@@ -124,7 +124,7 @@ The studio never changes a setting and never drops a slot itself.
 
 ## R02 WAL archiving failing
 
-Runs in both studios, Marten Studio and Postgres Studio. Variants: `failing`, `backlog`.
+Runs in both modules, Marten and Postgres. Variants: `failing`, `backlog`.
 
 With `archive_mode` on, Postgres keeps every WAL file until the archive command has copied it. An archiver that
 fails, hangs or falls behind fills `pg_wal` until the WAL volume is full and the server stops accepting writes, and
@@ -185,7 +185,7 @@ written the moment the archiver first succeeds, or as a backlog that shrank to n
 
 ## R03 Standby lag
 
-Runs in both studios, Marten Studio and Postgres Studio. Variants: `primary-view`, `standby-view`, `paused`, `aurora-reader`.
+Runs in both modules, Marten and Postgres. Variants: `primary-view`, `standby-view`, `paused`, `aurora-reader`.
 
 A standby that is behind is behind for whatever reads it, and if it is the failover target, everything it has not
 replayed is what a failover loses or waits for. The thresholds are issue #8 G8's: **Warning** at 5 minutes or 1 GiB
@@ -267,7 +267,7 @@ than the samples) `replication.standby-stall-open`, which carry its start from o
 
 ## R04 Requested checkpoints
 
-Runs in both studios, Marten Studio and Postgres Studio.
+Runs in both modules, Marten and Postgres.
 
 A checkpoint is *requested* rather than timed when WAL reaches `max_wal_size` before `checkpoint_timeout` comes round
 (or a `CHECKPOINT`, a base backup or `CREATE DATABASE` asks for one). Checkpoints then come closer together than

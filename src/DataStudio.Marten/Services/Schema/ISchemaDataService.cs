@@ -1,0 +1,154 @@
+using DataStudio.Postgres.Services;
+
+namespace DataStudio.Marten.Services.Schema;
+
+/// <summary>
+/// What the Schema screen reads, and the one place a schema change can be applied from.
+/// </summary>
+/// <remarks>
+/// An interface so a component test can drive the page without a Postgres, and so the capability gate
+/// has exactly one implementation to live in. Every method takes a <see cref="StudioScope" /> and
+/// resolves it: none of them accepts an <c>IDocumentStore</c> or an <c>IMartenDatabase</c>, because a
+/// resolved database has already passed authorization and a method that accepted one would make the
+/// check skippable (see <see cref="StudioScopeResolver" />).
+/// </remarks>
+/// <remarks>
+/// <para>
+/// <b>Three of these are actions, not reads.</b> <see cref="CheckAsync" />, <see cref="PreviewAsync" />
+/// and <see cref="DdlAsync" /> reach Weasel's <c>CreateMigrationAsync()</c> / <c>ToDatabaseScript()</c>,
+/// which walk <c>IMartenDatabase.AllObjects()</c> - and below Marten 9.50.3 that builds Marten's feature
+/// schemas through the lazy HiLo <c>Sequences</c> feature, whose initialiser applies a migration under the
+/// database's own <c>AutoCreate</c>. There they can create Marten's own bookkeeping objects (<c>mt_hilo</c>,
+/// <c>mt_get_next_hi</c>) on a schema that did not have them; since 9.50.3 (#5665) the enumeration describes
+/// them without applying anything. Every one of them is
+/// still connection-hungry, is behind a button that says what it may do on this host's Marten, and may not
+/// be called on navigation.
+/// </para>
+/// <para>
+/// <b>And what they show spans the whole database</b> - every tenant's partitions by name, every document
+/// type's tables, the hidden ones included - so each of the three, and <see cref="ApplyAsync" />, answers
+/// only a visitor the store policy allows for the database with no tenant and, while the store hides a
+/// document type, one past the database browser's gate. Anybody else gets the refusal as a value
+/// (<see cref="SchemaScriptRefusal" />), audited (<see cref="SchemaScriptGate" />).
+/// </para>
+/// <para>
+/// <see cref="TablesAsync" />, <see cref="IndexesAsync" /> and <see cref="FunctionsAsync" /> are the
+/// navigation paths and execute no DDL at all: their schema list and their declarations come from
+/// <c>StoreOptions</c> (see <see cref="SchemaDeclarationReader" />) and their numbers from
+/// <c>pg_catalog</c>, read in the database browser's read-only session. <c>SchemaNoDdlLiveTests</c> holds
+/// them to it.
+/// </para>
+/// </remarks>
+internal interface ISchemaDataService
+{
+    /// <summary>
+    /// Whether the database matches its configuration.
+    /// </summary>
+    /// <remarks>
+    /// An action, not a read: it opens connections, reads the whole catalog and builds every feature
+    /// schema, which below Marten 9.50.3 can create Marten's own HiLo objects. Never called on navigation -
+    /// the Drift tab runs it from a button that says what it may do.
+    /// </remarks>
+    Task<SchemaCheck> CheckAsync(StudioScope scope, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The SQL Marten would run to bring the database up to its configuration.
+    /// </summary>
+    /// <remarks>
+    /// Applies nothing of what it renders - the assertion in the live tests is that the declared indexes
+    /// are unchanged. It does build Marten's feature schemas to get there, so like
+    /// <see cref="CheckAsync" /> it is an explicit action rather than something a tab does on arrival.
+    /// </remarks>
+    Task<MigrationPreview> PreviewAsync(StudioScope scope, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Applies every configured change to the database in scope.
+    /// </summary>
+    /// <param name="scope">The store and database to change.</param>
+    /// <param name="confirmation">
+    /// What the visitor <em>typed</em> into the confirm dialog - carried out of the dialog's own input
+    /// rather than re-supplied by the page. It has to equal the database's identity; the dialog checks it
+    /// too, but the dialog is a convenience and this is the check that matters. A page that passed its
+    /// own copy of the identity here would be handing the service the answer, and the check would prove
+    /// nothing.
+    /// </param>
+    /// <param name="cancellationToken">Cancels the apply.</param>
+    /// <returns>
+    /// What was applied - or, while the store hides a document type and the visitor is not past the database
+    /// browser's gate, a result that did not succeed and carries the refusal
+    /// (<see cref="SchemaApplyResult.Withheld" />), with nothing run: the migration would print that type's table.
+    /// </returns>
+    /// <remarks>
+    /// The migration is the whole database's - every tenant's tables and partitions - whatever tenant
+    /// <paramref name="scope" /> selects, so both policies are asked about <c>scope with { TenantId = null }</c>:
+    /// the store policy, then the write policy with <c>ApplySchemaChanges</c> named.
+    /// </remarks>
+    /// <exception cref="StudioCapabilityDeniedException">
+    /// <c>MartenOptions.Capabilities.ApplySchemaChanges</c> is off, or <c>ReadOnly</c> is on.
+    /// </exception>
+    /// <exception cref="StudioNotAuthorizedException">
+    /// The store policy or the write policy refused this store and database as a whole; its
+    /// <see cref="StudioNotAuthorizedException.Scope" /> carries no tenant.
+    /// </exception>
+    Task<SchemaApplyResult> ApplyAsync(
+        StudioScope scope,
+        string confirmation,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Table sizes and activity for the store's schemas, each table classified by the database browser's
+    /// rules, partitions rolled into their parent, hidden document types left out.
+    /// </summary>
+    Task<SchemaTables> TablesAsync(StudioScope scope, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Every index that exists, every index that is declared, and what to do about the difference - from the
+    /// catalogs' columns alone, so it locks nothing it lists (D27) and carries no index's statement
+    /// (<see cref="IndexDefinitionAsync" />).
+    /// </summary>
+    Task<SchemaIndexes> IndexesAsync(StudioScope scope, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The statement Postgres reconstructs for one index <see cref="IndexesAsync" /> lists, read when a person asks for
+    /// it. Postgres opens the indexed table for the moment it deparses, so this read - unlike the list - may queue
+    /// behind a migration's lock on that one table and gives up at the session's <c>lock_timeout</c>
+    /// (<see cref="SchemaIndexDefinition.Busy" />).
+    /// </summary>
+    /// <param name="scope">The store and database to read.</param>
+    /// <param name="schema">The index's schema.</param>
+    /// <param name="table">The table it is on.</param>
+    /// <param name="name">The index name.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    /// <remarks>
+    /// Shown to exactly the visitors, and for exactly the indexes, the list shows (same store policy, same
+    /// classification: a hidden document type's table, or one a degraded classification withholds, is "not there"),
+    /// with every schema the visitor is not shown masked as in the list. The index is found by its names inside the
+    /// store's own schemas; no oid travels in from the caller.
+    /// </remarks>
+    Task<SchemaIndexDefinition> IndexDefinitionAsync(
+        StudioScope scope,
+        string schema,
+        string table,
+        string name,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The functions, procedures, aggregates and window functions in the store's schemas, with whether this
+    /// visitor may read each one's body - never the bodies themselves, which the database browser's
+    /// definition read serves one at a time.
+    /// </summary>
+    Task<SchemaFunctions> FunctionsAsync(StudioScope scope, CancellationToken cancellationToken = default);
+
+    /// <summary>The whole creation script for the store's schema objects.</summary>
+    /// <remarks>
+    /// <c>IMartenDatabase.ToDatabaseScript()</c>, which walks <c>AllObjects()</c> - so, like
+    /// <see cref="CheckAsync" />, it is an explicit action behind a button rather than something the DDL
+    /// tab does on arrival.
+    /// </remarks>
+    Task<DdlScript> DdlAsync(StudioScope scope, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The identity of the database in scope, which is what the apply dialog makes the visitor type.
+    /// </summary>
+    Task<string> DatabaseIdentityAsync(StudioScope scope, CancellationToken cancellationToken = default);
+}

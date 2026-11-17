@@ -1,0 +1,122 @@
+using System.Security.Claims;
+
+using DataStudio.Services;
+using DataStudio.Kafka.Services;
+
+using DataStudio.Marten.Tests.Support;
+
+using Microsoft.AspNetCore.Components.Authorization;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+
+using Npgsql;
+
+
+namespace DataStudio.Kafka.Integration.Tests.Support;
+
+/// <summary>
+/// The Kafka module's real services over a real broker, composed by the real registrations (<c>AddPostgres()</c> and <c>AddKafka()</c>) and used the way
+/// a circuit uses them - from one scope - for the tests of the search service (UI-B). The authorization is the Kafka module's own <c>KafkaAuthorization</c> over the
+/// application's real <c>IAuthorizationService</c> and a real policy that is asked about the <c>KafkaTopicResource</c>; the ring is the studio's own. Nothing
+/// here connects to Postgres: the data source is only registered, and no hosted service is started.
+/// </summary>
+internal sealed class LiveSearchHost : IAsyncDisposable
+{
+    private readonly ServiceProvider provider;
+    private readonly IServiceScope scope;
+    private readonly HashSet<string> refused = new(StringComparer.Ordinal);
+
+    private LiveSearchHost(ServiceProvider provider, CapturingLoggerProvider logs, HashSet<string> refused, KafkaProfile? profile)
+    {
+        this.provider = provider;
+        this.refused = refused;
+        Logs = logs;
+        Entry = new KafkaClusterEntry("live", null, "Live", null, profile);
+        scope = provider.CreateScope();
+    }
+
+    /// <summary>Everything the Kafka module and the studio logged.</summary>
+    public CapturingLoggerProvider Logs { get; }
+
+    /// <summary>The cluster entry the host registered.</summary>
+    public KafkaClusterEntry Entry { get; }
+
+    public KafkaSearchService Search => scope.ServiceProvider.GetRequiredService<KafkaSearchService>();
+
+    /// <summary>The export service (D45).</summary>
+    public KafkaExportService Export => scope.ServiceProvider.GetRequiredService<KafkaExportService>();
+
+    /// <summary>The live tail service (D46).</summary>
+    public KafkaTailService Tail => scope.ServiceProvider.GetRequiredService<KafkaTailService>();
+
+    /// <summary>The related-records service (D42).</summary>
+    public KafkaCorrelationService Correlation => scope.ServiceProvider.GetRequiredService<KafkaCorrelationService>();
+
+    /// <summary>The studio's audit ring.</summary>
+    public IReadOnlyList<StudioActionLogEntry> Ring => provider.GetRequiredService<StudioActionLogService>().GetLatest();
+
+    /// <summary>Topics the cluster policy refuses from now on.</summary>
+    /// <param name="topics">The topic names.</param>
+    public void Refuse(params string[] topics)
+    {
+        foreach (string topic in topics)
+        {
+            refused.Add(topic);
+        }
+    }
+
+    /// <summary>Builds the host for a principal of the fixture's broker.</summary>
+    /// <param name="fixture">The broker.</param>
+    /// <param name="user">The Kafka principal the engine reads as.</param>
+    /// <param name="configure">Sets the Kafka module's options (topics, limits).</param>
+    /// <param name="profile">The cluster's profile, or <see langword="null" /> for none.</param>
+    public static LiveSearchHost Create(KafkaFixture fixture, string user, Action<KafkaOptions>? configure = null, KafkaProfile? profile = null)
+    {
+        Assert.SkipUnless(DockerAvailability.IsAvailable, DockerAvailability.SkipReason);
+        DockerAvailability.ThrowIfMissingOnContinuousIntegration();
+
+        CapturingLoggerProvider logs = new();
+        HashSet<string> refused = new(StringComparer.Ordinal);
+
+        ServiceCollection services = new();
+        services.AddLogging(builder => builder.SetMinimumLevel(LogLevel.Trace).AddProvider(logs));
+        services.AddHttpContextAccessor();
+        services.AddSingleton(NpgsqlDataSource.Create("Host=127.0.0.1;Port=1;Database=none;Username=none;Password=none"));
+        services.AddDataStudio().AddPostgres();
+        services.AddAuthorization(options => options.AddPolicy(
+            "kafka-topics",
+            policy => policy.RequireAssertion(context => context.Resource is KafkaTopicResource resource && (resource.Topic is null || !refused.Contains(resource.Topic)))));
+        services.AddDataStudio().AddKafka(options =>
+        {
+            options.AddCluster("live", fixture.Client(user), cluster =>
+            {
+                cluster.DisplayName("Live");
+
+                if (profile is { } p)
+                {
+                    cluster.Profile(p);
+                }
+            });
+            options.Capabilities.SearchRecords = true;
+            options.ClusterAuthorizationPolicy = "kafka-topics";
+            configure?.Invoke(options);
+        });
+
+        // After the studio's own: the circuit's visitor, signed in.
+        services.AddScoped<AuthenticationStateProvider, SignedIn>();
+
+        return new LiveSearchHost(services.BuildServiceProvider(), logs, refused, profile);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        scope.Dispose();
+        await provider.DisposeAsync();
+    }
+
+    private sealed class SignedIn : AuthenticationStateProvider
+    {
+        public override Task<AuthenticationState> GetAuthenticationStateAsync() =>
+            Task.FromResult(new AuthenticationState(new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Name, "live-visitor")], "test"))));
+    }
+}

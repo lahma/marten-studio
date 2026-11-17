@@ -1,0 +1,578 @@
+using JasperFx.Events;
+
+using Marten;
+using Marten.Schema;
+
+using DataStudio.Sample.Marten.Domain.Documents;
+using DataStudio.Sample.Marten.Domain.Events;
+
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+
+using Npgsql;
+
+using DataStudio.Sample.Postgres.Data;
+
+namespace DataStudio.Sample.Marten.Domain;
+
+/// <summary>
+/// A marker document, so the seeder can tell a fresh database from one it has already filled.
+/// </summary>
+public sealed class SeedMarker
+{
+    /// <summary>The one row there is ever meant to be.</summary>
+    public static readonly Guid WellKnownId = new("0f1a1f7e-6d2f-4a4b-9f1d-9f9e2c9a0001");
+
+    public Guid Id { get; set; }
+
+    public int Version { get; set; }
+
+    public DateTimeOffset SeededAt { get; set; }
+}
+
+/// <summary>
+/// Writes the demo data on host start, once.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Idempotent through <see cref="SeedMarker" />: the sample host is expected to be started and stopped
+/// repeatedly against a reused container, and a seeder that appended another twenty-five customers every
+/// time would make every screen in the studio a lie about what the demo contains.
+/// </para>
+/// <para>
+/// Three parts, in this order: the event streams, the documents, and then the relational demo schemas
+/// (<see cref="RelationalDemoSchema" />) - last, because one of their tables holds a foreign key into
+/// <c>mt_doc_customer</c>, which has to exist and hold the seeded customers first. Each half has its
+/// own idempotency guard, and the relational part runs on every start rather than behind the seed
+/// marker, so a database an older build already marked as seeded still gets it.
+/// </para>
+/// </remarks>
+public sealed class SampleDataSeeder : IInitialData
+{
+    /// <summary>
+    /// Bumped when the data below changes, so an existing database is re-seeded - and when
+    /// <see cref="SampleStore" />'s configuration changes in a way Marten cannot migrate over the rows an older build
+    /// wrote, such as a new foreign key.
+    /// </summary>
+    /// <remarks>
+    /// The sample host compares it with the database's <see cref="SeedMarker" /> before Marten touches anything
+    /// (<see cref="SampleDatabase" />), and a database another version seeded has the demo's schemas dropped and seeded
+    /// again, or the host stops and says how to do that. The re-seed below - clear, then write again - is for a store
+    /// whose tables already have the current shape, which is what a test that rewinds the marker builds.
+    /// </remarks>
+    public const int SeedVersion = 3;
+
+    private readonly ILogger logger;
+
+    private readonly bool grantConsoleRole;
+
+    /// <summary>A seeder that reports what it skipped to <paramref name="logger" />.</summary>
+    /// <param name="logger">
+    /// Where the relational demo says it left a <c>quartz</c> or <c>legacy</c> schema alone because the
+    /// sample did not create it. Optional: <c>new SampleDataSeeder()</c> logs nowhere, and a host that
+    /// wants the line registers the seeder with <c>InitializeWith&lt;SampleDataSeeder&gt;()</c> so the
+    /// container supplies one.
+    /// </param>
+    /// <param name="seeding">
+    /// What the host allowed beyond the store's own data (<see cref="SampleSeeding" />). Optional, and without it the
+    /// seeding grants <see cref="SampleConsoleRole" /> nothing: only the host knows whether the database is the demo's.
+    /// </param>
+    public SampleDataSeeder(ILogger<SampleDataSeeder>? logger = null, SampleSeeding? seeding = null)
+    {
+        this.logger = logger ?? (ILogger) NullLogger.Instance;
+        grantConsoleRole = seeding?.GrantConsoleRole ?? false;
+    }
+
+    /// <summary>How big <see cref="MediaAsset" />'s decoded payload is: base64 makes it about 2 MB.</summary>
+    private const int MediaAssetBytes = 1_500_000;
+
+    /// <summary>How many customers the seeder writes, numbered from one.</summary>
+    /// <remarks>The relational demo's credit lines name the same customers, so the number is defined there.</remarks>
+    public const int CustomerCount = SampleCustomers.Count;
+
+    public async Task Populate(IDocumentStore store, CancellationToken cancellation)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+
+        // Before the marker check, not after it: the events have an idempotency guard of their own, and a
+        // database that an older build already marked as seeded would otherwise never get them.
+        await SeedEventsAsync(store, cancellation);
+
+        await SeedDocumentsAsync(store, cancellation);
+
+        await ApplyRelationalDemoAsync(store, logger, grantConsoleRole, cancellation);
+    }
+
+    /// <summary>
+    /// Creates and fills the <c>quartz</c> and <c>legacy</c> schemas and <c>studio_sample.app_settings</c>,
+    /// for the sample host's own store and nobody else's.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Only when the store is the sample's own</b>, meaning its documents live in
+    /// <see cref="SampleStore.DocumentSchema" />. The relational demo is anchored there - its foreign key
+    /// points at <c>studio_sample.mt_doc_customer</c> and its in-schema table is
+    /// <c>studio_sample.app_settings</c> - and the schema names it creates, <c>quartz</c> and
+    /// <c>legacy</c>, are fixed. Every integration fixture re-points this same domain at a schema of its
+    /// own on one shared database and runs this seeder; if they applied the demo too, a dozen classes
+    /// running in parallel would all be creating and filling the same two schemas in a database other
+    /// tests read the whole catalog of.
+    /// </para>
+    /// <para>
+    /// <b>On every start</b>, not behind <see cref="SeedMarker" />: the scripts and the seeding are
+    /// idempotent on their own terms, and <see cref="SeedDocumentsAsync" />'s re-seed path truncates
+    /// <c>mt_doc_customer</c> with <c>CASCADE</c> - Marten's cleaner does - which empties
+    /// <c>legacy.customer_credit</c> through its foreign key. Running afterwards is what refills it.
+    /// </para>
+    /// <para>
+    /// <b>The console role's grants only where the host allowed them</b> (<see cref="SampleSeeding.GrantConsoleRole" />):
+    /// the throwaway container, or a database <c>--allow-data-generation</c> names. Role membership is cluster-wide, so on
+    /// any other database of a server where an earlier start made the login a member, the grants would land too.
+    /// </para>
+    /// </remarks>
+    private static async Task ApplyRelationalDemoAsync(IDocumentStore store, ILogger logger, bool grantConsoleRole, CancellationToken cancellation)
+    {
+        if (!string.Equals(store.Options.DatabaseSchemaName, SampleStore.DocumentSchema, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        await using NpgsqlConnection connection = store.Storage.Database.CreateConnection();
+        await connection.OpenAsync(cancellation);
+
+        await RelationalDemoSchema.ApplyAsync(connection, logger, cancellation);
+
+        // Wave 6: the studio's narrowed role reads the demo's schemas, which exist from here on (SampleConsoleRole) - on a
+        // database that is the demo's, and nowhere else.
+        if (grantConsoleRole)
+        {
+            await SampleConsoleRole.GrantAsync(connection, logger, cancellationToken: cancellation);
+        }
+    }
+
+    /// <summary>The seeded documents, behind <see cref="SeedMarker" />.</summary>
+    private static async Task SeedDocumentsAsync(IDocumentStore store, CancellationToken cancellation)
+    {
+        await using IDocumentSession session = store.LightweightSession();
+
+        SeedMarker? marker = await session.LoadAsync<SeedMarker>(SeedMarker.WellKnownId, cancellation);
+        if (marker is not null && marker.Version >= SeedVersion)
+        {
+            return;
+        }
+
+        if (marker is not null)
+        {
+            // Re-seeding, not seeding. Writing the same ids again is not enough: Order uses optimistic
+            // concurrency, so storing one whose mt_version this session never read fails the check and
+            // takes the whole batch with it. Clearing the demo's own collections first is what makes a
+            // version bump a thing a developer can actually run.
+            await ClearAsync(store, cancellation);
+        }
+
+        // A fixed seed, so two runs of the demo describe the same data and a screenshot stays true.
+        Random random = new(20260914);
+
+        List<Customer> customers = [];
+        for (int i = 1; i <= CustomerCount; i++)
+        {
+            customers.Add(new Customer
+            {
+                Id = CustomerId(i),
+                Name = $"Customer {i:00}",
+                Email = $"customer{i:00}@example.com",
+                Address = new Address($"{i} Example Street", Cities[i % Cities.Length], $"{10000 + i}", "FI"),
+                Tags = i % 3 == 0 ? ["preferred", "eu"] : ["eu"],
+                RegisteredAt = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero).AddDays(i)
+            });
+        }
+
+        session.Store(customers.ToArray());
+
+        List<Order> orders = [];
+        for (int i = 1; i <= 15; i++)
+        {
+            Customer customer = customers[i % customers.Count];
+            List<OrderLine> lines =
+            [
+                new($"SKU-{i:000}", random.Next(1, 4), 19.90m + i),
+                new($"SKU-{i + 100:000}", random.Next(1, 3), 5.50m)
+            ];
+
+            orders.Add(new Order
+            {
+                Id = new OrderId(DeterministicGuid("order", i)),
+                CustomerId = customer.Id,
+                Reference = $"ORD-2026-{i:0000}",
+                Total = lines.Sum(static line => line.Quantity * line.UnitPrice),
+                Status = i % 4 == 0 ? "Shipped" : "Placed",
+                Lines = lines,
+                PlacedAt = new DateTimeOffset(2026, 2, 1, 0, 0, 0, TimeSpan.Zero).AddHours(i * 7)
+            });
+        }
+
+        session.Store(orders.ToArray());
+
+        // A hierarchy: cars and trucks share the vehicle table and are told apart by mt_doc_type. Stored
+        // as the concrete types, which is what makes Marten write the discriminator.
+        List<Car> cars = [];
+        List<Truck> trucks = [];
+
+        for (int i = 1; i <= 6; i++)
+        {
+            cars.Add(new Car
+            {
+                Id = DeterministicGuid("car", i),
+                Make = Makes[i % Makes.Length],
+                Model = $"C{i:00}",
+                Year = 2018 + (i % 8),
+                Doors = i % 2 == 0 ? 5 : 3,
+                IsConvertible = i % 5 == 0
+            });
+        }
+
+        for (int i = 1; i <= 4; i++)
+        {
+            trucks.Add(new Truck
+            {
+                Id = DeterministicGuid("truck", i),
+                Make = Makes[(i + 1) % Makes.Length],
+                Model = $"T{i:00}",
+                Year = 2015 + i,
+                PayloadTonnes = 3.5m * i,
+                Axles = 2 + (i % 3)
+            });
+        }
+
+        session.Store(cars.ToArray());
+        session.Store(trucks.ToArray());
+
+        // A string primary key the application assigns, through UseIdentityKey().
+        List<Product> products = [];
+        for (int i = 1; i <= 12; i++)
+        {
+            products.Add(new Product
+            {
+                Id = $"SKU-{i:000}",
+                Name = $"Product {i:00}",
+                Category = Categories[i % Categories.Length],
+                Price = 9.90m + (i * 3),
+                Discontinued = i % 7 == 0
+            });
+        }
+
+        session.Store(products.ToArray());
+
+        // Every optional metadata column on, and every one off, so both ends of the range have rows.
+        List<AuditNote> auditNotes = [];
+        for (int i = 1; i <= 8; i++)
+        {
+            auditNotes.Add(new AuditNote
+            {
+                Id = DeterministicGuid("audit", i),
+                Subject = $"Audit note {i:00}",
+                Body = $"Something worth writing down happened, for the {i} time.",
+                Severity = i % 4 == 0 ? "warning" : "info"
+            });
+        }
+
+        session.Store(auditNotes.ToArray());
+
+        session.Store(new MinimalNote
+        {
+            Id = DeterministicGuid("minimal", 1),
+            Text = "This collection's table is id and data and nothing else."
+        });
+
+        // One two-megabyte document, written once. Seeding fifty of them would make every `dotnet run` of
+        // the sample a hundred-megabyte write for no extra demonstration.
+        session.Store(BuildMediaAsset());
+
+        session.Store(new SeedMarker
+        {
+            Id = SeedMarker.WellKnownId,
+            Version = SeedVersion,
+            SeededAt = DateTimeOffset.UtcNow
+        });
+
+        await session.SaveChangesAsync(cancellation);
+
+        // Three of the fifteen are soft-deleted, so the documents screen has a tri-state to show: alive,
+        // deleted, and "deleted rows exist but are hidden". A second round trip, because Marten has to
+        // have written the rows before they can be marked deleted.
+        await using (IDocumentSession deletions = store.LightweightSession())
+        {
+            foreach (Order order in orders.Take(3))
+            {
+                deletions.Delete(order);
+            }
+
+            await deletions.SaveChangesAsync(cancellation);
+        }
+
+        // Invoices are conjoined multi-tenant, so each tenant gets its own session and its own rows.
+        int invoiceIndex = 0;
+        foreach (string tenantId in SampleStore.TenantIds)
+        {
+            await using IDocumentSession tenantSession = store.LightweightSession(tenantId);
+            for (int i = 0; i < 3; i++)
+            {
+                invoiceIndex++;
+                Customer customer = customers[invoiceIndex % customers.Count];
+                tenantSession.Store(new Invoice
+                {
+                    CustomerId = customer.Id,
+                    Number = $"{tenantId.ToUpperInvariant()}-INV-{invoiceIndex:000}",
+                    Amount = 100m * invoiceIndex,
+                    Paid = invoiceIndex % 2 == 0,
+                    IssuedAt = new DateTimeOffset(2026, 3, 1, 0, 0, 0, TimeSpan.Zero).AddDays(invoiceIndex)
+                });
+            }
+
+            await tenantSession.SaveChangesAsync(cancellation);
+        }
+    }
+
+    /// <summary>
+    /// Appends the demo's order streams, one of them poisoned and one of them archived.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Separate from the documents above and idempotent on its own terms, because appending is not
+    /// upserting: running it twice would double every stream rather than replace it. The guard is the
+    /// first stream's own state, so this is safe to call directly - which the integration suite does,
+    /// against a store the sample host never touched.
+    /// </para>
+    /// <para>
+    /// Correlation, causation and headers are set on every session: <c>SampleStore.Configure</c> turns
+    /// those columns on, and a column that is enabled and always null tells a studio nothing.
+    /// </para>
+    /// <para>
+    /// This runs from <c>IInitialData</c>, which is before the daemon starts. That is fine and is the
+    /// point: the projections screen opens on a daemon that has a backlog to work through.
+    /// </para>
+    /// </remarks>
+    /// <param name="store">The store to append to.</param>
+    /// <param name="cancellation">Cancels the seeding.</param>
+    /// <returns>How many streams were appended - zero when the events were already there. The untyped orders and the typed ones each have their own guard.</returns>
+    public static async Task<int> SeedEventsAsync(IDocumentStore store, CancellationToken cancellation = default)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+
+        int appended = await SeedUntypedOrderStreamsAsync(store, cancellation);
+
+        // Its own guard, so a store an earlier build seeded - which has the untyped orders and not these - still gets them.
+        return appended + await SeedTypedOrderStreamsAsync(store, cancellation);
+    }
+
+    private static async Task<int> SeedUntypedOrderStreamsAsync(IDocumentStore store, CancellationToken cancellation)
+    {
+        await using (IQuerySession probe = store.QuerySession())
+        {
+            StreamState? existing = await probe.Events.FetchStreamStateAsync(OrderStreamId(1), cancellation);
+            if (existing is not null)
+            {
+                return 0;
+            }
+        }
+
+        DateTimeOffset day = new(2026, 2, 1, 8, 0, 0, TimeSpan.Zero);
+
+        await using IDocumentSession session = store.LightweightSession();
+
+        session.CorrelationId = "sample-seed";
+        session.CausationId = "SampleDataSeeder.SeedEventsAsync";
+        session.SetHeader("source", "marten-studio-sample");
+
+        for (int i = 1; i <= OrderStreamCount; i++)
+        {
+            // Five orders a day across five days, so DailySales has more than one row to roll up into.
+            DateTimeOffset placedAt = day.AddDays((i - 1) / 5).AddHours(i % 5);
+
+            List<object> events =
+            [
+                new OrderPlaced(OrderStreamId(i), $"Customer {i % 25 + 1:00}", placedAt),
+                new ItemAdded($"SKU-{i:000}", i % 3 + 1, 19.90m + i, placedAt.AddMinutes(1))
+            ];
+
+            // One stream carries the SKU that ShipmentTracker throws on. That is the whole dead-letter
+            // story: nothing writes a dead letter here, the daemon does.
+            if (i == PoisonedOrderIndex)
+            {
+                events.Add(new ItemAdded(ItemAdded.PoisonSku, 1, 999m, placedAt.AddMinutes(2)));
+            }
+
+            if (i % 5 == 0)
+            {
+                events.Add(new OrderShipped($"Carrier {i % 3 + 1}", placedAt.AddHours(6)));
+            }
+            else if (i % 7 == 0)
+            {
+                events.Add(new OrderCancelled("Out of stock", placedAt.AddHours(2)));
+            }
+
+            session.Events.StartStream(OrderStreamId(i), events);
+        }
+
+        await session.SaveChangesAsync(cancellation);
+
+        // One archived stream, so the events screens have a stream that is deliberately out of the
+        // default view. Archiving is queued on a session like any other operation.
+        await using IDocumentSession archiving = store.LightweightSession();
+        archiving.CorrelationId = "sample-seed";
+        archiving.Events.ArchiveStream(OrderStreamId(ArchivedOrderIndex));
+        await archiving.SaveChangesAsync(cancellation);
+
+        return OrderStreamCount;
+    }
+
+    /// <summary>
+    /// Appends the demo's <em>typed</em> order streams (1.1): started with <c>StartStream&lt;OrderSummary&gt;</c>, so the
+    /// stream's type is the aggregate <see cref="OrderSummaryProjection" /> folds, and the studio offers to compact them.
+    /// One of them ends with <see cref="OrderVoided" />, which the projection answers by deleting its aggregate - the
+    /// stream folds to nothing, and the Compact dialog says so before the click.
+    /// </summary>
+    /// <remarks>
+    /// Every event is one of the untyped orders' own kinds on the same days (and none is <see cref="OrderShipped" />, which
+    /// <c>ShipmentTracker</c> would turn into a shipment), so the daily roll-up simply has a few more orders. Deterministic:
+    /// stream ids and times come from the index alone.
+    /// </remarks>
+    private static async Task<int> SeedTypedOrderStreamsAsync(IDocumentStore store, CancellationToken cancellation)
+    {
+        await using (IQuerySession probe = store.QuerySession())
+        {
+            if (await probe.Events.FetchStreamStateAsync(TypedOrderStreamId(1), cancellation) is not null)
+            {
+                return 0;
+            }
+        }
+
+        DateTimeOffset day = new(2026, 2, 3, 14, 0, 0, TimeSpan.Zero);
+
+        await using IDocumentSession session = store.LightweightSession();
+
+        session.CorrelationId = "sample-seed";
+        session.CausationId = "SampleDataSeeder.SeedEventsAsync";
+        session.SetHeader("source", "marten-studio-sample");
+
+        for (int i = 1; i <= TypedOrderStreamCount; i++)
+        {
+            DateTimeOffset placedAt = day.AddHours(i);
+
+            List<object> events =
+            [
+                new OrderPlaced(TypedOrderStreamId(i), $"Customer {i + 20:00}", placedAt),
+                new ItemAdded($"SKU-T{i:00}", 2, 12.50m + i, placedAt.AddMinutes(1)),
+            ];
+
+            switch (i)
+            {
+                case TypedOrderStreamCount:
+                    // The last one is voided: the projection deletes the aggregate, so the stream folds to nothing.
+                    events.Add(new OrderVoided("Entered twice", placedAt.AddMinutes(5)));
+                    break;
+                case 2:
+                    events.Add(new OrderCancelled("Customer changed their mind", placedAt.AddMinutes(30)));
+                    break;
+                default:
+                    events.Add(new ItemAdded($"SKU-T{i:00}-B", 1, 4.25m, placedAt.AddMinutes(3)));
+                    break;
+            }
+
+            session.Events.StartStream<OrderSummary>(TypedOrderStreamId(i), events);
+        }
+
+        await session.SaveChangesAsync(cancellation);
+
+        return TypedOrderStreamCount;
+    }
+
+    /// <summary>How many untyped order streams <see cref="SeedEventsAsync" /> appends.</summary>
+    public const int OrderStreamCount = 25;
+
+    /// <summary>How many typed order streams <see cref="SeedEventsAsync" /> appends; the last one is voided, so it folds to nothing.</summary>
+    public const int TypedOrderStreamCount = 4;
+
+    /// <summary>The stream id of typed demo order <paramref name="index" />, stable across runs.</summary>
+    public static Guid TypedOrderStreamId(int index) => DeterministicGuid("typed-order", index);
+
+    /// <summary>The order whose stream carries the poisoned item.</summary>
+    public const int PoisonedOrderIndex = 13;
+
+    /// <summary>The order whose stream is archived after it is written.</summary>
+    public const int ArchivedOrderIndex = 24;
+
+    /// <summary>The stream id of demo order <paramref name="index" />, stable across runs.</summary>
+    public static Guid OrderStreamId(int index) => DeterministicGuid("order-stream", index);
+
+    /// <summary>
+    /// The id of seeded customer <paramref name="index" />, one to <see cref="CustomerCount" />, stable
+    /// across runs - which is what lets <c>legacy.customer_credit</c> point at the same customers every
+    /// time it is filled. Defined by the relational demo (<see cref="SampleCustomers.Id" />), which names
+    /// them without referencing Marten, and the same as <c>DeterministicGuid("customer", index)</c>.
+    /// </summary>
+    public static Guid CustomerId(int index) => SampleCustomers.Id(index);
+
+    /// <summary>
+    /// Empties the demo's own collections, and only those: a sample store may be sharing a database with
+    /// something that is not a demo.
+    /// </summary>
+    /// <remarks>
+    /// "Only those" is Marten's <c>truncate … cascade</c> talking, so it also empties every table that
+    /// holds a foreign key into one of them - in this demo, <c>legacy.customer_credit</c>, which
+    /// <see cref="ApplyRelationalDemoAsync" /> refills straight afterwards.
+    /// </remarks>
+    private static async Task ClearAsync(IDocumentStore store, CancellationToken cancellation)
+    {
+        Type[] seeded =
+        [
+            typeof(Customer), typeof(Order), typeof(Invoice), typeof(Product),
+            typeof(Vehicle), typeof(AuditNote), typeof(MinimalNote), typeof(MediaAsset),
+        ];
+
+        foreach (Type type in seeded)
+        {
+            await store.Advanced.Clean.DeleteDocumentsByTypeAsync(type, cancellation);
+        }
+    }
+
+    private static readonly string[] Cities = ["Helsinki", "Tampere", "Turku", "Oulu"];
+
+    private static readonly string[] Makes = ["Volvo", "Scania", "Toyota", "Ford"];
+
+    private static readonly string[] Categories = ["tools", "hardware", "consumables"];
+
+    /// <summary>
+    /// The one big document, built from a deterministic byte pattern rather than from randomness so that
+    /// two runs of the demo produce the same bytes and the same size on every screen that reports it.
+    /// </summary>
+    private static MediaAsset BuildMediaAsset()
+    {
+        byte[] payload = new byte[MediaAssetBytes];
+        for (int i = 0; i < payload.Length; i++)
+        {
+            payload[i] = (byte) (i * 31 % 251);
+        }
+
+        return new MediaAsset
+        {
+            Id = DeterministicGuid("media", 1),
+            FileName = "sample-asset.bin",
+            ContentType = "application/octet-stream",
+            ByteCount = payload.Length,
+            Base64 = Convert.ToBase64String(payload)
+        };
+    }
+
+    /// <summary>
+    /// The same id on every run, so re-seeding replaces rows rather than adding a second set of them.
+    /// </summary>
+    /// <remarks>The kind is written into the id's first twelve bytes, so it is at most twelve UTF-8 bytes long.</remarks>
+    private static Guid DeterministicGuid(string kind, int index)
+    {
+        byte[] bytes = new byte[16];
+        System.Text.Encoding.UTF8.GetBytes(kind).CopyTo(bytes, 0);
+        BitConverter.GetBytes(index).CopyTo(bytes, 12);
+        return new Guid(bytes);
+    }
+}

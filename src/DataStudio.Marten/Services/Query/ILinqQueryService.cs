@@ -1,0 +1,65 @@
+using DataStudio.Postgres.Services;
+
+namespace DataStudio.Marten.Services.Query;
+
+/// <summary>
+/// LINQ mode on the Query page: a typed predicate over one document type, parsed under the studio's
+/// allow-list and translated by Marten's own <c>Query&lt;T&gt;()</c> (F7) - or, from 1.1, a typed predicate over the
+/// event log, translated by Marten's own <c>IReadOnlyEventStore.QueryRawEvents()</c>, chosen by
+/// <see cref="LinqQueryRequest.Target" /> and never by an alias.
+/// </summary>
+/// <remarks>
+/// <para>
+/// A separate seam from <see cref="IQueryService" /> because its gate is separate:
+/// <see cref="MartenCapabilities.RunLinqQueries" />, asked like a write (D13), where a Marten
+/// <c>where</c> clause needs no capability and the console needs <c>RunSql</c>. It is an interface for the
+/// same reason every data seam is (D12): the page tests drive every refusal without a Postgres.
+/// </para>
+/// </remarks>
+internal interface ILinqQueryService
+{
+    /// <summary>
+    /// Whether LINQ mode is available here, why not, and - when it is - the document types the visitor may
+    /// query and whether the policies let them.
+    /// </summary>
+    /// <remarks>
+    /// Never throws for a refusal and runs nothing: a capability that is off, <c>ReadOnly</c>, or a Marten
+    /// older than 9.48 is a value the page draws. A scope the store policy refuses is
+    /// <see cref="StudioNotAuthorizedException" />, as for every other read.
+    /// </remarks>
+    Task<LinqModeStatus> DescribeAsync(StudioScope scope, CancellationToken cancellationToken = default);
+
+    /// <summary>Runs one page of a LINQ query.</summary>
+    /// <exception cref="StudioCapabilityDeniedException">
+    /// <see cref="MartenCapabilities.RunLinqQueries" /> is off, or the studio is read-only. Nothing is parsed.
+    /// </exception>
+    /// <exception cref="StudioNotAuthorizedException">
+    /// The store policy, or the write policy asked with <c>RunLinqQueries</c>, refused this scope. Nothing is parsed.
+    /// </exception>
+    /// <exception cref="KeyNotFoundException">No such store or database.</exception>
+    /// <remarks>
+    /// Every other outcome is a value: a mode this host cannot run, a type it does not offer, a refusal by the
+    /// screen, the parser, the guard or Marten's translation, and a Postgres error - each audited, success and
+    /// failure alike, and a success only on the first page of its signature.
+    /// </remarks>
+    Task<LinqQueryResult> RunAsync(
+        StudioScope scope,
+        LinqQueryRequest request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// X2: Marten's statement for this query planned now and under the index Marten would create for the advisor's line, which
+    /// hypopg imagines - through the same gate as <see cref="RunAsync" /> and then the plan's own (<c>RunLinqQueries</c> for the
+    /// database as a whole), composed again from the request, never from what the page holds. Every refusal is a value,
+    /// audited; nothing is thrown but for cancellation.
+    /// </summary>
+    /// <param name="scope">The visitor's scope.</param>
+    /// <param name="request">The query the advice is about.</param>
+    /// <param name="index">The index to imagine: one the advice offered, found again by its key and Marten's definition.</param>
+    /// <param name="cancellationToken">Cancels the what-if; never the reset after it.</param>
+    Task<DataStudio.Postgres.Services.Query.WhatIfResult> WhatIfAsync(
+        StudioScope scope,
+        LinqQueryRequest request,
+        DataStudio.Postgres.Services.Query.HypotheticalIndex index,
+        CancellationToken cancellationToken = default);
+}

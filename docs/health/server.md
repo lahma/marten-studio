@@ -5,8 +5,8 @@ supports it, the settings that blind the store's maintenance or trade its safety
 checksums failed. They read `pg_settings`, `pg_stat_database` and the server's version, once per regular sweep,
 in the studio's read-only transaction, and lock nothing they read. Back to the [index](../health.md).
 
-**Studios.** S01 to S13 read Postgres alone and run in both studios, with the data source in place of the store in
-Postgres Studio ([codes.md](codes.md)).
+**Modules.** S01 to S13 read Postgres alone and run in both modules, with the data source in place of the store in
+The Postgres module ([codes.md](codes.md)).
 
 ## Managed platforms
 
@@ -123,7 +123,7 @@ settings waiting for a restart are the whole of what S02 judges.
 
 Variants: `setting`, one finding per watched setting at a dangerous value, whose subject is the setting's name (key
 `S02|setting|fsync`); and `pending-restart`, one finding for every setting that waits for a restart, with no subject (key
-`S02|pending-restart`, as before 0.5, when the kind was its subject). Both studios run it.
+`S02|pending-restart`, as before 0.5, when the kind was its subject). Both modules run it.
 
 The values are read on a connection from the store's own data source, so a value set for its role, its database,
 or in its connection string's startup options (`Options=-c …`) is the value the store's sessions run with.
@@ -147,7 +147,7 @@ environment both are Critical, which is true of that server.
   User Guide's parameter reference lists neither, and no AWS page the studio could find says what Aurora reports
   for them (checked 2026-10-18).
 
-For these three, the finding says the provider manages durability and Marten Studio cannot verify the setting's
+For these three, the finding says the provider manages durability and the Marten module cannot verify the setting's
 meaning there, and it offers no remedy line. No other platform changes S02's judgement.
 
 **Not read is not safe.** A setting S02 watches whose `pg_settings` row it could not read - hidden from the role,
@@ -182,7 +182,7 @@ an Aurora cluster. S03 is listed with that reason and never run. See [Aurora](..
 
 ## S04 Connecting as a superuser
 
-**Warning in Production, Info anywhere else.** Both studios. The role the data source logs in as - `session_user` on a
+**Warning in Production, Info anywhere else.** Both modules. The role the data source logs in as - `session_user` on a
 connection of the store's or data source's own data source, before any `SET ROLE` - is one of three kinds, its variant
 (worst first):
 
@@ -204,7 +204,7 @@ create and the data source's to log in as; the finding says so in words. `SqlCon
 
 ## S05 Connection without TLS
 
-**Warning in Production, Info anywhere else.** Both studios. `pg_stat_ssl` for the backend of a connection from the data
+**Warning in Production, Info anywhere else.** Both modules. `pg_stat_ssl` for the backend of a connection from the data
 source says `ssl = false`, and the connection came over TCP from another machine: `inet_client_addr()` is set and is not a
 loopback address (`127.0.0.0/8`, `::1`). A Unix-domain socket, which has no client address, and a loopback connection never
 leave the server's machine and are quiet.
@@ -240,8 +240,8 @@ connection is plain anyway (`SSL Mode=Disable` or `Allow`), the remedy stays the
 
 ## S06 Anyone may create in an application schema
 
-**Warning**, one finding per schema. Both studios. `PUBLIC` - every role on the server, now and later - holds `CREATE` on
-one of the source's own schemas: a Marten store's schemas, or Postgres Studio's admitted `BrowsableSchemas`. It is read from
+**Warning**, one finding per schema. Both modules. `PUBLIC` - every role on the server, now and later - holds `CREATE` on
+one of the source's own schemas: a Marten store's schemas, or the Postgres module's admitted `BrowsableSchemas`. It is read from
 the schema's ACL with `aclexplode`, or from its owner's default when it has none, which grants `PUBLIC` nothing. The finding
 names the schema, which is structure the source's own visitors are shown already.
 
@@ -258,7 +258,7 @@ it from `PUBLIC`, and grants it to the roles that create objects there.
 
 ## S07 Outdated extension
 
-**Info**, one finding per extension. Both studios. An extension installed in this database is at another version
+**Info**, one finding per extension. Both modules. An extension installed in this database is at another version
 (`pg_extension.extversion`) than the one the server's files would install now (`pg_available_extensions.default_version`).
 
 A package upgrade on the server replaces an extension's library at once, and the SQL objects the extension created in each
@@ -271,7 +271,7 @@ The remedy is words, because it is DDL: the extension's owner - or a superuser, 
 
 ## S08 Connecting role's password expires
 
-**Warning** within 30 days, **Critical** within 7 days and once it has passed. Both studios. No variant. The role the data
+**Warning** within 30 days, **Critical** within 7 days and once it has passed. Both modules. No variant. The role the data
 source logs in as has a `VALID UNTIL` (`pg_roles.rolvaliduntil`). Seven days is PostgreSQL 19's default
 `password_expiration_warning_threshold`.
 
@@ -285,7 +285,7 @@ later expiry or a new password (`ALTER ROLE … VALID UNTIL …`) - a DBA's chan
 
 ## S09 Planner method switched off
 
-**Warning**, one finding per setting. Both studios. A `pg_settings` row whose name is `enable_…` reads `off` while its
+**Warning**, one finding per setting. Both modules. A `pg_settings` row whose name is `enable_…` reads `off` while its
 built-in value (`boot_val`) is `on`, read on a connection of the data source's own, so a value set for its role, its
 database or in its connection string counts. A switch a release ships off is never a finding.
 
@@ -299,7 +299,7 @@ line) when the server's configuration set it; words for a role's or a database's
 
 ## S10 Store connections cannot write
 
-Both studios. Two variants:
+Both modules. Two variants:
 
 - **`read-only`, Critical**: `default_transaction_read_only = on` as the data source's own sessions start with it, and its
   `source` says who set it. A transaction that does not ask otherwise is read-only, and Marten never asks, so every
@@ -314,7 +314,7 @@ Both studios. Two variants:
 
 ## S11 Server certificate not verified
 
-Both studios. The connection is encrypted - the connection's own `pg_stat_ssl` row says `ssl = true` - but the data source's `SSL Mode`
+Both modules. The connection is encrypted - the connection's own `pg_stat_ssl` row says `ssl = true` - but the data source's `SSL Mode`
 is below `VerifyCA`, so Npgsql accepts whatever certificate the server presents and anything on the path that answers as the server
 is believed. Two variants:
 
@@ -355,7 +355,7 @@ that view needs the privileges of the login role, which a narrowed `SqlConsoleRo
 
 ## S12 A credential is readable from configuration
 
-Both studios. Three variants, none of which shows a value: the evidence says a credential is **set**, never what it is.
+Both modules. Three variants, none of which shows a value: the evidence says a credential is **set**, never what it is.
 
 - **`persist-security-info`, Warning**: `Persist Security Info=true` with a `Password` in the connection string. Npgsql removes the
   password from `NpgsqlDataSource.ConnectionString` unless this is on, and names the pool by that string (the `pool.name` tag of its
@@ -380,12 +380,12 @@ The default password file (`~/.pgpass`, `%APPDATA%\postgresql\pgpass.conf`) is n
 
 ## S13 Driver settings that copy values into logs or exceptions
 
-**Info**, both studios, **only in Production** (`IHostEnvironment.EnvironmentName`, as K01 and S04 read it; a host that registers none is not
+**Info**, both modules, **only in Production** (`IHostEnvironment.EnvironmentName`, as K01 and S04 read it; a host that registers none is not
 Production). Three variants, one per setting, each off by default and a development aid:
 
 - **`log-parameters`**: `Log Parameters=true` writes every command's parameter values to the log, where the data source has a logger
   factory: Npgsql writes parameters only through one, which the studio cannot see. `NpgsqlDataSourceBuilder.EnableParameterLogging()` turns
-  parameter logging on whatever the keyword says, so removing the keyword does not end it where the host calls that. In Marten Studio the
+  parameter logging on whatever the keyword says, so removing the keyword does not end it where the host calls that. In the Marten module the
   finding adds that Marten 9 gives its data sources no logger factory while `StoreOptions.DisableNpgsqlLogging` is on, its default, so there
   the keyword logs nothing unless the host turned that off or built its own data source with a logger factory.
 - **`include-error-detail`**: `Include Error Detail=true` puts PostgreSQL's error and notice details on `PostgresException.Detail` and

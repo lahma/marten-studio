@@ -1,0 +1,242 @@
+using DataStudio.Postgres.Services;
+using DataStudio.Postgres.Services.Health;
+using DataStudio.Postgres.Services.Health.Checks;
+using DataStudio.Postgres.Services.Postgres;
+using DataStudio.Postgres.Services.Settings;
+
+using static DataStudio.Postgres.Tests.Server.ServerTestFacts;
+
+namespace DataStudio.Postgres.Tests.Server;
+
+/// <summary>K05-K07 against permutations of the studio's options, in each studio's own option names (W5-S2).</summary>
+public class StudioLintCheckTests
+{
+    private static StudioLintFacts Options(
+        bool readOnly = false,
+        StudioCapability[]? on = null,
+        bool consoleRole = false,
+        bool everySchema = false,
+        bool postgres = false) =>
+        new(
+            readOnly,
+            on ?? [],
+            consoleRole,
+            everySchema,
+            postgres ? "PostgresOptions" : "MartenOptions",
+            postgres ? "services.AddDataStudio().AddPostgres(options => ...)" : "services.AddDataStudio().AddMarten(options => ...)",
+            postgres ? "PostgresCapabilities" : "MartenCapabilities",
+            postgres ? "PostgresOptions.ReadOnly" : "MartenOptions.ReadOnly");
+
+    // ---- K05 ----------------------------------------------------------------------------------------------------------
+
+    [Fact]
+    public void K05_RunSql_on_without_a_console_role_is_a_Warning_whose_remedy_is_the_option_line()
+    {
+        HealthFinding finding = new ConsoleWithoutRoleCheck().Evaluate(Options(on: [StudioCapability.RunSql]), Evaluation())
+            .ShouldBeWellFormedFor<ConsoleWithoutRoleCheck>()
+            .Findings.Should().ContainSingle().Subject;
+
+        finding.Severity.Should().Be(HealthSeverity.Warning);
+        finding.WhyItMatters.Should().Contain("MartenOptions.Capabilities.RunSql").And.Contain("MartenOptions.SqlConsoleRole");
+        finding.Remedy!.Kind.Should().Be(HealthRemedyKind.Configuration);
+        finding.Remedy.Code.Should().Contain("// In services.AddDataStudio().AddMarten(options => ...)").And.Contain("options.SqlConsoleRole = ");
+        finding.Remedy.Explanation.Should().Contain("MartenOptions.SqlConsoleRole");
+    }
+
+    [Fact]
+    public void K05_in_Postgres_Studio_names_its_own_options()
+    {
+        HealthFinding finding = new ConsoleWithoutRoleCheck().Evaluate(Options(on: [StudioCapability.RunSql], postgres: true), Evaluation(postgres: true))
+            .Findings.Single();
+
+        finding.WhyItMatters.Should().Contain("PostgresOptions.SqlConsoleRole").And.NotContain("Marten");
+        finding.Remedy!.Code.Should().Contain("// In services.AddDataStudio().AddPostgres(options => ...)");
+    }
+
+    [Theory]
+    [InlineData(true, true, false, "ReadOnly is true")]
+    [InlineData(false, false, false, "is off")]
+    [InlineData(false, true, true, "narrows")]
+    public void K05_is_quiet_under_ReadOnly_with_the_console_off_and_with_a_console_role(bool readOnly, bool runSql, bool role, string why)
+    {
+        HealthVerdict verdict = new ConsoleWithoutRoleCheck().Evaluate(
+            Options(readOnly, runSql ? [StudioCapability.RunSql] : [StudioCapability.BrowseDatabase], role),
+            Evaluation());
+
+        verdict.Findings.Should().BeEmpty();
+        verdict.Note.Should().Contain(why);
+    }
+
+    [Fact]
+    public void K05_never_names_the_console_role_at_its_gate_which_is_None()
+    {
+        HealthCheckRegistry.Describe(typeof(ConsoleWithoutRoleCheck)).Gate.Should().Be(HealthGate.None);
+        HealthCheckRegistry.Describe(typeof(ConsoleWithoutRoleCheck)).Tier.Should().Be(HealthCostTier.InProcess);
+
+        // The role's name is the database-wide gate's (D29); the facts carry only whether one is set.
+        typeof(StudioLintFacts).GetProperty(nameof(StudioLintFacts.SqlConsoleRole))!.PropertyType.Should().Be<bool>();
+    }
+
+    // ---- K06 ----------------------------------------------------------------------------------------------------------
+
+    [Fact]
+    public void K06_the_browser_on_every_schema_without_a_role_is_event_9230s_condition_as_a_Warning()
+    {
+        HealthFinding finding = new BrowserWithoutRoleCheck().Evaluate(Options(on: [StudioCapability.BrowseDatabase], everySchema: true), Evaluation())
+            .ShouldBeWellFormedFor<BrowserWithoutRoleCheck>()
+            .Findings.Should().ContainSingle().Subject;
+
+        finding.Severity.Should().Be(HealthSeverity.Warning);
+        finding.WhyItMatters.Should().Contain("event 9230").And.Contain("MartenOptions.BrowsableSchemas");
+        finding.Remedy!.Code.Should().Contain("options.SqlConsoleRole = ");
+    }
+
+    [Theory]
+    [InlineData(true, true, true, false)]
+    [InlineData(false, false, true, false)]
+    [InlineData(false, true, false, false)]
+    [InlineData(false, true, true, true)]
+    public void K06_is_quiet_under_ReadOnly_without_the_capability_with_exact_schemas_and_with_a_role(bool readOnly, bool browse, bool everySchema, bool role)
+    {
+        new BrowserWithoutRoleCheck()
+            .Evaluate(Options(readOnly, browse ? [StudioCapability.BrowseDatabase] : [StudioCapability.RunSql], role, everySchema), Evaluation())
+            .Findings.Should().BeEmpty();
+    }
+
+    // ---- K07 ----------------------------------------------------------------------------------------------------------
+
+    [Theory]
+    [InlineData("Production", "Critical")]
+    [InlineData("Development", "Warning")]
+    [InlineData(null, "Warning")]
+    public void K07_anonymous_with_a_capability_on_is_Critical_in_Production_and_a_Warning_elsewhere(string? environment, string expected)
+    {
+        HealthSeverity severity = Enum.Parse<HealthSeverity>(expected);
+        HealthFinding finding = new AnonymousStudioCheck()
+            .Evaluate(new AnonymousStudioFacts(Options(on: [StudioCapability.RunSql, StudioCapability.EditDocuments]), true, environment), Evaluation())
+            .ShouldBeWellFormedFor<AnonymousStudioCheck>()
+            .Findings.Should().ContainSingle().Subject;
+
+        finding.Severity.Should().Be(severity);
+        finding.Evidence.Should().Contain(x => x.Label == "Capabilities on" && x.Value == "RunSql, EditDocuments");
+        finding.Remedy!.Code.Should().Contain("app.MapDataStudio().RequireAuthorization();").And.Contain("new MartenCapabilities()");
+    }
+
+    [Fact]
+    public void K07_in_Postgres_Studio_maps_its_own_studio()
+    {
+        new AnonymousStudioCheck()
+            .Evaluate(new AnonymousStudioFacts(Options(on: [StudioCapability.RunSql], postgres: true), true, "Production"), Evaluation(postgres: true))
+            .Findings.Single().Remedy!.Code.Should().Contain("app.MapDataStudio()").And.Contain("new PostgresCapabilities()");
+    }
+
+    [Theory]
+    [InlineData(null, false, false, "no record")]
+    [InlineData(false, false, false, "not served anonymously")]
+    [InlineData(true, false, true, "every capability off")]
+    [InlineData(true, true, false, "every capability off (MartenOptions.ReadOnly)")]
+    public void K07_is_quiet_without_anonymous_pages_without_a_capability_and_under_ReadOnly(bool? anonymous, bool readOnly, bool noCapability, string why)
+    {
+        HealthVerdict verdict = new AnonymousStudioCheck().Evaluate(
+            new AnonymousStudioFacts(Options(readOnly, noCapability ? [] : [StudioCapability.RunSql]), anonymous, "Production"),
+            Evaluation());
+
+        verdict.Findings.Should().BeEmpty();
+        verdict.Note.Should().Contain(why);
+    }
+
+    // ---- K07 counts every module's capabilities (REVIEW-V2-B finding 1) ----------------------------------------------
+
+    private static readonly StudioModuleCapabilitiesOn KafkaOn = new("Kafka", ["SearchRecords", "ExportRecords"]);
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void K07_is_not_quiet_while_another_modules_capability_is_on_whatever_the_database_modules_switch_says(bool moduleReadOnly)
+    {
+        // The module's own ReadOnly turns off only the module: Kafka's capabilities are another module's, and anyone can use them.
+        AnonymousStudioFacts facts = new(Options(readOnly: moduleReadOnly, on: [StudioCapability.RunSql]), true, "Production") { OtherModules = [KafkaOn] };
+
+        HealthFinding finding = new AnonymousStudioCheck().Evaluate(facts, Evaluation()).Findings.Should().ContainSingle().Subject;
+
+        finding.Severity.Should().Be(HealthSeverity.Critical);
+        finding.Evidence.Should().Contain(x => x.Label == "Capabilities on" && x.Value.Contains("SearchRecords (Kafka)", StringComparison.Ordinal)
+            && x.Value.Contains("ExportRecords (Kafka)", StringComparison.Ordinal));
+        finding.WhyItMatters.Should().Contain("Kafka decide what it reaches of its own");
+    }
+
+    [Fact]
+    public void K07_with_the_database_modules_capabilities_off_and_another_modules_on_is_a_finding_that_names_only_the_modules_that_have_one()
+    {
+        AnonymousStudioFacts facts = new(Options(readOnly: true), true, "Development") { OtherModules = [KafkaOn] };
+
+        HealthFinding finding = new AnonymousStudioCheck().Evaluate(facts, Evaluation()).Findings.Should().ContainSingle().Subject;
+
+        finding.Severity.Should().Be(HealthSeverity.Warning);
+        finding.Evidence.Single(static x => x.Label == "Capabilities on").Value.Should().Be("SearchRecords (Kafka), ExportRecords (Kafka)");
+    }
+
+    [Fact]
+    public void K07_is_quiet_only_when_no_module_has_a_capability_on()
+    {
+        AnonymousStudioFacts none = new(Options(readOnly: true), true, "Production") { OtherModules = [] };
+
+        HealthVerdict verdict = new AnonymousStudioCheck().Evaluate(none, Evaluation());
+
+        verdict.Findings.Should().BeEmpty();
+        verdict.Note.Should().Contain("every capability off (MartenOptions.ReadOnly): it browses and changes nothing");
+    }
+
+    // ---- the switch that is on ----------------------------------------------------------------------------------------
+
+    [Fact]
+    public void The_three_quiet_verdicts_name_the_switch_that_is_on_not_always_the_modules()
+    {
+        StudioLintFacts facts = Options(readOnly: true, on: [StudioCapability.RunSql, StudioCapability.BrowseDatabase]) with { ReadOnlyOptionName = "DataStudioOptions.ReadOnly" };
+
+        new ConsoleWithoutRoleCheck().Evaluate(facts, Evaluation()).Note.Should().StartWith("DataStudioOptions.ReadOnly is true").And.NotContain("MartenOptions.ReadOnly");
+        new BrowserWithoutRoleCheck().Evaluate(facts, Evaluation()).Note.Should().StartWith("DataStudioOptions.ReadOnly is true").And.NotContain("MartenOptions.ReadOnly");
+        new AnonymousStudioCheck().Evaluate(new AnonymousStudioFacts(facts, true, "Production"), Evaluation()).Note
+            .Should().Contain("(DataStudioOptions.ReadOnly)").And.NotContain("MartenOptions.ReadOnly");
+    }
+
+    [Theory]
+    [InlineData(true, false, "DataStudioOptions.ReadOnly")]
+    [InlineData(false, true, "PostgresOptions.ReadOnly")]
+    [InlineData(true, true, "DataStudioOptions.ReadOnly")]
+    public void The_facts_read_the_effective_switchs_name_off_the_registered_settings(bool shellReadOnly, bool moduleReadOnly, string expected)
+    {
+        PostgresSettings settings = PostgresSettings.Of(
+            new PostgresOptions { ReadOnly = moduleReadOnly },
+            new DataStudio.Services.Settings.ShellSettings(Microsoft.Extensions.Options.Options.Create(new DataStudioOptions { ReadOnly = shellReadOnly })));
+
+        StudioLintFacts facts = StudioLintFacts.Of(settings);
+
+        facts.ReadOnly.Should().BeTrue();
+        facts.ReadOnlyOptionName.Should().Be(expected);
+    }
+
+    [Fact]
+    public void K07_names_the_one_map_call_and_the_shells_policy_option_whichever_module_registered()
+    {
+        StudioLintFacts.MapMethod.Should().Be("MapDataStudio");
+        StudioLintFacts.AuthorizationPolicyOptionName.Should().Be("DataStudioOptions.AuthorizationPolicy");
+
+        new AnonymousStudioCheck()
+            .Evaluate(new AnonymousStudioFacts(Options(on: [StudioCapability.RunSql]), true, "Production"), Evaluation())
+            .Findings.Single().Remedy!.Explanation.Should().Contain("DataStudioOptions.AuthorizationPolicy names another").And.NotContain("MartenOptions.AuthorizationPolicy");
+    }
+
+    [Fact]
+    public void The_three_lints_run_in_both_studios_from_the_shared_assembly_with_no_I_O()
+    {
+        foreach (Type check in (Type[]) [typeof(ConsoleWithoutRoleCheck), typeof(BrowserWithoutRoleCheck), typeof(AnonymousStudioCheck)])
+        {
+            HealthCheckInfo info = HealthCheckRegistry.Describe(check);
+            info.Area.Should().Be(HealthArea.Configuration);
+            info.Tier.Should().Be(HealthCostTier.InProcess);
+            info.Gate.Should().Be(HealthGate.None);
+            check.Assembly.Should().BeSameAs(typeof(StudioDescriptor).Assembly, "the shared studio's, so both studios run it: every descriptor lists this assembly beside the engine's");
+        }
+    }
+}

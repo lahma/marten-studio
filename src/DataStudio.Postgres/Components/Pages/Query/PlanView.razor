@@ -1,0 +1,843 @@
+@using System.Globalization
+@using DataStudio.Components.Json
+@using DataStudio.Postgres.Components.Shared
+@using DataStudio.Postgres.Services.Health
+@using DataStudio.Postgres.Services
+@using DataStudio.Postgres.Services.Health.Checks
+@using DataStudio.Postgres.Services.Maintenance
+@using DataStudio.Postgres.Services.Query
+@using DataStudio.Postgres.Services.Settings
+@inject IStudioSettings Settings
+@inject StudioDescriptor Descriptor
+@inject StudioState State
+@inject IEnumerable<IPlanInsightContributor> Contributors
+
+@*
+    X1: a plan as a hand-rolled tree, and under it X1b's insights - for every place the studio shows a plan: the SQL
+    console's Explain buttons and a typed EXPLAIN (FORMAT JSON), Query Mode A's plan, LINQ mode's, and the Statements page's
+    drill-in. No third-party viewer (hard rule 3: PEV2 is Vue and Bootstrap); every class is ms-plan-, in studio.css's X1
+    section.
+
+    Two ways in. Json is EXPLAIN's own text, read here with QueryPlanReader and offered whole as raw JSON below the tree - the
+    console's and Mode A's plans, RunSql output that D27 leaves unmasked. Plan is a plan a service read already, masked for
+    the visitor - the Statements drill-in's, whose raw JSON is never handed to the page.
+
+    The tree sits in a labelled scroll region (D25): a deep plan is wide, and scrolls sideways rather than squeezing its
+    labels. Nothing here links within the page: under the studio-rooted <base href>, a fragment link navigates to the
+    studio's front page, so an insight names its node and the node carries the insight's code.
+
+    X3 (issue #28): with Analyzer set - the Plan page's own, never the console's, Mode A's or the drill-in's - the same plan also
+    has a summary strip, a node table beside the tree (one selected node for both), the critical path, heat colouring, the
+    selected node's every key and the raw JSON with Copy, Copy as Markdown and Download. Without it the markup is what it was.
+*@
+
+<div class="ms-plan">
+    @if (read?.Plan is not { } plan)
+    {
+        <p class="ms-muted ms-plan-unreadable">@(read?.Failure ?? "There is no plan.")</p>
+    }
+    else
+    {
+        @if (Analyzer)
+        {
+            <PlanSummaryStrip Plan="plan" />
+        }
+        else
+        {
+            <p class="ms-plan-summary">
+                <span class="ms-plan-summary-item">@(plan.Analyzed ? "EXPLAIN ANALYZE" : "EXPLAIN")</span>
+                @if (plan.Root.TotalCost is { } cost)
+                {
+                    <span class="ms-plan-summary-item">estimated cost @Number(cost)</span>
+                }
+                @if (plan.PlanningMs is { } planning)
+                {
+                    <span class="ms-plan-summary-item">planned in @Milliseconds(planning)</span>
+                }
+                @if (plan.ExecutionMs is { } execution)
+                {
+                    <span class="ms-plan-summary-item">ran in @Milliseconds(execution)</span>
+                }
+                <span class="ms-plan-summary-item">@NodeCount(plan)</span>
+            </p>
+        }
+
+        @if (!string.IsNullOrWhiteSpace(Caption))
+        {
+            <p class="ms-plan-caption">@Caption</p>
+        }
+
+        @if (plan.Statements > 1)
+        {
+            <p class="ms-plan-caption">Postgres planned @plan.Statements.ToString(CultureInfo.InvariantCulture) statements for this one (a rewrite rule); the first is drawn.</p>
+        }
+
+        @if (Analyzer)
+        {
+            <div class="ms-plan-controls">
+                <div class="ms-plan-view-switch" role="group" aria-label="Plan view">
+                    <button type="button" class="ms-btn ms-btn-sm ms-plan-view-tree" aria-pressed="@(table || icicle ? "false" : "true")" @onclick="() => ShowTable(false)">Tree</button>
+                    <button type="button" class="ms-btn ms-btn-sm ms-plan-view-table" aria-pressed="@(table ? "true" : "false")" @onclick="() => ShowTable(true)">Node table</button>
+                    <button type="button" class="ms-btn ms-btn-sm ms-plan-view-icicle" aria-pressed="@(icicle ? "true" : "false")" @onclick="ShowIcicle">Icicle</button>
+                </div>
+
+                <label class="ms-plan-heat-label">
+                    <span>Heat</span>
+                    <select class="ms-input ms-plan-heat-select" value="@PlanAnalysis.Key(heat)" @onchange="OnHeatChanged">
+                        @foreach (PlanHeat option in PlanAnalysis.Heats)
+                        {
+                            <option value="@PlanAnalysis.Key(option)" selected="@(option == heat)" @key="option">@PlanAnalysis.Label(option, plan)</option>
+                        }
+                    </select>
+                </label>
+
+                <label class="ms-plan-critical-toggle">
+                    <input type="checkbox" class="ms-plan-critical-input" checked="@critical" @onchange="OnCriticalChanged" />
+                    <span>Critical path</span>
+                </label>
+            </div>
+
+            @if (heat != PlanHeat.None)
+            {
+                <p class="ms-plan-legend ms-plan-heat-legend">@PlanAnalysis.Legend(plan, heat)</p>
+            }
+
+            @if (critical)
+            {
+                <p class="ms-plan-legend ms-plan-critical-legend">
+                    The critical path is the chain of nodes that carries most of the plan's @(plan.Timed ? "time" : "estimated cost"): from the root, each
+                    step follows the child with the largest @(plan.Timed ? "inclusive time" : "total cost"). It is marked <span class="ms-chip ms-plan-chip">critical</span> here and in the node table.
+                </p>
+            }
+        }
+
+        <p class="ms-plan-legend">
+            @(plan.Timed
+                ? "Each node's bar is its share of the plan's time - its own, less the nodes below it."
+                : "Each node's bar is its share of the plan's estimated cost - its own, less the nodes below it.")
+            @(plan.Analyzed ? " Rows are per loop, as Postgres counts them." : " Rows are the planner's estimates.")
+        </p>
+
+        @if (Analyzer && icicle)
+        {
+            @* 1.0-P3B: the icicle view, the tree's selection shared. *@
+            <PlanIcicle Plan="plan"
+                        HeatCells="@heatCells"
+                        SelectedId="selectedId"
+                        OnSelect="SelectAsync"
+                        Label="@(Label + " as an icicle")" />
+        }
+        else if (Analyzer && table)
+        {
+            <PlanNodeTable Plan="plan"
+                           SelectedId="selectedId"
+                           OnSelect="SelectAsync"
+                           Critical="critical"
+                           Heat="@PlanAnalysis.Key(heat)"
+                           Flags="flags"
+                           Facts="@PlanFactsValue" />
+        }
+        else
+        {
+            <TableScroll Label="@Label">
+                <ul class="ms-plan-tree">
+                    @NodeView(plan.Root)
+                </ul>
+            </TableScroll>
+        }
+
+        @if (Analyzer && selectedId is not null)
+        {
+            <PlanNodeDetail Plan="plan" NodeId="selectedId" OnClose="ClearSelectionAsync" Facts="@PlanFactsValue" />
+        }
+
+        @if (plan.Triggers.Count > 0)
+        {
+            <ul class="ms-plan-triggers" aria-label="Triggers">
+                @for (int i = 0; i < plan.Triggers.Count; i++)
+                {
+                    PlanTrigger trigger = plan.Triggers[i];
+                    <li class="ms-plan-trigger" @key="i">
+                        Trigger <code>@trigger.Name</code>@(trigger.Relation is { } on ? " on " + on : string.Empty):
+                        @(trigger.Calls is { } calls ? TableText.Count(calls) + " calls" : string.Empty)
+                        @(trigger.TimeMs is { } time ? ", " + Milliseconds(time) : string.Empty)
+                    </li>
+                }
+            </ul>
+        }
+
+        @if (plan.JitFunctions is { } functions)
+        {
+            <p class="ms-plan-caption">JIT compiled @TableText.Count(functions) functions@(plan.JitMs is { } jit ? " in " + Milliseconds(jit) : string.Empty).</p>
+        }
+
+        <section class="ms-plan-insights" aria-label="Plan insights">
+            <h3 class="ms-plan-insights-title">Plan insights</h3>
+
+            @if (insights.Count == 0)
+            {
+                <p class="ms-muted ms-plan-insights-none">
+                    @(plan.Analyzed ? "None of the plan insights fired on this plan." : "None of the plan insights a plain plan can be judged by fired on it.")
+                </p>
+            }
+            else
+            {
+                <ul class="ms-plan-insight-list">
+                    @for (int i = 0; i < insights.Count; i++)
+                    {
+                        PlanInsightFinding finding = insights[i];
+                        <li class="ms-plan-insight @SeverityClass(finding.Insight.Severity)" @key="i">
+                            <p class="ms-plan-insight-head">
+                                <a class="ms-plan-insight-code" href="@finding.Insight.DocsUrl" target="_blank" rel="noopener noreferrer">@finding.Insight.Code</a>
+                                <span class="ms-plan-insight-title">@finding.Insight.Title</span>
+                                <span class="ms-plan-insight-severity">@finding.Insight.Severity</span>
+                            </p>
+                            <p class="ms-plan-insight-message">@finding.Message</p>
+                            <p class="ms-plan-insight-remedy">@finding.Remedy</p>
+                            @if (RelatedLink(finding) is { } related)
+                            {
+                                <p class="ms-plan-insight-link"><a class="ms-plan-insight-page" href="@related.Href">@related.Label</a></p>
+                            }
+                        </li>
+                    }
+                </ul>
+            }
+
+            @if (notJudged.Count > 0)
+            {
+                <p class="ms-plan-not-judged">
+                    @(Analyzer ? "Not judged without Explain analyze:" : "Not judged without EXPLAIN ANALYZE, which only the SQL console runs:")
+                    @string.Join(", ", notJudged.Select(static x => x.Code + " " + x.Title)).
+                </p>
+            }
+
+            @if (notJudgedHere.Count > 0)
+            {
+                <p class="ms-plan-not-judged ms-plan-not-judged-here">
+                    Not judged on this plan:
+                    @string.Join(", ", notJudgedHere.Select(static x => x.Code + " " + x.Title)).
+                </p>
+            }
+
+            @if (notJudgedWithoutFacts.Count > 0)
+            {
+                <p class="ms-plan-not-judged ms-plan-not-judged-facts">
+                    Not judged without the database's facts, which are read only for a plan this page ran:
+                    @string.Join(", ", notJudgedWithoutFacts.Select(static x => x.Code + " " + x.Title)).
+                </p>
+            }
+        </section>
+
+        @if (Analyzer && PlanFactsValue is not null)
+        {
+            @* 0.10-A: what the database knows beside the plan - read after it, behind the console's gate and each relation's own. *@
+            <PlanFactsPanel Facts="@PlanFactsValue" />
+        }
+
+        @if (WhatIf is not null)
+        {
+            @* X2: the indexes this plan suggests, and how Postgres would plan it under each - through the plan's own gate. *@
+            <WhatIfPanel Source="WhatIf" Plan="plan" />
+        }
+
+        @if (Analyzer && Plan is null)
+        {
+            <PlanExport Json="@Json" Text="@Text" Plan="plan" FileName="@DownloadFileName" Statement="@ExportStatement" />
+        }
+        else if (MaskedExport && Plan is not null)
+        {
+            @* 1.0-P3B: the Statements drill-in's exports, built from the masked plan it draws - never anything unmasked. *@
+            <PlanExport Plan="plan" MaskedOnly="true" />
+        }
+    }
+
+    @if (Plan is null && !string.IsNullOrWhiteSpace(Json) && !(Analyzer && read?.Plan is not null))
+    {
+        <details class="ms-plan-raw">
+            <summary>The plan as Postgres printed it (JSON)</summary>
+            <JsonView Json="@Json" Label="Query plan JSON" AutoExpandDepth="3" ShowSearch="false" DownloadFileName="@DownloadFileName" />
+        </details>
+    }
+</div>
+
+@code {
+    /// <summary>The most nodes drawn; a larger plan says how many more there are, and its raw JSON has them all.</summary>
+    internal const int MaxDrawnNodes = 400;
+
+    private QueryPlanRead? read;
+    private IReadOnlyList<PlanInsightFinding> insights = [];
+    private IReadOnlyList<PlanInsightInfo> notJudged = [];
+    private IReadOnlyList<PlanInsightInfo> notJudgedWithoutFacts = [];
+
+    // 1.0-P3C: what the studio's own contributors (the Marten module's document-table insights) made of the plan on screen - found
+    // asynchronously, since learning what the visitor's scope declares is authorized - and the plan, facts and scope it was made for.
+    private IReadOnlyList<PlanInsightFinding> contributed = [];
+    private IReadOnlyList<PlanInsightInfo> contributedUnjudged = [];
+    private IReadOnlyList<PlanInsightInfo> notJudgedHere = [];
+    private QueryPlan? contributedFor;
+    private PlanFacts? contributedFacts;
+    private StudioScope? contributedScope;
+    private PlanFacts? facts;
+    private Dictionary<int, List<string>> flags = [];
+    private string? readJson;
+    private QueryPlan? readPlan;
+
+    // X3: the analyzer's view state, one for the tree and the table both - what is selected, which view, the heat, the path.
+    private int? selectedId;
+    private bool table;
+    private bool icicle;
+    private PlanHeat heat;
+    private bool critical;
+    private HashSet<int> criticalIds = [];
+    private IReadOnlyDictionary<int, PlanHeatCell> heatCells = new Dictionary<int, PlanHeatCell>();
+
+    /// <summary>
+    /// X3 (issue #28): draw the plan as the Plan page does - a summary strip, a node table beside the tree, the critical path,
+    /// heat, the selected node's every key and the raw JSON's export. Off, the markup is the console's, Mode A's and the
+    /// drill-in's, unchanged. Only for a plan the visitor ran or pasted, which is unmasked: the keys the detail lists are
+    /// <see cref="PlanNode.Properties" />, which a masked read does not keep.
+    /// </summary>
+    [Parameter]
+    public bool Analyzer { get; set; }
+
+    /// <summary>
+    /// The statement the plan is of, which names the speedscope export; <see langword="null" /> for a pasted plan (X3). Read only
+    /// under <see cref="Analyzer" />.
+    /// </summary>
+    [Parameter]
+    public string? ExportStatement { get; set; }
+
+    /// <summary>
+    /// 0.10-A: what the database knows beside the plan, a <c>PlanFacts</c> (<see cref="object" />, as <see cref="Plan" /> is) read for a
+    /// plan the Plan page ran - or <see langword="null" />, for a pasted plan, the console's and every other place. Read only under
+    /// <see cref="Analyzer" />. It feeds P15 to P18 and the Facts panel; without it those four are listed as not judged.
+    /// </summary>
+    [Parameter]
+    public object? PlanFactsValue { get; set; }
+
+    /// <summary>The plan as <c>EXPLAIN (FORMAT JSON)</c> printed it - read here, and offered whole as raw JSON.</summary>
+    [Parameter]
+    public string? Json { get; set; }
+
+    /// <summary>
+    /// 1.0-P3A: a plan as <c>EXPLAIN</c> printed it in its default text format - read here with <see cref="QueryPlanTextReader" />, and
+    /// offered whole as text - when there is no <see cref="Json" />. A pasted plan's, so read unmasked like a pasted JSON plan.
+    /// </summary>
+    [Parameter]
+    public string? Text { get; set; }
+
+    /// <summary>
+    /// A plan a service already read, and masked for this visitor - the Statements drill-in's. <see cref="object" /> because the
+    /// Razor SDK emits every component as public and a public parameter cannot have an internal type. Wins over
+    /// <see cref="Json" />, and no raw JSON is offered for it.
+    /// </summary>
+    [Parameter]
+    public object? Plan { get; set; }
+
+    /// <summary>
+    /// 1.0-P3B: whether a <see cref="Plan" /> given read and masked - the Statements drill-in's - is offered as Markdown and for
+    /// speedscope, built from that masked plan alone. No raw form is offered for it.
+    /// </summary>
+    [Parameter]
+    public bool MaskedExport { get; set; }
+
+    /// <summary>A line under the summary: what kind of plan this is, and what it can and cannot say.</summary>
+    [Parameter]
+    public string? Caption { get; set; }
+
+    /// <summary>The tree region's accessible name.</summary>
+    [Parameter]
+    public string Label { get; set; } = "Query plan";
+
+    /// <summary>The raw JSON's download name.</summary>
+    [Parameter]
+    public string DownloadFileName { get; set; } = "plan.json";
+
+    /// <summary>
+    /// X2: how to run a what-if from this plan, a <c>WhatIfSource</c> (<see cref="object" />, as <see cref="Plan" /> is) - or
+    /// <see langword="null" />, and no "What if?" is offered: the two plans a what-if draws side by side are drawn without one.
+    /// </summary>
+    [Parameter]
+    public object? WhatIf { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        PlanFacts? given = Analyzer ? PlanFactsValue as PlanFacts : null;
+        bool factsChanged = !ReferenceEquals(given, facts);
+        facts = given;
+
+        if (factsChanged && read?.Plan is { } current)
+        {
+            // The same plan, with its facts arriving (or going): the insights are judged again; what is selected stays.
+            EvaluateInsights(current);
+        }
+
+        if (Plan is QueryPlan given2)
+        {
+            if (!ReferenceEquals(given2, readPlan))
+            {
+                readPlan = given2;
+                readJson = null;
+                Evaluate(QueryPlanRead.Of(given2));
+            }
+
+            return;
+        }
+
+        // 1.0-P3A: JSON wins; a text plan is read when there is no JSON. readJson holds whichever source was read last.
+        bool fromText = string.IsNullOrEmpty(Json) && !string.IsNullOrEmpty(Text);
+        string? source = fromText ? Text : Json;
+
+        if (read is null || readPlan is not null || !string.Equals(source, readJson, StringComparison.Ordinal))
+        {
+            readPlan = null;
+            readJson = source;
+            Evaluate(fromText ? QueryPlanTextReader.Read(Text) : QueryPlanReader.Read(Json));
+        }
+    }
+
+    private void Evaluate(QueryPlanRead next)
+    {
+        read = next;
+
+        // A new plan: what was selected on the last one is another plan's node.
+        selectedId = null;
+
+        if (next.Plan is { } plan)
+        {
+            EvaluateInsights(plan);
+
+            if (Analyzer)
+            {
+                criticalIds = [.. PlanAnalysis.CriticalPath(plan)];
+                heatCells = PlanAnalysis.HeatMap(plan, heat);
+            }
+        }
+        else
+        {
+            insights = [];
+            notJudged = [];
+            notJudgedHere = [];
+            notJudgedWithoutFacts = [];
+            flags = [];
+            criticalIds = [];
+            heatCells = new Dictionary<int, PlanHeatCell>();
+        }
+    }
+
+    /// <summary>
+    /// 1.0-P3C: asks the registered contributors about the plan on screen once per plan, set of facts and scope, and judges the
+    /// insights again with what they found. A contributor that throws contributes nothing: the plan's own insights are never lost to it.
+    /// </summary>
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!Contributors.Any() || read?.Plan is not { } plan)
+        {
+            return;
+        }
+
+        StudioScope? scope = State.ActiveScope;
+
+        if (ReferenceEquals(contributedFor, plan) && ReferenceEquals(contributedFacts, facts) && Equals(contributedScope, scope))
+        {
+            return;
+        }
+
+        PlanInsightContext context = new(scope, facts);
+        List<PlanInsightFinding> findings = [];
+        List<PlanInsightInfo> unjudged = [];
+
+        foreach (IPlanInsightContributor contributor in Contributors)
+        {
+            try
+            {
+                PlanContribution made = await contributor.ContributeAsync(plan, context, CancellationToken.None);
+                findings.AddRange(made.Findings);
+                unjudged.AddRange(made.NotJudged);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                // A contributor's failure is its own: the insights every studio has stand, and its own are listed as not judged.
+                unjudged.AddRange(contributor.Insights);
+            }
+        }
+
+        // The plan may have been replaced while the contributors worked; theirs would then be another plan's.
+        if (!ReferenceEquals(read?.Plan, plan))
+        {
+            return;
+        }
+
+        contributed = findings;
+        contributedUnjudged = unjudged;
+        contributedFor = plan;
+        contributedFacts = facts;
+        contributedScope = scope;
+        EvaluateInsights(plan);
+    }
+
+    private void EvaluateInsights(QueryPlan plan)
+    {
+        bool current = ReferenceEquals(contributedFor, plan) && ReferenceEquals(contributedFacts, facts);
+        insights = current
+            ? [.. PlanInsights.Evaluate(plan, Settings.Text, facts), .. contributed]
+            : PlanInsights.Evaluate(plan, Settings.Text, facts);
+        notJudgedHere = current ? contributedUnjudged : [];
+        notJudged = plan.Analyzed
+            ? PlanInsights.NotJudged(plan)
+            : [.. PlanInsights.NotJudged(plan), .. Contributors.SelectMany(static x => x.Insights).Where(static x => x.NeedsAnalyze)];
+
+        // Only the Plan page reads facts, so only it names what their absence leaves unjudged.
+        notJudgedWithoutFacts = Analyzer ? PlanInsights.NotJudgedWithoutFacts(plan, facts) : [];
+        flags = insights
+            .GroupBy(static x => x.NodeId)
+            .ToDictionary(static x => x.Key, static x => x.Select(static f => f.Insight.Code).Distinct(StringComparer.Ordinal).ToList());
+    }
+
+    private Task SelectAsync(int id)
+    {
+        selectedId = id;
+        return Task.CompletedTask;
+    }
+
+    private Task ClearSelectionAsync()
+    {
+        selectedId = null;
+        return Task.CompletedTask;
+    }
+
+    private void ShowTable(bool value)
+    {
+        table = value;
+        icicle = false;
+    }
+
+    /// <summary>1.0-P3B: the icicle view, in the tree's and the table's place.</summary>
+    private void ShowIcicle()
+    {
+        icicle = true;
+        table = false;
+    }
+
+    private void OnHeatChanged(ChangeEventArgs args)
+    {
+        heat = PlanAnalysis.ParseHeat(args.Value?.ToString());
+        heatCells = read?.Plan is { } plan ? PlanAnalysis.HeatMap(plan, heat) : new Dictionary<int, PlanHeatCell>();
+    }
+
+    private void OnCriticalChanged(ChangeEventArgs args) => critical = args.Value is true;
+
+    /// <summary>The page a finding's remedy refers to, as a link for the scope on screen - or <see langword="null" /> where the studio offers none.</summary>
+    private (string Href, string Label)? RelatedLink(PlanInsightFinding finding) => finding.RelatedPage switch
+    {
+        PlanInsightPage.Maintenance when MaintenanceLinks.ToMaintenance(Settings, Descriptor, State.ActiveScope) is { } href => (href, "Open Operations › Maintenance"),
+        _ => null,
+    };
+
+    private RenderFragment NodeView(PlanNode node) => __builder =>
+    {
+        bool selected = Analyzer && selectedId == node.Id;
+        bool onPath = Analyzer && critical && criticalIds.Contains(node.Id);
+        PlanHeatCell? cell = Analyzer ? heatCells.GetValueOrDefault(node.Id) : null;
+
+        <li class="ms-plan-item" @key="node.Id">
+            @if (Analyzer)
+            {
+                @* The whole card selects the node for a mouse; the button inside it is the same selection for a keyboard. *@
+                <div class="@NodeClass(node, selected, onPath, cell)" aria-current="@(selected ? "true" : null)" @onclick="() => SelectAsync(node.Id)">
+                    @NodeBody(node, selected, onPath, cell)
+                </div>
+            }
+            else
+            {
+                <div class="@NodeClass(node, selected, onPath, cell)">
+                    @NodeBody(node, selected, onPath, cell)
+                </div>
+            }
+
+            @if (node.Children.Any(static x => x.Id < MaxDrawnNodes))
+            {
+                <ul class="ms-plan-children">
+                    @foreach (PlanNode child in node.Children.Where(static x => x.Id < MaxDrawnNodes))
+                    {
+                        @NodeView(child)
+                    }
+                </ul>
+            }
+        </li>
+    };
+
+    private static string NodeClass(PlanNode node, bool selected, bool onPath, PlanHeatCell? cell) =>
+        string.Join(' ', new[]
+        {
+            "ms-plan-node",
+            node.NeverExecuted ? "ms-plan-node-idle" : null,
+            selected ? "ms-plan-node-selected" : null,
+            onPath ? "ms-plan-critical" : null,
+            cell is { Level: > 0 } ? "ms-plan-heat-" + cell.Level.ToString(CultureInfo.InvariantCulture) : null,
+        }.Where(static x => x is not null));
+
+    private RenderFragment NodeBody(PlanNode node, bool selected, bool onPath, PlanHeatCell? cell) => __builder =>
+    {
+        @if (Analyzer)
+        {
+            <button type="button"
+                    class="ms-plan-pick ms-plan-node-pick"
+                    aria-pressed="@(selected ? "true" : "false")"
+                    aria-label="@("Select " + node.Description)"
+                    @onclick="() => SelectAsync(node.Id)"
+                    @onclick:stopPropagation="true"></button>
+        }
+
+        <p class="ms-plan-node-head">
+            @if (node.SubplanName is { } subplan)
+            {
+                <span class="ms-plan-subplan">@subplan</span>
+            }
+            else if (node.ParentRelationship is "InitPlan" or "SubPlan")
+            {
+                <span class="ms-plan-subplan">@node.ParentRelationship</span>
+            }
+            <span class="ms-plan-node-type">@node.Label</span>
+            @if (node.Target is { } target)
+            {
+                <span class="ms-plan-node-target">@target</span>
+            }
+            @if (node.Disabled == true)
+            {
+                <span class="ms-chip ms-chip-warning ms-plan-chip" title="A planner setting (enable_*) disabled this kind of node, and the planner used it anyway.">disabled</span>
+            }
+            @if (node.NeverExecuted)
+            {
+                <span class="ms-chip ms-plan-chip">never executed</span>
+            }
+            @if (onPath)
+            {
+                <span class="ms-chip ms-plan-chip ms-plan-critical-flag" title="On the critical path: the chain of nodes that carries most of the plan's time">critical</span>
+            }
+            @if (flags.TryGetValue(node.Id, out List<string>? codes))
+            {
+                @foreach (string code in codes)
+                {
+                    string current = code;
+                    <span class="ms-chip ms-chip-warning ms-plan-chip ms-plan-node-flag" @key="current">@current</span>
+                }
+            }
+        </p>
+
+        @if (Share(node) is { } share)
+        {
+            <p class="ms-plan-share">
+                <span class="ms-plan-bar @(cell is { Level: > 0 } ? "ms-plan-heat-" + cell.Level.ToString(CultureInfo.InvariantCulture) : null)" style="--ms-plan-share: @Width(share.Value)" aria-hidden="true"></span>
+                <span class="ms-plan-share-value">@TableText.Percent(share.Value) of @share.Of</span>
+            </p>
+        }
+
+        @if (cell is not null)
+        {
+            @* The heat as text beside the colour: colour is never the only signal. *@
+            <p class="ms-plan-heat-line">
+                <span class="ms-plan-heat-chip ms-plan-heat-@cell.Level.ToString(CultureInfo.InvariantCulture)">@PlanAnalysis.Label(heat, read?.Plan): @cell.Text</span>
+            </p>
+        }
+
+        <p class="ms-plan-facts">
+            @{ IReadOnlyList<string> facts = Facts(node); }
+            @for (int i = 0; i < facts.Count; i++)
+            {
+                <span class="ms-plan-fact" @key="i">@facts[i]</span>
+            }
+        </p>
+
+        @if (Details(node) is { Count: > 0 } details)
+        {
+            <details class="ms-plan-details">
+                <summary>Details</summary>
+                <dl class="ms-plan-detail-list">
+                    @for (int i = 0; i < details.Count; i++)
+                    {
+                        (string Term, string Value) detail = details[i];
+                        <div class="ms-plan-detail" @key="i">
+                            <dt>@detail.Term</dt>
+                            <dd><code class="ms-plan-detail-value">@detail.Value</code></dd>
+                        </div>
+                    }
+                </dl>
+            </details>
+        }
+    };
+
+    /// <summary>The node's share of the plan's time, when it was analyzed with timing, or else of its cost.</summary>
+    private static (double Value, string Of)? Share(PlanNode node) =>
+        node.TimeShare is { } time ? (time, "time")
+        : node.CostShare is { } cost ? (cost, "cost")
+        : null;
+
+    /// <summary>The node's numbers in a line: rows, cost, time, buffers, I/O, and PostgreSQL 18's keys where printed.</summary>
+    internal static IReadOnlyList<string> Facts(PlanNode node)
+    {
+        List<string> facts = [];
+
+        if (node.PlanRows is { } planned)
+        {
+            facts.Add("~" + TableText.Count(planned) + " rows estimated");
+        }
+
+        if (node.ActualRows is { } rows && node.ActualLoops is { } loops && loops > 0)
+        {
+            facts.Add(TableText.Count(rows) + " rows returned" + (loops > 1 ? " × " + TableText.Count(loops) + " loops" : string.Empty));
+        }
+
+        if (node.StartupCost is { } startup && node.TotalCost is { } total)
+        {
+            facts.Add("cost " + Number(startup) + "..." + Number(total));
+        }
+
+        if (node.ExclusiveMs is { } own)
+        {
+            facts.Add(Milliseconds(own) + " of its own");
+        }
+
+        if (node.Buffers is { } buffers)
+        {
+            facts.Add(Buffers(buffers));
+        }
+
+        if (node.IoReadMs is not null || node.IoWriteMs is not null)
+        {
+            facts.Add("I/O read " + Milliseconds(node.IoReadMs ?? 0) + ", write " + Milliseconds(node.IoWriteMs ?? 0));
+        }
+
+        if (node.IndexSearches is { } searches)
+        {
+            facts.Add(TableText.Count(searches) + " index " + (searches == 1 ? "search" : "searches"));
+        }
+
+        if (node.Storage is { } storage)
+        {
+            facts.Add("kept in " + storage.ToLowerInvariant() + (node.MaximumStorageKb is { } most ? ", at most " + Kilobytes(most) : string.Empty));
+        }
+
+        return facts;
+    }
+
+    /// <summary>Buffers in words: only the counters above zero, or "no blocks touched".</summary>
+    internal static string Buffers(PlanBuffers buffers)
+    {
+        List<string> parts = [];
+
+        Part("shared hit", buffers.SharedHit);
+        Part("read", buffers.SharedRead);
+        Part("dirtied", buffers.SharedDirtied);
+        Part("written", buffers.SharedWritten);
+        Part("local hit", buffers.LocalHit);
+        Part("local read", buffers.LocalRead);
+        Part("local dirtied", buffers.LocalDirtied);
+        Part("local written", buffers.LocalWritten);
+        Part("temp read", buffers.TempRead);
+        Part("temp written", buffers.TempWritten);
+
+        return parts.Count == 0 ? "no blocks touched" : "buffers: " + string.Join(", ", parts);
+
+        void Part(string name, long blocks)
+        {
+            if (blocks > 0)
+            {
+                parts.Add(name + " " + TableText.Count(blocks));
+            }
+        }
+    }
+
+    /// <summary>Everything else the node printed, by Postgres' own name for it.</summary>
+    internal static IReadOnlyList<(string Term, string Value)> Details(PlanNode node)
+    {
+        List<(string Term, string Value)> details = [];
+
+        Text("Filter", node.Filter);
+        Count("Rows removed by filter", node.RowsRemovedByFilter);
+        Text("Index condition", node.IndexCondition);
+        Text("Recheck condition", node.RecheckCondition);
+        Count("Rows removed by recheck", node.RowsRemovedByIndexRecheck);
+        Text("Hash condition", node.HashCondition);
+        Text("Merge condition", node.MergeCondition);
+        Text("Join filter", node.JoinFilter);
+        Count("Rows removed by join filter", node.RowsRemovedByJoinFilter);
+        Text("One-time filter", node.OneTimeFilter);
+        Text("Sort key", node.SortKey.Count > 0 ? string.Join(", ", node.SortKey) : null);
+        Text("Group key", node.GroupKey.Count > 0 ? string.Join(", ", node.GroupKey) : null);
+        Text("Sort", node.SortMethod is { } method
+            ? method + (node.SortSpaceUsedKb is { } used ? ", " + Kilobytes(used) + (node.SortSpaceType is { } type ? " of " + type.ToLowerInvariant() : string.Empty) : string.Empty)
+            : null);
+        Text("Workers' sort", node.WorkerSortDiskKb is { } workers ? "on disk, up to " + Kilobytes(workers) + " each" : null);
+        Text("Hash", node.HashBuckets is not null || node.HashBatches is not null
+            ? string.Join(", ", new[]
+            {
+                node.HashBuckets is { } buckets ? TableText.Count(buckets) + " buckets" : null,
+                node.HashBatches is { } batches ? TableText.Count(batches) + " batches" + (node.OriginalHashBatches is { } original && original != batches ? " (" + TableText.Count(original) + " planned)" : string.Empty) : null,
+                node.PeakMemoryKb is { } peak ? Kilobytes(peak) + " at its peak" : null,
+            }.Where(static x => x is not null))
+            : null);
+        Text("Hash aggregate", node.HashAggBatches is not null || node.DiskUsageKb is not null
+            ? (node.HashAggBatches is { } aggregated ? TableText.Count(aggregated) + " batches" : string.Empty)
+              + (node.DiskUsageKb is { } disk ? (node.HashAggBatches is null ? string.Empty : ", ") + Kilobytes(disk) + " on disk" : string.Empty)
+            : null);
+        Text("Heap pages", node.ExactHeapBlocks is not null || node.LossyHeapBlocks is not null
+            ? TableText.Count(node.ExactHeapBlocks ?? 0) + " exact, " + TableText.Count(node.LossyHeapBlocks ?? 0) + " lossy"
+            : null);
+        Text("Workers", node.WorkersPlanned is { } plannedWorkers
+            ? TableText.Count(plannedWorkers) + " planned" + (node.WorkersLaunched is { } launched ? ", " + TableText.Count(launched) + " launched" : string.Empty)
+            : null);
+        Text("Strategy", node.Strategy);
+        Text("Join type", node.JoinType);
+        Count("Row width (bytes)", node.PlanWidth);
+
+        return details;
+
+        void Text(string term, string? value)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                details.Add((term, value));
+            }
+        }
+
+        void Count(string term, double? value)
+        {
+            if (value is { } number)
+            {
+                details.Add((term, TableText.Count(number)));
+            }
+        }
+    }
+
+    private static string NodeCount(QueryPlan plan)
+    {
+        string nodes = plan.NodeCount.ToString("N0", CultureInfo.InvariantCulture) + (plan.NodeCount == 1 ? " node" : " nodes");
+
+        if (plan.NodeCount > MaxDrawnNodes)
+        {
+            nodes += ", the first " + MaxDrawnNodes.ToString(CultureInfo.InvariantCulture) + " drawn";
+        }
+
+        return plan.Truncated ? nodes + " read of a larger plan" : nodes;
+    }
+
+    private static string SeverityClass(HealthSeverity severity) => severity switch
+    {
+        HealthSeverity.Critical => "ms-plan-insight-critical",
+        HealthSeverity.Warning => "ms-plan-insight-warning",
+        _ => "ms-plan-insight-info",
+    };
+
+    private static string Width(double share) =>
+        Math.Clamp(share * 100, 0, 100).ToString("0.##", CultureInfo.InvariantCulture) + "%";
+
+    private static string Number(double value) => value.ToString("#,0.00", CultureInfo.InvariantCulture);
+
+    private static string Milliseconds(double ms) =>
+        ms < 1 ? ms.ToString("0.###", CultureInfo.InvariantCulture) + " ms"
+        : ms < 1000 ? ms.ToString("0.#", CultureInfo.InvariantCulture) + " ms"
+        : (ms / 1000).ToString("0.##", CultureInfo.InvariantCulture) + " s";
+
+    private static string Kilobytes(double kb) => TableText.Bytes((long) Math.Round(kb * 1024));
+}

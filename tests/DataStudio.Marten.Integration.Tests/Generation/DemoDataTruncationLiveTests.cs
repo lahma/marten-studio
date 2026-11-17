@@ -1,0 +1,138 @@
+using Marten;
+
+using DataStudio.Sample.Marten.Domain.Documents;
+using DataStudio.Sample.Marten.Domain.Generation;
+using DataStudio.Marten.Services.Events;
+
+namespace DataStudio.Marten.Integration.Tests.Generation;
+
+/// <summary>
+/// A generated set that is then truncated, so that "removes only what it generated" is an assertion.
+/// </summary>
+/// <param name="postgres">The assembly's Postgres, injected by xunit.</param>
+/// <remarks>
+/// Its own fixture because the tests in it write. The plan is <see cref="DemoDataSize.Small" />: what is
+/// being tested is which rows go and which stay, and that is the same question at twenty-five rows as at
+/// six hundred thousand - only faster.
+/// </remarks>
+public sealed class TruncationDataSetFixture(PostgresFixture postgres) : GeneratedDataFixtureBase(postgres)
+{
+    /// <inheritdoc />
+    public override string Schema => "generation_truncate";
+
+    /// <inheritdoc />
+    internal override DemoDataPlan Plan => DemoDataPlan.For(DemoDataSize.Small) with { AnalyzeWhenDone = false };
+}
+
+/// <summary>
+/// Truncation: every generated document goes, every seeded one stays, and the generated streams are
+/// archived rather than silently left behind.
+/// </summary>
+/// <param name="fixture">The generated set, built once for this class.</param>
+public class DemoDataTruncationLiveTests(TruncationDataSetFixture fixture) : IClassFixture<TruncationDataSetFixture>
+{
+    private static CancellationToken Token => TestContext.Current.CancellationToken;
+
+    /// <summary>
+    /// One truncation, with every before-and-after assertion in it.
+    /// </summary>
+    /// <remarks>
+    /// One test rather than five, because truncation is a one-way door: a second test in this class
+    /// would be asserting about a database the first one had already emptied, which is a test that
+    /// passes for the wrong reason.
+    /// </remarks>
+    [PostgresFact]
+    public async Task Truncation_removes_the_generated_rows_and_leaves_the_seeded_ones()
+    {
+        IDocumentStore store = fixture.Marten.Store;
+        DemoDataPlan plan = DemoDataPlan.For(DemoDataSize.Small);
+
+        await using (IQuerySession before = store.QuerySession())
+        {
+            (await before.Query<Customer>().CountAsync(Token)).Should().Be(plan.Customers + 25);
+            (await before.Query<Product>().CountAsync(Token)).Should().Be(plan.Products + 12);
+        }
+
+        // The run was recorded, which is the only way a later process could find the streams it appended.
+        var truncator = new DemoDataTruncator(store);
+
+        IReadOnlyList<DemoDataRun> runs = await truncator.ListRunsAsync(Token);
+        runs.Should().ContainSingle(x => x.Id == fixture.RunId);
+        runs.Single(x => x.Id == fixture.RunId).Completed.Should().BeTrue();
+
+        // A batch of seven, so that seventy-odd documents take more than a dozen statements: the bound is what keeps
+        // the Large preset's 600 000 customers - three foreign-key triggers a row - inside the command
+        // timeout, and a batch that never stopped at the bound would pass at the default size here.
+        const int BatchSize = 7;
+
+        List<DemoDataTruncationProgress> steps = [];
+        DemoDataTruncation result = await new DemoDataTruncator(store, BatchSize).TruncateAsync(
+            deleteAllEventData: false,
+            progress: steps.Add,
+            Token);
+
+        result.Runs.Should().Be(1);
+        result.DocumentsDeleted.Should().Be(plan.DocumentTarget, "every generated document, and only those");
+        result.StreamsArchived.Should().Be(plan.Streams);
+        result.EventDataDeleted.Should().BeFalse();
+
+        // The panel's progress line: documents first, a batch at a time up to the total, then the streams.
+        long[] deleted =
+        [
+            0, .. steps.Where(x => x.Phase == DemoDataTruncationPhase.DeletingDocuments).Select(x => x.DocumentsDeleted),
+        ];
+
+        deleted.Zip(deleted.Skip(1), (before, after) => after - before)
+            .Should().AllSatisfy(x => x.Should().BeInRange(1, BatchSize, "one statement, one bounded batch"));
+        deleted.Last().Should().Be(plan.DocumentTarget);
+        deleted.Should().HaveCountGreaterThan((int) (plan.DocumentTarget / BatchSize));
+
+        steps.Last().Phase.Should().Be(DemoDataTruncationPhase.ArchivingStreams);
+        steps.Last().StreamsArchived.Should().Be(plan.Streams);
+        steps.Last().DocumentsDeleted.Should().Be(plan.DocumentTarget);
+
+        await using (IQuerySession after = store.QuerySession())
+        {
+            // Exactly the seeder's rows are left, in every collection the generator writes.
+            (await after.Query<Customer>().CountAsync(Token)).Should().Be(25);
+            (await after.Query<Product>().CountAsync(Token)).Should().Be(12);
+            (await after.Query<Vehicle>().CountAsync(Token)).Should().Be(10);
+            (await after.Query<MediaAsset>().CountAsync(Token)).Should().Be(1);
+            (await after.Query<AuditNote>().CountAsync(Token)).Should().Be(8);
+
+            // Order is soft-deleted, so a generated order that was only marked deleted would still be a
+            // row. HardDeleteWhere is what makes "truncate" mean what it says.
+            (await after.Query<Order>().CountAsync(Token)).Should().Be(12, "three of the seeder's fifteen are soft-deleted");
+
+            (await after.Query<DemoDataRun>().CountAsync(Token)).Should().Be(0);
+        }
+
+        // Invoices are conjoined, so each tenant has to have been visited.
+        foreach (string tenantId in DataStudio.Sample.Marten.Domain.SampleStore.TenantIds)
+        {
+            await using IQuerySession tenant = store.QuerySession(tenantId);
+            (await tenant.Query<Invoice>().CountAsync(Token)).Should().Be(3, "the seeder writes three per tenant");
+        }
+
+        // The generated streams are archived, not deleted: Marten has no operation that deletes a stream,
+        // and the events screens have to be able to tell the difference.
+        using var events = fixture.Marten.Resolve<IEventDataService>();
+
+        var streamId = DemoDataGenerator.StreamId(fixture.RunId, 0).ToString();
+
+        DataStudio.Marten.Services.Events.StreamState state = await events.Service.GetStreamAsync(
+            fixture.Marten.Scope, streamId, Token);
+
+        state.Exists.Should().BeTrue("archiving is not deleting");
+        state.IsArchived.Should().BeTrue();
+
+        // ... and the seeder's own streams are untouched.
+        DataStudio.Marten.Services.Events.StreamState seeded = await events.Service.GetStreamAsync(
+            fixture.Marten.Scope,
+            DataStudio.Sample.Marten.Domain.SampleDataSeeder.OrderStreamId(1).ToString(),
+            Token);
+
+        seeded.Exists.Should().BeTrue();
+        seeded.IsArchived.Should().BeFalse();
+    }
+}

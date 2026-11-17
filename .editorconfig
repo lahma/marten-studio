@@ -137,7 +137,7 @@ insert_final_newline = true
 [*.{cs,razor}]
 dotnet_diagnostic.BL0005.severity = error
 
-# CS1591 is an error in src/ only: MartenStudio is a documented public library. Everything else is
+# CS1591 is an error in src/ only: The Marten module is a documented public library. Everything else is
 # internal code where a missing doc comment is noise. CA1707 (underscores in names) is how test
 # method names read.
 [{build,tests,samples}/**.cs]

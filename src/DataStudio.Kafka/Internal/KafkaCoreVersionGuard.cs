@@ -1,0 +1,172 @@
+using System.Reflection;
+using System.Runtime.CompilerServices;
+
+namespace DataStudio.Kafka.Internal;
+
+/// <summary>
+/// Refuses to start the Kafka module beside any DataStudio (the shell) or DataStudio.Kafka.Core but its own build - including none at all.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>Why.</b> DataStudio.Kafka, DataStudio and DataStudio.Kafka.Core are one program split in three files: the shell grants DataStudio.Kafka its internals,
+/// and DataStudio.Kafka.Core grants it its own, so one skewed assembly is a <see cref="MissingMethodException" /> on the first
+/// internal signature that moved. The nuspec pins the others exactly, and NuGet enforces that pin everywhere but one place: with
+/// <c>CentralPackageTransitivePinningEnabled</c> and a central <c>PackageVersion</c> for one of them at another version, the SDK's resolver
+/// drops it from the graph without a diagnostic - a green build and a <see cref="FileNotFoundException" /> at startup (measured by PS-0,
+/// 2026-10-20, for the database module; DataStudio.Marten's <c>PostgresVersionGuard</c> is this guard's model).
+/// </para>
+/// <para>
+/// <b>How it can run at all when one is missing.</b> This type names no DataStudio or DataStudio.Kafka.Core type, and neither does the public
+/// <c>AddKafka</c> that calls it first: everything that does is behind a <see cref="MethodImplOptions.NoInlining" /> method, so the JIT
+/// resolves none of it until this guard has passed. Each assembly is loaded by name, from a <see cref="MethodImplOptions.NoInlining" /> method of
+/// its own. <c>KafkaCoreVersionGuardTests</c> scans the IL of both to keep it that way.
+/// </para>
+/// <para>
+/// <b>The caveat.</b> <c>KafkaOptions</c> derives from a DataStudio.Kafka.Core type, and <c>AddKafka</c> extends the shell's
+/// <c>DataStudioBuilder</c>, so the runtime loads DataStudio.Kafka.Core and DataStudio to compile <c>AddKafka</c> itself: a <em>missing or older</em>
+/// one of them fails in the loader with a <see cref="FileNotFoundException" /> that names it, before this guard runs (and the host's own
+/// <c>AddDataStudio()</c>, which comes first, fails the same way for a missing shell). The guard explains a newer one, and another build of the
+/// same version, of either.
+/// </para>
+/// <para>
+/// <b>What it compares.</b> The informational versions. The packages are packed from one commit at one CHANGELOG version, in Release, and
+/// SourceLink appends that commit after a <c>+</c>: when both assemblies are Release builds and both carry one, the whole strings must match.
+/// Otherwise - a Debug build, where an IDE's incremental build after a commit legitimately leaves the assemblies on different commits - only the
+/// part before the <c>+</c> is compared.
+/// </para>
+/// </remarks>
+internal static class KafkaCoreVersionGuard
+{
+    /// <summary>The shell's assembly name: a string, never a type, for the reason in the remarks.</summary>
+    internal const string ShellAssemblyName = "DataStudio";
+
+    /// <summary>The Kafka module's engine assembly name, checked the same way.</summary>
+    internal const string EngineAssemblyName = "DataStudio.Kafka.Core";
+
+    /// <summary>
+    /// Throws unless the DataStudio and DataStudio.Kafka.Core this process loads are the builds this DataStudio.Kafka was packed
+    /// with.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Any is missing, or is another version.</exception>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public static void Ensure() =>
+        Ensure(typeof(KafkaCoreVersionGuard).Assembly, LoadShell, LoadEngine);
+
+    /// <summary>
+    /// The whole check, with the loaders supplied - the seam the tests use: the shell first, then DataStudio.Kafka.Core.
+    /// </summary>
+    /// <param name="kafka">DataStudio.Kafka's own assembly, whose version is the one required.</param>
+    /// <param name="loadShell">Loads the shell's assembly; may throw <see cref="FileNotFoundException" />.</param>
+    /// <param name="loadEngine">Loads DataStudio.Kafka.Core; may throw <see cref="FileNotFoundException" />.</param>
+    /// <exception cref="InvalidOperationException">Any is missing, or is another version.</exception>
+    internal static void Ensure(
+        Assembly kafka,
+        Func<Assembly> loadShell,
+        Func<Assembly> loadEngine)
+    {
+        EnsureAssembly(ShellAssemblyName, "DataStudio.Kafka", kafka, loadShell);
+        EnsureAssembly(EngineAssemblyName, "DataStudio.Kafka", kafka, loadEngine);
+    }
+
+    /// <summary>One required assembly: loaded, and the same build as DataStudio.Kafka's own.</summary>
+    /// <param name="name">The required package.</param>
+    /// <param name="bringer">The package whose reference brings it, which a host that removes its pin lets do so.</param>
+    /// <param name="kafka">DataStudio.Kafka's own assembly, whose version is the one required.</param>
+    /// <param name="load">Loads the required assembly; may throw <see cref="FileNotFoundException" />.</param>
+    private static void EnsureAssembly(string name, string bringer, Assembly kafka, Func<Assembly> load)
+    {
+        string? self = InformationalVersion(kafka);
+        string required = ReleaseVersion(self);
+        Assembly loaded;
+
+        try
+        {
+            loaded = load();
+        }
+        catch (FileNotFoundException e)
+        {
+            throw new InvalidOperationException(
+                $"DataStudio.Kafka {ReleaseVersion(self)} needs {name} {required} exactly, and this application was deployed " +
+                $"without {name}. The usual cause is a central PackageVersion for {name} at another " +
+                $"version under CentralPackageTransitivePinningEnabled: NuGet then drops {name} from the graph " +
+                $"without a warning. The packages are released together: pin {name} to {required}, or remove " +
+                $"its PackageVersion row and let {bringer} bring it.",
+                e);
+        }
+
+        string? loadedVersion = InformationalVersion(loaded);
+        bool bothRelease = IsReleaseBuild(kafka) && IsReleaseBuild(loaded);
+
+        if (SameBuild(self, loadedVersion, bothRelease))
+        {
+            return;
+        }
+
+        // The commits were compared: name them, since the release version may well be the same on both sides.
+        bool commits = bothRelease && HasBuildMetadata(self) && HasBuildMetadata(loadedVersion);
+        string shownRequired = commits ? self! : required;
+        string shownSelf = commits ? self! : ReleaseVersion(self);
+        string shownFound = commits ? loadedVersion! : ReleaseVersion(loadedVersion);
+
+        throw new InvalidOperationException(
+            $"DataStudio.Kafka {shownSelf} needs {name} {shownRequired} exactly, and found {name} " +
+            $"{shownFound}. The packages are released together and must be upgraded together: a central " +
+            $"PackageVersion or a PackageReference for {name} must say {required}, or be removed and let " +
+            $"{bringer} bring it.");
+    }
+
+    /// <summary>
+    /// Whether two informational versions name the same build. When both assemblies are Release builds and both carry build metadata - the
+    /// <c>+&lt;commit&gt;</c> SourceLink appends - the whole strings must match; otherwise the release versions (the part before the <c>+</c>) must.
+    /// </summary>
+    /// <param name="kafka">DataStudio.Kafka's informational version.</param>
+    /// <param name="other">The other assembly's informational version.</param>
+    /// <param name="bothRelease">Whether both assemblies say <c>[AssemblyConfiguration("Release")]</c>, as every pack does.</param>
+    internal static bool SameBuild(string? kafka, string? other, bool bothRelease) =>
+        bothRelease && HasBuildMetadata(kafka) && HasBuildMetadata(other)
+            ? string.Equals(kafka, other, StringComparison.Ordinal)
+            : string.Equals(ReleaseVersion(kafka), ReleaseVersion(other), StringComparison.Ordinal);
+
+    /// <summary>Whether an assembly was built in the Release configuration, as every pack of the packages is.</summary>
+    /// <param name="assembly">The assembly.</param>
+    internal static bool IsReleaseBuild(Assembly assembly) =>
+        string.Equals(
+            assembly.GetCustomAttribute<AssemblyConfigurationAttribute>()?.Configuration,
+            "Release",
+            StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>An assembly's informational version up to the <c>+</c>, or its assembly version without one.</summary>
+    /// <param name="assembly">The assembly.</param>
+    internal static string ReleaseVersion(Assembly assembly) => ReleaseVersion(InformationalVersion(assembly));
+
+    /// <summary>An assembly's informational version as it carries it, or its assembly version when it has none.</summary>
+    /// <param name="assembly">The assembly.</param>
+    internal static string? InformationalVersion(Assembly assembly) =>
+        assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+        ?? assembly.GetName().Version?.ToString();
+
+    private static bool HasBuildMetadata(string? informationalVersion) =>
+        informationalVersion?.Contains('+', StringComparison.Ordinal) == true;
+
+    /// <summary>The part of an informational version before the <c>+</c> build metadata, or <c>?</c> for none.</summary>
+    /// <param name="informationalVersion">The version as the assembly carries it.</param>
+    internal static string ReleaseVersion(string? informationalVersion)
+    {
+        if (string.IsNullOrWhiteSpace(informationalVersion))
+        {
+            return "?";
+        }
+
+        int plus = informationalVersion.IndexOf('+', StringComparison.Ordinal);
+
+        return plus < 0 ? informationalVersion : informationalVersion[..plus];
+    }
+
+    /// <summary>Loads the shell by name - the one place its name meets the loader.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static Assembly LoadShell() => Assembly.Load(new AssemblyName(ShellAssemblyName));
+
+    /// <summary>Loads the Kafka module's engine by name, for the same reason and from a method of its own.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static Assembly LoadEngine() => Assembly.Load(new AssemblyName(EngineAssemblyName));
+}

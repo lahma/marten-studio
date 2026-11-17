@@ -1,0 +1,237 @@
+using DataStudio.Services.Settings;
+using DataStudio.Marten.Services;
+using DataStudio.Postgres.Services.Settings;
+
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace DataStudio.Marten.Tests.Endpoints;
+
+/// <summary>
+/// The startup guard: an application whose Data Studio mapping answers nothing about authorization
+/// refuses to start, and each of four ways of answering satisfies it.
+/// </summary>
+/// <remarks>
+/// "I forgot to add <c>RequireAuthorization</c>" must not be a silent state (plan D5). The studio's pages
+/// can read and edit every document in every Marten store in the process, so an open one is a serious
+/// exposure rather than an information leak - and the mistake that opens it is a mapping call that says
+/// nothing at all.
+/// </remarks>
+public class StartupGuardTest
+{
+    private static CancellationToken Token => TestContext.Current.CancellationToken;
+
+    private static WebApplication CreateApp(
+        Action<DataStudioOptions>? configureShell = null,
+        Action<WebApplicationBuilder>? configureBuilder = null)
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Services.AddDataStudio(configureShell).AddMarten();
+        configureBuilder?.Invoke(builder);
+        return builder.Build();
+    }
+
+    private static async Task<Exception?> StartAndStopAsync(WebApplication app)
+    {
+        try
+        {
+            await app.StartAsync(Token);
+        }
+        catch (Exception exception)
+        {
+            return exception;
+        }
+
+        await app.StopAsync(Token);
+        return null;
+    }
+
+    [Fact]
+    public async Task A_mapping_that_answers_nothing_refuses_to_start()
+    {
+        await using var app = CreateApp();
+        app.MapDataStudio();
+
+        var failure = await StartAndStopAsync(app);
+
+        failure.Should().BeOfType<InvalidOperationException>();
+        failure!.Message.Should().Contain("Data Studio is mapped with no authorization");
+        failure.Message.Should().Contain("app.MapDataStudio().RequireAuthorization()");
+        failure.Message.Should().Contain("options.AuthorizationPolicy");
+        failure.Message.Should().Contain("app.MapDataStudio().AllowAnonymous()");
+        failure.Message.Should().Contain("FallbackPolicy");
+        failure.Message.Should().Contain("/studio", "the message names the routes nothing authorizes");
+    }
+
+    /// <summary>
+    /// The composition is validated when the studio is mapped, so a root two page assemblies claim fails the mapping call
+    /// itself - at startup, never at the first request for a page. (A route two pages of one assembly claim is the route table's, built at the same time.)
+    /// </summary>
+    [Fact]
+    public async Task A_root_two_page_assemblies_claim_fails_the_mapping_call()
+    {
+        // This test assembly claims the root the Postgres pages already use.
+        StudioDescriptor descriptor = Clone(
+            MartenDescriptor.Instance,
+            [
+                .. MartenDescriptor.Instance.PageAssemblies,
+                new StudioPageAssembly(typeof(StartupGuardTest).Assembly, "/POSTGRES"),
+            ]);
+
+        await using var app = CreateApp(configureBuilder: builder => builder.Services.AddSingleton(descriptor));
+
+        Action map = () => app.MapDataStudio().AllowAnonymous();
+
+        map.Should().Throw<InvalidOperationException>().WithMessage("*already use*");
+    }
+
+    private static StudioDescriptor Clone(
+        StudioDescriptor source,
+        IReadOnlyList<StudioPageAssembly> pageAssemblies) => new()
+    {
+        Key = source.Key,
+        ProductName = source.ProductName,
+        PageAssemblies = pageAssemblies,
+        HealthCheckAssemblies = source.HealthCheckAssemblies,
+        Navigation = source.Navigation,
+        Summary = source.Summary,
+        QueryComponent = source.QueryComponent,
+        SourceQueryParameter = source.SourceQueryParameter,
+        SourceNoun = source.SourceNoun,
+        SourceLabel = source.SourceLabel,
+        ExposedContent = source.ExposedContent,
+        CreateResource = source.CreateResource,
+    };
+
+    [Fact]
+    public async Task RequireAuthorization_at_the_map_site_satisfies_the_guard()
+    {
+        await using var app = CreateApp(configureBuilder: static builder =>
+            builder.Services.AddAuthorization(static options =>
+                options.AddPolicy("studio-policy", static policy => policy.RequireAssertion(static _ => true))));
+
+        app.MapDataStudio().RequireAuthorization("studio-policy");
+
+        (await StartAndStopAsync(app)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task AllowAnonymous_at_the_map_site_satisfies_the_guard()
+    {
+        await using var app = CreateApp();
+        app.MapDataStudio().AllowAnonymous();
+
+        (await StartAndStopAsync(app)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task A_configured_AuthorizationPolicy_satisfies_the_guard()
+    {
+        await using var app = CreateApp(
+            options => options.AuthorizationPolicy = "studio-policy",
+            static builder => builder.Services.AddAuthorization(static options =>
+                options.AddPolicy("studio-policy", static policy => policy.RequireAssertion(static _ => true))));
+
+        app.MapDataStudio();
+
+        (await StartAndStopAsync(app)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task A_host_FallbackPolicy_satisfies_the_guard()
+    {
+        await using var app = CreateApp(configureBuilder: static builder =>
+            builder.Services.AddAuthorization(static options =>
+                options.FallbackPolicy = new AuthorizationPolicyBuilder().RequireAssertion(static _ => true).Build()));
+
+        app.MapDataStudio();
+
+        (await StartAndStopAsync(app)).Should().BeNull();
+    }
+
+    /// <summary>
+    /// A group's own data sources answer with the endpoints as they were mapped - before the group's
+    /// prefix and before the group's conventions - so reading them in <c>StartingAsync</c> would refuse a
+    /// mapping the application had authorized. The guard skips the group and catches it in
+    /// <c>StartedAsync</c> from the container's own endpoint data source instead.
+    /// </summary>
+    [Fact]
+    public async Task A_group_that_authorizes_the_studio_satisfies_the_guard()
+    {
+        await using var app = CreateApp(configureBuilder: static builder =>
+            builder.Services.AddAuthorization(static options =>
+                options.AddPolicy("studio-policy", static policy => policy.RequireAssertion(static _ => true))));
+
+        var group = app.MapGroup("/admin");
+        group.MapDataStudio();
+        group.RequireAuthorization("studio-policy");
+
+        (await StartAndStopAsync(app)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task A_group_that_authorizes_nothing_is_still_caught()
+    {
+        await using var app = CreateApp();
+
+        var group = app.MapGroup("/admin");
+        group.MapDataStudio();
+
+        var failure = await StartAndStopAsync(app);
+
+        failure.Should().BeOfType<InvalidOperationException>();
+        failure!.Message.Should().Contain("Data Studio is mapped with no authorization");
+    }
+
+    /// <summary>
+    /// A <c>Startup.Configure</c> class, or anything else that maps inside <c>UseEndpoints</c>, builds its
+    /// routes while the web host is starting - after <c>StartingAsync</c> has already run and found
+    /// nothing. Later than ideal, since the listener is bound by then, but the host stops on the
+    /// exception and the alternative is passing it in silence.
+    /// </summary>
+    [Fact]
+    public async Task A_mapping_inside_UseEndpoints_is_still_caught()
+    {
+        await using var app = CreateApp();
+
+        app.UseRouting();
+#pragma warning disable ASP0014 // Suggest using top level route registrations - the shape under test is exactly this one.
+        app.UseEndpoints(endpoints => endpoints.MapDataStudio());
+#pragma warning restore ASP0014
+
+        var failure = await StartAndStopAsync(app);
+
+        failure.Should().BeOfType<InvalidOperationException>();
+        failure!.Message.Should().Contain("Data Studio is mapped with no authorization");
+    }
+
+    [Fact]
+    public async Task A_mapping_inside_UseEndpoints_that_authorizes_itself_passes()
+    {
+        await using var app = CreateApp(configureBuilder: static builder =>
+            builder.Services.AddAuthorization(static options =>
+                options.AddPolicy("studio-policy", static policy => policy.RequireAssertion(static _ => true))));
+
+        app.UseRouting();
+#pragma warning disable ASP0014
+        app.UseEndpoints(static endpoints => endpoints.MapDataStudio().RequireAuthorization("studio-policy"));
+#pragma warning restore ASP0014
+
+        (await StartAndStopAsync(app)).Should().BeNull();
+    }
+
+    /// <summary>
+    /// Registering the services and never mapping the endpoints serves nothing, so there is nothing to
+    /// refuse. The guard must not turn "I added the package" into a startup failure.
+    /// </summary>
+    [Fact]
+    public async Task Registering_without_mapping_starts_normally()
+    {
+        await using var app = CreateApp();
+
+        (await StartAndStopAsync(app)).Should().BeNull();
+    }
+}

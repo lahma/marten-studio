@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The shell's own fast suite (AGENTS.md D16, v2 steps 3 and 4): no Docker and no database. It references the DataStudio project and the one
+       module that needs no database, DataStudio.Kafka (v2 step 4: a Kafka-only host), so that a host with the shell and that module is built and
+       mapped for real, and its output folder is the file-level proof that such a host holds no Npgsql and no DataStudio.Postgres*
+       (MapDataStudioTests). The shell's own purity is held at the project file, the restore graph and the built assembly (ShellFenceTests), which
+       the reference does not touch. A test that composes a database module lives in the module's suite. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsTestProject>true</IsTestProject>
+    <!-- The linked SourceScanner.cs documents itself with crefs to the Marten suite's tests (CS1574), which this project does not compile. -->
+    <NoWarn>$(NoWarn);CS1574</NoWarn>
+  </PropertyGroup>
+
+  <!-- Global usings: `Xunit` comes from Verify.XunitV3's build props. -->
+  <ItemGroup>
+    <Using Include="AwesomeAssertions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="GitHubActionsTestLogger" />
+    <PackageReference Include="AwesomeAssertions" />
+    <PackageReference Include="Verify.XunitV3" />
+    <PackageReference Include="PublicApiGenerator" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/DataStudio/DataStudio.csproj" />
+    <ProjectReference Include="../../src/DataStudio.Kafka/DataStudio.Kafka.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="../DataStudio.Marten.Tests/Support/ComposedRailAssertions.cs" Link="Support/Linked/ComposedRailAssertions.cs" />
+    <Compile Include="../DataStudio.Marten.Tests/Conventions/RepositoryRoot.cs" Link="Support/Linked/RepositoryRoot.cs" />
+    <Compile Include="../DataStudio.Marten.Tests/Conventions/SourceScanner.cs" Link="Support/Linked/SourceScanner.cs" />
+    <Compile Include="../DataStudio.Marten.Tests/Conventions/LogEventScan.cs" Link="Support/Linked/LogEventScan.cs" />
+  </ItemGroup>
+
+</Project>

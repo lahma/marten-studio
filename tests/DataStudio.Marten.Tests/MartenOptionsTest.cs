@@ -1,0 +1,312 @@
+using DataStudio.Marten.Services;
+using DataStudio.Services;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+using DataStudio.Postgres.Services;
+
+namespace DataStudio.Marten.Tests;
+
+/// <summary>
+/// Options validation, the derived-path cache, and the capability truth table.
+/// </summary>
+/// <remarks>
+/// Every rule here fails at <em>startup</em>. A page size of zero or a SQL console role with a quote in
+/// it is a configuration mistake, and the only good time to find one is before the application is
+/// serving.
+/// </remarks>
+public class MartenOptionsTest
+{
+    private static MartenOptions Resolve(Action<MartenOptions> configure)
+    {
+        var services = new ServiceCollection();
+        services.AddDataStudio().AddMarten(configure);
+        using var provider = services.BuildServiceProvider();
+        return provider.GetRequiredService<IOptions<MartenOptions>>().Value;
+    }
+
+    private static Action ResolveAction(Action<MartenOptions> configure) => () => Resolve(configure);
+
+    [Fact]
+    public void The_defaults_are_valid_and_are_the_documented_ones()
+    {
+        var options = Resolve(static _ => { });
+
+        options.StoreAuthorizationPolicy.Should().BeNull();
+        options.WriteAuthorizationPolicy.Should().BeNull();
+        options.ReadOnly.Should().BeFalse();
+        options.DefaultPageSize.Should().Be(50);
+        options.MaxPageSize.Should().Be(500);
+        options.QueryTimeout.Should().Be(TimeSpan.FromSeconds(30));
+        options.MaxInlineValueBytes.Should().Be(512 * 1024);
+        options.MaxSqlConsoleRows.Should().Be(500);
+        options.SqlConsoleRole.Should().BeNull();
+        options.ExactCountThreshold.Should().Be(100_000);
+        options.HealthInterval.Should().Be(TimeSpan.FromSeconds(60));
+        options.RebuildShardTimeout.Should().Be(TimeSpan.FromHours(1));
+        options.IsDocumentTypeVisible.Should().BeNull();
+        options.IncludeAncillaryStores.Should().BeTrue();
+        options.KnownTenantIds.Should().BeEmpty();
+        options.BrowsableSchemas.Should().BeEmpty();
+        options.DiscoverTenantIds.Should().BeTrue();
+
+        // D4: every capability is off until the host says otherwise - the three 0.4 added, and 0.8's ViewDefinitions, included.
+        StudioCapabilityGuard.All.Should().HaveCount(14);
+        options.Capabilities.ViewDefinitions.Should().BeFalse();
+        options.Capabilities.ViewDatabaseActivity.Should().BeFalse();
+        options.Capabilities.CompactStreams.Should().BeFalse();
+        options.Capabilities.RunLinqQueries.Should().BeFalse();
+        foreach (var capability in StudioCapabilityGuard.All)
+        {
+            Support.MartenSpine.Guard(Options.Create(options)).IsEnabled(capability).Should().BeFalse();
+        }
+    }
+
+    [Theory]
+    [InlineData(0, 500)]
+    [InlineData(-1, 500)]
+    [InlineData(501, 500)]
+    public void A_default_page_size_outside_one_to_MaxPageSize_is_refused(int defaultPageSize, int maxPageSize)
+    {
+        ResolveAction(options =>
+        {
+            options.DefaultPageSize = defaultPageSize;
+            options.MaxPageSize = maxPageSize;
+        }).Should().Throw<OptionsValidationException>().WithMessage("*DefaultPageSize*");
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(5001)]
+    public void A_max_page_size_outside_one_to_five_thousand_is_refused(int maxPageSize)
+    {
+        ResolveAction(options =>
+        {
+            options.MaxPageSize = maxPageSize;
+            options.DefaultPageSize = 1;
+        }).Should().Throw<OptionsValidationException>().WithMessage("*MaxPageSize*");
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(999)]
+    [InlineData(600_001)]
+    public void A_query_timeout_outside_one_second_to_ten_minutes_is_refused(int milliseconds)
+    {
+        ResolveAction(options => options.QueryTimeout = TimeSpan.FromMilliseconds(milliseconds))
+            .Should().Throw<OptionsValidationException>().WithMessage("*QueryTimeout*");
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData((64 * 1024 * 1024) + 1)]
+    public void An_inline_document_limit_outside_one_byte_to_64_MiB_is_refused(int bytes)
+    {
+        ResolveAction(options => options.MaxInlineValueBytes = bytes)
+            .Should().Throw<OptionsValidationException>().WithMessage("*MaxInlineValueBytes*");
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(10_001)]
+    public void A_sql_console_row_cap_outside_one_to_ten_thousand_is_refused(int rows)
+    {
+        ResolveAction(options => options.MaxSqlConsoleRows = rows)
+            .Should().Throw<OptionsValidationException>().WithMessage("*MaxSqlConsoleRows*");
+    }
+
+    /// <summary>
+    /// The console's role is written into <c>SET LOCAL ROLE</c>, where it is an identifier and cannot be
+    /// a parameter. The shape is checked here, at startup, rather than escaped later.
+    /// </summary>
+    [Theory]
+    [InlineData("")]
+    [InlineData("1role")]
+    [InlineData("role name")]
+    [InlineData("role\"; drop table x; --")]
+    [InlineData("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
+    [InlineData("studio_reader\n")]
+    [InlineData("studio_reader\r\n")]
+    [InlineData("studio_reader\u2028")]
+    public void A_sql_console_role_that_is_not_a_plain_identifier_is_refused(string role)
+    {
+        ResolveAction(options => options.SqlConsoleRole = role)
+            .Should().Throw<OptionsValidationException>().WithMessage("*SqlConsoleRole*");
+    }
+
+    [Theory]
+    [InlineData("readonly_role")]
+    [InlineData("_role")]
+    [InlineData("Role$1")]
+    public void A_plain_identifier_is_an_acceptable_sql_console_role(string role)
+    {
+        Resolve(options => options.SqlConsoleRole = role).SqlConsoleRole.Should().Be(role);
+    }
+
+    [Fact]
+    public void A_negative_exact_count_threshold_is_refused()
+    {
+        ResolveAction(static options => options.ExactCountThreshold = -1)
+            .Should().Throw<OptionsValidationException>().WithMessage("*ExactCountThreshold*");
+    }
+
+    /// <summary>
+    /// H1: the advisor's cadence is bounded like RefreshInterval is - fifteen seconds to an hour - because several
+    /// checks scan the lock table and the process array.
+    /// </summary>
+    [Theory]
+    [InlineData(14_999)]
+    [InlineData(3_600_001)]
+    [InlineData(0)]
+    public void A_health_interval_outside_fifteen_seconds_to_an_hour_is_refused(int milliseconds)
+    {
+        ResolveAction(options => options.HealthInterval = TimeSpan.FromMilliseconds(milliseconds))
+            .Should().Throw<OptionsValidationException>().WithMessage("*HealthInterval*");
+    }
+
+    /// <summary>
+    /// "Never shorter than the shell's RefreshInterval" is a clamp, not a startup error: a host that already polls every two
+    /// minutes must not be refused a start by an option it never set.
+    /// </summary>
+    [Theory]
+    [InlineData(15_000, 5_000, 15_000)]
+    [InlineData(3_600_000, 300_000, 3_600_000)]
+    [InlineData(20_000, 120_000, 120_000)]
+    [InlineData(60_000, 60_000, 60_000)]
+    public void The_advisor_never_runs_faster_than_the_pages_poll(int healthMilliseconds, int refreshMilliseconds, int effectiveMilliseconds)
+    {
+        MartenOptions options = Resolve(options => options.HealthInterval = TimeSpan.FromMilliseconds(healthMilliseconds));
+        DataStudioOptions shell = new() { RefreshInterval = TimeSpan.FromMilliseconds(refreshMilliseconds) };
+
+        options.HealthInterval.Should().Be(TimeSpan.FromMilliseconds(healthMilliseconds));
+        MartenSettings.Of(options, new DataStudio.Services.Settings.ShellSettings(Options.Create(shell))).EffectiveHealthInterval
+            .Should().Be(TimeSpan.FromMilliseconds(effectiveMilliseconds), "the shell's RefreshInterval is the floor");
+    }
+
+    [Fact]
+    public void Null_capabilities_are_refused()
+    {
+        ResolveAction(static options => options.Capabilities = null!)
+            .Should().Throw<OptionsValidationException>().WithMessage("*Capabilities*");
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void An_empty_tenant_id_is_refused(string tenantId)
+    {
+        ResolveAction(options => options.KnownTenantIds.Add(tenantId))
+            .Should().Throw<OptionsValidationException>().WithMessage("*KnownTenantIds*");
+    }
+
+    // -------------------------------------------------------------------------------------------
+    // Capability x ReadOnly
+    // -------------------------------------------------------------------------------------------
+
+    [Fact]
+    public void Every_capability_is_off_by_default()
+    {
+        var guard = Support.MartenSpine.Guard(Options.Create(new MartenOptions()));
+
+        guard.EnabledCount.Should().Be(0);
+        guard.ReadOnly.Should().BeFalse();
+    }
+
+    [Fact]
+    public void All_turns_on_every_capability()
+    {
+        var guard = Support.MartenSpine.Guard(Options.Create(new MartenOptions
+        {
+            Capabilities = MartenCapabilities.All()
+        }));
+
+        guard.EnabledCount.Should().Be(StudioCapabilityGuard.All.Count);
+        foreach (var capability in StudioCapabilityGuard.All)
+        {
+            guard.IsEnabled(capability).Should().BeTrue();
+        }
+    }
+
+    [Fact]
+    public void ReadOnly_overrides_every_capability_however_they_were_configured()
+    {
+        var guard = Support.MartenSpine.Guard(Options.Create(new MartenOptions
+        {
+            Capabilities = MartenCapabilities.All(),
+            ReadOnly = true
+        }));
+
+        guard.EnabledCount.Should().Be(0);
+        guard.ReadOnly.Should().BeTrue();
+
+        foreach (var capability in StudioCapabilityGuard.All)
+        {
+            var refusal = guard.Invoking(x => x.Require(capability)).Should().Throw<StudioCapabilityDeniedException>().Which;
+
+            refusal.Reason.Should().Be(CapabilityDenialReason.ReadOnly);
+            refusal.Capability.Should().Be(capability);
+            refusal.Message.Should().Contain("MartenOptions.ReadOnly");
+        }
+    }
+
+    /// <summary>
+    /// The whole table, one capability at a time: with exactly one enabled, that one passes and the other
+    /// eight refuse, each naming its own option.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(EveryCapability))]
+    public void One_enabled_capability_enables_exactly_itself(string capabilityName)
+    {
+        // The parameter is the capability's name rather than the enum: xunit needs a public test method,
+        // and StudioCapability is internal because it is not part of the package's public surface.
+        var enabled = Enum.Parse<StudioCapability>(capabilityName);
+
+        var capabilities = new MartenCapabilities();
+        typeof(MartenCapabilities).GetProperty(capabilityName)!.SetValue(capabilities, true);
+
+        var guard = Support.MartenSpine.Guard(Options.Create(new MartenOptions { Capabilities = capabilities }));
+
+        guard.EnabledCount.Should().Be(1);
+        guard.IsEnabled(enabled).Should().BeTrue();
+        guard.Invoking(x => x.Require(enabled)).Should().NotThrow();
+
+        foreach (var other in StudioCapabilityGuard.All.Where(x => x != enabled))
+        {
+            guard.IsEnabled(other).Should().BeFalse();
+
+            var refusal = guard.Invoking(x => x.Require(other)).Should().Throw<StudioCapabilityDeniedException>().Which;
+
+            refusal.Reason.Should().Be(CapabilityDenialReason.Disabled);
+            refusal.Message.Should().Contain("MartenOptions.Capabilities." + other);
+        }
+    }
+
+    public static TheoryData<string> EveryCapability()
+    {
+        var data = new TheoryData<string>();
+        foreach (var capability in StudioCapabilityGuard.All)
+        {
+            data.Add(capability.ToString());
+        }
+
+        return data;
+    }
+
+    /// <summary>
+    /// The enum and the options class must not drift: a capability added to one and forgotten in the
+    /// other is a switch that cannot be set, or a property that does nothing.
+    /// </summary>
+    [Fact]
+    public void The_capability_enum_and_the_options_class_name_the_same_operations()
+    {
+        var properties = typeof(MartenCapabilities)
+            .GetProperties()
+            .Select(x => x.Name)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+        var enumNames = StudioCapabilityGuard.All.Select(x => x.ToString()).Order(StringComparer.Ordinal).ToArray();
+
+        properties.Should().BeEquivalentTo(enumNames);
+    }
+}

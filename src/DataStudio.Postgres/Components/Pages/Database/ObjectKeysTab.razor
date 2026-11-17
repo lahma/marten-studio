@@ -1,0 +1,308 @@
+@using System.Globalization
+@using DataStudio.Postgres.Services.Schema
+@using DataStudio.Postgres.Services.Settings
+@using DataStudio.Postgres.Services.Database
+@using DataStudio.Postgres.Components.Shared
+@using DataStudio.Postgres.Services
+@inject IStudioSettings Settings
+@inject StudioDescriptor Descriptor
+@inject StudioState State
+
+@*
+    Everything that identifies a row or ties it to another: the row key and where it came from, the
+    constraints and indexes as Postgres prints them (pg_get_constraintdef, pg_get_indexdef, coloured by
+    SqlText on the server), and the foreign keys both ways with their far ends linked - or said to be out of
+    view, never named - and what a delete or an update does to them. A pgvector HNSW or IVFFlat index also says
+    its operator classes and its build parameters, defaults included (VectorIndexSummary).
+*@
+
+@if (DetailModel is { } detail)
+{
+    string relationName = detail.Relation?.Name ?? "this relation";
+
+    <section class="ms-db-keys-section">
+        <h2 class="ms-db-section-title">Row key</h2>
+        @if (detail.RowKey is { } key)
+        {
+            <p class="ms-db-rowkey">
+                Rows are identified by <code>(@string.Join(", ", key.Columns))</code>:
+                @(key.Source == DatabaseRowKeySource.PrimaryKey
+                    ? "the primary key, " + key.IndexName + "."
+                    : "the unique index " + key.IndexName + ", a valid unconditional index over NOT NULL columns - there is no primary key.")
+            </p>
+        }
+        else
+        {
+            <p class="ms-db-rowkey ms-muted">
+                No row key: there is no primary key and no valid, unconditional unique index over NOT NULL
+                columns, so a single row cannot be named.
+            </p>
+        }
+    </section>
+
+    <section class="ms-db-keys-section">
+        <h2 class="ms-db-section-title">Constraints <span class="ms-tab-count">@detail.Constraints.Count</span></h2>
+        @if (detail.Constraints.Count == 0)
+        {
+            <p class="ms-muted">No constraints besides foreign keys.</p>
+        }
+        else
+        {
+            <TableScroll Label="@($"Constraints of {relationName}")">
+                <table class="ms-table ms-db-table ms-db-constraints">
+                    <thead>
+                        <tr>
+                            <th scope="col">Name</th>
+                            <th scope="col">Kind</th>
+                            <th scope="col">Definition</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (DatabaseConstraintInfo constraint in detail.Constraints)
+                        {
+                            <tr @key="constraint.Name">
+                                <td class="ms-db-cell-name">
+                                    <span class="ms-db-name">@constraint.Name</span>
+                                    @if (constraint.Temporal)
+                                    {
+                                        <span class="ms-db-badge ms-db-badge-temporal" title="@TemporalTitle">WITHOUT OVERLAPS</span>
+                                    }
+                                </td>
+                                <td>@ConstraintKind(constraint.Kind)</td>
+                                <td class="ms-db-cell-sql"><SqlText Sql="@constraint.Definition" Label="@($"Definition of {constraint.Name}")" Wrap="true" ShowLineNumbers="false" /></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </TableScroll>
+        }
+    </section>
+
+    <section class="ms-db-keys-section">
+        <h2 class="ms-db-section-title">Indexes <span class="ms-tab-count">@detail.Indexes.Count</span></h2>
+        @if (detail.Indexes.Count == 0)
+        {
+            <p class="ms-muted">No indexes: every read of it is a sequential scan.</p>
+        }
+        else
+        {
+            <TableScroll Label="@($"Indexes of {relationName}")">
+                <table class="ms-table ms-db-table ms-db-indexes">
+                    <thead>
+                        <tr>
+                            <th scope="col">Name</th>
+                            <th scope="col">Definition</th>
+                            <th scope="col">Size</th>
+                            <th scope="col">Scans</th>
+                            <th scope="col">Last scan</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (DatabaseIndexInfo index in detail.Indexes)
+                        {
+                            <tr @key="index.Name">
+                                <td class="ms-db-cell-name">
+                                    <span class="ms-db-name">@index.Name</span>
+                                    <span class="ms-db-badges">
+                                        @if (index.IsPrimary)
+                                        {
+                                            <span class="ms-db-badge ms-db-badge-key" title="Backs the primary key">primary</span>
+                                        }
+                                        else if (index.IsUnique)
+                                        {
+                                            <span class="ms-db-badge" title="Unique">unique</span>
+                                        }
+                                        @if (index.IsPartial)
+                                        {
+                                            <span class="ms-db-badge" title="Partial: it covers only the rows its WHERE clause admits">partial</span>
+                                        }
+                                        @if (!index.IsValid)
+                                        {
+                                            <span class="ms-db-badge ms-db-badge-warning" title="Invalid: a CREATE INDEX CONCURRENTLY that failed. Postgres keeps it up to date and never uses it; drop it and build it again.">invalid</span>
+                                        }
+                                        @if (!index.IsReady)
+                                        {
+                                            <span class="ms-db-badge ms-db-badge-warning" title="Not ready: an index build is still running or failed before it could take writes.">not ready</span>
+                                        }
+                                    </span>
+                                </td>
+                                <td class="ms-db-cell-sql">
+                                    <SqlText Sql="@index.Definition" Label="@($"Definition of {index.Name}")" Wrap="true" ShowLineNumbers="false" />
+                                    @if (index.Vector is { } vector)
+                                    {
+                                        <VectorIndexSummary Model="vector" />
+                                    }
+                                </td>
+                                <td class="ms-db-cell-number">@(index.SizeBytes is { } size ? "~" + SchemaFormat.Bytes(size) : "—")</td>
+                                <td class="ms-db-cell-number" title="@ScansTitle(index)">@(index.Scans is { } scans ? DatabasePresentation.Number(scans) : "—")</td>
+                                <td class="ms-db-cell-number">@(index.LastScan is { } last ? last.UtcDateTime.ToString("yyyy-MM-dd HH:mm 'UTC'", CultureInfo.InvariantCulture) : "—")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </TableScroll>
+            <p class="ms-muted ms-db-index-note">Sizes are estimates as of the last VACUUM, ANALYZE or build. Scans count since the database's statistics were last reset; Storage says when. Last scan needs PostgreSQL 16.</p>
+        }
+    </section>
+
+    <section class="ms-db-keys-section">
+        <h2 class="ms-db-section-title">Foreign keys out <span class="ms-tab-count">@detail.ForeignKeysOut.Count</span></h2>
+        @if (detail.ForeignKeysOut.Count == 0)
+        {
+            <p class="ms-muted">It points at nothing.</p>
+        }
+        else
+        {
+            <TableScroll Label="@($"Foreign keys from {relationName}")">
+                <table class="ms-table ms-db-table ms-db-fks-out">
+                    <thead>
+                        <tr>
+                            <th scope="col">Name</th>
+                            <th scope="col">Columns</th>
+                            <th scope="col">References</th>
+                            <th scope="col">On delete</th>
+                            <th scope="col">On update</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (DatabaseForeignKeyInfo key in detail.ForeignKeysOut)
+                        {
+                            <tr @key="key.Name">
+                                <td class="ms-db-cell-name">
+                                    <span class="ms-db-name">@key.Name</span>
+                                    @if (key.Period)
+                                    {
+                                        <span class="ms-db-badge ms-db-badge-temporal" title="@PeriodTitle">PERIOD</span>
+                                    }
+                                    @if (!key.Validated)
+                                    {
+                                        <span class="ms-db-badge ms-db-badge-warning" title="NOT VALID: rows that were there when it was added were never checked, so a pointed-at row may be missing">NOT VALID</span>
+                                    }
+                                    @if (key.Covered == false)
+                                    {
+                                        <span class="ms-db-badge ms-db-badge-warning ms-db-fk-uncovered" title="@UncoveredTitle">@UncoveredText</span>
+                                    }
+                                </td>
+                                <td class="ms-db-cell-type">@key.ColumnText(key.Columns)</td>
+                                <td class="ms-db-cell-name">
+                                    @if (key is { LinkedVisible: true, LinkedSchema: { } schema, LinkedTable: { } table })
+                                    {
+                                        <a class="ms-db-name" href="@DatabaseLinks.ToObject(Descriptor, State.ActiveScope, schema, table)">@DatabaseLinks.QualifiedName(schema, table)</a>
+                                        <span class="ms-db-fk-columns">(@key.ColumnText(key.LinkedColumns))</span>
+                                        @if (key.OtherEndOwnership is { IsMarten: true } owner)
+                                        {
+                                            <DatabaseOwnerBadge Model="owner" />
+                                        }
+                                    }
+                                    else
+                                    {
+                                        <span class="ms-db-none" title="The table it references is in a schema this studio does not show you">not visible</span>
+                                    }
+                                </td>
+                                <td class="@ActionClass(key.OnDelete)">@key.OnDelete</td>
+                                <td class="@ActionClass(key.OnUpdate)">@key.OnUpdate</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </TableScroll>
+        }
+    </section>
+
+    <section class="ms-db-keys-section">
+        <h2 class="ms-db-section-title">Foreign keys in <span class="ms-tab-count">@detail.ForeignKeysIn.Count</span></h2>
+        @if (detail.ForeignKeysIn.Count == 0)
+        {
+            <p class="ms-muted">Nothing you can see points at it.</p>
+        }
+        else
+        {
+            <TableScroll Label="@($"Foreign keys into {relationName}")">
+                <table class="ms-table ms-db-table ms-db-fks-in">
+                    <thead>
+                        <tr>
+                            <th scope="col">From</th>
+                            <th scope="col">Columns</th>
+                            <th scope="col">To columns</th>
+                            <th scope="col">On delete</th>
+                            <th scope="col">On update</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (DatabaseForeignKeyInfo key in detail.ForeignKeysIn)
+                        {
+                            <tr @key="key.Schema + '\u001f' + key.Table + '\u001f' + key.Name">
+                                <td class="ms-db-cell-name">
+                                    <a class="ms-db-name" href="@DatabaseLinks.ToObject(Descriptor, State.ActiveScope, key.Schema, key.Table)" title="@key.Name">@DatabaseLinks.QualifiedName(key.Schema, key.Table)</a>
+                                    @if (key.Period)
+                                    {
+                                        <span class="ms-db-badge ms-db-badge-temporal" title="@PeriodTitle">PERIOD</span>
+                                    }
+                                    @if (!key.Validated)
+                                    {
+                                        <span class="ms-db-badge ms-db-badge-warning" title="NOT VALID: rows that were there when it was added were never checked">NOT VALID</span>
+                                    }
+                                    @if (key.Covered == false)
+                                    {
+                                        <span class="ms-db-badge ms-db-badge-warning ms-db-fk-uncovered" title="@UncoveredTitle">@UncoveredText</span>
+                                    }
+                                </td>
+                                <td class="ms-db-cell-type">@key.ColumnText(key.Columns)</td>
+                                <td class="ms-db-cell-type">@key.ColumnText(key.LinkedColumns)</td>
+                                <td class="@ActionClass(key.OnDelete)" title="@(key.OnDelete == "cascade" ? "Deleting a row here deletes the rows that point at it" : null)">@key.OnDelete</td>
+                                <td class="@ActionClass(key.OnUpdate)">@key.OnUpdate</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </TableScroll>
+        }
+    </section>
+}
+
+@code {
+    /// <summary>The relation's <c>DatabaseObjectDetail</c>. Typed <see cref="object" /> - see <c>ComponentModel</c>.</summary>
+    [Parameter]
+    public object? Detail { get; set; }
+
+    private DatabaseObjectDetail? DetailModel => Detail as DatabaseObjectDetail;
+
+    /// <summary>The badge of a foreign key no index covers - T15's rule, <c>ForeignKeyCoverage.IsCovered</c> (W5-B1).</summary>
+    internal const string UncoveredText = "No index covers this foreign key";
+
+    /// <summary>Why it matters, in the badge's title.</summary>
+    internal const string UncoveredTitle =
+        "No valid, unconditional index on the pointing table leads with the key's columns, so every delete from the table it "
+        + "references - and every update of that table's key - reads the whole pointing table to find the rows that point at "
+        + "it. Postgres indexes a primary key and a unique constraint by itself, never a foreign key. Health's T15 says so once "
+        + "the table is 8 MiB.";
+
+    /// <summary>What <c>WITHOUT OVERLAPS</c> means, in the badge's title (PostgreSQL 18).</summary>
+    internal const string TemporalTitle =
+        "WITHOUT OVERLAPS (PostgreSQL 18): a temporal key. Its last column is a range, and two rows with the same other "
+        + "columns may not have overlapping ranges. Postgres backs it with a GiST index.";
+
+    /// <summary>What <c>PERIOD</c> means, in the badge's title (PostgreSQL 18).</summary>
+    internal const string PeriodTitle =
+        "PERIOD (PostgreSQL 18): a temporal foreign key. Its last column is a range, and the referenced table must cover that "
+        + "whole range, by one row or several, for the same other columns.";
+
+    private static string? ScansTitle(DatabaseIndexInfo index) =>
+        index is { TuplesRead: { } read, TuplesFetched: { } fetched }
+            ? $"{DatabasePresentation.Number(read)} index entries read, {DatabasePresentation.Number(fetched)} table rows fetched"
+            : null;
+
+    private static string ConstraintKind(DatabaseConstraintKind kind) => kind switch
+    {
+        DatabaseConstraintKind.PrimaryKey => "primary key",
+        DatabaseConstraintKind.Unique => "unique",
+        DatabaseConstraintKind.Check => "check",
+        DatabaseConstraintKind.Exclusion => "exclusion",
+        DatabaseConstraintKind.ConstraintTrigger => "constraint trigger",
+        _ => "other",
+    };
+
+    /// <summary>A cascade is the action that surprises people, so it is the one drawn so it is seen.</summary>
+    private static string ActionClass(string action) =>
+        action is "cascade" or "set null" or "set default" ? "ms-db-fk-action ms-db-fk-action-strong" : "ms-db-fk-action";
+}

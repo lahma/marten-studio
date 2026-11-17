@@ -1,0 +1,202 @@
+using System.Net;
+
+using JasperFx.Events.Daemon;
+
+using Marten;
+
+using DataStudio;
+using DataStudio.Sample.Kafka;
+using DataStudio.Sample.Kafka.Auth;
+using DataStudio.Sample.Kafka.Kafka;
+using DataStudio.Sample.Kafka.Wolverine;
+
+using DataStudio.Marten;
+using DataStudio.Sample.Marten.Domain;
+
+using Microsoft.AspNetCore.Antiforgery;
+using Microsoft.AspNetCore.Authentication.Cookies;
+
+using Wolverine;
+
+// The one switch this host understands. It is taken out of the arguments before the host sees them: .NET's command-line provider binds a bare
+// `--key` to the token after it, and would swallow whatever follows.
+const string AllowDataGenerationSwitch = "--allow-data-generation";
+bool allowDataGeneration = args.Contains(AllowDataGenerationSwitch, StringComparer.OrdinalIgnoreCase);
+string[] hostArguments = [.. args.Where(static x => !string.Equals(x, AllowDataGenerationSwitch, StringComparison.OrdinalIgnoreCase))];
+
+WebApplicationBuilder builder = WebApplication.CreateBuilder(hostArguments);
+
+// Started before anything that needs them, and with no silent fallback (D18): either something configured a cluster and a database, or a
+// throwaway container is started for each, or the host stops and says how to fix it. Kafka first, so that the sentence a missing Docker
+// produces is the Kafka one.
+await using SampleKafka kafka = await SampleKafka.StartAsync(builder.Configuration);
+
+string? postgresHostAndPort = null;
+string? postgres = builder.Configuration.GetConnectionString("Postgres");
+if (string.IsNullOrWhiteSpace(postgres))
+{
+    (postgres, postgresHostAndPort) = await EphemeralPostgres.StartAsync();
+}
+
+// A configured Postgres can hold what another build of the Marten sample seeded, in tables this store cannot migrate over their rows. The
+// throwaway container never does; a database somebody configured is left alone unless --allow-data-generation names it as the demo's.
+SampleDatabaseInspection inspected = await SampleDatabase.InspectAsync(postgres);
+if (inspected.NeedsReseed)
+{
+    if (!EphemeralPostgres.IsThrowaway(postgres) && !allowDataGeneration)
+    {
+        await Console.Error.WriteLineAsync(
+            "Data Studio Kafka sample: the database in ConnectionStrings:Postgres was seeded by another build of the demo, or has rows in the demo's schemas "
+            + "that the demo did not seed. Start once with --allow-data-generation to have it drop and seed "
+            + string.Join(" and ", SampleDatabase.Schemas) + " again, or drop them yourself.");
+        return 1;
+    }
+
+    await SampleDatabase.ReseedAsync(postgres);
+}
+
+// The judge, and the seed: the marker topic rule decides whether the cluster is the sample's own, and a configured cluster is seeded only
+// when the host says outright that creating topics there is allowed.
+if (await kafka.PrepareAsync(allowDataGeneration, Console.Out) is { } refusal)
+{
+    await Console.Error.WriteLineAsync(refusal);
+    return 1;
+}
+
+builder.Services
+    .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+    .AddCookie(options =>
+    {
+        options.LoginPath = "/login";
+        options.AccessDeniedPath = "/login";
+        options.Cookie.Name = "data-studio-sample-kafka";
+    });
+
+builder.Services.AddAuthorization(SamplePolicies.Configure);
+SampleKafkaPolicies.AddHandlers(builder.Services);
+
+// The Marten module of the studio runs over the demo store: Kafka is a module of the same Data Studio, beside it.
+builder.Services.AddSingleton(new SampleSeeding(GrantConsoleRole: false));
+// The sample's Wolverine application (D-CORR decision 11) creates topics of its own (AutoProvision) and produces to them, so it runs where the seed
+// may: on the throwaway broker, or on a configured one the host was told it may generate data in. Elsewhere the sample is the browser it was.
+bool wolverine = kafka.IsThrowaway || allowDataGeneration;
+
+builder.Services
+    .AddMarten(options =>
+    {
+        SampleStore.Configure(options, postgres);
+
+        if (wolverine)
+        {
+            // After the demo domain's configuration: the checkout document is the sample's, not the domain's (D17), and it is conjoined like Invoice.
+            options.Schema.For<CheckoutOrder>().MultiTenanted();
+        }
+    })
+    .UseLightweightSessions()
+    .AddAsyncDaemon(DaemonMode.Solo)
+    .InitializeWith<SampleDataSeeder>();
+
+DataStudioBuilder studio = builder.Services.AddDataStudio(options =>
+{
+    options.AuthorizationPolicy = SamplePolicies.Studio;
+});
+
+studio.AddMarten(options =>
+{
+    options.WriteAuthorizationPolicy = SamplePolicies.StudioWrite;
+    options.Capabilities = MartenCapabilities.All();
+
+    foreach (string tenantId in SampleStore.TenantIds)
+    {
+        options.KnownTenantIds.Add(tenantId);
+    }
+});
+
+// The header's "Back to application" link, to the sample's own landing page.
+builder.Services.Configure<DataStudioOptions>(static options => options.ApplicationPath = "/");
+
+if (wolverine)
+{
+    SampleWolverine.ListenToTraces();
+    builder.Services.AddWolverine(options => SampleWolverine.Configure(options, kafka.BootstrapServers));
+
+    // After Wolverine's own hosted service, so that its bus is up when the sender publishes.
+    builder.Services.AddSingleton(new SampleKafkaAddress(kafka.BootstrapServers));
+    builder.Services.AddHostedService<CheckoutSender>();
+
+    // The sample's own heartbeat, one record every two seconds, for the live tail to follow. Written by this host's producer, never by the Kafka module.
+    builder.Services.AddHostedService<SampleTicker>();
+}
+
+studio.AddKafka(o =>
+{
+    SampleKafkaRegistration.Configure(o, kafka.BootstrapServers, builder.Configuration);
+
+    if (wolverine)
+    {
+        SampleKafkaRegistration.ConfigureWolverine(o);
+    }
+});
+
+WebApplication app = builder.Build();
+
+// The loud banner (D18): at Warning, on start, naming whichever of the two is a container.
+if (SampleKafka.Banner(
+        kafka.IsThrowaway ? kafka.BootstrapServers : null,
+        postgresHostAndPort,
+        SampleKafka.IsReuseRequested(Environment.GetEnvironmentVariable(SampleKafka.ReuseEnvironmentVariable))) is { } banner)
+{
+    app.Logger.LogWarning("{Banner}", banner);
+}
+
+app.UseAuthentication();
+app.UseAuthorization();
+app.UseAntiforgery();
+app.MapStaticAssets();
+
+app.MapDataStudio().RequireAuthorization(SamplePolicies.Studio);
+app.MapLogin();
+
+app.MapGet("/", (HttpContext context, IAntiforgery antiforgery) =>
+{
+    string who = context.User.Identity?.IsAuthenticated == true
+        ? $"Signed in as <strong>{WebUtility.HtmlEncode(context.User.Identity.Name)}</strong>."
+        : "Not signed in.";
+
+    AntiforgeryTokenSet tokens = antiforgery.GetAndStoreTokens(context);
+    context.Response.ContentType = "text/html; charset=utf-8";
+
+    return context.Response.WriteAsync($$"""
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+          <meta charset="utf-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1" />
+          <title>Data Studio Kafka sample</title>
+          <link rel="icon" href="data:," />
+          <style>
+            body { font-family: system-ui, sans-serif; margin: 3rem auto; max-width: 48rem; line-height: 1.5; padding: 0 1rem; }
+            code { background: #f1f5f9; padding: .1rem .3rem; border-radius: 3px; }
+          </style>
+        </head>
+        <body>
+          <h1>Data Studio Kafka sample</h1>
+          <p>{{who}}</p>
+          <ul>
+            <li><a href="/studio/kafka">Open the Kafka pages</a> &mdash; the Kafka module of Data Studio, mounted at <code>/studio</code></li>
+            <li><a href="/studio">Open Data Studio</a> &mdash; the front page, with the Marten and Kafka modules</li>
+            <li><a href="/login">Sign in</a> as <code>admin</code> (every topic) or <code>support</code> (<code>orders.*</code> and <code>checkout.*</code> only); the password is the user name</li>
+          </ul>
+          <p>Try, as <code>support</code>, in Search over the last 24 hours of <code>orders.v1</code>: <code>header.correlation-id = 'c-0042'</code></p>
+          <form method="post" action="/logout">
+            <input type="hidden" name="{{LoginEndpoints.AntiforgeryFieldName}}" value="{{WebUtility.HtmlEncode(tokens.RequestToken)}}" />
+            <button type="submit">Sign out</button>
+          </form>
+        </body>
+        </html>
+        """);
+}).AllowAnonymous();
+
+await app.RunAsync();
+
+return 0;

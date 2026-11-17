@@ -18,8 +18,8 @@ This table is the list of every code there is. It is the contract, and the rules
 
 A finding's `Key` is `Code`, then `|Variant` when the check has variants, then `|Subject` when the finding is about one
 object (`T03|index|public.mt_doc_order_idx_total`). **Subject** below says what kind of object that is; `-` means a
-finding about the database, the server or the configuration as a whole. **Studios** is `both` for a check Marten Studio
-and Postgres Studio both run, and `Marten` for one that reads a Marten store and runs only in Marten Studio. **Since** is
+finding about the database, the server or the configuration as a whole. **Studios** is `both` for a check the Postgres and
+Marten modules both run, and `Marten` for one that reads a Marten store and runs only with the Marten module. **Since** is
 the release that first shipped the code. Gaps in the numbering are codes no release has shipped.
 
 `HealthCodesTests` holds this table to the registered checks: every registered code has its row with the same area,

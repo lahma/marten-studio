@@ -1,8 +1,8 @@
 # The diagnostics API
 
-From 0.5, the studio's findings and measurements are available to your own code: `IPostgresDiagnostics`, registered by
-`AddPostgresStudio()` and by `AddMartenStudio()` - and, from 0.11, by `AddPostgresDiagnostics()` alone, with no studio and
-no ASP.NET Core ([Without the UI](#without-the-ui)). It answers what the Health, Storage, Statements, Server and
+The studio's findings and measurements are available to your own code: `IPostgresDiagnostics`, registered by
+`.AddPostgres()` and by `.AddMarten()` on the Data Studio builder - and by `services.AddPostgresDiagnostics()` alone, with no
+studio and no ASP.NET Core ([Without the UI](#without-the-ui)). It answers what the Health, Storage, Statements, Server and
 Database › Sessions pages read, for one database at a time, as typed results with stable codes - so you can put a
 summary in your own e-mail, your own admin page or your own alerting, worded in your own language.
 
@@ -13,14 +13,14 @@ decision.
 ## Getting it
 
 `IPostgresDiagnostics` is a singleton in the container. Resolve it wherever your code runs: a hosted service, an endpoint
-behind your own authorization, a background job. You do not need to map the studio (`MapPostgresStudio()` /
-`MapMartenStudio()`) to use it - an application can register the studio for the API alone - and a host with no UI at all
-registers `AddPostgresDiagnostics()` instead.
+behind your own authorization, a background job. You do not need to map the studio (`MapDataStudio()`) to
+use it - an application can register the studio for the API alone - and a host with no UI at all registers
+`AddPostgresDiagnostics()` instead.
 
 ```csharp
-// Postgres Studio: an admin database and one database per tenant.
+// The Postgres module: an admin database and one database per tenant.
 builder.Services.AddSingleton<TenantDatabases>();          // your own IPostgresDatabaseSource
-builder.Services.AddPostgresStudio(o =>
+builder.Services.AddDataStudio().AddPostgres(o =>
 {
     o.IncludeDefaultDataSource = false;
     o.AddDataSource("admin", sp => sp.GetRequiredService<AdminDatabase>().DataSource);
@@ -47,8 +47,8 @@ await foreach (PostgresDatabaseRef db in diagnostics.ListDatabasesAsync(ct))
 ```
 
 ```csharp
-// Marten Studio: the same service over the store's databases.
-builder.Services.AddMartenStudio(o => { /* as before */ });
+// The Marten module: the same service over the store's databases.
+builder.Services.AddDataStudio().AddMarten(o => { /* as before */ });
 
 PostgresDiagnosticsSnapshot s = await diagnostics.GetSnapshotAsync(
     new PostgresDatabaseRef("default", ""),        // the store's key; "" is its default database
@@ -60,7 +60,7 @@ PostgresDiagnosticsSnapshot s = await diagnostics.GetSnapshotAsync(
 ## The three members
 
 - **`ListDatabasesAsync`** yields the databases the studio would list, in its order: each data source and database
-  source in registration order (the unkeyed data source first) and, in Marten Studio, each store's databases its
+  source in registration order (the unkeyed data source first) and, in a Marten host, each store's databases its
   tenancy already holds. Listing creates nothing and builds no data source; a Marten tenancy that builds its databases
   on demand is never asked to (hard rule 14, D27). A source that cannot be listed is left out and logged.
 - **`GetSnapshotAsync(database, request)`** returns one database's `PostgresDiagnosticsSnapshot`. It **never throws** for
@@ -84,7 +84,7 @@ PostgresDiagnosticsSnapshot s = await diagnostics.GetSnapshotAsync(
 | `Settings` | the curated server settings and the extensions, and whether data checksums are on and what they have counted | `Settings` |
 | `Connections` | sessions by state for the database, the server's connection budget, and sessions per application | `Connections` |
 | `Wal` | the write-ahead log's records, full-page images, bytes, writes and syncs (and their times when the server times them) since the statistics last began | `Wal` |
-| `ConnectionHistory` | the connection history of the database's server (1.0.1): the window, samples, the peak against the client limit and when, instance changes, and per application with `IncludeActivity` | `ConnectionHistory` |
+| `ConnectionHistory` | the connection history of the database's server: the window, samples, the peak against the client limit and when, instance changes, and per application with `IncludeActivity` | `ConnectionHistory` |
 | `Withheld` | each section or part left out, keyed by its name, with what it would take | always |
 
 `PostgresDiagnosticsRequest.FindingsOnly` asks for the findings alone; `PostgresDiagnosticsRequest.AllSections` for every
@@ -176,7 +176,7 @@ A `PostgresFindingGroup` is every unaccepted finding of one check (`Code`):
 - `Count` is how many findings it holds, and `Findings` they are, in the snapshot's order.
 - With one finding (`Count == 1`) the group carries that finding's own `Title`, `Subject` and `Detail`, and `StudioPath`
   is the finding's card on the Health page. With more, `Title` is the check's title from `Checks`, `Subject` and `Detail`
-  are `null`, and `StudioPath` is the database's Health page (what `GetStudioPath(database, PostgresStudioPage.Health)`
+  are `null`, and `StudioPath` is the database's Health page (what `GetStudioPath(database, PostgresPage.Health)`
   returns), since no one card is the group's.
 - The groups are ordered by severity, worst first, and then by the order of the snapshot's `Checks`; a code `Checks` does
   not list comes last, by code.
@@ -185,7 +185,8 @@ A `PostgresFindingGroup` is every unaccepted finding of one check (`Code`):
 - A snapshot that was not read (`Outcome` is not `Read`) or has no findings returns an empty list.
 
 `FindingsByCheck()` is a method, not a property: the snapshot's JSON is exactly what it was, and the groups are computed
-from `Findings` each time you call it. `StudioPath` is relative to the studio's mount path, as every path in this API is.
+from `Findings` each time you call it. `StudioPath` is relative to the studio's mount path, as every path in this API is, and starts with the Postgres module's segment
+(`postgres/health?store=default&db=app`).
 
 #### The only database
 
@@ -221,7 +222,7 @@ statement texts in an e-mail.
 Each finding carries `StudioPath`, its card on the Health page, and `StudioLinks`, the screens that help with it;
 `GetStudioPath(database, page)` gives the path of one page for a database:
 
-| `PostgresStudioPage` | The page |
+| `PostgresPage` | The page |
 |---|---|
 | `Health` | Health |
 | `Sessions`, `Blocking`, `Holders` | Database › Sessions, its blocking view, and its holders view |
@@ -232,10 +233,11 @@ Each finding carries `StudioPath`, its card on the Health page, and `StudioLinks
 | `Plan` | Query › Plan |
 | `Replication` | Replication |
 | `Overview` | the Overview, the studio's landing page |
-| `Connection` | Database › Connection: how this application connects (1.2, issue #55) |
+| `Connection` | Database › Connection: how this application connects |
 
-Each path is relative to where you mapped the studio, with the database's scope in its query, so
-`$"{options.Path}/{finding.StudioPath}"` opens it. Take them from here rather than building routes: the studio's routes
+Each path is relative to where you mapped the studio (`DataStudioOptions.Path`), starts with `postgres/` (the Postgres module's
+segment) and carries the database's scope in its query, so `$"{studioOptions.Path}/{finding.StudioPath}"` opens it (for example
+`/studio/postgres/health?store=default&db=app`). Take them from here rather than building routes: the studio's routes
 and query parameters are its own and may change between releases. A link opens the page for whoever follows it, under
 that visitor's own gates; it carries nothing the page would not show them. A finding's `StudioPath` ends in its card's
 fragment: the Health page scrolls to the card once it has drawn it, opens the muted list if the card is in it, and marks
@@ -244,17 +246,18 @@ no longer reported."
 
 ## Without the UI
 
-`PostgresStudio.Diagnostics` is the engine under both studios as a package of its own, with no ASP.NET Core in it: the
+`DataStudio.Postgres.Diagnostics` is the engine under the Postgres and Marten modules as a package of its own, with no ASP.NET
+Core in it: the
 health sweep and its checks, the facts they read, `IPostgresDiagnostics` and its read model, and the opt-in health check.
 Take it when the host has no UI to mount and only wants the findings:
 
 - a **worker or job host** that mails or posts a daily summary, as above, or runs the checks before a deployment;
 - a **shared library** of your own that other applications call to ask "is this database healthy?", without the library
   pulling a Blazor UI into every one of them;
-- an application that wants the **health check** (`AddHealthChecks().AddPostgresStudio()`) and no pages.
+- an application that wants the **health check** (`AddHealthChecks().AddPostgresDiagnostics()`) and no pages.
 
 ```shell
-dotnet add package PostgresStudio.Diagnostics
+dotnet add package DataStudio.Postgres.Diagnostics --prerelease   # beta: remove at 2.0.0
 ```
 
 ```csharp
@@ -272,42 +275,38 @@ builder.Services.AddHostedService<DailySummary>();           // resolves IPostgr
 await builder.Build().RunAsync();
 ```
 
-[`samples/PostgresStudio.Worker`](../samples/PostgresStudio.Worker) is this, complete: a generic host that references
-`PostgresStudio.Diagnostics` alone and logs a summary of every database at start and then every `Summary:Interval`
+[`samples/DataStudio.Sample.Postgres.Worker`](../samples/DataStudio.Sample.Postgres.Worker) is this, complete: a generic host that
+references `DataStudio.Postgres.Diagnostics` alone and logs a summary of every database at start and then every `Summary:Interval`
 (24 hours by default), a line per check (`FindingsByCheck()`) with its link when `Summary:StudioBaseUrl` is set. A real host sends the text where it
 already notifies - e-mail, a chat webhook - and keeps the loop.
-
-Code compiled against PostgresStudio 0.10 that uses the types that moved to this package - `IPostgresDiagnostics` and
-its read model, `PostgresDatabaseRef`, `IPostgresDatabaseSource`, `IPostgresCapacitySource` and the health-check
-extension - must be recompiled against 0.11: they keep their namespace and their names, so it is source-compatible, but
-the types are in a new assembly and there is no type forwarding, so it is not binary-compatible.
 
 **What differs from the studio's registration:**
 
 - **No mutes.** Muting a finding is a visitor's choice on the Health page, and there is no visitor. What the host decides
   for everyone is `AcceptedChecks`, which `PostgresDiagnosticsOptions` has and the snapshot reports as `accepted`.
 - **Links are mount-relative strings, meaningless without a UI.** `StudioPath`, `StudioLinks` and `GetStudioPath` are the
-  same strings as ever (`health?store=default&db=app`) and are only useful joined to the path a studio is mounted at -
+  same strings the studio uses (`postgres/health?store=default&db=app`) and are only useful joined to the path a studio is mounted at -
   yours, if a separate application hosts one. With nothing mounted anywhere, ignore them.
 - **Options are validated on start** (`ValidateOnStart`): a host that registers `AddPostgresDiagnostics()` with a
   `QueryTimeout`, `SqlConsoleRole`, `HealthInterval`, schema name or source name the engine refuses stops at startup, naming
   the member, not at the first read. The studio validates the same members, and its own besides.
-- **No K-checks.** K05 to K07 judge the studio's own configuration and live in `PostgresStudio`, so they never run under
+- **No K-checks.** K05 to K07 judge the studio's own configuration and live in `DataStudio.Postgres`, so they never run under
   `AddPostgresDiagnostics()` alone, and naming one in `AcceptedChecks` there stops the host at startup.
-- **One registration.** `AddPostgresDiagnostics()` throws in a container that already called `AddPostgresStudio()` or
-  `AddMartenStudio()`, and they throw after it: the studios register the engine themselves, from the same options object.
-  An application that wants a studio calls the studio's method alone.
+- **One registration.** `AddPostgresDiagnostics()` throws in a container that already called `.AddPostgres()` or
+  `.AddMarten()`, and they throw after it: the modules register the engine themselves, from the same options object.
+  An application that wants a studio calls the module's method alone.
 - **No studio-only options.** `PostgresDiagnosticsOptions` has `QueryTimeout`, `MaxStudioConnections`, `StudioApplicationName` (whose
-  derived name ends with `(Postgres Studio Diagnostics)` on a host with no studio), `SqlConsoleRole`, `HealthInterval`,
+  derived name ends with `(Data Studio Diagnostics)` on a host with no studio), `SqlConsoleRole`, `HealthInterval`,
   `AcceptedChecks`, `BrowsableSchemas`, `IncludeDefaultDataSource`, `AddDataSource` and `AddDatabaseSource`. The path, the
   title, the three authorization policies, `ReadOnly`, the capabilities, paging, the console's limits and `RefreshInterval`
-  belong to `PostgresStudioOptions`, which inherits all of the above: configure a member the same way in either.
+  belong to the shell's `DataStudioOptions` and to `PostgresOptions`, which inherits all of the above: configure a member the
+same way in either.
 
-**The health check** is the same call as with a studio, and needs `AddPostgresDiagnostics()` (or a studio) registered
-first; without either it reports `Degraded` and says so:
+**The health check** is the same call as with a studio (named `data-studio-postgres` unless you give it a name), and needs
+`AddPostgresDiagnostics()` (or a studio) registered first; without either it reports `Degraded` and says so:
 
 ```csharp
-builder.Services.AddHealthChecks().AddPostgresStudio(tags: ["postgres"]);
+builder.Services.AddHealthChecks().AddPostgresDiagnostics(tags: ["postgres"]);
 ```
 
 It reports codes, outcomes, severities and counts, never a name, as in the studio's ([Security](#security)).
@@ -315,11 +314,11 @@ It reports codes, outcomes, severities and counts, never a name, as in the studi
 ## Connection history
 
 Database › Sessions › Holders shows who holds the server's connections *now*. The question after an outage is who held them
-*then*. `AddPostgresConnectionHistory()` (1.0, issue #43) keeps the answer: a background service samples each server the studio
+*then*. `AddPostgresConnectionHistory()` keeps the answer: a background service samples each server the studio
 reads, every `Interval`, and appends what it counted to a store.
 
 ```csharp
-builder.Services.AddPostgresStudio();              // or AddMartenStudio(), or AddPostgresDiagnostics()
+builder.Services.AddDataStudio().AddPostgres();    // or .AddMarten(), or services.AddPostgresDiagnostics()
 builder.Services.AddPostgresConnectionHistory(o =>
 {
     o.Interval = TimeSpan.FromMinutes(1);          // 15 seconds to 1 hour; a minute by default
@@ -355,33 +354,33 @@ enumerating such a tenancy is not read-only; its servers are sampled only where 
 
 **The kept connection.** A sampler that opened a connection to sample would count nothing at the one moment that matters:
 when the server refuses new ones. So each server gets one connection from the application's own data source, opened once
-and kept, named like the studio's own sessions with "history" after the product (`orders-api (Postgres Studio history)`, or
+and kept, named like the studio's own sessions with "history" after the product (`orders-api (Data Studio history)`, or
 your `StudioApplicationName` with " (history)" after it) for as long as it is kept, idle between samples too, and given its
 own name back before it is closed. It is **outside `MaxStudioConnections`**: count it in the application's pool size. Its
 time is not the studio's on the Health page's cost line - a session kept for a week is not a week of the studio's work. A
 connection that breaks is opened again at the next round; while `ShouldSample` answers no, every kept connection is closed
 and any samples still held are offered to the store.
 
-**Reading a history another process fills** (1.0.1, issue #48). A process that must never sample - a web application whose
+**Reading a history another process fills.** A process that must never sample - a web application whose
 studio pool has no connection to spare, while a worker samples on a connection it reserves - registers
 `AddPostgresConnectionHistoryReader()` instead, with the store the sampling process appends to. It adds no background service
 and opens no connection of its own, validates only `Retention` (the window Holders reads), and refuses to start without an
 `IPostgresConnectionHistoryStore` (an in-memory store nothing appends to is always empty) or without a studio or the engine. It is
-exclusive with `AddPostgresConnectionHistory()` in one container. See [Postgres Studio's README](../src/PostgresStudio/README.md).
+exclusive with `AddPostgresConnectionHistory()` in one container. See [the Postgres module's README](../src/DataStudio.Postgres/README.md).
 
 **What a visitor sees.** On Holders, anybody the source policy passes sees the counts: the window, the peak against the client
 limit and when, how many samples, and how many instance changes. The applications' own peaks need `ViewDatabaseActivity`, as
 Holders' applications do. Without the registration, Holders says how to turn it on.
 
 Before the first sample of a server is stored, Holders and the `ConnectionHistory` section say who takes it. With no
-`ShouldSample` it is this process, a moment after the application starts. With one (1.2, issue #57) the sentence follows its last
+`ShouldSample` it is this process, a moment after the application starts. With one the sentence follows its last
 answer: yes, and the first is taken at the next interval; no, or none yet, and another process samples and its samples
 appear once stored - unless this process keeps the default in-memory history, which that process's samples never reach, and
 the sentence then says to register a shared `IPostgresConnectionHistoryStore`. A reader-only registration says another process
 fills the history. A server only a source of dynamic databases names is never sampled, and the sentences that promise a
 sample say so.
 
-**In the snapshot** (1.0.1, issue #47). `PostgresDiagnosticsRequest.ConnectionHistory` (in `AllSections`, not in `FindingsOnly`)
+**In the snapshot.** `PostgresDiagnosticsRequest.ConnectionHistory` (in `AllSections`, not in `FindingsOnly`)
 adds a `ConnectionHistory` section, for a worker or a support page that has no Holders to open:
 
 ```csharp
@@ -405,7 +404,7 @@ that). `ByApplication` lists each application's own peak (`ApplicationName`, `Pe
 cache, so the two never disagree. It reads the history store and not the database, so it is there even when the database cannot be
 reached. In the JSON it is the `connectionHistory` key (`null` when not asked; `windowSeconds` for the window; the times in UTC).
 
-**Check C15** "Connections came close to the limit" (1.0.1) raises a peak of the last 24 hours at 80 % (Warning) or 95 % (Critical)
+**Check C15** "Connections came close to the limit" raises a peak of the last 24 hours at 80 % (Warning) or 95 % (Critical)
 of `ClientLimitNow`; it is not applicable without a connection history. See [connections.md](health/connections.md#c15-connections-came-close-to-the-limit).
 
 **Failures.** A round or a server that fails is logged as event 9460 or 9461, throttled like the studio's polled reads, and
@@ -419,7 +418,7 @@ store that hangs costs one `QueryTimeout` per server per round. A sample the sam
 still offered to the store. Past the hour the oldest is dropped (event 9464, throttled), and when the backlog is written the
 sampler says so (event 9463, Information, once). The backlog lives in the sampling process alone: a process that stops
 loses it. While `ShouldSample` answers no, no new sample is taken, but the samples still held are offered to the store at
-every round, oldest first and by the same rules (1.1, issue #54), so a peak held through a change of leader is not lost;
+every round, oldest first and by the same rules, so a peak held through a change of leader is not lost;
 writing a held sample reads nothing from the server. Nothing is added to such a backlog to push the oldest out, so the
 samples taken more than that hour ago are dropped at the round instead (event 9464, throttled), and a sample the store
 refuses for good cannot hold back the ones behind it forever. An append that committed and then timed out is retried with
@@ -498,7 +497,7 @@ masked the same way, and a section they may not see is a `withheld` entry carryi
 deeper or statement sweep the visitor did not start, and nothing is stored: the JSON is handed to the browser and dropped.
 The file is named `{studio}-snapshot-{source}-{database}-{yyyyMMddTHHmmssZ}.json`.
 
-**The Markdown report** (1.2) is the same gated view written for a ticket: a summary, the findings by severity with their
+**The Markdown report** is the same gated view written for a ticket: a summary, the findings by severity with their
 evidence and remedies, the accepted checks, what was checked, storage, the statements with the most time, settings,
 connections, the write-ahead log and the connection settings, and last a list of what was withheld from you. It is written
 from the very snapshot the JSON is, so it holds nothing the JSON does not, and it is named like the JSON with `.md`.
@@ -506,7 +505,7 @@ Every value that came from the database is escaped: names and values are code sp
 character escaped, a statement or a remedy is a fenced block, and the only link is a check's documentation address when it
 is a plain `https` one.
 
-**Compare with an earlier snapshot** (1.2) reads a snapshot file this menu saved - `schemaVersion` 1, at most 4 MB, chosen
+**Compare with an earlier snapshot** reads a snapshot file this menu saved - `schemaVersion` 1, at most 4 MB, chosen
 with a file input, never pasted - and compares it with what your pages show now: findings that are new, worse, better,
 accepted or no longer reported; statements and tables that moved; the database's size; the write-ahead log written between
 the two; new checksum failures; settings and extensions; and the Connection page's settings, compared as that page shows

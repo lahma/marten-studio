@@ -1,0 +1,911 @@
+using System.Reflection;
+
+using DataStudio.Services;
+using Marten;
+
+using DataStudio.Marten.Services;
+using DataStudio.Marten.Services.Configuration;
+using DataStudio.Postgres.Services.Database;
+using DataStudio.Marten.Services.Documents;
+using DataStudio.Marten.Services.Events;
+using DataStudio.Marten.Services.Projections;
+using DataStudio.Marten.Services.Query;
+using DataStudio.Marten.Services.Schema;
+using DataStudio.Postgres.Services.Sources;
+using DataStudio.Marten.Tests.Support;
+
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Components.Authorization;
+using Microsoft.Extensions.DependencyInjection;
+using DataStudio.Postgres.Internal.Sql;
+using DataStudio.Postgres.Services;
+using DataStudio.Postgres.Services.Connection;
+using DataStudio.Postgres.Services.Diagnostics;
+using DataStudio.Postgres.Services.Health;
+using DataStudio.Postgres.Services.Query;
+using DataStudio.Postgres.Services.Relationships;
+
+namespace DataStudio.Marten.Tests.Conventions;
+
+/// <summary>
+/// One place that fails when a mutating service method is added without gating it.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>What this adds to the per-area tests.</b> Every area already proves its own refusals —
+/// <c>DocumentWriteServiceTests</c>, <c>ProjectionsWritePolicyTests</c>, <c>SchemaWritePolicyTests</c>
+/// and the live suites. What none of them can do is fail when a <em>new</em> mutating method appears:
+/// a method nobody wrote a test for is a method with no test, and the gap is silent. So the roster below
+/// names every member of every data seam interface with a verdict, and
+/// <see cref="Every_member_of_every_data_service_is_classified" /> fails when the interfaces and the
+/// roster disagree in either direction. Adding a method without classifying it is a red build.
+/// </para>
+/// <para>
+/// <b>The three refusals, for every mutating member.</b> AGENTS.md hard rule 5 says a mutating operation
+/// is capability-gated in the service layer and audited. That is three separate refusals — the
+/// capability is off, <c>ReadOnly</c> is on, the write policy refused this visitor for this scope — and
+/// each of them has to reach the audit whether or not anything is rendered. Each is asserted here for
+/// all twenty mutating members at once.
+/// </para>
+/// <para>
+/// <b>No database.</b> The store is pointed at a host that does not resolve, exactly as
+/// <c>DocumentWriteServiceTests</c> does. Every refusal asserted here must happen <em>before</em> a
+/// connection is opened, so a gate that ran too late would hang or throw a Npgsql error rather than
+/// quietly passing.
+/// </para>
+/// </remarks>
+public class CapabilityGatingMatrixTests
+{
+    private const string DummyConnectionString =
+        "Host=marten-studio-gating-test.invalid;Database=none;Username=none;Password=none";
+
+    private const string StorePolicy = "store-policy";
+    private const string WritePolicy = "write-policy";
+
+    private static readonly StudioScope Scope = new("default", string.Empty, null);
+
+    private static CancellationToken Token => Xunit.TestContext.Current.CancellationToken;
+
+    // -------------------------------------------------------------------------------------------------
+    // The roster
+    // -------------------------------------------------------------------------------------------------
+
+    /// <summary>One mutating member: what it is called, and which capability it needs.</summary>
+    /// <param name="Service">The seam interface it lives on.</param>
+    /// <param name="Method">Its name.</param>
+    /// <param name="Capability">The capability the service requires before it does anything.</param>
+    private sealed record GatedCall(Type Service, string Method, StudioCapability Capability);
+
+    /// <summary>
+    /// Every mutating member of every data seam interface, and the capability it is gated on.
+    /// </summary>
+    /// <remarks>
+    /// Curated deliberately rather than discovered: "which of these methods changes something" is a
+    /// design decision, and a heuristic that guessed it would be a test that agrees with whatever the
+    /// code happens to do. What reflection checks is that the roster and the interfaces say the same
+    /// thing.
+    /// </remarks>
+    private static readonly GatedCall[] Mutating =
+    [
+        new(typeof(IDocumentWriteService), nameof(IDocumentWriteService.PreviewAsync), StudioCapability.EditDocuments),
+        new(typeof(IDocumentWriteService), nameof(IDocumentWriteService.SaveAsync), StudioCapability.EditDocuments),
+        new(typeof(IDocumentWriteService), nameof(IDocumentWriteService.DeleteAsync), StudioCapability.DeleteDocuments),
+        new(typeof(IDocumentWriteService), nameof(IDocumentWriteService.UndeleteAsync), StudioCapability.DeleteDocuments),
+        new(typeof(IDocumentWriteService), nameof(IDocumentWriteService.BulkDeleteAsync), StudioCapability.DeleteDocuments),
+
+        new(typeof(IEventDataService), nameof(IEventDataService.ArchiveStreamAsync), StudioCapability.ArchiveStreams),
+        new(typeof(IEventDataService), nameof(IEventDataService.DiscardDeadLetterAsync), StudioCapability.ManageDeadLetters),
+        new(typeof(IEventDataService), nameof(IEventDataService.SkipEventAsync), StudioCapability.ManageDeadLetters),
+
+        // M3: the bulk skip, single Skip's path over one group's events.
+        new(typeof(IEventDataService), nameof(IEventDataService.SkipDeadLetterGroupAsync), StudioCapability.ManageDeadLetters),
+        new(typeof(IEventDataService), nameof(IEventDataService.RewindSubscriptionAsync), StudioCapability.ManageDeadLetters),
+        new(typeof(IEventDataService), nameof(IEventDataService.CompactStreamAsync), StudioCapability.CompactStreams),
+
+        new(typeof(IProjectionDataService), nameof(IProjectionDataService.StartAgentAsync), StudioCapability.ControlDaemon),
+        new(typeof(IProjectionDataService), nameof(IProjectionDataService.StopAgentAsync), StudioCapability.ControlDaemon),
+        new(typeof(IProjectionDataService), nameof(IProjectionDataService.PauseDaemonAsync), StudioCapability.ControlDaemon),
+        new(typeof(IProjectionDataService), nameof(IProjectionDataService.ResumeDaemonAsync), StudioCapability.ControlDaemon),
+        new(typeof(IProjectionDataService), nameof(IProjectionDataService.RestartHighWaterAgentAsync), StudioCapability.ControlDaemon),
+        new(typeof(IProjectionDataService), nameof(IProjectionDataService.RebuildAsync), StudioCapability.RebuildProjections),
+        new(typeof(IProjectionDataService), nameof(IProjectionDataService.CancelOperationAsync), StudioCapability.RebuildProjections),
+        new(typeof(IProjectionDataService), nameof(IProjectionDataService.AdvanceHighWaterMarkAsync), StudioCapability.CorrectProgression),
+        new(typeof(IProjectionDataService), nameof(IProjectionDataService.CorrectProgressionAsync), StudioCapability.CorrectProgression),
+        new(typeof(IProjectionDataService), nameof(IProjectionDataService.RemoveOrphanedProgressionAsync), StudioCapability.CorrectProgression),
+
+        new(typeof(ISchemaDataService), nameof(ISchemaDataService.ApplyAsync), StudioCapability.ApplySchemaChanges),
+
+        new(typeof(ISqlConsoleService), nameof(ISqlConsoleService.RunSqlAsync), StudioCapability.RunSql),
+
+        // X3 (issue #28): the Plan page's plan of a statement - planned, analyzed, generic or custom - is the console's gate whole
+        // (capability, write policy for the database as a whole, guard) and refuses by throwing as RunSqlAsync does, so it is
+        // asked the same three refusals. EXPLAIN ANALYZE runs the statement, which is why it is no read.
+        new(typeof(ISqlConsoleService), nameof(ISqlConsoleService.PlanAsync), StudioCapability.RunSql),
+
+        // 0.10-A (issue #28): the facts the Plan page reads beside a plan it ran - the console's gate whole, thrown and audited the
+        // same way, before any relation is resolved. Its second gate (each relation's schema) and the values' third (BrowseDatabase,
+        // audited per relation) are asked after this one and are held by the live suite's gate tests.
+        new(typeof(IPlanFactsService), nameof(IPlanFactsService.ReadAsync), StudioCapability.RunSql),
+
+        // F7: a read gated like a write that refuses by throwing, exactly as the console does - so it sits
+        // here, beside RunSqlAsync, and gets the same three refusals.
+        new(typeof(ILinqQueryService), nameof(ILinqQueryService.RunAsync), StudioCapability.RunLinqQueries),
+    ];
+
+    /// <summary>
+    /// The reads that are gated like writes, and refuse with a value rather than an exception.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>BrowseDatabase</c> is a read treated as a write for authorization, like <c>RunSql</c> (D13), but
+    /// its service answers every refusal as a result a page can draw - "never an exception to the page" -
+    /// where <c>RunSqlAsync</c> throws. So its members are not in <see cref="Mutating" />, whose tests
+    /// require a throw, and they are not merely in <see cref="Reads" />, which would say nothing gates them.
+    /// They are here, and the three refusals below are asserted for them in their own shape: nothing
+    /// thrown, a <c>Refusal</c> on the result, and a failure in the audit ring.
+    /// </para>
+    /// <para>
+    /// Each is called with a schema that is not one of the store's own, which is what makes the call a
+    /// <c>BrowseDatabase</c> read at all - the store's own structure needs no capability.
+    /// </para>
+    /// </remarks>
+    private static readonly GatedCall[] GatedReads =
+    [
+        new(typeof(IDatabaseObjectService), nameof(IDatabaseObjectService.ListAsync), StudioCapability.BrowseDatabase),
+        new(typeof(IDatabaseObjectService), nameof(IDatabaseObjectService.GetObjectAsync), StudioCapability.BrowseDatabase),
+        new(typeof(IDatabaseObjectService), nameof(IDatabaseObjectService.GetDefinitionAsync), StudioCapability.BrowseDatabase),
+        new(typeof(IDatabaseObjectService), nameof(IDatabaseObjectService.GetSequenceValueAsync), StudioCapability.BrowseDatabase),
+
+        // 0.8, issue #22: a definition has a second way in. ViewDefinitions admits it for the schemas BrowsableSchemas names
+        // exactly, BrowseDatabase implies it, and neither opens the other's rows. The same member, so the same three
+        // refusals - with both capabilities off, in ReadOnly, and from the write policy - are asserted for the second way too:
+        // the audited capability is BrowseDatabase's whenever that is on (DatabaseAccess.ReadCapability), so nothing here moves
+        // for a host that has not heard of ViewDefinitions, and the live suites assert ViewDefinitions' own entries.
+        // GetSequenceValueAsync stays BrowseDatabase's alone, above: a value is data, not a definition.
+        new(typeof(IDatabaseObjectService), nameof(IDatabaseObjectService.GetDefinitionAsync), StudioCapability.ViewDefinitions),
+
+        // DB-3: every row read is behind DatabaseAccess.RequireRowAccessAsync, refused as a value.
+        new(typeof(ITableRowService), nameof(ITableRowService.ListRowsAsync), StudioCapability.BrowseDatabase),
+        new(typeof(ITableRowService), nameof(ITableRowService.GetRowAsync), StudioCapability.BrowseDatabase),
+        new(typeof(ITableRowService), nameof(ITableRowService.GetReferencesAsync), StudioCapability.BrowseDatabase),
+        new(typeof(ITableRowService), nameof(ITableRowService.CountExactAsync), StudioCapability.BrowseDatabase),
+        new(typeof(ITableRowService), nameof(ITableRowService.GetCellAsync), StudioCapability.BrowseDatabase),
+
+        // H3: Database > Sessions' details - process ids, roles, client addresses, application names and
+        // statements - refused as a value and audited; the summary beside it is a plain read.
+        new(typeof(ISessionActivityService), nameof(ISessionActivityService.GetDetailsAsync), StudioCapability.ViewDatabaseActivity),
+
+        // 1.1-NP3: Database > Connection's "This application's sessions" - the same gate, the same three refusals as values, audited.
+        // The page beside it (GetAsync) is the store policy's for the database as a whole, like the sessions' summary.
+        new(typeof(IConnectionInsightService), nameof(IConnectionInsightService.GetApplicationsAsync), StudioCapability.ViewDatabaseActivity),
+        // X2: a what-if plans a statement under a hypothetical index, behind the gate of the plan it accompanies - the
+        // console's (RunSql), Mode A's (the console's again) and LINQ mode's (RunLinqQueries) - refused as a value, audited.
+        new(typeof(ISqlConsoleService), nameof(ISqlConsoleService.WhatIfAsync), StudioCapability.RunSql),
+
+        // 0.10-B: the Plan page's what-if in place - X2's gate and engine for the page's own statement, so the same three refusals as
+        // values, audited under RunSql.
+        new(typeof(ISqlConsoleService), nameof(ISqlConsoleService.PlanWhatIfAsync), StudioCapability.RunSql),
+        new(typeof(IQueryService), nameof(IQueryService.WhatIfAsync), StudioCapability.RunSql),
+        new(typeof(ILinqQueryService), nameof(ILinqQueryService.WhatIfAsync), StudioCapability.RunLinqQueries),
+        new(typeof(IDocumentDataService), nameof(IDocumentDataService.WhatIfAsync), StudioCapability.RunLinqQueries),
+    ];
+
+    /// <summary>
+    /// Every member that reads, by interface.
+    /// </summary>
+    /// <remarks>
+    /// Named rather than assumed, because "not in the mutating list" is not the same claim as "somebody
+    /// decided this one reads". Three of these do touch the database in ways worth knowing about —
+    /// <c>ISchemaDataService.CheckAsync</c>, <c>PreviewAsync</c> and <c>DdlAsync</c> are behind buttons
+    /// that say what they may create (hard rule 14) — and they are still reads as far as the capability
+    /// model is concerned.
+    /// </remarks>
+    private static readonly Dictionary<Type, string[]> Reads = new()
+    {
+        [typeof(IStoreInfoService)] = ["GetOverviewAsync"],
+        [typeof(IConfigurationService)] = ["DescribeAsync"],
+        [typeof(IRelationshipDataService)] = ["GetGraphAsync", "GetReferencedByAsync"],
+        [typeof(IDocumentWriteService)] = [],
+        [typeof(IDocumentDataService)] =
+        [
+            "CountExactAsync", "GetCollectionsAsync", "GetDocumentAsync", "GetRelatedAsync",
+            "ListAsync", "ListRecentAsync", "ProbeIdAsync", "StreamExistsAsync",
+            // 1.2-SCOPE-3: Find by id, an ungated read like ProbeIdAsync - the scope's store policy through the resolver, then each
+            // tenant a hit names asked of that policy; it audits nothing, because the detail read it stands in for does not.
+            "FindByIdAsync",
+            // X2: a gated read (GatedReads), behind the Query page's advisor's plan gate.
+            "WhatIfAsync",
+        ],
+        [typeof(IEventDataService)] =
+        [
+            "AggregateAtVersionAsync", "CheckCompactionFoldAsync", "CountDeadLettersAsync", "DescribeAsync", "DescribeCompactionAsync",
+            "FindStreamsByNaturalKeyAsync", "GetEventBySequenceAsync", "GetEventStoreCountsAsync",
+            "GetEventTagsAsync", "GetFeedAsync", "GetHighestSequenceAsync", "GetRecentStreamsAsync",
+            "GetStreamAsync", "GetStreamEventsAsync", "ListAggregateCandidatesAsync", "ListDeadLettersAsync",
+            "ListEventTypesAsync", "ListStreamsAsync", "ListTagTypesAsync",
+
+            // 1.2-UX-FIX: the shape check's peek at the counted listing - the store policy for the scope, resolved first, as
+            // ListEventTypesAsync is; it reads nothing and starts no read.
+            "SharedCountedListingAsync",
+
+            // 1.2 (M6): Event flow reads StoreOptions and the projection graph and opens no connection, as the Event types page
+            // without counts does; the scope resolution in front of its cache is the store policy.
+            "GetEventFlowAsync",
+
+            // M1: the stepper is time travel one event at a time, and gated as time travel is - the store policy for the
+            // scope, no capability. It runs the projection's own code exactly as AggregateAtVersionAsync does.
+            "FindNextChangeAsync", "StepAsync",
+
+            // M3: the grouped view and what its bulk skip would do - reads; the skip itself is Mutating. Since 1.0-HARD the
+            // preview answers the ManageDeadLetters switch first (a refusal sentence, nothing resolved or read), but asks no
+            // write policy and audits nothing: it is not a read authorized like a write (The_bulk_skip_preview_...).
+            "DescribeDeadLetterGroupSkipAsync", "ListDeadLetterGroupsAsync",
+        ],
+        [typeof(IProjectionDataService)] =
+        [
+            // FindOperation is the one synchronous member on any of these interfaces: an in-memory
+            // lookup of a running operation by its handle, which reads the tracker and touches nothing.
+            "DescribeRebuildAsync", "FindOperation", "GetProjectionsAsync", "GetSummaryAsync",
+            "RunningOperationsAsync", "SubscribeToLiveStateAsync",
+
+            // H2: D01's "Explain". ViewDatabaseActivity decides whether the sessions that could hold the mark are
+            // named, as the health report's evidence is - a redaction, never a refusal (see Reserved).
+            "ExplainHighWaterAsync",
+        ],
+        [typeof(ISchemaDataService)] =
+        [
+            // 1.2-LOCKS: IndexDefinitionAsync is the Indexes list's statement for one index, shown to the visitors and for the
+            // indexes the list shows, at the list's own gate (store policy, classification) - a structure read, not gated by a capability.
+            "CheckAsync", "DatabaseIdentityAsync", "DdlAsync", "FunctionsAsync", "IndexDefinitionAsync", "IndexesAsync",
+            "PreviewAsync", "TablesAsync",
+        ],
+        [typeof(IQueryService)] = ["BuildExamplesAsync", "ListDocumentTypesAsync", "RunMartenQueryAsync", "WhatIfAsync"],
+
+        // PS-1d: the console is the shared seam now, and its run is gated (Mutating); X2's what-if is a gated read.
+        [typeof(ISqlConsoleService)] = ["WhatIfAsync", "PlanWhatIfAsync"],
+        [typeof(IPlanFactsService)] = [],
+        [typeof(ILinqQueryService)] = ["DescribeAsync", "WhatIfAsync"],
+        [typeof(IDatabaseObjectService)] =
+        [
+            "GetDefinitionAsync", "GetObjectAsync", "GetOverviewAsync", "GetSequenceValueAsync", "ListAsync",
+        ],
+        [typeof(ITableRowService)] = ["CountExactAsync", "GetCellAsync", "GetReferencesAsync", "GetRowAsync", "ListRowsAsync"],
+
+        // H1: the health advisor reads; ViewDatabaseActivity decides what of a report a visitor is shown, per
+        // finding and per piece of evidence, and refuses nothing - the read that refuses on it is the sessions one.
+        // 1.2-SCOPE-1: CheckAsync is GetReportAsync's resolve and regular sweep, answered through the glance: the store policy for the
+        // database, no capability, and it audits nothing because it shows no evidence.
+        [typeof(IHealthService)] = ["CachedFindingsAsync", "CheckAsync", "GetReportAsync", "GlanceAsync"],
+
+        // 1.2-H-C: a finding's on-demand action. A read at the finding's own gate (re-asked on every press, in the service), audited
+        // on every press. No 1.2 action declares a capability; one that does moves RunAsync to GatedReads, with the three refusals.
+        [typeof(IHealthActionService)] = ["OffersFor", "RunAsync"],
+
+        // H3: the summary is the store policy's for the database as a whole; the details are a gated read.
+        [typeof(ISessionActivityService)] = ["GetDetailsAsync", "GetSummaryAsync"],
+
+        // 1.1-NP3: the Connection page reads (GetAsync, and the Overview's GetGlanceAsync without a peak: the store policy's) and its
+        // application sessions (a gated read, above).
+        [typeof(IConnectionInsightService)] = ["GetApplicationsAsync", "GetAsync", "GetGlanceAsync"],
+
+        // 1.1-NP3: the compare view parses a pasted connection string and drops it; it writes nothing and is the Connection page's
+        // read (the store policy's), so a mutating method added to the service later has to be classified here or fail the matrix.
+        [typeof(IConnectionCompareService)] = ["CompareAsync"],
+
+        // 1.2-H-B: Health > Snapshot > "Compare with an earlier snapshot". It builds the visitor's own gated view first (the very view
+        // Download JSON writes, which asks each page's service as the visitor and so audits what those do) and reads the file
+        // after; it writes nothing, logs nothing and audits nothing of its own - the file is the visitor's - so it is a read. A
+        // mutating method added to the service later has to be classified here or fail the matrix.
+        [typeof(ISnapshotCompareService)] = ["CompareAsync"],
+    };
+
+    /// <summary>
+    /// Capabilities that exist ahead of the service member that will be gated on them, and why.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 0.4 lands every public-surface addition in one packet (H1), so that later packets never contend for the
+    /// API baseline - which means capabilities exist before the reads and writes that need them do (three did;
+    /// EV's compaction has since moved <c>CompactStreams</c> into <see cref="Mutating" />).
+    /// "A capability no method requires is a capability nothing enforces" is still the rule; this list is
+    /// where the exception is written down, naming the packet that ends it.
+    /// <see cref="A_reserved_capability_is_required_by_nothing_yet" /> fails the moment a service starts to
+    /// <c>Require</c> one, so its packet has to move it into <see cref="Mutating" /> or <see cref="GatedReads" />
+    /// and give it the three refusals.
+    /// </para>
+    /// <para>
+    /// <c>ViewDatabaseActivity</c> left this list with H3: <c>ISessionActivityService.GetDetailsAsync</c> requires
+    /// it and is a gated read above. The health report still consumes it as a redaction rather than a refusal
+    /// (<c>HealthGateTests</c>, <c>ConnectionFindingGatesTests</c>).
+    /// </para>
+    /// <para>
+    /// <c>CompactStreams</c> left it with EV (<c>IEventDataService.CompactStreamAsync</c>, Mutating) and
+    /// <c>RunLinqQueries</c> with F7 (<c>ILinqQueryService.RunAsync</c>), so the list is empty in 0.4; it stays as the
+    /// place a capability added before its consumer is parked.
+    /// </para>
+    /// </remarks>
+    private static readonly Dictionary<StudioCapability, string> Reserved = new()
+    {
+    };
+
+    /// <summary>
+    /// Verbs a method name cannot start with and be a read.
+    /// </summary>
+    /// <remarks>
+    /// The second net, and the one that catches the more likely mistake: classifying a new mutating
+    /// method as a read. The roster above fails when a method is <em>missing</em>; this fails when it is
+    /// present and filed under the wrong heading. Deliberately unambiguous prefixes — <c>Run</c> is not
+    /// one of them, because <c>RunMartenQueryAsync</c> reads and <c>RunSqlAsync</c> does not.
+    /// </remarks>
+    private static readonly string[] MutatingVerbs =
+    [
+        "Advance", "Apply", "Archive", "BulkDelete", "Cancel", "Compact", "Correct", "Delete", "Discard", "Pause",
+        "Rebuild", "Restart", "Resume", "Rewind", "RunSql", "Save", "Skip", "Start", "Stop", "Undelete",
+    ];
+
+    private static IEnumerable<Type> Services => Reads.Keys;
+
+    // -------------------------------------------------------------------------------------------------
+    // The roster agrees with the interfaces
+    // -------------------------------------------------------------------------------------------------
+
+    [Fact]
+    public void Every_member_of_every_data_service_is_classified()
+    {
+        List<string> problems = [];
+
+        foreach (Type service in Services)
+        {
+            HashSet<string> classified =
+            [
+                .. Reads[service],
+                .. Mutating.Where(x => x.Service == service).Select(static x => x.Method),
+            ];
+
+            HashSet<string> declared =
+            [
+                .. service.GetMethods(BindingFlags.Public | BindingFlags.Instance)
+                    .Select(static x => x.Name),
+            ];
+
+            foreach (string missing in declared.Except(classified).Order(StringComparer.Ordinal))
+            {
+                problems.Add(
+                    service.Name + "." + missing + " is not classified. Add it to Mutating (with the "
+                    + "capability its implementation requires) or to Reads.");
+            }
+
+            foreach (string stale in classified.Except(declared).Order(StringComparer.Ordinal))
+            {
+                problems.Add(service.Name + "." + stale + " is in the roster but no longer exists.");
+            }
+        }
+
+        problems.Should().BeEmpty(
+            "a mutating method added to a data service without being gated is the failure this test "
+            + "exists to catch, and it can only catch it if the roster is complete: "
+            + string.Join(" | ", problems));
+    }
+
+    [Fact]
+    public void A_method_that_reads_like_a_write_is_classified_as_one()
+    {
+        List<string> problems = [];
+
+        foreach (Type service in Services)
+        {
+            foreach (string read in Reads[service])
+            {
+                string? verb = MutatingVerbs.FirstOrDefault(x => read.StartsWith(x, StringComparison.Ordinal));
+
+                if (verb is not null)
+                {
+                    problems.Add(service.Name + "." + read + " starts with '" + verb + "' and is filed as a read.");
+                }
+            }
+        }
+
+        problems.Should().BeEmpty(
+            "a mutating method filed under Reads is gated by nothing and audited by nothing: "
+            + string.Join(" | ", problems));
+    }
+
+    [Fact]
+    public void The_roster_covers_every_capability()
+    {
+        Mutating.Concat(GatedReads).Select(static x => x.Capability).Concat(Reserved.Keys).Distinct().Order().Should().Equal(
+            Enum.GetValues<StudioCapability>().Order(),
+            "a capability no method requires is a capability nothing enforces, and one this roster has "
+            + "forgotten is a set of methods nothing here tests");
+    }
+
+    /// <summary>
+    /// A visitor the write policy refuses is told so in a sentence about that capability, not the catch-all -
+    /// the three 0.4 added included, before their screens exist.
+    /// </summary>
+    [Fact]
+    public void Every_capability_has_a_refusal_sentence_of_its_own()
+    {
+        string fallback = WritePolicyRefusal.For("NoSuchCapability");
+
+        foreach (StudioCapability capability in Enum.GetValues<StudioCapability>())
+        {
+            WritePolicyRefusal.For(capability).Should().NotBe(fallback, "{0} has a sentence of its own", capability);
+        }
+
+        Enum.GetValues<StudioCapability>().Select(static x => WritePolicyRefusal.For(x)).Should().OnlyHaveUniqueItems();
+    }
+
+    [Fact]
+    public void A_reserved_capability_is_required_by_nothing_yet()
+    {
+        Mutating.Concat(GatedReads).Select(static x => x.Capability).Should().NotIntersectWith(
+            Reserved.Keys, "a capability something gates on is in the roster, not reserved");
+
+        foreach ((StudioCapability capability, string why) in Reserved)
+        {
+            why.Length.Should().BeGreaterThan(20, "a reason, naming the packet that ends it, for {0}", capability);
+
+            string required = "Require(StudioCapability." + capability + ")";
+
+            SourceScanner.ShippedSourceFiles()
+                .Where(file => SourceScanner.StripCommentsAndStrings(File.ReadAllText(file)).Contains(required, StringComparison.Ordinal))
+                .Should().BeEmpty(
+                    "{0} is reserved; a service that requires it now gates on it, so move it to Mutating or GatedReads and assert its refusals",
+                    capability);
+        }
+    }
+
+    [Fact]
+    public void Every_gated_read_is_also_classified_as_a_read()
+    {
+        foreach (GatedCall call in GatedReads)
+        {
+            Reads[call.Service].Should().Contain(call.Method,
+                "a gated read is a read the capability model gates, not a mutating member");
+        }
+    }
+
+    // -------------------------------------------------------------------------------------------------
+    // The three refusals
+    // -------------------------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task A_capability_that_is_off_refuses_every_mutating_call_and_audits_it()
+    {
+        await using Harness harness = Harness.Create(static options => options.Capabilities = new MartenCapabilities());
+
+        await AssertEveryCallRefusedAsync<StudioCapabilityDeniedException>(harness, checkCapabilityOnEntry: true);
+
+        harness.Policies.Calls.Should().BeEmpty(
+            "a capability that is off is answered before anybody is asked who is asking, so no policy "
+            + "handler runs and nothing about this process leaks to a caller who may not write");
+    }
+
+    [Fact]
+    public async Task ReadOnly_refuses_every_mutating_call_and_audits_it()
+    {
+        await using Harness harness = Harness.Create(static options =>
+        {
+            options.Capabilities = MartenCapabilities.All();
+            options.ReadOnly = true;
+        });
+
+        await AssertEveryCallRefusedAsync<StudioCapabilityDeniedException>(harness, checkCapabilityOnEntry: true);
+    }
+
+    [Fact]
+    public async Task A_write_policy_that_refuses_the_visitor_refuses_every_mutating_call_and_audits_it()
+    {
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenCapabilities.All());
+
+        // The store policy passes and the write policy does not, which is the shape that matters: the
+        // visitor may look at this store and may not change it. The capability travels on the resource,
+        // so a null capability is the store question and a named one is the write question.
+        harness.Policies.Allow(static resource => resource.Capability is null);
+
+        await AssertEveryCallRefusedAsync<StudioNotAuthorizedException>(harness, checkCapabilityOnEntry: false);
+    }
+
+    // -------------------------------------------------------------------------------------------------
+    // The three refusals, for every gated read
+    // -------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// 1.0-HARD: the bulk skip's preview is refused with <c>ManageDeadLetters</c> off - or under <c>ReadOnly</c> - before anything is
+    /// resolved or read: no policy is asked, no connection is opened (the store's host does not resolve), and nothing is audited,
+    /// because it is not a write. The sentence names the property a host would set.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task The_bulk_skip_preview_is_refused_by_the_ManageDeadLetters_switch_before_anything_is_asked_or_read(bool readOnly)
+    {
+        await using Harness harness = Harness.Create(options =>
+        {
+            options.Capabilities = readOnly ? MartenCapabilities.All() : new MartenCapabilities();
+            options.ReadOnly = readOnly;
+        });
+
+        IEventDataService events = (IEventDataService) harness.Resolve(typeof(IEventDataService));
+        DeadLetterGroupSkipPlan plan = await events.DescribeDeadLetterGroupSkipAsync(
+            Scope, new DeadLetterGroupKey("Orders", "Orders:All", "order_placed", "System.InvalidOperationException", "fp"), TestContext.Current.CancellationToken);
+
+        plan.Refusal.Should().Contain(readOnly ? "ReadOnly" : "Capabilities.ManageDeadLetters");
+        plan.ToSkip.Should().Be(0);
+        harness.Policies.Calls.Should().BeEmpty("the switch is answered before anybody is asked who is asking");
+        harness.Ring.GetLatest().Should().BeEmpty("a preview is not a write and is not audited");
+    }
+
+    [Fact]
+    public async Task A_capability_that_is_off_refuses_every_gated_read_as_a_value_and_audits_it()
+    {
+        await using Harness harness = Harness.Create(static options => options.Capabilities = new MartenCapabilities());
+
+        await AssertEveryGatedReadRefusedAsync(harness, DatabaseRefusal.CapabilityOff);
+    }
+
+    [Fact]
+    public async Task ReadOnly_refuses_every_gated_read_as_a_value_and_audits_it()
+    {
+        await using Harness harness = Harness.Create(static options =>
+        {
+            options.Capabilities = MartenCapabilities.All();
+            options.ReadOnly = true;
+        });
+
+        await AssertEveryGatedReadRefusedAsync(harness, DatabaseRefusal.ReadOnly);
+    }
+
+    [Fact]
+    public async Task A_write_policy_that_refuses_the_visitor_refuses_every_gated_read_as_a_value_and_audits_it()
+    {
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenCapabilities.All());
+
+        harness.Policies.Allow(static resource => resource.Capability is null);
+
+        await AssertEveryGatedReadRefusedAsync(harness, DatabaseRefusal.WritePolicy);
+
+        harness.Policies.Calls.Where(static x => x.Resource.Capability is not null)
+            .Should().OnlyContain(static x => x.Resource.TenantId == null,
+                "BrowseDatabase and ViewDatabaseActivity are always asked of the database as a whole");
+    }
+
+    private static async Task AssertEveryGatedReadRefusedAsync(Harness harness, DatabaseRefusal expected)
+    {
+        List<string> problems = [];
+
+        foreach (GatedCall call in GatedReads)
+        {
+            int before = harness.Ring.GetLatest().Count;
+            string what = call.Service.Name + "." + call.Method;
+
+            object service = harness.Resolve(call.Service);
+            MethodInfo method = call.Service.GetMethod(call.Method)
+                ?? throw new InvalidOperationException(what + " does not exist.");
+
+            object?[] arguments = [.. method.GetParameters().Select(Argument)];
+            object? result;
+
+            try
+            {
+                object? returned = method.Invoke(service, arguments);
+                result = returned is Task task ? await AwaitResultAsync(task) : returned;
+            }
+            catch (Exception exception)
+            {
+                Exception thrown = exception is TargetInvocationException { InnerException: { } inner } ? inner : exception;
+                problems.Add(what + " threw " + thrown.GetType().Name + " where a refusal value was required: " + thrown.Message);
+                continue;
+            }
+
+            object? refusal = result?.GetType().GetProperty("Refusal")?.GetValue(result);
+
+            if (!Equals(refusal, expected))
+            {
+                problems.Add(what + " answered " + (refusal ?? "nothing") + " where " + expected + " was required");
+            }
+
+            IReadOnlyList<StudioActionLogEntry> after = harness.Ring.GetLatest();
+
+            if (after.Count <= before)
+            {
+                problems.Add(what + " was refused and wrote nothing to the audit");
+                continue;
+            }
+
+            if (after[0].Succeeded)
+            {
+                problems.Add(what + " audited its refusal as a success");
+            }
+        }
+
+        problems.Should().BeEmpty(
+            "a read gated like a write is refused in the service layer and audited, as a value a page can "
+            + "draw: " + string.Join(" | ", problems));
+    }
+
+    private static async Task<object?> AwaitResultAsync(Task task)
+    {
+        await task;
+        return task.GetType().GetProperty("Result")?.GetValue(task);
+    }
+
+    private static async Task AssertEveryCallRefusedAsync<TException>(Harness harness, bool checkCapabilityOnEntry)
+        where TException : Exception
+    {
+        List<string> problems = [];
+
+        foreach (GatedCall call in Mutating)
+        {
+            int before = harness.Ring.GetLatest().Count;
+            string what = call.Service.Name + "." + call.Method;
+
+            object service = harness.Resolve(call.Service);
+            MethodInfo method = call.Service.GetMethod(call.Method)
+                ?? throw new InvalidOperationException(what + " does not exist.");
+
+            Exception? thrown = await InvokeAsync(service, method);
+
+            if (thrown is not TException)
+            {
+                problems.Add(what + " threw " + (thrown?.GetType().Name ?? "nothing")
+                    + " where " + typeof(TException).Name + " was required"
+                    + (thrown is null ? string.Empty : ": " + thrown.Message));
+                continue;
+            }
+
+            if (checkCapabilityOnEntry
+                && thrown is StudioCapabilityDeniedException denial
+                && denial.Capability != call.Capability)
+            {
+                problems.Add(what + " was refused for " + denial.Capability + " rather than " + call.Capability);
+            }
+
+            IReadOnlyList<StudioActionLogEntry> after = harness.Ring.GetLatest();
+
+            if (after.Count <= before)
+            {
+                problems.Add(what + " was refused and wrote nothing to the audit");
+                continue;
+            }
+
+            if (after[0].Succeeded)
+            {
+                problems.Add(what + " audited its refusal as a success");
+            }
+        }
+
+        problems.Should().BeEmpty(
+            "every mutating operation is refused in the service layer and audited, whatever a page "
+            + "chose to render (AGENTS.md hard rule 5): " + string.Join(" | ", problems));
+    }
+
+    /// <summary>Invokes one service method with plausible arguments and returns what it threw.</summary>
+    /// <remarks>
+    /// Plausible, not empty: several of these validate their arguments before they reach the gate, and an
+    /// <c>ArgumentException</c> from a blank id would be a test that proved nothing about gating.
+    /// </remarks>
+    private static async Task<Exception?> InvokeAsync(object service, MethodInfo method)
+    {
+        object?[] arguments = [.. method.GetParameters().Select(Argument)];
+
+        try
+        {
+            object? returned = method.Invoke(service, arguments);
+
+            if (returned is Task task)
+            {
+                await task;
+            }
+
+            return null;
+        }
+        catch (TargetInvocationException exception) when (exception.InnerException is not null)
+        {
+            return exception.InnerException;
+        }
+        catch (Exception exception)
+        {
+            return exception;
+        }
+    }
+
+    private static object? Argument(ParameterInfo parameter)
+    {
+        Type type = parameter.ParameterType;
+
+        if (type == typeof(StudioScope))
+        {
+            return Scope;
+        }
+
+        if (type == typeof(CancellationToken))
+        {
+            return Token;
+        }
+
+        if (type == typeof(Guid))
+        {
+            return Guid.Parse("8f1d5a6e-1a2b-4c3d-9e8f-000000000001");
+        }
+
+        if (type == typeof(long))
+        {
+            return 1L;
+        }
+
+        if (type == typeof(bool))
+        {
+            return false;
+        }
+
+        if (type == typeof(string))
+        {
+            return parameter.Name switch
+            {
+                "alias" => "customer",
+                "editedJson" => "{}",
+                "confirmation" => "not-the-database-identity",
+                _ => "8f1d5a6e-1a2b-4c3d-9e8f-000000000001",
+            };
+        }
+
+        if (type == typeof(IReadOnlyList<string>))
+        {
+            return new[] { "8f1d5a6e-1a2b-4c3d-9e8f-000000000001" };
+        }
+
+        if (type == typeof(DocumentConcurrencyToken))
+        {
+            return DocumentConcurrencyToken.None;
+        }
+
+        // A group the grouped view could have read, so a gate that ran after the group was looked at would be caught.
+        if (type == typeof(DeadLetterGroupKey))
+        {
+            return new DeadLetterGroupKey("OrderSummary", "All", "order_placed", "InvalidOperationException", "Failure to apply event #{n} Id({guid})");
+        }
+
+        if (type == typeof(SqlConsoleRequest))
+        {
+            return new SqlConsoleRequest("select 1");
+        }
+
+        // The plan the Plan page just ran, naming a relation and a column, so a gate that ran after the plan was looked at - to find the
+        // relations to ask about - would be caught looking rather than refusing.
+        if (type == typeof(QueryPlan))
+        {
+            return QueryPlanReader.Read(
+                """[{"Plan":{"Node Type":"Seq Scan","Relation Name":"orders","Schema":"public","Alias":"o","Filter":"(o.status = 'open'::text)","Total Cost":10}}]""").Plan!;
+        }
+
+        // The Plan page's request, with a placeholder and its value and the options that need ANALYZE on: a gate that ran after
+        // the text or the values were looked at would be caught looking rather than refusing.
+        if (type == typeof(PlanRunRequest))
+        {
+            return new PlanRunRequest("select 1 where $1 = 1", PlanMode.Analyze) { Values = ["1"], Options = new PlanOptions { Wal = true, Serialize = true } };
+        }
+
+        // A request the screen would accept, so a gate that ran after the text was looked at would be caught
+        // looking rather than refusing for the text.
+        if (type == typeof(LinqQueryRequest))
+        {
+            return new LinqQueryRequest("customer", "Name == \"x\"", "Name");
+        }
+
+        // A schema that is not the store's own, which is what makes a database-browser call a
+        // BrowseDatabase read rather than the structure every visitor may see.
+        if (type == typeof(DatabaseObjectQuery))
+        {
+            return new DatabaseObjectQuery(DatabaseObjectCategory.Tables, Schema: "8f1d5a6e-1a2b-4c3d-9e8f-000000000001");
+        }
+
+        if (type == typeof(DatabaseObjectRef))
+        {
+            return new DatabaseObjectRef(
+                DatabaseObjectKind.View, "8f1d5a6e-1a2b-4c3d-9e8f-000000000001", "8f1d5a6e-1a2b-4c3d-9e8f-000000000001");
+        }
+
+        // A row read with everything a page would send: a filter, a sort, a cursor - so a gate that ran
+        // after the request was looked at would be caught looking.
+        if (type == typeof(TableRowRequest))
+        {
+            return new TableRowRequest
+            {
+                Filter = "status = approved",
+                SortColumn = "total",
+                Cursor = new TableRowCursor("total", false, "1", ["1"]),
+            };
+        }
+
+        if (type == typeof(IReadOnlyDictionary<string, string>))
+        {
+            return new Dictionary<string, string> { ["id"] = "8f1d5a6e-1a2b-4c3d-9e8f-000000000001" };
+        }
+
+        // X2: an index a plan would suggest, and the clause Mode A ran - so a gate that ran after either was looked at is caught.
+        if (type == typeof(HypotheticalIndex))
+        {
+            return HypotheticalIndexCandidates.FromPlan(QueryPlanReader.Read(
+                """[{"Plan":{"Node Type":"Seq Scan","Relation Name":"orders","Schema":"public","Alias":"o","Filter":"(o.customer_id = 42)","Total Cost":10}}]""").Plan!)[0];
+        }
+
+        if (type == typeof(MartenQueryRequest))
+        {
+            return new MartenQueryRequest("customer", "data ->> 'Name' = 'x'");
+        }
+
+        if (type == typeof(DocumentListRequest))
+        {
+            return new DocumentListRequest { Search = "Name:x", SortKey = "mt_last_modified" };
+        }
+
+        throw new NotSupportedException(
+            "No argument is defined for " + type.Name + " " + parameter.Name
+            + ". Add one here: a mutating member this test cannot call is a mutating member it cannot gate-check.");
+    }
+
+    // -------------------------------------------------------------------------------------------------
+    // The harness
+    // -------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// A real studio container over a store that will never connect.
+    /// </summary>
+    /// <remarks>
+    /// The whole container rather than five hand-built services, because what is being asserted is what
+    /// a circuit resolves: a service constructed by hand in a test could be wired differently from the
+    /// one a page gets, and the difference would be invisible.
+    /// </remarks>
+    private sealed class Harness : IAsyncDisposable
+    {
+        private readonly ServiceProvider provider;
+        private readonly IServiceScope scope;
+
+        private Harness(ServiceProvider provider, IServiceScope scope, TestStoreAuthorizationService policies)
+        {
+            this.provider = provider;
+            this.scope = scope;
+            Policies = policies;
+        }
+
+        public TestStoreAuthorizationService Policies { get; }
+
+        public StudioActionLogService Ring => provider.GetRequiredService<StudioActionLogService>();
+
+        public object Resolve(Type service) => scope.ServiceProvider.GetRequiredService(service);
+
+        public static Harness Create(Action<MartenOptions> configure)
+        {
+            var users = new TestAuthenticationStateProvider();
+            users.SignIn("tester");
+
+            var policies = new TestStoreAuthorizationService();
+
+            var services = new ServiceCollection();
+            services.AddLogging();
+            services.AddMarten(x => x.Connection(DummyConnectionString));
+            services.AddDataStudio().AddMarten(options =>
+            {
+                options.StoreAuthorizationPolicy = StorePolicy;
+                options.WriteAuthorizationPolicy = WritePolicy;
+                configure(options);
+            });
+
+            // After AddMarten, so these win over anything the framework registrations contributed.
+            services.AddSingleton<IAuthorizationService>(policies);
+            services.AddScoped<AuthenticationStateProvider>(_ => users);
+
+            ServiceProvider provider = services.BuildServiceProvider();
+
+            return new Harness(provider, provider.CreateScope(), policies);
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            scope.Dispose();
+            await provider.DisposeAsync();
+        }
+    }
+}

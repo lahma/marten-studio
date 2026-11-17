@@ -1,13 +1,13 @@
 # The health advisor
 
-The Health page (`/marten/health` in Marten Studio, `/postgres/health` in Postgres Studio) says what is wrong with the
-database a studio is pointed at, how sure it is, and what would change it: a line of the host's `StoreOptions`, a
+The Health page (`/studio/postgres/health`, in a Marten host too) says what is wrong with the
+database the studio is pointed at, how sure it is, and what would change it: a line of the host's `StoreOptions`, a
 migration for the host's own tables, or a server setting. It is an advisor, not a monitor: it pages nobody, it keeps
 an hour of history in memory and no more, and it runs only while somebody is looking.
 
-Both studios run the same engine. The checks that read Postgres alone run in both; the ones that read a Marten store -
-the daemon (`D`), the events (`E`) and a few others - run only in Marten Studio. Every code, its variants, what its
-subject names and which studios run it: [health/codes.md](health/codes.md).
+The Postgres and Marten modules run the same engine. The checks that read Postgres alone run in both; the ones that read a
+Marten store - the daemon (`D`), the events (`E`) and a few others - run only in a Marten host. Every code, its variants,
+what its subject names and which modules run it: [health/codes.md](health/codes.md).
 
 This page is the index. Each area has a file of its own with one section per check, and each section's
 heading is the anchor the page's "About" link opens:
@@ -73,7 +73,7 @@ A finding about a decision your application made on purpose and cannot change st
 anything wrong?" never reads clean. `AcceptedChecks` says, in your registration, that you have looked at it and why:
 
 ```csharp
-builder.Services.AddMartenStudio(options =>   // or AddPostgresStudio
+builder.Services.AddDataStudio().AddMarten(options =>   // or AddPostgres
 {
     // K05: the SQL console reads as the data source's own role. On a managed PostgreSQL the roles belong to the platform
     // team, so SqlConsoleRole stays unset - a trade-off this application made knowingly.
@@ -82,11 +82,11 @@ builder.Services.AddMartenStudio(options =>   // or AddPostgresStudio
 ```
 
 The key is a check's code (compared ignoring case) and the value is the reason, in your own words: up to 500 characters,
-never empty. Startup refuses a key that is not a check of that studio - a typo can never silently accept nothing, and a
-Marten check's code is unknown to Postgres Studio - and a reason that is blank or too long. The one exception is a code a
-release retired (K10, retired in 1.1): an entry for it is accepted and ignored, so a host never fails to start because of an
+never empty. Startup refuses a key that is not a check of that module - a typo can never silently accept nothing, and a
+Marten check's code is unknown to the Postgres module - and a reason that is blank or too long. The one exception is a code a
+release retired (K10): an entry for it is accepted and ignored, so a host never fails to start because of an
 upgrade, and one `Information` line (event 9490) says the entry can be removed. The list is read once, when the options
-are validated at startup (1.2): a change made to the resolved options afterwards is not seen.
+are validated at startup: a change made to the resolved options afterwards is not seen.
 
 An accepted check **still runs**, and its finding is still **shown**, but it counts for nothing:
 
@@ -100,8 +100,8 @@ An accepted check **still runs**, and its finding is still **shown**, but it cou
 - The diagnostics API returns it with `Accepted = true` and your reason as `AcceptedReason`, and `ToJson()` keeps it, so an
   escalation snapshot still shows the whole picture. A summary of your own leaves out the findings where `Accepted` is true,
   with no list of codes of its own to keep in step with the studio's.
-- The Server page, under its security posture (in both studios), and Marten Studio's Configuration page list each accepted
-  check with its title and reason.
+- The Server page, under its security posture (in both modules), and the Marten module's Configuration page list each
+  accepted check with its title and reason.
 
 Acceptance changes how a finding counts, not who may see it. A finding a visitor's gate withholds stays withheld and is
 counted as withheld, and the check's row shows your reason only beside a finding that visitor may see. The *Accepted checks*
@@ -168,7 +168,7 @@ starts none of its own. Opening the page, pressing Refresh, or running the Healt
 starts a sweep when the last one is more than five minutes old; within five minutes, everybody gets the one
 that ran. The window the page ranks over grows only between such sweeps.
 
-**Mark** (1.2) remembers the counters on screen and shows each statement's change since then ("since 14:02")
+**Mark** remembers the counters on screen and shows each statement's change since then ("since 14:02")
 instead of the advisor's window, until you clear it. It is kept in this tab's connection to the server only -
 nothing is stored anywhere - and ends when you reload. A reset of `pg_stat_statements`, or a crash, restore or
 failover that began the server's counters again, ends it and says so, and the page counts over the advisor's
@@ -208,8 +208,8 @@ reads: anything that changes state has a screen and a capability of its own, nev
   its message and never a value it read. A failure for a reason nobody chose is logged once as event 9223; a refusal
   is logged at Debug as 9224.
 
-1.2 has three. Marten Studio's E06 offers **Find the 20 longest streams**
-([E06](health/events.md#on-demand-the-20-longest-streams)). In both studios T15 (a foreign key without a covering index)
+Three findings offer one. The Marten module's E06 offers **Find the 20 longest streams**
+([E06](health/events.md#on-demand-the-20-longest-streams)). In both modules T15 (a foreign key without a covering index)
 offers **What if it had an index?**, at the finding's own gate, and T01 (sequential scans on a large table) offers **Try
 indexes against this table's statements**, which runs the Statements page's index advisor for that table under its own
 bounds (20 statements, at most 150 plans, 60 seconds) at the `Activity` gate ([tables.md](health/tables.md)).
@@ -226,7 +226,7 @@ The sweep is about the database; what each visitor is shown of it is decided per
   database-wide gate, as the Configuration page's database list is. S01, a catalog read, is shown at the same
   gate as K01: the server's version is on the Overview already.
 - A database-wide number needs the store policy for the database as a whole, asked with `TenantId = null` (in
-  Postgres Studio, the source policy for the database).
+  the Postgres module, the source policy for the database).
 - Anything that names another session, a process id, another role, a client address, an application, a statement or a
   tenant needs `Capabilities.ViewDatabaseActivity` - off by default, off under
   `ReadOnly` - and the write policy, asked with `Capability = "ViewDatabaseActivity"` and `TenantId = null`.
@@ -267,22 +267,22 @@ under event 9222.
 ## Export
 
 The advisor pages nobody, but the host's own monitoring already knows how to: an ASP.NET Core health check.
-It is opt-in, and neither `AddMartenStudio()` nor `AddPostgresStudio()` registers it:
+It is opt-in, and neither `.AddMarten()` nor `.AddPostgres()` registers it:
 
 ```csharp
-builder.Services.AddMartenStudio();
-builder.Services.AddHealthChecks().AddMartenStudio(name: "marten-studio", failureStatus: null, tags: ["marten"]);
+builder.Services.AddDataStudio().AddMarten();
+builder.Services.AddHealthChecks().AddMartenDiagnostics(name: "marten", failureStatus: null, tags: ["marten"]);
 
-// or, in a Postgres Studio host:
-builder.Services.AddPostgresStudio();
-builder.Services.AddHealthChecks().AddPostgresStudio(name: "postgres-studio", failureStatus: null, tags: ["postgres"]);
+// or, in a Postgres host:
+builder.Services.AddDataStudio().AddPostgres();
+builder.Services.AddHealthChecks().AddPostgresDiagnostics(name: "postgres", failureStatus: null, tags: ["postgres"]);
 
 // ...
 app.MapHealthChecks("/healthz");
 ```
 
-`AddHealthChecks().AddMartenStudio(...)` and `.AddPostgresStudio(...)` take ASP.NET Core's usual `name`
-(`marten-studio` or `postgres-studio` unless given), `failureStatus`, `tags` and `timeout`, and register one check.
+`AddHealthChecks().AddMartenDiagnostics(...)` and `.AddPostgresDiagnostics(...)` take ASP.NET Core's usual `name`
+(`data-studio-marten` or `data-studio-postgres` unless given), `failureStatus`, `tags` and `timeout`, and register one check.
 Each run sweeps tiers 0 and 1 - the configuration and catalog checks, never the deeper reads or the statements - over
 every registered store or source and the databases each one holds (*Many databases*, below), straight through the
 sweeper the Health page uses.
@@ -304,7 +304,7 @@ under `accepted`.
 Info findings, and checks that could not run for a reason that is the host's choice - no privilege, no extension,
 an old Postgres - leave it `Healthy`. The Health page shows both kinds of "not checked" the same way; the export
 does not, because a database that cannot answer a catalog read in time is worth somebody's look. A host that added
-the health check but not the studio itself (`services.AddMartenStudio()` or `services.AddPostgresStudio()`) gets
+the health check but not a module (`.AddMarten()` or `.AddPostgres()`, or `services.AddPostgresDiagnostics()`) gets
 `Degraded` with a description saying which call is missing. A fault in the export itself is `Degraded` too, naming the exception's type, with its message in event 9270
 (a Warning once per ten minutes, Debug while it repeats). The check never throws, except when the probe's own
 cancellation fires.

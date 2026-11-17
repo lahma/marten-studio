@@ -25,10 +25,11 @@ using Project = Fallout.Solutions.Project;
 /// hand-written: the CHANGELOG-driven version (<see cref="OnBuildInitialized"/>), the NuGet leg in
 /// <c>Build.Publish.cs</c>, the Playwright browser install in <c>Build.Browsers.cs</c>, the choice of
 /// Marten - the floor, or the latest-tested 9.x - in <c>Build.Marten.cs</c>, and the choice of Npgsql for
-/// the PostgresStudio-only projects, with its second pass over <c>postgres-studio.slnf</c>, in
-/// <c>Build.Npgsql.cs</c>, and the choice of Confluent.Kafka for the KStudio projects in <c>Build.Confluent.cs</c>.
-/// There is no publish or archive target: the studio ships as three NuGet packages,
-/// PostgresStudio.Diagnostics, PostgresStudio and MartenStudio, released together, and nothing else.
+/// the Postgres-only projects, with its second pass over <c>data-studio-postgres.slnf</c>, in
+/// <c>Build.Npgsql.cs</c>, and the choice of Confluent.Kafka for the Kafka projects in <c>Build.Confluent.cs</c>.
+/// There is no publish or archive target: Data Studio ships as seven NuGet packages (DataStudio.Postgres.Diagnostics, DataStudio,
+/// DataStudio.Postgres, DataStudio.Marten, DataStudio.Kafka.Core, DataStudio.Kafka and DataStudio.Kafka.Wolverine), released
+/// together at one version, and nothing else.
 /// </remarks>
 [ShutdownDotNetAfterServerBuild]
 partial class Build : FalloutBuild,
@@ -55,10 +56,10 @@ partial class Build : FalloutBuild,
 
     // Spelled out rather than looked up through the solution: on Linux the path is case-sensitive, and
     // a typo here should fail as a missing file rather than as a null reference three targets later.
-    AbsolutePath StudioProject => SourceDirectory / "MartenStudio" / "MartenStudio.csproj";
-    AbsolutePath DiagnosticsProject => SourceDirectory / "PostgresStudio.Diagnostics" / "PostgresStudio.Diagnostics.csproj";
-    AbsolutePath PostgresStudioProject => SourceDirectory / "PostgresStudio" / "PostgresStudio.csproj";
-    AbsolutePath SampleProject => SamplesDirectory / "MartenStudio.Sample" / "MartenStudio.Sample.csproj";
+    AbsolutePath MartenProject => SourceDirectory / "DataStudio.Marten" / "DataStudio.Marten.csproj";
+    AbsolutePath DiagnosticsProject => SourceDirectory / "DataStudio.Postgres.Diagnostics" / "DataStudio.Postgres.Diagnostics.csproj";
+    AbsolutePath PostgresProject => SourceDirectory / "DataStudio.Postgres" / "DataStudio.Postgres.csproj";
+    AbsolutePath SampleProject => SamplesDirectory / "DataStudio.Sample.Marten" / "DataStudio.Sample.Marten.csproj";
 
     AbsolutePath ChangelogPath => RootDirectory / "CHANGELOG.md";
     AbsolutePath ReleaseNotesFile => ArtifactsDirectory / "release-notes.md";
@@ -119,11 +120,11 @@ partial class Build : FalloutBuild,
         // asks for it. Settled here so a bad value fails before anything is restored.
         ResolveMartenVersion();
 
-        // Build.Npgsql.cs: the same for the PostgresStudio-only projects' Npgsql, whose non-floor values get a
+        // Build.Npgsql.cs: the same for the Postgres-only projects' Npgsql, whose non-floor values get a
         // pass of their own after Test.
         ResolveNpgsqlVersion();
 
-        // Build.Confluent.cs: the floor, or the latest-tested Confluent.Kafka for the KStudio projects.
+        // Build.Confluent.cs: the floor, or the latest-tested Confluent.Kafka for the Kafka projects.
         ResolveConfluentVersion();
     }
 
@@ -144,9 +145,9 @@ partial class Build : FalloutBuild,
     IEnumerable<Project> ITest.TestProjects => Solution.GetAllProjects("*.Tests");
 
     // The Marten version goes to all three, the floor included (Build.Marten.cs says why). The Npgsql version of
-    // this whole-solution pass is always the floor - never the requested one, which would reach MartenStudio through
-    // its PostgresStudio reference - and is said explicitly for the same reason (Build.Npgsql.cs). The Confluent.Kafka
-    // version goes to all three too: only the KStudio projects (KStudio.Wolverine among them, which takes it through WolverineFx.Kafka) reference the package (Build.Confluent.cs).
+    // this whole-solution pass is always the floor - never the requested one, which would reach the Marten module through
+    // its Postgres module reference - and is said explicitly for the same reason (Build.Npgsql.cs). The Confluent.Kafka
+    // version goes to all three too: only the Kafka projects (DataStudio.Kafka.Wolverine among them, which takes it through WolverineFx.Kafka) reference the package (Build.Confluent.cs).
     Configure<DotNetRestoreSettings> IRestore.RestoreSettings => _ => _
         .SetProperty(MartenVersionProperty, ResolvedMartenVersion)
         .SetProperty(NpgsqlVersionProperty, NpgsqlFloor)
@@ -164,13 +165,13 @@ partial class Build : FalloutBuild,
         .SetProperty(NpgsqlVersionProperty, NpgsqlFloor)
         .SetProperty(ConfluentVersionProperty, ResolvedConfluentVersion);
 
-    // 1.2-HANG-2: the three fast suites run with a ten-minute blame-hang timeout, so a test that waits for ever fails the run within ten
+    // 1.2-HANG-2: the fast suites run with a ten-minute blame-hang timeout, so a test that waits for ever fails the run within ten
     // minutes with a dump and a sequence file naming it (in artifacts/test-results, which the workflows upload), instead of running to the
     // job's own timeout with nothing said. Not the three integration suites: their Playwright and live tests may legitimately run long.
     Configure<DotNetTestSettings, Project> ITest.TestProjectSettings => (_, project) => WithBlameHang(_, project);
 
     /// <summary>The test projects that run without Docker or a browser: nothing in them takes ten minutes, so a test that does is hung.</summary>
-    static readonly string[] BlameHangTestProjects = ["MartenStudio.Tests", "PostgresStudio.Tests", "KStudio.Tests", "KStudio.Wolverine.Tests"];
+    static readonly string[] BlameHangTestProjects = ["DataStudio.Tests", "DataStudio.Marten.Tests", "DataStudio.Postgres.Tests", "DataStudio.Kafka.Tests", "DataStudio.Kafka.Wolverine.Tests"];
 
     /// <summary>How long a single fast-suite test may run before the run is stopped and a mini dump taken (<c>--blame-hang-timeout</c>).</summary>
     const string BlameHangTimeout = "10m";
@@ -187,7 +188,7 @@ partial class Build : FalloutBuild,
     /// KS-CI-FIX-4: the suite that loads native librdkafka runs with the blame-crash collector, so a native crash (exit code 139, marten-latest run
     /// 43212361402) names the test that was running in the log and a sequence file, instead of only "Test process crashed".
     /// </summary>
-    static readonly string[] BlameCrashTestProjects = ["KStudio.Integration.Tests"];
+    static readonly string[] BlameCrashTestProjects = ["DataStudio.Kafka.Integration.Tests"];
 
     string ICreateGitHubRelease.Name => $"v{Version}";
 
@@ -196,7 +197,7 @@ partial class Build : FalloutBuild,
 
     /// <summary>The GitHub Release carries the changelog notes and no files at all.</summary>
     /// <remarks>
-    /// MartenStudio is consumed by <c>PackageReference</c>; the package on nuget.org is the artifact and
+    /// The Marten module is consumed by <c>PackageReference</c>; the package on nuget.org is the artifact and
     /// there is nothing a user could usefully download from a release page. Attaching a second copy of
     /// the .nupkg would only invite someone to install the file rather than the published package - a
     /// build that never went through the trusted-publishing path and carries none of its provenance.

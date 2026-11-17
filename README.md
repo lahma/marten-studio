@@ -1,36 +1,52 @@
-# Marten Studio
+# Data Studio
 
-An embeddable Blazor Server admin UI for [MartenDB](https://martendb.io), shipped as an MIT-licensed
-Razor Class Library built on [Postgres Studio](#six-packages). You add `AddMartenStudio()` to your container and
-`MapMartenStudio()` to your endpoint pipeline, and the studio runs inside your own ASP.NET Core application against *that
-application's own* configured `IDocumentStore` — browsing document collections and their JSON,
-inspecting and steering event streams, projections and the async daemon, running guarded queries and
-managing schema. Everything it knows, it knows because you configured Marten that way: aliases,
-duplicated fields, soft delete, tenancy, projections and metadata columns all come from your
-`StoreOptions`. That is the whole reason a Marten UI beats pgAdmin, and it is why the studio is keyed on
-`IDocumentStore` and never on a connection string.
+<!-- beta: remove at 2.0.0 -->
+> **Data Studio 2.0 is in beta** (`2.0.0-beta.1`), published for trial: names, addresses and options may still move before
+> 2.0.0, and every package is installed with `--prerelease`. What is promised meanwhile is in [docs/stability.md](docs/stability.md).
 
-It is **not** a standalone application, **not** a fleet monitor and **not** a connection-string tool.
-There is no "point it at a database" mode, and there never will be — a studio that could be aimed
-anywhere would have to re-implement everything Marten already knows, and would get it subtly wrong. Both
-packages are keyed on the databases the host registered, Marten's or not: Marten Studio on its stores, Postgres
-Studio on its `NpgsqlDataSource`s, each with the application's own role, pool and TLS.
+An embeddable Blazor Server admin UI for the data stores your ASP.NET Core application already uses, shipped as
+MIT-licensed Razor Class Libraries. It is one product with three modules. You add `AddDataStudio()` to your container,
+one call for each module you want, and `MapDataStudio()` to your endpoint pipeline, and Data Studio runs inside your own
+application against *that application's own* configuration, never against a connection string you hand it:
+
+- **Marten**, for [MartenDB](https://martendb.io): the application's own configured `IDocumentStore`. Browse document
+  collections and their JSON, inspect and steer event streams, projections and the async daemon, run guarded queries
+  and manage schema. Everything this module knows, it knows because you configured Marten that way: aliases, duplicated
+  fields, soft delete, tenancy, projections and metadata columns all come from your `StoreOptions`. That is the whole
+  reason a Marten UI beats pgAdmin, and it is why the module is keyed on `IDocumentStore` and never on a connection
+  string.
+- **Postgres**, for any application that registers an `NpgsqlDataSource`, Marten or not: a database browser, sessions and
+  locks, the foreign keys as a diagram, a health advisor that says what is wrong and how sure it is, the statements
+  that take the database's time, autovacuum, storage, replication, the server's settings and a guarded SQL console. The
+  Marten module is built on it, and shows these pages over the databases of the application's stores.
+- **Kafka**, for the clusters, topics, partitions and consumer groups the application's own Kafka
+  credentials can describe, and, behind capabilities that are off by default, a search for the records you need.
+
+It is **not** a standalone application, **not** a fleet monitor and **not** a connection-string tool. There is no
+"point it at a database" mode, and there never will be: a studio that could be aimed anywhere would have to
+re-implement everything Marten already knows, and would get it subtly wrong. Every module is keyed on what the host
+registered, the Marten module on its stores, the Postgres module on its `NpgsqlDataSource`s and the Kafka module on its
+own Kafka configuration, each with the application's own role, pool, TLS and credentials.
 [CritterWatch](https://jasperfx.net) is the Critter Stack's fleet console, with an embedded mode for Wolverine
-applications; pgAdmin is a general SQL client. Marten Studio is the local one between them — *this* process, *this*
-store, with Marten's own metadata in front of you and every mutating action off until you turn it on.
+applications; pgAdmin is a general SQL client. Data Studio is the local one between them: *this* process, *this* store,
+with Marten's own metadata in front of you and every mutating action off until you turn it on.
 
-Registering the studio must never change how your application behaves. No global styles, no
-component-library version pinned onto your host, no middleware ordering requirement, no altered
-authentication, no second projection daemon. A host that adds the package and never maps it is
-byte-for-byte the application it was.
+Registering it must never change how your application behaves. No global styles, no component-library version pinned
+onto your host, no middleware ordering requirement, no altered authentication, no second projection daemon. A host that
+adds the packages and never maps them is byte-for-byte the application it was.
+
+For an application that uses Marten, start with `dotnet add package DataStudio.Marten --prerelease` <!-- beta: remove at 2.0.0 --> (this README is that package's own);
+the install lines for every other kind of host are under [Install](#install).
 
 ### The first five minutes, in Development
 
 - Map it behind your own policy ([Register and mount](#register-and-mount)) and turn capabilities on only where you
-  would hand out `psql`: `o.Capabilities = MartenStudioCapabilities.All()` is the one-line opt-in for a development box.
+  would hand out `psql`: `marten.Capabilities = MartenCapabilities.All()` is the one-line opt-in for a development box.
   The header's badge says which environment you are looking at.
-- **Overview** and **Health**: your stores and databases, and findings with the `StoreOptions` line that would change
-  each one.
+- The **front page** (`/studio`) has one tile per module, in the order you added them; with one module it opens that
+  module's home. **Activity** (`/studio/activity`) lists what was done through the studio in this process.
+- Marten **Overview** (`/studio/marten`) and Postgres **Health** (`/studio/postgres/health`): your stores and databases,
+  and findings with the `StoreOptions` line that would change each one.
 - **Documents**: a collection, a `field:value` search with its index verdict, a document's JSON and metadata; **Check
   shapes** says whether what is stored still fits your types.
 - **Events**: a stream's timeline and time travel; **Event flow** shows which projections read which event types.
@@ -40,73 +56,80 @@ byte-for-byte the application it was.
   name or a statement's queryid; one match opens it, several are listed. Each probe is the read its page makes, under the
   same gates; a hidden type never answers.
 
-## Six packages
+Every address in this document is under the studio's mount, `/studio` unless you set `DataStudioOptions.Path`.
 
-The studio is three packages, released together at one version, with KStudio's three beside them as a preview: six in all.
+## Packages and modules
 
-| Package | For | Register and map | Mounted at |
+Data Studio is seven packages, released together at one version.
+
+| Package | What it is | Register | Pages |
 |---|---|---|---|
-| `MartenStudio` | an application with a Marten `IDocumentStore` | `AddMartenStudio()`, `MapMartenStudio()` | `/marten` |
-| `PostgresStudio` | any application that registers an `NpgsqlDataSource`, and no Marten | `AddPostgresStudio()`, `MapPostgresStudio()` | `/postgres` |
-| `PostgresStudio.Diagnostics` | the findings in your own code, with no UI and no ASP.NET Core: a worker, a job host, a shared library | `AddPostgresDiagnostics()` | nothing: no pages |
-| `KStudio` (preview) | a Kafka section for either studio, over the application's own Kafka credentials | `AddKafkaStudio()`, beside `AddMartenStudio()` or `AddPostgresStudio()`; no map call | `/kafka`, under the studio's own path |
-| `KStudio.Core` (preview) | the Kafka engine `KStudio` is built on, with no ASP.NET Core; brought by `KStudio` | nothing: take `KStudio` | nothing: no pages |
-| `KStudio.Wolverine` (preview) | listing a Wolverine application's Kafka clusters and topics in `KStudio` | `k.UseWolverineKafka()` | nothing: no pages |
+| `DataStudio` | The shell: the mount, the layout, the rail, the front page, Activity and the assets. ASP.NET Core and nothing else; every module brings it | `AddDataStudio()`, `MapDataStudio()` | `/studio`, `/studio/activity` |
+| `DataStudio.Marten` | The Marten module, for an application with a Marten `IDocumentStore`; brings the Postgres module | `.AddMarten()` | `/studio/marten/…`, and the Postgres pages over the stores' databases |
+| `DataStudio.Postgres` | The Postgres module, for any application that registers an `NpgsqlDataSource` and has no Marten | `.AddPostgres()` | `/studio/postgres/…` |
+| `DataStudio.Postgres.Diagnostics` | The findings in your own code, with no UI and no ASP.NET Core: a worker, a job host, a shared library | `services.AddPostgresDiagnostics()` | none |
+| `DataStudio.Kafka` | The Kafka module, over the application's own Kafka credentials; needs no database module | `.AddKafka()` | `/studio/kafka/…` |
+| `DataStudio.Kafka.Core` | The Kafka engine, with no ASP.NET Core; brought by `DataStudio.Kafka` | none: take `DataStudio.Kafka` | none |
+| `DataStudio.Kafka.Wolverine` | Lists a Wolverine application's Kafka clusters and topics in the Kafka module | `kafka.UseWolverineKafka()` | none |
 
-**Which to choose.** If the application uses Marten, take `MartenStudio`: it brings `PostgresStudio` with it, at
-exactly its own version, and shows everything Postgres Studio shows for the store's databases - the database browser,
-Sessions, the health advisor and its pages, the SQL console, Relationships - beside the Marten screens. Otherwise take
-`PostgresStudio` alone: it references Npgsql and no Marten, JasperFx or Weasel package, and browses the application's
-own data sources. And if all you want is the health advisor's findings in your own code - a worker that mails a daily
-summary, a shared library - take `PostgresStudio.Diagnostics` alone, the engine both studios are built on, which has no
-ASP.NET Core in it ([`docs/diagnostics.md`](docs/diagnostics.md#without-the-ui), and its own
-[README](src/PostgresStudio.Diagnostics/README.md)). This README is Marten Studio's; Postgres Studio's is
-[`src/PostgresStudio/README.md`](src/PostgresStudio/README.md), with the long form in
-[`docs/postgresstudio.md`](docs/postgresstudio.md).
+**Which to choose.** If the application uses Marten, take `DataStudio.Marten`: it brings `DataStudio.Postgres` with it, at
+exactly its own version, and shows everything the Postgres module shows for the store's databases - the database
+browser, Sessions, the health advisor and its pages, the SQL console, Relationships - beside the Marten screens.
+Otherwise take `DataStudio.Postgres` alone: it references Npgsql and no Marten, JasperFx or Weasel package, and browses
+the application's own data sources. If the application has Kafka, add `DataStudio.Kafka` beside either, or alone: a host
+with only Kafka gets no Postgres module, no engine and no Npgsql. And if all you want is the health advisor's findings in
+your own code - a worker that mails a daily summary, a shared library - take `DataStudio.Postgres.Diagnostics` alone, the
+engine the Postgres module is built on, which has no ASP.NET Core in it
+([`docs/diagnostics.md`](docs/diagnostics.md#without-the-ui), and its own
+[README](src/DataStudio.Postgres.Diagnostics/README.md)). This README is the whole product's; the Postgres module's is
+[`src/DataStudio.Postgres/README.md`](src/DataStudio.Postgres/README.md), with the long form in
+[`docs/postgres.md`](docs/postgres.md), and the Kafka module's is [`docs/kafka.md`](docs/kafka.md).
 
-**One studio per application.** `AddPostgresStudio()` throws in an application that called `AddMartenStudio()`, and
-the reverse; each `Map*Studio()` names the other call to make. Marten Studio's database browser shows what else lives
-in the store's own databases - a job store, a legacy schema - but a separate plain database of a Marten application
-is not listed.
+**One shell per application.** `AddDataStudio()` and each module's call are idempotent, and the modules appear (in the
+rail, the banner, the capability chip, the credit line and the front page) in the order the calls were written.
+`AddMarten()` brings the Postgres module's pages over the stores' databases, as part of the Marten module (one tile, one
+rail), so a Marten host does not call `.AddPostgres()`, and the two together are refused. The Marten
+module's database browser shows what else lives in the store's own databases - a job store, a legacy schema - but a
+separate plain database of a Marten application is not listed.
 
-**KStudio for Apache Kafka®** (a preview: its API and screens may change in a minor release; its packages are versioned `<version>-preview.1`) adds a Kafka section to Marten Studio or Postgres Studio: the
-clusters, topics, partitions and consumer groups your application's own Kafka credentials can describe, and, behind
-capabilities that are off by default, a search for the records you need. Call `AddKafkaStudio()` beside
-`AddMartenStudio()` or `AddPostgresStudio()`; there is no separate map call, and the Kafka pages are served under the
-studio's own path, at `/kafka`. It never creates a topic, never commits an offset, and asks your own policies about every
-cluster and topic it reads. Apache Kafka is a trademark of the Apache Software Foundation. KStudio is not affiliated with
-or endorsed by the Apache Software Foundation.
+**The Kafka module for Apache Kafka®** adds a Kafka section to the studio: the clusters, topics, partitions and consumer groups
+your application's own Kafka credentials can describe, and, behind capabilities that are off by default, a search for the
+records you need. Call `.AddKafka()` on the same builder; there is no separate map call, and the Kafka pages are served
+under the studio's own path, at `/studio/kafka`. It never creates a topic, never commits an offset, and asks your own
+policies about every cluster and topic it reads. Apache Kafka is a trademark of the Apache Software Foundation. Data
+Studio is not affiliated with or endorsed by the Apache Software Foundation.
 
-Install it with `dotnet add package KStudio --prerelease` (and `dotnet add package KStudio.Wolverine --prerelease` for a
-Wolverine application's clusters and topics); `KStudio.Core`, the engine, comes with it.
-
-#### KStudio in five lines
+#### The Kafka module in five lines
 
 ```csharp
-builder.Services.AddMartenStudio();                    // or AddPostgresStudio()
-builder.Services.AddKafkaStudio(o =>
-{
-    o.AddCluster("primary", new ClientConfig { BootstrapServers = "…" });
-    o.Topic("orders.v1", t => t.Key(KafkaKeyFormat.Utf8String).Redact(r => r.Header("customer-email")));
-});
+using Confluent.Kafka;
+using DataStudio;
+using DataStudio.Kafka;
+
+builder.Services
+    .AddDataStudio()
+    .AddKafka(kafka =>
+    {
+        kafka.AddCluster("primary", new ClientConfig { BootstrapServers = "…" });
+        kafka.Topic("orders.v1", t => t.Key(KafkaKeyFormat.Utf8String).Redact(r => r.Header("customer-email")));
+    });
 ```
 
-The Kafka pages are at `{studio path}/kafka`: the topics this application's credentials can describe, each topic's
-partitions, watermarks, configuration and consumer-group lag, and the cluster's settings, with every secret shown only as
-"set" or "not set". With `o.Capabilities.SearchRecords = true` and a policy that answers who may use it, **Search** finds
-records by key, header and CloudEvents attribute in a time window, shows exactly what it read and why it stopped, and links
-every record by its offset. With `ReadPayloads` it reads values too, with JSON-path searches and redaction rules; `ExportRecords`
-saves results as JSON Lines or CSV, and `LiveTail` follows topics as records arrive. A cluster marked
-`Profile(KafkaProfile.Production)` gets lower limits and no export or tail. See [docs/kstudio.md](docs/kstudio.md).
+The Kafka pages are at `/studio/kafka`: the topics this application's credentials can describe, each topic's
+partitions, watermarks, configuration and consumer-group lag, and the cluster's settings, with every secret shown only
+as "set" or "not set". With `kafka.Capabilities.SearchRecords = true` and a policy that answers who may use it, **Search**
+finds records by key, header and CloudEvents attribute in a time window, shows exactly what it read and why it stopped,
+and links every record by its offset. With `ReadPayloads` it reads values too, with JSON-path searches and redaction
+rules; `ExportRecords` saves results as JSON Lines or CSV, and `LiveTail` follows topics as records arrive. A cluster
+marked `Profile(KafkaProfile.Production)` gets lower limits and no export or tail. See [docs/kafka.md](docs/kafka.md).
 
-**Upgrade them together.** The assemblies are one program in several files, so `MartenStudio` depends on exactly its
-own `PostgresStudio` (an exact `[x.y.z]` dependency in the nuspec), and `PostgresStudio` on exactly its own `PostgresStudio.Diagnostics`. A
-central `PackageVersion` for either, if your repository has one, must equal `MartenStudio`'s, or be removed. Under
-`CentralPackageTransitivePinningEnabled` a central pin at another version makes NuGet drop the package from the graph
-without a warning, so `AddMartenStudio()` checks all three at startup and throws an `InvalidOperationException` that says
-which version to pin, and `AddPostgresStudio()` checks a newer `PostgresStudio.Diagnostics` or another build of its version
-the same way; a missing or older one fails when `AddPostgresStudio()` is first called, in the loader, with a
-`FileNotFoundException` that names the package and the version to pin.
+**Upgrade them together.** The assemblies are one program in several files: each package depends on exactly its own
+version of the ones below it (an exact `[x.y.z]` dependency in the nuspec), so a central `PackageVersion` for any of them,
+if your repository has one, must equal the others', or be removed. Under `CentralPackageTransitivePinningEnabled` a central
+pin at another version makes NuGet drop the package from the graph without a warning, so each `Add…()` call checks the
+packages beneath it at startup and throws an `InvalidOperationException` that says which version to pin; a missing or
+older one fails when the call is first made, in the loader, with a `FileNotFoundException` that names the package and
+the version to pin.
 
 ## Screenshots
 
@@ -127,25 +150,40 @@ the same way; a missing or older one fails when `AddPostgresStudio()` is first c
 | [![Row detail](https://raw.githubusercontent.com/lahma/marten-studio/main/docs/screenshots/database-row-detail.png)](docs/screenshots/database-row-detail.png) | [![Relationships over tables](https://raw.githubusercontent.com/lahma/marten-studio/main/docs/screenshots/relationships-quartz.png)](docs/screenshots/relationships-quartz.png) |
 | One row: every column, what it points at and what points at it | Relationships over plain tables beside the document types |
 | [![Event flow](https://raw.githubusercontent.com/lahma/marten-studio/main/docs/screenshots/event-flow.png)](docs/screenshots/event-flow.png) | |
-| Events › Event flow (1.2) — which projections and subscriptions read each event type, and what they write | |
+| Events › Event flow — which projections and subscriptions read each event type, and what they write | |
 
 ## Install
 
+Take the packages for the kind of host you have. Target framework: `net10.0`.
+
+| Your application | Install |
+|---|---|
+| Uses Marten | `dotnet add package DataStudio.Marten --prerelease` <!-- beta: remove at 2.0.0 --> |
+| Uses Npgsql with no Marten | `dotnet add package DataStudio.Postgres --prerelease` <!-- beta: remove at 2.0.0 --> |
+| Uses only Kafka | `dotnet add package DataStudio.Kafka --prerelease` <!-- beta: remove at 2.0.0 --> |
+| Uses Marten and Kafka | `dotnet add package DataStudio.Marten --prerelease`, then `dotnet add package DataStudio.Kafka --prerelease` <!-- beta: remove at 2.0.0 --> |
+| Wants only the findings in its own code, with no UI | `dotnet add package DataStudio.Postgres.Diagnostics --prerelease` <!-- beta: remove at 2.0.0 --> |
+
+For a Wolverine application's Kafka clusters and topics, add `dotnet add package DataStudio.Kafka.Wolverine --prerelease` <!-- beta: remove at 2.0.0 -->
+beside `DataStudio.Kafka`; `DataStudio.Kafka.Core`, the engine, comes with `DataStudio.Kafka`.
+
 ```shell
-dotnet add package MartenStudio
+dotnet add package DataStudio.Marten --prerelease   # beta: remove at 2.0.0
 ```
 
-One package reference. The studio brings `Marten` (floor `9.57.0`: the floors follow the latest releases, and
-9.57.0 is the first with the fix for compacting a stream that folds to nothing) and `PostgresStudio` at exactly
-its own version, which brings `Npgsql` (floor `9.0.4`, the one Marten 9.57.0 itself uses) and
-`Microsoft.AspNetCore.App.Internal.Assets` (floor `10.0.12`, three `.js` files and an
-MSBuild target, no runtime assembly), and it takes everything else — Blazor, SignalR, authorization, endpoint
-routing — from the shared framework, so it pins no ASP.NET Core patch onto your application. Target framework:
-`net10.0`. Your application's Npgsql stays the one Marten brings, which is never below Postgres Studio's floor;
-Marten Studio is tested at Marten 9.57.0, the floor, and not on Npgsql 10, which no tested Marten brings.
+One package reference per module. `DataStudio.Marten` brings `Marten` (floor `9.57.0`: the floors follow the latest
+releases, and 9.57.0 is the first with the fix for compacting a stream that folds to nothing) and `DataStudio.Postgres` at
+exactly its own version. That brings `DataStudio.Postgres.Diagnostics`, the engine, and with it `Npgsql` (floor `9.0.4`,
+the one Marten 9.57.0 itself uses), and `DataStudio`, the shell, and with it `Microsoft.AspNetCore.App.Internal.Assets`
+(floor `10.0.12`, three `.js` files and an MSBuild target, no runtime assembly). Everything else (Blazor, SignalR,
+authorization, endpoint routing) comes from the shared framework, so no package pins an ASP.NET Core patch onto your
+application. `DataStudio.Kafka` brings `DataStudio` and `DataStudio.Kafka.Core` (over `Confluent.Kafka`, floor `2.14.0`) and
+nothing that touches a database. Your application's Npgsql stays the one Marten brings, which is never below the Postgres
+module's floor; the Marten module is tested at Marten 9.57.0, the floor, and not on Npgsql 10, which no tested Marten
+brings.
 
 **PostgreSQL 15 to 19** are tested (19 on its release candidate until it is generally available, planned 2026-11-19). 14
-works but reaches its end of life on 2026-11-12 and is untested from 1.1. Below 14 the studio still reads the server, with no
+works but reaches its end of life on 2026-11-12 and is untested. Below 14 the studio still reads the server, with no
 promise. A health check that needs more privilege than the reading role has says "not checked", which grant it needs
 and who can give it on your platform. See [`docs/postgres-versions.md`](docs/postgres-versions.md), and, for Amazon
 Aurora, [`docs/aurora.md`](docs/aurora.md).
@@ -155,17 +193,25 @@ Aurora, [`docs/aurora.md`](docs/aurora.md).
 The minimum is two calls, and a decision about who may open it:
 
 ```csharp
-builder.Services.AddMartenStudio();
+using DataStudio;
+using DataStudio.Marten;
+
+builder.Services
+    .AddDataStudio()
+    .AddMarten();
 
 // ...
 
-app.MapMartenStudio().RequireAuthorization();
+app.MapDataStudio().RequireAuthorization();
 ```
 
-The studio is then at `/marten`, read-only, behind whatever `RequireAuthorization()` means in your
-application. The sample host does the same thing with every option spelled out — this block is compiled
-from [`samples/MartenStudio.Sample/Program.cs`](samples/MartenStudio.Sample/Program.cs), so it cannot
-drift:
+The studio is then at `/studio`, read-only, behind whatever `RequireAuthorization()` means in your application. A host
+adds one call for each module it has, on the same builder, in the order it wants them listed: `.AddMarten(...)`,
+`.AddPostgres(...)` and `.AddKafka(...)` (`AddMarten()` brings the Postgres module's pages over the stores' databases, as
+part of the Marten module, so a Marten host does not add `.AddPostgres()`, and the two together are refused). A host with only Kafka writes `AddDataStudio().AddKafka(...)`,
+and a worker with no UI writes `services.AddPostgresDiagnostics()` and no shell at all. The sample host does the same thing
+with every option spelled out - this block is compiled from
+[`samples/DataStudio.Sample.Marten/Program.cs`](samples/DataStudio.Sample.Marten/Program.cs), so it cannot drift:
 
 <!-- snippet: readme_register -->
 ```csharp
@@ -176,37 +222,43 @@ builder.Services
     .AddAsyncDaemon(sample.NoDaemon ? DaemonMode.Disabled : DaemonMode.Solo)
     .InitializeWith<SampleDataSeeder>();
 
-builder.Services.AddMartenStudio(options =>
-{
-    // Who gets in, and who may change anything: the studio evaluates both against the host's own
-    // authorization, and never authenticates anybody itself.
-    //
-    // --anonymous leaves AuthorizationPolicy unset on purpose. AllowAnonymous() on the mapping does win
-    // over a configured policy - the studio's endpoints carry both and AllowAnonymous is what the
-    // authorization middleware honours - but saying "this policy governs the studio" and then "anyone
-    // may open it" in the same application is two answers to one question, and a demo should show the
-    // one it means.
-    options.AuthorizationPolicy = sample.Anonymous ? null : SamplePolicies.Studio;
-    options.WriteAuthorizationPolicy = SamplePolicies.StudioWrite;
-
-    // Every mutating operation is off until the host says otherwise. `All()` is the one-line, greppable
-    // opt-in; `ReadOnly` overrides it whatever it says.
-    options.Capabilities = sample.ReadOnly ? new MartenStudioCapabilities() : MartenStudioCapabilities.All();
-    options.ReadOnly = sample.ReadOnly;
-
-    // The database browser (Capabilities.BrowseDatabase, part of All()) may also show these schemas: the
-    // Quartz.NET job store and the legacy relational schema the sample seeds beside the store. "*" would
-    // open every schema the studio's role can use - fine for a scratch database, not for a shared one.
-    options.BrowsableSchemas.Add(RelationalDemoSchema.QuartzSchemaName);
-    options.BrowsableSchemas.Add(RelationalDemoSchema.LegacySchemaName);
-
-    // The demo's invoices are conjoined multi-tenant. Naming the tenants here is the cheapest of the
-    // three discovery tiers and the only one that can answer before any events have been written.
-    foreach (string tenantId in SampleStore.TenantIds)
+builder.Services
+    .AddDataStudio(studio =>
     {
-        options.KnownTenantIds.Add(tenantId);
-    }
-});
+        // Who gets in: the shell evaluates it against the host's own authorization, and never authenticates anybody itself.
+        //
+        // --anonymous leaves AuthorizationPolicy unset on purpose. AllowAnonymous() on the mapping does win
+        // over a configured policy - the studio's endpoints carry both and AllowAnonymous is what the
+        // authorization middleware honours - but saying "this policy governs the studio" and then "anyone
+        // may open it" in the same application is two answers to one question, and a demo should show the
+        // one it means.
+        studio.AuthorizationPolicy = sample.Anonymous ? null : SamplePolicies.Studio;
+
+        // The master switch: every module's capabilities are off, whatever they say.
+        studio.ReadOnly = sample.ReadOnly;
+    })
+    .AddMarten(options =>
+    {
+        // Who may change anything: the module evaluates it against the host's own authorization.
+        options.WriteAuthorizationPolicy = SamplePolicies.StudioWrite;
+
+        // Every mutating operation is off until the host says otherwise. `All()` is the one-line, greppable
+        // opt-in; the shell's `ReadOnly` overrides it whatever it says.
+        options.Capabilities = sample.ReadOnly ? new MartenCapabilities() : MartenCapabilities.All();
+
+        // The database browser (Capabilities.BrowseDatabase, part of All()) may also show these schemas: the
+        // Quartz.NET job store and the legacy relational schema the sample seeds beside the store. "*" would
+        // open every schema the studio's role can use - fine for a scratch database, not for a shared one.
+        options.BrowsableSchemas.Add(RelationalDemoSchema.QuartzSchemaName);
+        options.BrowsableSchemas.Add(RelationalDemoSchema.LegacySchemaName);
+
+        // The demo's invoices are conjoined multi-tenant. Naming the tenants here is the cheapest of the
+        // three discovery tiers and the only one that can answer before any events have been written.
+        foreach (string tenantId in SampleStore.TenantIds)
+        {
+            options.KnownTenantIds.Add(tenantId);
+        }
+    });
 ```
 <!-- endSnippet -->
 
@@ -215,8 +267,8 @@ and the mapping:
 <!-- snippet: readme_map -->
 ```csharp
 IEndpointConventionBuilder studio = sample.Path is { Length: > 0 } path
-    ? app.MapMartenStudio(path)
-    : app.MapMartenStudio();
+    ? app.MapDataStudio(path)
+    : app.MapDataStudio();
 
 if (sample.Anonymous)
 {
@@ -231,13 +283,14 @@ else
 ```
 <!-- endSnippet -->
 
-`sample.Anonymous`, `sample.ReadOnly` and `sample.Path` are the demo's own command-line switches; in
-your host they are just values. `AddMartenStudio()` may be called before or after `AddMarten()` — the
-scan that finds your stores runs lazily, on first use, when the container is complete.
 
-`MapMartenStudio("/ops/marten")` mounts the studio somewhere else. The pattern wins over
-`MartenStudioOptions.Path`, and the pages, the static assets, the Blazor circuit and the framework
-script all move with it.
+`sample.Anonymous`, `sample.ReadOnly` and `sample.Path` are the demo's own command-line switches; in your host they are just
+values. `AddDataStudio()` may be called before or after your own `services.AddMarten()`: the scan that finds your stores
+runs lazily, on first use, when the container is complete.
+
+`app.MapDataStudio("/ops")` mounts the studio somewhere else, with each module's pages under a segment of its own
+(`/ops/marten`, `/ops/postgres`, `/ops/kafka`). The pattern wins over `DataStudioOptions.Path`, and the pages, the static
+assets, the Blazor circuit and the framework script all move with it.
 
 ### The opt-in health check
 
@@ -246,15 +299,17 @@ monitoring gets to alert on it. It is opt-in, and this block is compiled from th
 
 <!-- snippet: readme_health -->
 ```csharp
-// Optional, and AddMartenStudio() does not do it for you: the health advisor's configuration and catalog
+// Optional, and AddMarten() does not do it for you: the health advisor's configuration and catalog
 // checks as one ASP.NET Core health check. It reports codes and counts, never a name, and runs the checks at
 // most once per HealthInterval however often the endpoint is probed.
-builder.Services.AddHealthChecks().AddMartenStudio(tags: ["marten"]);
+builder.Services.AddHealthChecks().AddMartenDiagnostics(tags: ["marten"]);
 ```
 <!-- endSnippet -->
 
-Map it the usual way, with `app.MapHealthChecks("/healthz")`. `AddMartenStudio(name, failureStatus, tags,
-timeout)` takes ASP.NET Core's usual arguments (`name` is `marten-studio` unless given). Each run sweeps the
+Map it the usual way, with `app.MapHealthChecks("/healthz")`. `AddMartenDiagnostics(name, failureStatus, tags,
+timeout)` takes ASP.NET Core's usual arguments (`name` is `data-studio-marten` unless given; `AddPostgresDiagnostics(...)`
+on the health-check builder takes the same, names its check `data-studio-postgres` unless given and reads the registered
+data sources). Each run sweeps the
 configuration and catalog checks over every registered store and the databases each one holds, at most 25 a
 run, and reports `failureStatus` (`Unhealthy` unless given) on a Critical finding and `Degraded` on a Warning,
 on a check that failed or ran out of time, and on a store that would not build or list its databases. Its data
@@ -265,64 +320,67 @@ never calls it is unchanged. The details are in [`docs/health.md`](docs/health.m
 
 ## Authorization
 
-There are three layers, and two process-wide switches on top of them. All five are yours to configure;
-the studio authenticates nobody.
+There are three layers, and two kinds of switch on top of them. All of it is yours to configure; the studio authenticates
+nobody.
 
-1. **`AuthorizationPolicy`** — *who gets in*. Applied to every studio endpoint: the pages, the Blazor
-   circuit, the static assets and the forward of your own `_framework` files. `RequireAuthorization()` on the builder
-   returned by `MapMartenStudio()` does the same job, and covers the pages, the circuit and that forward.
-2. **`StoreAuthorizationPolicy`** — *which store, database and tenant*. Resource-based, evaluated
-   against a `MartenStoreResource`, and asked on **every** data call rather than only at the scope
-   selector. Listings are filtered rather than annotated: a tenant you may not see is one you never
-   learn exists.
-3. **`WriteAuthorizationPolicy`** — *each mutating call*, against the same resource with the capability
-   name attached. Falls back to `StoreAuthorizationPolicy` when you configure only one.
+1. **`DataStudioOptions.AuthorizationPolicy`** - *who gets in*. Applied to every studio endpoint, whatever the module: the
+   front page, Activity, every module's pages, the Blazor circuit, the static assets and the forward of your own
+   `_framework` files. `RequireAuthorization()` on the builder `MapDataStudio()` returns does the same job, and covers the
+   pages, the circuit and that forward.
+2. **A module's resource policy** - *which store, database, source, cluster or tenant*. Resource-based, evaluated against the
+   module's own resource and asked on **every** data call rather than only at a scope selector:
+   `MartenOptions.StoreAuthorizationPolicy` against a `MartenStoreResource`, `PostgresOptions.SourceAuthorizationPolicy`
+   against a `PostgresResource` and, for Kafka, `KafkaOptions.ClusterAuthorizationPolicy` against a `KafkaTopicResource`,
+   asked once for each topic. Listings are filtered rather than annotated: a tenant you may not see is one you never learn exists. The
+   three resources are unrelated on purpose, and no module falls back to another's policy: a handler written for one is
+   never handed another's resource.
+3. **A module's write policy** - *each mutating call*, against the same resource with the capability name attached:
+   `WriteAuthorizationPolicy` on the Marten and Postgres modules (it falls back to the module's resource policy when you
+   configure only one), and `KafkaOptions.CapabilityAuthorizationPolicy` on the Kafka module (it falls back to the cluster
+   policy).
 
-On top: **`ReadOnly`** turns every capability off whatever `Capabilities` says, and **`Capabilities`**
-decides which mutating operations exist at all.
+On top: **`ReadOnly`** (two switches, below) turns capabilities off whatever `Capabilities` says, and **`Capabilities`**, a
+module's own, decides which mutating operations exist at all.
 
 ### The startup guard
 
-A mapping that answers none of this refuses to start, before the web host binds a listener:
+A mapping that answers none of this refuses to start, before the web host binds a listener. The message says what every
+module you registered would expose, once each; for a Marten host it reads:
 
-> Marten Studio is mapped with no authorization. Its pages can read and edit every document in every
-> Marten store in this process, archive event streams, control the projection daemon, apply schema
-> changes and run SQL, so Marten Studio refuses to start rather than serve that by accident. Say which
-> you meant:
+> Data Studio is mapped with no authorization. Its pages carry no authorization, so every document, event stream and
+> schema in this process is readable by anyone who can reach this URL. Data Studio refuses to start rather than serve that
+> by accident. Say which you meant:
 >
-> - `app.MapMartenStudio().RequireAuthorization()` authorizes its pages and its Blazor circuit;
-> - `services.AddMartenStudio(options => options.AuthorizationPolicy = "...")` authorizes those and the
->   static assets with them;
-> - `app.MapMartenStudio().AllowAnonymous()` serves it to anyone, deliberately.
+> - `app.MapDataStudio().RequireAuthorization()` authorizes its pages and its Blazor circuit;
+> - `services.AddDataStudio(options => options.AuthorizationPolicy = "...")` authorizes those and the static assets with
+>   them;
+> - `app.MapDataStudio().AllowAnonymous()` serves it to anyone, deliberately.
 >
-> A non-null `AuthorizationOptions.FallbackPolicy` satisfies this too, since it covers every endpoint
-> that states nothing.
+> A non-null `AuthorizationOptions.FallbackPolicy` satisfies this too, since it covers every endpoint that states nothing.
 
 "I forgot to add `RequireAuthorization`" must not be a silent state, so it is a startup failure instead.
 
 ### What protects the circuit
 
-Both `MartenStudioOptions.AuthorizationPolicy` and `RequireAuthorization()` on the returned builder
-cover the Blazor circuit as well as the pages — the builder holds the studio's page endpoints *and* its
-`/_blazor` endpoints, so a statement about the studio is a statement about both. That matters: the
-circuit is the dangerous half, because it is the half that runs components. The studio stamps no
-`AllowAnonymous` of its own on `/_blazor`.
+Both `DataStudioOptions.AuthorizationPolicy` and `RequireAuthorization()` on the returned builder cover the Blazor circuit as
+well as the pages - the builder holds the studio's page endpoints *and* its `/_blazor` endpoints, so a statement about the
+studio is a statement about both. That matters: the circuit is the dangerous half, because it is the half that runs
+components. The studio stamps no `AllowAnonymous` of its own on `/_blazor`.
 
-The static assets under `_content/PostgresStudio/` (both studios' shell is Postgres Studio's) are package content
-— CSS and a little JS. With a
-studio policy configured they carry it too; without one they opt out explicitly, so an application with
-a fail-closed `FallbackPolicy` can still load the stylesheet.
+The static assets under `_content/DataStudio/` are package content - CSS and a little JS. With a studio policy configured
+they carry it too; without one they opt out explicitly, so an application with a fail-closed `FallbackPolicy` can still
+load the stylesheet.
 
-The `{Path}/_framework/{**file}` forward is **not** among them: it serves files that are *yours* (the host's
-`_framework` tree, for example the .NET 11 SDK's hot-reload initializer), so it can never opt out. With an
-`AuthorizationPolicy` it carries the policy; without one it is part of what `MapMartenStudio()` returns, so your
-`RequireAuthorization()` or `AllowAnonymous()` on the mapping and your `FallbackPolicy` govern it exactly as they govern
-the page that imports those files. It also never serves more than your own root would: a root endpoint that refuses the
-visitor, or does not answer GET, is a 404 under the mount.
+The `{Path}/_framework/{**file}` forward is **not** among them: it serves files that are *yours* (the host's `_framework`
+tree, for example the .NET 11 SDK's hot-reload initializer), so it can never opt out. With an `AuthorizationPolicy` it
+carries the policy; without one it is part of what `MapDataStudio()` returns, so your `RequireAuthorization()` or
+`AllowAnonymous()` on the mapping and your `FallbackPolicy` govern it exactly as they govern the page that imports those
+files. It also never serves more than your own root would: a root endpoint that refuses the visitor, or does not answer GET,
+is a 404 under the mount.
 
 ### Resource-based authorization
 
-`MartenStoreResource` is what the two store policies are evaluated against:
+`MartenStoreResource` is what the Marten module's two policies are evaluated against:
 
 ```csharp
 public sealed record MartenStoreResource(
@@ -332,19 +390,21 @@ public sealed record MartenStoreResource(
     string? Capability);        // "EditDocuments", "RunSql", ... - or null for a read
 ```
 
-One handler answers for the scope selector, the page frame and every data call. This example is
-*illustrative* — it is not compiled from the sample, which uses plain claim policies:
+One handler answers for the scope selector, the page frame and every data call. The Postgres module's
+`PostgresResource(SourceName, DatabaseIdentifier, Capability)` has no tenant, and `KafkaTopicResource(Cluster, TenantId,
+Topic, Capability)` names a topic. This example is *illustrative* - it is not compiled from the sample, which uses plain
+claim policies:
 
 ```csharp
 // Illustrative, not compiled.
-public sealed class MartenStudioRequirement : IAuthorizationRequirement;
+public sealed class MartenStoreRequirement : IAuthorizationRequirement;
 
-public sealed class MartenStudioHandler
-    : AuthorizationHandler<MartenStudioRequirement, MartenStoreResource>
+public sealed class MartenStoreHandler
+    : AuthorizationHandler<MartenStoreRequirement, MartenStoreResource>
 {
     protected override Task HandleRequirementAsync(
         AuthorizationHandlerContext context,
-        MartenStudioRequirement requirement,
+        MartenStoreRequirement requirement,
         MartenStoreResource resource)
     {
         // Reads: the tenant has to be one this user owns - and a resource with no tenant is every
@@ -373,35 +433,40 @@ public sealed class MartenStudioHandler
 }
 ```
 
-A `null` tenant is not "no tenant to check" but every tenant at once — the all-tenants view, and every
-`BrowseDatabase` read, every `ViewDatabaseActivity` read, every SQL console run and every operation that
-reaches a whole shared database (a dead-letter rewind, a progression correction, a rebuild, a schema
-apply), which are always asked with `TenantId = null` because nothing narrows them to a tenant — so a
-handler that let it through for everybody would hand a user scoped to one tenant all of them.
+A `null` tenant is not "no tenant to check" but every tenant at once - the all-tenants view, and every `BrowseDatabase`
+read, every `ViewDatabaseActivity` read, every SQL console run and every operation that reaches a whole shared database (a
+dead-letter rewind, a progression correction, a rebuild, a schema apply), which are always asked with `TenantId = null`
+because nothing narrows them to a tenant - so a handler that let it through for everybody would hand a user scoped to one
+tenant all of them.
 
 Register it the usual way and name the policy:
 
 ```csharp
 // Illustrative, not compiled.
-builder.Services.AddSingleton<IAuthorizationHandler, MartenStudioHandler>();
+builder.Services.AddSingleton<IAuthorizationHandler, MartenStoreHandler>();
 builder.Services.AddAuthorizationBuilder()
-    .AddPolicy("MartenStudioStore", policy => policy.AddRequirements(new MartenStudioRequirement()));
+    .AddPolicy("MartenStore", policy => policy.AddRequirements(new MartenStoreRequirement()));
 
-builder.Services.AddMartenStudio(options =>
-{
-    options.AuthorizationPolicy = "MartenStudio";
-    options.StoreAuthorizationPolicy = "MartenStudioStore";
-    options.WriteAuthorizationPolicy = "MartenStudioStore";
-});
+builder.Services
+    .AddDataStudio(studio => studio.AuthorizationPolicy = "DataStudio")
+    .AddMarten(marten =>
+    {
+        marten.StoreAuthorizationPolicy = "MartenStore";
+        marten.WriteAuthorizationPolicy = "MartenStore";
+    });
 ```
 
-With no store policy configured, nothing is asked and everything passes — which is what keeps an
-application that never set the option exactly as it was.
+With no resource policy configured, nothing is asked and everything passes - which is what keeps an application that never
+set the option exactly as it was.
 
 ## Capabilities
 
-Fourteen booleans, **all `false` by default** and all turned on by `MartenStudioCapabilities.All()`. A freshly
-mapped studio is a read-only browser of Marten's own data.
+Every module has capabilities of its own, **all `false` by default**: a freshly mapped studio is a read-only browser. The
+Marten module has fourteen, all turned on by `MartenCapabilities.All()`. The Postgres module has four, all reads authorized
+like writes - `RunSql`, `BrowseDatabase`, `ViewDefinitions` and `ViewDatabaseActivity`, which mean what the table below says
+of them - and `PostgresCapabilities.All()` turns them on. The Kafka module has four (`SearchRecords`, `ReadPayloads`,
+`ExportRecords` and `LiveTail`), turned on by `KafkaCapabilities.All()` and described in [docs/kafka.md](docs/kafka.md).
+The Marten module's:
 
 | Capability | What it allows |
 |---|---|
@@ -421,56 +486,74 @@ mapped studio is a read-only browser of Marten's own data.
 | `RunLinqQueries` | Run LINQ mode on the Query page: a typed predicate parsed in this process and applied to Marten's own `Query<T>()`, or to the event log through `QueryRawEvents()`. A read, authorized like a write — with the tenant for a conjoined collection (or conjoined events), with `TenantId = null` for one not divided by tenant and for the plan. It also governs What if? beside LINQ mode's and the Documents list's index advice. Off by default, in `All()` — see [`docs/linq-mode.md`](docs/linq-mode.md) |
 
 ```csharp
-options.Capabilities = MartenStudioCapabilities.All();   // everything: the one-line, greppable opt-in
-options.Capabilities.RebuildProjections = true;          // or one switch at a time, from all-off
-options.ReadOnly = true;                                 // and this overrides whichever you wrote
+// Inside .AddMarten(marten => { ... }) and .AddDataStudio(studio => { ... }):
+marten.Capabilities = MartenCapabilities.All();   // everything: the one-line, greppable opt-in
+marten.Capabilities.RebuildProjections = true;    // or one switch at a time, from all-off
+marten.ReadOnly = true;                           // turns the Marten module's capabilities off, whichever you wrote
+studio.ReadOnly = true;                           // and this turns every module's off
 ```
+
+There are two read-only switches. **`DataStudioOptions.ReadOnly`** turns every module's capabilities off. A module's own
+(`MartenOptions.ReadOnly`, `PostgresOptions.ReadOnly`) turns off that module's alone, so it never turns the Kafka module's
+capabilities off; Kafka has no switch of its own and obeys the shell's. A host that relied on a module's `ReadOnly` to keep
+Kafka read-only sets `DataStudioOptions.ReadOnly` too: otherwise Kafka's capabilities, if turned on, are on, and with
+neither Kafka policy set the application refuses to start.
 
 Every disabled control says the exact property you would set, spelled the way you would write it:
 
-> Editing documents is not enabled. Set `MartenStudioOptions.Capabilities.EditDocuments` to `true`, or
-> `MartenStudioOptions.Capabilities = MartenStudioCapabilities.All()` to enable all of them.
+> Editing documents is not enabled. Set `MartenOptions.Capabilities.EditDocuments` to `true`, or
+> `MartenOptions.Capabilities = MartenCapabilities.All()` to enable all of them.
 
-and with the master switch on:
+and with a read-only switch on, the one that is on:
 
-> `MartenStudioOptions.ReadOnly` is `true`, which turns every capability off: the mutating operations,
+> `MartenOptions.ReadOnly` is `true`, which turns every capability of the Marten pages off: the mutating operations,
 > and the reads authorized like writes (`RunSql`, `BrowseDatabase`, `ViewDatabaseActivity` and
 > `RunLinqQueries`).
 
-Hiding a button is a convenience. The refusal itself lives in the service layer, where the operation
-does, because a Blazor circuit is a long-lived object a client can drive — and every refusal is written
-to the audit log just like a success.
+or, for the shell's, "`DataStudioOptions.ReadOnly` is `true`, which turns every capability off". The capability chip in the
+header names the switch that is on, and each module's group in it.
+
+Hiding a button is a convenience. The refusal itself lives in the service layer, where the operation does, because a Blazor
+circuit is a long-lived object a client can drive - and every refusal is written to the audit log just like a success.
 
 ## Options
 
-Every property of `MartenStudioOptions`. Validation runs at startup: a value outside the range given here
-fails the host with a message that names the option.
+The shell's are `DataStudioOptions`, set in `AddDataStudio(studio => ...)`:
 
 | Option | Default | |
 |---|---|---|
-| `Path` | `/marten` | Where the studio is mounted. A plain rooted URL path. `MapMartenStudio(pattern)` overrides it. |
-| `Title` | `Marten Studio` | Browser tab and sidebar heading. |
+| `Path` | `/studio` | Where the studio is mounted. A plain rooted URL path. `MapDataStudio(pattern)` overrides it. Each module's pages are under its own segment below it. |
+| `Title` | `Data Studio` | Browser tab and sidebar heading. |
 | `ApplicationPath` | `null` | Where the header's "Back to application" link goes; no link when `null`. A path that starts with a single `/` (`/`, `/app`; a host behind `UsePathBase` includes its base, `/myapp/`) or an absolute `http` or `https` URL without user information, used exactly as written and never re-rooted under the studio's mount path. Anything else fails startup. |
-| `AuthorizationPolicy` | `null` | Policy applied to every studio endpoint — pages, circuit and static assets. |
+| `AuthorizationPolicy` | `null` | Policy applied to every studio endpoint - the front page, Activity, every module's pages, the circuit and the static assets. |
+| `ReadOnly` | `false` | Master switch: every module's capabilities off, mutating controls not rendered, services refuse. A module has a switch of its own that turns only its own capabilities off. |
+| `RefreshInterval` | 5 seconds | How often live pages poll. Paused while the tab is hidden. 1 second … 5 minutes. |
+
+The Marten module's are every property of `MartenOptions`, set in `.AddMarten(marten => ...)`; the Postgres module's
+(`PostgresOptions`) and the Kafka module's (`KafkaOptions`) are in [docs/postgres.md](docs/postgres.md) and
+[docs/kafka.md](docs/kafka.md). Validation runs at startup: a value outside the range given here fails the host with a
+message that names the option.
+
+| Option | Default | |
+|---|---|---|
 | `StoreAuthorizationPolicy` | `null` | Policy evaluated against `MartenStoreResource` before a store, database or tenant is listed, framed or read. |
 | `WriteAuthorizationPolicy` | `null` | Policy evaluated against `MartenStoreResource` with the capability named, before every mutation. Falls back to `StoreAuthorizationPolicy`. |
-| `ReadOnly` | `false` | Master switch: every capability off, mutating controls not rendered, services refuse. |
+| `ReadOnly` | `false` | Turns this module's capabilities off, whatever `Capabilities` says: mutating controls not rendered, services refuse. `DataStudioOptions.ReadOnly` does the same for every module; this one leaves the others alone. |
 | `Capabilities` | all off | Which mutating operations, and which reads authorized like writes (`RunSql`, `BrowseDatabase`, `ViewDatabaseActivity`, `RunLinqQueries`), are enabled. |
 | `DefaultPageSize` | `50` | Rows per page when a list is first shown. 1 … `MaxPageSize`. |
 | `MaxPageSize` | `500` | The largest page a user may pick. 1 … 5000. |
 | `QueryTimeout` | 30 seconds | How long a studio query may run. It is a server-side `statement_timeout` where the studio owns a transaction — the SQL console, the Marten `where` clause, the recent-documents scan — and Npgsql's client-side `CommandTimeout` everywhere else. 1 second … 10 minutes. |
 | `MaxStudioConnections` | 2 | The most connections the studio holds at a time of each pool it reads through - each of the application's own data sources. A read that finds all of them in use waits for one, at most `QueryTimeout`, and then says so; a nested read never waits for its own caller. The cap is never above the data source's own `Maximum Pool Size` (the smaller of the two, when `Pooling` is on), so a host never copies a pool's size into this option; a data source the connection history samples through keeps one more connection for it outside the cap, so a dedicated pool for both needs one more. The Health page's studio-cost line shows the cap in force and how many are in use, and C01 says how many of a saturated pool's connections were the studio's. 1 … 100. |
-| `StudioApplicationName` | derived | The `application_name` the studio's sessions carry in `pg_stat_activity`, Database › Sessions and an external monitor: by default the application's own `Application Name` with the studio's after it in parentheses (`orders-api (Marten Studio)`), or the studio's alone. Set for each of the studio's read-only transactions only (`set_config(…, true)`), so a pooled connection goes back to the application as it came; `""` leaves the application's own name. Printable ASCII, at most 63 characters. |
-| `MaxInlineDocumentBytes` | 512 KiB | Documents larger than this are not fetched into list views and show as raw text in the detail view. 1 byte … 64 MiB. |
+| `StudioApplicationName` | derived | The `application_name` the studio's sessions carry in `pg_stat_activity`, Database › Sessions and an external monitor: by default the application's own `Application Name` with the studio's after it in parentheses (`orders-api (Data Studio)`), or the studio's alone. Set for each of the studio's read-only transactions only (`set_config(…, true)`), so a pooled connection goes back to the application as it came; `""` leaves the application's own name. Printable ASCII, at most 63 characters. |
+| `MaxInlineValueBytes` | 512 KiB | Documents larger than this are not fetched into list views and show as raw text in the detail view. 1 byte … 64 MiB. |
 | `MaxSqlConsoleRows` | `500` | Row cap for the SQL console; the reader stops there rather than rewriting your statement. 1 … 10 000. |
 | `SqlConsoleRole` | `null` | A Postgres role the SQL console **and the Marten `where` clause** switch to with `SET LOCAL ROLE` inside their read-only transaction — as do LINQ mode, the database browser and the health advisor's reads, except its statement checks, which read `pg_stat_statements` as the store's own role. Must be a plain identifier — and must be able to `select` from the document tables, or the Query page answers `42501`. |
 | `ExactCountThreshold` | `100000` | Above this estimated row count, collection counts stay `pg_class.reltuples` estimates, prefixed `~`, instead of becoming `count(*)` — and asking for an exact count is **refused**, with the reason on the badge, rather than being paid for. A conjoined collection under a tenant scope is the exception: that count is `where tenant_id = …`, which Marten makes index-backed by putting `tenant_id` first in the primary key, so it is always counted exactly and this threshold never applies to it. |
-| `RefreshInterval` | 5 seconds | How often live pages poll. Paused while the tab is hidden. 1 second … 5 minutes. |
-| `HealthInterval` | 60 seconds | How often the health advisor re-checks a database while its Health page or the Overview is open. One check serves every open tab and circuit for that long, and nothing is checked while no page is open and nothing probes the opt-in health check, if you registered it (whose runs follow the same interval). 15 seconds … 1 hour, and never shorter than `RefreshInterval`: a longer `RefreshInterval` wins. The deeper checks are cached for five minutes whatever it says. |
-| `AcceptedChecks` | empty | Health checks the application accepts, by code with a reason (`options.AcceptedChecks["K05"] = "..."`): they still run and are shown, as accepted, but count nowhere - not in the Health page's state, the badge, the banners or the opt-in health check's status. Startup refuses an unknown code and a blank or over-long reason; an entry for a retired code (K10, retired in 1.1) is accepted and ignored, with one `Information` line (event 9490) saying it can be removed. Read once, when the options are validated at startup (1.2). See [docs/health.md](docs/health.md#accepting-a-check). |
+| `HealthInterval` | 60 seconds | How often the health advisor re-checks a database while its Health page or the Overview is open. One check serves every open tab and circuit for that long, and nothing is checked while no page is open and nothing probes the opt-in health check, if you registered it (whose runs follow the same interval). 15 seconds … 1 hour, and never shorter than `DataStudioOptions.RefreshInterval`: a longer `RefreshInterval` wins. The deeper checks are cached for five minutes whatever it says. |
+| `AcceptedChecks` | empty | Health checks the application accepts, by code with a reason (`options.AcceptedChecks["K05"] = "..."`): they still run and are shown, as accepted, but count nowhere - not in the Health page's state, the badge, the banners or the opt-in health check's status. Startup refuses an unknown code and a blank or over-long reason; an entry for a retired code (K10) is accepted and ignored, with one `Information` line (event 9490) saying it can be removed. Read once, when the options are validated at startup. See [docs/health.md](docs/health.md#accepting-a-check). |
 | `RebuildShardTimeout` | 1 hour | The per-shard replay budget handed to Marten's rebuild. At least 1 minute — see the warning below. |
 | `ProjectionThresholds` | empty | How far behind the high-water mark a projection may fall, in events, before the studio colours it amber and red, by projection name: `o.ProjectionThresholds["Trips"] = new(WarningBehind: 5_000, CriticalBehind: 50_000);` (`ProjectionLagThreshold`). It colours the Projections page and the Overview, draws the lines on a shard's chart and is what D04 judges a lag against, and it wins over numbers a host wrote into a progression row's `warning_behind_threshold` and `critical_behind_threshold` (Marten writes neither) and over the studio's own 1,000 and 100,000. It applies to **every store** by projection name alone; a name no projection of a store has is not an error, the Projections page's *Thresholds that apply* says so. Names are compared exactly. Startup refuses an entry whose numbers are not above zero or whose `CriticalBehind` is below its `WarningBehind`, naming the projection. |
-| `IsDocumentTypeVisible` | `null` | `Func<Type, bool>` filter over the registered document types, applied in the data layer and not only in navigation. Marten's own `DeadLetterEvent` is asked too, and hiding it hides the dead-letter screen, its navigation entry and Overview tile, Discard and Rewind, and the advisor's D06 — so a delegate written as an allow-list of your own types hides the dead letters unless it answers `true` for `typeof(DeadLetterEvent)`. A delegate that throws for it is read as hiding it. It must answer from the type alone and the same way every time: since 1.2 a shape check's result and the Event flow's model are shared between visitors who resolve the same scope, so it hides types, not visitors (keep a visitor from a type with `StoreAuthorizationPolicy`; see [docs/security.md](docs/security.md#what-isdocumenttypevisible-hides)). |
+| `IsDocumentTypeVisible` | `null` | `Func<Type, bool>` filter over the registered document types, applied in the data layer and not only in navigation. Marten's own `DeadLetterEvent` is asked too, and hiding it hides the dead-letter screen, its navigation entry and Overview tile, Discard and Rewind, and the advisor's D06 — so a delegate written as an allow-list of your own types hides the dead letters unless it answers `true` for `typeof(DeadLetterEvent)`. A delegate that throws for it is read as hiding it. It must answer from the type alone and the same way every time: a shape check's result and the Event flow's model are shared between visitors who resolve the same scope, so it hides types, not visitors (keep a visitor from a type with `StoreAuthorizationPolicy`; see [docs/security.md](docs/security.md#what-isdocumenttypevisible-hides)). |
 | `IncludeAncillaryStores` | `true` | Whether stores registered with `AddMartenStore<T>()` appear beside the default `IDocumentStore`. |
 | `KnownTenantIds` | empty | Tenant ids to offer in the selector. When non-empty, discovery is skipped. |
 | `DiscoverTenantIds` | `true` | When `KnownTenantIds` is empty, whether to discover tenants from Marten's descriptors and then from a bounded query. |
@@ -483,106 +566,43 @@ fails the host with a message that names the option.
 
 ## Screens
 
+Each module's pages are under a segment of their own below the mount: `/studio/marten/…`, `/studio/postgres/…` and
+`/studio/kafka/…`. The shell has two of its own, the front page and Activity. A 404 is what an address that names none of
+them gets: there are no aliases for another spelling. Below, the shell's screens come first, then the Marten module's, then
+the Postgres module's (which a Marten host shows over the databases of its stores, and says so where the pages differ), and
+then the Kafka module's.
+
+### The shell
+
+**Front page** (`/studio`) - one tile per module, in the order the host added them, each with the module's name, a sentence
+and a link to its home; with one module there is nothing to choose, and the address opens that module's home instead. It is
+authorized by `DataStudioOptions.AuthorizationPolicy` like every other page and reads nothing: a tile carries no count.
+
+**Activity** (`/studio/activity`) - the last 500 actions taken through the studio in this process, from every module,
+newest first, with user, scope, action, target, outcome, capability and message. It is in memory and goes away with the
+process. The durable record is your own `ILogger`, under the studio's reserved event ids: 9200-9299, 9300-9329 and
+9400-9519 for the database modules and 9600-9699 for the Kafka module.
+
+### The Marten module
+
 **Overview** — the selected store's card (with two or more stores, a line linking to Stores): databases, document
 types, event types, the PostgreSQL version, tenancy, stream identity, event append mode and the schemas in play. A store
 that will not build gets its own error region rather than blanking the page. A Health tile and the three worst findings
 of the selected database sit beside the store card, and one line, "Connection: TLS verified · pool 100 · 2 things worth a
 look", links to Database › Connection.
 
-**Stores** (`/marten/stores`, 1.2, shown when you may see two or more stores) — every store you may see: whether it
+**Stores** (`/studio/marten/stores`, shown when you may see two or more stores) — every store you may see: whether it
 builds and why not, its tenancy in words, its document types and event store, whether this process hosts its daemon, and
 each database with a health chip from the last sweep. The page never starts a sweep by being opened; Check runs the one
 a database's Overview would. A link to another store, database or tenant that you click moves the studio to it, and so
 does Back or Forward to such an address when your own listings carry it; Back or Forward to an address that names only
 part of the scope on screen rewrites the address to the scope on screen.
 
-**Tenants** (`/marten/tenants`, 1.2, shown for a store with conjoined data) — the tenants you may address, 25 a page:
+**Tenants** (`/studio/marten/tenants`, shown for a store with conjoined data) — the tenants you may address, 25 a page:
 where each lives (its own database, its own partition, or shared tables), estimated documents, events and streams from
 the catalog's statistics (never a `count(*)`), its last event where an index finds it, and its projection progress where
 Marten keeps progress per tenant. Estimates and last events compare tenants, so they need `ViewDatabaseActivity`, as
 T18 does.
-
-**Health** — the health advisor, at `/marten/health` (the long form is
-[`docs/health.md`](docs/health.md), and every code, its variants and what its subject names are in
-[`docs/health/codes.md`](docs/health/codes.md)): checks that read Marten's configuration and the database and say what
-is wrong, how sure they are, and which `StoreOptions` line would change it — for a table the store declares a remedy
-is never DDL, and one that needs a newer Marten says so. The table checks judge every table in the store's schemas,
-and in the schemas `BrowsableSchemas` admits while `Capabilities.BrowseDatabase` is on, so a job store or a legacy
-schema beside the store is judged too: its remedies are migration SQL, shown "for your own migrations - the studio
-never runs this", and a recognised library's table is left out of the index-design rules. A finding about a table
-outside the store's own schemas is shown only to a visitor the database browser's gate admits to that schema, and the
-navigation badge never counts it. They are grouped by area: the daemon and the high-water mark (D),
-events (E), tables and indexes (T), connections and sessions (C), replication (R), the server (S) and the
-configuration (K). T20 says when a range-partitioned table is running out of partitions - a time range by its clock,
-a `smallint`, `integer` or `bigint` range by where its rows stop - with the remedy each kind of range takes (for a
-static Marten `ByRange()`, its `.AddRange(...)` line); T18 says when one tenant holds more than half of a large
-conjoined table, and names it only to a visitor past the activity gate and that tenant's store policy; C12 names the
-head of a blocking chain that sits idle in its transaction or has kept others waiting for minutes. Each finding
-carries its evidence and when it was measured, Show SQL, a caveat such as "counters since `stats_reset` at 09:14", a
-link to its section of the docs, and "mute in this browser". A
-sweep runs only while a Health page or the Overview is open, or when the [opt-in health
-check](#the-opt-in-health-check) is probed, at most once per `HealthInterval` per database however many
-tabs watch, in the studio's read-only transaction, without DDL and without a lock beyond what a read
-takes; **Run deeper checks** reads a bounded slice of the data, and **Run statement checks** reads
-`pg_stat_statements` behind `ViewDatabaseActivity`. A database-wide number needs the store policy for the
-database as a whole, and anything that names a session, a role, an address, a statement or a tenant needs
-`ViewDatabaseActivity`. The navigation entry carries a severity badge, a toast says when a Critical
-finding appears, and findings also show where they belong: D01 and D02 as Projections banners, index marks
-on Schema › Indexes, E05 on Event types. A finding may carry an action that reads more when you press it, for you
-alone and audited: E06's lists the 20 longest streams and the aggregate each belongs to. **Database › Sessions** (`/marten/database/sessions`) lists this
-database's sessions, locks and prepared transactions under the same two gates, labels a lock by the
-store's own table it belongs to, counts sessions by application beside the server's connection budget, and has no
-cancel or terminate button. Its **Blocking** tab (`?view=blocking`) draws who holds up whom as trees - each chain's
-head, then every session waiting on it - with the head's `pg_terminate_backend` (and `pg_cancel_backend`, when it runs
-a statement) as text to copy for whoever may run it, which the studio never runs; on PostgreSQL 19 it also shows the
-server's lock waits from `pg_stat_lock`. Its **Holders** tab (`?view=holders`) groups the whole server's client sessions - every
-database on it, not only this one - by database, application, role and client address, against the connection budget C03
-judges: the counts per database for anybody the store policy passes (a database named only where that policy admits them to
-it, the rest together as "Other databases"), the applications, roles and addresses, and every database's name, behind the
-activity gate. C13 (an application holding a tenth of the client limit idle while the server is 80% used) and C14 (connections
-that set no `Application Name`, Info) are the checks over it. With `AddPostgresConnectionHistory()` (1.0) Holders also says what
-the server's connections peaked at before now, and when - each application's own peak behind the activity gate - from a
-sample a minute that the host keeps where it likes ([docs/diagnostics.md](docs/diagnostics.md#connection-history)). The Health page's **Snapshot** menu views, copies or downloads what your
-pages show of the database as JSON or as a Markdown report for a ticket, built from your own view of each page, and
-compares an earlier snapshot file with now.
-
-**Statements** (Operations, `/marten/statements`) — where the database's time goes, statement by statement, grouped
-by Marten operation and document type, behind `ViewDatabaseActivity`. A statement's **Plan** link (`?queryid=`) opens
-its drill-in: the text, the counters and its generic plan, planned as `SqlConsoleRole` with its plan insights and What
-if?, and audited. A write, a locking read, a cut text or one withheld from you gets no plan and says why, and a plan
-that reads a schema you may not see is not shown. **Index advisor** (1.2) plans the 20 statements with the most execution
-time that you may see, imagines each index their plans suggest with hypopg, one at a time, and ranks them by planned cost
-saved times calls, with the `StoreOptions` line (Marten document tables) or `CREATE INDEX CONCURRENTLY` as the remedy; it
-plans on a press, behind the page's own gate, creates nothing and applies nothing. Health's T01 and T15 cards offer it,
-narrowed to the table, and a what-if of the foreign key's own lookup. **Mark** (1.2) counts from now, in this tab: each statement's change
-since the mark instead of the advisor's window, kept in this tab's connection only.
-
-**Maintenance** (Operations, `/marten/maintenance`) — what autovacuum will do next and why: each table against the
-triggers autovacuum itself uses, what is running now, the workers, the freeze forecast and the vacuum horizon, with an
-on-demand bloat measure; **Mark** (1.2) counts each table's vacuums and analyzes from now, in this tab; see
-[`docs/health/tables.md`](docs/health/tables.md#the-maintenance-page).
-
-**Storage** (Operations, `/marten/storage`) — how big the database is, how fast it grows and which tables hold the
-space, from the catalog's own page counts (no size function over a table, nothing locked); the exact size of one table
-is on its page in the database browser. **Mark** (1.2) counts each table's growth and rows written from now, in
-this tab.
-
-**Replication** (Operations, `/marten/replication`) — slots, the standbys streaming from the server or a standby's own
-replay, the archiver, WAL volume, checkpoints, I/O by backend type and tablespaces; names behind
-`ViewDatabaseActivity`.
-
-**Server** (System, `/marten/server`) — the server's version, platform and uptime, what the studio's reading role can
-see grant by grant, a curated view of its settings, the extensions it uses and what stands in their way, and the
-security posture.
-
-> **Seeing replication lag.** On a primary, `pg_stat_replication` shows a standby's positions and lag only to a role
-> with `pg_read_all_stats`, which `pg_monitor` includes. Any other role sees a sender's process id, role and application
-> name. R03 and the Replication page then say "not checked", naming the grant and who can give it on your platform: a
-> superuser when self-hosted, the master user on RDS and Aurora, the server admin on Azure, a `cloudsqlsuperuser` member
-> on Cloud SQL. `pg_monitor` also lets the archiver's evidence count the WAL files waiting in `archive_status`, and the
-> size of `pg_wal`. Without any grant, a data source that reaches a standby (a multi-host data source) measures lag
-> there instead: what the standby has received less what it has replayed is exact and readable by any role, and so is
-> whether replay is paused. A physical slot's `restart_lsn` is no substitute: it tracks flush, not replay.
 
 **Documents** — a collections rail with per-collection counts (estimates, prefixed `~`; below
 `ExactCountThreshold` the `=` beside a collection pays for an exact `count(*)`, and above it the studio
@@ -601,7 +621,7 @@ refused, naming both, and the dialog also shows what Marten's own preview of the
 (`PreviewDocumentJsonAsync`) would keep, and holds a save Marten keeps differently or refuses. An **Order** control
 lists a collection newest first by last modified, created or revision, where its table has the column. With
 `DeleteDocuments` you get delete (soft where
-the mapping says soft, hard otherwise), undelete, and a bulk delete over the selection. **Check shapes** (1.2) asks
+the mapping says soft, hard otherwise), undelete, and a bulk delete over the selection. **Check shapes** asks
 whether what is stored still fits the type this build has. It reads a sample of the collection in scope (all of it up
 to 200 documents), loads each document as Marten would, writes it back in memory, and lists what does not fit:
 documents that cannot be loaded, members the type no longer declares and the next save would drop, values that change
@@ -609,113 +629,6 @@ or come back empty, and members the stored documents never had. Each line has a 
 Nothing is written, and the result shows member names and counts, never values. On a conjoined-tenanted collection
 with no tenant selected, only the lowest and highest keys are read, in the primary key's own order; choose a tenant
 for a spread sample.
-
-**Database** — everything else in the store's Postgres database, for a host that keeps a Quartz.NET job
-store, a legacy schema or another library's tables beside Marten. A schema rail, and kind tabs for
-tables, views, functions, triggers, sequences and types; Marten's own objects are quieter, sorted last and
-linked to where their data is really read, and a Quartz.NET, Wolverine, EF Core, Hangfire or Flyway object
-is hinted by name. Each object has a detail page — columns, keys and indexes, foreign keys both ways,
-triggers, a view's query, and its neighbourhood in the relationships diagram — and a table, view or
-materialized view that is not Marten's has a **Rows** tab: a `col = value` / `col ~ text` / `col is:null`
-filter with an index verdict (and "Run anyway" before an unindexed read of a large table), keyset paging
-over composite keys, typed and sortable headers, JSON and `bytea` cells opening in the viewer, a "≈ date"
-hint under `bigint` columns holding .NET ticks or epoch times, and row detail that follows foreign keys
-both ways. The structure of the store's own schemas is shown to every visitor, as the Schema screen always
-did; everything else — other schemas, definitions of what Marten does not own, and every row — needs
-`Capabilities.BrowseDatabase`, a schema `BrowsableSchemas` names (or `"*"`), and the write policy asked
-with `TenantId = null`, because nothing filters those tables by tenant. It is read-only, runs in the same
-read-only transaction as the SQL console as `SqlConsoleRole`, locks nothing it lists, and audits the first
-read of every relation. It never reads the rows of Marten's own document or event tables (they are read in
-Documents and Events, where tenancy, soft delete and the serializer apply), never reads a foreign table,
-directly or through a view, never shows a hidden document type or anything built on it, and masks the name
-of a schema the visitor may not see as `‹withheld›` wherever Postgres prints it. A `vector`, `halfvec` or
-`sparsevec` value is shown collapsed to its type and first components, with Expand and Copy.
-
-**Database › Connection** (1.1; Postgres Studio's page, shared by both studios; the long form is
-[`docs/connection.md`](docs/connection.md)) shows how your application actually connects. A strip of facts gives the
-server and database, the role, whether the connection is encrypted and whether the server's certificate is checked, the
-pool, the Npgsql version loaded and any managed platform or pooler in front. "Worth a look" lists what the health advisor
-found about the connection and what Postgres Studio would change - each with the setting it is about and the fix as a
-connection string and as `NpgsqlDataSourceBuilder` code, ready to copy. Below that, every Npgsql setting with its value in
-effect, where the value came from (the connection string, an environment variable such as `PGUSER`, or Npgsql's default)
-and the default; by default only what differs from the default is shown. It then shows what the server saw of the studio's
-own connection, and - with `ViewDatabaseActivity` - which applications this login has sessions for, how old the oldest is
-and how many are on TLS. A password is only ever shown as set or not set; the connection string itself is never shown,
-logged or exported. Marten Studio adds "How Marten uses this connection": the command timeout Marten applies, whether the
-data source is Marten's own or the application's, the store options that bear on connections and the connections the
-hosted async daemon needs. The page reads and changes nothing. Under "Compare a connection string" you can paste another
-Npgsql connection string - the one in a new configuration, one a colleague sent - to see which of its settings differ from
-the connection in effect and what the page's advice would be if the application switched to it. Passwords are removed
-before anything is read, an option's value is never shown, and the studio keeps, logs, audits and connects to nothing you
-paste; it is read in this page only, so it is not part of the audit log. A password with a `;` in it must be quoted, or
-the keyword that follows it is refused without a name. The advice is the page's own hints, judged against what the server
-reported about the connection in effect; the health advisor's findings run on the application's real data source only.
-What you paste travels to the server over SignalR like every other input in a Blazor Server page, so if your application
-logs `Microsoft.AspNetCore.SignalR` at Debug level that log records it (typed SQL in the console included): keep that
-category at Information or above in production.
-
-**Relationships** — the document types of the store as a graph: one node per registered type with its
-collection colour, its .NET type and a `reltuples` estimate, one arrow per foreign key. What
-`StoreOptions` declares and what `pg_constraint` actually holds are cross-checked, so an arrow is
-*declared and enforced*, *declared only* — configured, never applied, nothing enforcing it — or *in the
-database only*, which Marten does not know about and an apply under `CreateOrUpdate` would drop. Keys
-into the database's other tables are drawn too, as square, schema-coloured nodes — a Documents / Tables /
-Both switch and schema chips narrow the picture, composite-key labels leave out the leading columns both
-primary keys share, and a `NOT VALID` key is dashed — while a key into a schema the visitor may not see is
-counted, never named, and a type hidden by `IsDocumentTypeVisible` appears nowhere at all. Clicking a node opens the collection; hovering an arrow
-names the column, the target and the delete action. Beside the picture — and, on a narrow screen,
-instead of it — a table carries the same relationships with the same links, which is also what a screen
-reader gets. There is no pan, no zoom and no JavaScript: the layout is computed on the server and is a
-pure function of the configuration, so the same store draws the same diagram every time. On a document's
-detail page, **Referenced by** names each collection that points at it and how many of its documents do
-— exact up to a thousand and "1,000+" beyond that, so the answer never costs a sequential scan — each row
-linking to that collection already filtered on this document.
-
-**Query** — three modes, and the asymmetry between the first two is the design. *Mode A, a Marten
-`where` clause*, is a read against one document type and needs no capability, so the service holds it to
-being a *clause*: no `;`, no statement of its own, brackets that balance, a tail that is
-`[order by …] [limit n] [offset n]` and nothing else, no function that reads, writes or waits outside
-the row, no `::regclass` cast — and, without `RunSql`, no subquery, union, join, `lateral` or
-`returning` either. It runs inside the same `BEGIN; SET TRANSACTION READ ONLY; …; ROLLBACK` as the
-console, under the same `QueryTimeout` and the same optional `SqlConsoleRole`. Results come back as the
-`data` column itself, never round-tripped through a CLR type, the composed statement is shown, and a plan
-is offered where `RunSql` allows one (`EXPLAIN`, never `EXPLAIN ANALYZE`). *Mode B, the SQL console*, is arbitrary
-read-only SQL against the whole database, is gated on `RunSql`, and is limited by `MaxSqlConsoleRows`,
-`QueryTimeout`, a 3-second lock timeout, a 60-second idle-in-transaction timeout and an optional
-`SqlConsoleRole` — inside `BEGIN; SET TRANSACTION READ ONLY; …; ROLLBACK`. The row cap stops the reader;
-it never appends a `LIMIT` to your statement. See [Security model and limits](#security-model-and-limits).
-*LINQ mode* ([`docs/linq-mode.md`](docs/linq-mode.md)), gated on `RunLinqQueries`,
-takes the predicate your code would write (`Status == "Open" && Total > 100`) and an ordering, parses them
-with JasperFx's Dynamic LINQ under its allow-list and the studio's own, and applies them to Marten's own
-`Query<T>()` on a session pinned to the scope, so tenancy, soft deletes and hierarchies are Marten's. It
-shows the rows, the SQL Marten built, its plan (`EXPLAIN`, never `ANALYZE`) and index advice with the
-`StoreOptions` line that would declare the index. It builds Marten's statement without `ToCommand`, so it
-never creates a table, and it runs in the same read-only transaction as the console. Since 1.1 it also queries the
-event log: pick *Events* (or "Query these events with LINQ" on the Feed) to filter and order events by sequence, time,
-type, stream, version, tenant and, where the store records them, correlation id, causation id and user name, through
-Marten's own `IReadOnlyEventStore.QueryRawEvents()`; archived events are left out unless asked for.
-
-The console's **Explain** and **Explain analyze** buttons draw a plan as a tree - each node's type and what it reads,
-estimated and actual rows and loops, its share of the plan's time or cost, buffers and I/O - and so does an
-`EXPLAIN (FORMAT JSON)` you type, and Mode A's plan. `EXPLAIN ANALYZE` runs only in the console, under `RunSql`, for a
-statement its guard accepts and inside its read-only transaction: a write the guard misses is refused by Postgres
-(`25006`) and changes nothing. **Query › Plan** is the same gate as a page of its own: write a statement - or paste the JSON of
-a plan, which reads nothing - and get it planned, analyzed, or planned as a generic or custom plan of a statement with `$1`
-placeholders, then drawn as a tree and as a sortable table of every node, with a summary strip, the critical path, heat
-colouring, every key Postgres printed for a node and what each means, and Copy as Markdown / Download for
-[speedscope](https://www.speedscope.app) beside the raw JSON; the console's **Open in Plan** link carries a statement there.
-Under every plan, **plan insights** with stable codes P01-P20
-([`docs/health/plans.md`](docs/health/plans.md)) point at a row estimate off tenfold, a sort or hash spilled to disk, a
-lossy bitmap heap scan, a selective sequential scan, a nested loop over a large outer side, a large `OFFSET`, a
-leading-wildcard `LIKE`, parallel workers short of the plan, an index-only scan fetching the heap, a filter discarding most
-rows after an index, a hash built in batches, JIT costing more than it saves, planning slower than execution and a memoize
-cache mostly missing; with the facts the page reads beside a plan it ran (each relation's estimate, analyze state,
-indexes and extended statistics, and the statistics of the columns the plan uses), also stale statistics, correlated
-columns, a function on an indexed column, missing partition pruning, a function's default row estimate and triggers
-dominating the statement. Where the studio suggests an index - under a plan, or
-in LINQ mode's and the Documents list's index advice - **What if?** plans the statement again with that one index
-imagined by [hypopg](https://github.com/HypoPG/hypopg), and draws the plan now and the plan with the index side by side.
-It creates nothing, and needs hypopg installed in the database, which is your decision; the studio never installs it.
 
 **Events** — *Streams* lists and filters streams; *stream detail* draws the timeline with each event's
 JSON, headers and metadata, offers aggregate **time travel** (replayed on demand by Marten's own
@@ -732,7 +645,7 @@ the version the dialog shows into one snapshot and deletes them, behind a typed 
 event type, sequence range, stream, tenant, a **DCB tag** (`tag:<type>=<value>`, with its index verdict)
 and the archived/skipped flags the store actually has, with a follow mode; each event's tags are chips
 that link to that filter. *Event types* counts what the store has seen and lists the tag types with each
-table's key; its **Check shapes** (1.2) runs the documents' check for each event type through Marten's own event reader,
+table's key; its **Check shapes** runs the documents' check for each event type through Marten's own event reader,
 so it answers "would a rebuild throw?" before you start one: events no type can read, events that fail to deserialize
 (with the sequence a rebuild would stop at, and whether `RebuildErrors` would skip them), and members your event types no
 longer declare. Events an upcaster reads as a newer type are counted, not compared. Event types the store does not
@@ -742,7 +655,7 @@ discards a record, marks the underlying event as skipped — only on a store tha
 because it writes `mt_events.is_skipped` and a store without that column has no way to express the idea —
 or rewinds the projection's subscription to the event that failed, behind a typed confirmation that states
 what gets replayed, where the daemon is hosted in this process. A *Grouped by cause* view groups them by projection,
-event type, exception type and message fingerprint, and opens a group as the list. *Event flow* (1.2) draws which
+event type, exception type and message fingerprint, and opens a group as the list. *Event flow* draws which
 projections and subscriptions read each event type and what each one writes, from `StoreOptions` alone: the event types
 (by alias and .NET type); the projections that take them in, whether exactly, through a base type or interface they
 declare, or as every event for one that declares none; and the document types, flat tables and live aggregates they
@@ -824,14 +737,212 @@ the features newer Marten releases add this host has. It also lists the command 
 logging, connection tracing, the hi-lo settings, the multi-host session preferences and whether row-level security is
 configured (never its setting); [Database › Connection](docs/connection.md) explains how each bears on the pool.
 
-**Activity** — the last 500 actions taken through the studio in this process, newest first, with user,
-scope, action, target, outcome, capability and message. It is in memory and goes away with the process.
-The durable record is your own `ILogger`, under the studio's reserved event ids: 9200–9299, and from 0.5 also
-9300–9329 and 9400–9519.
+### The Postgres module
+
+The Postgres module's pages are under `/studio/postgres/…`, the same pages in a Postgres host (over the
+`NpgsqlDataSource`s it registered) and in a Marten host (over the databases of its stores). In a Marten host the Marten
+module adds what only a Marten store has to them (the paragraphs below say where), and `/studio/postgres` itself redirects
+to the Marten overview. The long form for a Postgres host is [docs/postgres.md](docs/postgres.md).
+
+**Health** — the health advisor, at `/studio/postgres/health` (the long form is
+[`docs/health.md`](docs/health.md), and every code, its variants and what its subject names are in
+[`docs/health/codes.md`](docs/health/codes.md)): checks that read Marten's configuration and the database and say what
+is wrong, how sure they are, and which `StoreOptions` line would change it — for a table the store declares a remedy
+is never DDL, and one that needs a newer Marten says so. The table checks judge every table in the store's schemas,
+and in the schemas `BrowsableSchemas` admits while `Capabilities.BrowseDatabase` is on, so a job store or a legacy
+schema beside the store is judged too: its remedies are migration SQL, shown "for your own migrations - the studio
+never runs this", and a recognised library's table is left out of the index-design rules. A finding about a table
+outside the store's own schemas is shown only to a visitor the database browser's gate admits to that schema, and the
+navigation badge never counts it. They are grouped by area: the daemon and the high-water mark (D),
+events (E), tables and indexes (T), connections and sessions (C), replication (R), the server (S) and the
+configuration (K). T20 says when a range-partitioned table is running out of partitions - a time range by its clock,
+a `smallint`, `integer` or `bigint` range by where its rows stop - with the remedy each kind of range takes (for a
+static Marten `ByRange()`, its `.AddRange(...)` line); T18 says when one tenant holds more than half of a large
+conjoined table, and names it only to a visitor past the activity gate and that tenant's store policy; C12 names the
+head of a blocking chain that sits idle in its transaction or has kept others waiting for minutes. Each finding
+carries its evidence and when it was measured, Show SQL, a caveat such as "counters since `stats_reset` at 09:14", a
+link to its section of the docs, and "mute in this browser". A
+sweep runs only while a Health page or the Overview is open, or when the [opt-in health
+check](#the-opt-in-health-check) is probed, at most once per `HealthInterval` per database however many
+tabs watch, in the studio's read-only transaction, without DDL and without a lock beyond what a read
+takes; **Run deeper checks** reads a bounded slice of the data, and **Run statement checks** reads
+`pg_stat_statements` behind `ViewDatabaseActivity`. A database-wide number needs the store policy for the
+database as a whole, and anything that names a session, a role, an address, a statement or a tenant needs
+`ViewDatabaseActivity`. The navigation entry carries a severity badge, a toast says when a Critical
+finding appears, and findings also show where they belong: D01 and D02 as Projections banners, index marks
+on Schema › Indexes, E05 on Event types. A finding may carry an action that reads more when you press it, for you
+alone and audited: E06's lists the 20 longest streams and the aggregate each belongs to. **Database › Sessions** (`/studio/postgres/database/sessions`) lists this
+database's sessions, locks and prepared transactions under the same two gates, labels a lock by the
+store's own table it belongs to, counts sessions by application beside the server's connection budget, and has no
+cancel or terminate button. Its **Blocking** tab (`?view=blocking`) draws who holds up whom as trees - each chain's
+head, then every session waiting on it - with the head's `pg_terminate_backend` (and `pg_cancel_backend`, when it runs
+a statement) as text to copy for whoever may run it, which the studio never runs; on PostgreSQL 19 it also shows the
+server's lock waits from `pg_stat_lock`. Its **Holders** tab (`?view=holders`) groups the whole server's client sessions - every
+database on it, not only this one - by database, application, role and client address, against the connection budget C03
+judges: the counts per database for anybody the store policy passes (a database named only where that policy admits them to
+it, the rest together as "Other databases"), the applications, roles and addresses, and every database's name, behind the
+activity gate. C13 (an application holding a tenth of the client limit idle while the server is 80% used) and C14 (connections
+that set no `Application Name`, Info) are the checks over it. With `AddPostgresConnectionHistory()` Holders also says what
+the server's connections peaked at before now, and when - each application's own peak behind the activity gate - from a
+sample a minute that the host keeps where it likes ([docs/diagnostics.md](docs/diagnostics.md#connection-history)). The Health page's **Snapshot** menu views, copies or downloads what your
+pages show of the database as JSON or as a Markdown report for a ticket, built from your own view of each page, and
+compares an earlier snapshot file with now.
+
+**Statements** (Operations, `/studio/postgres/statements`) — where the database's time goes, statement by statement, grouped
+by Marten operation and document type, behind `ViewDatabaseActivity`. A statement's **Plan** link (`?queryid=`) opens
+its drill-in: the text, the counters and its generic plan, planned as `SqlConsoleRole` with its plan insights and What
+if?, and audited. A write, a locking read, a cut text or one withheld from you gets no plan and says why, and a plan
+that reads a schema you may not see is not shown. **Index advisor** plans the 20 statements with the most execution
+time that you may see, imagines each index their plans suggest with hypopg, one at a time, and ranks them by planned cost
+saved times calls, with the `StoreOptions` line (Marten document tables) or `CREATE INDEX CONCURRENTLY` as the remedy; it
+plans on a press, behind the page's own gate, creates nothing and applies nothing. Health's T01 and T15 cards offer it,
+narrowed to the table, and a what-if of the foreign key's own lookup. **Mark** counts from now, in this tab: each statement's change
+since the mark instead of the advisor's window, kept in this tab's connection only.
+
+**Maintenance** (Operations, `/studio/postgres/maintenance`) — what autovacuum will do next and why: each table against the
+triggers autovacuum itself uses, what is running now, the workers, the freeze forecast and the vacuum horizon, with an
+on-demand bloat measure; **Mark** counts each table's vacuums and analyzes from now, in this tab; see
+[`docs/health/tables.md`](docs/health/tables.md#the-maintenance-page).
+
+**Storage** (Operations, `/studio/postgres/storage`) — how big the database is, how fast it grows and which tables hold the
+space, from the catalog's own page counts (no size function over a table, nothing locked); the exact size of one table
+is on its page in the database browser. **Mark** counts each table's growth and rows written from now, in
+this tab.
+
+**Replication** (Operations, `/studio/postgres/replication`) — slots, the standbys streaming from the server or a standby's own
+replay, the archiver, WAL volume, checkpoints, I/O by backend type and tablespaces; names behind
+`ViewDatabaseActivity`.
+
+**Server** (System, `/studio/postgres/server`) — the server's version, platform and uptime, what the studio's reading role can
+see grant by grant, a curated view of its settings, the extensions it uses and what stands in their way, and the
+security posture.
+
+> **Seeing replication lag.** On a primary, `pg_stat_replication` shows a standby's positions and lag only to a role
+> with `pg_read_all_stats`, which `pg_monitor` includes. Any other role sees a sender's process id, role and application
+> name. R03 and the Replication page then say "not checked", naming the grant and who can give it on your platform: a
+> superuser when self-hosted, the master user on RDS and Aurora, the server admin on Azure, a `cloudsqlsuperuser` member
+> on Cloud SQL. `pg_monitor` also lets the archiver's evidence count the WAL files waiting in `archive_status`, and the
+> size of `pg_wal`. Without any grant, a data source that reaches a standby (a multi-host data source) measures lag
+> there instead: what the standby has received less what it has replayed is exact and readable by any role, and so is
+> whether replay is paused. A physical slot's `restart_lsn` is no substitute: it tracks flush, not replay.
+
+**Database** — everything else in the store's Postgres database, for a host that keeps a Quartz.NET job
+store, a legacy schema or another library's tables beside Marten. A schema rail, and kind tabs for
+tables, views, functions, triggers, sequences and types; Marten's own objects are quieter, sorted last and
+linked to where their data is really read, and a Quartz.NET, Wolverine, EF Core, Hangfire or Flyway object
+is hinted by name. Each object has a detail page — columns, keys and indexes, foreign keys both ways,
+triggers, a view's query, and its neighbourhood in the relationships diagram — and a table, view or
+materialized view that is not Marten's has a **Rows** tab: a `col = value` / `col ~ text` / `col is:null`
+filter with an index verdict (and "Run anyway" before an unindexed read of a large table), keyset paging
+over composite keys, typed and sortable headers, JSON and `bytea` cells opening in the viewer, a "≈ date"
+hint under `bigint` columns holding .NET ticks or epoch times, and row detail that follows foreign keys
+both ways. The structure of the store's own schemas is shown to every visitor, as the Schema screen always
+did; everything else — other schemas, definitions of what Marten does not own, and every row — needs
+`Capabilities.BrowseDatabase`, a schema `BrowsableSchemas` names (or `"*"`), and the write policy asked
+with `TenantId = null`, because nothing filters those tables by tenant. It is read-only, runs in the same
+read-only transaction as the SQL console as `SqlConsoleRole`, locks nothing it lists, and audits the first
+read of every relation. It never reads the rows of Marten's own document or event tables (they are read in
+Documents and Events, where tenancy, soft delete and the serializer apply), never reads a foreign table,
+directly or through a view, never shows a hidden document type or anything built on it, and masks the name
+of a schema the visitor may not see as `‹withheld›` wherever Postgres prints it. A `vector`, `halfvec` or
+`sparsevec` value is shown collapsed to its type and first components, with Expand and Copy.
+
+**Database › Connection** (the Postgres module's page, shared by the Postgres and Marten modules; the long form is
+[`docs/connection.md`](docs/connection.md)) shows how your application actually connects. A strip of facts gives the
+server and database, the role, whether the connection is encrypted and whether the server's certificate is checked, the
+pool, the Npgsql version loaded and any managed platform or pooler in front. "Worth a look" lists what the health advisor
+found about the connection and what the studio would change - each with the setting it is about and the fix as a
+connection string and as `NpgsqlDataSourceBuilder` code, ready to copy. Below that, every Npgsql setting with its value in
+effect, where the value came from (the connection string, an environment variable such as `PGUSER`, or Npgsql's default)
+and the default; by default only what differs from the default is shown. It then shows what the server saw of the studio's
+own connection, and - with `ViewDatabaseActivity` - which applications this login has sessions for, how old the oldest is
+and how many are on TLS. A password is only ever shown as set or not set; the connection string itself is never shown,
+logged or exported. The Marten module adds "How Marten uses this connection": the command timeout Marten applies, whether the
+data source is Marten's own or the application's, the store options that bear on connections and the connections the
+hosted async daemon needs. The page reads and changes nothing. Under "Compare a connection string" you can paste another
+Npgsql connection string - the one in a new configuration, one a colleague sent - to see which of its settings differ from
+the connection in effect and what the page's advice would be if the application switched to it. Passwords are removed
+before anything is read, an option's value is never shown, and the studio keeps, logs, audits and connects to nothing you
+paste; it is read in this page only, so it is not part of the audit log. A password with a `;` in it must be quoted, or
+the keyword that follows it is refused without a name. The advice is the page's own hints, judged against what the server
+reported about the connection in effect; the health advisor's findings run on the application's real data source only.
+What you paste travels to the server over SignalR like every other input in a Blazor Server page, so if your application
+logs `Microsoft.AspNetCore.SignalR` at Debug level that log records it (typed SQL in the console included): keep that
+category at Information or above in production.
+
+**Relationships** — the document types of the store as a graph: one node per registered type with its
+collection colour, its .NET type and a `reltuples` estimate, one arrow per foreign key. What
+`StoreOptions` declares and what `pg_constraint` actually holds are cross-checked, so an arrow is
+*declared and enforced*, *declared only* — configured, never applied, nothing enforcing it — or *in the
+database only*, which Marten does not know about and an apply under `CreateOrUpdate` would drop. Keys
+into the database's other tables are drawn too, as square, schema-coloured nodes — a Documents / Tables /
+Both switch and schema chips narrow the picture, composite-key labels leave out the leading columns both
+primary keys share, and a `NOT VALID` key is dashed — while a key into a schema the visitor may not see is
+counted, never named, and a type hidden by `IsDocumentTypeVisible` appears nowhere at all. Clicking a node opens the collection; hovering an arrow
+names the column, the target and the delete action. Beside the picture — and, on a narrow screen,
+instead of it — a table carries the same relationships with the same links, which is also what a screen
+reader gets. There is no pan, no zoom and no JavaScript: the layout is computed on the server and is a
+pure function of the configuration, so the same store draws the same diagram every time. On a document's
+detail page, **Referenced by** names each collection that points at it and how many of its documents do
+— exact up to a thousand and "1,000+" beyond that, so the answer never costs a sequential scan — each row
+linking to that collection already filtered on this document.
+
+**Query** — three modes, and the asymmetry between the first two is the design. *Mode A, a Marten
+`where` clause*, is a read against one document type and needs no capability, so the service holds it to
+being a *clause*: no `;`, no statement of its own, brackets that balance, a tail that is
+`[order by …] [limit n] [offset n]` and nothing else, no function that reads, writes or waits outside
+the row, no `::regclass` cast — and, without `RunSql`, no subquery, union, join, `lateral` or
+`returning` either. It runs inside the same `BEGIN; SET TRANSACTION READ ONLY; …; ROLLBACK` as the
+console, under the same `QueryTimeout` and the same optional `SqlConsoleRole`. Results come back as the
+`data` column itself, never round-tripped through a CLR type, the composed statement is shown, and a plan
+is offered where `RunSql` allows one (`EXPLAIN`, never `EXPLAIN ANALYZE`). *Mode B, the SQL console*, is arbitrary
+read-only SQL against the whole database, is gated on `RunSql`, and is limited by `MaxSqlConsoleRows`,
+`QueryTimeout`, a 3-second lock timeout, a 60-second idle-in-transaction timeout and an optional
+`SqlConsoleRole` — inside `BEGIN; SET TRANSACTION READ ONLY; …; ROLLBACK`. The row cap stops the reader;
+it never appends a `LIMIT` to your statement. See [Security model and limits](#security-model-and-limits).
+*LINQ mode* ([`docs/linq-mode.md`](docs/linq-mode.md)), gated on `RunLinqQueries`,
+takes the predicate your code would write (`Status == "Open" && Total > 100`) and an ordering, parses them
+with JasperFx's Dynamic LINQ under its allow-list and the studio's own, and applies them to Marten's own
+`Query<T>()` on a session pinned to the scope, so tenancy, soft deletes and hierarchies are Marten's. It
+shows the rows, the SQL Marten built, its plan (`EXPLAIN`, never `ANALYZE`) and index advice with the
+`StoreOptions` line that would declare the index. It builds Marten's statement without `ToCommand`, so it
+never creates a table, and it runs in the same read-only transaction as the console. It also queries the
+event log: pick *Events* (or "Query these events with LINQ" on the Feed) to filter and order events by sequence, time,
+type, stream, version, tenant and, where the store records them, correlation id, causation id and user name, through
+Marten's own `IReadOnlyEventStore.QueryRawEvents()`; archived events are left out unless asked for.
+
+The console's **Explain** and **Explain analyze** buttons draw a plan as a tree - each node's type and what it reads,
+estimated and actual rows and loops, its share of the plan's time or cost, buffers and I/O - and so does an
+`EXPLAIN (FORMAT JSON)` you type, and Mode A's plan. `EXPLAIN ANALYZE` runs only in the console, under `RunSql`, for a
+statement its guard accepts and inside its read-only transaction: a write the guard misses is refused by Postgres
+(`25006`) and changes nothing. **Query › Plan** is the same gate as a page of its own: write a statement - or paste the JSON of
+a plan, which reads nothing - and get it planned, analyzed, or planned as a generic or custom plan of a statement with `$1`
+placeholders, then drawn as a tree and as a sortable table of every node, with a summary strip, the critical path, heat
+colouring, every key Postgres printed for a node and what each means, and Copy as Markdown / Download for
+[speedscope](https://www.speedscope.app) beside the raw JSON; the console's **Open in Plan** link carries a statement there.
+Under every plan, **plan insights** with stable codes P01-P20
+([`docs/health/plans.md`](docs/health/plans.md)) point at a row estimate off tenfold, a sort or hash spilled to disk, a
+lossy bitmap heap scan, a selective sequential scan, a nested loop over a large outer side, a large `OFFSET`, a
+leading-wildcard `LIKE`, parallel workers short of the plan, an index-only scan fetching the heap, a filter discarding most
+rows after an index, a hash built in batches, JIT costing more than it saves, planning slower than execution and a memoize
+cache mostly missing; with the facts the page reads beside a plan it ran (each relation's estimate, analyze state,
+indexes and extended statistics, and the statistics of the columns the plan uses), also stale statistics, correlated
+columns, a function on an indexed column, missing partition pruning, a function's default row estimate and triggers
+dominating the statement. Where the studio suggests an index - under a plan, or
+in LINQ mode's and the Documents list's index advice - **What if?** plans the statement again with that one index
+imagined by [hypopg](https://github.com/HypoPG/hypopg), and draws the plan now and the plan with the index side by side.
+It creates nothing, and needs hypopg installed in the database, which is your decision; the studio never installs it.
+
+### The Kafka module
+
+The Kafka module's pages are under `/studio/kafka/…`: the clusters and topics the application's own Kafka credentials can
+describe, and, behind capabilities that are off by default, search, compare, related records, export and a live tail. It
+reads and never writes. [docs/kafka.md](docs/kafka.md) is its long form.
 
 ## The diagnostics API
 
-`IPostgresDiagnostics`, registered by `AddMartenStudio()` (and by `AddPostgresStudio()`), gives your own code what the
+`IPostgresDiagnostics`, registered by `AddMarten()` and `AddPostgres()` (and by `services.AddPostgresDiagnostics()`
+alone, for a host with no UI), gives your own code what the
 studio reads: the databases it would list, and for each one the findings, with stable codes and variants, and Storage,
 Statements, Settings and Connections sections - for an e-mail, an admin page of your own or your own alerting, worded in
 your own language and keyed on the codes. It answers host code, not a visitor, so no studio policy, capability or
@@ -874,47 +985,43 @@ tenant, because there is nothing to filter on and hiding it would hide something
 ## Hosting notes
 
 - **It works in an API-only host.** No `.razor` file of your own is needed, and you do not need to set
-  `RequiresAspNetWebAssets` — `PostgresStudio`, which `MartenStudio` brings, references
+  `RequiresAspNetWebAssets` — `DataStudio`, which every module brings, references
   `Microsoft.AspNetCore.App.Internal.Assets`, whose `buildTransitive` targets define `_framework/blazor.web.js` as
-  *your* project's static web asset, two package hops away. Verified against a scratch API-only host that has no
-  Blazor components at all and references only `MartenStudio`.
-- **The stylesheet and script moved in 0.5**, from `{Path}/_content/MartenStudio/` to
-  `{Path}/_content/PostgresStudio/` (`css/studio.css`, `js/studio.js`). A Content-Security-Policy, WAF rule or proxy
-  allow-list that names the old path must name the new one; every page's URL is unchanged.
+  *your* project's static web asset, up to three package hops away.
+- **The stylesheet and script are served from `{Path}/_content/DataStudio/`** (`css/studio.css`, `js/studio.js`): a
+  Content-Security-Policy, WAF rule or proxy allow-list names that path.
 - **You do not need `app.UseAntiforgery()`.** The studio has no `<form>` and no `<EditForm>`; every
   mutation is a Blazor event over the circuit, and SignalR's own same-origin check is what stands
   between a cross-site page and that circuit. The studio's component endpoints say
-  `.DisableAntiforgery()`, so a host that never calls the middleware still gets a 200 for `GET /marten`.
+  `.DisableAntiforgery()`, so a host that never calls the middleware still gets a 200 for `GET /studio/marten`.
   A host that *does* call it is unaffected — the middleware simply has nothing to validate here.
-- **Sub-path mounting is a first-class shape.** `MapMartenStudio("/ops/marten")` moves the pages, the
+- **Sub-path mounting is a first-class shape.** `MapDataStudio("/ops")` moves the pages, the
   `/_blazor` circuit, the `opaque-redirect` endpoint, `blazor.web.js` and the
-  `_content/PostgresStudio/` mirror under the path, and the shell renders a studio-rooted `<base href>`.
-  Every mount is studio-rooted — including the default `/marten` — so a host that has a Blazor app of
+  `_content/DataStudio/` mirror under the path, and the shell renders a studio-rooted `<base href>`.
+  Every mount is studio-rooted — including the default `/studio` — so a host that has a Blazor app of
   its own does not end up with two endpoints on `/_blazor`.
 - **.NET 11 and the hot-reload initializer.** A Debug build of the host with the .NET 11 SDK lists a hot-reload
-  script among the page's Blazor initializers. From 1.2.0 the studio serves the host's whole `_framework` tree under
-  its path, so that script loads and the page starts; on 1.1.x, build the host with
-  `-p:EnableHotReloadInRuntimeConfigDevFile=false`.
+  script among the page's Blazor initializers. The studio serves the host's whole `_framework` tree under its path, so
+  that script loads and the page starts.
 - **.NET 11 and a fail-closed `FallbackPolicy`.** ASP.NET Core 11 holds the async hub methods Blazor's circuit uses to the
   `FallbackPolicy` whatever the endpoint allows, so the circuit starts only for a visitor the `FallbackPolicy` admits; an
   `AllowAnonymous()` mapping under a fail-closed policy is the usual case
   ([dotnet/aspnetcore#69624](https://github.com/dotnet/aspnetcore/issues/69624), open). The studio does not work around
   it; until it is fixed, an anonymous mapping on .NET 11 needs an application without a fail-closed `FallbackPolicy`.
-- **Navigation inside the studio is handled by its circuit (1.2).** A link, Back and a page's own address changes no longer
-  fetch the page from the server. The `PostgresStudio.DisableNavigationInterception` switch that restored 1.1's behaviour
-  for a release is gone (1.3).
+- **Navigation inside the studio is handled by its circuit.** A link, Back and a page's own address change do not
+  fetch the page from the server.
 - **Behind a reverse proxy**, forward the studio prefix and it works: the studio's plumbing is all under
   its own path. If the proxy strips a prefix, give the application the same prefix with
   `app.UsePathBase("/…")` so that the routes and the `<base href>` agree; mounting at
-  `MapMartenStudio("/ops/marten")` and stripping `/ops` at the proxy without a matching `UsePathBase` is
+  `MapDataStudio("/ops")` and stripping `/ops` at the proxy without a matching `UsePathBase` is
   the shape that renders locally and 404s in production.
 - **Static assets.** `app.MapStaticAssets()` (or `UseStaticFiles()`) serves the stylesheet and the
   studio's browser helpers the normal way. The studio also maps its own
-  `_content/PostgresStudio/{**path}` endpoints as a fallback, so an API-only host that configures neither
+  `_content/DataStudio/{**path}` endpoints as a fallback, so an API-only host that configures neither
   still gets a styled, interactive studio. Both are asked for by the studio's own pages and by nothing
   else: the package ships no Blazor JS initializer, so a host that runs a Blazor app of its own never
   fetches anything of the studio's on pages that have nothing to do with it. The document names an icon of its
-  own, `_content/PostgresStudio/favicon.svg`, so the browser does not ask your site root for `/favicon.ico`.
+  own, `_content/DataStudio/favicon.svg`, so the browser does not ask your site root for `/favicon.ico`.
 - **A host's own Blazor Server options survive, in either order.** Registering the studio does not undo a
   `services.AddServerSideBlazor().AddHubOptions(...)` you made before it: the framework's own repeated hub-options
   registration is left out, so your `ClientTimeoutInterval` and `MaximumReceiveMessageSize` stay yours.
@@ -923,13 +1030,13 @@ tenant, because there is nothing to filter on and hiding it would hide something
   discovered from `IDocumentType.DocumentType` at run time; a trimmer told it may cut has no way to see
   either. An application that publishes trimmed or native AOT does so without the studio.
 - **There is no "integrate into my own Blazor app" mode.** The studio maps its own
-  `MapRazorComponents<MartenStudioApp>()` root and re-roots it. Adding its pages to your own router is
-  not supported in v1.
+  `MapRazorComponents<DataStudioApp>()` root and re-roots it. Adding its pages to your own router is
+  not supported.
 
 ## Sample application
 
 ```shell
-dotnet run --project samples/MartenStudio.Sample
+dotnet run --project samples/DataStudio.Sample.Marten
 ```
 
 Then open <http://localhost:5210>. With no connection string configured, the sample starts a throwaway
@@ -944,9 +1051,9 @@ it at a database of your own. On its throwaway database (or one `--allow-data-ge
 narrowed role, `studio_sample_reader`, and sets `SqlConsoleRole` to it, so the SQL console, the database browser and
 the health checks read as that role; it creates no role and grants nothing anywhere else.
 
-Postgres Studio has a sample of its own, with no Marten: `dotnet run --project samples/PostgresStudio.Sample`, then
+The Postgres module has a sample of its own, with no Marten: `dotnet run --project samples/DataStudio.Sample.Postgres`, then
 <http://localhost:5211> - an admin database and three tenant databases listed through the host's own
-`IPostgresDatabaseSource`; see [`samples/PostgresStudio.Sample/README.md`](samples/PostgresStudio.Sample/README.md).
+`IPostgresDatabaseSource`; see [`samples/DataStudio.Sample.Postgres/README.md`](samples/DataStudio.Sample.Postgres/README.md).
 
 Sign in as `admin`, `ops` or `viewer` — the password is the user name. They differ by claim: `admin` has
 read, write and destroy, `ops` read and write, `viewer` read only, which is how you can see what each
@@ -955,8 +1062,8 @@ layer of the authorization contract does.
 | Switch | |
 |---|---|
 | `--anonymous` | Map the studio with `AllowAnonymous()` instead of a policy, to show what an unauthenticated studio looks like. The landing page draws a red banner saying so. Never do this anywhere real. |
-| `--readonly` | Set `MartenStudioOptions.ReadOnly`, which turns every mutating capability off however they were configured. |
-| `--path /ops/marten` | Mount the studio somewhere other than `/marten`, which is what exercises the sub-path re-rooting. |
+| `--readonly` | Set `DataStudioOptions.ReadOnly`, which turns every mutating capability off however they were configured. |
+| `--path /ops` | Mount the studio somewhere other than `/studio`, which is what exercises the sub-path re-rooting. |
 | `--no-daemon` | Host no async daemon (`AddAsyncDaemon(DaemonMode.Disabled)`), the shape of a production host whose projections run elsewhere. The studio shows progress from the database and logs nothing about it above Debug. |
 
 > **Argument order does not matter.** The sample's boolean switches — `--anonymous`, `--readonly`,
@@ -964,7 +1071,7 @@ layer of the authorization contract does.
 > token after it is left alone, so `dotnet run -- --anonymous --urls http://localhost:5000` and
 > `dotnet run -- --urls http://localhost:5000 --anonymous` do the same thing. An explicit value is
 > still accepted where a script wants to pass a variable (`--readonly false`, `--readonly=false`), and
-> only a literal `true` or `false` counts as one. `--path /ops/marten` is a pair and does take the
+> only a literal `true` or `false` counts as one. `--path /ops` is a pair and does take the
 > token after it. This needs saying because .NET's own command-line configuration provider does *not*
 > work that way — it reads `--key value` pairs, so a bare switch would otherwise swallow your `--urls`
 > and then drop the URL without a word; `SampleOptions.HostArguments` reconciles the two before the
@@ -980,7 +1087,7 @@ daemon's lag, plus a truncate that removes exactly what was generated. Documents
 `COPY`; order streams go through Marten sessions so the inline projection runs and the async ones have
 something to catch up on, with one poisoned stream per 10 000 so the dead-letter screen has real content.
 The studio's own services are measured against the Medium set in every integration run; the Large set
-runs under `MARTENSTUDIO_LARGE=1`. See [`samples/MartenStudio.Sample/README.md`](samples/MartenStudio.Sample/README.md).
+runs under `MARTENSTUDIO_LARGE=1`. See [`samples/DataStudio.Sample.Marten/README.md`](samples/DataStudio.Sample.Marten/README.md).
 The same panel has **Make it unhealthy** switches - a pinned gap, a session idle in a transaction, a bloated
 table, a hogged pool - each turning itself off after ten minutes; see the sample's README.
 
@@ -988,7 +1095,8 @@ table, a hogged pool - each turning itself off after ten minutes; see the sample
 
 The long form is in [`docs/security.md`](docs/security.md). The short form:
 
-- **Nothing mutating is on by default.** Thirteen capability flags, all `false`, plus `ReadOnly`. The
+- **Nothing mutating is on by default.** Every module's capability flags are `false`, and two `ReadOnly` switches turn
+  them off again (the shell's for every module, a module's own for itself). The
   dashboard that is dangerous by default is the one somebody maps without reading the docs.
 - **Refusals live in the service layer**, not in the markup, and are audited whether they succeed or
   fail: `StudioCapabilityGuard.Require(…)` → scope resolution with the write policy → the operation →
@@ -1040,6 +1148,11 @@ The long form is in [`docs/security.md`](docs/security.md). The short form:
   function that reads, writes or waits outside the row, or cast to `regclass`/`regproc` — **none of
   which `RunSql` lifts**. What `RunSql` lifts is reaching another relation: subquery, union, join,
   `lateral`, `returning`. The scanner errs towards refusing, and every refusal names what would lift it.
+- **The Kafka module's read never writes.** No client it builds creates a topic, commits or stores an offset, joins a
+  consumer group or runs your builder delegates; every read assigns explicit offsets, and the module has no produce,
+  commit, delete or alter call at all. Its capabilities (`SearchRecords`, `ReadPayloads`, `ExportRecords`, `LiveTail`)
+  are off by default, and every cluster and topic it reads is asked of your own policies first
+  ([docs/kafka.md](docs/kafka.md)).
 - **Audit.** Every mutating operation and every refusal is written to a 500-entry in-memory ring (the
   Activity page) *and* to your `ILogger` under the reserved event ids **9200–9299**, which is the copy
   that survives a deployment. 9200 `ActionPerformed`, 9201 `ActionFailed`, 9202 `CapabilityDenied`, 9203
@@ -1048,7 +1161,7 @@ The long form is in [`docs/security.md`](docs/security.md). The short form:
   `StoreUnavailable`, 9211 `DocumentWriteRoundTripDropped`. A database browser's first read of a
   relation's rows is 9235 and an opened row 9236, a read of other sessions' details is 9245, a LINQ
   mode run, refusal and Postgres failure are 9260, 9261 and 9262, a bloat measure is audited as "Measure bloat", a
-  finding's action as its own name ("Find the longest streams", "What-if foreign key lookup", "Try indexes for a table"), an orphaned progression row's removal is 9225 and its refusal 9226, Tenants' first read of per-tenant estimates in a circuit is 9265, and the Statements page's first read in a circuit is 9452. The ranges 9200–9299, 9300–9329 and 9400–9519 are
+  finding's action as its own name ("Find the longest streams", "What-if foreign key lookup", "Try indexes for a table"), an orphaned progression row's removal is 9225 and its refusal 9226, Tenants' first read of per-tenant estimates in a circuit is 9265, and the Statements page's first read in a circuit is 9452. The ranges 9200–9299, 9300–9329 and 9400–9519 (and 9600–9699, the Kafka module's) are
   reserved. Every value a visitor could shape - a typed `?store=`, a statement, a reason - reaches the log escaped and
   bounded, so it cannot write a log line of any length or forge a second one.
 - **Log levels.** A state the host configured is not a warning. No async daemon in this process, a
@@ -1105,7 +1218,7 @@ The long form is in [`docs/security.md`](docs/security.md). The short form:
   the value in safely.
 - **No push, no hub.** Live pages poll at `RefreshInterval` through a single-flight snapshot cache,
   paused on hidden tabs; only projection state gets sub-second updates, and only where the daemon is
-  hosted in this process. There is no SignalR hub of the studio's own in v1 — adding one would add a
+  hosted in this process. There is no SignalR hub of the studio's own — adding one would add a
   host-visible endpoint for something polling covers.
 - **No patch, no bulk update.** Documents are edited one at a time through a full round trip. Deleting
   a selection is supported; changing one is not.
@@ -1126,8 +1239,8 @@ The long form is in [`docs/security.md`](docs/security.md). The short form:
   "registration changes host behaviour" failure this project refuses. Every generated grid carries a
   "Show SQL" disclosure instead.
 - **Read-only and the capabilities are process-wide switches**, not per store, per database or per tenant. What a
-  visitor may do in a scope is expressible all the same: `StoreAuthorizationPolicy` decides which scopes they see, and
-  `WriteAuthorizationPolicy` is asked on every mutating call with the capability and the store, database and tenant, so
+  visitor may do in a scope is expressible all the same: `MartenOptions.StoreAuthorizationPolicy` decides which scopes
+  they see, and `MartenOptions.WriteAuthorizationPolicy` is asked on every mutating call with the capability and the store, database and tenant, so
   "this tenant may edit but not delete" is a write policy that allows `EditDocuments` and refuses `DeleteDocuments` for
   that tenant.
 - **Counts are estimates above `ExactCountThreshold`.** A `~` prefix says so. The `=` beside a collection
@@ -1140,11 +1253,11 @@ The long form is in [`docs/security.md`](docs/security.md). The short form:
   every tenant's rows.
 - **A mapping made after the host has started is never checked** by the startup guard — from a hosted
   service, or a lazily built `EndpointDataSource`. Map the studio while the application is being built.
-- **The studio needs Marten 9.57.0 or later, and uses what 9.57 has without asking.** Since 1.1 the floor is the
-  latest release, so nothing here is conditional on the host's Marten: LINQ mode (JasperFx 2.84, Marten 9.48), the
+- **The studio needs Marten 9.57.0 or later, and uses what 9.57 has without asking.** Nothing here is conditional on the
+  host's Marten: LINQ mode (JasperFx 2.84, Marten 9.48), the
   `FillFactor` and `StorageParameter` remedies and the Schema screen's storage-parameter drift (9.47), D03's reading of
   the high-water agent's own liveness stamp (9.43), the daemon's own word that a projection is being rebuilt by
-  something other than Marten Studio (9.50), and, on a store that numbers events per tenant
+  something other than Data Studio (9.50), and, on a store that numbers events per tenant
   (`UseTenantPartitionedEvents`), Skip event and Rewind subscription acting on one tenant (9.51; a rewind is offered
   only for a tenant whose agent the daemon in this process runs). A stream whose folded events carry DCB tags compacts,
   and its tag rows go with them (9.51). The Schema screen's Check, Preview and Generate script buttons create nothing
@@ -1167,23 +1280,26 @@ The long form is in [`docs/security.md`](docs/security.md). The short form:
   startup, has always enumerated before it. The opt-in health check's own listing never enumerates one
   (AGENTS.md D27); a hosted projection coordinator it asks for its daemons enumerates the store, as its own
   leadership loop does every cycle.
-- **Marten Studio is a store console, not an ETL tool.** Import, dumping a whole collection, copying
+- **Data Studio is a store console, not an ETL tool.** Import, dumping a whole collection, copying
   between stores and scripted migration are outside it. The Query page exports the page you are looking
   at — the row cap has already stopped the reader by then — and never a table.
 
 ## Building from source
 
 ```powershell
-.\build.ps1 Test                 # restore, compile, run all four test projects
+.\build.ps1 Test                 # restore, compile, run all eight test projects
 .\build.ps1 Test --playwright    # ... and install the Chromium build the browser suites drive first
-.\build.ps1 Pack                 # the three NuGet packages into artifacts/packages
+.\build.ps1 Pack                 # the seven NuGet packages into artifacts/packages
 ```
 
 The fast suites need nothing:
 
 ```powershell
-dotnet test tests\MartenStudio.Tests
-dotnet test tests\PostgresStudio.Tests
+dotnet test tests\DataStudio.Tests
+dotnet test tests\DataStudio.Marten.Tests
+dotnet test tests\DataStudio.Postgres.Tests
+dotnet test tests\DataStudio.Kafka.Tests
+dotnet test tests\DataStudio.Kafka.Wolverine.Tests
 ```
 
 The integration suite needs Docker — run `docker info` first. It starts one `postgres:17-alpine` through
@@ -1194,11 +1310,12 @@ class names and two runs on one reused container drop each other's tables:
 
 ```powershell
 $env:MARTENSTUDIO_PG_REUSE='false'
-dotnet test tests\MartenStudio.Integration.Tests
-dotnet test tests\PostgresStudio.Integration.Tests
+dotnet test tests\DataStudio.Marten.Integration.Tests
+dotnet test tests\DataStudio.Postgres.Integration.Tests
+dotnet test tests\DataStudio.Kafka.Integration.Tests
 ```
 
-Postgres Studio's live suite has a container reuse identity of its own and never attaches to the Marten suite's; its
+The Postgres module's live suite has a container reuse identity of its own and never attaches to the Marten suite's; its
 version matrix starts one server per PostgreSQL major, 15 to 19, 19 on its release candidate.
 
 (`TESTCONTAINERS_REUSE_ENABLE` is not read by Testcontainers 4.x and must not be used.)
@@ -1209,10 +1326,11 @@ missing browser has to be a failure rather than a silent skip.
 
 ## Versioning and support
 
-From 1.0 the three packages follow Semantic Versioning, over what [`docs/stability.md`](docs/stability.md) lists as the
-contract - the public API baselines, the finding codes, the snapshot JSON, the capabilities and their defaults, the log
-event ids - and say there what is not one (page addresses, markup, wording). The same page has the support matrix.
-Upgrading from 0.x: [`docs/upgrading.md`](docs/upgrading.md). Reporting a vulnerability: [`SECURITY.md`](SECURITY.md).
+Data Studio is still being shaped, and a release of any size may break what a host compiles against:
+[`docs/stability.md`](docs/stability.md) says what is promised (capabilities off by default, authorization never widened,
+finding codes and log event ids that keep their meaning) and what is not. Pin the version you tested. The same page has
+the support matrix.
+Upgrading from 1.x: [`docs/upgrading.md`](docs/upgrading.md). Reporting a vulnerability: [`SECURITY.md`](SECURITY.md).
 
 ## Contributing
 

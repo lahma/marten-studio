@@ -554,3 +554,33 @@ role short of a superuser can plant an Aurora marker.
 condition, `MARTENSTUDIO_PG_REUSE`), a container labelled `marten-studio.tests=PostgresStudio.Integration.Tests` so it
 never attaches to this suite's, and no Marten anywhere in its graph; it is in `postgres-studio.slnf`, so the Npgsql
 pass runs it too.
+
+## D49 — Why 2.0 dropped the two wordings and the root module (2026-11-17)
+
+**Two wordings.** 1.x grew as Marten Studio, then Postgres Studio under it, then KStudio as a guest, and the code still told that history. `StudioProduct` chose between
+two sets of sentences, and every log template that both products shared existed twice (`StudioLog` in Marten Studio's words, `PostgresStudioLog` in Postgres
+Studio's), so that Marten Studio 0.4's words never moved; `StudioTextPinTests` pinned the first set so that one host never saw a word change. With one product and
+no promise to keep a 1.x sentence (decided 2026-11-16: no legacy), the choice had no reader: every shared sentence had two copies, a test to stop one drifting, and no module
+could reword a sentence without deciding what it did to the other. 2.0 has one wording per module, in the module that says it, pinned by a `WordsTests` baseline of its
+own so that a change is read as a diff, and one template per log event. What is a promise is the id (`docs/stability.md`), which a host's alert or dashboard can key on, and the levels and property
+names were kept with it; a template's words are not, and a monitor that matched "(Marten Studio)" in an application name or a message no longer matches.
+Three things moved with the merge and are said where they happened: 9230 gained three option-name properties, fourteen Debug lines lost their `{Product}`
+property, and a Postgres source's events carry `{TenantId}` = `(all)`.
+
+**The root module.** Phase A of the shell plan made the database a module but kept one module whose pages sat at the mount itself, so that every 1.x address
+(`{mount}/documents`, `{mount}/health`) went on working. `IStudioModule.IsRoot` and `StudioPageAssembly.KeepsRoot` existed for that alone, and the rail's credit, the route table
+and the composition each carried a special case for it. With no 1.x address to keep, every module
+has a segment of its own (`postgres`, `marten`, `kafka`), the shell owns the mount (a front page of one tile per module, or a redirect when there is one) and `activity`, and the layout has one
+path: the module of the page on screen. A pasted 1.x address is a 404 and not a wrong page, and issue #78 is closed by the new addresses. Module order stopped being the composition's choice for the same reason: it
+is the order the host wrote its `Add…()` calls.
+
+## The Kafka packages' preview label (2026-11-17)
+
+Until 2.0 the three Kafka packages (`DataStudio.Kafka.Core`, `DataStudio.Kafka` and `DataStudio.Kafka.Wolverine`) were packed as a preview of the family's
+version, `<version>-preview.1` (K8), through one property, `Directory.Build.props`' `KafkaPrereleaseLabel`, which only the three read. The owner dropped the
+label at 2.0 (2026-11-17: "drop preview label from kafka and use the same versioning policy as others"): the Kafka module is part of Data Studio 2.0 at the
+family's version, and all seven packages have one version, the CHANGELOG's, always. What existed only for the label went with it: the property, the three
+projects' own `PackageVersion`, `InformationalVersion` and assembly metadata, their own empty package-validation baseline, `KStudioVersion` in the
+build (one `Version` for the seven), the version guard's family-version special case and the tests that computed a Kafka version. 2.0 itself ships first
+as `2.0.0-beta.1`, for the owner to try in real projects, and `2.0.0` follows after feedback: that is a prerelease of the one version, which the CHANGELOG
+header carries and all seven packages take.

@@ -1,0 +1,863 @@
+@page "/postgres/statements"
+@using System.Globalization
+@using DataStudio.Postgres.Internal.Sql
+@using DataStudio.Postgres.Services.Database
+@using DataStudio.Postgres.Services.Health
+@using DataStudio.Postgres.Services.Health.Checks
+@using DataStudio.Postgres.Services.Live
+@using DataStudio.Postgres.Services.Query
+@using DataStudio.Postgres.Services.Settings
+@using DataStudio.Postgres.Services.Sources
+@using DataStudio.Postgres.Services.Statements
+@using DataStudio.Postgres.Components.Pages.Query
+@using DataStudio.Postgres.Components.Shared
+@using DataStudio.Postgres.Services
+@implements IAsyncDisposable
+@inject IStatementsService StatementsData
+@inject StudioState State
+@inject StudioPreferences Preferences
+@inject StudioLiveUpdatesFactory LiveFactory
+@inject IStudioSettings Settings
+@inject StudioDescriptor Descriptor
+@inject SinceMarks Marks
+
+@*
+    Statements (W5-Q1, issue #8 G6 and A5): where this database's time goes, statement by statement - the statements
+    pg_stat_statements counts for the source's own role, over the window the statement checks watched, ranked by execution
+    time (and on Aurora by storage-level reads), and summed by group. Read through IStatementsService, whose facts are the
+    statement sweep's own read: no second read of pg_stat_statements.
+
+    One audience: a visitor through the activity gate (ViewDatabaseActivity, the store policy and the write policy, all asked
+    with no tenant), as Database › Sessions' details are. Below it the page says what it needs and reads nothing. Every text
+    is masked for the visitor, and a group that names a table in a schema they may not see is shown without it: both the
+    service's to decide.
+
+    A statement sweep runs when the page becomes interactive and on Refresh, kept for five minutes, single flight, whoever
+    asks; every HealthInterval while the page stays open it shows the last sweep that finished and starts none
+    (GetLatestAsync), because a statement sweep plans statements (T02) and a tab left open must not (W5-Q1-fix F6).
+
+    The drill-in (X1): ?queryid= opens one statement - its text as the visitor may read it, its counters, and its generic plan
+    as a tree with the plan insights under it (PlanView). It plans when it opens and on "Plan again", never on the page's poll,
+    behind the page's own gate, and the service decides whether a plan may be shown and masks it (IStatementsService.PlanAsync).
+    The link is D9's: the queryid and the scope in the query string reopen the same statement.
+
+    The index advisor (1.2-INDEX-A): ?advise=all (or ?advise=schema.table) opens a panel above the list, below a drill-in
+    (StatementsIndexAdvisor). It runs nothing on its own - not on load, a poll, a scope change or the navigation that opened it;
+    its Run button plans the top statements and imagines the indexes their plans suggest (IStatementsService.AdviseIndexesAsync).
+
+    Mark (1.2-H-A, X6): remembers the counters on screen - numbers only, in this circuit's memory - and counts each statement's
+    change since then in place of the advisor's window, until it is cleared or a reset of pg_stat_statements, or a restart that
+    began the counters again, ends it (StatementsSinceMark). `raw` is the read as the service gave it; `view` is what the page
+    draws, which is `raw` counted from the mark when there is one that holds.
+*@
+
+<PageTitle>Statements</PageTitle>
+
+<div class="ms-page ms-stmts">
+    <div class="ms-page-header">
+        <h1 class="ms-page-title">Statements</h1>
+        <div class="ms-stmts-actions">
+            <button type="button" class="ms-button" @onclick="RefreshAsync" disabled="@(!interactive || busy)">Refresh</button>
+            @if (view is { Refusal: DatabaseRefusal.None })
+            {
+                @* 1.2-INDEX-A: opens the panel (?advise=all, D9) and runs nothing; the panel's Run does. *@
+                <a class="ms-button ms-advisor-open" href="@StatementLinks.ToAdvisor(Descriptor, State.ActiveScope)" aria-current="@(Advising ? "true" : null)">Index advisor</a>
+            }
+            <SinceMarkControl MarkedAt="@mark?.At" Invalid="@(markEnded is null ? null : EndedConsequence)" Disabled="@(!interactive || loading || !CanMark)" ClearDisabled="@(!interactive)" OnMark="MarkAsync" OnClear="ClearMarkAsync" />
+        </div>
+    </div>
+
+    <p class="ms-stmts-lead">
+        Where this database's time goes, statement by statement: what pg_stat_statements counts for @Settings.Text.SourcePossessive own
+        role, over the window the statement checks watched, and the text of each statement as you may read it.
+    </p>
+
+    @if (!interactive || (loading && view is null))
+    {
+        @* A static render reads nothing: the read waits for the circuit, so a prerender is never a statement sweep. *@
+        <LoadingSpinner />
+    }
+    else if (error is { Length: > 0 })
+    {
+        <ErrorAlert Message="@error" OnRetry="RefreshAsync" />
+    }
+    else if (view is null)
+    {
+        <div class="ms-empty">
+            <p class="ms-empty-title">No database selected</p>
+            <p class="ms-empty-description">Pick a database in the header to see its statements.</p>
+        </div>
+    }
+    else if (view.Refusal is DatabaseRefusal.CapabilityOff or DatabaseRefusal.ReadOnly)
+    {
+        <CapabilityDisabled Capability="@nameof(StudioCapability.ViewDatabaseActivity)" Action="Statements" />
+        <p class="ms-muted ms-stmts-gate">
+            Statements are other programs' source text and the work of other sessions, so this page is shown only with
+            ViewDatabaseActivity on and the write policy allowing it for this database - as Database › Sessions' details are.
+        </p>
+    }
+    else if (view.Refusal != DatabaseRefusal.None)
+    {
+        <div class="ms-alert ms-alert-warning ms-stmts-refusal" role="status">
+            <div class="ms-alert-content">
+                <p>@view.Reason</p>
+            </div>
+        </div>
+    }
+    else if (view.State != StatementsState.Read)
+    {
+        <div class="ms-alert ms-alert-info ms-stmts-status" role="status">
+            <div class="ms-alert-content">
+                <p>@view.Status</p>
+            </div>
+        </div>
+
+        @Advisor()
+
+        @Footer(view)
+    }
+    else
+    {
+        @if (QueryId is { } drilled)
+        {
+            @Drill(drilled)
+        }
+
+        @Advisor()
+
+        @if (markEnded is { } ended && mark is { } held)
+        {
+            <div class="ms-alert ms-alert-warning ms-mark-alert" role="status">
+                <div class="ms-alert-content">
+                    <p>
+                        Your mark at @SinceMarkTime.When(Preferences, held.At) no longer holds: @ended.Text(moment => SinceMarkTime.When(Preferences, moment)). @EndedConsequence
+                    </p>
+                </div>
+            </div>
+        }
+
+        @if (view.MarkedAt is { } markedAt)
+        {
+            <p class="ms-stmts-window ms-stmts-window-marked">
+                Since your mark at @SinceMarkTime.When(Preferences, markedAt) (@TableText.Span(view.MarkSpan ?? TimeSpan.Zero)): each statement's change since
+                then, and its share of every statement's.
+            </p>
+        }
+        else
+        {
+            <p class="ms-stmts-window">@view.WindowText</p>
+        }
+
+        @if (view.Basis is { Length: > 0 } basis)
+        {
+            <p class="ms-stmts-basis" role="note">@basis</p>
+        }
+
+        <div class="ms-stmts-controls">
+            <div class="ms-stmts-choice" role="group" aria-label="How many statements">
+                <span class="ms-stmts-choice-label">Top</span>
+                @foreach (int choice in StatementsView.TopChoices)
+                {
+                    int n = choice;
+                    <button type="button" class="ms-button ms-stmts-choice-button @(top == n ? "ms-stmts-on" : null)" aria-pressed="@(top == n ? "true" : "false")" @onclick="() => top = n">@n</button>
+                }
+            </div>
+
+            @if (view.StorageReads)
+            {
+                <div class="ms-stmts-choice" role="group" aria-label="Rank by">
+                    <span class="ms-stmts-choice-label">Rank by</span>
+                    <button type="button" class="ms-button ms-stmts-choice-button @(ranking == StatementRanking.TotalTime ? "ms-stmts-on" : null)" aria-pressed="@(ranking == StatementRanking.TotalTime ? "true" : "false")" @onclick="() => Rank(StatementRanking.TotalTime)">total time</button>
+                    <button type="button" class="ms-button ms-stmts-choice-button ms-stmts-rank-storage @(ranking == StatementRanking.StorageReads ? "ms-stmts-on" : null)" aria-pressed="@(ranking == StatementRanking.StorageReads ? "true" : "false")" @onclick="() => Rank(StatementRanking.StorageReads)">storage reads</button>
+                </div>
+            }
+
+            <div class="ms-stmts-choice" role="group" aria-label="View">
+                <span class="ms-stmts-choice-label">View</span>
+                <button type="button" class="ms-button ms-stmts-choice-button @(!groups ? "ms-stmts-on" : null)" aria-pressed="@(!groups ? "true" : "false")" @onclick="() => groups = false">statements</button>
+                <button type="button" class="ms-button ms-stmts-choice-button ms-stmts-view-groups @(groups ? "ms-stmts-on" : null)" aria-pressed="@(groups ? "true" : "false")" @onclick="() => groups = true">groups</button>
+            </div>
+        </div>
+
+        @if (view.TextsWithheld is { Length: > 0 } withheld)
+        {
+            <p class="ms-stmts-withheld" role="note">@withheld</p>
+        }
+
+        @if (view.Rows.Count == 0)
+        {
+            <p class="ms-muted">No statement is in the window yet.</p>
+        }
+        else if (groups)
+        {
+            IReadOnlyList<StatementGroupRowView> rows = view.Groups(top, ranking);
+
+            <TableScroll Label="The top statements of this database, summed by group">
+                <table class="ms-table ms-stmts-groups">
+                    <thead>
+                        <tr>
+                            <th scope="col">Group</th>
+                            <th scope="col" class="ms-stmts-number">Statements</th>
+                            <th scope="col">Share</th>
+                            <th scope="col" class="ms-stmts-number">Total</th>
+                            <th scope="col" class="ms-stmts-number">Calls</th>
+                            <th scope="col" class="ms-stmts-number">Rows</th>
+                            <th scope="col" class="ms-stmts-number">Shared read</th>
+                            <th scope="col" class="ms-stmts-number">Temp written</th>
+                            @if (view.StorageReads)
+                            {
+                                <th scope="col" class="ms-stmts-number">Storage reads</th>
+                            }
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (StatementGroupRowView row in rows)
+                        {
+                            <tr @key="row.Key">
+                                <td class="ms-stmts-group">@row.Label</td>
+                                <td class="ms-stmts-number">@SessionText.Number(row.Statements)</td>
+                                <td class="ms-stmts-share">@ShareCell(row.Share)</td>
+                                <td class="ms-stmts-number">@StatementWindows.Milliseconds(row.Counts.ExecMs)</td>
+                                <td class="ms-stmts-number">@TableText.Count(row.Counts.Calls)</td>
+                                <td class="ms-stmts-number">@TableText.Count(row.Counts.Rows)</td>
+                                <td class="ms-stmts-number">@TableText.Count(row.Counts.SharedBlocksRead)</td>
+                                <td class="ms-stmts-number">@TableText.Count(row.Counts.TempBlocksWritten)</td>
+                                @if (view.StorageReads)
+                                {
+                                    <td class="ms-stmts-number">@(row.Counts.StorageBlocksRead is { } storage ? TableText.Count(storage) : "–")</td>
+                                }
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </TableScroll>
+        }
+        else
+        {
+            IReadOnlyList<StatementRowView> rows = view.Top(top, ranking, sort);
+
+            <TableScroll Label="The top statements of this database">
+                <table class="ms-table ms-stmts-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">Group</th>
+                            <th scope="col">Share</th>
+                            @SortHeader("Total", StatementSort.TotalTime)
+                            @SortHeader("Calls", StatementSort.Calls)
+                            @SortHeader("Mean", StatementSort.Mean)
+                            @SortHeader("Rows", StatementSort.Rows)
+                            <th scope="col" class="ms-stmts-number">Shared hit</th>
+                            @SortHeader("Shared read", StatementSort.SharedRead)
+                            @SortHeader("Temp written", StatementSort.Temp)
+                            @if (view.StorageReads)
+                            {
+                                @SortHeader("Storage reads", StatementSort.StorageReads)
+                            }
+                            <th scope="col">Statement</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (StatementRowView row in rows)
+                        {
+                            <tr @key="row.Key" class="@(row.Window is null ? "ms-stmts-unwatched" : null)">
+                                <td class="ms-stmts-group">@row.GroupLabel</td>
+                                <td class="ms-stmts-share">@ShareCell(row.Share)</td>
+                                @if (row.Window is { } counts)
+                                {
+                                    <td class="ms-stmts-number">@StatementWindows.Milliseconds(counts.ExecMs)</td>
+                                    <td class="ms-stmts-number">@TableText.Count(counts.Calls)</td>
+                                    <td class="ms-stmts-number">@(counts.MeanMs is { } mean ? StatementWindows.Milliseconds(mean) : "–")</td>
+                                    <td class="ms-stmts-number">@TableText.Count(counts.Rows)</td>
+                                    <td class="ms-stmts-number">@TableText.Count(counts.SharedBlocksHit)</td>
+                                    <td class="ms-stmts-number">@TableText.Count(counts.SharedBlocksRead)</td>
+                                    <td class="ms-stmts-number">@TableText.Count(counts.TempBlocksWritten)</td>
+                                    @if (view.StorageReads)
+                                    {
+                                        <td class="ms-stmts-number">@(counts.StorageBlocksRead is { } storage ? TableText.Count(storage) : "–")</td>
+                                    }
+                                }
+                                else
+                                {
+                                    <td class="ms-stmts-number ms-muted" colspan="@(view.StorageReads ? 8 : 7)">
+                                        @(row.MarkNote ?? "not watched yet: new to the statements kept, watched from the next check")
+                                    </td>
+                                }
+                                <td class="ms-stmts-statement">
+                                    @if (row.Text is { Length: > 0 } text)
+                                    {
+                                        <details class="ms-stmts-text">
+                                            <summary><code>@Summary(text)</code></summary>
+                                            <pre class="ms-mono">@text</pre>
+                                        </details>
+                                    }
+
+                                    @if (row.TextNote is { Length: > 0 } note)
+                                    {
+                                        <p class="ms-stmts-note">@note</p>
+                                    }
+
+                                    @if (row.WatchedFrom is { } from)
+                                    {
+                                        <p class="ms-stmts-note">Watched since @(view.MarkedAt is not null ? SinceMarkTime.When(Preferences, from) : TableText.When(from)), part of the window.</p>
+                                    }
+
+                                    @if (row.ParallelNote is { Length: > 0 } parallel)
+                                    {
+                                        <p class="ms-stmts-note">@parallel</p>
+                                    }
+
+                                    @if (row.ServerCounters?.Text is { Length: > 0 } serverCounters)
+                                    {
+                                        <p class="ms-stmts-note ms-stmts-server-counters">@serverCounters</p>
+                                    }
+
+                                    <p class="ms-stmts-queryid">
+                                        queryid @row.Key
+                                        @if (row.Text is { Length: > 0 })
+                                        {
+                                            <a class="ms-plan-open" href="@StatementLinks.ToStatement(Descriptor, State.ActiveScope, row.QueryId)">Plan</a>
+                                        }
+                                    </p>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </TableScroll>
+        }
+
+        <p class="ms-stmts-caveat">@view.Caveat</p>
+
+        @Footer(view)
+    }
+</div>
+
+@code {
+    private readonly CancellationTokenSource lifetime = new();
+
+    /// <summary>The page's own polling loop, at <c>HealthInterval</c>; built rather than injected.</summary>
+    private StudioLiveUpdates? live;
+
+    /// <summary>What the page draws: <see cref="raw" /> counted from <see cref="mark" /> while there is one that holds.</summary>
+    private StatementsView? view;
+
+    /// <summary>The read as the service gave it, uncounted.</summary>
+    private StatementsView? raw;
+
+    /// <summary>This database's mark in the circuit's <see cref="SinceMarks" />, or <see langword="null" />.</summary>
+    private StatementsMark? mark;
+
+    /// <summary>Why <see cref="mark" /> no longer holds, or <see langword="null" />.</summary>
+    private SinceMarkEnd? markEnded;
+
+    private const string EndedConsequence = "The page counts over the advisor's window again; mark again to count from now.";
+
+    private string? error;
+    private bool loading = true;
+    private bool busy;
+    private bool interactive;
+    private bool disposed;
+
+    private int top = 25;
+    private StatementRanking ranking = StatementRanking.TotalTime;
+    private StatementSort sort = StatementSort.TotalTime;
+    private bool groups;
+
+    // The drill-in (X1): the plan on screen, the queryid it was planned for, and whether one is being planned.
+    private StatementPlanView? plan;
+    private long? plannedFor;
+    private bool planning;
+    private string? planError;
+
+    /// <summary>The drill-in's statement, as the query string carries it (D9).</summary>
+    [SupplyParameterFromQuery(Name = StatementLinks.QueryIdParameter)]
+    public string? QueryIdParameter { get; set; }
+
+    private long? QueryId => StatementLinks.ParseQueryId(QueryIdParameter);
+
+    /// <summary>The index advisor's panel, as the query string carries it (D9): <c>all</c>, or a <c>schema.table</c>.</summary>
+    [SupplyParameterFromQuery(Name = IndexAdvisor.AdviseParameter)]
+    public string? AdviseParameter { get; set; }
+
+    /// <summary>Whether the address asks for the index advisor's panel.</summary>
+    private bool Advising => !string.IsNullOrWhiteSpace(AdviseParameter);
+
+    /// <summary>The table the panel is narrowed to, or <see langword="null" /> for every table.</summary>
+    private string? AdviseTable => string.Equals(AdviseParameter, IndexAdvisor.AdviseAll, StringComparison.Ordinal) ? null : AdviseParameter;
+
+    /// <summary>
+    /// 1.2-INDEX-A: the index advisor's panel - above the list, below a drill-in - when the address names it. It plans nothing until
+    /// its Run is pressed, and a visitor short of the page's gate never reaches it (the page draws no list for them).
+    /// </summary>
+    private RenderFragment Advisor() => __builder =>
+    {
+        @if (Advising && view is { Refusal: DatabaseRefusal.None })
+        {
+            <StatementsIndexAdvisor @key="@(AdviseParameter + "|" + State.ActiveScope)" Table="@AdviseTable" />
+        }
+    };
+
+    protected override void OnInitialized()
+    {
+        // Nothing is read here: this runs during prerendering too, and the read waits for the circuit.
+        State.ScopeChanged += OnScopeChangedAsync;
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // A Plan link on this page, or Back and Forward between two statements: a new queryid in the same page instance.
+        // Before the first render there is no circuit to plan for; OnAfterRenderAsync plans then.
+        if (interactive && !disposed && QueryId != plannedFor)
+        {
+            await LoadPlanAsync();
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || disposed)
+        {
+            return;
+        }
+
+        interactive = true;
+
+        await LoadAsync();
+
+        // Leaving the page during the first read disposes it under the await: the lifetime's source is gone, and reading its
+        // token would throw out of OnAfterRenderAsync and end the circuit.
+        if (disposed)
+        {
+            return;
+        }
+
+        if (QueryId is not null && QueryId != plannedFor)
+        {
+            await LoadPlanAsync();
+
+            if (disposed)
+            {
+                return;
+            }
+        }
+
+        live = LiveFactory.Create();
+        await live.StartAsync(Settings.EffectiveHealthInterval, TickAsync, lifetime.Token);
+    }
+
+    /// <summary>One poll, under the loop's token as well as the page's: the last sweep that finished, never a new one.</summary>
+    private async Task TickAsync(CancellationToken cancellationToken) => await LoadAsync(cancellationToken, run: false);
+
+    private async Task RefreshAsync() => await LoadAsync();
+
+    private async Task OnScopeChangedAsync()
+    {
+        if (!interactive)
+        {
+            return;
+        }
+
+        view = null;
+        raw = null;
+        mark = null;
+        markEnded = null;
+        plan = null;
+        plannedFor = null;
+        await LoadAsync();
+
+        if (QueryId is not null)
+        {
+            await LoadPlanAsync();
+        }
+    }
+
+    private async Task PlanAgainAsync() => await LoadPlanAsync();
+
+    /// <summary>
+    /// The drill-in's plan of the statement the address names - or nothing, when it names none. Never from a poll: a plan is
+    /// asked for when the drill-in opens and on Plan again, and each is one Activity entry.
+    /// </summary>
+    private async Task LoadPlanAsync()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        // Read before anything is awaited: once the page is disposed, the source is gone with it.
+        CancellationToken token = lifetime.Token;
+        long? queryId = QueryId;
+        StudioScope? scope = State.ActiveScope;
+        plannedFor = queryId;
+
+        if (queryId is not { } id || scope is null)
+        {
+            plan = null;
+            planError = null;
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        planning = true;
+        planError = null;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            StatementPlanView read = await StatementsData.PlanAsync(scope, id, token);
+
+            // The address or the scope moved while it planned: the plan is of something nobody is looking at.
+            if (QueryId == id && State.ActiveScope == scope)
+            {
+                plan = read;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            // On the page: a plan that failed out of sight is a drill-in that silently shows nothing.
+            planError = exception.Message;
+        }
+        finally
+        {
+            planning = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    // X2: the drill-in's what-if, one per plan, so the comparison under it stays until the plan is planned again.
+    private StatementPlanView? whatIfPlan;
+    private WhatIfSource? whatIf;
+
+    /// <summary>
+    /// The plan's "What if?": the indexes it suggests, each planned through the drill-in's own gate and audited by queryid
+    /// (<see cref="IStatementsService.WhatIfAsync" />), which imagines only an index the plan it plans again still suggests.
+    /// </summary>
+    private WhatIfSource WhatIfFor(StatementPlanView shown)
+    {
+        if (!ReferenceEquals(shown, whatIfPlan) || whatIf is null)
+        {
+            whatIfPlan = shown;
+            long id = shown.QueryId;
+            whatIf = new WhatIfSource
+            {
+                RunAsync = async (index, token) =>
+                {
+                    StudioScope? scope = State.ActiveScope;
+                    return scope is null
+                        ? WhatIfResult.NotCompared(index, "Not compared: no database is selected.")
+                        : await StatementsData.WhatIfAsync(scope, id, index, token);
+                },
+                Note = "Each is planned as the drill-in plans: the generic plan, as SqlConsoleRole, under your own search_path.",
+            };
+        }
+
+        return whatIf;
+    }
+
+    /// <summary>The drill-in: one statement as the visitor may read it, and its plan.</summary>
+    private RenderFragment Drill(long queryId) => __builder =>
+    {
+        string id = queryId.ToString(CultureInfo.InvariantCulture);
+
+        <section class="ms-plan-drill" aria-labelledby="ms-plan-drill-title">
+            <div class="ms-plan-drill-header">
+                <h2 class="ms-plan-drill-title" id="ms-plan-drill-title">Statement <span class="ms-mono">@id</span></h2>
+                <div class="ms-plan-drill-actions">
+                    <button type="button" class="ms-button ms-plan-drill-again" @onclick="PlanAgainAsync" disabled="@planning">Plan again</button>
+                    <a class="ms-button ms-plan-drill-close" href="@StatementLinks.ToStatements(Descriptor, State.ActiveScope)">All statements</a>
+                </div>
+            </div>
+
+            @if (planError is { Length: > 0 } failed)
+            {
+                <ErrorAlert Message="@failed" OnRetry="PlanAgainAsync" />
+            }
+            else if (plan is not { } shown || shown.QueryId != queryId)
+            {
+                <LoadingSpinner />
+            }
+            else if (shown.Refusal != DatabaseRefusal.None)
+            {
+                <div class="ms-alert ms-alert-warning ms-plan-drill-refusal" role="status">
+                    <div class="ms-alert-content">
+                        <p>@shown.Reason</p>
+                    </div>
+                </div>
+            }
+            else
+            {
+                @if (shown.Statement is { } row)
+                {
+                    @if (row.Text is { Length: > 0 } text)
+                    {
+                        <pre class="ms-mono ms-plan-drill-text">@text</pre>
+                    }
+
+                    @if (row.TextNote is { Length: > 0 } note)
+                    {
+                        <p class="ms-stmts-note">@note</p>
+                    }
+
+                    // The plan's own row is the advisor's window; while a mark counts, the counts are the page's, so the drill-in
+                    // says what the window line says.
+                    bool counting = mark is not null && markEnded is null && view?.MarkedAt is not null;
+                    StatementRowView? counted = counting ? view!.Rows.FirstOrDefault(x => x.QueryId == queryId) : null;
+                    StatementCounts? drillCounts = counting ? counted?.Window : row.Window;
+
+                    @if (drillCounts is { } counts)
+                    {
+                        <p class="ms-plan-drill-counts">
+                            @TableText.Count(counts.Calls) calls, @StatementWindows.Milliseconds(counts.ExecMs) of execution
+                            @(counts.MeanMs is { } mean ? "(" + StatementWindows.Milliseconds(mean) + " a call)" : string.Empty),
+                            @TableText.Count(counts.Rows) rows, over the window above.
+                        </p>
+                    }
+                    else if (counting && counted?.MarkNote is { Length: > 0 } markNote)
+                    {
+                        <p class="ms-plan-drill-counts ms-stmts-note">@markNote</p>
+                    }
+
+                    @if (row.ServerCounters?.Text is { Length: > 0 } serverCounters)
+                    {
+                        <p class="ms-plan-drill-counts ms-stmts-server-counters">@serverCounters</p>
+                    }
+                }
+
+                @if (shown.Plan is { } tree)
+                {
+                    <PlanView Plan="tree" MaskedExport="true" Caption="@shown.Caveat" Label="@("The generic plan of statement " + id)" WhatIf="@WhatIfFor(shown)" />
+                }
+                else if (shown.NoPlan is { Length: > 0 } why)
+                {
+                    <p class="ms-plan-drill-none" role="note">@why</p>
+                }
+
+                @foreach (HealthStatement statement in shown.Statements)
+                {
+                    <SqlDisclosure Sql="@statement.Sql" ParameterNames="statement.ParameterNames" />
+                }
+
+                @if (shown.PlannedAt is { } planned)
+                {
+                    <p class="ms-plan-drill-measured">
+                        Planned @Preferences.FormatInSelectedTimeZone(planned) (<TimeAgo Timestamp="planned" />), as the console's role, and
+                        recorded in the Activity log.
+                    </p>
+                }
+            }
+        </section>
+    };
+
+    /// <summary>A read: the statement sweep's, run when stale (<paramref name="run" />), or the last that finished (a poll).</summary>
+    private async Task LoadAsync(CancellationToken poll = default, bool run = true)
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        StudioScope? scope = State.ActiveScope;
+
+        using CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token, poll);
+        CancellationToken token = linked.Token;
+        busy = true;
+        loading = true;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            StatementsView? read = scope is null ? null
+                : run ? await StatementsData.GetAsync(scope, token)
+                : await StatementsData.GetLatestAsync(scope, token);
+
+            // A scope change while this was reading: the answer is about a database nobody is looking at.
+            if (State.ActiveScope == scope)
+            {
+                raw = read;
+                Rebuild();
+                error = null;
+
+                if (view is { StorageReads: false } && (ranking == StatementRanking.StorageReads || sort == StatementSort.StorageReads))
+                {
+                    Rank(StatementRanking.TotalTime);
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            // On the page, not only in the log: a failure the visitor cannot see is a page that silently shows nothing.
+            error = exception.Message;
+        }
+        finally
+        {
+            busy = false;
+            loading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    /// <summary>Whether the page shows a read whose counters a mark can remember.</summary>
+    private bool CanMark => raw is { Refusal: DatabaseRefusal.None, State: StatementsState.Read, MeasuredAt: not null };
+
+    /// <summary>Takes <see cref="view" /> from <see cref="raw" /> and this database's mark: counted from it when it holds.</summary>
+    private void Rebuild()
+    {
+        StudioScope? scope = State.ActiveScope;
+        mark = scope is null ? null : Marks.Get<StatementsMark>(StatementsSinceMark.Page, scope);
+        markEnded = null;
+        view = raw;
+
+        if (raw is not null && mark is not null)
+        {
+            (StatementsView counted, SinceMarkEnd? ended) = StatementsSinceMark.Apply(raw, mark);
+            view = counted;
+            markEnded = ended;
+        }
+    }
+
+    /// <summary>Remembers the counters on screen. Numbers only, in this circuit's memory; no interop, no storage.</summary>
+    private async Task MarkAsync()
+    {
+        try
+        {
+            if (!disposed && raw is not null && State.ActiveScope is { } scope && StatementsSinceMark.Take(raw) is { } taken)
+            {
+                Marks.Set(StatementsSinceMark.Page, scope, taken);
+                Rebuild();
+            }
+        }
+        catch (Exception exception)
+        {
+            error = exception.Message;
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Forgets this database's mark: the page counts over the advisor's window again.</summary>
+    private async Task ClearMarkAsync()
+    {
+        try
+        {
+            if (!disposed && State.ActiveScope is { } scope)
+            {
+                Marks.Clear(StatementsSinceMark.Page, scope);
+                Rebuild();
+            }
+        }
+        catch (Exception exception)
+        {
+            error = exception.Message;
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>A sortable column's header: a button that sorts the top statements by it, the most first.</summary>
+    private RenderFragment SortHeader(string label, StatementSort by) => __builder =>
+    {
+        <th scope="col" class="ms-stmts-number" aria-sort="@(sort == by ? "descending" : "none")">
+            <button type="button" class="ms-stmts-sort @(sort == by ? "ms-stmts-on" : null)" @onclick="() => sort = by">@label</button>
+        </th>
+    };
+
+    /// <summary>The studio's own line, "Show SQL" and when it was read: below the table, and below a status alone.</summary>
+    private RenderFragment Footer(StatementsView shown) => __builder =>
+    {
+        @if (shown.StudioCost is { } cost)
+        {
+            <p class="ms-stmts-studio">@StudioLine(cost, shown.StudioCostText)</p>
+        }
+
+        @foreach (HealthStatement statement in shown.Statements)
+        {
+            <SqlDisclosure Sql="@statement.Sql" ParameterNames="statement.ParameterNames" />
+        }
+
+        @if (shown.MeasuredAt is { } measured)
+        {
+            <p class="ms-stmts-measured">
+                Read @Preferences.FormatInSelectedTimeZone(measured) (<TimeAgo Timestamp="measured" />), for this database only. While
+                the page is open it shows the latest read and starts none of its own; Refresh reads again once the last read is
+                five minutes old.
+            </p>
+        }
+    };
+
+    /// <summary>Ranks by <paramref name="by" />, and sorts by it too: the top N by storage reads are read most-first.</summary>
+    private void Rank(StatementRanking by)
+    {
+        ranking = by;
+        sort = by == StatementRanking.StorageReads ? StatementSort.StorageReads : StatementSort.TotalTime;
+    }
+
+    /// <summary>"The studio itself: 1.50 s of database time over 12 connections to this database in the last 5 minutes. …"</summary>
+    private static string StudioLine(StudioCost cost, string? covers) =>
+        "The studio itself: " + cost.Total.TotalSeconds.ToString("0.00", CultureInfo.InvariantCulture) + " s of database time over "
+        + SessionText.Count(cost.Connections, "connection") + " to this database in the last "
+        + ((int) cost.Window.TotalMinutes).ToString(CultureInfo.InvariantCulture) + " minutes. " + covers;
+
+    /// <summary>A share of the window's execution time: a bar and its percentage, or a dash when there is none.</summary>
+    private static RenderFragment ShareCell(double? share) => __builder =>
+    {
+        @if (share is { } value)
+        {
+            <span class="ms-stmts-bar" style="--ms-stmts-share: @Width(value)" aria-hidden="true"></span>
+            <span class="ms-stmts-share-value">@TableText.Percent(value)</span>
+        }
+        else
+        {
+            @("–")
+        }
+    };
+
+    private static string Width(double share) =>
+        Math.Clamp(share * 100, 0, 100).ToString("0.##", CultureInfo.InvariantCulture) + "%";
+
+    /// <summary>The first line of a statement, cut, for the row's summary.</summary>
+    private static string Summary(string text)
+    {
+        string first = text.Split('\n', 2)[0].Trim();
+        return first.Length > 120 ? first[..120] + " …" : first;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        disposed = true;
+
+        State.ScopeChanged -= OnScopeChangedAsync;
+
+        try
+        {
+            if (live is not null)
+            {
+                await live.DisposeAsync();
+                live = null;
+            }
+        }
+        finally
+        {
+            try
+            {
+                await lifetime.CancelAsync();
+            }
+            finally
+            {
+                lifetime.Dispose();
+            }
+        }
+
+        GC.SuppressFinalize(this);
+    }
+}

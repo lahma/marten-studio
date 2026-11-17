@@ -1,0 +1,572 @@
+using DataStudio.Postgres.Services.Connection;
+using DataStudio.Postgres.Services.Health;
+using DataStudio.Postgres.Services.Health.Checks;
+
+using static DataStudio.Postgres.Tests.Connection.ConnectionCheckFacts;
+using static DataStudio.Postgres.Tests.Server.ServerTestFacts;
+
+namespace DataStudio.Postgres.Tests.Connection;
+
+/// <summary>
+/// 1.1-NP2: S11, S12 and S13 over stated facts and no Postgres - every variant both ways, every stand-down, severities, remedies in
+/// every form, and the findings' words in both studios.
+/// </summary>
+public sealed class PostureChecksTests
+{
+    // ----------------------------------------------------------------------------------------------
+    // S11 Server certificate not verified
+    // ----------------------------------------------------------------------------------------------
+
+    private static HealthVerdict S11(ConnectionFacts facts, bool postgres = false) =>
+        new ServerCertificateCheck().Evaluate(facts, Evaluation(postgres)).ShouldBeWellFormedFor<ServerCertificateCheck>();
+
+    [Theory]
+    [InlineData("Host=db.example", "prefer")]
+    [InlineData("Host=db.example;SSL Mode=Prefer", "prefer")]
+    [InlineData("Host=db.example;SSL Mode=Allow", "prefer")]
+    [InlineData("Host=db.example;SSL Mode=Require", "require")]
+    public void TLS_in_use_below_VerifyCA_is_a_finding_with_the_variant_of_its_mode(string connectionString, string variant)
+    {
+        HealthFinding finding = S11(Facts(connectionString, Observed(ssl: true, sslVersion: "TLSv1.3"))).Findings.Should().ContainSingle().Subject;
+
+        finding.Variant.Should().Be(variant);
+        finding.Key.Should().Be("S11|" + variant);
+        finding.Evidence.Should().Contain(x => x.Label == "Connection" && x.Value == "encrypted (TLSv1.3)");
+    }
+
+    [Theory]
+    [InlineData("Host=db.example;SSL Mode=VerifyCA")]
+    [InlineData("Host=db.example;SSL Mode=VerifyFull")]
+    public void A_mode_that_checks_the_certificate_is_quiet(string connectionString)
+    {
+        HealthVerdict verdict = S11(Facts(connectionString, Observed(ssl: true)));
+
+        verdict.Findings.Should().BeEmpty();
+        verdict.Note.Should().Contain("checks the server's certificate");
+    }
+
+    [Theory]
+    [InlineData("Host=localhost")]
+    [InlineData("Host=127.0.0.1")]
+    [InlineData("Host=/var/run/postgresql")]
+    public void A_host_that_never_leaves_the_machine_is_quiet(string connectionString)
+    {
+        S11(Facts(connectionString, Observed(ssl: true))).Findings.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void A_connection_without_TLS_is_S05s_and_quiet_here()
+    {
+        HealthVerdict verdict = S11(Facts("Host=db.example", Observed(ssl: false)));
+
+        verdict.Findings.Should().BeEmpty();
+        verdict.Note.Should().Contain("S05");
+    }
+
+    [Fact]
+    public void One_remote_host_among_local_ones_is_judged()
+    {
+        S11(Facts("Host=localhost,db.example", Observed(ssl: true))).Findings.Should().ContainSingle();
+    }
+
+    [Fact]
+    public void Trust_Server_Certificate_is_no_variant_and_changes_nothing()
+    {
+        // Obsolete, and does nothing at Npgsql 9.0.4 and 10.0.3: the mode alone decides.
+        S11(Facts("Host=db.example;SSL Mode=Require;Trust Server Certificate=true", Observed(ssl: true))).Findings.Should().ContainSingle()
+            .Which.Variant.Should().Be("require");
+        HealthCheckRegistry.Describe(typeof(ServerCertificateCheck)).Variants.Should().Equal("prefer", "require");
+    }
+
+    [Theory]
+    [InlineData(PostgresPlatformKind.AmazonRds, "Warning")]
+    [InlineData(PostgresPlatformKind.AmazonAurora, "Warning")]
+    [InlineData(PostgresPlatformKind.Azure, "Warning")]
+    [InlineData(PostgresPlatformKind.CloudSql, "Warning")]
+    [InlineData(PostgresPlatformKind.Neon, "Warning")]
+    [InlineData(PostgresPlatformKind.Supabase, "Warning")]
+    [InlineData(PostgresPlatformKind.SelfHosted, "Info")]
+    public void The_severity_is_Warning_on_a_detected_cloud_platform_and_Info_elsewhere(PostgresPlatformKind platform, string expected)
+    {
+        S11(Facts("Host=db.example", Observed(ssl: true), platform)).Findings.Single().Severity.ToString().Should().Be(expected);
+    }
+
+    [Fact]
+    public void The_remedy_is_VerifyFull_with_the_providers_bundle_where_the_studio_has_a_source()
+    {
+        HealthFinding rds = S11(Facts("Host=db.example", Observed(ssl: true), PostgresPlatformKind.AmazonRds)).Findings.Single();
+
+        rds.Remedy!.Code.Should()
+            .Contain("SSL Mode=VerifyFull;Root Certificate=")
+            .And.Contain("b.ConnectionStringBuilder.SslMode = SslMode.VerifyFull;")
+            .And.Contain("b.ConnectionStringBuilder.RootCertificate = ");
+        rds.Remedy.Explanation.Should().Contain("global-bundle.pem");
+        Everything(rds).Should().NotContain("rds.force_ssl");
+
+        S11(Facts("Host=db.example", Observed(ssl: true), PostgresPlatformKind.Azure)).Findings.Single().Remedy!.Explanation
+            .Should().Contain("DigiCert Global Root G2").And.Contain("Microsoft RSA Root CA 2017");
+        Everything(S11(Facts("Host=db.example", Observed(ssl: true), PostgresPlatformKind.AmazonAurora)).Findings.Single()).Should().NotContain("rds.force_ssl", "nothing is claimed about Aurora's default");
+    }
+
+    [Fact]
+    public void A_Root_Certificate_set_under_Require_is_reported_as_ignored_without_its_path()
+    {
+        HealthFinding finding = S11(Facts("Host=db.example;SSL Mode=Require;Root Certificate=/etc/ssl/S3NT1NEL-root.pem", Observed(ssl: true))).Findings.Single();
+
+        finding.Evidence.Should().Contain(x => x.Label == "Root Certificate" && x.Value.Contains("not used", StringComparison.Ordinal));
+        Everything(finding).Should().NotContain("S3NT1NEL").And.NotContain("/etc/ssl");
+    }
+
+    [Fact]
+    public void The_Cloud_SQL_Auth_Proxy_case_is_not_applicable_and_says_why()
+    {
+        // A Cloud SQL server reached on loopback or a socket: the proxy wraps its leg to the instance in TLS itself.
+        ServerCertificateCheck.NotApplicableReason(Facts("Host=127.0.0.1", Observed(ssl: false), PostgresPlatformKind.CloudSql))
+            .Should().Contain("Auth Proxy").And.Contain("TLS itself");
+        ServerCertificateCheck.NotApplicableReason(Facts("Host=/cloudsql/project:region:instance", Observed(ssl: false), PostgresPlatformKind.CloudSql))
+            .Should().Contain("Auth Proxy");
+
+        // A Cloud SQL server reached directly is judged; so is a loopback host that is not Cloud SQL.
+        ServerCertificateCheck.NotApplicableReason(Facts("Host=34.1.2.3", Observed(ssl: true), PostgresPlatformKind.CloudSql)).Should().BeNull();
+        ServerCertificateCheck.NotApplicableReason(Facts("Host=127.0.0.1", Observed(ssl: true))).Should().BeNull();
+    }
+
+    // One host (or port) per pooler sign: a Neon pooled endpoint, Supabase's 6543, Azure's built-in PgBouncer, PgBouncer's port and an RDS Proxy.
+    public static TheoryData<string> PoolerHosts => new()
+    {
+        "Host=ep-cool-123-pooler.us-east-2.aws.neon.tech",
+        "Host=db.example;Port=6543",
+        "Host=myserver.postgres.database.azure.com;Port=6432",
+        "Host=db.example;Port=6432",
+        "Host=" + ProxyHost,
+    };
+
+    [Theory]
+    [MemberData(nameof(PoolerHosts))]
+    public void Behind_a_pooler_S11_is_not_applicable_because_the_TLS_row_is_the_poolers_own(string connectionString)
+    {
+        string? reason = ServerCertificateCheck.NotApplicableReason(Facts(connectionString, Observed(ssl: true)));
+
+        reason.Should().Contain("connection pooler").And.Contain("pg_stat_ssl row is the pooler's own connection, not the application's")
+            .And.Contain("Connection page's TLS hint judges SSL Mode");
+    }
+
+    [Theory]
+    [MemberData(nameof(PoolerHosts))]
+    public void Behind_a_pooler_S05_is_not_applicable_for_the_same_reason(string connectionString)
+    {
+        string? reason = UnencryptedConnectionCheck.NotApplicableReason(Facts(connectionString, Observed(ssl: false)).Settings.PoolerSigns);
+
+        reason.Should().Contain("connection pooler").And.Contain("pg_stat_ssl row is the pooler's own connection, not the application's")
+            .And.Contain("Connection page's TLS hint judges SSL Mode");
+    }
+
+    [Theory]
+    [MemberData(nameof(PoolerHosts))]
+    public void Behind_a_pooler_S11_stands_down_as_not_applicable_even_when_the_connection_could_not_be_read(string connectionString)
+    {
+        // GatherAsync asks the pooler first (PoolerReason), then the unread connection (UnavailableReason): an unread server behind a pooler
+        // is not applicable, not unavailable.
+        ConnectionFacts facts = Facts(connectionString, observed: null, notRead: "the connection read failed (SQLSTATE 57014)");
+
+        ServerCertificateCheck.PoolerReason(facts).Should().Contain("connection pooler");
+        ServerCertificateCheck.UnavailableReason(facts).Should().Contain("SQLSTATE 57014");
+        ServerCertificateCheck.PoolerReason(Facts("Host=db.example", observed: null, notRead: "x")).Should().BeNull();
+    }
+
+    // ---- FINAL-POLISH A1: a port alone must not switch S05 off, nor S11's require variant ----
+
+    private static HealthVerdict S05(ConnectionFacts facts, string environment = "Production") =>
+        new UnencryptedConnectionCheck()
+            .Evaluate(
+                new UnencryptedConnectionFacts(null, null, environment, facts.Settings.PoolerSigns, UnencryptedConnectionCheck.JudgedFromSslMode(facts)),
+                Evaluation())
+            .ShouldBeWellFormedFor<UnencryptedConnectionCheck>();
+
+    [Theory]
+    [InlineData("Host=db.example;Port=6432;SSL Mode=Disable")]
+    [InlineData("Host=db.example;Port=6543;SSL Mode=disable")]
+    [InlineData("Host=myserver.postgres.database.azure.com;Port=6432;SSL Mode=Disable")]
+    [InlineData("Host=ep-cool-123-pooler.us-east-2.aws.neon.tech;SSL Mode=Disable")]
+    [InlineData("Host=" + ProxyHost + ";SSL Mode=Disable")]
+    public void SSL_Mode_Disable_to_a_remote_host_fires_S05_from_the_setting_whatever_the_pooler_signs_say(string connectionString)
+    {
+        ConnectionFacts facts = Facts(connectionString, Observed(ssl: false));
+
+        facts.Settings.PoolerSigns.Should().NotBeEmpty();
+        UnencryptedConnectionCheck.JudgedFromSslMode(facts).Should().BeTrue();
+
+        HealthFinding finding = S05(facts).Findings.Should().ContainSingle().Subject;
+
+        finding.Severity.Should().Be(HealthSeverity.Warning);
+        finding.Evidence.Should().Contain(x => x.Label == "Connection" && x.Value.Contains("SSL Mode=Disable", StringComparison.Ordinal)
+                                                  && x.Value.Contains("to the server or to a pooler in front of it", StringComparison.Ordinal));
+        finding.Evidence.Should().Contain(x => x.Label == "Judged from");
+        finding.Caveat.Should().Contain("Judged from SSL Mode=Disable").And.Contain("may sit in front of the server");
+        Everything(finding).Should().NotContain("db.example").And.NotContain("neon.tech").And.NotContain("azure.com").And.NotContain("amazonaws.com");
+    }
+
+    [Theory]
+    [InlineData("Host=db.example;Port=6432;SSL Mode=Disable", "Production", "Warning")]
+    [InlineData("Host=db.example;Port=6432;SSL Mode=Disable", "Development", "Info")]
+    public void The_S05_finding_from_the_setting_keeps_the_environment_severity(string connectionString, string environment, string severity)
+    {
+        S05(Facts(connectionString), environment).Findings.Single().Severity.ToString().Should().Be(severity);
+    }
+
+    [Theory]
+    [InlineData("Host=db.example;Port=6432;SSL Mode=Prefer")]
+    [InlineData("Host=db.example;Port=6432;SSL Mode=Require")]
+    [InlineData("Host=db.example;Port=6432")]
+    [InlineData("Host=localhost;Port=6432;SSL Mode=Disable")]
+    [InlineData("Host=db.example;Port=5432;SSL Mode=Disable")]
+    public void S05_stands_down_behind_a_pooler_for_every_other_mode_and_is_the_servers_to_judge_without_a_sign(string connectionString)
+    {
+        ConnectionFacts facts = Facts(connectionString, Observed(ssl: false));
+
+        UnencryptedConnectionCheck.JudgedFromSslMode(facts).Should().BeFalse();
+
+        if (facts.Settings.PoolerSigns.Count > 0)
+        {
+            UnencryptedConnectionCheck.NotApplicableReason(facts.Settings.PoolerSigns).Should().NotBeNull();
+        }
+    }
+
+    [Theory]
+    [InlineData("Host=db.example;Port=6432;SSL Mode=Require", "require")]
+    [InlineData("Host=db.example;Port=6543;SSL Mode=require", "require")]
+    [InlineData("Host=ep-cool-123-pooler.us-east-2.aws.neon.tech;SSL Mode=Require", "require")]
+    public void SSL_Mode_Require_behind_a_pooler_fires_S11_require_from_the_setting(string connectionString, string variant)
+    {
+        // The server saw the pooler's own connection (here unencrypted); the setting alone decides.
+        ConnectionFacts facts = Facts(connectionString, Observed(ssl: false), PostgresPlatformKind.AmazonRds);
+
+        ServerCertificateCheck.JudgedFromSslMode(facts).Should().BeTrue();
+        ServerCertificateCheck.PoolerReason(facts).Should().BeNull();
+        ServerCertificateCheck.NotApplicableReason(facts).Should().BeNull();
+
+        HealthFinding finding = S11(facts).Findings.Should().ContainSingle().Subject;
+
+        finding.Key.Should().Be("S11|" + variant);
+        finding.Severity.Should().Be(HealthSeverity.Warning);
+        finding.Evidence.Should().Contain(x => x.Label == "Connection" && x.Value.Contains("judged from the setting", StringComparison.Ordinal));
+        finding.Caveat.Should().Contain("Judged from SSL Mode=Require").And.Contain("may sit in front of the server");
+        Everything(finding).Should().NotContain("db.example").And.NotContain("neon.tech");
+    }
+
+    [Fact]
+    public void S11_require_from_the_setting_needs_no_observation_of_the_server()
+    {
+        ConnectionFacts facts = Facts("Host=db.example;Port=6432;SSL Mode=Require", observed: null, notRead: "the connection read failed");
+
+        ServerCertificateCheck.JudgedFromSslMode(facts).Should().BeTrue();
+        S11(facts).Findings.Should().ContainSingle().Which.Variant.Should().Be("require");
+    }
+
+    [Theory]
+    [InlineData("Host=db.example;Port=6432;SSL Mode=Prefer")]
+    [InlineData("Host=db.example;Port=6432;SSL Mode=Allow")]
+    [InlineData("Host=db.example;Port=6432")]
+    [InlineData("Host=db.example;Port=6432;SSL Mode=Disable")]
+    [InlineData("Host=db.example;Port=6432;SSL Mode=VerifyFull")]
+    public void S11_behind_a_pooler_stays_not_applicable_for_every_mode_but_Require(string connectionString)
+    {
+        ConnectionFacts facts = Facts(connectionString, Observed(ssl: true));
+
+        ServerCertificateCheck.JudgedFromSslMode(facts).Should().BeFalse();
+        ServerCertificateCheck.NotApplicableReason(facts).Should().Contain("connection pooler");
+    }
+
+    [Fact]
+    public void An_RDS_Proxy_with_Require_gets_the_ACM_remedy_through_the_setting_path()
+    {
+        ConnectionFacts facts = Facts("Host=" + ProxyHost + ";SSL Mode=Require", Observed(ssl: false), PostgresPlatformKind.AmazonRds);
+
+        ServerCertificateCheck.JudgedFromSslMode(facts).Should().BeTrue();
+
+        HealthFinding finding = S11(facts).Findings.Single();
+
+        finding.Variant.Should().Be("require");
+        finding.Remedy!.Code.Should().Contain("SSL Mode=VerifyFull").And.NotContain("Root Certificate").And.NotContain("RootCertificate");
+        finding.Remedy.Explanation.Should().Contain("AWS Certificate Manager").And.NotContain("global-bundle.pem");
+    }
+
+    [Fact]
+    public void A_port_alone_says_may_reach_a_pooler_and_a_recognised_host_says_reaches()
+    {
+        string?[] port =
+        [
+            UnencryptedConnectionCheck.NotApplicableReason(Facts("Host=db.example;Port=6432").Settings.PoolerSigns),
+            UnencryptedConnectionCheck.NotApplicableReason(Facts("Host=db.example;Port=6543").Settings.PoolerSigns),
+            ServerCertificateCheck.PoolerReason(Facts("Host=db.example;Port=6432")),
+        ];
+
+        port.Should().OnlyContain(x => x != null && x.Contains("may reach a connection pooler", StringComparison.Ordinal)
+                                       && x.Contains("pg_stat_ssl row is the pooler's own connection, not the application's", StringComparison.Ordinal));
+
+        string?[] recognised =
+        [
+            UnencryptedConnectionCheck.NotApplicableReason(Facts("Host=" + ProxyHost).Settings.PoolerSigns),
+            UnencryptedConnectionCheck.NotApplicableReason(Facts("Host=ep-cool-123-pooler.us-east-2.aws.neon.tech").Settings.PoolerSigns),
+            UnencryptedConnectionCheck.NotApplicableReason(Facts("Host=myserver.postgres.database.azure.com;Port=6432").Settings.PoolerSigns),
+            ServerCertificateCheck.PoolerReason(Facts("Host=" + ProxyHost)),
+        ];
+
+        recognised.Should().OnlyContain(x => x != null && x.Contains("reaches a connection pooler", StringComparison.Ordinal)
+                                             && !x.Contains("may reach", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Without_a_pooler_sign_S05_and_S11_apply()
+    {
+        ConnectionFacts facts = Facts("Host=db.example;Port=5432", Observed(ssl: true));
+
+        UnencryptedConnectionCheck.NotApplicableReason(facts.Settings.PoolerSigns).Should().BeNull();
+        UnencryptedConnectionCheck.NotApplicableReason(null).Should().BeNull();
+        ServerCertificateCheck.NotApplicableReason(facts).Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData(PostgresPlatformKind.AmazonRds)]
+    [InlineData(PostgresPlatformKind.AmazonAurora)]
+    public void The_remedy_behind_an_RDS_Proxy_is_VerifyFull_with_no_Root_Certificate_and_never_the_RDS_bundle(PostgresPlatformKind platform)
+    {
+        HealthFinding finding = S11(Facts("Host=" + ProxyHost, Observed(ssl: true), platform)).Findings.Single();
+
+        finding.Remedy!.Code.Should().Contain("SSL Mode=VerifyFull").And.Contain("b.ConnectionStringBuilder.SslMode = SslMode.VerifyFull;")
+            .And.NotContain("Root Certificate").And.NotContain("RootCertificate");
+        finding.Remedy.Explanation.Should().Contain("Using TLS/SSL with RDS Proxy").And.Contain("AWS Certificate Manager").And.NotContain("global-bundle.pem");
+    }
+
+    [Fact]
+    public void A_role_that_cannot_see_its_own_TLS_row_stands_down_with_a_sentence()
+    {
+        ServerCertificateCheck.NotApplicableReason(Facts("Host=db.example", Observed(ssl: null))).Should().Contain("pg_stat_ssl").And.Contain("not known");
+        ServerCertificateCheck.NotApplicableReason(Facts("Host=db.example", Observed(ssl: true))).Should().BeNull();
+    }
+
+    [Fact]
+    public void An_unread_server_is_not_checked_not_quiet()
+    {
+        ServerCertificateCheck.UnavailableReason(Facts("Host=db.example", observed: null, notRead: "the connection read failed (SQLSTATE 57014)"))
+            .Should().Contain("SQLSTATE 57014");
+        ServerCertificateCheck.UnavailableReason(Facts("Host=db.example", Observed())).Should().BeNull();
+    }
+
+    [Fact]
+    public void In_the_Postgres_modules_words_there_is_no_Marten_and_the_builder_is_named()
+    {
+        HealthFinding finding = S11(Facts("Host=db.example", Observed(ssl: true)), postgres: true).Findings.Single();
+
+        Everything(finding).Should().Contain("NpgsqlDataSourceBuilder").And.NotContain("Marten").And.NotContain("opts.");
+    }
+
+    // ----------------------------------------------------------------------------------------------
+    // S12 A credential is readable from configuration
+    // ----------------------------------------------------------------------------------------------
+
+    private static HealthVerdict S12(ConnectionFacts facts, bool postgres = false) =>
+        new ReadableCredentialCheck().Evaluate(facts, Evaluation(postgres)).ShouldBeWellFormedFor<ReadableCredentialCheck>();
+
+    [Fact]
+    public void Persist_Security_Info_with_a_password_in_the_string_is_a_Warning()
+    {
+        HealthFinding finding = S12(Facts("Host=db.example;Password=S3NT1NEL-pw;Persist Security Info=true")).Findings.Should().ContainSingle().Subject;
+
+        finding.Variant.Should().Be("persist-security-info");
+        finding.Severity.Should().Be(HealthSeverity.Warning);
+        finding.Remedy!.Code.Should().Contain("Persist Security Info=false").And.Contain("b.ConnectionStringBuilder.PersistSecurityInfo = false;");
+        Everything(finding).Should().NotContain("S3NT1NEL");
+    }
+
+    [Theory]
+    [InlineData("Host=db.example;Persist Security Info=true")]
+    [InlineData("Host=db.example;Password=S3NT1NEL-pw")]
+    [InlineData("Host=db.example")]
+    public void Persist_Security_Info_without_a_password_in_the_string_or_a_password_without_it_is_quiet(string connectionString)
+    {
+        S12(Facts(connectionString)).Findings.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("Host=db.example;SSL Password=S3NT1NEL-key", true)]
+    [InlineData("Host=db.example;SSL Password=S3NT1NEL-key;Persist Security Info=false", true)]
+    [InlineData("Host=db.example;SSL Key=/k.pem", false)]
+    public void An_SSL_Password_is_a_Warning_whatever_Persist_Security_Info_says(string connectionString, bool expected)
+    {
+        HealthVerdict verdict = S12(Facts(connectionString));
+
+        if (expected)
+        {
+            HealthFinding finding = verdict.Findings.Should().ContainSingle().Subject;
+            finding.Variant.Should().Be("ssl-password");
+            finding.Severity.Should().Be(HealthSeverity.Warning);
+            finding.WhyItMatters.Should().Contain("NpgsqlDataSource.ConnectionString").And.Contain("pool name").And.Contain("OpenTelemetry");
+            finding.Remedy!.Code.Should().Contain("UseSslClientAuthenticationOptionsCallback").And.Contain("ClientCertificates");
+            finding.Remedy.Explanation.Should().Contain("UseClientCertificate is obsolete");
+            Everything(finding).Should().NotContain("S3NT1NEL");
+        }
+        else
+        {
+            verdict.Findings.Should().BeEmpty();
+        }
+    }
+
+    [Fact]
+    public void The_SSL_Password_remedy_leaves_all_three_certificate_keywords_out_because_Npgsql_loads_them_before_the_callback()
+    {
+        HealthFinding finding = S12(Facts("Host=db.example;SSL Password=S3NT1NEL-key")).Findings.Single();
+
+        finding.Remedy!.Code.Should().Contain("SSL Certificate, SSL Key and SSL Password").And.Contain("PGSSLCERT and PGSSLKEY").And.Contain("UseSslClientAuthenticationOptionsCallback");
+        finding.Remedy.Explanation.Should().Contain("before the callback runs").And.Contain("throws").And.Contain("client certificate context");
+        Everything(finding).Should().NotContain("S3NT1NEL");
+    }
+
+    [Theory]
+    [InlineData("Host=db.example", "ignores PGPASSWORD")]
+    [InlineData("Host=db.example;Persist Security Info=true", "Npgsql uses PGPASSWORD")]
+    public void The_PGPASSWORD_caveat_names_the_password_providers_the_studio_cannot_see(string connectionString, string sentence)
+    {
+        FakeEnvironment environment = new(("PGPASSWORD", "S3NT1NEL-env"));
+
+        HealthFinding finding = S12(Facts(connectionString, environment: environment)).Findings.Single();
+
+        finding.Caveat.Should().Contain(sentence).And.Contain("UsePasswordProvider").And.Contain("UsePeriodicPasswordProvider").And.Contain("cannot see");
+    }
+
+    [Fact]
+    public void PGPASSWORD_in_the_environment_is_Info_and_never_shows_its_value()
+    {
+        FakeEnvironment environment = new(("PGPASSWORD", "S3NT1NEL-env"));
+
+        HealthFinding finding = S12(Facts("Host=db.example", environment: environment)).Findings.Should().ContainSingle().Subject;
+
+        finding.Variant.Should().Be("pgpassword-env");
+        finding.Severity.Should().Be(HealthSeverity.Info);
+        finding.Caveat.Should().Contain("cannot see whether the connection string has a password of its own");
+        finding.Remedy!.Code.Should().Contain("Passfile=").And.Contain("b.ConnectionStringBuilder.Passfile = ");
+        Everything(finding).Should().NotContain("S3NT1NEL");
+    }
+
+    [Fact]
+    public void PGPASSWORD_is_ignored_when_the_visible_connection_string_has_a_password_of_its_own()
+    {
+        FakeEnvironment environment = new(("PGPASSWORD", "S3NT1NEL-env"));
+
+        HealthVerdict verdict = S12(Facts("Host=db.example;Password=S3NT1NEL-pw;Persist Security Info=true", environment: environment));
+
+        verdict.Findings.Select(static x => x.Variant).Should().Equal("persist-security-info");
+
+        // Persist Security Info on and no password in the string: Npgsql does use PGPASSWORD, and the finding says so.
+        S12(Facts("Host=db.example;Persist Security Info=true", environment: environment)).Findings.Should().ContainSingle()
+            .Which.Caveat.Should().Contain("Npgsql uses PGPASSWORD");
+    }
+
+    [Fact]
+    public void All_three_together_are_three_findings_with_keys_of_their_own_and_quiet_says_what_was_looked_at()
+    {
+        FakeEnvironment environment = new(("PGPASSWORD", "S3NT1NEL-env"));
+
+        S12(Facts("Host=db.example;Password=S3NT1NEL-pw;Persist Security Info=true;SSL Password=S3NT1NEL-key", environment: environment))
+            .Findings.Select(static x => x.Key).Should().Equal("S12|persist-security-info", "S12|ssl-password");
+
+        S12(Facts("Host=db.example;SSL Password=S3NT1NEL-key", environment: environment))
+            .Findings.Select(static x => x.Key).Should().Equal("S12|ssl-password", "S12|pgpassword-env");
+
+        S12(Facts("Host=db.example")).Note.Should().Contain("PGPASSWORD is not in the process's environment");
+    }
+
+    [Fact]
+    public void In_Postgres_Studios_words_S12_names_no_Marten()
+    {
+        FakeEnvironment environment = new(("PGPASSWORD", "S3NT1NEL-env"));
+
+        foreach (HealthFinding finding in S12(Facts("Host=db.example;Password=x;Persist Security Info=true;SSL Password=y", environment: environment), postgres: true).Findings)
+        {
+            Everything(finding).Should().NotContain("Marten").And.NotContain("opts.");
+        }
+    }
+
+    // ----------------------------------------------------------------------------------------------
+    // S13 Driver settings that copy values into logs or exceptions
+    // ----------------------------------------------------------------------------------------------
+
+    private static HealthVerdict S13(ConnectionFacts facts, string? environment, bool postgres = false) =>
+        new DriverLoggingSettingsCheck().Evaluate(new DriverLoggingFacts(facts, environment), Evaluation(postgres))
+            .ShouldBeWellFormedFor<DriverLoggingSettingsCheck>();
+
+    private static HealthVerdict S13(string connectionString, string? environment, bool postgres = false) =>
+        S13(Facts(connectionString), environment, postgres);
+
+    private static ConnectionFacts AllThree() =>
+        ValuesFacts(("Log Parameters", true), ("Include Error Detail", true), ("Include Failed Batched Command", true));
+
+    [Theory]
+    [InlineData("Host=db.example;Log Parameters=true", "log-parameters")]
+    [InlineData("Host=db.example;Include Error Detail=true", "include-error-detail")]
+    public void Each_setting_on_in_Production_is_an_Info_finding_with_its_variant(string connectionString, string variant)
+    {
+        HealthFinding finding = S13(connectionString, "Production").Findings.Should().ContainSingle().Subject;
+
+        finding.Variant.Should().Be(variant);
+        finding.Severity.Should().Be(HealthSeverity.Info);
+        finding.Remedy!.Code.Should().Contain("=false").And.Contain("b.ConnectionStringBuilder.");
+    }
+
+    [Theory]
+    [InlineData("Development")]
+    [InlineData("Staging")]
+    [InlineData(null)]
+    public void Outside_Production_none_of_them_is_judged(string? environment)
+    {
+        HealthVerdict verdict = S13(AllThree(), environment);
+
+        verdict.Findings.Should().BeEmpty();
+        verdict.Note.Should().Contain("Production only");
+    }
+
+    [Fact]
+    public void The_settings_off_in_Production_are_quiet_and_all_three_together_are_three_findings()
+    {
+        S13("Host=db.example", "production").Findings.Should().BeEmpty("the environment name is compared in any case");
+        S13(AllThree(), "Production")
+            .Findings.Select(static x => x.Key).Should().Equal("S13|log-parameters", "S13|include-error-detail", "S13|include-failed-batched-command");
+    }
+
+    [Fact]
+    public void Include_Failed_Batched_Command_on_in_Production_is_an_Info_finding_that_names_the_exception_property()
+    {
+        HealthFinding finding = S13(ValuesFacts(("Include Failed Batched Command", true)), "Production").Findings.Should().ContainSingle().Subject;
+
+        finding.Variant.Should().Be("include-failed-batched-command");
+        finding.Severity.Should().Be(HealthSeverity.Info);
+        finding.WhyItMatters.Should().Contain("NpgsqlException.BatchCommand");
+        finding.Remedy!.Code.Should().Contain("Include Failed Batched Command=false").And.Contain("b.ConnectionStringBuilder.IncludeFailedBatchedCommand = false;");
+    }
+
+    [Fact]
+    public void Log_Parameters_says_it_logs_only_through_a_logger_factory_and_that_EnableParameterLogging_overrides_the_keyword()
+    {
+        HealthFinding finding = S13("Host=db.example;Log Parameters=true", "Production", postgres: true).Findings.Single();
+
+        finding.WhyItMatters.Should().Contain("Where the data source has a logger factory");
+        finding.Caveat.Should().Contain("only through a logger factory");
+        finding.Remedy!.Explanation.Should().Contain("EnableParameterLogging()").And.Contain("whatever this keyword says");
+
+        // The Marten module adds what Marten 9 does by default; the Postgres module's words know nothing of it.
+        Everything(finding).Should().NotContain("DisableNpgsqlLogging");
+
+        // The other two variants carry none of it.
+        Everything(S13("Host=db.example;Include Error Detail=true", "Production").Findings.Single())
+            .Should().NotContain("EnableParameterLogging").And.NotContain("logger factory");
+    }
+
+    [Fact]
+    public void In_the_Postgres_modules_words_S13_names_no_Marten()
+    {
+        foreach (HealthFinding finding in S13("Host=db.example;Log Parameters=true", "Production", postgres: true).Findings)
+        {
+            Everything(finding).Should().NotContain("Marten").And.NotContain("opts.").And.Contain("NpgsqlDataSourceBuilder");
+        }
+    }
+}

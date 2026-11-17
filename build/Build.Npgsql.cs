@@ -22,50 +22,50 @@ using static Fallout.Common.Tools.DotNet.DotNetTasks;
 using Project = Fallout.Solutions.Project;
 
 /// <summary>
-/// Which Npgsql the PostgresStudio-only projects are tested against: the floor the PostgresStudio package depends
+/// Which Npgsql the Postgres-only projects are tested against: the floor the Postgres module package depends
 /// on, and - in a second pass of their own - the newest Npgsql CI tests (design doc 6.2 and 6.3, and its amendment 2
 /// after PS-0).
 /// </summary>
 /// <remarks>
 /// <para>
 /// <b>Two passes, never one.</b> Both versions live in <c>Directory.Packages.props</c>
-/// (<c>PostgresStudioNpgsqlFloor</c>, <c>PostgresStudioNpgsqlLatest</c>), and its conditional <c>Npgsql</c> row
-/// applies only to projects that set <c>PostgresStudioPinsNpgsql</c>. Handing <c>-p:PostgresStudioNpgsqlVersion=</c>
-/// to the whole solution would still reach MartenStudio: it references PostgresStudio, so restore takes
-/// PostgresStudio's <c>Npgsql &gt;= 10.0.3</c> into MartenStudio's graph and its tests, with no diagnostic (measured
-/// by PS-0). MartenStudio on Npgsql 10 is not a tested combination. So the whole-solution pass - Restore, Compile and
+/// (<c>DataStudioNpgsqlFloor</c>, <c>DataStudioNpgsqlLatest</c>), and its conditional <c>Npgsql</c> row
+/// applies only to projects that set <c>DataStudioPostgresPinsNpgsql</c>. Handing <c>-p:DataStudioNpgsqlVersion=</c>
+/// to the whole solution would still reach the Marten module: it references the Postgres module, so restore takes
+/// The Postgres module's <c>Npgsql &gt;= 10.0.3</c> into the Marten module's graph and its tests, with no diagnostic (measured
+/// by PS-0). The Marten module on Npgsql 10 is not a tested combination. So the whole-solution pass - Restore, Compile and
 /// Test, at whatever Marten <c>--marten-version</c> chose - always gets the Npgsql <em>floor</em>, said explicitly so
 /// that an environment variable of that name cannot change it, and a requested other Npgsql gets a pass of its own,
-/// <see cref="NpgsqlPass" />: restore, build and test over <c>postgres-studio.slnf</c> alone, which holds exactly the
-/// projects that set the property (<c>PostgresStudioSolutionFilterTests</c> keeps it so). It runs after Test, in
-/// separate <c>dotnet</c> invocations, so MartenStudio never meets that Npgsql.
+/// <see cref="NpgsqlPass" />: restore, build and test over <c>data-studio-postgres.slnf</c> alone, which holds exactly the
+/// projects that set the property (<c>PostgresSolutionFilterTests</c> keeps it so). It runs after Test, in
+/// separate <c>dotnet</c> invocations, so the Marten module never meets that Npgsql.
 /// </para>
 /// <para>
 /// <b>Pack</b> refuses any Npgsql but the floor (<see cref="AssertPackingAtTheNpgsqlFloor" />), and
-/// <c>src/PostgresStudio/PostgresStudio.csproj</c> refuses the same for a bare <c>dotnet pack</c>, checking what
+/// <c>src/DataStudio.Postgres/DataStudio.Postgres.csproj</c> refuses the same for a bare <c>dotnet pack</c>, checking what
 /// <c>project.assets.json</c> resolved as well as the property: after the second pass that file holds Npgsql 10.0.3,
 /// and NuGet writes the dependency range from it.
 /// </para>
 /// </remarks>
 partial class Build
 {
-    /// <summary>The MSBuild property <c>Directory.Packages.props</c> takes the PostgresStudio-only Npgsql version from.</summary>
-    const string NpgsqlVersionProperty = "PostgresStudioNpgsqlVersion";
+    /// <summary>The MSBuild property <c>Directory.Packages.props</c> takes the Postgres-only Npgsql version from.</summary>
+    const string NpgsqlVersionProperty = "DataStudioNpgsqlVersion";
 
-    [Parameter("The Npgsql version the PostgresStudio-only projects (postgres-studio.slnf) are tested against: " +
-               "'floor' (the default - the version the PostgresStudio package depends on, the only one Pack packs at, " +
+    [Parameter("The Npgsql version the Postgres-only projects (data-studio-postgres.slnf) are tested against: " +
+               "'floor' (the default - the version the DataStudio.Postgres package depends on, the only one Pack packs at, " +
                "and the one the whole-solution pass always uses), 'latest' (the newest Npgsql CI tests, pinned in " +
                "Directory.Packages.props), or an exact version such as 10.0.3. Anything but the floor adds a second " +
-               "restore, build and test pass over postgres-studio.slnf after Test. (env: NPGSQL_VERSION)")]
+               "restore, build and test pass over data-studio-postgres.slnf after Test. (env: NPGSQL_VERSION)")]
     readonly string NpgsqlVersion;
 
-    /// <summary>The solution filter holding exactly the projects that set <c>PostgresStudioPinsNpgsql</c>.</summary>
-    AbsolutePath PostgresStudioSolutionFilter => RootDirectory / "postgres-studio.slnf";
+    /// <summary>The solution filter holding exactly the projects that set <c>DataStudioPostgresPinsNpgsql</c>.</summary>
+    AbsolutePath PostgresSolutionFilter => RootDirectory / "data-studio-postgres.slnf";
 
-    /// <summary><c>PostgresStudioNpgsqlFloor</c> from <c>Directory.Packages.props</c>.</summary>
+    /// <summary><c>DataStudioNpgsqlFloor</c> from <c>Directory.Packages.props</c>.</summary>
     string NpgsqlFloor { get; set; }
 
-    /// <summary><c>PostgresStudioNpgsqlLatest</c> from <c>Directory.Packages.props</c>.</summary>
+    /// <summary><c>DataStudioNpgsqlLatest</c> from <c>Directory.Packages.props</c>.</summary>
     string NpgsqlLatest { get; set; }
 
     /// <summary>The exact Npgsql the second pass uses; the floor when there is no second pass.</summary>
@@ -79,8 +79,8 @@ partial class Build
     {
         var props = XDocument.Load(PackagesPropsFile);
 
-        NpgsqlFloor = ReadPackagesProperty(props, "PostgresStudioNpgsqlFloor");
-        NpgsqlLatest = ReadPackagesProperty(props, "PostgresStudioNpgsqlLatest");
+        NpgsqlFloor = ReadPackagesProperty(props, "DataStudioNpgsqlFloor");
+        NpgsqlLatest = ReadPackagesProperty(props, "DataStudioNpgsqlLatest");
 
         var requested = NpgsqlVersion?.Trim();
 
@@ -98,52 +98,52 @@ partial class Build
 
         if (ResolvedNpgsqlVersion == NpgsqlFloor)
         {
-            Log.Information("Npgsql {Version} for PostgresStudio (the floor; latest tested {Latest}): no second pass",
+            Log.Information("Npgsql {Version} for the Postgres module (the floor; latest tested {Latest}): no second pass",
                 NpgsqlFloor, NpgsqlLatest);
         }
         else
         {
             Log.Information(
-                "Npgsql {Version} for PostgresStudio ({Which}; floor {Floor}): a second pass over {Filter} after Test",
+                "Npgsql {Version} for the Postgres module ({Which}; floor {Floor}): a second pass over {Filter} after Test",
                 ResolvedNpgsqlVersion, ResolvedNpgsqlVersion == NpgsqlLatest ? "the latest tested" : "an explicit version",
-                NpgsqlFloor, PostgresStudioSolutionFilter.Name);
+                NpgsqlFloor, PostgresSolutionFilter.Name);
         }
     }
 
     /// <summary>
-    /// The PostgresStudio package is packed at the Npgsql floor or not at all. The csproj has the same guard for a bare
+    /// The Postgres module package is packed at the Npgsql floor or not at all. The csproj has the same guard for a bare
     /// <c>dotnet pack</c>; this one fails first and names the Fallout parameter.
     /// </summary>
     void AssertPackingAtTheNpgsqlFloor()
     {
         Assert.True(ResolvedNpgsqlVersion == NpgsqlFloor,
-            $"Refusing to pack with --npgsql-version {ResolvedNpgsqlVersion}: PostgresStudio is packed only at the Npgsql " +
-            $"floor ({NpgsqlFloor}, PostgresStudioNpgsqlFloor in Directory.Packages.props). The nuspec would say " +
+            $"Refusing to pack with --npgsql-version {ResolvedNpgsqlVersion}: the Postgres module is packed only at the Npgsql " +
+            $"floor ({NpgsqlFloor}, DataStudioNpgsqlFloor in Directory.Packages.props). The nuspec would say " +
             $"'Npgsql >= {ResolvedNpgsqlVersion}' and raise every host's Npgsql. Run Pack without --npgsql-version (and " +
             "without NPGSQL_VERSION in the environment), or raise the floor deliberately and record why in " +
             "docs/maintainers/package-budget-changes.md.");
     }
 
     Target NpgsqlPass => _ => _
-        .Description("After Test: restores, builds and tests postgres-studio.slnf at --npgsql-version, when that is not the floor")
+        .Description("After Test: restores, builds and tests data-studio-postgres.slnf at --npgsql-version, when that is not the floor")
         .TriggeredBy<ITest>(x => x.Test)
         .OnlyWhenDynamic(() => ResolvedNpgsqlVersion != NpgsqlFloor)
         .Executes(() =>
         {
-            var projects = PostgresStudioFilterProjects();
+            var projects = PostgresFilterProjects();
             var configuration = ((IHasConfiguration)this).Configuration;
 
             Log.Information("Npgsql {Version} pass over {Filter}: {Projects}",
-                ResolvedNpgsqlVersion, PostgresStudioSolutionFilter.Name, string.Join(", ", projects.Select(x => x.Name)));
+                ResolvedNpgsqlVersion, PostgresSolutionFilter.Name, string.Join(", ", projects.Select(x => x.Name)));
 
             // The Marten version is passed for symmetry only: nothing in the filter references Marten.
             DotNetRestore(_ => _
-                .SetProjectFile(PostgresStudioSolutionFilter)
+                .SetProjectFile(PostgresSolutionFilter)
                 .SetProperty(MartenVersionProperty, ResolvedMartenVersion)
                 .SetProperty(NpgsqlVersionProperty, ResolvedNpgsqlVersion));
 
             DotNetBuild(_ => _
-                .SetProjectFile(PostgresStudioSolutionFilter)
+                .SetProjectFile(PostgresSolutionFilter)
                 .SetConfiguration(configuration)
                 .EnableNoRestore()
                 .SetProperty("Version", Version)
@@ -154,11 +154,11 @@ partial class Build
 
             if (testProjects.Count == 0)
             {
-                // Until tests/PostgresStudio.Tests exists (PS-3a): the pass still proves src/PostgresStudio restores and
-                // compiles at this Npgsql. PostgresStudioSolutionFilterTests fails the moment a project that sets
-                // PostgresStudioPinsNpgsql is missing from the filter, so this branch cannot outlive that project.
-                Log.Warning("{Filter} lists no test project yet: PostgresStudio was restored and built at Npgsql {Version}, " +
-                            "and no test ran", PostgresStudioSolutionFilter.Name, ResolvedNpgsqlVersion);
+                // Until tests/DataStudio.Postgres.Tests exists (PS-3a): the pass still proves src/DataStudio.Postgres restores and
+                // compiles at this Npgsql. PostgresSolutionFilterTests fails the moment a project that sets
+                // DataStudioPostgresPinsNpgsql is missing from the filter, so this branch cannot outlive that project.
+                Log.Warning("{Filter} lists no test project yet: the Postgres module was restored and built at Npgsql {Version}, " +
+                            "and no test ran", PostgresSolutionFilter.Name, ResolvedNpgsqlVersion);
             }
             else
             {
@@ -188,19 +188,19 @@ partial class Build
         });
 
     /// <summary>
-    /// The projects <c>postgres-studio.slnf</c> lists, as the solution knows them. A path the solution does not have
+    /// The projects <c>data-studio-postgres.slnf</c> lists, as the solution knows them. A path the solution does not have
     /// fails here, by name, rather than as an MSBuild error about a filter.
     /// </summary>
-    IReadOnlyList<Project> PostgresStudioFilterProjects()
+    IReadOnlyList<Project> PostgresFilterProjects()
     {
-        Assert.True(PostgresStudioSolutionFilter.FileExists(), $"'{PostgresStudioSolutionFilter}' does not exist");
+        Assert.True(PostgresSolutionFilter.FileExists(), $"'{PostgresSolutionFilter}' does not exist");
 
-        using var filter = JsonDocument.Parse(File.ReadAllText(PostgresStudioSolutionFilter));
+        using var filter = JsonDocument.Parse(File.ReadAllText(PostgresSolutionFilter));
         var listed = filter.RootElement.GetProperty("solution").GetProperty("projects").EnumerateArray()
             .Select(x => x.GetString()!.Replace('\\', '/'))
             .ToList();
 
-        Assert.NotEmpty(listed, $"{PostgresStudioSolutionFilter.Name} lists no project");
+        Assert.NotEmpty(listed, $"{PostgresSolutionFilter.Name} lists no project");
 
         var known = Solution.GetAllProjects("*").ToDictionary(x => x.RelativePath.Replace('\\', '/'), StringComparer.Ordinal);
 
@@ -208,7 +208,7 @@ partial class Build
             .Select(path => known.TryGetValue(path, out var project)
                 ? project
                 : throw new InvalidOperationException(
-                    $"{PostgresStudioSolutionFilter.Name} lists '{path}', which marten-studio.slnx does not have"))
+                    $"{PostgresSolutionFilter.Name} lists '{path}', which data-studio.slnx does not have"))
             .ToList();
     }
 }

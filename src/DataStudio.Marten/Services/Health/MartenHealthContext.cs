@@ -1,0 +1,122 @@
+using Marten;
+using Marten.Storage;
+
+using DataStudio.Marten.Services.Configuration;
+using DataStudio.Marten.Services.Health.Checks;
+using DataStudio.Postgres.Services.Settings;
+using DataStudio.Postgres.Services.Sources;
+using DataStudio.Postgres.Services;
+using DataStudio.Postgres.Services.Health;
+
+namespace DataStudio.Marten.Services.Health;
+
+/// <summary>
+/// The Marten module's reading of the shared health context and evaluation: the store, its options, its database and the
+/// Marten it runs - C# 14 extension members, so that the Marten module's own checks read the context as they always have.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>Only for a Marten source.</b> The shared context holds the resolver's own record, which for a Marten store is a
+/// <see cref="ResolvedScope" />; a check in the Marten module's assembly is only ever offered the Marten module's sources, so
+/// <c>Scope</c>'s cast holds - and where it would not, it throws and the check is a "could not check" row rather than a
+/// misreading.
+/// </para>
+/// <para>
+/// <b>Not for shared code.</b> A file bound for the shared assembly must not use these: after the move it cannot see
+/// this class, and the text fence cannot tell an extension call from a member of the shared type. The shared checks read
+/// <see cref="HealthCheckContext.Source" />, <see cref="HealthCheckContext.Target" /> and the studio's seams instead.
+/// </para>
+/// </remarks>
+internal static class MartenHealthContext
+{
+    extension(HealthCheckContext context)
+    {
+        /// <summary>The store and database being swept, resolved with no tenant.</summary>
+        /// <exception cref="InvalidOperationException">The source is not a Marten store's.</exception>
+        public ResolvedScope Scope => context.Source as ResolvedScope
+            ?? throw new InvalidOperationException(
+                "A Marten health check was handed a source that is not a Marten store: '" + context.StoreKey + "'.");
+
+        /// <summary>The store.</summary>
+        public IDocumentStore Store => context.Scope.Store;
+
+        /// <summary>What the host told Marten.</summary>
+        public IReadOnlyStoreOptions StoreOptions => context.Scope.Store.Options;
+
+        /// <summary>The database.</summary>
+        public IMartenDatabase Database => context.Scope.Database;
+
+        /// <summary>The Marten this host runs, and its light-up probes.</summary>
+        public MartenRuntime Runtime => (context.StudioRuntime as MartenHealthRuntime)?.Runtime ?? MartenRuntime.Current;
+
+        /// <summary>
+        /// The studio's settings, under the name the Marten module's checks read them by - the interval and the document-type
+        /// filter, which are all they read, live from <c>MartenOptions</c>.
+        /// </summary>
+        public IStudioSettings StudioOptions => context.Settings as IStudioSettings
+            ?? throw new InvalidOperationException("Data Studio's Marten checks run under AddMarten(), whose one settings object is a studio's.");
+    }
+
+    extension(HealthEvaluation evaluation)
+    {
+        /// <summary>The Marten the host runs, for a remedy or a judgement that needs a newer one.</summary>
+        public MartenRuntime Runtime => (evaluation.StudioRuntime as MartenHealthRuntime)?.Runtime ?? MartenRuntime.Current;
+
+        /// <summary>
+        /// An evaluation at <paramref name="now" /> as the Marten module's sweep makes one, for a unit test: against
+        /// <paramref name="runtime" /> (this process's when <see langword="null" />), with the Marten module's remedy wording and
+        /// plan advisor.
+        /// </summary>
+        /// <param name="now">When.</param>
+        /// <param name="runtime">The Marten the host runs.</param>
+        /// <param name="history">The history, or none.</param>
+        public static HealthEvaluation At(DateTimeOffset now, MartenRuntime? runtime, HealthHistoryView? history = null) =>
+            new(now, new MartenHealthRuntime(runtime ?? MartenRuntime.Current), history ?? HealthHistoryView.Empty)
+            {
+                TableRemedies = MartenHealthRemedyProvider.Instance,
+                PlanAdvisor = MartenStatementPlanAdvisor.Instance,
+                Text = MartenText.Instance,
+            };
+    }
+}
+
+/// <summary>
+/// The Marten module's spellings of shared health members whose shared form takes the studio's seams - C# 14 static extension
+/// members, so that Marten-only code compiles unchanged. The rule is <see cref="MartenServiceBridges" />'s: Marten-only code
+/// may call these; a shared-bound file must not, and each member lists its callers - every one the Marten module's own since
+/// PS-1e, which moved the last test caller of <c>HealthService.WithheldSchemaReason</c> onto
+/// <see cref="HealthService.WithheldSchemaReasonFor" /> and deleted that member.
+/// </summary>
+internal static class MartenHealthBridges
+{
+    extension(DataSourceEndpoints)
+    {
+        /// <summary>
+        /// <see cref="DataSourceEndpoints.Of(IStudioDatabase)" /> for a Marten database. Caller: C10
+        /// (<c>PooledDaemonLockCheck</c>).
+        /// </summary>
+        /// <param name="database">The database.</param>
+        internal static DataSourceEndpoints? Of(IMartenDatabase database) => DataSourceEndpoints.Of(MartenSourceDatabase.Of(database));
+    }
+
+    extension(HealthLinks)
+    {
+        /// <summary>
+        /// <see cref="HealthLinks.ToPage(string, StudioScope?)" /> with the Marten module's source
+        /// parameter. Caller: <c>Overview.razor</c>, the Marten module's overview body.
+        /// </summary>
+        /// <param name="scope">The scope to carry.</param>
+        internal static string ToPage(StudioScope? scope) =>
+            HealthLinks.ToPage(MartenDescriptor.SourceQueryParameter, scope);
+
+        /// <summary>
+        /// <see cref="HealthLinks.ToFinding(string, StudioScope?, HealthReportFinding)" /> with
+        /// The Marten module's source parameter. Callers: <c>Overview.razor</c>, <c>EventTypes.razor</c>,
+        /// <c>Projections.razor</c> and <c>IndexesTab.razor</c>.
+        /// </summary>
+        /// <param name="scope">The scope to carry.</param>
+        /// <param name="finding">The finding.</param>
+        internal static string ToFinding(StudioScope? scope, HealthReportFinding finding) =>
+            HealthLinks.ToFinding(MartenDescriptor.SourceQueryParameter, scope, finding);
+    }
+}
