@@ -357,7 +357,7 @@ partition scheme does.
 
 ## T08 Never analysed, or stale statistics
 
-**Warning** (Info for the two cases below), held for ten minutes of samples unless autovacuum is off. Studios:
+**Warning** (Info for the two cases below), held for ten minutes of samples unless autovacuum is off. Modules:
 both. Variants:
 
 - `stale` - `n_mod_since_analyze` at least **10,000 past twice the table's own analyze trigger**, with no

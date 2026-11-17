@@ -271,18 +271,18 @@ It is opt-in, and neither `.AddMarten()` nor `.AddPostgres()` registers it:
 
 ```csharp
 builder.Services.AddDataStudio().AddMarten();
-builder.Services.AddHealthChecks().AddMartenDiagnostics(name: "marten-studio", failureStatus: null, tags: ["marten"]);
+builder.Services.AddHealthChecks().AddMartenDiagnostics(name: "marten", failureStatus: null, tags: ["marten"]);
 
 // or, in a Postgres host:
 builder.Services.AddDataStudio().AddPostgres();
-builder.Services.AddHealthChecks().AddPostgresDiagnostics(name: "postgres-studio", failureStatus: null, tags: ["postgres"]);
+builder.Services.AddHealthChecks().AddPostgresDiagnostics(name: "postgres", failureStatus: null, tags: ["postgres"]);
 
 // ...
 app.MapHealthChecks("/healthz");
 ```
 
-`AddHealthChecks().AddMartenDiagnostics(...)` and `.AddPostgresDiagnostics(...)` take ASP.NET Core's usual `name`
-(`marten-studio` or `postgres-studio` unless given), `failureStatus`, `tags` and `timeout`, and register one check.
+`AddHealthChecks().AddMartenDiagnostics(...)` and `.AddPostgresDiagnostics(...)` take ASP.NET Core's usual `name`,
+`failureStatus`, `tags` and `timeout`, and register one check.
 Each run sweeps tiers 0 and 1 - the configuration and catalog checks, never the deeper reads or the statements - over
 every registered store or source and the databases each one holds (*Many databases*, below), straight through the
 sweeper the Health page uses.

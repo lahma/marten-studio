@@ -31,6 +31,9 @@ Registering it must never change how your application behaves. No global styles,
 onto your host, no middleware ordering requirement, no altered authentication, no second projection daemon. A host that
 adds the packages and never maps them is byte-for-byte the application it was.
 
+For an application that uses Marten, start with `dotnet add package DataStudio.Marten` (this README is that package's own);
+the install lines for every other kind of host are under [Install](#install).
+
 ### The first five minutes, in Development
 
 - Map it behind your own policy ([Register and mount](#register-and-mount)) and turn capabilities on only where you
